@@ -90,4 +90,40 @@ describe("a page's request", () => {
     expect(reached).toEqual(["POST /api/v1/status"]);
     expect(elsewhere).toEqual([]);
   });
+
+  test("a page's answer past 25 MiB fails as Lumiverse fails it: cut as it is read, or refused by its declared length, and told to the page as RPE not reached", async () => {
+    const rig = await new Rig().start();
+    const limit = 25 * 1024 * 1024;
+    /** `size` bytes of answer in megabyte chunks, its length declared where `declare` says. */
+    const answerOf = (size: number, declare: boolean): Response => {
+      let sent = 0;
+      const chunk = new Uint8Array(1 << 20).fill(97);
+      const body = new ReadableStream<Uint8Array>({
+        pull(out) {
+          const left = size - sent;
+          if (left <= 0) return out.close();
+          const take = left < chunk.length ? chunk.subarray(0, left) : chunk;
+          sent += take.length;
+          out.enqueue(take);
+        },
+      });
+      return new Response(body, { headers: { "content-type": "text/plain", ...(declare ? { "content-length": String(size) } : {}) } });
+    };
+    const rpe = rig.lv.servers.get(RPE)!;
+    rig.lv.servers.set(RPE, (request) => {
+      const path = new URL(request.url).pathname;
+      return path === "/api/v1/streamed" ? Promise.resolve(answerOf(limit + 1, false)) : path === "/api/v1/declared" ? Promise.resolve(answerOf(limit + 1, true)) : rpe(request);
+    });
+    const answers = new Map<string, unknown>();
+    const toRpe = rig.lv.frontends;
+    rig.lv.frontends = (m) => {
+      if (m.session !== PAGE) return toRpe?.(m) ?? false;
+      if (isRecord(m.payload) && m.payload.rpe === "response") answers.set(String(m.payload.id), m.payload);
+      return true;
+    };
+    for (const [id, path] of [["streamed", "/api/v1/streamed"], ["declared", "/api/v1/declared"]] as const) rig.ext.fromFrontend({ rpe: "request", id, method: "GET", path, headers: { authorization: "Bearer rpp_page" } }, USER, PAGE);
+    await until("both answers", () => answers.size === 2);
+    expect(answers.get("streamed")).toMatchObject({ status: 502, body: expect.stringContaining(`Response too large: more than ${limit} bytes`) });
+    expect(answers.get("declared")).toMatchObject({ status: 502, body: expect.stringContaining(`Response too large: ${limit + 1} bytes (max ${limit})`) });
+  });
 });

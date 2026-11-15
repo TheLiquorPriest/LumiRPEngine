@@ -143,7 +143,7 @@ describe("Lumiverse's limits (`spindle/worker-host.ts:771`, `:3159-3163`, `:4937
       await clock.advance(29_999);
       expect(result).toBe("waiting");
       await clock.advance(1);
-      expect(await asked).toBe("The operation timed out.");
+      expect(await asked).toBe("Request timed out after 30000ms");
     }
     // The World Info interceptor's ten seconds, then the prompt interceptor's, each answered by nothing; the generation goes on with what it had.
     {

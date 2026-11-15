@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import type { ExtSpindle, InterceptorReturn, PermissionChange, PromptMessageDTO, ProxyAnswer } from "../../src/ext/spindle";
 import type { WorldInfoResult } from "./lore";
+import { readText, safeFetch } from "./safe-fetch";
 import type { LlmMessage } from "./steps";
 
 export type Server = (request: Request) => Promise<Response>;
@@ -139,8 +140,9 @@ export const PROCESS_CLOCK: HostClock = {
   clearTimeout: (handle) => clearTimeout(handle as Timer),
 };
 
-/** Spindle's proxy limit (`spindle/worker-host.ts:771`): fixed, as Lumiverse has it. */
+/** Spindle's proxy limits (`spindle/worker-host.ts:771-772`): fixed, as Lumiverse has them; the answer's cap is 25 MiB, 26,214,400 bytes. */
 export const PROXY_TIMEOUT_MS = 30_000;
+export const PROXY_MAX_BODY_BYTES = 25 * 1024 * 1024;
 
 export class ExtensionHost {
   readonly servers = new Map<string, Server>();
@@ -476,19 +478,14 @@ export class ExtensionHost {
     }
   }
 
-  /** Spindle's proxy (`spindle/worker-host.ts:4641-4741`): needs `cors_proxy`; loopback allowed (`allowPrivate`, `utils/safe-fetch.ts:267-286`); 30 seconds; the body as text. */
+  /**
+   * Spindle's proxy (`spindle/worker-host.ts:4641-4741`): needs `cors_proxy`; the request goes through `safeFetch` (`safe-fetch.ts`) with Lumiverse's limits, 30 seconds on the host's clock until the body has ended and
+   * 25 MiB of answer, loopback and private addresses allowed (`allowPrivate`), a JavaScript path or answer refused; the answer's body is read as text. A refusal reaches the worker as the error's own message.
+   */
   private async proxy(ext: Ext, url: string, init: { method: string; headers: Record<string, string>; body?: string }): Promise<ProxyAnswer> {
     if (!ext.granted.has("cors_proxy")) throw new Error("Permission denied: cors_proxy — CORS proxy permission not granted");
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error(`Only http and https URLs are allowed, got: ${parsed.protocol}`);
-    const timeout = Promise.withResolvers<never>();
-    const timer = this.clock.setTimeout(() => timeout.reject(new Error("The operation timed out.")), PROXY_TIMEOUT_MS);
-    try {
-      const res = await Promise.race([this.fetch(url, { method: init.method, headers: init.headers, body: init.body }), timeout.promise]);
-      return { status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()), body: await res.text() };
-    } finally {
-      this.clock.clearTimeout(timer);
-    }
+    const res = await safeFetch(this, url, { method: init.method || "GET", headers: init.headers, ...(init.body !== undefined ? { body: init.body } : {}), timeoutMs: PROXY_TIMEOUT_MS, maxBytes: PROXY_MAX_BODY_BYTES, blockJavaScript: true });
+    return { status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()), body: await readText(res, PROXY_MAX_BODY_BYTES) };
   }
 
   // ---------------------------------------------------------------- the context handlers
