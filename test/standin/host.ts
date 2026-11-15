@@ -6,6 +6,8 @@
 // an address with none answers as a stopped server does. What it copies from Lumiverse's source (staging at
 // a70f4ed2) says the file and lines; paths are Lumiverse's `src/`.
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, posix } from "node:path";
 import type { ExtSpindle, InterceptorReturn, PermissionChange, PromptMessageDTO, ProxyAnswer } from "../../src/ext/spindle";
 import type { WorldInfoResult } from "./lore";
 import type { LlmMessage } from "./steps";
@@ -14,6 +16,7 @@ export type Server = (request: Request) => Promise<Response>;
 
 /** The extension side of one installed extension: Spindle's API as its worker sees it, and what the test does to it. */
 export interface Installed extends ExtSpindle {
+  /** Low-level, for a test that starts a worker by hand with `install(granted)`: the change reaches the worker at once, with none of the manager's announcements (an admin's grant is `spindle.setPermissions`). */
   grant(permission: string): void;
   revoke(permission: string): void;
   /** Its worker stopped: every registration of it goes, as Lumiverse drops them (`spindle/worker-host.ts:1563-1576`), and so does all it held in memory. */
@@ -21,6 +24,14 @@ export interface Installed extends ExtSpindle {
   readonly logs: string[];
   /** Lumiverse's id for it. */
   readonly id: string;
+  /** Where it was installed for: one user's alone (`install_scope: "user"`, with who installed it), or the operator's, for every user (`worker-host.ts:getScopedUserId`). */
+  readonly scope: "user" | "operator";
+  readonly installedBy: string | null;
+  /**
+   * `spindle.storage` (`spindle/worker-host-storage-api.ts:124-135`, `:173-185`): the extension's own folder, `<data>/extensions/<identifier>/storage/`, or for a user-scoped
+   * extension its installer's `<data>/users, <user>/extensions/<identifier>/`; a path out of it is refused, a file that is not there is "File not found".
+   */
+  readonly storage: { read(path: string): Promise<string>; write(path: string, data: string): Promise<void> };
   /** Its manifest's identifier, which names its own namespace of a preset's metadata (`spindle/worker-host.ts:3173`); by default its id. */
   readonly identifier: string;
   /**
@@ -42,6 +53,10 @@ export interface Installed extends ExtSpindle {
 export interface Ext {
   id: string;
   identifier: string;
+  scope: "user" | "operator";
+  installedBy: string | null;
+  /** Its worker stopped: nothing is delivered to it, and a task already posted to it is dropped. */
+  stopped: boolean;
   granted: Set<string>;
   changed: Set<(change: PermissionChange) => void>;
   /** The worker's handlers by event (`spindle/worker-runtime.ts:1747-1765`). */
@@ -90,8 +105,13 @@ export const PROXY_TIMEOUT_MS = 30_000;
 export class ExtensionHost {
   readonly servers = new Map<string, Server>();
   readonly log: string[] = [];
-  /** Each user's extension storage, by user and path (the stand-in's disk). */
-  readonly storage = new Map<string, string>();
+  /**
+   * Lumiverse's data folder as the extensions' files sit in it (`manager.service.ts:707-721`, `:2109-2135`; `auth/provision.ts:38-49`): each file by its path from the data
+   * folder, `extensions/<identifier>/storage/<path>` for an operator's extension, `users/<user>/extensions/<identifier>/<path>` for a user's files. Held in memory, and written
+   * to the folder `dataDir` names where a test gives one, so a reader of the files finds them where Lumiverse puts them.
+   */
+  readonly disk = new Map<string, string>();
+  dataDir: string | null = null;
   /** Where `sendToFrontend` delivers: a test's sockets say whether the session was there; with none, nothing is delivered. */
   frontends: ((message: { extension: string; payload: unknown; user: string | undefined; session: string | undefined }) => boolean) | null = null;
 
@@ -110,17 +130,62 @@ export class ExtensionHost {
   /** The context handlers (`spindle/context-handler.ts`), each with its wall-clock budget. */
   protected contextHandlers: (Registration<ContextHandler> & { timeoutMs: number })[] = [];
 
-  /** Installs an extension with these permissions granted, and gives its worker's view of Spindle; its manifest `identifier` is its id unless one is given. */
-  install(granted: readonly string[], identifier?: string): Installed {
-    const id = `ext-${this.installed.length + 1}`;
-    const ext: Ext = { id, identifier: identifier ?? id, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [] };
+  /** A file under the data folder: in memory, else on the disk where `dataDir` names a folder. */
+  readFile(path: string): string | undefined {
+    const held = this.disk.get(path);
+    if (held !== undefined || this.dataDir === null) return held;
+    const real = join(this.dataDir, path);
+    return existsSync(real) ? readFileSync(real, "utf-8") : undefined;
+  }
+
+  writeFile(path: string, text: string): void {
+    this.disk.set(path, text);
+    if (this.dataDir === null) return;
+    const real = join(this.dataDir, path);
+    mkdirSync(dirname(real), { recursive: true });
+    writeFileSync(real, text, "utf-8");
+  }
+
+  /** `resolveWithin` (`spindle/worker-host-storage-api.ts:128-135`): the path inside the base, or "Path traversal detected". */
+  private within(base: string, requested: string): string {
+    const target = posix.normalize(posix.join(base, requested));
+    if (target !== base && !target.startsWith(`${base}/`)) throw new Error("Path traversal detected");
+    return target;
+  }
+
+  private nextId = 1;
+
+  /**
+   * Starts an extension's worker with these permissions granted, and gives its view of Spindle. The id and the install scope are the manager's own where it
+   * makes the worker (`spindle.ts`); a test that starts one by hand gets the next id, an operator's scope and its manifest `identifier` as its id.
+   */
+  install(granted: readonly string[], identifier?: string, options: { id?: string; scope?: "user" | "operator"; installedBy?: string | null } = {}): Installed {
+    const id = options.id ?? `ext-${this.nextId++}`;
+    const scope = options.scope ?? "operator";
+    const ext: Ext = { id, identifier: identifier ?? id, scope, installedBy: options.installedBy ?? null, stopped: false, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [] };
     const modals = new Map<string, { title: string; items: unknown[] }>();
     const host = this;
     const change = (permission: string, granted: boolean): void => {
       if (granted) ext.granted.add(permission);
       else ext.granted.delete(permission);
-      // `permission_changed` (`spindle/worker-runtime.ts:5065-5090`).
       for (const handler of ext.changed) handler({ permission, granted, allGranted: [...ext.granted] });
+    };
+    /** The extension's own folder, by its install scope (`worker-host-storage-api.ts:116-122`). */
+    const storageRoot = (): string => {
+      if (ext.scope === "user") {
+        if (ext.installedBy === null) throw new Error("Extension owner is not set");
+        return `users/${ext.installedBy}/extensions/${ext.identifier}`;
+      }
+      return `extensions/${ext.identifier}/storage`;
+    };
+    /** The folder `userStorage` reads and writes (`:249-262`): a user-scoped extension's installer's, else the user the call names. */
+    const userRoot = (requested: string | undefined): string => {
+      if (ext.scope === "user") {
+        if (ext.installedBy === null) throw new Error("Extension owner is not set");
+        return `users/${ext.installedBy}/extensions/${ext.identifier}`;
+      }
+      if (requested === undefined || requested === "") throw new Error("userId is required for operator-scoped extensions");
+      return `users/${requested}/extensions/${ext.identifier}`;
     };
     // Each list is kept sorted by priority, lowest first; equal ones in the order registered (`spindle/interceptor-pipeline.ts:87-90`,
     // `spindle/world-info-interceptor.ts:192-194`, `spindle/context-handler.ts:23-26`).
@@ -148,20 +213,28 @@ export class ExtensionHost {
         ext.frontend.add(handler);
         return () => ext.frontend.delete(handler);
       },
+      scope: ext.scope,
+      installedBy: ext.installedBy,
+      storage: {
+        read: async (path) => {
+          const text = host.readFile(host.within(storageRoot(), path));
+          if (text === undefined) throw new Error("File not found");
+          return text;
+        },
+        write: async (path, data) => host.writeFile(host.within(storageRoot(), path), data),
+      },
       userStorage: {
-        // `getJson` reads the fallback for a missing or unreadable file (`spindle/worker-runtime.ts:2198-2210`).
+        // `getJson` reads the fallback for a missing or unreadable file, and for a call the host refuses, an operator-scoped extension's with no user among them
+        // (`spindle/worker-runtime.ts:2198-2210`); `setJson` throws what the host says (`:2211-2221`).
         getJson: async <T>(path: string, options: { fallback: T; userId?: string }): Promise<T> => {
-          const text = host.storage.get(`${options.userId ?? ""}\u0000${path}`);
-          if (text === undefined) return options.fallback;
           try {
-            return JSON.parse(text) as T;
+            const text = host.readFile(host.within(userRoot(options.userId), path));
+            return text === undefined ? options.fallback : (JSON.parse(text) as T);
           } catch {
             return options.fallback;
           }
         },
-        setJson: async (path, value, options) => {
-          host.storage.set(`${options?.userId ?? ""}\u0000${path}`, JSON.stringify(value, null, 2));
-        },
+        setJson: async (path, value, options) => host.writeFile(host.within(userRoot(options?.userId), path), JSON.stringify(value, null, 2)),
       },
       modal: {
         // A modal opened with a request id of the caller's is closed by it (`spindle/worker-host-presentation-api.ts:486-554`).
@@ -176,6 +249,8 @@ export class ExtensionHost {
       grant: (permission) => change(permission, true),
       revoke: (permission) => change(permission, false),
       stop() {
+        ext.stopped = true;
+        host.installed.splice(0, host.installed.length, ...host.installed.filter((e) => e !== ext));
         host.worldInfo = host.worldInfo.filter((r) => r.ext !== ext);
         host.interceptors = host.interceptors.filter((r) => r.ext !== ext);
         host.contextHandlers = host.contextHandlers.filter((r) => r.ext !== ext);
@@ -252,15 +327,52 @@ export class ExtensionHost {
     return api;
   }
 
-  /** An event for the extensions' workers alone: listeners run on a later task, never inline; the worker gets the payload and its user (`spindle/worker-host.ts:2917-2932`, `spindle/worker-runtime.ts:4773-4786`). */
-  toWorkers(event: string, payload: unknown, userId: string): void {
+  /**
+   * An event for the extensions' workers alone: listeners run on a later task, never inline; the worker gets the payload and its user (`spindle/worker-host.ts:2917-2932`,
+   * `spindle/worker-runtime.ts:4773-4786`). An extension installed for one user hears that user's events alone, and none that name no user (`:2920-2922`), and the
+   * announcement of a permission's change reaches the extension it is about (`:2923-2929`).
+   */
+  toWorkers(event: string, payload: unknown, userId?: string): void {
     for (const ext of this.installed) {
       if (!ext.forwarded.has(event)) continue;
+      if (ext.scope === "user" && userId !== ext.installedBy) continue;
+      if (event === "SPINDLE_PERMISSION_CHANGED" && (payload as { extensionId?: string } | null)?.extensionId !== ext.id) continue;
       const copy = structuredClone(payload);
       this.later(() => {
+        if (ext.stopped) return;
         for (const handler of ext.handlers.get(event) ?? []) handler(copy, userId);
       });
     }
+  }
+
+  /**
+   * A permission granted or revoked reaches the running worker (`spindle/worker-host.ts:1648-1656`, `spindle/worker-runtime.ts:5065-5090`): posted to it, and handled on a later
+   * task, where its grants become the set the host sent whole, and its `onChanged` handlers and those of `PERMISSION_CHANGED` hear the detail, which names the extension by its
+   * identifier. Until then the worker still holds what it held.
+   */
+  notifyPermissionChanged(id: string, permission: string, granted: boolean, allGranted: readonly string[]): void {
+    const ext = this.installed.find((e) => e.id === id);
+    if (ext === undefined) return;
+    const detail = { extensionId: ext.identifier, permission, granted, allGranted: [...allGranted] };
+    this.later(() => {
+      if (ext.stopped) return;
+      ext.granted.clear();
+      for (const p of detail.allGranted) ext.granted.add(p);
+      for (const handler of [...ext.changed]) {
+        try {
+          handler(detail);
+        } catch (error) {
+          ext.logs.push(`Permission changed handler error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      for (const handler of [...(ext.handlers.get("PERMISSION_CHANGED") ?? [])]) {
+        try {
+          handler(detail);
+        } catch (error) {
+          ext.logs.push(`PERMISSION_CHANGED event handler error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    });
   }
 
   // ---------------------------------------------------------------- the network

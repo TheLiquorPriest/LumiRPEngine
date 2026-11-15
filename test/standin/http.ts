@@ -21,6 +21,7 @@ import type { StandInDb } from "./db";
 import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
 import type { Installed, Outcome, StandIn } from "./lumiverse";
 import { Profiles } from "./profiles";
+import { Refused, type Viewer } from "./spindle";
 import { dryRunResult, pageOf, parsePagination, parsed, rowMetadata, rowToBook, rowToCharacter, rowToEntry, rowToMessage, rowToMessageLight, rowToPersona, rowToPreset, rowToSetting, type Pagination } from "./served";
 import { RECEIVE_LIMITS, ServerSocket, SWEEP_MS } from "./sockets";
 
@@ -185,7 +186,7 @@ export class LumiverseServer {
       host.later = (run) => void this.clock.setTimeout(run, 0);
       host.now = () => this.clock.now();
       host.frontends = (m) => this.toFrontend(m.extension, m.payload, m.user, m.session);
-      host.sockets = (event, payload, user) => this.frame(event, payload, user);
+      host.sockets = (event, payload, user, options) => this.frame(event, payload, user, options);
     }
     // The bus's sweep (`ws/bus.ts:17-18`, `:457-466`): every minute, a socket silent for two is closed.
     const sweep = (): void => {
@@ -206,7 +207,7 @@ export class LumiverseServer {
   /** Installs an extension in the stand-in host under its identifier (`spindle/manager.service.ts`). */
   install(identifier: string, granted: readonly string[]): Installed {
     if (!this.options.host) throw new Error("the stand-in server has no host to install in");
-    const installed = this.options.host.install(granted);
+    const installed = this.options.host.install(granted, identifier);
     this.listed.set(installed.id, { installed, identifier });
     return installed;
   }
@@ -247,9 +248,17 @@ export class LumiverseServer {
   }
 
   /** An event's frame, to every socket of the user (`ws/bus.ts:520-529`). */
-  private frame(event: string, payload: unknown, user?: string): void {
+  /**
+   * `eventBus.emit` to the sockets (`ws/bus.ts:502-544`): an event with no topic reaches every socket of the user (every socket, with no user); one with a topic only the sockets
+   * subscribed to it, `stream:<user>:<chat>` for the sockets whose page says it views that chat.
+   */
+  private frame(event: string, payload: unknown, user?: string, options?: { topic?: string }): void {
     const frame = JSON.stringify({ event, payload, timestamp: this.clock.now(), ...(user !== undefined ? { userId: user } : {}) });
-    for (const s of this.sockets) if (s.closed === null && (user === undefined || s.user === user)) s.send(frame);
+    for (const s of this.sockets) {
+      if (s.closed !== null || (user !== undefined && s.user !== user)) continue;
+      if (options?.topic !== undefined && (s.focus === null || options.topic !== `stream:${s.user}:${s.focus}`)) continue;
+      s.send(frame);
+    }
   }
 
   // ---------------------------------------------------------------- HTTP
@@ -405,10 +414,14 @@ export class LumiverseServer {
 
     // `GET /api/v1/spindle` (`routes/spindle.routes.ts:45-58`): the extensions the user may use.
     if (request.method === "GET" && path === "/api/v1/spindle") {
-      const extensions = [...this.listed.entries()].map(([id, l]) => ({ id, identifier: l.identifier, name: l.identifier, enabled: true, status: "running" }));
-      return json(200, { extensions, isPrivileged: false });
+      const legacy = [...this.listed.entries()].map(([id, l]) => ({ id, identifier: l.identifier, name: l.identifier, enabled: true, status: "running" }));
+      const viewer = this.viewerOf(user);
+      const managed = this.options.host?.spindle.list(viewer).map((ext) => ({ ...ext, frontend_runtime_capabilities: [] })) ?? [];
+      return json(200, { extensions: [...legacy, ...managed], isPrivileged: viewer.role !== "user" });
     }
 
+    const spindle = await this.fromSpindle(request, url, user);
+    if (spindle !== null) return spindle;
     const chatWrites = await this.fromChatWrites(request, url, user);
     if (chatWrites !== null) return chatWrites;
     const served = await this.fromRows(request, url, user);
@@ -518,6 +531,13 @@ export class LumiverseServer {
     if (personaRoute !== null) {
       const row = rows("SELECT * FROM personas WHERE id = ? AND user_id = ?", named(personaRoute)!, user)[0];
       return row === undefined ? json(404, { error: "Not found" }) : json(200, rowToPersona(row));
+    }
+
+    // `GET /api/v1/presets` (`routes/presets.routes.ts`, `listPresets`, `services/presets.service.ts:94-102`): the user's, the most lately changed first, paged.
+    if (path === "/api/v1/presets") {
+      const total = Number(rows("SELECT COUNT(*) AS count FROM presets WHERE user_id = ?", user)[0]?.count ?? 0);
+      const list = rows("SELECT * FROM presets WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?", user, pagination.limit, pagination.offset);
+      return json(200, pageOf(list.map(rowToPreset), total, pagination));
     }
 
     // `GET /api/v1/presets/:id` (`routes/presets.routes.ts:139-158`): tagged by the preset's cache revision and the user.
@@ -681,6 +701,44 @@ export class LumiverseServer {
     const total = Number(rows(`SELECT COUNT(*) as count FROM world_book_entries e WHERE ${where}`, ...params)[0]!.count);
     const page = rows(`SELECT e.* FROM world_book_entries e WHERE ${where} ORDER BY e.${column}${collate} ${direction}, e.id ASC LIMIT ? OFFSET ?`, ...params, pagination.limit, pagination.offset);
     return pageOf(page.map(rowToEntry), total, pagination);
+  }
+
+  /** Who asks, by role (`getViewer`, `routes/spindle.routes.ts:25-32`). */
+  private viewerOf(user: string): Viewer {
+    return { userId: user, role: this.roleOf(user) };
+  }
+
+  /**
+   * The routes of Spindle's manager (`routes/spindle.routes.ts`, `spindle.ts`): the branches of a remote, an install from one, an extension enabled, disabled and restarted, and what
+   * it is granted. A refusal is its status and message; any other failure is 400 with its message (`:226-228`). Null for any other route.
+   */
+  private async fromSpindle(request: Request, url: URL, user: string): Promise<Response | null> {
+    const manager = this.options.host?.spindle;
+    const route = /^\/api\/v1\/spindle\/(branches|install|([^/]+)\/(enable|disable|restart|permissions))$/.exec(url.pathname);
+    if (manager === undefined || route === null) return null;
+    const viewer = this.viewerOf(user);
+    const method = request.method;
+    const body = async (): Promise<Record<string, unknown>> => {
+      const read = parsed(await request.text(), undefined);
+      if (read === undefined || read === null || typeof read !== "object") throw new SyntaxError("Unexpected end of JSON input");
+      return read as Record<string, unknown>;
+    };
+    try {
+      if (route[1] === "branches" && method === "POST") return json(200, { branches: manager.branches(viewer, await body()) });
+      if (route[1] === "install" && method === "POST") return json(201, manager.install(viewer, await body()));
+      const id = decodeURIComponent(route[2]!);
+      const action = route[3];
+      if (action === "permissions" && method === "GET") return json(200, manager.permissions(viewer, id));
+      if (action === "permissions" && method === "POST") return json(200, manager.setPermissions(viewer, id, await body()));
+      if (method !== "POST") return null;
+      if (action === "enable") await manager.enable(viewer, id);
+      else if (action === "disable") await manager.disable(viewer, id);
+      else if (action === "restart") await manager.restart(viewer, id);
+      return json(200, { success: true });
+    } catch (error) {
+      if (error instanceof Refused) return json(error.status, { error: error.message });
+      return json(400, { error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /** What the chat and connection routes read and write of the stand-in (`chatwrites.ts`, `profiles.ts`). */
@@ -862,6 +920,11 @@ export class LumiverseServer {
     if (frame.type === "visibility") {
       // `ws/handler.ts:299-304`: the page says whether it is shown; a hidden one is let be 30 minutes (`ws/bus.ts:461-463`).
       socket.visible = !!frame.visible;
+      return;
+    }
+    if (frame.type === "stream_focus") {
+      // `ws/handler.ts:306-312`: the page names the chat it views, or none; the socket's one subscription moves to that chat's topic.
+      socket.focus = typeof frame.chatId === "string" ? frame.chatId : null;
       return;
     }
     if (frame.type === "ping") {

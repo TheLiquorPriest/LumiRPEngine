@@ -187,7 +187,7 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
       const origins = new Set([new URL(listening.url).origin, new URL(listening.loopback).origin]);
       for (const origin of origins) host.servers.set(origin, (request) => fetch(request));
       await until("the extension's answer to this RPE's registration", () => {
-        const registered = readRegistration(JSON.parse(host.storage.get(`${USER}\u0000${REGISTRATION_FILE}`) ?? "null"));
+        const registered = readRegistration(JSON.parse(host.readFile(`users/${USER}/extensions/${EXTENSION_IDENTIFIER}/${REGISTRATION_FILE}`) ?? "null"));
         return registered !== null && origins.has(new URL(registered.base).origin) ? registered : null;
       });
       await until("RPE's event socket to open", () => composition.door.lumiverse()?.events.open);

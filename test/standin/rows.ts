@@ -8,6 +8,7 @@
 
 import type { StandInDb } from "./db";
 import { ExtensionHost } from "./host";
+import { SpindleManager } from "./spindle";
 import { Library, type Character } from "./books";
 import type { Role } from "./steps";
 
@@ -73,21 +74,23 @@ export class ChatRows extends ExtensionHost {
   readonly stored = new Map<string, { chatId: string; data: Stored }>();
   readonly events: { event: string; payload: unknown }[] = [];
   /** Where Lumiverse's event bus frames an event for the user's sockets (`ws/bus.ts:520-529`): the stand-in server's, when this host is behind one. */
-  sockets: ((event: string, payload: unknown, user: string) => void) | null = null;
+  sockets: ((event: string, payload: unknown, user?: string, options?: { topic?: string }) => void) | null = null;
   /** The database Lumiverse's chat service writes the chats' rows to; with none, the chats are held in memory only. */
   db: StandInDb | null = null;
   /** The time for its rows' stamps: the host's clock (a test that moves time moves it), unless a test gives another; Lumiverse stamps seconds (`services/chats.service.ts:2640`). */
   now: () => number = () => this.clock.now();
   /** The books, characters, personas and settings a generation reads its lore sources from: kept here and, with a database, written to it and read from it. Set `db` before adding any. */
   readonly library = new Library(() => this.db, () => this.now());
+  /** Spindle's manager (`spindle.ts`): installs from a remote's branch, enables, grants as an admin does, and starts each extension's worker in this host. */
+  readonly spindle = new SpindleManager(this, () => this.now());
 
   /**
    * `eventBus.emit` (`ws/bus.ts:502-544`): a frame to each of the user's sockets at once, through the
    * server where one serves this host, and the event to the extensions' workers.
    */
-  emit(event: string, payload: unknown, userId: string): void {
+  emit(event: string, payload: unknown, userId?: string, options?: { topic?: string }): void {
     this.events.push({ event, payload });
-    this.sockets?.(event, payload, userId);
+    this.sockets?.(event, payload, userId, options);
     this.toWorkers(event, payload, userId);
   }
 

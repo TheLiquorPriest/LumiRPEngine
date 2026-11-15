@@ -64,6 +64,8 @@ export class ServerSocket {
   admitted = true;
   /** Its page's own word (`visibility`, `ws/handler.ts:299-304`): hidden pages are let be 30 minutes (`ws/bus.ts:461-463`). */
   visible = true;
+  /** The chat its page says it is viewing (`stream_focus`, `ws/handler.ts:306-312`; `setClientStreamFocus`, `ws/bus.ts:296-318`): the stream tokens of that chat reach this socket and no other of the user's. */
+  focus: string | null = null;
   /** When the client last sent anything (`ws/handler.ts:257`). */
   lastInbound: number;
   private pending = 0;

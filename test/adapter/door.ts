@@ -14,10 +14,10 @@ import type { SecrecyAsk, WindowAsk } from "../../src/adapter/lumiverse/answer";
 import { lumiverseDoor, type AdapterLanes, type LumiverseDoor } from "../../src/adapter/lumiverse/mount";
 import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import type { TaggedTurn } from "../../src/adapter/lumiverse/provider";
-import type { RelaySettings } from "../../src/adapter/lumiverse/relay";
-import { LUMIVERSE_DEFAULTS } from "../../src/adapter/lumiverse/settings";
+import { LUMIVERSE_SETTINGS } from "../../src/adapter/lumiverse/settings";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { startExtension } from "../../src/ext/start";
+import { treeReader } from "../../src/tree/settings";
 import { ALL } from "../ext/rig";
 import { StandInDb } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
@@ -60,7 +60,8 @@ export interface DoorBed {
 export interface DoorOptions {
   clock: BedClock;
   handlerMs?: number;
-  relay?: Partial<RelaySettings>;
+  /** The `lumiverse:` group of `RPE-global.yml`, as the bed writes it there for the door to read. */
+  lumiverse?: Record<string, unknown>;
   /** Areas the test adds after the door's own. */
   areas?: readonly Area[];
   /** RPE's config over the bed's own. */
@@ -124,11 +125,13 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
       },
       passConnection: () => "conn-author",
     };
-    const relay = options.relay;
-    const door = lumiverseDoor(lanes, { fetch: server.fetch, open: server.open, clock, sleep: (ms) => Bun.sleep(ms), ...(relay ? { settings: () => ({ ...LUMIVERSE_DEFAULTS, relay: { ...LUMIVERSE_DEFAULTS.relay, ...relay } }) } : {}) });
-    const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: "conn-rpe" }, ...options.config }, {}, "the test's config");
+    if (options.lumiverse !== undefined) await Bun.write(paths.globalConfig, JSON.stringify({ lumiverse: options.lumiverse }));
     const logs: string[] = [];
-    const app = await openApp({ paths, config, version: "build-7", areas: [door.area, ...(options.areas ?? [])], now: () => clock.now(), log: lineLog((line) => logs.push(line), () => clock.now()) });
+    const log = lineLog((line) => logs.push(line), () => clock.now());
+    const settings = treeReader({ files: () => paths.files, folders: () => null, log: () => log, known: () => LUMIVERSE_SETTINGS });
+    const door = lumiverseDoor(lanes, { fetch: server.fetch, open: server.open, clock, sleep: (ms) => Bun.sleep(ms), settings });
+    const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: "conn-rpe" }, ...options.config }, {}, "the test's config");
+    const app = await openApp({ paths, config, version: "build-7", areas: [door.area, ...(options.areas ?? [])], now: () => clock.now(), log });
     cleanups.push(() => app.close());
     const providerKey = (await app.auth.makeKey("provider")).key;
 
@@ -169,7 +172,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
     await until("the extension's answer to RPE's registration", () => door.extension().missing !== null);
     const registration = door.registration();
     if (registration === null) throw new Error("RPE made no registration");
-    const kept = (): Registration | null => readRegistration(JSON.parse(host.storage.get(`${USER}\u0000${REGISTRATION_FILE}`) ?? "null"));
+    const kept = (): Registration | null => readRegistration(JSON.parse(host.readFile(`users/${USER}/extensions/${EXTENSION_IDENTIFIER}/${REGISTRATION_FILE}`) ?? "null"));
     return { app, listening, door, host, server, installed, extension: installed.id, providerKey, registration, kept, logs, heard, until, run, close };
   } catch (error) {
     await close();
