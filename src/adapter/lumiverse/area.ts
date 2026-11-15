@@ -8,8 +8,9 @@
 // handle this returns.
 
 import type { DoorFills } from "../../app/hooks";
-import { type AdapterDeps, type AdapterLanes, type LumiverseDoor, lumiverseDoor } from "./mount";
 import type { SecrecyRules } from "./answer";
+import { type AdapterDeps, type AdapterLanes, type LumiverseDoor, lumiverseDoor } from "./mount";
+import { LUMIVERSE_SETTINGS } from "./settings";
 
 // An area adds a lane by naming it here: the app's hooks carry no type of the door's.
 declare module "../../app/hooks" {
@@ -33,9 +34,6 @@ const UNFILLED: AdapterLanes = {
     play: async () => {
       throw none("turns");
     },
-    standbyLine: () => {
-      throw none("turns");
-    },
   },
   changes: { changed: () => undefined, reopened: () => undefined },
   window: async () => null,
@@ -57,7 +55,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
   /** The lane as the areas filled it, or the door's own answer. */
   const lane = <K extends keyof AdapterLanes>(name: K): AdapterLanes[K] => (filled[name] as AdapterLanes[K] | undefined) ?? UNFILLED[name];
   const lanes: AdapterLanes = {
-    turns: { play: (turn, out, signal) => lane("turns").play(turn, out, signal), standbyLine: (turn) => lane("turns").standbyLine(turn) },
+    turns: { play: (turn, out, signal) => lane("turns").play(turn, out, signal) },
     changes: { changed: (change) => lane("changes").changed(change), reopened: () => lane("changes").reopened() },
     window: (ask, signal) => lane("window")(ask, signal),
     secrecy: (ask, signal) => lane("secrecy")(ask, signal),
@@ -72,6 +70,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     ...door,
     area: {
       ...door.area,
+      settings: LUMIVERSE_SETTINGS,
       mount: async (at) => {
         filled = at.hooks.door;
         await door.area.mount?.(at);

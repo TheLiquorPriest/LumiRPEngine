@@ -15,13 +15,16 @@ import type { SettingDef } from "../../src/app/setting-list";
 import { type LevelFile, settingsRoutes } from "../../src/app/settings-routes";
 import { type LiveEvent, LIVE_TOKEN_ENDED, type SettingsReply } from "../../src/shared/api";
 import { SESSION_PATH } from "../../src/ui/api";
-import { createClient, KEY_LET_GO, replyOf, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
+import { createClient, isJoined, KEY_LET_GO, replyOf, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
 import type { JsonValue } from "../../src/shared/json";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
 import { readSession } from "../../src/ui/pages/builds";
 import { browserDeps, probeDirect } from "../../src/ui/roads";
 import { testModelLayer } from "../app/helpers";
 import { CHAT, RECORDED, RECORDS, turnListAt, USER } from "./recorded";
+import { askOf, keyOf } from "../app/asking";
+import { replyProblems } from "../app/call";
+import { CHAT as BED_CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER } from "../turn/bed";
 
 /** A stand-in for the turn lane's list of turns, at the real route's path: it answers a recorded list, and what it was asked. */
 const ROOT = resolve(import.meta.dir, "../..");
@@ -266,6 +269,64 @@ describe("the direct road, against RPE's own server", () => {
     } finally {
       beforePage = () => undefined;
       harbor = HARBOR;
+    }
+  });
+});
+
+/** The route keys the pages write in their calls, found in the pages' own files. */
+async function pagesCall(): Promise<Set<string>> {
+  const called = new Set<string>();
+  for (const file of new Bun.Glob("src/ui/**/*.{ts,tsx}").scanSync(ROOT)) for (const m of (await Bun.file(join(ROOT, file)).text()).matchAll(/"((?:GET|POST|PUT|DELETE) \/api\/v1\/[^"]*)"/g)) called.add(m[1] ?? "");
+  return called;
+}
+
+describe("every route the pages call, through the client, on RPE as composed", () => {
+  test("each answers a reply its declaration takes, or a refusal in RPE's own words, and none fails as the server: reads of a chat that was played, changes of one that is nowhere", async () => {
+    const b = await openTurnBed({ answers: [replying("The tide turns.")] });
+    const open: RpeClient[] = [];
+    try {
+      b.host.send(BED_CHAT, "I watch the harbour.");
+      const played = await b.host.generate({ chat: BED_CHAT, connection: CONNECTION, preset: PRESET });
+      expect(played.error).toBeNull();
+      const first = await settledTurn(b, played.generationId ?? "");
+      let held: string | null = (await b.app.auth.mintPageToken(BED_USER, "extension")).token;
+      const client = createClient(webConnector(b.listening.url, { get: () => held, set: (next) => (held = next) }, browserDeps()));
+      open.push(client);
+
+      const table = new Map(b.app.routes.list().map((r) => [keyOf(r), r]));
+      const called = [...(await pagesCall())].sort((a, c) => Number(!a.startsWith("GET ")) - Number(!c.startsWith("GET ")));
+      const replied: string[] = [];
+      const refused: { key: string; status: number; reading: boolean }[] = [];
+      const wrong: string[] = [];
+      for (const key of called) {
+        const info = table.get(key);
+        if (info === undefined) {
+          wrong.push(`${key} is not in the table`);
+          continue;
+        }
+        // Reads are asked of the chat that was played, at the turn it holds; a change is asked of a chat and a turn that are nowhere, so none is made.
+        const reading = info.method === "GET";
+        const ask = askOf(info, { chat: reading ? BED_CHAT : "chat-nowhere", turn: reading ? first.id : "turn-nowhere" });
+        try {
+          const reply: unknown = await client.call(key as never, ask.params as never, { query: ask.query, body: ask.body } as never);
+          const problems = isJoined(reply) ? (info.declared.joined ? [] : ["it answers a joined turn, which it does not declare"]) : replyProblems(b.app, key, reply);
+          if (problems.length > 0) wrong.push(`${key}: ${problems.slice(0, 3).join(" ")}`);
+          else replied.push(key);
+        } catch (error) {
+          if (error instanceof RpeError && error.status >= 400 && error.status < 500 && error.message.trim() !== "") refused.push({ key, status: error.status, reading });
+          else wrong.push(`${key}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      expect(wrong).toEqual([]);
+      // A read of what the bed has answers; one is refused only for a character or a file the bed does not hold, named by a param of its path.
+      const strangers = refused.filter((r) => r.reading && !(table.get(r.key)?.params ?? []).some((p) => p !== "chat" && p !== "turn"));
+      expect(strangers).toEqual([]);
+      // The reads that answered are most of what the pages call: a call that is refused each time checks nothing.
+      expect(replied.filter((key) => key.startsWith("GET ")).length).toBeGreaterThan(15);
+      expect(replied.length + refused.length).toBe(called.length);
+    } finally {
+      for (const client of open) client.close();
+      await b.close();
     }
   });
 });

@@ -82,7 +82,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
     settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS],
     fills: {
       door: {
-        turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal), standbyLine: (turn) => made().lane.standbyLine(turn) },
+        turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
         changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
         // The history window on the chat's settings: the first history message the prompt keeps.
         window: async (ask) => historyWindow(ask.path, (await chatSettings(ask.chat)).window, covered(ask.chat)).first,

@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import type { AgentRef, Scope, SettingDef } from "rp-harness/contract";
 import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { USER_HEADER } from "../../src/adapter/lumiverse/pipe-wire";
+import { LUMIVERSE_SETTINGS } from "../../src/adapter/lumiverse/settings";
 import { QUESTION_PATH, type Question } from "../../src/adapter/lumiverse/wire";
 import type { LumiverseDoor } from "../../src/adapter/lumiverse/mount";
 import { type App, type Area, MIGRATION_AREAS } from "../../src/app";
@@ -42,7 +43,7 @@ const OWN: Readonly<Record<string, { file: string; settings: readonly SettingDef
   story: { file: "story/area.ts", settings: STORY_SETTINGS },
   build: { file: "build/area.ts", settings: [] },
   play: { file: "play/area.ts", settings: [] },
-  lumiverse: { file: "adapter/lumiverse/area.ts", settings: [] },
+  lumiverse: { file: "adapter/lumiverse/area.ts", settings: LUMIVERSE_SETTINGS },
 };
 
 /** Lumiverse's network refused, as the API generator composes: an area that reached for it while it mounted would stop here. */

@@ -67,7 +67,14 @@ export function sample(shape: AnyShape, turn: string, named: Readonly<Record<str
     case "union":
       return sample(shape.of.find((s) => !(s.kind === "literal" && s.value === null)) ?? (shape.of[0] as AnyShape), turn, named);
     case "object":
-      return Object.fromEntries(Object.entries(shape.fields).flatMap(([name, f]) => (isOptional(f) && !holdsTurn(fieldShape(f)) ? [] : [[name, fieldShape(f).kind === "text" && Object.hasOwn(named, name) && !holdsTurn(fieldShape(f)) ? named[name] : sample(fieldShape(f), turn, named)]])));
+      return Object.fromEntries(
+        Object.entries(shape.fields).flatMap(([name, f]) => {
+          if (isOptional(f) && !holdsTurn(fieldShape(f))) return [];
+          // A text field the path names (`chat`, or `chatId`) is the path's own, so the request agrees with itself.
+          const of = Object.hasOwn(named, name) ? name : name.endsWith("Id") && Object.hasOwn(named, name.slice(0, -2)) ? name.slice(0, -2) : null;
+          return [[name, of !== null && fieldShape(f).kind === "text" && !holdsTurn(fieldShape(f)) ? named[of] : sample(fieldShape(f), turn, named)]];
+        }),
+      );
     default:
       return undefined;
   }
