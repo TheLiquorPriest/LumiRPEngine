@@ -10,6 +10,7 @@ import type { LiveEvent } from "../../src/shared/api";
 import type { ExtensionStatus } from "../../src/ui/api";
 import { type ClientState, createClient, extensionConnector, isJoined, KEY_LET_GO, type LiveListener, pathOf, replyOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
+import { proofOf, sha256Hex } from "../../src/shared/page-proof";
 import { createUiSettings } from "../../src/ui/ui-settings";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
 import { CHAT, RECORDED, turnListAt } from "./recorded";
@@ -173,7 +174,17 @@ const refused = async (): Promise<never> => {
   throw new TypeError("Failed to fetch");
 };
 const json = (status: number, body: unknown) => async () => ({ status, text: async () => JSON.stringify(body) });
-const rpeStatus = json(200, { name: "rpe", version: "1.0.0", started: 0, belongsToUser: true });
+const rpeStatusBody = { name: "rpe", version: "1.0.0", started: 0, belongsToUser: true };
+/** RPE as a page finds it: its status, and, for any of the page tokens the tests make, the proof of the nonce RPE answers by the hash it keeps of the token. */
+const rpeStatus = async (url: string) => {
+  if (!url.includes("/api/v1/status/proof")) return json(200, rpeStatusBody)();
+  const asked = new URL(url).searchParams;
+  for (const token of ["rpp_page1", "rpp_page2", "rpp_page3", "rpp_x"]) {
+    const hash = await sha256Hex(token);
+    if (hash.startsWith(asked.get("id") ?? "-")) return json(200, { proof: await proofOf(hash, asked.get("nonce") ?? "") })();
+  }
+  return json(404, { error: "RPE holds no such token." })();
+};
 /** Lets everything the page has waiting on a promise run: the test's own timers stay where they are. */
 function settle(): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
@@ -268,7 +279,7 @@ describe("which road the drawer's client takes", () => {
 
   test("when RPE answers the page and its live socket opens, it goes directly, and the relay carries nothing", async () => {
     const channel = new Channel(() => ({ status: 500, body: { error: "not this way" } }));
-    const { deps, fetched, opened } = browser(async (url) => (url.endsWith("/api/v1/status") ? rpeStatus() : json(200, turnListAt())()));
+    const { deps, fetched, opened } = browser(async (url) => (url.includes("/api/v1/status") ? rpeStatus(url) : json(200, turnListAt())()));
     const client = track(createClient(extensionConnector(channel, deps)));
     const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } }));
     expect(list.turns.length).toBe(4);
@@ -327,7 +338,7 @@ describe("which road the drawer's client takes", () => {
     const timers = new ManualTimers();
     // RPE's clock is two hours behind the browser's: by the browser's clock, the time RPE names has long passed.
     const rpeNow = timers.now() - 2 * 3_600_000;
-    const backend = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: rpeNow + 30 * 60_000, expiresInMs: 30 * 60_000, addresses: [], build: "b-1", pageSettings: {} }));
+    const backend = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: rpeNow + 30 * 60_000, expiresInMs: 30 * 60_000, addresses: [], build: "b-1", pageSettings: {}, road: { requestMs: 35_000, renewMs: 20_000 } }));
     try {
       const client = track(createClient(extensionConnector(backend.road, browser(refused, "open", timers).deps)));
       await client.call("GET /api/v1/chats", {});
@@ -372,7 +383,7 @@ describe("a chat's live updates", () => {
 
   test("through the extension's own page road: the start, a request, and a live list in two parts all reach the page", async () => {
     const timers = new ManualTimers();
-    const { road, deliver, asked } = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: timers.now() + 1_800_000, expiresInMs: 1_800_000, addresses: [ADDRESS], build: "b-1", pageSettings: {} }));
+    const { road, deliver, asked } = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: timers.now() + 1_800_000, expiresInMs: 1_800_000, addresses: [ADDRESS], build: "b-1", pageSettings: {}, road: { requestMs: 35_000, renewMs: 20_000 } }));
     try {
       const client = track(createClient(extensionConnector(road, browser(refused, "open", timers).deps)));
       const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });
@@ -726,6 +737,16 @@ describe("the page's settings in the drawer's client", () => {
     expect(createUiSettings(null).values.get().startMs).toBe(35_000);
   });
 
+  test("a server that answers name: rpe and fails the proof is never sent the token, and the page takes the relay", async () => {
+    const channel = new Channel(() => ({ status: 200, body: {} }));
+    const { deps, opened } = browser(async (url) => (url.includes("/api/v1/status/proof") ? json(200, { proof: "0".repeat(64) })() : rpeStatus(url)));
+    const client = track(createClient(extensionConnector(channel, deps)));
+    client.connect();
+    const state = await settled(client);
+    expect(state.phase === "relay" ? state.why : "").toContain("did not prove that it is RPE");
+    expect(opened).toEqual([]);
+  });
+
   test("a request RPE took in hand and answered with an id is asked for every second until its answer is ready", async () => {
     const timers = new ManualTimers();
     let polls = 0;
@@ -736,13 +757,13 @@ describe("the page's settings in the drawer's client", () => {
     });
     const client = track(createClient(extensionConnector(channel, browser(refused, "open", timers).deps)));
     let result: unknown = null;
-    void client.call("POST /api/v1/chats", {}).then((answer) => (result = answer));
+    void client.call("POST /api/v1/chats/:chat/settle", { chat: CHAT }).then((answer) => (result = answer));
     for (let i = 0; i < 4; i++) {
       await settle();
       timers.advance(1000);
     }
     await settle();
     expect(result).toEqual({ ok: true });
-    expect(channel.requests.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /api/v1/chats", "GET /api/v1/answers/a1", "GET /api/v1/answers/a1", "GET /api/v1/answers/a1"]);
+    expect(channel.requests.map((r) => `${r.method} ${r.path}`)).toEqual([`POST /api/v1/chats/${CHAT}/settle`, "GET /api/v1/answers/a1", "GET /api/v1/answers/a1", "GET /api/v1/answers/a1"]);
   });
 });

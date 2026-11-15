@@ -7,6 +7,7 @@
 import type { Clock } from "rp-harness/contract";
 import { type ApiRoutes, type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, type MissingPermissionShown, TOKEN_PROTOCOL_PREFIX } from "../shared/api";
 import { isRecord } from "../shared/json";
+import { KEY_ID_LENGTH, newNonce, PROOF_PATH, proofOf, sha256Hex } from "../shared/page-proof";
 import type { PageSettings } from "../shared/page-settings";
 import type { Readable } from "./store";
 import { errorWords } from "./words";
@@ -142,25 +143,41 @@ export function readBatch(value: unknown): LiveBatch | null {
 export type Probe = { ok: true } | { ok: false; why: string };
 
 /**
- * Whether this page can reach RPE at `base` itself: the public status route, with no credential, then,
- * only once something there answers as RPE, the live socket, which offers the page's token. Browsers
- * differ on a page served over HTTPS calling a loopback address, and some let the HTTP call through and
- * not the socket, so both are tried. Nothing yet proves that what answers as RPE holds the token.
+ * Whether this page can reach RPE at `base` itself: the public status route, with no credential; then,
+ * only once something there answers as RPE, the proof route, which shows that what answers holds the
+ * table RPE's page tokens are kept in (`src/shared/page-proof.ts`: a nonce of the page's own, answered
+ * with its hash keyed by the token's); and only once that holds, the live socket, which offers the
+ * page's token. The token goes to no address that has not proved it is RPE. Browsers differ on a page
+ * served over HTTPS calling a loopback address, and some let the HTTP call through and not the socket,
+ * so both are tried.
  */
 export async function probeDirect(base: string, token: string, deps: RoadDeps, timeoutMs: number): Promise<Probe> {
   const seconds = `${Math.round(timeoutMs / 100) / 10} s`;
+  let hash: string;
+  try {
+    hash = await sha256Hex(token);
+  } catch (error) {
+    return { ok: false, why: `this page cannot tell that it is RPE that answers there (${errorWords(error)})` };
+  }
+  const nonce = newNonce();
   const controller = new AbortController();
   const timer = deps.timers.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const answer = await deps.fetch(new URL(STATUS_PATH, base).toString(), { method: "GET", headers: { accept: "application/json" }, signal: controller.signal });
-    if (answer.status !== 200) return { ok: false, why: `it answered ${answer.status}` };
-    let body: unknown = null;
+  const ask = (path: string) => deps.fetch(new URL(path, base).toString(), { method: "GET", headers: { accept: "application/json" }, signal: controller.signal });
+  const jsonOf = async (answer: { text(): Promise<string> }): Promise<unknown> => {
     try {
-      body = JSON.parse(await answer.text());
+      return JSON.parse(await answer.text());
     } catch {
-      // Not JSON: not RPE.
+      return null;
     }
+  };
+  try {
+    const answer = await ask(STATUS_PATH);
+    if (answer.status !== 200) return { ok: false, why: `it answered ${answer.status}` };
+    const body = await jsonOf(answer);
     if (!isRecord(body) || body.name !== "rpe") return { ok: false, why: "something other than RPE answered there" };
+    const proof = await ask(`${PROOF_PATH}?${new URLSearchParams({ id: hash.slice(0, KEY_ID_LENGTH), nonce })}`);
+    const proved = proof.status === 200 ? await jsonOf(proof) : null;
+    if (!isRecord(proved) || proved.proof !== (await proofOf(hash, nonce))) return { ok: false, why: "what answered there did not prove that it is RPE" };
   } catch (error) {
     return { ok: false, why: controller.signal.aborted ? `no answer within ${seconds}` : `the browser did not let this page call it (${errorWords(error)})` };
   } finally {
