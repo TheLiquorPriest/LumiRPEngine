@@ -25,8 +25,7 @@ saved_differs: What the chat saved as message {{message}} is not what was releas
 cut_short: The reply in message {{message}} was stopped before it was finished. The chat kept only the part written by then.
 progress_missing: This chat's progress.md has no still line, so nothing keeps a long turn alive: the chat application ends a generation that shows nothing after ten minutes. The turn's own time limit was held at {{time}} milliseconds.
 pictures_not_taken: Pictures in the prompt were left out: {{count}}, in messages {{messages}}, counting the prompt's first message as 0. Your model is not known to take pictures.
-pictures_text_only: Pictures in the prompt's system or assistant messages were left out: {{count}}, in messages {{messages}}, counting the prompt's first message as 0. Such a message carries text only.
-parts_not_carried: Parts of the prompt that can be given as neither text nor a picture (a picture by a web address, audio) were left out: {{count}}, in messages {{messages}}, counting the prompt's first message as 0.
+parts_not_carried: Parts of the prompt that can be given as neither text nor a picture (audio, for one) were left out: {{count}}, in messages {{messages}}, counting the prompt's first message as 0.
 world_state_failed: The world state could not be put in this briefing: {{error}}
 on_stage_failed: The cast's views of those on stage could not be put in this briefing: {{error}}
 cut_unmatched: Messages the chat application listed were not found in the prompt as it was sent: {{missing}}. The prompt's parts are not told apart.

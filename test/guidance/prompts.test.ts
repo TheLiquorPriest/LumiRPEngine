@@ -43,7 +43,6 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   cut_short: { message: 4 },
   progress_missing: { time: 540000 },
   pictures_not_taken: { count: 2, messages: "3, 5" },
-  pictures_text_only: { count: 1, messages: "0" },
   parts_not_carried: { count: 1, messages: "4" },
   world_state_failed: { error: "The fold broke." },
   on_stage_failed: { error: "The cast could not be read." },
