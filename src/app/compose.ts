@@ -16,6 +16,7 @@
 import { join } from "node:path";
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import type { Clock, CreateHarnessOptions } from "rp-harness";
+import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/lumiverse/mount";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
@@ -38,7 +39,6 @@ import { BOOTSTRAP_SETTINGS, BootstrapJobs, bootstrapRoutes } from "../turn/boot
 import { guidanceTexts } from "../turn/texts";
 import type { App, Area } from "./app";
 import { connectionRoutes, storedKey } from "./connections";
-import { HARNESS_SETTINGS } from "./harness-settings";
 import { type LevelFile, settingsRoutes } from "./settings-routes";
 import { UPDATE_SETTINGS } from "./update";
 
