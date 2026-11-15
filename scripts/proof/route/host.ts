@@ -107,21 +107,41 @@ export interface RunFacts {
   /** The settings in force, as `GET /api/v1/settings` gave them. */
   settings: SettingsReply;
   /**
-   * The guidance the run stood on, from which its standing is worked out (plan §17: a verdict comes
-   * only from shipped guidance on a clean build). A host that gives none, or gives null, makes the run
-   * a trial, with that as its why.
+   * The guidance the run stood on when it began (the user's and a character's layers, and the
+   * shipped tree as RPE serves it), from which the start of its standing is worked out (plan §17: a
+   * verdict comes only from shipped guidance on a clean build). A host that gives none, or gives null,
+   * makes the run a trial, with that as its why. What each play's own chat stood on, which is made
+   * after the run began, is the session's to say (`Session.guidance`).
    */
   guidance?: GuidanceFacts | null;
 }
 
-/** The guidance a run stood on, every file by its path and the SHA-256 of its bytes (`scripts/proof/lib/record.ts`). */
+/**
+ * What the levels' config files say of the names in force (RPH's `off:`, `layered:` and `added:`,
+ * RPE's `namesInForce` and the files route's `off` and `offIn`): a file's name appears here whatever
+ * the file holds, and a config is a setting, never guidance, so the tree's hashes cannot show these.
+ * Any name in any list means the agents did not run under the shipped guidance as shipped: the run
+ * is a trial, with that as its why.
+ */
+export interface NamesFacts {
+  /** Each name a level's `off:` switches off, with the levels whose list names it. */
+  off: { name: string; levels: string[] }[];
+  /** The instruction files read at every level that has one, named by a level's `layered:`. */
+  layered: string[];
+  /** The files a level's `added:` adds to stacks. */
+  added: string[];
+}
+
+/** The guidance a run, or one of its plays' chats, stood on: every file by its path and the SHA-256 of its bytes (`scripts/proof/lib/record.ts`), and the names its configs switch. */
 export interface GuidanceFacts {
-  /** The shipped level as RPE served it to the run's chats, by path below the level. */
+  /** The shipped level as RPE served it, by path below the level. */
   served: TreeFile[];
   /** The build's own shipped folders at the commits the run reports: RPH's `guidance/`, and RPE's, which RPE lays over it (`shippedOf`). */
   build: { rph: TreeFile[]; rpe: TreeFile[] };
   /** Every layer of the user's own the run stood on (the user's, a character's, a chat's), with all its files. */
   layers: Layer[];
+  /** What the levels' configs switch off, layer or add. Absent: the host did not say, and the run is a trial. */
+  names?: NamesFacts;
 }
 
 /** A form as the host is told of it when a play begins. */
@@ -156,6 +176,15 @@ export interface Session<Acts = unknown> {
   /** What the form may do here: the player's acts on the stand-in, or the steps on the bed's pages. */
   acts: Acts;
   browser: Browser;
+  /**
+   * What this play's own chat stands on at this moment: the shipped tree RPE serves it, every layer of
+   * the user's own it sees (its own chat's layer, the fixtures laid in it, an edit its form made),
+   * and the names its configs switch. The runner asks twice, once when the footing is ready and once
+   * when the play's form has ended, before the footing is put away; a difference between the two is
+   * declared by the form (`Play.declareGuidanceChange`) or makes the play a trial. A host whose
+   * session gives none, or whose answer is not one, makes every play of it a trial.
+   */
+  guidance?(): Promise<GuidanceFacts | null>;
   close(): Promise<void>;
 }
 

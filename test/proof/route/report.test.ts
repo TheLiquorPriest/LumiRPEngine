@@ -7,11 +7,11 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Bundle, readBundle, runRecord } from "../../../scripts/proof/route/evidence";
+import { Bundle, readBundle } from "../../../scripts/proof/route/evidence";
 import { summarize, writeReport } from "../../../scripts/proof/route/report";
 import type { FormRecord, Glance } from "../../../scripts/proof/route/results";
 import { sha256 } from "../../../scripts/proof/lib/record";
-import { fakeFacts } from "./fake";
+import { fakePlays, fakeRun } from "./fake";
 
 let out = "";
 let report = "";
@@ -23,7 +23,7 @@ function glance(width: number, part: string): Glance {
 }
 
 function record(id: string, number: number, line: number, part: string, words: string): FormRecord {
-  return { run: bundle.run, id, kind: "scenario", number, waves: [2], line, mode: "rig", plays: 1, stops: [], parts: [{ id: part, words, mark: "code", pages: ["World"], measured: null, wants: null, instances: [{ play: 1, at: 1, outcome: "shown", why: "time, place, coin and holder as before", page: null, glances: [glance(1440, part), glance(390, part)] }] }] };
+  return { run: bundle.run, nonce: bundle.nonce, id, kind: "scenario", number, waves: [2], line, mode: "rig", plays: 1, stops: [], standings: [{ play: 1, is: "verdict", why: [] }], parts: [{ id: part, words, mark: "code", pages: ["World"], measured: null, wants: null, instances: [{ play: 1, at: 1, outcome: "shown", why: "time, place, coin and holder as before", page: null, glances: [glance(1440, part), glance(390, part)] }] }] };
 }
 
 beforeAll(() => {
@@ -42,7 +42,7 @@ beforeAll(() => {
   bundle.writeNotes(twentyTwo);
   // 38: a folder made and nothing saved in it.
   mkdirSync(join(bundle.dir, "38"));
-  bundle.writeRun(runRecord(fakeFacts(), { run: bundle.run, mode: "rig", by: "a test", started: "2026-11-15T04:00:00.000Z", ended: "2026-11-15T04:01:00.000Z", asked: ["04", "22", "38"], unplayed: [], known: { scenarios: ["04", "22", "38"], gates: [] }, repeats: 10, faults: [] }));
+  bundle.writeRun(fakeRun({ run: bundle.run, nonce: bundle.nonce, mode: "rig", by: "a test", started: "2026-11-15T04:00:00.000Z", ended: "2026-11-15T04:01:00.000Z", asked: ["04", "22", "38"], unplayed: [], known: { scenarios: ["04", "22", "38"], gates: [] }, repeats: 10, faults: [] }, [...fakePlays("04"), ...fakePlays("22")]));
   report = writeReport(bundle.dir);
 });
 

@@ -116,14 +116,37 @@ export interface Play<Acts = unknown> {
   readonly acts: Acts;
   /** The browser the checks read with, for the form's own steps. */
   readonly look: Browser;
-  /** The run's record as `run.json` holds it, its standing in it (`standing.is`, `standing.why`): a trial gives no verdict on what rests on guidance. */
+  /**
+   * The run's record as `run.json` held it when this play began (a copy, frozen: a form cannot change
+   * the standing it is judged by), its standing in it (`standing.is`, `standing.why`): a trial gives no
+   * verdict on what rests on guidance.
+   */
   readonly run: RunRecord;
+  /**
+   * This play's standing so far: the run's own, and what its chat stood on when its footing was ready.
+   * What its form does, or what changes during it, may still make the play a trial; a play that is a
+   * trial here is one for good.
+   */
+  readonly standing: { readonly is: "verdict" | "trial"; readonly why: readonly string[] };
   /** Runs the part's checks now, on every page it is seen on or only on `page`, and keeps the screens. */
   see(part: string, page?: string): Promise<void>;
   /** A measured part's verdict, with what was measured (gates only). */
   judge(part: string, verdict: { pass: boolean; what: string }): Promise<void>;
-  /** That a measured part is not judged in this play, and why (gates only): recorded as "not judged", never a pass. */
+  /**
+   * That a part is not judged in this play, and why: recorded as "not judged", never a pass. A measured
+   * part (gates only) may be said so in any play; a part seen on screen only in a play that is a
+   * trial (`standing`), where what rests on guidance gives no verdict.
+   */
   notJudged(part: string, why: string): Promise<void>;
+  /**
+   * That this play's form changes guidance on purpose (a gate that cuts every shipped file to a stub, a
+   * scenario that switches a file off, a layer it lays), and why. The runner asks the host what the
+   * play's chat stands on before the form and after it; a difference no form declared makes the play a
+   * trial. A declared change is the form's own act and leaves the play as it was for parts that do not
+   * rest on guidance; a part that rests on guidance (a measured part, or an "as shipped" part played
+   * live) in a play whose form changed the guidance gives figures and no verdict.
+   */
+  declareGuidanceChange(why: string): void;
   /** Supporting evidence (route answers, rows, logs) into the form's `internal/` folder: never proof. */
   keep(name: string, data: Kept): Promise<void>;
 }

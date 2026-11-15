@@ -5,7 +5,9 @@
 // (`host.ts`, `Shot`): a screen's text is what the saved image shows, never what lies below the fold.
 
 import { sha256, shippedOf, type Layer, type TreeFile } from "../../../scripts/proof/lib/record";
-import type { Browser, Control, Host, PlayStart, RunFacts, Session, Shot, Shown } from "../../../scripts/proof/route/host";
+import { runRecord, standingOf, type PlayGuidance, type RunRecord, type StandingFrom } from "../../../scripts/proof/route/evidence";
+import type { Browser, Control, GuidanceFacts, Host, NamesFacts, PlayStart, RunFacts, Session, Shot, Shown } from "../../../scripts/proof/route/host";
+import { standingFromFacts } from "../../../scripts/proof/route/runner";
 
 export interface FakeOptions {
   /** The text each page shows, by its name. */
@@ -104,7 +106,18 @@ export const FAKE_BUILD: { rph: TreeFile[]; rpe: TreeFile[] } = {
 export interface GuidanceAsked {
   served?: TreeFile[];
   layers?: Layer[];
+  /** The names the configs switch off, layer or add; none by default. */
+  names?: NamesFacts;
+  /** The host says nothing of which names its configs switch. */
+  noNames?: true;
   none?: true;
+}
+
+const NO_NAMES: NamesFacts = { off: [], layered: [], added: [] };
+
+/** What a clean play's chat stands on: the build's shipped guidance, no layer of the user's own, no name switched. */
+export function fakeGuidance(asked: GuidanceAsked = {}): GuidanceFacts {
+  return { served: asked.served ?? shippedOf(FAKE_BUILD.rph, FAKE_BUILD.rpe), build: FAKE_BUILD, layers: asked.layers ?? [], ...(asked.noNames ? {} : { names: asked.names ?? NO_NAMES }) };
 }
 
 /** Invented facts of a run: commits, versions, one agent, one setting, and by default a clean run on the build's shipped guidance with no layer of the user's own. */
@@ -116,12 +129,33 @@ export function fakeFacts(guidance: GuidanceAsked = {}): RunFacts {
     browser: { name: "fake", version: "1" },
     agents: [{ agent: "author", connection: "Scripted", model: "scripted-author", replyForm: "tags", effort: "medium", streams: true }],
     settings: { chat: null, files: [], settings: [{ key: "reply.streamAnyway", value: false, default: false, from: null, file: null, takes: { type: "yesNo" }, takesWords: "yes or no", none: null, orNone: false, levels: [], passed: null }] },
-    guidance: guidance.none ? null : { served: guidance.served ?? shippedOf(FAKE_BUILD.rph, FAKE_BUILD.rpe), build: FAKE_BUILD, layers: guidance.layers ?? [] },
+    guidance: guidance.none ? null : fakeGuidance(guidance),
   };
 }
 
-/** A host whose every play opens a fresh browser on the same pages; `begun` lists every play it set up. */
-export function fakeHost(mode: "rig" | "live", options: FakeOptions, facts: RunFacts = fakeFacts()): Host & { begun: PlayStart[]; closed: number } {
+/** What a run's standing is worked out from, for facts a test made: `standingFromFacts` of their guidance. */
+export function fakeFrom(facts: RunFacts = fakeFacts()): StandingFrom | null {
+  return standingFromFacts(facts.guidance);
+}
+
+/** The accounts a runner leaves of plays whose chat stood on the guidance `facts` give, before and after alike, for each of `plays` plays of `id`. */
+export function fakePlays(id: string, plays = 1, facts: RunFacts = fakeFacts(), rests = false): PlayGuidance[] {
+  const from = fakeFrom(facts);
+  return Array.from({ length: plays }, (_, n) => ({ id, play: n + 1, before: from, after: from, declared: null, rests }));
+}
+
+/** A run's record as the runner writes it for a run that stood on `facts`, with the accounts of `plays` in its standing. */
+export function fakeRun(fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing">, plays: PlayGuidance[] = [], facts: RunFacts = fakeFacts()): RunRecord {
+  const from = fakeFrom(facts);
+  const run = runRecord(facts, fields, from);
+  return { ...run, standing: standingOf(run.rpe, run.rph, from, plays) };
+}
+
+/** What a fake host's session says its chat stands on, when asked the first time (footing ready) and the second (form ended): the run's own guidance unless the test says otherwise; `undefined` gives the run's, `null` no account. */
+export type SessionGuidance = (start: PlayStart, when: "before" | "after") => GuidanceFacts | null | undefined;
+
+/** A host whose every play opens a fresh browser on the same pages; `begun` lists every play it set up. Each session says what its chat stands on, by `guidance` or the run's own facts. */
+export function fakeHost(mode: "rig" | "live", options: FakeOptions, facts: RunFacts = fakeFacts(), guidance?: SessionGuidance): Host & { begun: PlayStart[]; closed: number } {
   const host = {
     mode,
     begun: [] as PlayStart[],
@@ -131,7 +165,16 @@ export function fakeHost(mode: "rig" | "live", options: FakeOptions, facts: RunF
     },
     async begin(start: PlayStart): Promise<Session> {
       host.begun.push(start);
-      return { acts: { chat: `chat-${start.form.id}-${start.play}` }, browser: new FakeBrowser(options), close: async () => {} };
+      let asked = 0;
+      return {
+        acts: { chat: `chat-${start.form.id}-${start.play}` },
+        browser: new FakeBrowser(options),
+        guidance: async () => {
+          const said = guidance?.(start, asked++ === 0 ? "before" : "after");
+          return said === undefined ? (facts.guidance ?? null) : said;
+        },
+        close: async () => {},
+      };
     },
     async close() {
       host.closed++;

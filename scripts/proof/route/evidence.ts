@@ -24,20 +24,27 @@
 // stage by stage and has one result over all of them: every stage the run asked must be in its own
 // folder, every part in exactly one stage, and the row's words carried by its stages together.
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { SettingsReply } from "../../../src/shared/api";
 import { wordFaults } from "./check";
 import { folderOf, gateIdFault, isStageName, pageSlug, parseStageId, scenarioId, stageId, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
-import type { AgentFacts, Browser, Kept, Mode, RunFacts, Shot } from "./host";
+import type { AgentFacts, Browser, Kept, Mode, NamesFacts, RunFacts, Shot } from "./host";
 import { LIST } from "./list";
-import { describeVerdict, formResult, measuredOutcomes, outcomeOf, SEEN_OUTCOMES, wholeResult, type FormRecord, type FormResult, type Glance, type Instance, type Outcome, type PartRecord } from "./results";
+import { describeVerdict, formResult, measuredOutcomes, outcomeOf, partTrial, restsOnGuidance, SEEN_OUTCOMES, wholeResult, type FormRecord, type FormResult, type Glance, type Instance, type Outcome, type PartRecord, type PlayStanding } from "./results";
 
 /** `run.json`: what a run stood on, who started it, when, and what it was asked. */
 export interface RunRecord {
   run: string;
+  /**
+   * Which run this is, as no other run is: a random text made when the run's folder was made. A run's
+   * name is its mode and its start to the second, so two runs started in one second into two folders
+   * share it; every record of a form carries its run's nonce, and a folder moved from another run's
+   * bundle is told by it. A `run.json` without one is not one the runner wrote.
+   */
+  nonce?: string;
   mode: Mode;
   by: string;
   started: string;
@@ -63,12 +70,39 @@ export interface RunRecord {
   settings: SettingsReply;
 }
 
-/** What a run's standing was worked out from: the shipped tree the server ran and the build's, by hash, the paths at which they differ, and each layer of the user's own with the guidance it holds. */
+/**
+ * What a run's, or a play's, standing was worked out from: the shipped tree the server ran and the
+ * build's, by hash, the paths at which they differ, and each layer of the user's own with the
+ * guidance it holds, and the names its configs switch. `files` and `names` are what the runner always
+ * writes: a record without either gives no account of what it concerns, and is a trial.
+ */
 export interface StandingFrom {
   served: string;
   build: string;
   changed: string[];
   layers: { level: string; hash: string; guidance: string[] }[];
+  /** How many files the served tree and the build's hold: a tree with none is no account of the guidance, as an empty folder read is no proof there is none. */
+  files?: { served: number; build: number };
+  /** The names the levels' configs switch off, layer or add (`NamesFacts`): they are settings, so the layers' guidance cannot show them. */
+  names?: NamesFacts;
+}
+
+/**
+ * What one play's own chat stood on, asked of the host when its footing was ready and again when its
+ * form had ended (`Session.guidance`), in `run.json`'s `standing.plays`, which is a standing's one
+ * home: its facts are held there, and worked out again whenever the bundle is read.
+ */
+export interface PlayGuidance {
+  /** What the run asked: a scenario's number, a gate's id, or a stage `<number>:<stage>`. */
+  id: string;
+  play: number;
+  /** Null when the host gave no account, or one that is not one. */
+  before: StandingFrom | null;
+  after: StandingFrom | null;
+  /** The form's word that it changed the guidance on purpose (`Play.declareGuidanceChange`); null when it said nothing. */
+  declared: string | null;
+  /** Whether a part of the play rests on guidance (`restsOnGuidance`): only then does a declared change make the play a trial. */
+  rests: boolean;
 }
 
 /** Whether a run gives a verdict or is a trial, and why (plan §17: a verdict comes only from shipped guidance on a clean build). */
@@ -76,36 +110,132 @@ export interface Standing {
   is: "verdict" | "trial";
   /** Why it is a trial; empty for a verdict. */
   why: string[];
-  /** Null when the host gave no account of the guidance the run stood on. */
+  /** Null when the host gave no account of the guidance the run stood on when it began. */
   from: StandingFrom | null;
+  /** What each play's own chat stood on, play by play, as the run went. */
+  plays?: PlayGuidance[];
+}
+
+/** Whether RPH as installed is the commit RPE pins: the one rule, worked out when a run is made and again whenever its bundle is read. Seven characters is the shortest form git writes a commit in, and either may be the shorter. */
+export function isPinned(commit: string, pin: string | null): boolean {
+  return pin !== null && Math.min(pin.length, commit.length) >= 7 && (pin.startsWith(commit) || commit.startsWith(pin));
+}
+
+/** Every name a `NamesFacts` holds, as the words a run's reasons give: `off: TURN (global)`, `layered: AGENTS`, `added: notes.md`. */
+function namesOf(names: NamesFacts): string[] {
+  return [...names.off.map((o) => `off: ${o.name}${o.levels.length > 0 ? ` (${o.levels.join(", ")})` : ""}`), ...names.layered.map((n) => `layered: ${n}`), ...names.added.map((n) => `added: ${n}`)];
 }
 
 /**
- * A run's standing from what it stood on, the same way when the run is made and when its bundle is
- * read back. A verdict needs all of it: RPE's tree at its commit, RPH at the commit RPE pins, the
- * shipped tree the server ran equal to the build's, and no layer of the user's own holding guidance. A
- * fact missing is a trial, with that as its why.
+ * Why what a run or a play stood on is not the shipped guidance as shipped, in plain words; empty
+ * when it is. `stood` says whose account it is. A missing account, an empty tree, and names the host
+ * did not give each make a trial: nothing shows the agents ran under the shipped guidance.
  */
-export function standingOf(rpe: RunRecord["rpe"], rph: RunRecord["rph"], from: StandingFrom | null): Standing {
+export function reasonsOf(from: StandingFrom | null, stood: string): string[] {
+  if (from === null) return [`the host gave no account of the guidance ${stood} (the shipped tree it served, the build's own, the layers of the user's own, the names its configs switch), so nothing shows its agents ran under the shipped guidance`];
+  const why: string[] = [];
+  const empty = from.files !== undefined && (from.files.served === 0 || from.files.build === 0);
+  if (!from.files) why.push(`the host did not say how many files the shipped trees ${stood} hold, so an empty tree cannot be told from a full one`);
+  else if (empty) why.push(`the shipped tree ${from.files.served === 0 ? "the server ran" : "the build holds"} has no file, which is no account of the guidance ${stood}`);
+  if (!empty && (from.served !== from.build || from.changed.length > 0)) why.push(`the shipped tree the server ran is not the build's: ${from.changed.length} ${from.changed.length === 1 ? "path differs" : "paths differ"}${from.changed.length > 0 ? ` (${from.changed.join(", ")})` : ""}`);
+  for (const layer of from.layers) if (layer.guidance.length > 0) why.push(`the ${layer.level} layer holds guidance of its own, so its agents did not run under the shipped guidance: ${layer.guidance.join(", ")}`);
+  if (!from.names) why.push(`the host did not say which names the configs ${stood} switch off, layer or add, so a file switched off cannot be told from one in force`);
+  else {
+    const named = namesOf(from.names);
+    if (named.length > 0) why.push(`a config switches shipped guidance: ${named.join(", ")}, so its agents did not run under the shipped guidance as shipped`);
+  }
+  return why;
+}
+
+/** Where two accounts of the guidance differ, by what differs; empty when they agree. */
+function changesOf(a: StandingFrom, b: StandingFrom): string[] {
+  const out: string[] = [];
+  if (a.served !== b.served) out.push("the shipped tree its chat was served");
+  if (a.build !== b.build) out.push("the build's shipped tree");
+  const hashes = (from: StandingFrom, level: string) => from.layers.filter((l) => l.level === level).map((l) => l.hash).sort().join(",");
+  for (const level of new Set([...a.layers, ...b.layers].map((l) => l.level))) if (hashes(a, level) !== hashes(b, level)) out.push(`the ${level} layer`);
+  const names = (from: StandingFrom) => (from.names ? namesOf(from.names).sort().join("\n") : null);
+  if (names(a) !== names(b)) out.push("the names its configs switch");
+  return out;
+}
+
+/**
+ * Why one play is a trial for what its own chat stood on: no account, or an account of guidance that
+ * is not the shipped guidance, when its footing was ready; and the same when its form had ended,
+ * where the guidance changed during the play. A change its form did not declare is a reason in
+ * itself. A change it declared is its own act (a gate that cuts every shipped file to a stub, a
+ * scenario that switches one off) and is no reason for a play whose parts do not rest on guidance;
+ * for a play with a part that rests on guidance, the declared change is the reason, since that part
+ * is then not under the shipped guidance.
+ */
+export function playReasons(play: PlayGuidance): string[] {
+  const out = [...reasonsOf(play.before, "the play's chat stood on when its footing was ready")];
+  if (play.after === null) out.push("the host gave no account of the guidance the play's chat stood on when its form had ended, so a change the play made cannot be seen");
+  else {
+    const moved = play.before === null ? [] : changesOf(play.before, play.after);
+    if (play.declared === null) {
+      out.push(...reasonsOf(play.after, "the play's chat stood on when its form had ended"));
+      if (moved.length > 0) out.push(`its guidance changed during the play (${moved.join("; ")}) and its form did not say so`);
+    } else if (moved.length > 0 && play.rests) out.push(`its form changed the guidance on purpose (${play.declared}), so what rests on guidance in it is not under the shipped guidance as shipped`);
+  }
+  return [...new Set(out)];
+}
+
+/** What makes a run a trial before any play: RPE's tree changed, RPH not the commit RPE pins, and the guidance it stood on when it began. */
+function startReasons(rpe: RunRecord["rpe"], rph: RunRecord["rph"], from: StandingFrom | null): string[] {
   const why: string[] = [];
   if (rpe.dirty) why.push(`RPE's tree held changes beyond its commit ${rpe.commit}`);
   if (!rph.pinned) why.push(`RPH as installed (${rph.commit}) is not the commit RPE pins (${rph.pin ?? "none"})`);
-  if (from === null) why.push("the host gave no account of the guidance the run stood on (the shipped tree it served, the build's own, the layers of the user's own), so nothing shows its agents ran under the shipped guidance");
-  else {
-    if (from.served !== from.build || from.changed.length > 0) why.push(`the shipped tree the server ran is not the build's: ${from.changed.length} ${from.changed.length === 1 ? "path differs" : "paths differ"}${from.changed.length > 0 ? ` (${from.changed.join(", ")})` : ""}`);
-    for (const layer of from.layers) if (layer.guidance.length > 0) why.push(`the ${layer.level} layer holds guidance of its own, so its agents did not run under the shipped guidance: ${layer.guidance.join(", ")}`);
-  }
-  return { is: why.length === 0 ? "verdict" : "trial", why, from };
+  return [...why, ...reasonsOf(from, "the run stood on")];
 }
 
-/** The standing a bundle gives, worked out again from what its run.json says the run stood on, never taken on its word; a run.json without one gives no verdict. */
+/**
+ * A run's standing from what it stood on and what each of its plays' chats stood on, the same way
+ * when the run is made and when its bundle is read back. A verdict needs all of it: RPE's tree at its
+ * commit, RPH at the commit RPE pins, the shipped tree the server ran equal to the build's and not
+ * empty, no layer of the user's own holding guidance, no config switching a name, and every play's
+ * own chat the same (`playReasons`). A fact missing is a trial, with that as its why.
+ */
+export function standingOf(rpe: RunRecord["rpe"], rph: RunRecord["rph"], from: StandingFrom | null, plays: readonly PlayGuidance[] = []): Standing {
+  const start = startReasons(rpe, rph, from);
+  const why = [...start];
+  const grouped = new Map<string, { id: string; reason: string; plays: number[] }>();
+  for (const play of plays)
+    for (const reason of playReasons(play)) {
+      if (start.includes(reason)) continue;
+      const held = grouped.get(`${play.id}\0${reason}`);
+      if (held) held.plays.push(play.play);
+      else grouped.set(`${play.id}\0${reason}`, { id: play.id, reason, plays: [play.play] });
+    }
+  for (const { id, reason, plays: at } of grouped.values()) why.push(`${id}, play ${at.join(", ")}: ${reason}`);
+  return { is: why.length === 0 ? "verdict" : "trial", why, from, ...(plays.length > 0 ? { plays: [...plays] } : {}) };
+}
+
+/** One play's standing: the run's start reasons and the play's own. A play that is a trial gives no verdict on what rests on guidance. */
+export function standingOfPlay(rpe: RunRecord["rpe"], rph: RunRecord["rph"], from: StandingFrom | null, play: PlayGuidance): PlayStanding {
+  const why = [...new Set([...startReasons(rpe, rph, from), ...playReasons(play)])];
+  return { play: play.play, is: why.length === 0 ? "verdict" : "trial", why };
+}
+
+/** The run's RPH as its commit and pin make it, never as its record says. */
+function rphOf(run: RunRecord): RunRecord["rph"] {
+  return { ...run.rph, pinned: isPinned(run.rph.commit, run.rph.pin) };
+}
+
+/** The standing a bundle gives, worked out again from what its run.json says the run and its plays stood on, whether RPH is the pinned commit among it, never taken on its word; a run.json without one gives no verdict. */
 export function standingOfRun(run: RunRecord): { is: "verdict" | "trial"; why: string[] } {
   if (!run.standing) return { is: "trial", why: ["run.json does not give the run's standing, so it gives no verdict"] };
-  const { is, why } = standingOf(run.rpe, run.rph, run.standing.from);
+  const { is, why } = standingOf(run.rpe, rphOf(run), run.standing.from, run.standing.plays);
   return { is, why };
 }
 
-const trialOf = (run: RunRecord): boolean => standingOfRun(run).is === "trial";
+/** What one play of a run stood on, worked out again from run.json: a play it holds no account of is a trial. */
+export function standingOfRunPlay(run: RunRecord, id: string, play: number): PlayStanding {
+  const held = run.standing?.plays?.find((p) => p.id === id && p.play === play);
+  if (!run.standing) return { play, is: "trial", why: ["run.json does not give the run's standing, so it gives no verdict"] };
+  if (!held) return { play, is: "trial", why: [`run.json gives no account of the guidance play ${play} of ${id} stood on, so it gives no verdict`] };
+  return standingOfPlay(run.rpe, rphOf(run), run.standing.from, held);
+}
 
 /** A bundle that cannot be read as evidence, with why. */
 export class BundleRefused extends Error {}
@@ -132,16 +262,20 @@ export function partOfScreen(what: string, parts: ReadonlySet<string>): string |
 
 /** Writes one run's bundle. */
 export class Bundle {
-  private constructor(readonly dir: string) {}
+  private constructor(
+    readonly dir: string,
+    /** The run's nonce: no other run has it, though another may share the run's name (`RunRecord.nonce`). */
+    readonly nonce: string,
+  ) {}
 
-  /** A new folder under `out`, named for the run: its mode and when it started. */
+  /** A new folder under `out`, named for the run: its mode and when it started, with a nonce of its own beside the name. */
   static open(out: string, mode: Mode, now: Date): Bundle {
     mkdirSync(out, { recursive: true });
     const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
     let name = `${mode}-${stamp}`;
     for (let n = 2; existsSync(join(out, name)); n++) name = `${mode}-${stamp}-${n}`;
     mkdirSync(join(out, name));
-    return new Bundle(join(out, name));
+    return new Bundle(join(out, name), randomUUID());
   }
 
   get run(): string {
@@ -186,8 +320,8 @@ export class Bundle {
     writeFileSync(join(this.dir, folderOf(askedIdOf(record)), "result.json"), `${JSON.stringify(record, null, 2)}\n`);
   }
 
-  writeNotes(record: FormRecord, trial = false): void {
-    writeFileSync(join(this.dir, folderOf(askedIdOf(record)), "notes.md"), notesOf(record, this.run, trial));
+  writeNotes(record: FormRecord): void {
+    writeFileSync(join(this.dir, folderOf(askedIdOf(record)), "notes.md"), notesOf(record, this.run));
   }
 }
 
@@ -196,12 +330,10 @@ export function askedIdOf(record: Pick<FormRecord, "id" | "stage">): string {
   return record.stage ? stageId(record.id, record.stage.name) : record.id;
 }
 
-/** The run's record from the host's facts, its standing worked out from what the host said the run stood on (none said: a trial). RPH is the pinned commit when the two name one commit, whether either is written short or whole. */
+/** The run's record from the host's facts, its standing worked out from what the host said the run stood on (none said: a trial). RPH is the pinned commit by `isPinned`. */
 export function runRecord(facts: RunFacts, fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing">, from: StandingFrom | null = null): RunRecord {
   const { commit, pin } = facts.rph;
-  // Seven characters is the shortest form git writes a commit in.
-  const pinned = pin !== null && Math.min(pin.length, commit.length) >= 7 && (pin.startsWith(commit) || commit.startsWith(pin));
-  const rph = { commit, pin, pinned };
+  const rph = { commit, pin, pinned: isPinned(commit, pin) };
   return { ...fields, standing: standingOf(facts.rpe, rph, from), rpe: facts.rpe, rph, lumiverse: facts.lumiverse, browser: facts.browser, agents: facts.agents, settings: facts.settings };
 }
 
@@ -320,8 +452,8 @@ export function titleOf(record: Pick<FormRecord, "kind" | "number" | "id" | "sta
   return `Scenario ${record.number}: ${LIST.find((row) => row.number === record.number)?.title ?? "not in the list of the 68"}${record.stage ? `, stage ${record.stage.name}` : ""}`;
 }
 
-/** `notes.md`: part by part, in the plan's words, what came of every look and which screens show it; in a trial, what rests on guidance as figures only. */
-export function notesOf(record: FormRecord, run: string, trial = false): string {
+/** `notes.md`: part by part, in the plan's words, what came of every look and which screens show it; a play that was a trial is named, and what rests on guidance in it is figures only. */
+export function notesOf(record: FormRecord, run: string): string {
   const where = record.mode === "rig" ? "in the rig" : "live on the test bed";
   const lines = [
     `# ${titleOf(record)}`,
@@ -331,8 +463,9 @@ export function notesOf(record: FormRecord, run: string, trial = false): string 
     "Only the screens named below count as proof (plan §17.0). `internal/` holds route answers, rows and logs: supporting evidence only.",
   ];
   for (const stop of record.stops) lines.push("", `Play ${stop.play} stopped: ${stop.why}.`);
+  for (const standing of record.standings ?? []) if (standing.is === "trial") lines.push("", `Play ${standing.play} is a trial, and gives no verdict on what rests on guidance: ${standing.why.join("; ")}.`);
   for (const part of record.parts) {
-    lines.push("", `## "${part.words}" (${part.mark})`, "", describeVerdict(part, record.mode, trial)[0] ?? "");
+    lines.push("", `## "${part.words}" (${part.mark})`, "", describeVerdict(part, record.mode, partTrial(record, part))[0] ?? "");
     lines.push(part.measured ? `Measured: ${part.measured}.` : `Seen on: ${part.pages.join(", ")}.`, "");
     for (const instance of part.instances) lines.push(`- ${instanceLine(instance)}`);
   }
@@ -382,7 +515,7 @@ export interface ReadBundle {
   standing: { is: "verdict" | "trial"; why: string[] };
 }
 
-/** Reads a bundle back. Refused without a whole `run.json`: what is not tied to its build, its settings and who ran it proves nothing. */
+/** Reads a bundle back. Refused without a whole `run.json`: what is not tied to its build, its settings and who ran it proves nothing. Every fact is worked out again from what the files hold, and none is taken on a record's word. */
 export function readBundle(dir: string): ReadBundle {
   const runFile = join(dir, "run.json");
   if (!existsSync(runFile)) throw new BundleRefused(`${dir} has no run.json, so what was run, on which build and settings, and by whom, is unknown: nothing in it counts`);
@@ -399,6 +532,8 @@ export function readBundle(dir: string): ReadBundle {
   const faults: string[] = [...(run.faults ?? [])];
   const standing = standingOfRun(run);
   const said = run.standing;
+  const pinned = isPinned(run.rph.commit, run.rph.pin);
+  if (run.rph.pinned !== pinned) faults.push(`run.json says RPH ${run.rph.pinned ? "is" : "is not"} the commit RPE pins, and its commit ${run.rph.commit} and pin ${run.rph.pin ?? "none"} make it ${pinned ? "the pinned commit" : "not the pinned commit"}`);
   if (said && (said.is !== standing.is || said.why.join("\n") !== standing.why.join("\n"))) faults.push(said.is === "verdict" ? `run.json says the run gives a verdict, and what it stood on makes it a trial: ${standing.why.join("; ")}` : `run.json gives the run's standing as ${said.is} (${said.why.join("; ") || "no why"}), and what it stood on makes it ${standing.is === "verdict" ? "a verdict" : `a trial (${standing.why.join("; ")})`}`);
   const folders = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   const forms = folders.map((id) => readForm(join(dir, id), id, run));
@@ -428,17 +563,27 @@ function runFaults(raw: unknown): string[] {
   if (!isRecord(raw.known) || !Array.isArray(raw.known.scenarios) || !Array.isArray(raw.known.gates) || !raw.known.gates.every(text)) out.push("the scripts the runner found");
   if (typeof raw.repeats !== "number" || !Number.isInteger(raw.repeats) || raw.repeats < 1) out.push("how many plays an \"as shipped\" part gets");
   if (raw.faults !== undefined && (!Array.isArray(raw.faults) || !raw.faults.every(text))) out.push("what went wrong in the run, as a list");
+  if (!text(raw.nonce)) out.push("the run's nonce, which ties each record to its own run");
   if (!isRecord(raw.rph) || typeof raw.rph.pinned !== "boolean") out.push("whether RPH is the pinned commit");
   if (raw.standing !== undefined && !isStanding(raw.standing)) out.push("the run's standing as the runner writes it");
   return out;
 }
 
-function isStanding(value: unknown): boolean {
-  if (!isRecord(value) || (value.is !== "verdict" && value.is !== "trial") || !Array.isArray(value.why) || !value.why.every((w) => typeof w === "string")) return false;
-  const from = value.from;
+function isFromOf(from: unknown): boolean {
   if (from === null) return true;
   const texts = (list: unknown) => Array.isArray(list) && list.every((t) => typeof t === "string");
-  return isRecord(from) && typeof from.served === "string" && typeof from.build === "string" && texts(from.changed) && Array.isArray(from.layers) && from.layers.every((l) => isRecord(l) && typeof l.level === "string" && typeof l.hash === "string" && texts(l.guidance));
+  const count = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0;
+  if (!isRecord(from) || typeof from.served !== "string" || typeof from.build !== "string" || !texts(from.changed) || !Array.isArray(from.layers)) return false;
+  if (!from.layers.every((l) => isRecord(l) && typeof l.level === "string" && typeof l.hash === "string" && texts(l.guidance))) return false;
+  if (from.files !== undefined && !(isRecord(from.files) && count(from.files.served) && count(from.files.build))) return false;
+  const names = from.names;
+  return names === undefined || (isRecord(names) && texts(names.layered) && texts(names.added) && Array.isArray(names.off) && names.off.every((o) => isRecord(o) && typeof o.name === "string" && texts(o.levels)));
+}
+
+function isStanding(value: unknown): boolean {
+  if (!isRecord(value) || (value.is !== "verdict" && value.is !== "trial") || !Array.isArray(value.why) || !value.why.every((w) => typeof w === "string")) return false;
+  if (value.plays !== undefined && !(Array.isArray(value.plays) && value.plays.every((p) => isRecord(p) && typeof p.id === "string" && p.id !== "" && typeof p.play === "number" && Number.isInteger(p.play) && p.play >= 1 && isFromOf(p.before) && isFromOf(p.after) && (p.declared === null || typeof p.declared === "string") && typeof p.rests === "boolean"))) return false;
+  return isFromOf(value.from);
 }
 
 /** Every file under a folder, `internal/` left out, from the folder. */
@@ -460,15 +605,20 @@ const SCREEN_FILE = /\.(png|webp|txt)$/;
 function readForm(dir: string, id: string, run: RunRecord): ReadForm {
   if (isStaged(dir, id, run)) return readStaged(dir, id, run);
   const { record, faults } = readFolder(dir, id, run, null);
-  return { id, record, stages: null, faults, result: record === null || faults.length > 0 ? "failed" : formResult(record, trialOf(run)) };
+  return { id, record, stages: null, faults, result: record === null || faults.length > 0 ? "failed" : formResult(record) };
 }
 
-/** Whether a scenario's folder is one played in stages: the run asked for its stages, or it holds folders only a stage's can be and no record of its own. */
+/**
+ * Whether a scenario's folder is one played in stages: the run asked for its stages, or it holds
+ * folders only a stage's can be and no record of its own. A folder that holds its own `result.json` is
+ * a scenario played whole, whatever else the run asked of the number: a stage asked of a scenario that
+ * has none was refused, and the run's `unplayed` says so.
+ */
 function isStaged(dir: string, id: string, run: RunRecord): boolean {
-  if (!/^\d{2}$/.test(id)) return false;
+  if (!/^\d{2}$/.test(id) || existsSync(join(dir, "result.json"))) return false;
   if ([...run.asked, ...run.unplayed.map((u) => u.id)].some((asked) => parseStageId(asked)?.scenario === id)) return true;
   const inner = readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name !== "internal" && !/^play-\d+$/.test(entry.name));
-  return inner.length > 0 && !existsSync(join(dir, "result.json"));
+  return inner.length > 0;
 }
 
 /**
@@ -491,10 +641,11 @@ function readStaged(dir: string, id: string, run: RunRecord): ReadForm {
   if (lists.some((list) => list.join(", ") !== of.join(", "))) faults.push(`its stages' records do not agree on its stages: ${[...new Set(lists.map((list) => list.join(", ")))].map((list) => `(${list})`).join(" and ")}`);
   if (lists.length > 0 && (of.length < 2 || new Set(of).size !== of.length || !of.every(isStageName))) faults.push(`its records name its stages as ${of.join(", ")}: a scenario played in stages has two or more, each named once`);
   for (const name of read.keys()) if (!of.includes(name)) faults.push(`${name}/: a folder for a stage scenario ${Number(id)} does not have (its stages are ${of.join(", ")})`);
-  for (const name of new Set(askedStages)) if (!of.includes(name)) faults.push(`the run asked for its stage ${name}, which it does not have (its stages are ${of.join(", ")})`);
+  // A stage asked of a scenario that has none is a fault only where the run did not say it was refused: its `unplayed` is the run's own word, and the scenario's own stages stand on their own.
+  for (const name of new Set(askedStages)) if (!of.includes(name) && !run.unplayed.some((u) => u.id === stageId(id, name))) faults.push(`the run asked for its stage ${name}, which it does not have (its stages are ${of.join(", ")})`);
   const stages: ReadStage[] = of.map((name) => {
     const folder = read.get(name);
-    if (folder) return { name, record: folder.record, faults: folder.faults, result: folder.record === null || folder.faults.length > 0 ? "failed" : formResult(folder.record, trialOf(run)), why: null };
+    if (folder) return { name, record: folder.record, faults: folder.faults, result: folder.record === null || folder.faults.length > 0 ? "failed" : formResult(folder.record), why: null };
     const asked = stageId(id, name);
     const unplayed = run.unplayed.find((u) => u.id === asked);
     // A stage the run asked for and neither played nor said why not is a fault; one it said why of, or never asked, leaves the scenario not played whole.
@@ -569,7 +720,7 @@ function readFolder(dir: string, id: string, run: RunRecord, stage: string | nul
     for (const screen of named) if (!notes.has(screen)) faults.push(`notes.md does not name ${screen}, which result.json names`);
     // The notes say what the record says, word for word, for this run: notes taken from another run or rewritten are a fault.
     if (record) {
-      const said = notesOf(record, run.run, trialOf(run)).split("\n");
+      const said = notesOf(record, run.run).split("\n");
       const lines = text.split("\n");
       const at = lines.findIndex((line, i) => line !== said[i]);
       if (at >= 0 || lines.length !== said.length) {
@@ -580,7 +731,17 @@ function readFolder(dir: string, id: string, run: RunRecord, stage: string | nul
   }
   if (record) {
     faults.push(...identityFaults(record, id, run, stage));
-    record = recheck(record, dir, files, faults, run);
+    // Each play's standing is worked out again from run.json, and the record's word for it is held to that: a record that calls a play a verdict where the run's account makes it a trial changes nothing.
+    const askedId = stage === null ? id : stageId(id, stage);
+    const worked = Array.from({ length: record.plays }, (_, n) => standingOfRunPlay(run, askedId, n + 1));
+    const said = record.standings ?? [];
+    for (const standing of worked) {
+      const held = said.find((s) => s.play === standing.play);
+      if (!held) faults.push(`its record gives no standing for play ${standing.play}, which run.json's account of the play makes ${standing.is === "trial" ? "a trial" : "a verdict"}`);
+      else if (held.is !== standing.is || held.why.join("\n") !== standing.why.join("\n")) faults.push(`its record gives play ${standing.play}'s standing as ${held.is}${held.why.length > 0 ? ` (${held.why.join("; ")})` : ""}, and run.json's account of the play makes it ${standing.is === "trial" ? `a trial (${standing.why.join("; ")})` : "a verdict"}`);
+    }
+    for (const held of said) if (held.play < 1 || held.play > record.plays) faults.push(`its record gives a standing for play ${held.play}, which it does not have`);
+    record = recheck({ ...record, standings: worked }, dir, files, faults);
   }
   return { record, faults: [...new Set(faults)] };
 }
@@ -594,6 +755,7 @@ function shapeFaults(raw: unknown): string[] {
   const whole = (value: unknown, least: number) => typeof value === "number" && Number.isInteger(value) && value >= least;
   if (typeof raw.id !== "string" || raw.id === "") out.push("it has no id");
   if (raw.run !== undefined && typeof raw.run !== "string") out.push("its run is not a run's name");
+  if (raw.nonce !== undefined && typeof raw.nonce !== "string") out.push("its nonce is not a nonce");
   if (raw.kind !== "scenario" && raw.kind !== "gate") out.push("it is neither a scenario's nor a gate's");
   if (raw.mode !== "rig" && raw.mode !== "live") out.push("it was played neither in the rig nor live");
   if (!(raw.number === null || whole(raw.number, 1))) out.push("its number is not a number");
@@ -602,6 +764,7 @@ function shapeFaults(raw: unknown): string[] {
   if (!whole(raw.plays, 1)) out.push("its plays are not a count");
   if (!Array.isArray(raw.stops) || !raw.stops.every((s) => isRecord(s) && whole(s.play, 1) && typeof s.why === "string")) out.push("its stops are not stops");
   if (raw.stage !== undefined && !(isRecord(raw.stage) && isStageName(raw.stage.name) && Array.isArray(raw.stage.of) && raw.stage.of.every(isStageName))) out.push("its stage is not a stage of a scenario");
+  if (raw.standings !== undefined && !(Array.isArray(raw.standings) && raw.standings.every((s) => isRecord(s) && whole(s.play, 1) && (s.is === "verdict" || s.is === "trial") && texts(s.why)))) out.push("its standings are not the standing of each play");
   if (!Array.isArray(raw.parts) || raw.parts.length === 0) return [...out, "it has no parts"];
   raw.parts.forEach((part, p) => {
     if (!isRecord(part) || typeof part.id !== "string" || typeof part.words !== "string" || (part.mark !== "code" && part.mark !== "as shipped") || !texts(part.pages) || !textOrNull(part.measured) || !(part.wants === null || (isRecord(part.wants) && whole(part.wants.hits, 1) && whole(part.wants.of, 1))) || !Array.isArray(part.instances)) {
@@ -635,6 +798,7 @@ function identityFaults(record: FormRecord, id: string, run: RunRecord, stage: s
   if (stage !== null && record.stage?.name !== stage) out.push(`its record is of ${record.stage ? `stage ${record.stage.name}` : "a scenario played whole"}, not of stage ${stage}`);
   if (stage === null && record.stage) out.push(`its record is of stage ${record.stage.name}, and its folder is that of a form played whole`);
   if (record.run !== run.run) out.push(record.run === undefined ? "its record names no run, so nothing ties it to this run" : `its record is of run ${record.run}, and this bundle is run ${run.run}`);
+  else if (record.nonce !== run.nonce) out.push(record.nonce === undefined ? "its record carries no nonce, so nothing ties it to this very run: two runs can share a name" : "its record carries another run's nonce: it comes from another run that has this run's name");
   if (record.mode !== run.mode) out.push(`its record was played ${record.mode === "rig" ? "in the rig" : "live"}, and this run was played ${run.mode === "rig" ? "in the rig" : "live"}`);
   const shipped = record.parts.some((p) => p.mark === "as shipped");
   const plays = run.mode === "live" && record.kind === "scenario" && shipped ? run.repeats : 1;
@@ -660,13 +824,15 @@ function identityFaults(record: FormRecord, id: string, run: RunRecord, stage: s
 /**
  * The record with every look held to the runner's own way of recording it, and to its screens as
  * they are in the folder: each fault found is added to `faults`, and each look the folder does not
- * bear out is changed to what its screens make it (never to a pass).
+ * bear out is changed to what its screens make it (never to a pass). The record's standings are the
+ * ones worked out from `run.json`: a play that was a trial gives its measured parts as figures, and
+ * may leave a seen part not judged.
  */
-function recheck(record: FormRecord, dir: string, files: string[], faults: string[], run: RunRecord): FormRecord {
+function recheck(record: FormRecord, dir: string, files: string[], faults: string[]): FormRecord {
+  const trialPlays = new Set((record.standings ?? []).filter((s) => s.is === "trial").map((s) => s.play));
   const parts = record.parts.map((part) => {
     const seenPart = part.measured === null;
-    const trial = trialOf(run);
-    const allowed = seenPart ? SEEN_OUTCOMES : measuredOutcomes(trial);
+    const rests = restsOnGuidance(part, record.mode);
     if (seenPart && part.pages.length === 0) faults.push(`part ${part.id} is seen on no page`);
     if (!seenPart && part.pages.length > 0) faults.push(`part ${part.id} is measured and names pages`);
     const instances = part.instances.map((instance): Instance => {
@@ -676,9 +842,10 @@ function recheck(record: FormRecord, dir: string, files: string[], faults: strin
         faults.push(`${where} is of a play the record does not have`);
         return broken("a play the record does not have");
       }
+      const allowed = seenPart ? (trialPlays.has(instance.play) ? [...SEEN_OUTCOMES, "not judged"] : SEEN_OUTCOMES) : measuredOutcomes(rests && trialPlays.has(instance.play));
       if (!allowed.includes(instance.outcome)) {
-        const known = [...SEEN_OUTCOMES, ...measuredOutcomes(true), ...measuredOutcomes(false)].includes(instance.outcome);
-        const why = `is recorded "${instance.outcome}", which the runner ${!known ? "never writes" : seenPart ? "writes only for a measured part of a gate" : trial ? "never writes in a trial, which gives no verdict" : "writes only in a trial"}`;
+        const known = [...SEEN_OUTCOMES, "not judged", ...measuredOutcomes(true), ...measuredOutcomes(false)].includes(instance.outcome);
+        const why = `is recorded "${instance.outcome}", which the runner ${!known ? "never writes" : seenPart ? (instance.outcome === "not judged" ? "writes for a part that is seen only in a play that was a trial" : "writes only for a measured part of a gate") : rests && trialPlays.has(instance.play) ? "never writes in a play that was a trial, which gives no verdict" : "writes only in a trial"}`;
         faults.push(`${where} ${why}`);
         return broken(why);
       }
@@ -687,7 +854,7 @@ function recheck(record: FormRecord, dir: string, files: string[], faults: strin
         return instance;
       }
       if (instance.glances.length === 0) {
-        if (instance.outcome !== "unlooked" && instance.outcome !== "broken") {
+        if (instance.outcome !== "unlooked" && instance.outcome !== "broken" && instance.outcome !== "not judged") {
           const why = `is recorded "${instance.outcome}" and names no look on a page`;
           faults.push(`${where} ${why}`);
           return broken(why);

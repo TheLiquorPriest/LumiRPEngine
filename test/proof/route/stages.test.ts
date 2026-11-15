@@ -6,7 +6,7 @@
 // Author. The host is made up (`fake.ts`): each stage's pages are what that state of the bed shows.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { readBundle } from "../../../scripts/proof/route/evidence";
@@ -75,7 +75,7 @@ function stagedHost(pages: Record<string, Record<string, string>>, options: Reco
     async begin(start: PlayStart): Promise<Session> {
       host.begun.push(start);
       const stage = start.form.id.split(":")[1] ?? "";
-      return { acts: {}, browser: new FakeBrowser({ pages: pages[stage] ?? {}, ...options[stage] }), close: async () => {} };
+      return { acts: {}, browser: new FakeBrowser({ pages: pages[stage] ?? {}, ...options[stage] }), guidance: async () => fakeFacts().guidance ?? null, close: async () => {} };
     },
     async close() {},
   };
@@ -287,4 +287,77 @@ test("a stage not played leaves its scenario not played whole, never passed, and
   });
   const unplaced = await runOn(none, ["round"], { openHost: async () => stagedHost(pages), guard });
   expect(unplaced.printed).toContain("- Not played (the round's order does not place it: stages before, after): 41\n");
+});
+
+test("a stage asked of a scenario that has none, or a name that is no stage's, is named in the report with why and is no fault of what was played", async () => {
+  // Scenario 42 played whole, with a stage asked of it beside: 42 passes, and the stage is named as not played.
+  const whole = await runOn(root, ["rig", "42", "42:first"], { openHost: async () => stagedHost({ "": { World: "Chats: 3" } }) });
+  const read = readBundle(whole.dir);
+  expect(read.forms.find((f) => f.id === "42")).toMatchObject({ result: "passed", faults: [] });
+  expect(read.faults).toEqual([]);
+  expect(whole.printed).toContain("- 42. The run is made a second time: passed");
+  expect(whole.printed).toContain("## Asked, and no stage of a scenario played\n\n- 42:first: scenario 42 is played whole, not in stages: ask it as 42\n");
+  expect(whole.code).toBe(1);
+  // A name that is no stage's beside its scenario's stages, all played and seen: the scenario passes whole, the typo is named.
+  const typo = await runOn(root, ["rig", "41:before", "41:after", "41:Before", "41:middle"], { openHost: async () => stagedHost({ before: BEFORE, after: AFTER }) });
+  expect(readBundle(typo.dir).forms.find((f) => f.id === "41")).toMatchObject({ result: "passed", faults: [] });
+  expect(typo.printed).toContain(`${HEAD}: passed\n`);
+  expect(typo.printed).toContain("- 41:Before: 41:Before is not a stage: a stage is asked as its scenario's number and its name, lowercase words joined by hyphens (40:before)\n");
+  expect(typo.printed).toContain("- 41:middle: scenario 41 has no stage middle: its stages are before, after\n");
+  expect(typo.code).toBe(1);
+});
+
+test("two runs started in one second share a name and not a nonce: a folder moved from one bundle to the other is told", async () => {
+  const now = () => new Date("2026-11-15T07:00:00.000Z");
+  const one = await runOn(root, ["rig", "42"], { openHost: async () => stagedHost({ "": { World: "Chats: 3" } }), now });
+  const two = await runOn(root, ["rig", "42"], { openHost: async () => stagedHost({ "": { World: "Chats: 3" } }), now });
+  const names = [one.dir, two.dir].map((dir) => dir.split("/").pop());
+  expect(names[0]).toBe(names[1]);
+  expect(readBundle(one.dir).run.nonce).not.toBe(readBundle(two.dir).run.nonce);
+  // The first run's folder stands in the second's bundle, with no edit at all.
+  rmSync(join(two.dir, "42"), { recursive: true });
+  cpSync(join(one.dir, "42"), join(two.dir, "42"), { recursive: true });
+  const moved = readBundle(two.dir);
+  expect(moved.forms.find((f) => f.id === "42")?.faults).toContain("its record carries another run's nonce: it comes from another run that has this run's name");
+  expect(moved.forms.find((f) => f.id === "42")?.result).toBe("failed");
+});
+
+test("read back, a stage's folder is its own, every part is in one stage, the records agree, and a stage's record is never a whole scenario's", async () => {
+  const played = async () => (await runOn(root, ["rig", "41"], { openHost: async () => stagedHost({ before: BEFORE, after: AFTER }) })).dir;
+  const faultsOf = (dir: string) => readBundle(dir).forms.find((f) => f.id === "41")?.faults ?? [];
+  // The two stages' folders swapped: each record is of the other stage.
+  const swapped = await played();
+  renameSync(join(swapped, "41", "before"), join(swapped, "41", "tmp"));
+  renameSync(join(swapped, "41", "after"), join(swapped, "41", "before"));
+  renameSync(join(swapped, "41", "tmp"), join(swapped, "41", "after"));
+  expect(faultsOf(swapped)).toEqual(expect.arrayContaining(["stage before: its record is of stage after, not of stage before", "stage after: its record is of stage before, not of stage after"]));
+  expect(readBundle(swapped).forms.find((f) => f.id === "41")?.result).toBe("failed");
+  // One stage's record names a part the other holds: in two stages.
+  const twice = await played();
+  const afterFile = join(twice, "41", "after", "result.json");
+  const after = JSON.parse(readFileSync(afterFile, "utf8")) as { parts: unknown[] };
+  const before = JSON.parse(readFileSync(join(twice, "41", "before", "result.json"), "utf8")) as { parts: unknown[] };
+  writeFileSync(afterFile, JSON.stringify({ ...after, parts: [...after.parts, ...before.parts] }));
+  expect(faultsOf(twice)).toContain("part hud-state is in stages before and after: every part is in exactly one stage");
+  // Records that do not agree on the scenario's stages.
+  const apart = await played();
+  const file = join(apart, "41", "before", "result.json");
+  const record = JSON.parse(readFileSync(file, "utf8")) as { stage: { name: string; of: string[] } };
+  writeFileSync(file, JSON.stringify({ ...record, stage: { name: "before", of: ["before", "after", "third"] } }));
+  expect(faultsOf(apart).some((f) => f.startsWith("its stages' records do not agree on its stages: "))).toBe(true);
+  // A stage's record put where a scenario played whole keeps its own.
+  const whole = await played();
+  cpSync(join(whole, "41", "before", "result.json"), join(whole, "41", "result.json"));
+  expect(faultsOf(whole).some((f) => f.includes("its record is of stage before, and its folder is that of a form played whole"))).toBe(true);
+  expect(readBundle(whole).forms.find((f) => f.id === "41")?.result).toBe("failed");
+});
+
+test("a stage's form looking at another stage's part stops, and the part stays unseen in its own stage", async () => {
+  const wrong = stagedFile(TWO_STAGES).replace('await play.see("hud-state");', 'await play.see("author-answers");');
+  const own = proofRoot({ "scenarios/41-classic-played.ts": wrong });
+  const result = await runOn(own, ["rig", "41:before"], { openHost: async () => stagedHost({ before: BEFORE, after: AFTER }) });
+  const record = JSON.parse(readFileSync(join(result.dir, "41", "before", "result.json"), "utf8")) as { stops: { why: string }[] };
+  expect(record.stops[0]?.why).toBe("its form stopped: part author-answers is seen in stage after, not in this one");
+  expect(result.printed).toContain("Failed");
+  expect(result.code).toBe(1);
 });

@@ -18,8 +18,11 @@
 // repository, and names who started it with `--by` (or RPE_PROOF_BY). `--repeats` sets how many plays
 // an "as shipped" part gets live, over scripts/proof/settings.json. `--root` is the proof folder to
 // look in, this file's own by default. An option a command does not take, or one given no value, is a
-// usage error. A run's exit code is 0 only when everything asked was played and passed (or measured
-// as a rate) and its evidence holds no fault; `report` gives the same code for the bundle it reads.
+// usage error. A run's exit code is 2 for a usage error; 1 for any failure or fault (something asked
+// not played, a form that failed, was not seen, not judged or not played whole, a fault of the
+// evidence); 3 when nothing failed and the run is a trial, for any reason, whatever its forms hold; 0
+// only for a verdict whose forms passed or were measured as a rate. `report` gives the same code for
+// the bundle it reads.
 
 import { resolve } from "node:path";
 import { check, describeCheck } from "./route/check";

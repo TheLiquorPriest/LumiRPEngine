@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { Bundle, BundleRefused, lookAt, readBundle, runRecord, SUPPORTING, unshownBy } from "../../../scripts/proof/route/evidence";
 import type { Sighting } from "../../../scripts/proof/route/form";
 import { outcomeOf, verdictOf, type FormRecord, type PartRecord } from "../../../scripts/proof/route/results";
-import { FakeBrowser, fakeFacts } from "./fake";
+import { FakeBrowser, fakeFacts, fakePlays, fakeRun } from "./fake";
 
 let out = "";
 
@@ -140,11 +140,11 @@ test("a bundle keeps screens named for page, width and part, notes naming them, 
   // Looked at again through the bundle, so the screens are on disk.
   const glances = [await lookAt(new FakeBrowser({ pages: PAGES }), coin, 1440, save), await lookAt(new FakeBrowser({ pages: PAGES }), coin, 390, save)];
   const saved: PartRecord = { ...part, instances: [{ play: 1, at: 1, ...outcomeOf(glances, "code", "live"), page: null, glances }] };
-  const record: FormRecord = { run: bundle.run, id: "04", kind: "scenario", number: 4, waves: [2], line: 1814, mode: "live", plays: 1, parts: [saved], stops: [] };
+  const record: FormRecord = { run: bundle.run, nonce: bundle.nonce, id: "04", kind: "scenario", number: 4, waves: [2], line: 1814, mode: "live", plays: 1, parts: [saved], stops: [], standings: [{ play: 1, is: "verdict", why: [] }] };
   bundle.keep("04", 1, "world-route", { coin: 40 });
   bundle.writeResult(record);
   bundle.writeNotes(record);
-  bundle.writeRun(runRecord(fakeFacts(), { run: bundle.run, mode: "live", by: "a test", started: "2026-11-15T03:15:02.000Z", ended: "2026-11-15T03:16:00.000Z", asked: ["04"], unplayed: [], known: { scenarios: ["04"], gates: [] }, repeats: 10 }));
+  bundle.writeRun(fakeRun({ run: bundle.run, nonce: bundle.nonce, mode: "live", by: "a test", started: "2026-11-15T03:15:02.000Z", ended: "2026-11-15T03:16:00.000Z", asked: ["04"], unplayed: [], known: { scenarios: ["04"], gates: [] }, repeats: 10 }, fakePlays("04")));
 
   expect(glances.map((g) => g.screen)).toEqual(["play-01/world-1440-coin.png", "play-01/world-390-coin.png"]);
   expect(readFileSync(join(bundle.dir, "04/notes.md"), "utf8")).toContain("- Play 1: seen on screen: seen on the World page at 1440; seen on the World page at 390. Screens: play-01/world-1440-coin.png, play-01/world-390-coin.png");

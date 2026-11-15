@@ -15,6 +15,13 @@
 // parts with its own forms, its record and screens in its own folder: asked by its number, it plays
 // each of its stages in its order, each named `<number>:<stage>` in the run.
 //
+// A run's standing, a verdict or a trial, is worked out per play: the host is asked what the play's own
+// chat stands on when its footing is ready and again when its form has ended (`Session.guidance`), and
+// a difference no form declared (`Play.declareGuidanceChange`) makes the play a trial, as does any
+// account that is not the shipped guidance as shipped (`evidence.ts`, `standingOf`). The accounts are
+// written in `run.json` and each play's standing in its results file; the report and the exit read
+// them back, worked out again.
+//
 // A live run is never started without PlanScenarios-5's cheap gate and the bed's lock: the lock is
 // taken before the run's first step (before the bed's host is opened) and given back after its last,
 // and the commits the bed reports must be admitted by the gate. Plays run one at a time and nothing
@@ -24,13 +31,13 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import { check, fixturesDir, type Found } from "./check";
-import { guidanceOf, shippedOf, treeChanges, treeHash } from "../lib/record";
-import { Bundle, factFaults, lookAt, readBundle, runRecord, widthsOf, type RunRecord, type StandingFrom } from "./evidence";
+import { guidanceOf, shippedOf, treeChanges, treeHash, type TreeFile } from "../lib/record";
+import { Bundle, factFaults, lookAt, readBundle, runRecord, standingOf, standingOfPlay, widthsOf, type PlayGuidance, type RunRecord, type StandingFrom } from "./evidence";
 import { isMeasured, pageSlug, parseStageId, partsOfStage, scenarioId, stageId, stagesOf, type Form, type GatePart, type Play, type ProofForm } from "./form";
-import type { Host, HostOptions, Kept, LiveGuard, Mode, RoundStage, RunFacts, Session } from "./host";
+import type { GuidanceFacts, Host, HostOptions, Kept, LiveGuard, Mode, RoundStage, RunFacts, Session } from "./host";
 import { LIST, listFaults } from "./list";
 import { exitCode, reportOf } from "./report";
-import { outcomeOf, type FormRecord, type Glance, type Instance, type PartRecord } from "./results";
+import { outcomeOf, restsOnGuidance, type FormRecord, type Glance, type Instance, type PartRecord } from "./results";
 
 /** A run that may not go ahead, or that could not go on, with why. */
 export class RunRefused extends Error {}
@@ -204,7 +211,7 @@ async function run(options: RunOptions, found: Found[], asked: string[], playAll
   const unplayed: Unplayed = [];
   const faults: string[] = [];
   const known = { scenarios: [...new Set(found.filter((f) => f.kind === "scenario" && /^\d{2}$/.test(f.id)).map((f) => f.id))], gates: gateIds(found) };
-  const record = runRecord(facts, { run: bundle.run, mode: options.mode, by: options.by, started: now().toISOString(), ended: null, asked, unplayed, known, repeats: options.repeats, faults }, guidanceFrom(facts));
+  const record = runRecord(facts, { run: bundle.run, nonce: bundle.nonce, mode: options.mode, by: options.by, started: now().toISOString(), ended: null, asked, unplayed, known, repeats: options.repeats, faults }, standingFromFacts(facts.guidance));
   bundle.writeRun(record);
   const played = new Set<string>();
   let broke: unknown = null;
@@ -308,6 +315,7 @@ async function playOne(options: RunOptions, bundle: Bundle, host: Host, found: F
   bundle.formDir(id);
   const record: FormRecord = {
     run: run.run,
+    ...(run.nonce === undefined ? {} : { nonce: run.nonce }),
     id: scenario,
     kind: form.kind,
     number: form.kind === "scenario" ? form.number : null,
@@ -316,34 +324,80 @@ async function playOne(options: RunOptions, bundle: Bundle, host: Host, found: F
     mode: options.mode,
     plays,
     stops: [],
+    standings: [],
     parts: parts.map((p): PartRecord => ({ id: p.id, words: p.words, mark: p.mark, pages: isMeasured(p) ? [] : p.on.map((s) => s.page), measured: isMeasured(p) ? p.measured : null, wants: p.wants ?? null, instances: [] })),
     ...(stage && stages ? { stage: { name: stage.name, of: stages.map((s) => s.name) } } : {}),
   };
   for (let n = 1; n <= plays; n++) await onePlay(options, bundle, host, { id, file, form, parts, fn }, record, n, run);
   bundle.writeResult(record);
-  bundle.writeNotes(record, run.standing?.is !== "verdict");
+  bundle.writeNotes(record);
   return null;
 }
 
 /**
- * What the run stood on, for its standing: the shipped tree the host says RPE served and the build's
- * (RPH's shipped folder with RPE's over it), by hash and by the paths they differ at, and each layer of
- * the user's own with the guidance in it (the floor's own helpers, `scripts/proof/lib/record.ts`).
- * Null when the host gave no account of it, or gave one that is not one: the run is then a trial.
+ * What a run or a play's chat stood on, for its standing: the shipped tree the host says RPE served and
+ * the build's (RPH's shipped folder with RPE's over it), by hash and by the paths they differ at, the
+ * number of files each holds, each layer of the user's own with the guidance in it (the floor's own
+ * helpers, `scripts/proof/lib/record.ts`), and the names the configs switch. Null when the host gave
+ * no account of it, or gave one that is not one: what it concerns is then a trial.
  */
-function guidanceFrom(facts: RunFacts): StandingFrom | null {
-  const given = facts.guidance;
+export function standingFromFacts(given: GuidanceFacts | null | undefined): StandingFrom | null {
   const files = (list: unknown) => Array.isArray(list) && list.every((f) => isRecord(f) && typeof f.path === "string" && typeof f.sha256 === "string");
   if (!given || !files(given.served) || !isRecord(given.build) || !files(given.build.rph) || !files(given.build.rpe) || !Array.isArray(given.layers) || !given.layers.every((l) => isRecord(l) && typeof l.level === "string" && files(l.files))) return null;
-  const build = shippedOf(given.build.rph, given.build.rpe);
-  return { served: treeHash(given.served), build: treeHash(build), changed: treeChanges(given.served, build), layers: given.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files), guidance: guidanceOf(layer) })) };
+  let build: TreeFile[];
+  try {
+    build = shippedOf(given.build.rph, given.build.rpe);
+  } catch {
+    return null;
+  }
+  const texts = (list: unknown): list is string[] => Array.isArray(list) && list.every((t) => typeof t === "string");
+  const names = given.names;
+  const named = isRecord(names) && texts(names.layered) && texts(names.added) && Array.isArray(names.off) && names.off.every((o) => isRecord(o) && typeof o.name === "string" && texts(o.levels));
+  return {
+    served: treeHash(given.served),
+    build: treeHash(build),
+    changed: treeChanges(given.served, build),
+    layers: given.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files), guidance: guidanceOf(layer) })),
+    files: { served: given.served.length, build: build.length },
+    ...(named ? { names: { off: names.off.map((o) => ({ name: o.name, levels: [...o.levels] })), layered: [...names.layered], added: [...names.added] } } : {}),
+  };
+}
+
+/**
+ * What a play's chat stands on now, as its session says; null when the session gives no account, or
+ * one that is not one, or fails to give it. It never throws: a host that cannot say makes the play a
+ * trial, and what went wrong is kept beside the play as supporting evidence.
+ */
+async function accountOf(session: Session, when: "before" | "after", keep: (name: string, data: Kept) => Promise<void>): Promise<StandingFrom | null> {
+  if (typeof session.guidance !== "function") return null;
+  try {
+    const from = standingFromFacts(await session.guidance());
+    if (from === null) await keep(`guidance-${when}.txt`, `The host's session gave, ${when === "before" ? "when its footing was ready" : "when the form had ended"}, an answer that is not an account of the guidance its chat stood on.\n`);
+    return from;
+  } catch (error) {
+    await keep(`guidance-${when}.txt`, `The host's session could not say what its chat stood on ${when === "before" ? "when its footing was ready" : "when the form had ended"}: ${message(error)}\n`);
+    return null;
+  }
+}
+
+/** A deep copy that cannot be changed: what a form is handed of the run, so it cannot change the standing it is judged by. */
+function frozen<T>(value: T): T {
+  const copy = structuredClone(value);
+  const freeze = (v: unknown): void => {
+    if (v === null || typeof v !== "object" || Object.isFrozen(v)) return;
+    Object.freeze(v);
+    for (const inner of Object.values(v)) freeze(inner);
+  };
+  freeze(copy);
+  return copy;
 }
 
 async function onePlay(options: RunOptions, bundle: Bundle, host: Host, unit: Unit, record: FormRecord, n: number, run: RunRecord): Promise<void> {
   const { id, form, parts, fn } = unit;
   const { plays } = record;
-  // A trial gives no verdict on what rests on guidance: a measured part's figure is kept, never met or unmet.
-  const trial = run.standing?.is !== "verdict";
+  const start = run.standing?.from ?? null;
+  // Whether a part of this play rests on guidance in this mode: only then can a change its form declares make the play a trial.
+  const rests = parts.some((p) => restsOnGuidance({ measured: isMeasured(p) ? p.measured : null, mark: p.mark }, options.mode));
   const keep = async (name: string, data: Kept) => bundle.keep(id, n, name, data);
   const looked = new Map<string, Set<string>>(parts.map((p) => [p.id, new Set<string>()]));
   const looks = new Map<string, number>();
@@ -364,6 +418,14 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, unit: Un
   } catch (error) {
     stopped = `the host could not set up play ${n}: ${message(error)}`;
   }
+  // What the play's own chat stands on is asked of its host twice: when the footing is ready, and when the form has ended.
+  const declared: string[] = [];
+  let before: StandingFrom | null = null;
+  let after: StandingFrom | null = null;
+  const guidance = (): PlayGuidance => ({ id, play: n, before, after, declared: declared.length === 0 ? null : declared.join("; "), rests });
+  if (session) before = await accountOf(session, "before", keep);
+  // The standing so far: what the run stood on and what the chat stood on when its footing was ready.
+  const soFar = () => standingOfPlay(run.rpe, run.rph, start, { ...guidance(), after: before });
   if (session) {
     const browser = session.browser;
     const ctx: Play = {
@@ -372,8 +434,11 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, unit: Un
       plays,
       acts: session.acts,
       look: browser,
-      run,
-      keep,
+      run: frozen(run),
+      get standing() {
+        const now = soFar();
+        return { is: now.is, why: now.why };
+      },
       async see(partId, page) {
         const part = own(partId);
         if (isMeasured(part)) throw new Error(`part ${partId} is measured: its form judges it`);
@@ -390,20 +455,35 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, unit: Un
         const part = parts.find((p) => p.id === partId);
         if (!part || !isMeasured(part)) throw new Error(`the form judged ${partId}, which is not one of its measured parts`);
         looked.get(partId)?.add("");
-        add(partId, { outcome: trial ? "trial" : verdict.pass ? "met" : "unmet", why: verdict.what, page: null, glances: [] });
+        // A play that proves a trial, once its form has ended, turns this into the figure alone (below).
+        add(partId, { outcome: verdict.pass ? "met" : "unmet", why: verdict.what, page: null, glances: [] });
       },
       async notJudged(partId, why) {
         const part = parts.find((p) => p.id === partId);
-        if (!part || !isMeasured(part)) throw new Error(`the form said ${partId} is not judged, which is not one of its measured parts`);
-        looked.get(partId)?.add("");
-        add(partId, { outcome: "not judged", why, page: null, glances: [] });
+        if (!part) throw new Error(`the form said ${partId} is not judged, which is not one of its parts`);
+        if (isMeasured(part)) {
+          looked.get(partId)?.add("");
+          add(partId, { outcome: "not judged", why, page: null, glances: [] });
+          return;
+        }
+        if (soFar().is !== "trial") throw new Error(`the form said ${partId} is not judged, and it is seen on screen: only a play that is a trial may leave a seen part unjudged`);
+        for (const sighting of part.on) {
+          looked.get(partId)?.add(pageSlug(sighting.page));
+          add(partId, { outcome: "not judged", why, page: sighting.page, glances: [] });
+        }
       },
+      declareGuidanceChange(why) {
+        if (why.trim() === "") throw new Error("a declared change of guidance says what it changes and why");
+        declared.push(why.trim());
+      },
+      keep,
     };
     try {
       await fn(ctx);
     } catch (error) {
       stopped = `its form stopped: ${message(error)}`;
     }
+    after = await accountOf(session, "after", keep);
     try {
       await session.close();
     } catch (error) {
@@ -422,6 +502,12 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, unit: Un
       add(part.id, stopped ? { outcome: "broken", why: `${stopped}, before it was looked for on the ${page} page`, page, glances: [] } : { outcome: "unlooked", why: `its form never looked for it on the ${page} page`, page, glances: [] });
     }
   }
+  // The play's standing is its own, written beside run.json's account of it: a play that is a trial gives what rests on guidance as figures, never met or unmet.
+  const account = guidance();
+  const standing = standingOfPlay(run.rpe, run.rph, start, account);
+  run.standing = standingOf(run.rpe, run.rph, start, [...(run.standing?.plays ?? []), account]);
+  record.standings = [...(record.standings ?? []), standing];
+  if (standing.is === "trial") for (const part of record.parts) if (restsOnGuidance(part, record.mode)) for (const instance of part.instances) if (instance.play === n && (instance.outcome === "met" || instance.outcome === "unmet")) instance.outcome = "trial";
 }
 
 function message(error: unknown): string {

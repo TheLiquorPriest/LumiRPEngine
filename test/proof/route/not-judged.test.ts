@@ -77,8 +77,8 @@ test("a measured part declared not judged is recorded and reported not judged, w
   expect(report).toContain("- Gate gate-stack: not judged\n");
   expect(report).toContain("not judged 1");
 
-  // A form that says a part not judged which is none of its measured parts stops, as a fault of its script.
-  expect(report).toContain("- Gate gate-wrong: failed\n  - Play 1 stopped: its form stopped: the form said replies is not judged, which is not one of its measured parts\n");
+  // A form that says a part not judged which is none of its parts stops, as a fault of its script.
+  expect(report).toContain("- Gate gate-wrong: failed\n  - Play 1 stopped: its form stopped: the form said replies is not judged, which is not one of its parts\n");
   expect(code).toBe(1);
 
   // Read back alone, the bundle gives the same.

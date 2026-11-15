@@ -54,7 +54,7 @@ export interface Glance {
  */
 export type Outcome = "shown" | "absent" | "unseen" | "broken" | "unlooked" | "met" | "unmet" | "trial" | "not judged";
 
-/** The outcomes the runner writes for a part that is seen, and for one that is measured in a run that gives a verdict or is a trial: nothing else is a record of it. */
+/** The outcomes the runner writes for a part that is seen, and for one that is measured in a play that gives a verdict or is a trial: nothing else is a record of it. A seen part may be "not judged" in a trial play only. */
 export const SEEN_OUTCOMES: readonly Outcome[] = ["shown", "absent", "unseen", "broken", "unlooked"];
 export function measuredOutcomes(trial: boolean): readonly Outcome[] {
   return trial ? ["trial", "not judged", "broken", "unlooked"] : ["met", "unmet", "not judged", "broken", "unlooked"];
@@ -84,10 +84,20 @@ export interface PartRecord {
   instances: Instance[];
 }
 
+/** A play's standing as `result.json` says it: a copy of what `run.json`'s `standing.plays` works out (its one home), so the results file carries the word trial beside the figures. A read-back works it out again and faults a difference. */
+export interface PlayStanding {
+  play: number;
+  is: "verdict" | "trial";
+  /** Why a play is a trial: what the run stood on and what its play changed; empty for a verdict. */
+  why: string[];
+}
+
 /** A scenario or gate as a run recorded it: `result.json` in its folder. */
 export interface FormRecord {
   /** The run that made it (`run.json`'s `run`): a record naming another run, or none, is not this run's. */
   run?: string;
+  /** The run's nonce (`run.json`'s `nonce`), which no other run has, though two runs may share a name: a record with another's or none is not this run's. */
+  nonce?: string;
   /** The scenario's number as two digits, or the gate's id. */
   id: string;
   kind: "scenario" | "gate";
@@ -100,6 +110,8 @@ export interface FormRecord {
   parts: PartRecord[];
   /** What stopped a play before its form ended, by play. */
   stops: { play: number; why: string }[];
+  /** The standing of each play: a play that is a trial gives no verdict on what rests on guidance (`restsOnGuidance`). */
+  standings?: PlayStanding[];
   /** For one stage of a scenario played in stages: its name, and the scenario's stages in their order. A scenario played whole, and a gate, have none. */
   stage?: { name: string; of: string[] };
 }
@@ -145,9 +157,22 @@ export interface TrialVerdict {
 
 export type Verdict = CodeVerdict | RateVerdict | TrialVerdict;
 
-/** Whether a part's verdict rests on guidance, so a trial gives none: every measured part (only a gate has one) and every "as shipped" part. */
-export function restsOnGuidance(part: Pick<PartRecord, "measured" | "mark">): boolean {
-  return part.measured !== null || part.mark === "as shipped";
+/**
+ * Whether a part's verdict rests on guidance, so a trial gives none: every measured part (only a gate
+ * has one) and every "as shipped" part played live. In the rig the agent is scripted to follow its
+ * file, so a part marked "as shipped" there is its code path and is judged as code, whatever the
+ * run's standing (the lead's ruling after PlanScenarios-1-fix2's P1); a measured part marked "as
+ * shipped" is judged as code there too, and one marked "code" still gives a figure only in a trial.
+ */
+export function restsOnGuidance(part: Pick<PartRecord, "measured" | "mark">, mode: Mode): boolean {
+  if (part.mark === "as shipped") return mode === "live";
+  return part.measured !== null;
+}
+
+/** Whether a part's plays were a trial and it rests on guidance: it then has figures and the word trial, and no verdict. */
+export function partTrial(record: Pick<FormRecord, "standings" | "mode">, part: PartRecord): boolean {
+  if (!restsOnGuidance(part, record.mode)) return false;
+  return (record.standings ?? []).some((s) => s.is === "trial" && part.instances.some((i) => i.play === s.play));
 }
 
 /** Whether a part is judged as code in this mode: a code part always, an "as shipped" part in the rig. */
@@ -179,7 +204,7 @@ function place(glance: Glance): string {
 
 export function verdictOf(part: PartRecord, mode: Mode, trial = false): Verdict {
   const of = (...outcomes: Outcome[]) => part.instances.filter((i) => outcomes.includes(i.outcome));
-  if (trial && restsOnGuidance(part)) {
+  if (trial && restsOnGuidance(part, mode)) {
     const hits = of("shown").length;
     const misses = of("absent");
     return { kind: "trial", hits, judged: hits + misses.length, misses, figures: of("trial"), apart: of("broken", "unseen", "unlooked", "not judged") };
@@ -221,9 +246,9 @@ export function verdictOf(part: PartRecord, mode: Mode, trial = false): Verdict 
  */
 export type FormResult = "passed" | "failed" | "not seen" | "measured" | "not played whole" | "trial" | "not judged";
 
-/** A record's own result; `trial` for a run that gives no verdict, whose parts resting on guidance are figures only (`TrialVerdict`). */
-export function formResult(record: FormRecord, trial = false): FormResult {
-  const verdicts = record.parts.map((p) => verdictOf(p, record.mode, trial));
+/** A record's own result; a part that rests on guidance in a play that was a trial gives figures only (`TrialVerdict`), so a record whose every play was a trial is "trial" where its parts rest on guidance. */
+export function formResult(record: FormRecord): FormResult {
+  const verdicts = record.parts.map((p) => verdictOf(p, record.mode, partTrial(record, p)));
   const code = verdicts.filter((v): v is CodeVerdict => v.kind === "code");
   const rates = verdicts.filter((v): v is RateVerdict => v.kind === "rate");
   const trials = verdicts.filter((v): v is TrialVerdict => v.kind === "trial");
@@ -248,15 +273,15 @@ export function wholeResult(stages: (FormResult | null)[]): FormResult {
 }
 
 /** A form's result in plain words: a rate is given with its counts, and with every play missed said so. */
-export function headline(record: FormRecord, trial = false): string {
-  const result = formResult(record, trial);
+export function headline(record: FormRecord): string {
+  const result = formResult(record);
   if (result !== "measured") return result;
   const rated = record.parts.flatMap((part) => {
-    const verdict = verdictOf(part, record.mode);
+    const verdict = verdictOf(part, record.mode, partTrial(record, part));
     return verdict.kind === "rate" && verdict.wants === null ? [{ part, verdict }] : [];
   });
   const counts = rated.map(({ part, verdict }) => `${rated.length > 1 ? `${part.id} ` : ""}${verdict.hits} of ${verdict.judged}${verdict.hits === 0 && verdict.judged > 0 ? ", every play missed" : ""}`);
-  const code = record.parts.some((p) => verdictOf(p, record.mode).kind === "code") ? "its code passed; " : "";
+  const code = record.parts.some((p) => verdictOf(p, record.mode, partTrial(record, p)).kind === "code") ? "its code passed; " : "";
   return `measured as a rate: ${code}as shipped ${counts.join("; ")}`;
 }
 
@@ -265,7 +290,29 @@ export function screensOf(instance: Instance): string[] {
   return instance.glances.flatMap((g) => (g.screen === null ? [] : [g.screen]));
 }
 
-/** A part's verdict in plain words, the first line its result and each further line one instance behind it, with its screens. */
+/**
+ * What a part that passed or was met carries beside the word: a measured part's figure in each play it
+ * was met, and a seen part's note from its check, once for the plays it was made in. The report prints
+ * these; "Passed" alone says nothing of what was measured or noted.
+ */
+function figureLines(part: PartRecord): string[] {
+  const lines: string[] = [];
+  const notes = new Map<string, Set<number>>();
+  for (const i of part.instances) {
+    if (part.measured !== null) {
+      if (i.outcome === "met" && i.why.trim() !== "") lines.push(`Met in play ${i.play}${i.at > 1 ? `, look ${i.at}` : ""}: ${i.why}`);
+    } else
+      for (const g of i.glances)
+        if (g.found === true && g.what.trim() !== "") {
+          const key = `the ${g.page} page: ${g.what}`;
+          notes.set(key, (notes.get(key) ?? new Set<number>()).add(i.play));
+        }
+  }
+  for (const [note, plays] of notes) lines.push(`Seen on ${note} (in ${plays.size === 1 ? "play" : "plays"} ${[...plays].sort((a, b) => a - b).join(", ")})`);
+  return lines;
+}
+
+/** A part's verdict in plain words, the first line its result and each further line one instance behind it, with its screens; `trial` for a part whose plays were a trial. */
 export function describeVerdict(part: PartRecord, mode: Mode, trial = false): string[] {
   const verdict = verdictOf(part, mode, trial);
   const screens = (instance: Instance) => {
@@ -281,9 +328,10 @@ export function describeVerdict(part: PartRecord, mode: Mode, trial = false): st
   if (verdict.kind === "code") {
     if (verdict.result === "not judged") return [`Not judged: ${[...new Set(verdict.behind.map((i) => i.why))].join("; ")}`];
     const head = part.mark === "as shipped" ? `the code path only (the rig plays the agent as its file asks): ${verdict.result}` : verdict.result;
-    return [head[0]?.toUpperCase() + head.slice(1), ...verdict.behind.map((i) => line(verdict.result === "failed" ? "Failed" : "Not seen", i))];
+    const behind = verdict.result === "passed" ? figureLines(part) : verdict.behind.map((i) => line(verdict.result === "failed" ? "Failed" : "Not seen", i));
+    return [head[0]?.toUpperCase() + head.slice(1), ...behind];
   }
   const share = verdict.wants === null ? "" : verdict.meets === null ? `; the plan asks at least ${verdict.wants.hits} of ${verdict.wants.of}, and too few were judged to say` : verdict.meets ? `; the plan asks at least ${verdict.wants.hits} of ${verdict.wants.of}: met` : `; the plan asks at least ${verdict.wants.hits} of ${verdict.wants.of}: not met`;
   const head = `As shipped: ${verdict.hits} of ${verdict.judged} (${verdict.misses.length} ${verdict.misses.length === 1 ? "miss" : "misses"})${verdict.apart.length > 0 ? `; ${verdict.apart.length} kept out of the rate` : ""}${share}`;
-  return [head, ...verdict.misses.map((i) => line("Missed", i)), ...verdict.apart.map((i) => line(i.outcome === "broken" ? "Code failure, kept out of the rate," : i.outcome === "not judged" ? "Not judged, kept out of the rate," : "Not seen, kept out of the rate,", i))];
+  return [head, ...verdict.misses.map((i) => line("Missed", i)), ...verdict.apart.map((i) => line(i.outcome === "broken" ? "Code failure, kept out of the rate," : i.outcome === "not judged" ? "Not judged, kept out of the rate," : "Not seen, kept out of the rate,", i)), ...figureLines(part)];
 }

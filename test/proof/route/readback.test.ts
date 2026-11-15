@@ -11,12 +11,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { sha256 } from "../../../scripts/proof/lib/record";
-import { Bundle, notesOf, readBundle, runRecord } from "../../../scripts/proof/route/evidence";
+import { Bundle, notesOf, readBundle } from "../../../scripts/proof/route/evidence";
 import { main } from "../../../scripts/proof/run";
 import { pageSlug, type Mark } from "../../../scripts/proof/route/form";
 import { reportOf, summarize } from "../../../scripts/proof/route/report";
 import type { FormRecord, Glance, Instance, PartRecord } from "../../../scripts/proof/route/results";
-import { fakeFacts } from "./fake";
+import { fakePlays, fakeRun } from "./fake";
 
 let out = "";
 let count = 0;
@@ -65,14 +65,18 @@ const BRANCH: PartSpec[] = [{ id: "values", words: "The new chat's World page sh
 /** A folder of the bundle: its record, the screens it holds ("all" those the record names), and its notes ("made" from the record, "none", or a text of their own). */
 type FolderSpec = { folder: string; record: unknown; screens?: "all" | "none" | string[]; notes?: string };
 
-/** A bundle holding the folders given, each with its record, the screens it names (or none), and notes made from its record. */
+/** How many plays a folder's record says it holds (one for anything that is not a record). */
+const playsOf = (record: unknown): number => (record !== null && typeof record === "object" && typeof (record as FormRecord).plays === "number" ? (record as FormRecord).plays : 1);
+
+/** A bundle holding the folders given, each with its record, the screens it names (or none), and notes made from its record; its run.json carries a clean account of every play of every folder. */
 function bundle(folders: FolderSpec[], fields: { mode?: "rig" | "live"; repeats?: number; asked?: string[] } = {}): string {
   const made = Bundle.open(out, fields.mode ?? "rig", new Date(Date.UTC(2026, 10, 15, 5, 0, count++)));
   for (const spec of folders) {
     const dir = join(made.dir, spec.folder);
     mkdirSync(join(dir, "internal"), { recursive: true });
-    // A record is this run's unless the test says it is another's.
-    const rec = { run: made.run, ...(spec.record as FormRecord) };
+    // A record is this run's, a verdict in every play, unless the test says it is another's.
+    const standings = Array.from({ length: playsOf(spec.record) }, (_, n) => ({ play: n + 1, is: "verdict" as const, why: [] }));
+    const rec = { run: made.run, nonce: made.nonce, standings, ...(spec.record as FormRecord) };
     writeFileSync(join(dir, "result.json"), JSON.stringify(spec.record !== null && typeof spec.record === "object" ? rec : spec.record));
     const named = rec.parts?.flatMap((p) => p.instances?.flatMap((i) => i.glances?.flatMap((g) => (g.screen ? [g.screen] : [])) ?? []) ?? []) ?? [];
     const screens = spec.screens === undefined || spec.screens === "all" ? named : spec.screens === "none" ? [] : spec.screens;
@@ -83,7 +87,7 @@ function bundle(folders: FolderSpec[], fields: { mode?: "rig" | "live"; repeats?
     if (spec.notes !== "none") writeFileSync(join(dir, "notes.md"), spec.notes === undefined || spec.notes === "made" ? notesOf(rec, made.run) : spec.notes);
   }
   const asked = fields.asked ?? folders.map((f) => f.folder);
-  made.writeRun(runRecord(fakeFacts(), { run: made.run, mode: fields.mode ?? "rig", by: "a test", started: "2026-11-15T05:00:00.000Z", ended: "2026-11-15T05:01:00.000Z", asked, unplayed: [], known: { scenarios: asked.filter((a) => /^\d{2}$/.test(a)), gates: asked.filter((a) => !/^\d{2}$/.test(a)) }, repeats: fields.repeats ?? 10, faults: [] }));
+  made.writeRun(fakeRun({ run: made.run, nonce: made.nonce, mode: fields.mode ?? "rig", by: "a test", started: "2026-11-15T05:00:00.000Z", ended: "2026-11-15T05:01:00.000Z", asked, unplayed: [], known: { scenarios: asked.filter((a) => /^\d{2}$/.test(a)), gates: asked.filter((a) => !/^\d{2}$/.test(a)) }, repeats: fields.repeats ?? 10, faults: [] }, folders.flatMap((f) => fakePlays(f.folder, playsOf(f.record)))));
   return made.dir;
 }
 

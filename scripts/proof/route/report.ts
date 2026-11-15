@@ -12,10 +12,10 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { gateIdFault, scenarioId } from "./form";
+import { gateIdFault, parseStageId, scenarioId } from "./form";
 import { readBundle, titleOf, type ReadBundle, type ReadForm } from "./evidence";
 import { LIST } from "./list";
-import { describeVerdict, headline, verdictOf, type FormRecord, type FormResult } from "./results";
+import { describeVerdict, headline, partTrial, verdictOf, type FormRecord, type FormResult } from "./results";
 
 /** What came of one of the 68, or of a gate, in a run. */
 export interface Counted {
@@ -33,6 +33,8 @@ export interface Summary {
   /** The 68, in order, each with what came of it. */
   scenarios: (Counted & { number: number; wave: number })[];
   gates: Counted[];
+  /** Stages asked of a scenario that has no such stage (or none), which no line of the scenario says were not played. */
+  others: Counted[];
 }
 
 const SCENARIO_ID = /^\d{2}$/;
@@ -51,7 +53,14 @@ export function summarize(read: ReadBundle): Summary {
   // A gate the run knew by its file (one whose id cannot be read) is listed by its file; a folder is a gate's only when its name can be a gate's id.
   const named = [...read.run.known.gates, ...read.run.asked, ...read.forms.map((f) => f.id).filter((id) => gateIdFault(id) === null)];
   const gates = [...new Set(named)].filter((id) => !SCENARIO_ID.test(id) && !STAGE_ASKED.test(id)).sort();
-  return { scenarios, gates: gates.map(counted) };
+  // A stage asked of a scenario that was played, which is not one of its stages (a typo, a stage of a scenario played whole), is on no scenario's line: it is named here with why.
+  const stages = [...new Set([...read.run.asked, ...read.run.unplayed.map((u) => u.id)])].filter((id) => STAGE_ASKED.test(id));
+  const others = stages.filter((id) => {
+    const form = forms.get(id.slice(0, 2));
+    const stage = parseStageId(id);
+    return form !== undefined && !(stage !== null && form.stages?.some((s) => s.name === stage.stage));
+  });
+  return { scenarios, gates: gates.map(counted), others: others.map((id) => ({ id, played: false, result: null, faulty: false, why: unplayedWhy(read, id) })) };
 }
 
 /** Why a form was not played, from the run's record: a scenario played in stages, none of whose stages was played, says so stage by stage. */
@@ -90,26 +99,27 @@ function notPlayed(list: Counted[], name: (c: Counted) => string): string[] {
 }
 
 /** A played form's lines: its result, then each part in the plan's words with what came of it and its screens; a scenario played in stages, stage by stage, each stage not played named with why. */
-function playedLines(form: ReadForm, head: string, trial: boolean): string[] {
-  if (!form.stages) return recordLines(form.record, form.faults, head, "", trial);
+function playedLines(form: ReadForm, head: string): string[] {
+  if (!form.stages) return recordLines(form.record, form.faults, head, "");
   const result = form.faults.length > 0 ? "failed: a fault of its evidence" : form.result === "measured" ? "measured as a rate, stage by stage" : form.result;
   const unplayed = form.stages.filter((stage) => stage.result === null).map((stage) => stage.name);
   const missing = unplayed.length === 0 ? "" : `${result === "not played whole" ? ":" : ";"} ${unplayed.length === 1 ? "stage" : "stages"} ${unplayed.join(", ")} ${unplayed.length === 1 ? "was" : "were"} not played`;
   const lines = [`- ${head}: ${result}${missing}`];
   for (const stage of form.stages) {
     if (stage.result === null) lines.push(`  - Stage ${stage.name}: not played (${stage.why})`);
-    else lines.push(...recordLines(stage.record, stage.faults, `Stage ${stage.name}`, "  ", trial));
+    else lines.push(...recordLines(stage.record, stage.faults, `Stage ${stage.name}`, "  "));
   }
   return lines;
 }
 
-/** One record's lines, at an indent: its result, its stops, and each part with what came of it; in a trial, what rests on guidance as figures only. */
-function recordLines(record: FormRecord | null, faults: string[], head: string, indent: string, trial: boolean): string[] {
+/** One record's lines, at an indent: its result, its stops, the plays that were a trial, and each part with what came of it; in a trial play, what rests on guidance as figures only. */
+function recordLines(record: FormRecord | null, faults: string[], head: string, indent: string): string[] {
   if (!record) return [`${indent}- ${head}: failed: a fault of its evidence; its folder holds no record of what was played`];
-  const lines = [`${indent}- ${head}: ${faults.length > 0 ? "failed: a fault of its evidence" : headline(record, trial)}`];
+  const lines = [`${indent}- ${head}: ${faults.length > 0 ? "failed: a fault of its evidence" : headline(record)}`];
   for (const stop of record.stops) lines.push(`${indent}  - Play ${stop.play} stopped: ${stop.why}`);
+  for (const standing of record.standings ?? []) if (standing.is === "trial") lines.push(`${indent}  - Play ${standing.play} is a trial, and gives no verdict on what rests on guidance: ${standing.why.join("; ")}`);
   for (const part of record.parts) {
-    const [first, ...rest] = describeVerdict(part, record.mode, trial);
+    const [first, ...rest] = describeVerdict(part, record.mode, partTrial(record, part));
     lines.push(`${indent}  - "${part.words}" (${part.mark}): ${first}`);
     for (const line of rest) lines.push(`${indent}    - ${line}`);
   }
@@ -135,8 +145,8 @@ export function reportOf(read: ReadBundle): string {
     `RPE ${run.rpe.commit}${run.rpe.dirty ? " with changes not committed" : ""}. RPH ${run.rph.commit}, ${run.rph.pinned ? "the commit RPE pins" : run.rph.pin ? `not the commit RPE pins (${run.rph.pin})` : "and RPE pins no commit"}. Lumiverse ${run.lumiverse.version}. Browser ${run.browser.name} ${run.browser.version}.`,
     `Agents: ${run.agents.map((a) => `${a.agent} on ${a.connection} (${a.model}, ${a.replyForm}, effort ${a.effort}, ${a.streams ? "streaming" : "not streaming"})`).join("; ")}.`,
     trial
-      ? `This run is a trial, and gives no verdict on what rests on guidance: ${read.standing.why.join("; ")}. A gate's measured parts and every "as shipped" part are printed as trial, with their figures, and counted apart.`
-      : "This run gives a verdict: RPE's tree is its commit, RPH is the commit RPE pins, the shipped tree the server ran is the build's, and no layer of the user's own holds guidance.",
+      ? `This run is a trial, and gives no verdict on what rests on guidance: ${read.standing.why.join("; ")}. A gate's measured parts and every "as shipped" part played live are printed as trial, with their figures, and counted apart; in the rig an "as shipped" part is its code path, judged as code whatever the run's standing.`
+      : "This run gives a verdict: RPE's tree is its commit, RPH is the commit RPE pins, the shipped tree the server ran is the build's, no layer of the user's own holds guidance, no config switches a name, and what each play's own chat stood on was the same before and after.",
     `Asked: ${run.asked.length === 0 ? "nothing" : run.asked.join(", ")}. An "as shipped" part is played ${run.repeats} times live, each on a fresh chat; in the rig it is played once, as its code path only.`,
     "Only what was seen on screen counts as proof (plan §17.0). What code does is passed or failed; what the shipped guidance achieves is a rate, with every miss. A fault of the evidence fails what it concerns.",
     "",
@@ -149,41 +159,45 @@ export function reportOf(read: ReadBundle): string {
     lines.push("", `### Wave ${wave} (${inWave.length})`, "", sentence(counts(inWave)));
     for (const s of inWave) {
       const form = forms.get(s.id);
-      if (form) lines.push(...playedLines(form, `${s.number}. ${titleOf({ kind: "scenario", number: s.number, id: s.id }).replace(/^Scenario \d+: /, "")}`, trial));
+      if (form) lines.push(...playedLines(form, `${s.number}. ${titleOf({ kind: "scenario", number: s.number, id: s.id }).replace(/^Scenario \d+: /, "")}`));
     }
     lines.push(...notPlayed(inWave, (c) => String(Number(c.id))));
   }
-  const rates = read.forms.flatMap((form) => recordsOf(form).flatMap(({ record, faults }) => (record.mode === "live" ? record.parts.filter((p) => p.mark === "as shipped" && ["rate", "trial"].includes(verdictOf(p, "live", trial).kind)).map((part) => ({ form, record, faults, part })) : [])));
-  lines.push("", "## Rates of the shipped guidance", "");
+  const rates = read.forms.flatMap((form) => recordsOf(form).flatMap(({ record, faults }) => (record.mode === "live" ? record.parts.filter((p) => p.mark === "as shipped" && ["rate", "trial"].includes(verdictOf(p, "live", partTrial(record, p)).kind)).map((part) => ({ form, record, faults, part })) : [])));
+  lines.push("", "## Rates and trial figures of the shipped guidance", "");
   if (rates.length === 0) lines.push(run.mode === "rig" ? "None: the rig proves an \"as shipped\" part's code path only, and measures no rate." : "None: no \"as shipped\" part was played.");
   for (const { form, record, faults, part } of rates) {
-    const [first, ...rest] = describeVerdict(part, "live", trial);
+    const [first, ...rest] = describeVerdict(part, "live", partTrial(record, part));
     const title = SCENARIO_ID.test(form.id) ? titleOf(record) : `Gate ${form.id}`;
     lines.push(`- ${title}, "${part.words}": ${first}${faults.length > 0 ? " (its evidence is at fault)" : ""}`, ...rest.map((line) => `  - ${line}`));
   }
   lines.push("", "## Gates", "", summary.gates.length === 0 ? "No gate was known to this run." : sentence(counts(summary.gates)));
   for (const g of summary.gates) {
     const form = forms.get(g.id);
-    if (form) lines.push(...playedLines(form, `Gate ${g.id}`, trial));
+    if (form) lines.push(...playedLines(form, `Gate ${g.id}`));
   }
   lines.push(...notPlayed(summary.gates, (c) => c.id));
+  if (summary.others.length > 0) lines.push("", "## Asked, and no stage of a scenario played", "", ...summary.others.map((c) => `- ${c.id}: ${c.why}`));
   const faults = [...read.faults.map((f) => `- The run: ${f}`), ...read.forms.flatMap((f) => f.faults.map((fault) => `- ${f.id}: ${fault}`))];
   lines.push("", "## Faults of the evidence", "", ...(faults.length === 0 ? ["None."] : faults));
   return `${lines.join("\n")}\n`;
 }
 
 /**
- * A run's exit code, from its bundle alone, so `report` gives the code the run gave:
+ * A run's exit code, from its bundle alone, so `report` gives the code the run gave (the lead's
+ * ruling after the two checks of the runner):
  * - 1: a fault of the evidence; a run that broke off before its end; nothing asked; something asked not
  *   played; or a form failed, not seen, not played whole or not judged;
- * - 3: none of those, and a trial: what rests on guidance gave figures and no verdict (counted apart);
- * - 0: none of those, and every form passed or was measured as a rate. A miss of guidance is a finding,
- *   not a failure of the run (Y23).
+ * - 3: none of those, and the run is a trial, for any reason, whatever its forms hold: what rests on
+ *   guidance gave figures and no verdict, and a run of code only on a tree that is not the build's
+ *   proves nothing of the build (counted apart);
+ * - 0: none of those, and the run gives a verdict, every form passing or measured as a rate. A miss of
+ *   guidance is a finding, not a failure of the run (Y23).
  */
 export function exitCode(read: ReadBundle): number {
   if (read.faults.length > 0 || read.run.ended === null || read.run.asked.length === 0 || read.run.unplayed.length > 0) return 1;
   if (read.forms.some((f) => f.result === "failed" || f.result === "not seen" || f.result === "not played whole" || f.result === "not judged")) return 1;
-  return read.forms.some((f) => f.result === "trial") ? 3 : 0;
+  return read.standing.is === "trial" ? 3 : 0;
 }
 
 /** Reads a bundle, writes its `report.md`, and returns the report. */

@@ -6,7 +6,7 @@
 // "as shipped" part as its code path only, never as a rate.
 
 import { expect, test } from "bun:test";
-import { describeVerdict, formResult, headline, outcomeOf, verdictOf, type FormRecord, type Glance, type Instance, type Outcome, type PartRecord } from "../../../scripts/proof/route/results";
+import { describeVerdict, formResult, headline, outcomeOf, partTrial, verdictOf, type FormRecord, type Glance, type Instance, type Outcome, type PartRecord } from "../../../scripts/proof/route/results";
 
 const play = (n: number) => `play-${String(n).padStart(2, "0")}`;
 
@@ -60,6 +60,7 @@ test("one code part failing and an as-shipped part missed 3 times of 10 report e
     "Missed in play 2: not on the Turn page: the list names nobody. Screens: play-02/turn-1440-written.png, play-02/turn-390-written.png",
     "Missed in play 5: not on the Turn page: the list names nobody. Screens: play-05/turn-1440-written.png, play-05/turn-390-written.png",
     "Missed in play 9: not on the Turn page: the list names nobody. Screens: play-09/turn-1440-written.png, play-09/turn-390-written.png",
+    "Seen on the Turn page: the list names Mirela (in plays 1, 3, 4, 6, 7, 8, 10)",
   ]);
 });
 
@@ -119,4 +120,27 @@ test("the rig reports an as-shipped part as its code path only, never as a rate"
   expect(formResult(record("rig", [shipped]))).toBe("failed");
   // Played live, the same part with no code part beside it is measured as a rate.
   expect(formResult(record("live", [part("written", "as shipped", { 1: "absent" })]))).toBe("measured");
+});
+
+test("the rig judges an as-shipped part as code whatever the run's standing; live, a play that was a trial gives its figures and the word trial", () => {
+  const broken: PartRecord = { ...part("written", "as shipped", {}), instances: [instance(1, "written", "absent")] };
+  const trialPlay = [{ play: 1, is: "trial" as const, why: ["RPE's tree held changes beyond its commit abc"] }];
+  // In the rig a trial leaves the code path as it is: a broken one is a failure (exit 1), not a figure.
+  const rig = { ...record("rig", [broken]), standings: trialPlay };
+  expect(partTrial(rig, broken)).toBe(false);
+  expect(formResult(rig)).toBe("failed");
+  // Live, the same miss in a play that was a trial is a figure, never a miss of the run's verdict.
+  const live = { ...record("live", [{ ...broken, instances: [instance(1, "written", "absent"), instance(2, "written", "shown")] }]), plays: 2, standings: [...trialPlay, { play: 2, is: "verdict" as const, why: [] }] };
+  expect(formResult(live)).toBe("trial");
+  expect(describeVerdict(live.parts[0] as PartRecord, "live", true)[0]).toBe("Trial, no verdict: seen in 1 of 2 (1 miss)");
+  // A record with a standing for no play of the part is no trial.
+  expect(formResult({ ...live, standings: [{ play: 1, is: "verdict", why: [] }, { play: 2, is: "verdict", why: [] }] })).toBe("measured");
+});
+
+test("a part that is met carries its figure into the report, not only the word", () => {
+  const measured: PartRecord = { id: "calls", words: "Model calls on the reply's path: exactly 1", mark: "code", pages: [], measured: "calls begun before the first piece", wants: null, instances: [{ play: 1, at: 1, outcome: "met", why: "pair 1: 1 call", page: null, glances: [] }, { play: 1, at: 2, outcome: "met", why: "pair 2: 1 call", page: null, glances: [] }] };
+  expect(describeVerdict(measured, "live")).toEqual(["Passed", "Met in play 1: pair 1: 1 call", "Met in play 1, look 2: pair 2: 1 call"]);
+  // A seen part passes with the note its check gave, once for the plays it was made in.
+  const seen = part("missing", "code", {});
+  expect(describeVerdict(seen, "live")).toEqual(["Passed", "Seen on the Turn page: the list names Mirela (in plays 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)"]);
 });
