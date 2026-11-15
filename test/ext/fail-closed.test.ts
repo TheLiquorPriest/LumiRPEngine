@@ -7,6 +7,8 @@ import type { WorldInfoCandidate } from "../../src/shared/host";
 import { worldInfoVerdict, type WorldInfoGate } from "../../src/backend/wi-interceptor";
 import { failClosed, KeptOut } from "../../src/ext/fail-closed";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
+import type { Entry } from "../standin/lore";
+import { StandIn } from "../standin/lumiverse";
 
 const candidate = (id: string, content: string, extensions: Record<string, unknown> = {}, disabled = false): WorldInfoCandidate => ({ id, bookId: "book-coast", disabled, extensions: extensions as WorldInfoCandidate["extensions"], comment: id, content });
 
@@ -30,21 +32,48 @@ const unreadable: WorldInfoGate = {
   narrator: async () => Promise.reject(new Error("not reached")),
   log: () => undefined,
 };
+/** What a World Info interceptor is handed of each entry, as the extension reads it into a candidate. */
+type Handed = { id: string; world_book_id: string; disabled: boolean; extensions: Record<string, unknown>; comment: string; content: string };
+const candidatesOf = (ctx: unknown): WorldInfoCandidate[] => (ctx as { entries: Handed[] }).entries.map((e) => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: e.extensions as WorldInfoCandidate["extensions"], comment: e.comment, content: e.content }));
+
+/**
+ * The entries as Lumiverse's World Info chain leaves them, with this as the verdict of the interceptor registered on it: the candidates
+ * are rows of a book the chat reads, the verdict is applied as Lumiverse applies one (`spindle/world-info-interceptor.ts:318-392`), and a dry run
+ * gives back what the chain left for activation to work on.
+ */
+async function leftByChain(verdict: (candidates: WorldInfoCandidate[]) => Promise<{ disabled: string[]; enabled: string[]; mutated: { id: string; content: string }[] }>): Promise<Entry[]> {
+  const lv = new StandIn();
+  lv.connections.set("conn-coast", { id: "conn-coast", base: "http://127.0.0.1:7898/v1", key: "coast-key", model: "model" });
+  lv.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [] });
+  const entries: Entry[] = ENTRIES.map((e) => ({ id: e.id, book: "book-coast", comment: e.comment, content: e.content, disabled: e.disabled, extensions: e.extensions as Record<string, unknown> }));
+  lv.library.addBook({ id: "book-coast", name: "The coast", user: "user-coast", entries });
+  lv.addChat({ id: "chat-coast", user: "user-coast", character: { id: "char-coast", name: "Coast", extensions: { world_book_ids: ["book-coast"] } }, messages: [{ id: "m0", role: "assistant", content: "GREET The coast is quiet." }] });
+  lv.install(["generation"]).registerWorldInfoInterceptor(async (ctx) => await verdict(candidatesOf(ctx)), 10);
+  const out = await lv.generate({ chat: "chat-coast", connection: "conn-coast", preset: "preset-coast", dryRun: true });
+  expect(out.error).toBeNull();
+  return out.worldInfo.entries;
+}
 
 describe("the fail-closed answer", () => {
-  test("is today's: the same verdict today's World Info interceptor gives when the chat's state can't be read", async () => {
-    const today = await worldInfoVerdict(unreadable, { chatId: "chat-coast", userId: "user-coast", chatMetadata: {}, entries: ENTRIES });
-    expect(failClosed(ENTRIES, new Set())).toEqual({ disabled: today.disabled, enabled: today.enabled, mutated: today.mutated ?? [] });
+  test("is today's: the same verdict today's World Info interceptor gives when the chat's state can't be read, entry for entry as Lumiverse's chain leaves them", async () => {
+    const today = await leftByChain(async (entries) => {
+      const verdict = await worldInfoVerdict(unreadable, { chatId: "chat-coast", userId: "user-coast", chatMetadata: {}, entries });
+      return { disabled: verdict.disabled, enabled: verdict.enabled, mutated: verdict.mutated ?? [] };
+    });
+    const extension = await leftByChain(async (entries) => failClosed(entries, new Set()));
+    expect(extension.map((e) => [e.id, e.disabled === true, e.content])).toEqual(today.map((e) => [e.id, e.disabled === true, e.content]));
+    // The verdict did something: a whole-entry secret is off, a marked passage is cut.
+    expect(extension.find((e) => e.id === "tunnel")!.disabled).toBe(true);
+    expect(extension.find((e) => e.id === "lighthouse")!.content).not.toContain("KEEPER-SECRET");
   });
 
-  test("keeps every marked passage and every copy of a whole-entry secret out, and leaves the rest of each entry in", () => {
-    const verdict = failClosed(ENTRIES, new Set());
-    const shown = ENTRIES.filter((e) => !verdict.disabled.includes(e.id)).map((e) => verdict.mutated.find((m) => m.id === e.id)?.content ?? e.content);
-    const text = shown.join("\n");
+  test("keeps every marked passage and every copy of a whole-entry secret out, and leaves the rest of each entry in", async () => {
+    const left = await leftByChain(async (entries) => failClosed(entries, new Set()));
+    const text = left.filter((e) => e.disabled !== true).map((e) => e.content).join("\n");
     for (const kept of ["KEEPER-SECRET", "TUNNEL-SECRET", "ICE-SECRET", "COPY-SECRET", "BROKEN-A", "BROKEN-B"]) expect(text).not.toContain(kept);
-    for (const left of ["The lighthouse is white.", "The harbor freezes in winter.", "The pier is old.", "The gulls are loud."]) expect(text).toContain(left);
+    for (const stays of ["The lighthouse is white.", "The harbor freezes in winter.", "The pier is old.", "The gulls are loud."]) expect(text).toContain(stays);
     // The engine's own sections are no secret's, as today.
-    expect(verdict.disabled).not.toContain("engine");
+    expect(left.find((e) => e.id === "engine")!.disabled).not.toBe(true);
   });
 
   test("adds what RPE last kept out of the chat, and only for this chat", () => {

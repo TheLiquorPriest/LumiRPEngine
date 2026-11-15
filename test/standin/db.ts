@@ -6,6 +6,8 @@
 
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
+import type { Entry } from "./lore";
+import type { Role } from "./steps";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -159,6 +161,116 @@ export interface Rows {
   message_breakdowns: Row[];
 }
 
+/** The managed keys Lumiverse keeps inside an entry's `extensions` (`services/world-books.service.ts:170-172`, `:174-194`). */
+export const WI_MARKERS = ["chat_history", "world_info_before", "world_info_after", "char_description", "char_personality", "persona_description", "scenario", "dialogue_examples", "main_prompt", "enhance_definitions", "jailbreak", "nsfw_prompt"] as const;
+
+/**
+ * An entry as `createEntry` writes its row (`services/world-books.service.ts:827-880`, `:1757-1790`): each column as the table has it, its `uid` its
+ * own and never its id, its outlet name, its marker and the marker's side folded into `extensions` (`buildStoredEntryExtensions`, `:216-243`),
+ * the revision 1. What the entry does not give is the column's default.
+ */
+export function entryRow(e: Entry, uid: string, now: number): Row {
+  const outlet = typeof e.outlet_name === "string" && e.outlet_name.trim() !== "" ? e.outlet_name.trim() : null;
+  const marker = typeof e.wi_marker === "string" && (WI_MARKERS as readonly string[]).includes(e.wi_marker.trim().toLowerCase()) ? e.wi_marker.trim().toLowerCase() : null;
+  const side = typeof e.wi_marker_side === "string" && ["before", "after"].includes(e.wi_marker_side.trim().toLowerCase()) ? e.wi_marker_side.trim().toLowerCase() : null;
+  const extensions = { ...(e.extensions ?? {}), ...(outlet !== null ? { outlet_name: outlet } : {}), ...(marker !== null ? { wi_marker: marker } : {}), ...(side !== null ? { wi_marker_side: side } : {}) };
+  const flag = (value: boolean | undefined, otherwise = false): number => ((value ?? otherwise) ? 1 : 0);
+  return {
+    id: e.id,
+    world_book_id: e.book,
+    uid,
+    key: JSON.stringify(e.keys ?? []),
+    keysecondary: JSON.stringify(e.keysecondary ?? []),
+    content: e.content,
+    comment: e.comment ?? "",
+    position: e.position ?? 0,
+    depth: e.depth ?? 4,
+    role: e.role ?? null,
+    order_value: e.order_value ?? 100,
+    selective: flag(e.selective),
+    constant: flag(e.constant),
+    disabled: flag(e.disabled),
+    group_name: e.group_name ?? "",
+    group_override: flag(e.group_override),
+    group_weight: e.group_weight ?? 100,
+    probability: e.probability ?? 100,
+    scan_depth: e.scan_depth ?? null,
+    case_sensitive: flag(e.case_sensitive),
+    match_whole_words: flag(e.match_whole_words),
+    automation_id: e.automation_id ?? null,
+    extensions: JSON.stringify(extensions),
+    created_at: now,
+    updated_at: now,
+    use_regex: flag(e.use_regex),
+    prevent_recursion: flag(e.prevent_recursion),
+    exclude_recursion: flag(e.exclude_recursion),
+    delay_until_recursion: flag(e.delay_until_recursion),
+    priority: e.priority ?? 10,
+    sticky: e.sticky ?? 0,
+    cooldown: e.cooldown ?? 0,
+    delay: e.delay ?? 0,
+    selective_logic: e.selective_logic ?? 0,
+    use_probability: flag(e.use_probability, true),
+    vectorized: flag(e.vectorized),
+    vector_index_status: e.vector_index_status ?? "not_enabled",
+    exclude_greeting: flag(e.exclude_greeting),
+    revision: 1,
+    folder: "",
+    tags: "[]",
+  };
+}
+
+/** An entry as `rowToEntry` reads its row (`services/world-books.service.ts:343-382`): the managed keys out of `extensions`, `role` null when empty. */
+export function entryOfRow(row: Record<string, unknown>): Entry {
+  const raw = JSON.parse(String(row.extensions)) as Record<string, unknown>;
+  const { outlet_name, outletName, wi_marker, wiMarker, wi_marker_side, wiMarkerSide, ...rest } = raw;
+  const trimmed = (value: unknown): string | null => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
+  const marker = trimmed(wi_marker ?? wiMarker)?.toLowerCase() ?? null;
+  const sideRaw = trimmed(wi_marker_side ?? wiMarkerSide)?.toLowerCase() ?? null;
+  const flag = (value: unknown): boolean => value === 1 || value === true;
+  return {
+    id: String(row.id),
+    book: String(row.world_book_id),
+    uid: String(row.uid),
+    content: String(row.content),
+    comment: String(row.comment),
+    keys: JSON.parse(String(row.key)) as string[],
+    keysecondary: JSON.parse(String(row.keysecondary)) as string[],
+    position: Number(row.position) as Entry["position"],
+    depth: Number(row.depth),
+    ...(typeof row.role === "string" && row.role !== "" ? { role: row.role as Role } : {}),
+    order_value: Number(row.order_value),
+    selective: flag(row.selective),
+    constant: flag(row.constant),
+    disabled: flag(row.disabled),
+    group_name: String(row.group_name),
+    group_override: flag(row.group_override),
+    group_weight: Number(row.group_weight),
+    probability: Number(row.probability),
+    scan_depth: row.scan_depth === null || row.scan_depth === undefined ? null : Number(row.scan_depth),
+    case_sensitive: flag(row.case_sensitive),
+    match_whole_words: flag(row.match_whole_words),
+    automation_id: typeof row.automation_id === "string" && row.automation_id !== "" ? row.automation_id : null,
+    extensions: rest,
+    outlet_name: trimmed(outlet_name ?? outletName),
+    wi_marker: marker !== null && (WI_MARKERS as readonly string[]).includes(marker) ? marker : null,
+    wi_marker_side: sideRaw === "before" || sideRaw === "after" ? sideRaw : null,
+    use_regex: flag(row.use_regex),
+    prevent_recursion: flag(row.prevent_recursion),
+    exclude_recursion: flag(row.exclude_recursion),
+    delay_until_recursion: flag(row.delay_until_recursion),
+    priority: Number(row.priority),
+    sticky: Number(row.sticky),
+    cooldown: Number(row.cooldown),
+    delay: Number(row.delay),
+    selective_logic: Number(row.selective_logic) as 0 | 1 | 2 | 3,
+    use_probability: flag(row.use_probability),
+    vectorized: flag(row.vectorized),
+    vector_index_status: String(row.vector_index_status),
+    exclude_greeting: flag(row.exclude_greeting),
+  };
+}
+
 export class StandInDb {
   readonly dir: string;
   readonly path: string;
@@ -186,6 +298,12 @@ export class StandInDb {
         }
       }
     })();
+  }
+
+  /** One row written as given: the columns it names, the rest the table's own. */
+  insert(table: keyof Rows, row: Row): void {
+    const columns = Object.keys(row);
+    this.db.query(`INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...columns.map((c) => row[c] ?? null));
   }
 
   /** One statement of the stand-in's own, for a test that changes the file under the reader. */

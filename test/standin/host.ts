@@ -6,7 +6,8 @@
 // an address with none answers as a stopped server does. What it copies from Lumiverse's source (staging at
 // a70f4ed2) says the file and lines; paths are Lumiverse's `src/`.
 
-import type { ExtSpindle, InterceptorReturn, PermissionChange, PromptMessageDTO, ProxyAnswer, WorldInfoReturn } from "../../src/ext/spindle";
+import type { ExtSpindle, InterceptorReturn, PermissionChange, PromptMessageDTO, ProxyAnswer } from "../../src/ext/spindle";
+import type { WorldInfoResult } from "./lore";
 import type { LlmMessage } from "./steps";
 
 export type Server = (request: Request) => Promise<Response>;
@@ -20,6 +21,13 @@ export interface Installed extends ExtSpindle {
   readonly logs: string[];
   /** Lumiverse's id for it. */
   readonly id: string;
+  /** Its manifest's identifier, which names its own namespace of a preset's metadata (`spindle/worker-host.ts:3173`); by default its id. */
+  readonly identifier: string;
+  /**
+   * One per extension; a second replaces the first (`spindle/worker-host.ts:4922`). Needs `generation` (`:4910-4919`). What it gives back is
+   * Lumiverse's whole result (`WorldInfoInterceptorResultDTO`), of which RPE's own extension gives `disabled`, `enabled` and `mutated`.
+   */
+  registerWorldInfoInterceptor(handler: (ctx: unknown) => Promise<WorldInfoResult | void>, priority?: number): void;
   /** A `SPINDLE_BACKEND_MSG` from one of a user's sockets (`ws/handler.ts:440-467`). */
   fromFrontend(payload: unknown, user: string, session?: string): void;
   /** The modals it opened and has not closed, by user. */
@@ -33,6 +41,7 @@ export interface Installed extends ExtSpindle {
 
 export interface Ext {
   id: string;
+  identifier: string;
   granted: Set<string>;
   changed: Set<(change: PermissionChange) => void>;
   /** The worker's handlers by event (`spindle/worker-runtime.ts:1747-1765`). */
@@ -50,7 +59,7 @@ export interface Registration<H> {
   required: boolean;
 }
 
-export type WorldInfoHandler = (ctx: unknown) => Promise<WorldInfoReturn>;
+export type WorldInfoHandler = (ctx: unknown) => Promise<WorldInfoResult | void>;
 type PromptHandler = (messages: PromptMessageDTO[], context: unknown) => Promise<InterceptorReturn>;
 export type ContextHandler = (context: unknown, signal?: AbortSignal) => Promise<unknown>;
 
@@ -94,9 +103,10 @@ export class ExtensionHost {
     return () => clearTimeout(timer);
   };
 
-  /** Installs an extension with these permissions granted, and gives its worker's view of Spindle. */
-  install(granted: readonly string[]): Installed {
-    const ext: Ext = { id: `ext-${this.installed.length + 1}`, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [] };
+  /** Installs an extension with these permissions granted, and gives its worker's view of Spindle; its manifest `identifier` is its id unless one is given. */
+  install(granted: readonly string[], identifier?: string): Installed {
+    const id = `ext-${this.installed.length + 1}`;
+    const ext: Ext = { id, identifier: identifier ?? id, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [] };
     const modals = new Map<string, { title: string; items: unknown[] }>();
     const host = this;
     const change = (permission: string, granted: boolean): void => {
@@ -112,6 +122,7 @@ export class ExtensionHost {
     const api: Installed = {
       logs: ext.logs,
       id: ext.id,
+      identifier: ext.identifier,
       modals,
       fromFrontend(payload, user, session) {
         // The host posts it to the worker, which runs its handlers on a later task (`spindle/worker-host.ts:1611-1613`).
@@ -356,7 +367,7 @@ export class ExtensionHost {
         const call = (async () => {
           let returned: InterceptorReturn;
           try {
-            returned = await registration.handler(structuredClone(dto) as PromptMessageDTO[], { ...projectedContext(context, registration.ext.id), signal: controller.signal });
+            returned = await registration.handler(structuredClone(dto) as PromptMessageDTO[], { ...projectedContext(context, registration.ext), signal: controller.signal });
           } catch (error) {
             throw new Error(error instanceof Error ? error.message : String(error));
           }
@@ -393,20 +404,30 @@ function toldEntry(entry: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * `projectWorldInfoCaptureContext` (`spindle/world-info-capture.ts:31-73`), as the worker host hands an interceptor its context
- * (`spindle/worker-host.ts:3200-3204`): a copy, each activated entry cut to what an extension is told, and `capturedWorldInfo` only
+ * `projectWorldInfoCaptureContext` (`spindle/world-info-capture.ts:31-73`) over `projectPresetMetadataContext` (`spindle/preset-metadata-context.ts:48-76`),
+ * as the worker host hands an interceptor its context (`spindle/worker-host.ts:3200-3204`): a copy, the full preset metadata gone and only the
+ * extension's own namespace of it left as `presetMetadata`, each activated entry cut to what an extension is told, and `capturedWorldInfo` only
  * for the extension that asked to capture, never one the context already held.
  */
-function projectedContext(context: Record<string, unknown>, extensionId: string): Record<string, unknown> {
+function projectedContext(context: Record<string, unknown>, ext: Ext): Record<string, unknown> {
   const projected = structuredClone(context);
+  const metadata = projected.__spindlePresetMetadata;
+  delete projected.__spindlePresetMetadata;
+  // An identifier Lumiverse's preset editor owns names no namespace of an extension's (`:14-27`).
+  const owned = LOOM_OWNED_PRESET_METADATA_KEYS.has(ext.identifier) || ext.identifier.startsWith("_lumiverse_");
+  const own = !owned && typeof metadata === "object" && metadata !== null && !Array.isArray(metadata) && Object.hasOwn(metadata, ext.identifier) ? (metadata as Record<string, unknown>)[ext.identifier] : undefined;
+  projected.presetMetadata = own === undefined ? undefined : structuredClone(own);
   const captures = projected.__spindleWorldInfoCaptures;
   delete projected.__spindleWorldInfoCaptures;
   delete projected.capturedWorldInfo;
   const told = (entries: unknown[]): Record<string, unknown>[] => entries.filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null && typeof (e as { id?: unknown }).id === "string").map(toldEntry);
   if (Array.isArray(projected.activatedWorldInfo)) projected.activatedWorldInfo = told(projected.activatedWorldInfo);
-  if (typeof captures === "object" && captures !== null && Object.hasOwn(captures, extensionId)) {
-    const entries: unknown = (captures as Record<string, unknown>)[extensionId];
+  if (typeof captures === "object" && captures !== null && Object.hasOwn(captures, ext.id)) {
+    const entries: unknown = (captures as Record<string, unknown>)[ext.id];
     projected.capturedWorldInfo = Array.isArray(entries) ? told(entries) : [];
   }
   return projected;
 }
+
+/** The preset metadata keys Lumiverse's own editor owns (`spindle/preset-metadata-context.ts:14-24`). */
+const LOOM_OWNED_PRESET_METADATA_KEYS = new Set(["source", "modelProfiles", "schemaVersion", "description", "coverUrl", "cover_url", "isDefault", "lastProfileKey", "promptVariables"]);

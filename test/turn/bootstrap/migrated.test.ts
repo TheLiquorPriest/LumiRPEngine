@@ -27,7 +27,7 @@ test("every chat the migration carried is started one after another within the j
   });
   beds.push(boot);
   const { b, call } = boot;
-  b.host.addChat({ id: HERON, user: USER, name: "The heron", character: CHARACTER, messages: [{ id: "m-heron", role: "assistant", content: "A heron stands in the shallows." }], books: [] });
+  b.host.addChat({ id: HERON, user: USER, name: "The heron", character: CHARACTER, messages: [{ id: "m-heron", role: "assistant", content: "A heron stands in the shallows." }] });
 
   const all = await call<BootstrapBatch>("POST", BOOTSTRAP_PATH, {}, { chats: "migrated", relive: "outline" });
   expect(all.status).toBe(200);

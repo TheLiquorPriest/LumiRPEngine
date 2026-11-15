@@ -10,7 +10,7 @@ import { Generations } from "../../src/ext/generations";
 import { promptInterceptor } from "../../src/ext/prompt";
 import { worldInfoInterceptor } from "../../src/ext/question";
 import { PRIORITY } from "../../src/ext/start";
-import { ALL, FERRY_SECRET, FERRY_SHOWN, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
+import { ALL, FERRY_SECRET, FERRY_SHOWN, harborBooks, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
 import { settle } from "../standin/clock";
 
 const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
@@ -117,7 +117,9 @@ describe("the question before lore activates", () => {
 
   test("for a user with no registration (RPE has not registered yet, or is not theirs), RPE is not asked, and every marked passage and every copy of one still stays out of the prompt", async () => {
     const rig = await new Rig().start();
-    rig.lv.chats.set("chat-wren", { ...rig.chat, id: "chat-wren", user: "user-wren" });
+    // Another user of the same Lumiverse, with the harbor's books of their own and a character of their own: Lumiverse reads a user's own books alone.
+    for (const book of harborBooks("user-wren", "-wren")) rig.lv.library.addBook(book);
+    rig.lv.addChat({ ...rig.chat, id: "chat-wren", user: "user-wren", character: { id: "char-ilsa-wren", name: "Ilsa", extensions: { world_book_ids: ["book-card-wren"] } }, metadata: { chat_world_book_ids: ["book-harbor-wren"] } });
     const out = await rig.lv.generate({ chat: "chat-wren", connection: "conn-other", preset: PRESET.id });
     expect(out.error).toBeNull();
     expect(rig.questions).toEqual([]);

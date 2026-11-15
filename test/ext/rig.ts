@@ -14,6 +14,7 @@ import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/
 import { textOf as textKey } from "../../src/backend/lore-secrets";
 import type { JsonObject } from "../../src/shared/json";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
+import type { Book } from "../standin/books";
 
 export const USER = "user-harbor";
 export const RPE = "http://127.0.0.1:7860";
@@ -46,6 +47,29 @@ export function harborMessages(): ChatMessage[] {
     ["user", "HIST-11 And I wait."],
   ];
   return lines.map(([role, content, hidden], i) => ({ id: `m${i}`, role, content, ...(hidden ? { hidden } : {}) }));
+}
+
+/**
+ * The harbor's two books, of one user (a book is one user's): the card's own, and the world's the chat attaches. A `suffix` gives them, and
+ * their entries, ids of their own, for a second user of the same Lumiverse.
+ */
+export function harborBooks(user: string, suffix = ""): Book[] {
+  const card = `book-card${suffix}`;
+  const harbor = `book-harbor${suffix}`;
+  return [
+    { id: card, name: "Ilsa's card", user, entries: [{ id: `e-twin${suffix}`, book: card, comment: "Gossip", constant: true, content: `  ${VAULT_SECRET}\n` }] },
+    {
+      id: harbor,
+      name: "The harbor",
+      user,
+      entries: [
+        { id: `e-ferry${suffix}`, book: harbor, comment: "The ferry", keys: ["ferry"], content: `The ferry crosses the bay at dawn.\n{{// Secret (known to Ilsa): ${FERRY_SECRET}}}` },
+        { id: `e-vault${suffix}`, book: harbor, comment: "The vault", constant: true, content: `{{// Secret: ${VAULT_SECRET}}}` },
+        { id: `e-indexed${suffix}`, book: harbor, comment: "The mayor", constant: true, content: INDEXED_SECRET },
+        { id: `e-public${suffix}`, book: harbor, comment: "The bay", constant: true, content: PUBLIC_LORE },
+      ],
+    },
+  ];
 }
 
 export const PRESET: Preset = {
@@ -199,20 +223,10 @@ export class Rig {
     this.lv.presets.set(PRESET.id, { ...PRESET, ...options.completion, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { assistantPrefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });
     const messages = harborMessages();
     if (options.picture) messages[10] = { ...messages[10]!, images: [{ data: "aGFyYm9y", mime_type: "image/png" }] };
-    this.chat = {
-      id: "chat-harbor",
-      user: USER,
-      character: { id: "char-ilsa", name: "Ilsa" },
-      messages,
-      books: [
-        { id: "e-ferry", book: "book-harbor", comment: "The ferry", keys: ["ferry"], content: `The ferry crosses the bay at dawn.\n{{// Secret (known to Ilsa): ${FERRY_SECRET}}}` },
-        { id: "e-vault", book: "book-harbor", comment: "The vault", constant: true, content: `{{// Secret: ${VAULT_SECRET}}}` },
-        { id: "e-twin", book: "book-card", comment: "Gossip", constant: true, content: `  ${VAULT_SECRET}\n` },
-        { id: "e-indexed", book: "book-harbor", comment: "The mayor", constant: true, content: INDEXED_SECRET },
-        { id: "e-public", book: "book-harbor", comment: "The bay", constant: true, content: PUBLIC_LORE },
-      ],
-    };
-    this.lv.chats.set(this.chat.id, this.chat);
+    // The books as Lumiverse reads them: the card's own through its character, the world book the chat attaches through its metadata.
+    for (const book of harborBooks(USER)) this.lv.library.addBook(book);
+    this.chat = { id: "chat-harbor", user: USER, character: { id: "char-ilsa", name: "Ilsa", extensions: { world_book_ids: ["book-card"] } }, messages, metadata: { chat_world_book_ids: ["book-harbor"] } };
+    this.lv.addChat(this.chat);
   }
 
   /** Installs and starts the extension (again: a restarted worker remembers only its storage), and RPE registers with it as its relay socket would. */

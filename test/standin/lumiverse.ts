@@ -8,7 +8,8 @@
 // the generation that runs through them all, and the chat connections and presets it reads.
 
 import { assemble, type BreakdownEntry, type GenerationType, type Preset } from "./assembly";
-import { activateLore, DEFAULT_EMBEDDING_SETTINGS, worldInfoChain, worldInfoContext, type Activation, type BookSource, type EmbeddingSettings, type Entry, type VectorSearch, type WiState, type WorldInfoSettings } from "./lore";
+import { collectWorldInfoSources } from "./books";
+import { activateLore, DEFAULT_EMBEDDING_SETTINGS, normalizeWorldInfoSettings, worldInfoChain, worldInfoContext, type ActivatedWorldInfoEntry, type Activation, type EmbeddingSettings, type Entry, type VectorSearch, type WiState, type WorldInfoSettings } from "./lore";
 import { ChatRows, type Chat, type ChatMessage, type Stored } from "./rows";
 import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, textOf, type LlmMessage, type StreamSeen, type StreamedReply } from "./steps";
 
@@ -58,8 +59,12 @@ export interface Outcome {
   /** The generation's parameters as Lumiverse merged them, the interceptors' among them; null when it failed before. */
   parameters: Record<string, unknown> | null;
   stored: Stored | null;
-  /** The World Info chain: how long it took, and the entries as it left them; and how each entry that activated did, as Lumiverse works it out and does not tell. */
-  worldInfo: { ms: number; entries: Entry[]; activated: Activation[] };
+  /**
+   * The World Info chain: how long it took, and the entries as it left them; how each entry that activated did, as Lumiverse works it out and
+   * does not tell; and the statistics its assembly makes of the activation (`worldInfoStats`, `services/prompt-assembly.service.ts:2563-2597`),
+   * which a dry run reports and the event of a generation's lore carries.
+   */
+  worldInfo: { ms: number; entries: Entry[]; activated: Activation[]; stats: Record<string, unknown> };
   /**
    * A dry run's: the breakdown its assembly made, the chat history's entry left out (`services/generate.service.ts:3255`); its
    * interceptors add none. Absent for a generation, whose breakdown is the one Lumiverse stores beside the reply (`stored`).
@@ -84,8 +89,12 @@ export class StandIn extends ChatRows {
   councilBlock: string | null = null;
   /** The user's `worldInfoSettings` (`services/prompt-assembly.service.ts:2273-2280`): Lumiverse's defaults where unset. */
   worldInfoSettings: Partial<WorldInfoSettings> = {};
-  /** Each book's name and where it is attached for the chat (`bookNameMap`, `bookSourceMap`, `services/world-info-sources.service.ts`), until the stand-in reads a chat's books from their four places (PlanAdapter-S18). */
-  readonly worldBooks = new Map<string, { name: string; source: BookSource }>();
+  /**
+   * The books of the chat's active multiplayer peers' personas, relayed to this instance (`multiplayerWorldInfoProvider`,
+   * `services/prompt-assembly.service.ts:2262-2271`): after the books the chat reads, their entries of any user's join the chain and activate,
+   * their books attached as "peer" and, as Lumiverse names none of them, with no name.
+   */
+  readonly peerBooks = new Set<string>();
   /** The vector search a test scripts; null, no embeddings connection, as on the test bed, and no entry activates by vector. */
   vectorSearch: VectorSearch | null = null;
   /** The user's embeddings settings the ranking reads. */
@@ -186,11 +195,9 @@ export class StandIn extends ChatRows {
     // The stand-in keeps no personas, so the name for the user's messages is Lumiverse's own when there is none
     // (`services/prompt-assembly.service.ts:7186-7189`), as the stand-in's rows name them.
     const names = { user: "User", character: chat.character.name };
-    // Every entry has a uid of its own from here on, as every entry Lumiverse holds has (`services/world-books.service.ts:842`).
-    for (const e of chat.books) e.uid ??= crypto.randomUUID();
     let sent: LlmMessage[] = [];
     let body: Record<string, unknown> | null = null;
-    let worldInfo: Outcome["worldInfo"] = { ms: 0, entries: [], activated: [] };
+    let worldInfo: Outcome["worldInfo"] = { ms: 0, entries: [], activated: [], stats: {} };
     try {
       // ---- the extensions' context handlers, first in the pipeline (`generate.service.ts:1063-1083`): what they give back is the
       // context, the frontend session put back; one that asks to cancel stops the generation.
@@ -201,18 +208,49 @@ export class StandIn extends ChatRows {
         if (context.cancelGeneration === true) throw new CancelledByExtension();
       }
 
-      // ---- lore (`prompt-assembly.service.ts:2242-2597`): the chain before activation, then activation over the chat's own counts
-      // (`:2272`), which change in place and are saved after the interceptors.
+      // ---- lore (`prompt-assembly.service.ts:2242-2597`): the books the chat reads, from their places and as their rows stand now
+      // (`:2243-2271`); the chain before activation, over entries of every one (`:2282-2326`); then activation over the chat's own counts
+      // (`:2272`), which change in place and are saved after the interceptors, and, for an extension that asked for it, over the
+      // entries as they stood before the chain (`:2327-2561`).
       const wiStarted = performance.now();
-      const entries = this.worldInfo.length === 0 ? [...chat.books] : await worldInfoChain(this.worldInfo, chat.books, worldInfoContext(chat, messages), chat.user, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
+      const metadata = this.metadataOf(chat);
+      const speaker = this.library.charactersByIds(chat.user, [chat.character.id]).get(chat.character.id) ?? chat.character;
+      // A temporary chat has no persona (`:1923-1937`).
+      const persona = metadata.temporary === true ? null : this.library.persona(chat.user, input.persona);
+      const globalBooks = (this.library.setting(chat.user, "globalWorldBooks") as string[] | undefined) ?? [];
+      const chatBooks = (metadata.chat_world_book_ids as string[] | undefined) ?? [];
+      const sources = collectWorldInfoSources(this.library, chat.user, speaker, persona, globalBooks, chatBooks, metadata);
+      let wiEntries = sources.entries;
+      if (this.peerBooks.size > 0) {
+        const peers = this.library.entriesForBooks(null, [...this.peerBooks], new Map());
+        for (const id of this.peerBooks) {
+          wiEntries = wiEntries.concat(peers.get(id) ?? []);
+          sources.bookSourceMap.set(id, "peer");
+        }
+      }
+      const configured = (this.library.setting(chat.user, "worldInfoSettings") as Partial<WorldInfoSettings> | undefined) ?? this.worldInfoSettings;
+      const normalized = normalizeWorldInfoSettings(configured);
+      const chain = await worldInfoChain(this.worldInfo, wiEntries, worldInfoContext(chat, messages, { userId: chat.user, metadata, activationSettings: { globalScanDepth: normalized.globalScanDepth, maxRecursionPasses: normalized.maxRecursionPasses } }), chat.user, sources.bookSourceMap, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
+      for (const [book, source] of chain.additionalBookSources) sources.bookSourceMap.set(book, source);
       const wiMs = performance.now() - wiStarted;
-      const wiState = structuredClone((this.metadataOf(chat).wi_state ?? {}) as WiState);
-      const lore = activateLore({ entries, messages, wiState, settings: this.worldInfoSettings, random: this.random, vector: this.vectorSearch, embedding: this.embeddingSettings, books: this.worldBooks, names });
-      worldInfo = { ms: wiMs, entries, activated: lore.activated };
+      const activation = { ...normalized, maxRecursionPasses: chain.activationOverrides.disableRecursion === true ? 0 : normalized.maxRecursionPasses };
+      const wiState = structuredClone((metadata.wi_state ?? {}) as WiState);
+      // The raw view is activated over a copy of the counts as they were before the real one changes them (`:2331-2332`).
+      const hasCaptureRequests = chain.captureRequests.size > 0;
+      const captureWiState = [...chain.captureRequests.values()].some((ids) => ids.size > 0) ? structuredClone(wiState) : null;
+      const lore = activateLore({ entries: chain.entries, messages, wiState, settings: activation, random: this.random, vector: this.vectorSearch, embedding: this.embeddingSettings, bookSources: sources.bookSourceMap, bookNames: sources.bookNameMap, selection: chain.selectionContentByEntryId, names });
+      let captures: Record<string, ActivatedWorldInfoEntry[]> | undefined;
+      if (hasCaptureRequests && captureWiState === null) captures = Object.fromEntries([...chain.captureRequests.keys()].map((extension) => [extension, []]));
+      else if (captureWiState !== null) {
+        // What activation would have made of the entries before the chain touched them: its own draws (`createWorldInfoCaptureRandom`, `:5421-5430`), no selection text.
+        const raw = activateLore({ entries: [...wiEntries, ...chain.additionalEntries], messages, wiState: captureWiState, settings: activation, random: captureRandom(), vector: this.vectorSearch, embedding: this.embeddingSettings, bookSources: sources.bookSourceMap, bookNames: sources.bookNameMap, names });
+        captures = Object.fromEntries([...chain.captureRequests].map(([extension, ids]) => [extension, raw.told.filter((entry) => ids.has(entry.id))]));
+      }
+      worldInfo = { ms: wiMs, entries: chain.entries, activated: lore.activated, stats: lore.stats };
 
       // ---- the prompt (`assembly.ts`)
       const bound = connection.metadata?.reasoningBindings?.promptBias;
-      const { prompt, breakdown } = assemble(preset, lore.entries, messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
+      const { prompt, breakdown } = assemble(preset, lore.entries, messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, world: { placements: chain.placementByEntryId, insertionOrder: chain.insertionOrderByEntryId }, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
       sent = prompt;
       // The chat history as Lumiverse counts it beside the reply: the prompt's history messages before the interceptors, blank ones left out
       // (`services/generate.service.ts:1211-1215`, `:1424-1426`).
@@ -222,8 +260,11 @@ export class StandIn extends ChatRows {
       // only when some activated (`services/prompt-assembly.service.ts:4455-4456`): with none, the context keeps what a context handler left.
       if (lore.told.length > 0) context.activatedWorldInfo = lore.told;
       delete context.__spindleWorldInfoCaptures;
+      if (captures !== undefined) context.__spindleWorldInfoCaptures = captures;
+      // The resolved preset's own metadata is pinned on the context, which each worker is handed only its own namespace of (`generate.service.ts:1226-1231`).
       context.presetId = preset.id;
-      context.presetMetadata = undefined;
+      delete context.__spindlePresetMetadata;
+      if (preset.metadata) context.__spindlePresetMetadata = preset.metadata;
       const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context) : { messages: prompt, parameters: undefined };
       // After the interceptors: post-processing, the blank filter, collapse, then the parameters (`:1249-1256`, `:1414-1441`).
       sent = intercepted.messages;
@@ -294,7 +335,7 @@ export class StandIn extends ChatRows {
       // Stored after the generation ends, beside the reply (`:4432-4476`; `services/breakdown.service.ts:3-12`); token counts are the stand-in's own.
       const tokens = (text: string): number => Math.ceil(text.length / 4);
       const historyTokens = history.reduce((n, m) => n + tokens(textOf(m)), 0);
-      const entriesStored = breakdown.map((e) => ({ name: e.name, type: e.type, tokens: e.type === "chat_history" ? historyTokens : tokens(e.content ?? ""), ...(e.role ? { role: e.role } : {}), ...(e.blockId ? { blockId: e.blockId } : {}), content: e.content }));
+      const entriesStored = breakdown.map((e) => ({ name: e.name, type: e.type, tokens: e.type === "chat_history" ? historyTokens : tokens(e.tokenCountContent ?? e.content ?? ""), ...(e.role ? { role: e.role } : {}), ...(e.blockId ? { blockId: e.blockId } : {}), content: e.content }));
       const stored: Stored = {
         entries: entriesStored.filter((e) => e.type !== "chat_history"),
         chatHistoryTokens: historyTokens,
@@ -383,4 +424,17 @@ class CancelledByExtension extends Error {
     super("Generation cancelled by extension context handler");
     this.name = "GenerationCancelledByExtension";
   }
+}
+
+/** `createWorldInfoCaptureRandom` (`services/prompt-assembly.service.ts:5421-5430`): a draw of its own, seeded from the system, so a capture never takes a draw the generation's own would have had. */
+function captureRandom(): () => number {
+  const seed = new Uint32Array(1);
+  crypto.getRandomValues(seed);
+  let state = seed[0] || 0x9e3779b9;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
 }

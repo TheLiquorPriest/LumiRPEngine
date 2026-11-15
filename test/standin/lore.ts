@@ -23,13 +23,25 @@ export interface Entry {
   disabled?: boolean;
   extensions?: Record<string, unknown>;
   /**
-   * Where Lumiverse puts it (`world_book_entries.position`, `services/world-info-activation.service.ts:971-1021`): 0 at the
-   * preset's "World Info Before" marker, else just before the history; 1 at "World Info After", else just after it; 7 in the pool a
-   * block's `{{wi_marker}}` takes. Absent, 0. The stand-in places no other position.
+   * Where Lumiverse puts it (`world_book_entries.position`, `services/world-info-activation.service.ts:952-1022`): 0 before and 1 after the
+   * history (at the preset's "World Info Before"/"After" marker where it has one), 2 and 3 around the first history message
+   * ("AN"), 4 `depth` messages from the end of the prompt, 5 and 6 around it as 2 and 3 are ("EM"), 7 in the pool a block's
+   * `{{wi_marker}}` takes (or, with `wi_marker`, beside the block it names), 8 reached only through `{{outlet::name}}`. Absent, 0.
    */
-  position?: 0 | 1 | 7;
+  position?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  /** How many messages from the end a position 4 entry goes (`world_book_entries.depth`); absent, 4. */
+  depth?: number;
   /** The role it is sent with where no marker block gives one (`normalizeRole`, `:1049-1052`): absent, system. */
   role?: Role;
+  /**
+   * Stored inside `extensions` and read out of them (`splitManagedEntryExtensions`, `services/world-books.service.ts:197-214`): the name
+   * of the outlet its text is also given to, the marker a position 7 entry is pinned beside, and the side of it.
+   */
+  outlet_name?: string | null;
+  wi_marker?: string | null;
+  wi_marker_side?: "before" | "after" | null;
+  exclude_greeting?: boolean;
+  automation_id?: string | null;
   // The columns activation reads, named as Lumiverse stores them, each absent as its table's default (`db/baseline.sql:1070-1096`).
   /**
    * Its stable id, which its counts in `chat.metadata.wi_state` are keyed by. Lumiverse gives every entry a random one of its own,
@@ -74,57 +86,273 @@ export type BookSource = "character" | "persona" | "chat" | "global" | "peer";
  * What a World Info interceptor is told of the generation (`services/prompt-assembly.service.ts:2282-2313`):
  * the chat's messages the prompt is built from, hidden ones included with no mark of it, each with its text,
  * the number Lumiverse stored for it (`index_in_chat`, `:2304`: a delete leaves a gap) and the swipe it shows,
- * a greeting marked as one (`:2289-2305`).
+ * a greeting marked as one (`:2289-2305`), the chat's metadata as its row holds it, and the user's own
+ * `activationSettings`, normalized (`:2279-2312`). The entries are added by the chain, one handler at a time.
  */
-export function worldInfoContext(chat: Chat, messages: readonly ChatMessage[]): Record<string, unknown> {
+export function worldInfoContext(chat: Chat, messages: readonly ChatMessage[], now: { userId: string; metadata: Record<string, unknown>; activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } }): Record<string, unknown> & { activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } } {
   return {
     purpose: "prompt",
     chatId: chat.id,
     characterId: chat.character.id,
+    userId: now.userId,
     messages: messages.map((m) => ({ id: m.id, role: m.role, content: m.content, is_user: m.role === "user", is_greeting: m.greeting !== undefined, ...(m.greeting !== undefined ? { greeting_index: m.greeting } : {}), swipe_id: m.swipeId ?? 0, index_in_chat: indexInChat(m) })),
     chatTurn: messages.length,
-    chatMetadata: chat.metadata ?? {},
-    activationSettings: { globalScanDepth: null, maxRecursionPasses: 0 },
+    chatMetadata: now.metadata,
+    activationSettings: { globalScanDepth: now.activationSettings.globalScanDepth, maxRecursionPasses: now.activationSettings.maxRecursionPasses },
   };
 }
 
-/** The World Info chain (`spindle/world-info-interceptor.ts:206-407`), each handler behind its worker call (`spindle/worker-host.ts:4927-4955`). */
-export async function worldInfoChain(registrations: readonly Registration<WorldInfoHandler>[], entries: readonly Entry[], ctx: Record<string, unknown>, userId: string, limit: { timeoutMs: number; log: string[] }): Promise<Entry[]> {
+/** A prompt-local placement in the chat's history (`WorldInfoInterceptorPlacementDTO`, `spindle/world-info-interceptor.ts:155-179`). */
+export interface Placement {
+  type: "chat_depth";
+  role: Role;
+  depth: number;
+  direction: "from_start" | "from_end";
+}
+
+/** What the chain leaves (`WorldInfoInterceptorChainResult`, `spindle/world-info-interceptor.ts:117-130`). */
+export interface ChainResult {
+  /** The entries as the chain left them: disabled, enabled, forced and rewritten, the entries the handlers added among them. */
+  entries: Entry[];
+  /** The entries the handlers added, prompt-local (`promptLocalEntry`). */
+  additionalEntries: Entry[];
+  additionalBookSources: Map<string, BookSource>;
+  /** By extension, the entries it asked to be told of as the raw activation would have them (`captured`). */
+  captureRequests: Map<string, Set<string>>;
+  activationOverrides: { disableRecursion?: true };
+  selectionContentByEntryId: Map<string, string>;
+  placementByEntryId: Map<string, Placement>;
+  /** By entry, the extension whose `outputOrder: "insertion"` it carries. */
+  insertionOrderByEntryId: Map<string, string>;
+}
+
+/** `WorldInfoCandidateError` (`spindle/world-info-interceptor.ts:132-134`): a handler's added entry that is not whole, which ends the assembly. */
+export class WorldInfoCandidateError extends Error {
+  constructor(field: string) {
+    super(`Invalid prompt-local world info field: ${field}`);
+    this.name = "WorldInfoCandidateError";
+  }
+}
+
+/** `promptLocalEntry` (`spindle/world-info-interceptor.ts:136-172`): an added entry checked field by field, then made the model Lumiverse's activation works over. */
+function promptLocalEntry(value: Record<string, any> | null | undefined, extensionId: string, chatId: string): Entry {
+  if (!value || typeof value.id !== "string" || !value.id) throw new WorldInfoCandidateError("id");
+  for (const key of ["content", "comment", "group_name"]) if (typeof value[key] !== "string") throw new WorldInfoCandidateError(key);
+  for (const key of ["key", "keysecondary"]) if (!Array.isArray(value[key]) || value[key].some((item: unknown) => typeof item !== "string")) throw new WorldInfoCandidateError(key);
+  for (const key of ["position", "depth", "priority", "probability", "selective_logic", "group_weight", "order_value", "sticky", "cooldown", "delay"]) {
+    if (!Number.isFinite(value[key])) throw new WorldInfoCandidateError(key);
+  }
+  if (value.role !== null && !["system", "user", "assistant"].includes(value.role)) throw new WorldInfoCandidateError("role");
+  if (value.scan_depth !== null && (!Number.isFinite(value.scan_depth) || value.scan_depth < 0)) throw new WorldInfoCandidateError("scan_depth");
+  for (const key of ["disabled", "constant", "use_probability", "selective", "group_override", "match_whole_words", "case_sensitive", "use_regex", "prevent_recursion", "exclude_recursion", "delay_until_recursion", "exclude_greeting"]) {
+    if (typeof value[key] !== "boolean") throw new WorldInfoCandidateError(key);
+  }
+  const id = JSON.stringify(["spindle", extensionId, chatId, value.id]);
+  return {
+    id,
+    uid: id,
+    book: JSON.stringify(["spindle", extensionId, chatId]),
+    content: value.content,
+    comment: value.comment,
+    keys: [...value.key],
+    keysecondary: [...value.keysecondary],
+    position: value.position,
+    depth: value.depth,
+    ...(value.role !== null ? { role: value.role } : {}),
+    priority: value.priority,
+    order_value: value.order_value,
+    disabled: value.disabled,
+    constant: value.constant,
+    probability: value.probability,
+    use_probability: value.use_probability,
+    selective: value.selective,
+    selective_logic: value.selective_logic,
+    group_name: value.group_name,
+    group_override: value.group_override,
+    group_weight: value.group_weight,
+    match_whole_words: value.match_whole_words,
+    case_sensitive: value.case_sensitive,
+    use_regex: value.use_regex,
+    prevent_recursion: value.prevent_recursion,
+    exclude_recursion: value.exclude_recursion,
+    delay_until_recursion: value.delay_until_recursion,
+    exclude_greeting: value.exclude_greeting,
+    scan_depth: value.scan_depth,
+    sticky: value.sticky,
+    cooldown: value.cooldown,
+    delay: value.delay,
+    automation_id: value.automation_id,
+    extensions: { ...value.extensions },
+    outlet_name: null,
+    wi_marker: null,
+    wi_marker_side: null,
+    vectorized: false,
+    vector_index_status: "not_enabled",
+  } as Entry;
+}
+
+/** `normalizePlacement` (`spindle/world-info-interceptor.ts:174-199`): a placement as given, or none. */
+function normalizePlacement(value: unknown): Placement | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.type !== "chat_depth" || (candidate.role !== "system" && candidate.role !== "user" && candidate.role !== "assistant") || (candidate.direction !== "from_start" && candidate.direction !== "from_end") || typeof candidate.depth !== "number" || !Number.isFinite(candidate.depth) || !Number.isInteger(candidate.depth) || candidate.depth < 0) return null;
+  return { type: "chat_depth", role: candidate.role, depth: candidate.depth, direction: candidate.direction };
+}
+
+/** What a handler may give back (`WorldInfoInterceptorResultDTO`, `spindle/world-info-interceptor.ts:104-115`). */
+export interface WorldInfoResult {
+  disabled?: readonly string[];
+  enabled?: readonly string[];
+  forced?: readonly string[];
+  mutated?: readonly { id: string; content?: string; selectionContent?: string; placement?: unknown; outputOrder?: "selection" | "insertion" }[];
+  captured?: readonly string[];
+  additionalEntries?: readonly Record<string, unknown>[];
+  activationOverrides?: { disableRecursion?: true };
+}
+
+/**
+ * The World Info chain (`spindle/world-info-interceptor.ts:206-407`), each handler behind its worker call (`spindle/worker-host.ts:4927-4955`):
+ * each is handed every entry as the full DTO (`:11-60`, `:230-275`) with the context as the entries before it left it, and what it gives back
+ * is applied as a whole (`:318-392`): `disabled`, `enabled`, `forced` (constant), `mutated` (the text, `selectionContent`, `placement`,
+ * `outputOrder`), `captured`, `additionalEntries` and `activationOverrides`; one whose added entry is malformed ends the assembly (`:384-385`).
+ * `bookSources` is where each book is attached (`bookSourceMap`), told to a handler as each entry's `book_source`.
+ */
+export async function worldInfoChain(registrations: readonly Registration<WorldInfoHandler>[], entries: readonly Entry[], ctx: Record<string, unknown> & { activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } }, userId: string, bookSources: ReadonlyMap<string, BookSource>, limit: { timeoutMs: number; log: string[] }): Promise<ChainResult> {
+  const placementByEntryId = new Map<string, Placement>();
+  const insertionOrderByEntryId = new Map<string, string>();
+  const additionalBookSources = new Map<string, BookSource>();
+  const sourceEntries: Entry[] = [...entries];
   const disabledByChain = new Set<string>();
   const enabledByChain = new Set<string>();
+  const forcedByChain = new Set<string>();
   const contentOverrides = new Map<string, string>();
+  const captureRequests = new Map<string, Set<string>>();
   const candidateIds = new Set(entries.map((e) => e.id));
+  const selectionContentByEntryId = new Map<string, string>();
+  let disableRecursion = false;
   let working: Entry[] = [...entries];
   const rebuildWorking = (): Entry[] =>
-    entries.map((e) => {
+    sourceEntries.map((e) => {
       const isDisabled = disabledByChain.has(e.id);
       const wantsEnable = !isDisabled && enabledByChain.has(e.id) && e.disabled === true;
+      const wantsForce = !isDisabled && forcedByChain.has(e.id);
       const newContent = contentOverrides.get(e.id);
-      if (!isDisabled && !wantsEnable && newContent === undefined) return e;
-      return { ...e, ...(isDisabled ? { disabled: true } : {}), ...(wantsEnable ? { disabled: false } : {}), ...(newContent !== undefined ? { content: newContent } : {}) };
+      if (!isDisabled && !wantsEnable && !wantsForce && newContent === undefined) return e;
+      return { ...e, ...(isDisabled ? { disabled: true } : {}), ...(wantsEnable ? { disabled: false } : {}), ...(wantsForce ? { constant: true } : {}), ...(newContent !== undefined ? { content: newContent } : {}) };
     });
+  /** Every entry as a handler is handed it (`buildDto`, `:230-275`), the placement and order the chain has given it so far. */
+  const dtoOf = (e: Entry): Record<string, unknown> => ({
+    id: e.id,
+    world_book_id: e.book,
+    comment: e.comment ?? "",
+    disabled: e.disabled === true,
+    constant: e.constant === true,
+    extensions: e.extensions ?? {},
+    key: e.keys ?? [],
+    keysecondary: e.keysecondary ?? [],
+    position: e.position ?? 0,
+    depth: e.depth ?? 4,
+    role: e.role ?? null,
+    priority: e.priority ?? 10,
+    probability: e.probability ?? 100,
+    use_probability: e.use_probability ?? true,
+    content: e.content,
+    automation_id: e.automation_id ?? null,
+    selective: e.selective === true,
+    selective_logic: e.selective_logic ?? 0,
+    group_name: e.group_name ?? "",
+    group_override: e.group_override === true,
+    group_weight: e.group_weight ?? 100,
+    match_whole_words: e.match_whole_words === true,
+    case_sensitive: e.case_sensitive === true,
+    use_regex: e.use_regex === true,
+    prevent_recursion: e.prevent_recursion === true,
+    exclude_recursion: e.exclude_recursion === true,
+    delay_until_recursion: e.delay_until_recursion === true,
+    exclude_greeting: e.exclude_greeting === true,
+    scan_depth: e.scan_depth ?? null,
+    order_value: e.order_value ?? 100,
+    sticky: e.sticky ?? 0,
+    cooldown: e.cooldown ?? 0,
+    delay: e.delay ?? 0,
+    ...(placementByEntryId.has(e.id) ? { placement: placementByEntryId.get(e.id)! } : {}),
+    ...(insertionOrderByEntryId.has(e.id) ? { outputOrder: "insertion" } : {}),
+    book_source: additionalBookSources.get(e.book) ?? bookSources.get(e.book),
+  });
   for (const registration of registrations) {
-    const dto = { ...ctx, userId, entries: working.map((e) => ({ id: e.id, world_book_id: e.book, comment: e.comment ?? "", disabled: e.disabled === true, constant: e.constant === true, extensions: e.extensions ?? {}, key: e.keys ?? [], keysecondary: [], content: e.content })) };
-    // The worker's call: a throw reaches the host as no result (`spindle/worker-runtime.ts:4970-4993`), and past the limit the host goes on without one (`spindle/worker-host.ts:4937-4943`).
-    const call = registration.handler(structuredClone(dto)).catch((error: unknown) => {
-      registration.ext.logs.push(`World-info interceptor error: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
-    });
-    const waited = Promise.withResolvers<undefined>();
-    const timer = quietTimer(limit.timeoutMs, () => {
-      limit.log.push("World-info interceptor timed out after 10s; skipping");
-      waited.resolve(undefined);
-    });
-    const result = await Promise.race([call, waited.promise]);
-    clearTimeout(timer);
-    if (!result) continue;
-    const copy = structuredClone(result);
-    for (const id of copy.disabled ?? []) disabledByChain.add(id);
-    for (const id of copy.enabled ?? []) enabledByChain.add(id);
-    for (const m of copy.mutated ?? []) if (candidateIds.has(m.id) && m.content !== undefined) contentOverrides.set(m.id, m.content);
-    working = rebuildWorking();
+    try {
+      const dto = { ...ctx, userId, entries: working.map(dtoOf), activationSettings: { globalScanDepth: ctx.activationSettings.globalScanDepth, maxRecursionPasses: disableRecursion ? 0 : ctx.activationSettings.maxRecursionPasses } };
+      // The worker's call: a throw reaches the host as no result (`spindle/worker-runtime.ts:4970-4993`), and past the limit the host goes on without one (`spindle/worker-host.ts:4937-4943`).
+      const call = registration.handler(structuredClone(dto)).catch((error: unknown) => {
+        registration.ext.logs.push(`World-info interceptor error: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      });
+      const waited = Promise.withResolvers<undefined>();
+      const timer = quietTimer(limit.timeoutMs, () => {
+        limit.log.push("World-info interceptor timed out after 10s; skipping");
+        waited.resolve(undefined);
+      });
+      const result = await Promise.race([call, waited.promise]);
+      clearTimeout(timer);
+      // What crosses from the worker is a copy.
+      const copy = (result === undefined || result === null ? undefined : structuredClone(result)) as WorldInfoResult | undefined;
+      const supplied = copy?.additionalEntries ?? [];
+      const additional = supplied.map((entry) => promptLocalEntry(entry as Record<string, any>, registration.ext.id, String(ctx.chatId)));
+      const localIds = new Map(supplied.map((entry, index) => [entry.id as string, additional[index]!.id]));
+      if (supplied.some((entry) => candidateIds.has(entry.id as string))) throw new WorldInfoCandidateError("ambiguous id");
+      const resolveId = (id: string): string => localIds.get(id) ?? id;
+      const addedIds = new Set<string>();
+      for (const entry of additional) {
+        if (candidateIds.has(entry.id) || addedIds.has(entry.id)) throw new WorldInfoCandidateError("duplicate id");
+        addedIds.add(entry.id);
+      }
+      for (const entry of additional) {
+        candidateIds.add(entry.id);
+        sourceEntries.push(entry);
+        additionalBookSources.set(entry.book, "chat");
+      }
+      const disabledList = (copy?.disabled ?? []).map(resolveId);
+      const enabledList = (copy?.enabled ?? []).map(resolveId);
+      const forcedList = (copy?.forced ?? []).map(resolveId);
+      const mutatedList = (copy?.mutated ?? []).map((mutation) => ({ ...mutation, id: resolveId(mutation.id) }));
+      const capturedList = copy?.captured?.map(resolveId);
+      if (capturedList !== undefined) {
+        const requested = captureRequests.get(registration.ext.id) ?? new Set<string>();
+        for (const id of capturedList) if (candidateIds.has(id)) requested.add(id);
+        captureRequests.set(registration.ext.id, requested);
+      }
+      const disablesRecursion = copy?.activationOverrides?.disableRecursion === true;
+      if (disabledList.length === 0 && enabledList.length === 0 && forcedList.length === 0 && mutatedList.length === 0 && additional.length === 0 && !disablesRecursion) continue;
+      for (const id of disabledList) disabledByChain.add(id);
+      for (const id of enabledList) enabledByChain.add(id);
+      for (const id of forcedList) forcedByChain.add(id);
+      for (const m of mutatedList) {
+        if (!candidateIds.has(m.id)) continue;
+        if (m.content !== undefined) contentOverrides.set(m.id, m.content);
+        if (m.selectionContent !== undefined) selectionContentByEntryId.set(m.id, m.selectionContent);
+        const placement = normalizePlacement(m.placement);
+        if (placement) placementByEntryId.set(m.id, placement);
+        if (m.outputOrder === "insertion") insertionOrderByEntryId.set(m.id, registration.ext.id);
+        else if (m.outputOrder === "selection") insertionOrderByEntryId.delete(m.id);
+      }
+      disableRecursion ||= disablesRecursion;
+      if (disabledList.length > 0 || enabledList.length > 0 || forcedList.length > 0 || mutatedList.length > 0 || additional.length > 0) working = rebuildWorking();
+    } catch (error) {
+      // A malformed added entry stops the assembly (`:385`); anything else a handler does wrong is logged and the chain goes on (`:386-391`).
+      if (error instanceof WorldInfoCandidateError) throw error;
+      limit.log.push(`[Spindle] World-info interceptor error from ${registration.ext.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
-  return working;
+  return {
+    entries: working,
+    additionalEntries: sourceEntries.slice(entries.length),
+    additionalBookSources,
+    captureRequests,
+    activationOverrides: disableRecursion ? { disableRecursion: true } : {},
+    selectionContentByEntryId,
+    placementByEntryId,
+    insertionOrderByEntryId,
+  };
 }
 
 // ---------------------------------------------------------------- the user's settings and the counts
@@ -547,11 +775,14 @@ interface Finalized {
 /**
  * `finalizeActivatedWorldInfoEntries` (`:514-547`) and `enforceBudget` (`:584-630`): groups, an entry with no text left out, the
  * order (priority, highest first, then `order_value`), then the cap on entries and the token budget, each keeping every constant
- * entry first and taking the rest in that order, a later smaller entry still fitting where a larger one did not.
+ * entry first and taking the rest in that order, a later smaller entry still fitting where a larger one did not. An entry whose
+ * `selectionContent` an interceptor gave (`selectionContentFor`, `:563-567`) is read by that text throughout: kept or left out for
+ * it, counted by it.
  */
-function finalize(entries: readonly Row[], settings: WorldInfoSettings, options: { random: () => number; skipGroupLogic?: boolean; preserveOrder?: boolean }): Finalized {
+function finalize(entries: readonly Row[], settings: WorldInfoSettings, options: { random: () => number; skipGroupLogic?: boolean; preserveOrder?: boolean; selection?: ReadonlyMap<string, string> }): Finalized {
+  const selected = (e: Row): string => options.selection?.get(e.id) ?? e.content;
   const grouped = options.skipGroupLogic === true ? [...entries] : groupLogic(entries, options.random);
-  const insertable = grouped.filter((e) => e.content.trim() !== "");
+  const insertable = grouped.filter((e) => selected(e).trim() !== "");
   if (options.preserveOrder !== true) insertable.sort((a, b) => (b.priority !== a.priority ? b.priority - a.priority : a.order_value - b.order_value));
   let kept = insertable;
   if (settings.maxActivatedEntries > 0 && kept.length > settings.maxActivatedEntries) {
@@ -563,19 +794,19 @@ function finalize(entries: readonly Row[], settings: WorldInfoSettings, options:
     const within: Row[] = [];
     for (const e of kept) {
       if (!e.constant) continue;
-      total += tokensOf(e.content);
+      total += tokensOf(selected(e));
       within.push(e);
     }
     for (const e of kept) {
       if (e.constant) continue;
-      const tokens = tokensOf(e.content);
+      const tokens = tokensOf(selected(e));
       if (total + tokens > settings.maxTokenBudget) continue;
       total += tokens;
       within.push(e);
     }
     kept = within;
   }
-  return { entries: kept, activatedBeforeBudget: insertable.length, activatedAfterBudget: kept.length, evictedByBudget: insertable.length - kept.length, estimatedTokens: kept.reduce((n, e) => n + tokensOf(e.content), 0) };
+  return { entries: kept, activatedBeforeBudget: insertable.length, activatedAfterBudget: kept.length, evictedByBudget: insertable.length - kept.length, estimatedTokens: kept.reduce((n, e) => n + tokensOf(selected(e)), 0) };
 }
 
 /** The matched keys of an entry, in their order. */
@@ -589,7 +820,7 @@ const keysAt = (keys: readonly string[], hit: ReadonlySet<number> | undefined): 
  * nothing losing its delay; sticky entries still in their window back on, a cooldown starting as the window closes; then groups,
  * the order and the budget. `wiState` is changed in place, as Lumiverse changes it.
  */
-function activateKeywords(entries: readonly Row[], messages: readonly ChatMessage[], wiState: WiState, settings: WorldInfoSettings, random: () => number) {
+function activateKeywords(entries: readonly Row[], messages: readonly ChatMessage[], wiState: WiState, settings: WorldInfoSettings, random: () => number, selection?: ReadonlyMap<string, string>) {
   const uids = new Set(entries.map((e) => e.uid));
   for (const uid of Object.keys(wiState)) if (!uids.has(uid)) delete wiState[uid];
   let evictedByMinPriority = 0;
@@ -684,7 +915,7 @@ function activateKeywords(entries: readonly Row[], messages: readonly ChatMessag
     provenance.set(e.id, { origin: "sticky" });
     if (state.stickyLeft === 0 && e.cooldown > 0) state.cooldownLeft = e.cooldown;
   }
-  const finalized = finalize(activated, settings, { random });
+  const finalized = finalize(activated, settings, { random, selection });
   const surviving = new Set(finalized.entries.map((e) => e.id));
   for (const id of [...provenance.keys()]) if (!surviving.has(id)) provenance.delete(id);
   return { finalized, provenance, totalCandidates: candidates.length, evictedByMinPriority, recursionPassesUsed };
@@ -797,11 +1028,11 @@ type Sources = Map<string, { source: "keyword" | "vector"; score?: number }>;
 const SOURCE_PRECEDENCE: Record<string, number> = { character: 4, persona: 3, chat: 2, global: 1, peer: 0 };
 
 /** `compareEntryPrecedence` (`:271-304`): a constant entry, then the higher priority, then the nearer book, then (Vector First) the nearer hit, then a keyword match. */
-function precedence(a: Row, b: Row, sources: Sources, books: ReadonlyMap<string, { source: BookSource }>, retrieval?: (a: Row, b: Row) => number): number {
+function precedence(a: Row, b: Row, sources: Sources, books: ReadonlyMap<string, BookSource>, retrieval?: (a: Row, b: Row) => number): number {
   if (a.constant && !b.constant) return -1;
   if (!a.constant && b.constant) return 1;
   if (b.priority !== a.priority) return b.priority - a.priority;
-  const sourceRank = (e: Row): number => SOURCE_PRECEDENCE[books.get(e.book)?.source ?? ""] ?? 0;
+  const sourceRank = (e: Row): number => SOURCE_PRECEDENCE[books.get(e.book) ?? ""] ?? 0;
   if (sourceRank(b) !== sourceRank(a)) return sourceRank(b) - sourceRank(a);
   if (retrieval) return retrieval(a, b);
   const sa = sources.get(a.id)?.source;
@@ -819,7 +1050,7 @@ const normalized = (s: string): string => s.toLowerCase().replace(/[^\w\s]/g, ""
  * of the same text once letter case, punctuation and spacing are set aside, then of text at least 30 characters long sharing 85% of
  * its words (each of two letters or more), keep the one of highest precedence; a constant entry is never dropped.
  */
-function dedupe(entries: readonly Row[], sources: Sources, books: ReadonlyMap<string, { source: BookSource }>, retrieval?: (a: Row, b: Row) => number): { entries: Row[]; removed: string[] } {
+function dedupe(entries: readonly Row[], sources: Sources, books: ReadonlyMap<string, BookSource>, retrieval?: (a: Row, b: Row) => number): { entries: Row[]; removed: string[] } {
   if (entries.length <= 1) return { entries: [...entries], removed: [] };
   const removed = new Set<string>();
   const byPosition = new Map<number, Row[]>();
@@ -897,8 +1128,11 @@ export interface LoreInput {
   random: () => number;
   vector: VectorSearch | null;
   embedding: EmbeddingSettings;
-  /** Each book's name and where it is attached (`bookNameMap`, `bookSourceMap`). */
-  books: ReadonlyMap<string, { name: string; source: BookSource }>;
+  /** Where each book is attached (`bookSourceMap`) and what it is called (`bookNameMap`): a book Lumiverse names not has no name here. */
+  bookSources: ReadonlyMap<string, BookSource>;
+  bookNames: ReadonlyMap<string, string>;
+  /** What the World Info chain's `selectionContent` gave, by entry: the text selection, dedup and the budget read in place of its own (`:563-567`). */
+  selection?: ReadonlyMap<string, string>;
   /** The speakers' names the vector query writes. */
   names: { user: string; character: string };
 }
@@ -913,7 +1147,7 @@ export interface LoreInput {
 export function activateLore(input: LoreInput): Lore {
   const settings = normalizeWorldInfoSettings(input.settings);
   const rows = input.entries.map(rowOf);
-  const keyword = activateKeywords(rows, input.messages, input.wiState, settings, input.random);
+  const keyword = activateKeywords(rows, input.messages, input.wiState, settings, input.random, input.selection);
   const vector = vectorPicks(rows, input.messages, settings, input.vector, input.embedding, input.names);
   const mergeStarted = performance.now();
   const vectorFirst = input.embedding.hybridWeightMode === "vector_first";
@@ -946,7 +1180,11 @@ export function activateLore(input: LoreInput): Lore {
     }
     return 0;
   };
-  const deduped = dedupe(merged, sources, input.books, vectorFirst ? byRetrieval : undefined);
+  // Duplicates are looked for in the text selection reads (`entriesForDedup`, `:4907-4913`) and the entry itself is what is kept.
+  const forDedup = input.selection === undefined || input.selection.size === 0 ? merged : merged.map((e) => (input.selection!.has(e.id) ? { ...e, content: input.selection!.get(e.id)! } : e));
+  const dedupResult = dedupe(forDedup, sources, input.bookSources, vectorFirst ? byRetrieval : undefined);
+  const mergedById = new Map(merged.map((e) => [e.id, e]));
+  const deduped = { removed: dedupResult.removed, entries: dedupResult.entries.map((e) => mergedById.get(e.id) ?? e) };
   for (const id of deduped.removed) sources.delete(id);
   const selected = groupLogic(deduped.entries, input.random);
   const hasBudget = settings.maxActivatedEntries > 0 || settings.maxTokenBudget > 0;
@@ -966,11 +1204,10 @@ export function activateLore(input: LoreInput): Lore {
     const pb = boosted.get(b.id) ?? b.priority;
     return pb !== pa ? pb - pa : a.order_value - b.order_value;
   });
-  const finalized = finalize(hasBudget || vectorFirst ? competition : selected, settings, { random: input.random, skipGroupLogic: true, preserveOrder: true });
+  const finalized = finalize(hasBudget || vectorFirst ? competition : selected, settings, { random: input.random, skipGroupLogic: true, preserveOrder: true, selection: input.selection });
   const told: ActivatedWorldInfoEntry[] = finalized.entries.map((e) => {
     const s = sources.get(e.id);
-    const book = input.books.get(e.book);
-    return { id: e.id, comment: e.comment || "", keys: e.key, source: s?.source ?? "keyword", score: s?.score, bookId: e.book, bookSource: book?.source, bookName: book?.name, estimatedTokens: tokensOf(e.content) };
+    return { id: e.id, comment: e.comment || "", keys: e.key, source: s?.source ?? "keyword", score: s?.score, bookId: e.book, bookSource: input.bookSources.get(e.book), bookName: input.bookNames.get(e.book), estimatedTokens: tokensOf(input.selection?.get(e.id) ?? e.content) };
   });
   const mergeMs = performance.now() - mergeStarted;
   const keywordActivated = told.filter((e) => e.source === "keyword").length;

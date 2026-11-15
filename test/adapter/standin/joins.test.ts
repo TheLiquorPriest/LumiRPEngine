@@ -26,13 +26,14 @@ function marshLines(queued: readonly string[]): ChatMessage[] {
   return lines;
 }
 
-/** A stand-in Lumiverse with the marsh's chat, its book's entries, on a model that answers every request with one line. */
+/** A stand-in Lumiverse with the marsh's chat, its book's entries (the character's own book), on a model that answers every request with one line. */
 function marsh(messages: ChatMessage[], preset: Partial<Preset> = {}, books: Entry[] = []): StandIn {
   const lv = new StandIn();
   lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she poles on."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-marsh", { id: "preset-marsh", name: "Marsh", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a ferry crossing a marsh." }], ...preset });
-  lv.addChat({ id: CHAT, user: USER, character: { id: "char-tamsin", name: "Tamsin" }, messages, books });
+  lv.library.addBook({ id: "book-marsh", name: "Marsh lore", user: USER, entries: books });
+  lv.addChat({ id: CHAT, user: USER, character: { id: "char-tamsin", name: "Tamsin", extensions: { world_book_ids: ["book-marsh"] } }, messages });
   return lv;
 }
 
@@ -221,7 +222,7 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
     // it) just after the history.
     expect(marked.handed).toEqual([["MAIN", false], ["FERRY-LORE", true], ["LORE-NOTES", false], ...HISTORY, ["REEDS-LORE", true], ["POST", false]]);
     expect(marked.texts[2]).toBe("LORE-NOTES What the marsh holds:\nMIST-LORE Mist rolls in at dusk.\n\nBELL-LORE The bell rings at the tide.");
-    // Named as Lumiverse names them, the block with its id and the lore by position and label with none; the pool's tokens are the block's.
+    // Named as Lumiverse names them, the block with its id and the lore by position and label with none.
     const stored = marked.out.stored!;
     expect(stored.entries.map((e) => [e.type, e.name, e.blockId ?? null])).toEqual([
       ["block", "Main", "b-main"],
@@ -232,7 +233,10 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
       ["world_info", "WI At Marker: Mist", null],
       ["world_info", "WI At Marker: bell", null],
     ]);
-    expect(stored.totalTokens).toBe(stored.chatHistoryTokens + stored.entries.filter((e) => !e.name.startsWith("WI At Marker")).reduce((n, e) => n + e.tokens, 0));
+    // The block that expands the pool counts only its wrapper, and the pool's rows count in the total (`attributeExpandedMarkerWorldInfoTokens`,
+    // `services/prompt-assembly.service.ts:1522-1533`): Lumiverse's sum is every row's, not the sum with the pool's rows left out.
+    expect(stored.entries.find((e) => e.blockId === "b-lore")!.tokens).toBe(Math.ceil("LORE-NOTES What the marsh holds:".length / 4));
+    expect(stored.totalTokens).toBe(stored.chatHistoryTokens + stored.entries.reduce((n, e) => n + e.tokens, 0));
 
     // No markers: "before" just before the history, "after" just after it.
     const unmarked = await placed({ blocks: [MAIN, POST] }, book());

@@ -50,7 +50,6 @@ function harbor(b: DoorBed): void {
       { id: "m0", role: "assistant", content: "Welcome to the harbor." },
       { id: "m1", role: "user", content: "I walk to the ferry." },
     ],
-    books: [],
   });
 }
 
@@ -189,7 +188,7 @@ describe("the door, mounted in the app", () => {
     });
     b.host.connections.set("conn-slow", { id: "conn-slow", base: `${SLOW}/v1`, key: "slow-key", model: "slow" });
     b.host.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a harbor town." }] });
-    for (const chat of ["chat-harbor", "chat-cove"]) b.host.chats.set(chat, { id: chat, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages: [{ id: `${chat}-m0`, role: "user", content: "I wait for the ferry." }], books: [] });
+    for (const chat of ["chat-harbor", "chat-cove"]) b.host.chats.set(chat, { id: chat, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages: [{ id: `${chat}-m0`, role: "user", content: "I wait for the ferry." }] });
     const start = async (chat: string): Promise<{ id: string; outcome: Promise<Outcome> }> => {
       const from = b.host.events.length;
       const outcome = b.host.generate({ chat, connection: "conn-slow", preset: "preset-coast" });

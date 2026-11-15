@@ -169,7 +169,6 @@ describe("the Author starts at once; the turn's folder follows it", () => {
   test("the lore file is written from what intake read: no entry's text is read a second time", async () => {
     const b = await bed({ answers: [replying("Wren points down the stairs.")] });
     const content = "Whale oil is kept in the cellar under the lamp room, six barrels, the oldest nearest the door.";
-    b.host.chats.get(CHAT)!.books = [{ id: "wbe-oil", book: "wb-keep", content, comment: "The oil store", keys: ["oil"] }];
     b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-keep", "Keeper's Book", USER);
     b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-oil", "wb-keep", "1", JSON.stringify(["oil"]), content, "The oil store");
     // Lumiverse activates an entry only from a book the chat reads: here the chat's own.

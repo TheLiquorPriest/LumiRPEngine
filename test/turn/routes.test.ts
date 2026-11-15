@@ -98,7 +98,7 @@ describe("the Turn page's routes", () => {
     // Two chats a migration put in the store: one playing a world, one with none. Lumiverse holds both.
     const doc = world();
     const revision = hashJson(doc);
-    for (const [id, name] of [["chat-quay", "The quay"], ["chat-attic", "An attic"]] as const) b.host.addChat({ id, user: USER, name, character: CHARACTER, messages: [], books: [] });
+    for (const [id, name] of [["chat-quay", "The quay"], ["chat-attic", "An attic"]] as const) b.host.addChat({ id, user: USER, name, character: CHARACTER, messages: [] });
     await b.app.writes.run(() => {
       const store = b.turns.store.user(USER);
       store.putWorld(revision, doc);
@@ -120,9 +120,10 @@ describe("the Turn page's routes", () => {
     const b = await openTurnBed({ answers: [replying("Wren points down the stairs.")] });
     beds.push(b);
     const content = "Whale oil is kept in the cellar under the lamp room, six barrels.";
-    b.host.chats.get(CHAT)!.books = [{ id: "wbe-oil", book: "wb-keep", content, comment: "The oil store", keys: ["oil"] }];
     b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-keep", "Keeper's Book", USER);
     b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-oil", "wb-keep", "1", JSON.stringify(["oil"]), content, "The oil store");
+    // Lumiverse activates an entry only from a book the chat reads: here the chat's own.
+    b.db.run("UPDATE chats SET metadata = ? WHERE id = ?", JSON.stringify({ chat_world_book_ids: ["wb-keep"] }), CHAT);
     b.host.send(CHAT, "I ask where the oil is kept.");
     const turn = await settledTurn(b, (await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET })).generationId!);
 

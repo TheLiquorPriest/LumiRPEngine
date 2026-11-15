@@ -77,7 +77,6 @@ test("an indexing run is given the next batch by name and answered with the batc
     b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", e.id, BOOK.id, String(i + 1), JSON.stringify(e.keys), e.content, e.title);
   }
   b.db.run("UPDATE chats SET metadata = ? WHERE id = ?", JSON.stringify({ chat_world_book_ids: [BOOK.id] }), CHAT);
-  b.host.chats.get(CHAT)!.books = [OIL, OATH, BELL].map((e) => ({ id: e.id, book: BOOK.id, content: e.content, comment: e.title, keys: e.keys }));
 
   await play(b, "I ask where the oil is kept.");
   const [author, indexer, answered] = b.model.requests;

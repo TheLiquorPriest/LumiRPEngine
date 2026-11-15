@@ -134,7 +134,6 @@ describe("the turn's folder", () => {
   test("the lore file holds the lore map, then each entry that activated for the prompt, in full", async () => {
     const b = await bed({ answers: [replying("Wren points down the stairs.")] });
     const content = "Whale oil is kept in the cellar under the lamp room, six barrels, the oldest nearest the door.";
-    b.host.chats.get(CHAT)!.books = [{ id: "wbe-oil", book: "wb-keep", content, comment: "The oil store", keys: ["oil"] }];
     b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-keep", "Keeper's Book", USER);
     b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-oil", "wb-keep", "1", JSON.stringify(["oil"]), content, "The oil store");
     // Lumiverse activates an entry only from a book the chat reads: here the chat's own.

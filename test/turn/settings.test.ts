@@ -126,7 +126,6 @@ test("what the global file sets is read when RPE starts, by what is made once fo
   b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", BOOK.id, BOOK.name, USER);
   for (const [i, e] of ENTRIES.entries()) b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", e.id, BOOK.id, String(i + 1), JSON.stringify(e.keys), e.content, e.title);
   b.db.run("UPDATE chats SET metadata = ? WHERE id = ?", JSON.stringify({ chat_world_book_ids: [BOOK.id] }), CHAT);
-  b.host.chats.get(CHAT)!.books = ENTRIES.map((e) => ({ id: e.id, book: BOOK.id, content: e.content, comment: e.title, keys: e.keys }));
   const turn = await play(b, "I ask about the oil, the oath and the bell.");
   const scope = { user: USER, chat: CHAT, session: NO_SESSION, turn: turn.id };
 

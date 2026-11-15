@@ -26,7 +26,7 @@ const BRANCH = "chat-gannet-again";
 function branchAtLastReply(b: TurnBed): void {
   const rows = b.db.rows("SELECT id, is_user, content FROM messages WHERE chat_id = ? ORDER BY index_in_chat", CHAT);
   const messages = rows.map((m, i) => ({ id: `m-again-${i}`, role: m.is_user === 1 ? ("user" as const) : ("assistant" as const), content: String(m.content) }));
-  b.host.addChat({ id: BRANCH, user: USER, name: "The lighthouse, again", character: CHARACTER, messages, books: [], metadata: { branched_from: CHAT, branch_at_message: String(rows.at(-1)!.id) } });
+  b.host.addChat({ id: BRANCH, user: USER, name: "The lighthouse, again", character: CHARACTER, messages, metadata: { branched_from: CHAT, branch_at_message: String(rows.at(-1)!.id) } });
 }
 
 /** The turn of a generation in the branch, once Lumiverse's end of it is recorded and no run of the branch goes on. */

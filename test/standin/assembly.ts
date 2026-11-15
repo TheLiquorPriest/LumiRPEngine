@@ -4,9 +4,10 @@
 // marker" lore inside the block that asks for it, and in-history blocks spliced in; then the prompt's end
 // as Lumiverse makes it, the preset's completion settings over it all; and the breakdown Lumiverse keeps of
 // it. What it copies from Lumiverse's source (staging at a70f4ed2) says the file and lines; paths are
-// Lumiverse's `src/`. It resolves no macro but `{{wi_marker}}`, and a secret mark in lore.
+// Lumiverse's `src/`. It resolves no macro but `{{wi_marker}}`, `{{outlet::name}}` and a secret mark in lore.
 
-import type { Entry } from "./lore";
+import type { WI_MARKERS } from "./db";
+import type { Entry, Placement } from "./lore";
 import { indexInChat, type ChatMessage } from "./rows";
 import { stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role } from "./steps";
 
@@ -18,11 +19,13 @@ export interface Block {
   /** Spliced into the chat history this many messages from its end, not as history: a block placed "in history". */
   depth?: number;
   /**
-   * The marker it is, where it is one (`PromptBlock.marker`), its content not sent: `chat_history` places the chat's history,
-   * `world_info_before` and `world_info_after` the lore of their position (`services/prompt-assembly.service.ts:3161`, `:3491-3561`).
-   * A stand-in preset that marks no block `chat_history` has its history after its last block.
+   * The marker it is, where it is one (`PromptBlock.marker`): `chat_history` places the chat's history, `world_info_before` and
+   * `world_info_after` the lore of their position (`services/prompt-assembly.service.ts:3161`, `:3491-3561`), their content not sent. Any other
+   * of the twelve (`VALID_WI_MARKERS`, `services/world-books.service.ts:177-190`) is a block that sends its content as it is and that a
+   * position-7 entry pinned to it by `wi_marker` stands beside. A stand-in preset that marks no block `chat_history` has its history
+   * after its last block.
    */
-  marker?: "chat_history" | "world_info_before" | "world_info_after";
+  marker?: (typeof WI_MARKERS)[number];
 }
 
 /** A preset, with the parts of its `prompts` the stand-in reads. */
@@ -52,6 +55,8 @@ export interface Preset {
   useSystemPrompt?: boolean;
   /** Names (`completionSettings.namesBehavior`): 0 none, 1 the speaker's name beside each user and assistant message, 2 written at the start of its text. */
   namesBehavior?: 0 | 1 | 2;
+  /** The preset's own metadata (`presets.metadata`): each extension is handed only its own namespace of it, `metadata[<its identifier>]` (`spindle/preset-metadata-context.ts`). */
+  metadata?: Record<string, unknown>;
 }
 
 /** Lumiverse's own continue nudge, for a preset that sets none (`services/prompt-behavior.ts:10`). */
@@ -72,6 +77,11 @@ export interface Ending {
    * "User", and the character's for the assistant's.
    */
   names: { user: string; character: string };
+  /**
+   * What the World Info chain gave about where the activated lore goes (`services/prompt-assembly.service.ts:2472-2491`): the entries it placed in
+   * the chat's history, by entry, and the extension whose `outputOrder: "insertion"` it carries, by entry.
+   */
+  world?: { placements: ReadonlyMap<string, Placement>; insertionOrder: ReadonlyMap<string, string> };
 }
 
 /** One entry of the assembly's breakdown (`AssemblyBreakdownEntry`). */
@@ -86,6 +96,10 @@ export interface BreakdownEntry {
   marker?: string;
   /** Its tokens are already counted in the block that holds its text (`:3846`). */
   excludeFromTotal?: boolean;
+  /** The text its tokens are counted from where that is not its `content`: a block that expands `{{wi_marker}}` counts only its wrapper (`:1507-1532`). */
+  tokenCountContent?: string;
+  /** Its block expanded `{{wi_marker}}`, so the "WI At Marker" rows count in the total and this entry counts only its wrapper (`attributeExpandedMarkerWorldInfoTokens`, `:1507-1520`). */
+  attributesWorldInfoMarkerTokens?: boolean;
 }
 
 export interface Assembled {
@@ -191,39 +205,242 @@ interface PlacedLore {
   label: string;
 }
 
+/** A position-7 entry pinned beside the block whose marker it names (`WorldInfoCache.pinnedMarkers`, `services/world-info-activation.service.ts:994-1005`). */
+interface PinnedLore extends PlacedLore {
+  marker: string;
+  side: "before" | "after";
+}
+
+/** A position-4 entry (`WorldInfoCache.depth`): this many messages from the end of the prompt. */
+interface DepthLore extends PlacedLore {
+  depth: number;
+}
+
+/** An entry an interceptor placed in the chat's history (`RuntimeWorldInfoChatPlacementEntry`, `services/prompt-assembly.service.ts:403-411`). */
+interface RuntimeLore {
+  id: string;
+  content: string;
+  label: string;
+  orderValue: number;
+  placement: Placement;
+}
+
+/** Every bucket the activated lore goes into (`WorldInfoCache`, `services/world-info-activation.service.ts:912-939`), and what an interceptor placed. */
+interface Lore {
+  before: PlacedLore[];
+  after: PlacedLore[];
+  anBefore: PlacedLore[];
+  anAfter: PlacedLore[];
+  depth: DepthLore[];
+  emBefore: PlacedLore[];
+  emAfter: PlacedLore[];
+  atMarker: PlacedLore[];
+  pinned: PinnedLore[];
+  runtime: RuntimeLore[];
+  /** The text each outlet gives where `{{outlet::name}}` stands (`resolveWorldInfoOutlets`, `:4701-4794`). */
+  outlets: Record<string, string>;
+}
+
 /** A block, or a marker's lore, waiting to be spliced into the history (`pendingDepthBlocks`, `:3054-3064`). */
 interface InHistory {
   role: Role;
   depth: number;
   content: string;
+  tokenCountContent?: string;
+  attributesWorldInfoMarkerTokens?: boolean;
   name: string;
   blockId: string;
   worldInfo: boolean;
 }
 
-/** `{{wi_marker}}` and its alias (`macros/definitions/primitives.ts:159-171`). */
-const WI_MARKER = /\{\{\s*(?:wi_marker|wiMarker)\s*\}\}/g;
+/**
+ * `{{wi_marker}}` and its alias `{{wiMarker}}`, in any case, bare or with `::` and arguments it ignores (`macros/definitions/primitives.ts:159-171`;
+ * the registry folds a name's case, `macros/MacroRegistry.ts:25-68`), and the way Lumiverse looks for it before it counts a block
+ * (`WI_MARKER_MACRO_RE`, `services/prompt-assembly.service.ts:1500`).
+ */
+const WI_MARKER = /\{\{\s*wi_?marker\s*(?:::[^{}]*)?\}\}/gi;
+const WI_MARKER_USED = /\{\{\s*wi_?marker\s*(?:\}\}|::)/i;
+/** `{{outlet::name}}` (`macros/definitions/primitives.ts:126-140`): its name trimmed and folded to lower case; what has none gives nothing. */
+const OUTLET = /\{\{\s*outlet\s*::([^{}]*)\}\}/gi;
+
+/** What a text becomes under the macros the stand-in knows: an outlet's text where one stands, the "at marker" pool where `{{wi_marker}}` does. */
+function expandMacros(text: string, outlets: Record<string, string>, pool: string): string {
+  return text.replace(OUTLET, (_all, args: string) => outlets[args.split("::")[0]!.trim().toLowerCase()] ?? "").replace(WI_MARKER, () => pool);
+}
+
+/** `normalizePromptBlockText` (`services/prompt-assembly.service.ts:6999-7001`): runs of blank lines folded to one, the ends trimmed. */
+const normalizeBlockText = (text: string): string => text.replace(/\n{3,}/g, "\n\n").trim();
+
+/** `getWorldInfoEntryLabel` (`services/world-info-activation.service.ts:1036-1047`): the comment, else the primary keys, else the secondary keys, each trimmed and the empty ones left out, else the entry's id's first eight characters. */
+function entryLabel(e: Entry): string {
+  const comment = e.comment?.trim();
+  if (comment) return comment;
+  const primary = (e.keys ?? []).map((k) => k.trim()).filter((k) => k !== "");
+  if (primary.length > 0) return primary.join(", ");
+  const secondary = (e.keysecondary ?? []).map((k) => k.trim()).filter((k) => k !== "");
+  if (secondary.length > 0) return secondary.join(", ");
+  return `(unnamed entry ${e.id.slice(0, 8)})`;
+}
+
+/** `getRuntimeWorldInfoEntryLabel` (`:516-526`): the comment, else every key, primary then secondary, trimmed, else the id's first eight characters. */
+function runtimeLabel(e: Entry): string {
+  const comment = e.comment?.trim();
+  if (comment) return comment;
+  const keys = [...(e.keys ?? []), ...(e.keysecondary ?? [])].map((k) => k.trim()).filter((k) => k !== "");
+  return keys.length > 0 ? keys.join(", ") : `(unnamed entry ${e.id.slice(0, 8)})`;
+}
 
 /**
- * The activated entries by where they go (`bucketByPosition`, `services/world-info-activation.service.ts:952-1022`), each named by
- * its label (`getWorldInfoEntryLabel`, `:1036-1047`), then each text through the macro pass (`services/prompt-assembly.service.ts:2994-3025`),
- * which strips a lone secret mark (the stand-in's `stripClosingTags`), an entry left with no text dropped (`:3026`). The scan that
- * activated them read their raw text (`services/world-info-activation.service.ts:753-758`), so stripping a mark here changes no
- * entry's activation.
+ * `orderWorldInfoForOutput` (`services/world-info-output-order.ts`): the entries each extension asked to have in `insertion` order
+ * (by `order_value`, equal ones as they came, the last of them first before the reverse puts it right) keep the places they took among
+ * the activated entries and are put in that order within them; entries placed in the history are left out of it.
  */
-function placedLore(active: readonly Entry[]): { before: PlacedLore[]; after: PlacedLore[]; atMarker: PlacedLore[] } {
-  const placed = { before: [] as PlacedLore[], after: [] as PlacedLore[], atMarker: [] as PlacedLore[] };
-  for (const e of active) {
-    const content = stripClosingTags(e.content);
+function orderForOutput(entries: readonly Entry[], insertionOrder: ReadonlyMap<string, string>, placed: ReadonlySet<string>): Entry[] {
+  if (insertionOrder.size === 0) return [...entries];
+  const groups = new Map<string, { indices: number[]; entries: Entry[] }>();
+  entries.forEach((entry, index) => {
+    const extension = insertionOrder.get(entry.id);
+    if (extension === undefined || placed.has(entry.id)) return;
+    const group = groups.get(extension) ?? { indices: [], entries: [] };
+    group.indices.push(index);
+    group.entries.push(entry);
+    groups.set(extension, group);
+  });
+  const ordered = [...entries];
+  for (const group of groups.values()) {
+    if (group.entries.length < 2) continue;
+    group.entries.sort((a, b) => (b.order_value ?? 100) - (a.order_value ?? 100)).reverse();
+    group.indices.forEach((at, k) => {
+      ordered[at] = group.entries[k]!;
+    });
+  }
+  return ordered;
+}
+
+/**
+ * `resolveWorldInfoOutlets` (`services/prompt-assembly.service.ts:4701-4794`): every entry that names an outlet gives its text to it, those
+ * of one outlet joined by a blank line; each outlet's text then goes through the macros, an outlet naming another read again, up to five times.
+ */
+function resolveOutlets(entries: readonly Entry[]): Record<string, string> {
+  const templates = new Map<string, string>();
+  for (const e of entries) {
+    const name = typeof e.outlet_name === "string" ? e.outlet_name.trim().toLowerCase() : "";
+    if (name === "" || e.content.trim() === "") continue;
+    templates.set(name, templates.has(name) ? `${templates.get(name)}\n\n${e.content}` : e.content);
+  }
+  let resolved: Record<string, string> = Object.fromEntries(templates);
+  for (let pass = 0; pass < 5 && templates.size > 0; pass++) {
+    const next: Record<string, string> = {};
+    for (const [name, template] of templates) next[name] = stripClosingTags(expandMacros(template, resolved, ""));
+    const changed = Object.keys(next).some((name) => next[name] !== resolved[name]);
+    resolved = next;
+    if (!changed) break;
+  }
+  return resolved;
+}
+
+/**
+ * The activated entries by where they go (`bucketByPosition`, `services/world-info-activation.service.ts:952-1022`): 0 before, 1 after, 2 and 3
+ * around the first history message, 4 at its depth, 5 and 6 as 2 and 3, 7 in the "at marker" pool or, with a marker named, pinned beside its
+ * block, 8 in none; each named by its label, then each text through the macro pass (`services/prompt-assembly.service.ts:2994-3025`),
+ * which strips a lone secret mark (the stand-in's `stripClosingTags`) and gives an outlet's text where `{{outlet::name}}` stands, an entry left
+ * with no text dropped (`:3026`, `pruneEmptyWorldInfoCacheEntries`). The scan that activated them read their raw text
+ * (`services/world-info-activation.service.ts:753-758`), so stripping a mark here changes no entry's activation. An entry an interceptor
+ * placed in the history leaves the buckets (`:2472-2491`); the entries are ordered for output first (`:2479-2483`).
+ */
+function placedLore(active: readonly Entry[], world: Ending["world"]): Lore {
+  const requested = world?.placements ?? new Map<string, Placement>();
+  const runtime = active
+    .filter((e) => requested.has(e.id))
+    .map((e): RuntimeLore => ({ id: e.id, content: e.content, label: runtimeLabel(e), orderValue: e.order_value ?? 100, placement: requested.get(e.id)! }))
+    .sort((a, b) => b.orderValue - a.orderValue)
+    .reverse();
+  const runtimeIds = new Set(runtime.map((r) => r.id));
+  const output = orderForOutput(active, world?.insertionOrder ?? new Map<string, string>(), runtimeIds);
+  const outlets = resolveOutlets(output);
+  const placed: Lore = { before: [], after: [], anBefore: [], anAfter: [], depth: [], emBefore: [], emAfter: [], atMarker: [], pinned: [], runtime: [], outlets };
+  const text = (raw: string): string => stripClosingTags(expandMacros(raw, outlets, ""));
+  for (const e of output) {
+    if (runtimeIds.has(e.id) || e.content.trim() === "") continue;
+    const content = text(e.content);
     if (content.trim() === "") continue;
-    const keys = (e.keys ?? []).map((k) => k.trim()).filter((k) => k !== "");
-    const label = e.comment?.trim() || (keys.length > 0 ? keys.join(", ") : `(unnamed entry ${e.id.slice(0, 8)})`);
-    const lore = { content, role: e.role ?? "system", label };
-    if (e.position === 1) placed.after.push(lore);
-    else if (e.position === 7) placed.atMarker.push(lore);
-    else placed.before.push(lore);
+    const lore: PlacedLore = { content, role: e.role ?? "system", label: entryLabel(e) };
+    switch (e.position ?? 0) {
+      case 1:
+        placed.after.push(lore);
+        break;
+      case 2:
+        placed.anBefore.push(lore);
+        break;
+      case 3:
+        placed.anAfter.push(lore);
+        break;
+      case 4:
+        placed.depth.push({ ...lore, depth: e.depth ?? 4 });
+        break;
+      case 5:
+        placed.emBefore.push(lore);
+        break;
+      case 6:
+        placed.emAfter.push(lore);
+        break;
+      case 7:
+        if (typeof e.wi_marker === "string" && e.wi_marker.length > 0) placed.pinned.push({ ...lore, marker: e.wi_marker, side: e.wi_marker_side === "before" ? "before" : "after" });
+        else placed.atMarker.push(lore);
+        break;
+      case 8:
+        break;
+      default:
+        placed.before.push(lore);
+    }
+  }
+  for (const r of runtime) {
+    const content = text(r.content);
+    if (content.trim() !== "") placed.runtime.push({ ...r, content });
   }
   return placed;
+}
+
+/** `injectWorldInfoAt` (`services/prompt-assembly.service.ts:6582-6610`): each entry spliced in from `insertAt` on, flagged, and named by the position and its label; how many went in. */
+function injectLoreAt(prompt: LlmMessage[], breakdown: BreakdownEntry[], entries: readonly PlacedLore[], insertAt: number, name: string): number {
+  let at = Math.max(0, Math.min(insertAt, prompt.length));
+  for (const e of entries) {
+    prompt.splice(at, 0, { role: e.role, content: e.content, __worldInfoSource: true });
+    breakdown.push({ type: "world_info", name: `${name}: ${e.label}`, role: e.role, content: e.content });
+    at++;
+  }
+  return entries.length;
+}
+
+/** `pushPinnedMarkerEntries` (`:6618-6632`): the entries pinned beside a block, flagged, after what is in the prompt, named `WI @ <marker>: <label>`. */
+function pushPinned(prompt: LlmMessage[], breakdown: BreakdownEntry[], entries: readonly PinnedLore[]): void {
+  for (const e of entries) {
+    prompt.push({ role: e.role, content: e.content, __worldInfoSource: true });
+    breakdown.push({ type: "world_info", name: `WI @ ${e.marker}: ${e.label}`, role: e.role, content: e.content });
+  }
+}
+
+/**
+ * `insertRuntimeWorldInfoIntoTaggedHistory` (`services/prompt-assembly.service.ts:425-487`), in place: each entry in turn counted from the start or
+ * the end of the history messages as they stand (the ones placed before it among them), and spliced in; with no history, at `fallbackIndex`.
+ */
+function insertRuntime(prompt: LlmMessage[], entries: readonly RuntimeLore[], fallbackIndex: number): void {
+  const history = new Set<LlmMessage>(prompt.filter((m) => m.__chatHistorySource === true));
+  const fallback = Math.max(0, Math.min(Math.trunc(fallbackIndex), prompt.length));
+  for (const entry of entries) {
+    const places: number[] = [];
+    prompt.forEach((m, i) => {
+      if (history.has(m)) places.push(i);
+    });
+    const span = places.length;
+    const start = entry.placement.direction === "from_start" ? entry.placement.depth : span - entry.placement.depth;
+    // `Array.splice` takes a negative start as an offset from the end.
+    const boundary = start < 0 ? Math.max(span + start, 0) : Math.min(start, span);
+    const at = span === 0 ? fallback : boundary === span ? places[span - 1]! + 1 : places[boundary]!;
+    const message: LlmMessage = { role: entry.placement.role, content: entry.content, __worldInfoSource: true, __runtimeWorldInfoPlacementId: entry.id };
+    prompt.splice(at, 0, message);
+    history.add(message);
+  }
 }
 
 /**
@@ -247,17 +464,32 @@ function insertIntoHistory(messages: LlmMessage[], blocks: readonly InHistory[])
 export function assemble(preset: Preset, active: readonly Entry[], messages: readonly ChatMessage[], ending: Ending): Assembled {
   const breakdown: BreakdownEntry[] = [];
   const prompt: LlmMessage[] = [];
-  const lore = placedLore(active);
+  const lore = placedLore(active, ending.world);
   const pending: InHistory[] = [];
   let firstChatIdx = -1;
   let chatHistoryCount = 0;
   let hasWiBefore = false;
   let hasWiAfter = false;
   const blocks = preset.blocks.some((b) => b.marker === "chat_history") ? preset.blocks : [...preset.blocks, { id: "", name: "Chat History", role: "system" as const, content: "", marker: "chat_history" as const }];
+  // Lore pinned beside a marker block, by the marker's id and the side (`pinnedByMarker`, `:3092-3106`). The "after" ones of a block are put in
+  // at the top of the next turn of the loop, so they follow all that the block put in, and the last block's after the loop.
+  const pinnedBy = (marker: string, side: "before" | "after"): PinnedLore[] => lore.pinned.filter((p) => p.marker === marker && p.side === side);
+  let pendingPinnedAfter: PinnedLore[] | null = null;
+  // The "at marker" pool, joined by a blank line (`:3034-3041`).
+  const pool = lore.atMarker.map((e) => e.content).join("\n\n");
   // The assembly loop (`services/prompt-assembly.service.ts:3110-3664`), block by block in the preset's order.
   for (const block of blocks) {
-    // A second World Info marker of one kind is skipped (`:3147-3148`).
+    if (pendingPinnedAfter !== null) {
+      pushPinned(prompt, breakdown, pendingPinnedAfter);
+      pendingPinnedAfter = null;
+    }
+    // A second World Info marker of one kind is skipped (`:3147-3148`), before any lore is pinned beside it.
     if ((block.marker === "world_info_before" && hasWiBefore) || (block.marker === "world_info_after" && hasWiAfter)) continue;
+    if (block.marker !== undefined) {
+      pushPinned(prompt, breakdown, pinnedBy(block.marker, "before"));
+      const after = pinnedBy(block.marker, "after");
+      if (after.length > 0) pendingPinnedAfter = after;
+    }
     if (block.marker === "chat_history") {
       // The chat's history (`:3236-3463`): its visible messages, each flagged with its id and number, then queued sends joined before
       // anything is spliced into it. Its breakdown entry is pushed with the count before the join, and read again at the end.
@@ -289,30 +521,47 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
       }
       continue;
     }
-    // A block's own text (`:3600-3663`), its `{{wi_marker}}` taking the "at marker" lore joined by a blank line (`:3034-3041`): lore
-    // inside the block's text, with no flag of its own.
-    const content = block.content.replace(WI_MARKER, () => lore.atMarker.map((e) => e.content).join("\n\n"));
-    if (block.depth !== undefined) pending.push({ role: block.role, depth: Math.max(0, block.depth), content, name: block.name, blockId: block.id, worldInfo: false });
+    // A block's own text (`:3600-3663`): its `{{wi_marker}}` taking the "at marker" lore and its `{{outlet::name}}` an outlet's text (`:3034-3041`),
+    // lore inside the block's text with no flag of its own; runs of blank lines folded and the ends trimmed, and a block left with no text not sent
+    // (`:3638-3663`). One that expands the pool counts only its wrapper, the text with an empty pool (`evaluatePromptBlockTokenCountContent`, `:1500-1515`).
+    const content = normalizeBlockText(expandMacros(block.content, lore.outlets, pool));
+    if (content === "") continue;
+    const usesPool = WI_MARKER_USED.test(block.content);
+    const tokenCountContent = usesPool ? normalizeBlockText(expandMacros(block.content, lore.outlets, "")) : undefined;
+    if (block.depth !== undefined) pending.push({ role: block.role, depth: Math.max(0, block.depth), content, ...(usesPool ? { tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), name: block.name, blockId: block.id, worldInfo: false });
     else {
       prompt.push({ role: block.role, content });
-      breakdown.push({ type: "block", name: block.name, role: block.role, content, blockId: block.id });
+      breakdown.push({ type: "block", name: block.name, role: block.role, content, ...(usesPool ? { tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: block.id });
     }
   }
-  // Lore of a position with no marker in the preset (`:3728-3756`): "before" just before the history, "after" just after it.
-  if (!hasWiBefore && lore.before.length > 0) {
-    prompt.splice(firstChatIdx, 0, ...lore.before.map((e): LlmMessage => ({ role: e.role, content: e.content, __worldInfoSource: true })));
-    for (const e of lore.before) breakdown.push({ type: "world_info", name: `World Info Before (auto): ${e.label}`, role: e.role, content: e.content });
-    firstChatIdx += lore.before.length;
+  // The final block's lore pinned after it.
+  if (pendingPinnedAfter !== null) pushPinned(prompt, breakdown, pendingPinnedAfter);
+  // Lore of a position with no marker in the preset (`:3728-3756`): "before" just before the history, "after" just after it, 2 and 3 and 5 and 6 around
+  // its first message, 4 at its depth from the end, then what an interceptor placed in the history (`:3759-3836`), each named by the position and its label.
+  // Each position reads the history's first place as the ones before it left it: only "before" and the "AN before" entries move it.
+  if (!hasWiBefore && lore.before.length > 0) firstChatIdx += injectLoreAt(prompt, breakdown, lore.before, firstChatIdx, "World Info Before (auto)");
+  if (!hasWiAfter && lore.after.length > 0) injectLoreAt(prompt, breakdown, lore.after, firstChatIdx + chatHistoryCount, "World Info After (auto)");
+  if (lore.anBefore.length > 0) firstChatIdx += injectLoreAt(prompt, breakdown, lore.anBefore, firstChatIdx, "WI AN Before");
+  if (lore.anAfter.length > 0) injectLoreAt(prompt, breakdown, lore.anAfter, firstChatIdx + 1, "WI AN After");
+  if (lore.emBefore.length > 0) injectLoreAt(prompt, breakdown, lore.emBefore, firstChatIdx, "WI EM Before");
+  if (lore.emAfter.length > 0) injectLoreAt(prompt, breakdown, lore.emAfter, firstChatIdx + 1, "WI EM After");
+  for (const e of lore.depth) {
+    prompt.splice(Math.max(0, prompt.length - e.depth), 0, { role: e.role, content: e.content, __worldInfoSource: true });
+    breakdown.push({ type: "world_info", name: `WI Depth ${e.depth}: ${e.label}`, role: e.role, content: e.content });
   }
-  if (!hasWiAfter && lore.after.length > 0) {
-    prompt.splice(Math.min(firstChatIdx + chatHistoryCount, prompt.length), 0, ...lore.after.map((e): LlmMessage => ({ role: e.role, content: e.content, __worldInfoSource: true })));
-    for (const e of lore.after) breakdown.push({ type: "world_info", name: `World Info After (auto): ${e.label}`, role: e.role, content: e.content });
-  }
+  insertRuntime(prompt, lore.runtime, firstChatIdx);
+  for (const e of lore.runtime) breakdown.push({ type: "world_info", name: `WI Chat Depth ${e.placement.direction} ${e.placement.depth}: ${e.label}`, role: e.placement.role, content: e.content });
   // The "at marker" lore, named in the breakdown, its tokens counted in the block that holds it (`:3838-3847`).
   for (const e of lore.atMarker) breakdown.push({ type: "world_info", name: `WI At Marker: ${e.label}`, role: e.role, content: e.content, marker: "wi_marker", excludeFromTotal: true });
   // In-history blocks and markers spliced in, then named (`:3881-3902`).
   insertIntoHistory(prompt, pending);
-  for (const p of pending) breakdown.push(p.worldInfo ? { type: "world_info", name: p.name, role: p.role, content: p.content } : { type: "block", name: p.name, role: p.role, content: p.content, blockId: p.blockId });
+  for (const p of pending) {
+    if (p.worldInfo) breakdown.push({ type: "world_info", name: p.name, role: p.role, content: p.content });
+    else breakdown.push({ type: "block", name: p.name, role: p.role, content: p.content, ...(p.attributesWorldInfoMarkerTokens === true ? { tokenCountContent: p.tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: p.blockId });
+  }
+  // A block that expanded the pool counts only its wrapper, so the pool's rows count (`attributeExpandedMarkerWorldInfoTokens`, `:1522-1533`); the
+  // exclusion stays where the macro was in no block that was sent.
+  if (breakdown.some((e) => e.attributesWorldInfoMarkerTokens === true)) for (const e of breakdown) if (e.type === "world_info" && e.marker === "wi_marker") delete e.excludeFromTotal;
   // A continue's nudge, without "Continue prefill" (`services/prompt-assembly.service.ts:3987-4008`): marked, so that it is moved to stand
   // after the continued message below.
   if (ending.type === "continue" && preset.continuePrefill !== true) {

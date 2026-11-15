@@ -37,7 +37,6 @@ test("each fact's counts change exactly when its own records are written, and ne
   b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", BOOK.id, BOOK.name, USER);
   for (const [i, e] of [STAIR, SKERRY].entries()) b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", e.id, BOOK.id, String(i + 1), JSON.stringify(e.keys), e.content, e.title);
   b.db.run("UPDATE chats SET metadata = ? WHERE id = ?", JSON.stringify({ chat_world_book_ids: [BOOK.id] }), CHAT);
-  b.host.chats.get(CHAT)!.books = [STAIR, SKERRY].map((e) => ({ id: e.id, book: BOOK.id, content: e.content, comment: e.title, keys: e.keys }));
 
   b.host.send(CHAT, "I climb the stair to the lamp room.");
   const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });

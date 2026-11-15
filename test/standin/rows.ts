@@ -8,7 +8,7 @@
 
 import type { StandInDb } from "./db";
 import { ExtensionHost } from "./host";
-import type { Entry } from "./lore";
+import { Library, type Character } from "./books";
 import type { Role } from "./steps";
 
 export interface ChatMessage {
@@ -32,9 +32,9 @@ export interface ChatMessage {
 export interface Chat {
   id: string;
   user: string;
-  character: { id: string; name: string };
+  /** The chat's character, its card's `extensions` as far as lore reads them: which books it has (`extensions.world_book_ids`, else `world_book_id`). */
+  character: Character;
   messages: ChatMessage[];
-  books: Entry[];
   metadata?: Record<string, unknown>;
   /** The chat's name (`chats.name`, empty unless named). */
   name?: string;
@@ -72,6 +72,8 @@ export class ChatRows extends ExtensionHost {
   db: StandInDb | null = null;
   /** The host's clock, for its rows' stamps: Lumiverse stamps seconds (`services/chats.service.ts:2640`). */
   now: () => number = () => Date.now();
+  /** The books, characters, personas and settings a generation reads its lore sources from: kept here and, with a database, written to it and read from it. Set `db` before adding any. */
+  readonly library = new Library(() => this.db, () => this.now());
 
   /**
    * `eventBus.emit` (`ws/bus.ts:502-544`): a frame to each of the user's sockets at once, through the
@@ -179,8 +181,8 @@ export class ChatRows extends ExtensionHost {
   addChat(chat: Chat): void {
     this.chats.set(chat.id, chat);
     this.numbered(chat);
+    this.library.addCharacter(chat.user, chat.character);
     if (this.db === null) return;
-    this.db.run("INSERT OR IGNORE INTO characters (id, name, user_id) VALUES (?, ?, ?)", chat.character.id, chat.character.name, chat.user);
     this.db.run("INSERT INTO chats (id, character_id, name, metadata, user_id) VALUES (?, ?, ?, ?, ?)", chat.id, chat.character.id, chat.name ?? "", JSON.stringify(chat.metadata ?? {}), chat.user);
     for (const m of chat.messages) this.createRow(chat, m, m.role === "user" ? "User" : chat.character.name);
   }

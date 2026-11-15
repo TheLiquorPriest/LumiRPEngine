@@ -28,7 +28,14 @@ function fenLines(...lines: Omit<ChatMessage, "id">[]): ChatMessage[] {
   return [{ id: "m0", role: "assistant", content: "GREET The fen is quiet under the fog." }, ...lines.map((m, k) => ({ ...m, id: `m${k + 1}` }))];
 }
 
-/** A stand-in Lumiverse with the fen's chat and its book on a model that answers every request with one line, and the database its rows are written to. */
+/** The books the tests' entries name, by id, with the names Lumiverse's rows give them. */
+const BOOK_NAMES: Record<string, string> = { "book-fen": "Fen lore", "book-common": "Common lore", "book-peer": "Visitor's notes" };
+
+/**
+ * A stand-in Lumiverse with the fen's chat and its books on a model that answers every request with one line, and the database its rows are
+ * written to. Each book the entries name is a book of its own: the fen's is the character's, the common one is the user's global one, and
+ * the visitor's is relayed from a multiplayer peer.
+ */
 function fen(messages: ChatMessage[], books: Entry[]): { lv: StandIn; calls: () => number } {
   const lv = new StandIn();
   const db = new StandInDb();
@@ -42,8 +49,10 @@ function fen(messages: ChatMessage[], books: Entry[]): { lv: StandIn; calls: () 
   });
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-fen", { id: "preset-fen", name: "Fen", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a fen at dusk." }] });
-  lv.worldBooks.set("book-fen", { name: "Fen lore", source: "character" });
-  lv.addChat({ id: CHAT, user: USER, character: { id: "char-wynn", name: "Wynn" }, messages, books });
+  for (const id of new Set(books.map((e) => e.book))) lv.library.addBook({ id, name: BOOK_NAMES[id] ?? id, user: USER, entries: books.filter((e) => e.book === id) });
+  if (books.some((e) => e.book === "book-common")) lv.library.setSetting(USER, "globalWorldBooks", ["book-common"]);
+  if (books.some((e) => e.book === "book-peer")) lv.peerBooks.add("book-peer");
+  lv.addChat({ id: CHAT, user: USER, character: { id: "char-wynn", name: "Wynn", extensions: { world_book_ids: ["book-fen"] } }, messages });
   return { lv, calls: () => calls };
 }
 
@@ -66,7 +75,7 @@ function wiStateOf(lv: StandIn): Record<string, unknown> | undefined {
   return (JSON.parse(String(row.metadata)) as { wi_state?: Record<string, unknown> }).wi_state;
 }
 
-const uidOf = (lv: StandIn, id: string): string => lv.chats.get(CHAT)!.books.find((e) => e.id === id)!.uid!;
+const uidOf = (lv: StandIn, id: string): string => String(lv.db!.rows("SELECT uid FROM world_book_entries WHERE id = ?", id)[0]!.uid);
 const ids = (out: Outcome): string[] => out.worldInfo.activated.map((a) => a.id).sort();
 
 describe("which messages the scan reads (`services/world-info-activation.service.ts:733-762`; `services/prompt-assembly.service.ts:2289-2306`, `:5096-5110`)", () => {
@@ -226,7 +235,6 @@ describe("activation in Lumiverse's order (`services/world-info-activation.servi
       { id: "s-dupe-char", book: "book-fen", keys: ["wheel"], content: "DUPE-LORE It was rebuilt in spring." },
     ];
     const { lv } = fen(fenLines(), book);
-    lv.worldBooks.set("book-common", { name: "Common lore", source: "global" });
     lv.worldInfoSettings = { minPriority: 10 };
     expect(ids(await play(lv, said))).toEqual(["s-any", "s-dupe-char", "s-lowconst", "s-part", "s-regex"]);
     expect(told(lv).stats).toMatchObject({ evictedByMinPriority: 1, deduplicated: 1 });
@@ -300,7 +308,6 @@ describe("what Lumiverse tells of it (`services/generate.service.ts:1217-1231`, 
 
   test("the event and the context carry what Lumiverse puts in them", async () => {
     const { lv } = fen(fenLines(), book);
-    lv.worldBooks.set("book-peer", { name: "Visitor's notes", source: "peer" });
     lv.vectorSearch = (_query, candidates) => candidates.map((c) => ({ id: c.id, distance: 0.2, finalScore: 1.4 }));
     const seen: { context: Record<string, unknown>; told: number }[] = [];
     lv.install(["interceptor"]).registerInterceptor(async (messages, context) => {
@@ -309,13 +316,13 @@ describe("what Lumiverse tells of it (`services/generate.service.ts:1217-1231`, 
     }, {});
     await play(lv, "I pole the punt past a heron.");
 
-    // The event, after the interceptors: every entry with its book's name and where it is attached, a peer's as "peer", and its tokens.
+    // The event, after the interceptors: every entry with its book's name and where it is attached, a peer's as "peer" and, as Lumiverse names none of a peer's books, with no name, and its tokens.
     expect(seen[0]!.told).toBe(0);
     const event = told(lv);
     expect(event.chatId).toBe(CHAT);
     expect(event.entries).toEqual([
       { id: "e-gate", comment: "The gate", keys: [], source: "keyword", score: undefined, bookId: "book-fen", bookSource: "character", bookName: "Fen lore", estimatedTokens: 9 },
-      { id: "e-visitor", comment: "A visitor's punt", keys: ["punt"], source: "keyword", score: undefined, bookId: "book-peer", bookSource: "peer", bookName: "Visitor's notes", estimatedTokens: 9 },
+      { id: "e-visitor", comment: "A visitor's punt", keys: ["punt"], source: "keyword", score: undefined, bookId: "book-peer", bookSource: "peer", bookName: undefined, estimatedTokens: 9 },
       { id: "e-heron", comment: "The heron", keys: [], source: "vector", score: 1.4, bookId: "book-fen", bookSource: "character", bookName: "Fen lore", estimatedTokens: 8 },
     ]);
     expect(event.stats).toMatchObject({ totalCandidates: 3, keywordActivated: 2, vectorActivated: 1, totalActivated: 3, deduplicated: 0, estimatedTokens: 26, queryPreview: "[CHARACTER | Wynn]: GREET The fen is quiet under the fog.\n[USER | User]: I pole the punt past a heron.", vectorRetrieval: { eligibleCount: 1, hitsBeforeThreshold: 1, hitsAfterThreshold: 1, topK: 4, blockerMessages: [] } });
