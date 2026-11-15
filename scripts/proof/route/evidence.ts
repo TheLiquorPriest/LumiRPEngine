@@ -7,6 +7,8 @@
 // scenario or gate with its screens (`play-01/world-1440-four-values.png`: the play, the page, the
 // width, the part it shows), `result.json`, `notes.md` saying part by part in the plan's words which
 // screen shows it, and `internal/` for route answers, rows and logs, marked as supporting evidence.
+// A scenario played in stages has a folder for each stage played inside its own (`40/before/`), each
+// holding what a scenario's folder holds; its folder holds nothing else (`folderOf`, `form.ts`).
 //
 // A screen counts only when it shows what its check saw: the page it names was the page showing, it is
 // not blank, and the texts the check said show the part are in the text visible in the saved image
@@ -18,17 +20,20 @@
 // every page of the part at every width, every play accounted for, screens that are in the folder and
 // show what was seen, a record that is the folder's own scenario or gate and carries its row's words,
 // notes that name the record's screens. Anything else is a fault of the evidence, and a fault of the
-// evidence fails the result it concerns: it is never a pass.
+// evidence fails the result it concerns: it is never a pass. A scenario played in stages is read back
+// stage by stage and has one result over all of them: every stage the run asked must be in its own
+// folder, every part in exactly one stage, and the row's words carried by its stages together.
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { SettingsReply } from "../../../src/shared/api";
 import { wordFaults } from "./check";
-import { gateIdFault, pageSlug, scenarioId, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
+import { folderOf, gateIdFault, isStageName, pageSlug, parseStageId, scenarioId, stageId, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
 import type { AgentFacts, Browser, Kept, Mode, RunFacts, Shot } from "./host";
 import { LIST } from "./list";
-import { describeVerdict, formResult, MEASURED_OUTCOMES, outcomeOf, SEEN_OUTCOMES, type FormRecord, type FormResult, type Glance, type Instance, type Outcome, type PartRecord } from "./results";
+import { describeVerdict, formResult, measuredOutcomes, outcomeOf, SEEN_OUTCOMES, wholeResult, type FormRecord, type FormResult, type Glance, type Instance, type Outcome, type PartRecord } from "./results";
 
 /** `run.json`: what a run stood on, who started it, when, and what it was asked. */
 export interface RunRecord {
@@ -48,6 +53,8 @@ export interface RunRecord {
   repeats: number;
   /** What went wrong in the run itself, outside any form (the host or the lock could not be put away). A record that has none may leave it out. */
   faults?: string[];
+  /** Whether the run gives a verdict or is a trial, and why: its one home. A record without it gives no verdict. */
+  standing?: Standing;
   rpe: { commit: string; dirty: boolean };
   rph: { commit: string; pin: string | null; pinned: boolean };
   lumiverse: { version: string };
@@ -55,6 +62,50 @@ export interface RunRecord {
   agents: AgentFacts[];
   settings: SettingsReply;
 }
+
+/** What a run's standing was worked out from: the shipped tree the server ran and the build's, by hash, the paths at which they differ, and each layer of the user's own with the guidance it holds. */
+export interface StandingFrom {
+  served: string;
+  build: string;
+  changed: string[];
+  layers: { level: string; hash: string; guidance: string[] }[];
+}
+
+/** Whether a run gives a verdict or is a trial, and why (plan §17: a verdict comes only from shipped guidance on a clean build). */
+export interface Standing {
+  is: "verdict" | "trial";
+  /** Why it is a trial; empty for a verdict. */
+  why: string[];
+  /** Null when the host gave no account of the guidance the run stood on. */
+  from: StandingFrom | null;
+}
+
+/**
+ * A run's standing from what it stood on, the same way when the run is made and when its bundle is
+ * read back. A verdict needs all of it: RPE's tree at its commit, RPH at the commit RPE pins, the
+ * shipped tree the server ran equal to the build's, and no layer of the user's own holding guidance. A
+ * fact missing is a trial, with that as its why.
+ */
+export function standingOf(rpe: RunRecord["rpe"], rph: RunRecord["rph"], from: StandingFrom | null): Standing {
+  const why: string[] = [];
+  if (rpe.dirty) why.push(`RPE's tree held changes beyond its commit ${rpe.commit}`);
+  if (!rph.pinned) why.push(`RPH as installed (${rph.commit}) is not the commit RPE pins (${rph.pin ?? "none"})`);
+  if (from === null) why.push("the host gave no account of the guidance the run stood on (the shipped tree it served, the build's own, the layers of the user's own), so nothing shows its agents ran under the shipped guidance");
+  else {
+    if (from.served !== from.build || from.changed.length > 0) why.push(`the shipped tree the server ran is not the build's: ${from.changed.length} ${from.changed.length === 1 ? "path differs" : "paths differ"}${from.changed.length > 0 ? ` (${from.changed.join(", ")})` : ""}`);
+    for (const layer of from.layers) if (layer.guidance.length > 0) why.push(`the ${layer.level} layer holds guidance of its own, so its agents did not run under the shipped guidance: ${layer.guidance.join(", ")}`);
+  }
+  return { is: why.length === 0 ? "verdict" : "trial", why, from };
+}
+
+/** The standing a bundle gives, worked out again from what its run.json says the run stood on, never taken on its word; a run.json without one gives no verdict. */
+export function standingOfRun(run: RunRecord): { is: "verdict" | "trial"; why: string[] } {
+  if (!run.standing) return { is: "trial", why: ["run.json does not give the run's standing, so it gives no verdict"] };
+  const { is, why } = standingOf(run.rpe, run.rph, run.standing.from);
+  return { is, why };
+}
+
+const trialOf = (run: RunRecord): boolean => standingOfRun(run).is === "trial";
 
 /** A bundle that cannot be read as evidence, with why. */
 export class BundleRefused extends Error {}
@@ -101,28 +152,29 @@ export class Bundle {
     writeFileSync(join(this.dir, "run.json"), `${JSON.stringify(record, null, 2)}\n`);
   }
 
-  /** The form's folder, made with its `internal/` and the line that marks what is in there. */
+  /** The folder of what the run asked by `id` (a stage's in its scenario's, `folderOf`), made with its `internal/` and the line that marks what is in there. */
   formDir(id: string): string {
-    const dir = join(this.dir, id);
+    const dir = join(this.dir, folderOf(id));
     mkdirSync(join(dir, "internal"), { recursive: true });
     writeFileSync(join(dir, "internal", SUPPORTING), "Supporting evidence only: route answers, rows and logs kept beside the screens. Nothing here counts as proof of a scenario (plan §17.0).\n");
     return dir;
   }
 
-  /** Saves a screen in the play's folder, named for the page it showed, its width and the part; returns its name from the form's folder. */
+  /** Saves a screen in the play's folder, named for the page it showed, its width and the part; returns its name from the form's folder (a stage's own folder for a stage). */
   saveScreen(id: string, play: number, page: string, part: string, shot: Shot): string {
+    const at = join(this.dir, folderOf(id));
     const folder = `play-${String(play).padStart(2, "0")}`;
-    mkdirSync(join(this.dir, id, folder), { recursive: true });
+    mkdirSync(join(at, folder), { recursive: true });
     const base = `${pageSlug(page)}-${shot.width}-${part}`;
     let name = `${folder}/${base}.${shot.format}`;
-    for (let n = 2; existsSync(join(this.dir, id, name)); n++) name = `${folder}/${base}-${n}.${shot.format}`;
-    writeFileSync(join(this.dir, id, name), shot.image);
+    for (let n = 2; existsSync(join(at, name)); n++) name = `${folder}/${base}-${n}.${shot.format}`;
+    writeFileSync(join(at, name), shot.image);
     return name;
   }
 
   /** Supporting evidence of one play, in `internal/`. */
   keep(id: string, play: number, name: string, data: Kept): void {
-    const dir = join(this.dir, id, "internal", `play-${String(play).padStart(2, "0")}`);
+    const dir = join(this.dir, folderOf(id), "internal", `play-${String(play).padStart(2, "0")}`);
     mkdirSync(dir, { recursive: true });
     const safe = name.replace(/[\\/]+/g, "-");
     if (typeof data === "string") writeFileSync(join(dir, /\.\w+$/.test(safe) ? safe : `${safe}.txt`), data);
@@ -131,20 +183,26 @@ export class Bundle {
   }
 
   writeResult(record: FormRecord): void {
-    writeFileSync(join(this.dir, record.id, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+    writeFileSync(join(this.dir, folderOf(askedIdOf(record)), "result.json"), `${JSON.stringify(record, null, 2)}\n`);
   }
 
-  writeNotes(record: FormRecord): void {
-    writeFileSync(join(this.dir, record.id, "notes.md"), notesOf(record, this.run));
+  writeNotes(record: FormRecord, trial = false): void {
+    writeFileSync(join(this.dir, folderOf(askedIdOf(record)), "notes.md"), notesOf(record, this.run, trial));
   }
 }
 
-/** The run's record from the host's facts. RPH is the pinned commit when the two name one commit, whether either is written short or whole. */
-export function runRecord(facts: RunFacts, fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings">): RunRecord {
+/** The id a run asked a record's form by: the scenario's number or the gate's id, or for a stage `<number>:<stage>`. */
+export function askedIdOf(record: Pick<FormRecord, "id" | "stage">): string {
+  return record.stage ? stageId(record.id, record.stage.name) : record.id;
+}
+
+/** The run's record from the host's facts, its standing worked out from what the host said the run stood on (none said: a trial). RPH is the pinned commit when the two name one commit, whether either is written short or whole. */
+export function runRecord(facts: RunFacts, fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing">, from: StandingFrom | null = null): RunRecord {
   const { commit, pin } = facts.rph;
   // Seven characters is the shortest form git writes a commit in.
   const pinned = pin !== null && Math.min(pin.length, commit.length) >= 7 && (pin.startsWith(commit) || commit.startsWith(pin));
-  return { ...fields, rpe: facts.rpe, rph: { commit, pin, pinned }, lumiverse: facts.lumiverse, browser: facts.browser, agents: facts.agents, settings: facts.settings };
+  const rph = { commit, pin, pinned };
+  return { ...fields, standing: standingOf(facts.rpe, rph, from), rpe: facts.rpe, rph, lumiverse: facts.lumiverse, browser: facts.browser, agents: facts.agents, settings: facts.settings };
 }
 
 /** What is missing from a host's facts, which would leave a run without its provenance. */
@@ -212,6 +270,7 @@ export async function lookAt(browser: Browser, sighting: Sighting, width: number
     what: blind ?? (seen?.found === false ? String(seen.what) : (seen?.what ?? "")),
     shows: seen?.found ? seen.shows : [],
     screen,
+    sha256: screen === null || !shot ? null : digestOf(shot.image),
     shotPage: shot?.page ?? null,
     shotText: shot?.text ?? null,
     unshown: null,
@@ -251,26 +310,29 @@ const OUTCOME_WORDS: Record<Outcome, string> = {
   unlooked: "never looked for",
   met: "met",
   unmet: "not met",
+  trial: "trial, no verdict",
+  "not judged": "not judged",
 };
 
-/** A form's heading: its number and the plan's own scenario, or the gate's id. */
-export function titleOf(record: Pick<FormRecord, "kind" | "number" | "id">): string {
+/** A form's heading: its number and the plan's own scenario, or the gate's id; a stage's adds its name. */
+export function titleOf(record: Pick<FormRecord, "kind" | "number" | "id" | "stage">): string {
   if (record.kind === "gate") return `Gate ${record.id}`;
-  return `Scenario ${record.number}: ${LIST.find((row) => row.number === record.number)?.title ?? "not in the list of the 68"}`;
+  return `Scenario ${record.number}: ${LIST.find((row) => row.number === record.number)?.title ?? "not in the list of the 68"}${record.stage ? `, stage ${record.stage.name}` : ""}`;
 }
 
-/** `notes.md`: part by part, in the plan's words, what came of every look and which screens show it. */
-export function notesOf(record: FormRecord, run: string): string {
+/** `notes.md`: part by part, in the plan's words, what came of every look and which screens show it; in a trial, what rests on guidance as figures only. */
+export function notesOf(record: FormRecord, run: string, trial = false): string {
   const where = record.mode === "rig" ? "in the rig" : "live on the test bed";
   const lines = [
     `# ${titleOf(record)}`,
     "",
     `${record.line ? `Plan line ${record.line}. ` : ""}${record.waves.length === 1 ? `Wave ${record.waves[0]}` : `Waves ${record.waves.join(", ")}`}. Played ${where}, ${record.plays === 1 ? "once" : `${record.plays} times, each on a fresh chat`}, in run ${run}.`,
+    ...(record.stage ? [`Played in stages (${record.stage.of.join(", ")}): this is stage ${record.stage.name}, its parts alone, each stage in its own folder.`] : []),
     "Only the screens named below count as proof (plan §17.0). `internal/` holds route answers, rows and logs: supporting evidence only.",
   ];
   for (const stop of record.stops) lines.push("", `Play ${stop.play} stopped: ${stop.why}.`);
   for (const part of record.parts) {
-    lines.push("", `## "${part.words}" (${part.mark})`, "", describeVerdict(part, record.mode)[0] ?? "");
+    lines.push("", `## "${part.words}" (${part.mark})`, "", describeVerdict(part, record.mode, trial)[0] ?? "");
     lines.push(part.measured ? `Measured: ${part.measured}.` : `Seen on: ${part.pages.join(", ")}.`, "");
     for (const instance of part.instances) lines.push(`- ${instanceLine(instance)}`);
   }
@@ -287,12 +349,27 @@ function instanceLine(instance: Instance): string {
 /** A scenario's or gate's folder as read back, its record re-checked against the files. */
 export interface ReadForm {
   id: string;
-  /** The record as re-checked against the folder; null when `result.json` is missing, unreadable or not a record. */
+  /** The record as re-checked against the folder; null when `result.json` is missing, unreadable or not a record, and for a scenario played in stages. */
   record: FormRecord | null;
-  /** Faults of the evidence, in plain words. */
+  /** For a scenario played in stages: each of its stages, in its order, played or not; null for one played whole and for a gate. */
+  stages: ReadStage[] | null;
+  /** Faults of the evidence, in plain words; a stage's are given with its name. */
   faults: string[];
-  /** Its result: `failed` whenever the folder has a fault of the evidence or no record, otherwise the record's own. */
+  /** Its result: `failed` whenever the folder has a fault of the evidence or no record, otherwise the record's own; for a scenario played in stages, one over all of them. */
   result: FormResult;
+}
+
+/** One stage of a scenario played in stages, as read back from its own folder. */
+export interface ReadStage {
+  name: string;
+  /** Its record as re-checked against its folder; null when it was not played, or its record is missing, unreadable or not a record. */
+  record: FormRecord | null;
+  /** Faults of the evidence in its folder. */
+  faults: string[];
+  /** Its own result; null when it was not played. */
+  result: FormResult | null;
+  /** For a stage not played: why, as the run said, or that the run did not ask for it. */
+  why: string | null;
 }
 
 export interface ReadBundle {
@@ -301,6 +378,8 @@ export interface ReadBundle {
   forms: ReadForm[];
   /** Faults of the run's own record, and what went wrong in the run outside any form. */
   faults: string[];
+  /** The run's standing, worked out again from what run.json says it stood on (`standingOfRun`). */
+  standing: { is: "verdict" | "trial"; why: string[] };
 }
 
 /** Reads a bundle back. Refused without a whole `run.json`: what is not tied to its build, its settings and who ran it proves nothing. */
@@ -318,18 +397,21 @@ export function readBundle(dir: string): ReadBundle {
   // runFaults has checked every field this reader and the report use.
   const run = raw as RunRecord;
   const faults: string[] = [...(run.faults ?? [])];
+  const standing = standingOfRun(run);
+  const said = run.standing;
+  if (said && (said.is !== standing.is || said.why.join("\n") !== standing.why.join("\n"))) faults.push(said.is === "verdict" ? `run.json says the run gives a verdict, and what it stood on makes it a trial: ${standing.why.join("; ")}` : `run.json gives the run's standing as ${said.is} (${said.why.join("; ") || "no why"}), and what it stood on makes it ${standing.is === "verdict" ? "a verdict" : `a trial (${standing.why.join("; ")})`}`);
   const folders = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   const forms = folders.map((id) => readForm(join(dir, id), id, run));
   const seen = new Set<string>();
   for (const id of run.asked) {
     if (seen.has(id)) faults.push(`${id} is asked twice`);
     seen.add(id);
-    const played = folders.includes(id);
+    const played = folders.includes(id) || (parseStageId(id) !== null && isFolder(join(dir, folderOf(id))));
     const unplayed = run.unplayed.some((u) => u.id === id);
     if (!played && !unplayed) faults.push(`${id} was asked, and neither played nor said why not`);
     if (played && unplayed) faults.push(`${id} is both played and said not to be`);
   }
-  return { dir, run, forms, faults };
+  return { dir, run, forms, faults, standing };
 }
 
 function runFaults(raw: unknown): string[] {
@@ -347,7 +429,16 @@ function runFaults(raw: unknown): string[] {
   if (typeof raw.repeats !== "number" || !Number.isInteger(raw.repeats) || raw.repeats < 1) out.push("how many plays an \"as shipped\" part gets");
   if (raw.faults !== undefined && (!Array.isArray(raw.faults) || !raw.faults.every(text))) out.push("what went wrong in the run, as a list");
   if (!isRecord(raw.rph) || typeof raw.rph.pinned !== "boolean") out.push("whether RPH is the pinned commit");
+  if (raw.standing !== undefined && !isStanding(raw.standing)) out.push("the run's standing as the runner writes it");
   return out;
+}
+
+function isStanding(value: unknown): boolean {
+  if (!isRecord(value) || (value.is !== "verdict" && value.is !== "trial") || !Array.isArray(value.why) || !value.why.every((w) => typeof w === "string")) return false;
+  const from = value.from;
+  if (from === null) return true;
+  const texts = (list: unknown) => Array.isArray(list) && list.every((t) => typeof t === "string");
+  return isRecord(from) && typeof from.served === "string" && typeof from.build === "string" && texts(from.changed) && Array.isArray(from.layers) && from.layers.every((l) => isRecord(l) && typeof l.level === "string" && typeof l.hash === "string" && texts(l.guidance));
 }
 
 /** Every file under a folder, `internal/` left out, from the folder. */
@@ -359,17 +450,83 @@ function filesUnder(dir: string, under = ""): string[] {
   });
 }
 
+function isFolder(path: string): boolean {
+  return existsSync(path) && statSync(path).isDirectory();
+}
+
 const SCREEN_FILE = /\.(png|webp|txt)$/;
 
+/** A folder at the top of a bundle: a scenario played whole or a gate, or a scenario played in stages, read stage by stage. */
 function readForm(dir: string, id: string, run: RunRecord): ReadForm {
-  const files = filesUnder(dir);
-  const faults: string[] = [];
-  if (!run.asked.includes(id)) faults.push("the run did not ask for it");
+  if (isStaged(dir, id, run)) return readStaged(dir, id, run);
+  const { record, faults } = readFolder(dir, id, run, null);
+  return { id, record, stages: null, faults, result: record === null || faults.length > 0 ? "failed" : formResult(record, trialOf(run)) };
+}
+
+/** Whether a scenario's folder is one played in stages: the run asked for its stages, or it holds folders only a stage's can be and no record of its own. */
+function isStaged(dir: string, id: string, run: RunRecord): boolean {
+  if (!/^\d{2}$/.test(id)) return false;
+  if ([...run.asked, ...run.unplayed.map((u) => u.id)].some((asked) => parseStageId(asked)?.scenario === id)) return true;
+  const inner = readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name !== "internal" && !/^play-\d+$/.test(entry.name));
+  return inner.length > 0 && !existsSync(join(dir, "result.json"));
+}
+
+/**
+ * A scenario played in stages, read back: each stage's own folder as a form's folder is read, then the
+ * scenario whole. Its stages are the ones its records name, and the records must agree; every stage
+ * must be in its own folder; every part is in exactly one stage; and once every stage has its record,
+ * the row's words must be carried by its stages together. One result over all of them.
+ */
+function readStaged(dir: string, id: string, run: RunRecord): ReadForm {
+  const faults = folderNameFaults(id);
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) if (!entry.isDirectory()) faults.push(`${entry.name}: the folder of a scenario played in stages holds its stages' folders and nothing else`);
+  const read = new Map(entries.filter((entry) => entry.isDirectory()).map((entry) => [entry.name, readFolder(join(dir, entry.name), id, run, entry.name)] as const));
+  const askedStages = [...run.asked, ...run.unplayed.map((u) => u.id)].flatMap((asked) => {
+    const stage = parseStageId(asked);
+    return stage && stage.scenario === id ? [stage.stage] : [];
+  });
+  const lists = [...read.values()].flatMap((folder) => (folder.record?.stage ? [folder.record.stage.of] : []));
+  const of = lists[0] ?? [...new Set([...askedStages, ...read.keys()])];
+  if (lists.some((list) => list.join(", ") !== of.join(", "))) faults.push(`its stages' records do not agree on its stages: ${[...new Set(lists.map((list) => list.join(", ")))].map((list) => `(${list})`).join(" and ")}`);
+  if (lists.length > 0 && (of.length < 2 || new Set(of).size !== of.length || !of.every(isStageName))) faults.push(`its records name its stages as ${of.join(", ")}: a scenario played in stages has two or more, each named once`);
+  for (const name of read.keys()) if (!of.includes(name)) faults.push(`${name}/: a folder for a stage scenario ${Number(id)} does not have (its stages are ${of.join(", ")})`);
+  for (const name of new Set(askedStages)) if (!of.includes(name)) faults.push(`the run asked for its stage ${name}, which it does not have (its stages are ${of.join(", ")})`);
+  const stages: ReadStage[] = of.map((name) => {
+    const folder = read.get(name);
+    if (folder) return { name, record: folder.record, faults: folder.faults, result: folder.record === null || folder.faults.length > 0 ? "failed" : formResult(folder.record, trialOf(run)), why: null };
+    const asked = stageId(id, name);
+    const unplayed = run.unplayed.find((u) => u.id === asked);
+    // A stage the run asked for and neither played nor said why not is a fault; one it said why of, or never asked, leaves the scenario not played whole.
+    if (!unplayed && run.asked.includes(asked)) faults.push(`stage ${name} was asked, and neither played nor said why not`);
+    return { name, record: null, faults: [], result: null, why: unplayed?.why ?? (run.asked.includes(asked) ? "asked, and the run did not say why it was not played" : "not asked in this run") };
+  });
+  const holders = new Map<string, string[]>();
+  for (const stage of stages) for (const part of stage.record?.parts ?? []) holders.set(part.id, [...(holders.get(part.id) ?? []), stage.name]);
+  for (const [part, names] of holders) if (names.length > 1) faults.push(`part ${part} is in stages ${names.join(" and ")}: every part is in exactly one stage`);
+  const records = stages.map((stage) => stage.record);
+  const row = LIST.find((r) => scenarioId(r.number) === id);
+  if (row && records.every((record): record is FormRecord => record !== null)) for (const fault of wordFaults(row, records.flatMap((record) => record.parts))) faults.push(`its stages' records together: ${fault}`);
+  const all = [...new Set([...faults, ...stages.flatMap((stage) => stage.faults.map((fault) => `stage ${stage.name}: ${fault}`))])];
+  return { id, record: null, stages, faults: all, result: all.length > 0 ? "failed" : wholeResult(stages.map((stage) => stage.result)) };
+}
+
+/** Why a folder's name at the top of a bundle is not one a form's evidence is kept under. */
+function folderNameFaults(id: string): string[] {
   if (!/^\d{2}$/.test(id)) {
     const fault = gateIdFault(id);
-    if (fault) faults.push(`its folder's name is neither one of the 68 nor a gate's id: ${fault}`);
-  } else if (!LIST.some((row) => scenarioId(row.number) === id)) faults.push(`its folder is named for scenario ${Number(id)}, which is not one of the 68`);
-  if (files.length === 0 && readdirSync(dir).length === 0) return finish(id, null, [...faults, "the folder is empty"]);
+    return fault ? [`its folder's name is neither one of the 68 nor a gate's id: ${fault}`] : [];
+  }
+  return LIST.some((row) => scenarioId(row.number) === id) ? [] : [`its folder is named for scenario ${Number(id)}, which is not one of the 68`];
+}
+
+/** One folder of evidence, a form's or one stage's: its record re-checked against its files, and every fault of the evidence found in it. */
+function readFolder(dir: string, id: string, run: RunRecord, stage: string | null): { record: FormRecord | null; faults: string[] } {
+  const files = filesUnder(dir);
+  const faults: string[] = [];
+  if (!run.asked.includes(stage === null ? id : stageId(id, stage))) faults.push("the run did not ask for it");
+  if (stage === null) faults.push(...folderNameFaults(id));
+  if (files.length === 0 && readdirSync(dir).length === 0) return { record: null, faults: [...new Set([...faults, "the folder is empty"])] };
   let record: FormRecord | null = null;
   if (!files.includes("result.json")) faults.push("result.json is missing, so nothing played here can be counted");
   else {
@@ -388,6 +545,7 @@ function readForm(dir: string, id: string, run: RunRecord): ReadForm {
   const parts = new Set(record?.parts.map((p) => p.id) ?? []);
   const pages = new Set(record?.parts.flatMap((p) => p.pages.map(pageSlug)) ?? []);
   const named = new Set(record?.parts.flatMap((p) => p.instances.flatMap((i) => i.glances.flatMap((g) => (g.screen ? [g.screen] : [])))) ?? []);
+  const digests = new Map(record?.parts.flatMap((p) => p.instances.flatMap((i) => i.glances.flatMap((g) => (g.screen ? [[g.screen, g.sha256 ?? null] as const] : [])))) ?? []);
   for (const file of screens) {
     const name = parseScreen(file);
     if (!name) faults.push(`${file}: its name does not say its play, the page, the width and what it shows`);
@@ -395,24 +553,36 @@ function readForm(dir: string, id: string, run: RunRecord): ReadForm {
     else if (record && !pages.has(name.page)) faults.push(`${file}: named for the ${name.page} page, which none of its parts is seen on`);
     else if (record && !named.has(file)) faults.push(`${file}: no look in result.json names it`);
     if (statSync(join(dir, file)).size === 0) faults.push(`${file} is empty`);
+    // The bytes of each screen a look names are the ones the run saved: a screen changed afterwards proves nothing.
+    else if (record && named.has(file)) {
+      const digest = digests.get(file);
+      if (!digest) faults.push(`${file}: result.json gives no digest of it, so nothing shows it is the screen the run saved`);
+      else if (digest !== digestOf(readFileSync(join(dir, file)))) faults.push(`${file}: its bytes are not the screen the run saved (their digest is not result.json's)`);
+    }
   }
   if (!files.includes("notes.md")) faults.push("notes.md is missing");
   else {
-    const notes = new Set(readFileSync(join(dir, "notes.md"), "utf8").match(/play-\d{2}\/[^\s,)]+\.(?:png|webp|txt)/g) ?? []);
+    const text = readFileSync(join(dir, "notes.md"), "utf8");
+    const notes = new Set(text.match(/play-\d{2}\/[^\s,)]+\.(?:png|webp|txt)/g) ?? []);
     for (const screen of notes) if (!files.includes(screen)) faults.push(`notes.md names ${screen}, which the folder lacks`);
     for (const screen of notes) if (record && !named.has(screen)) faults.push(`notes.md names ${screen}, which no look in result.json names`);
     for (const screen of named) if (!notes.has(screen)) faults.push(`notes.md does not name ${screen}, which result.json names`);
+    // The notes say what the record says, word for word, for this run: notes taken from another run or rewritten are a fault.
+    if (record) {
+      const said = notesOf(record, run.run, trialOf(run)).split("\n");
+      const lines = text.split("\n");
+      const at = lines.findIndex((line, i) => line !== said[i]);
+      if (at >= 0 || lines.length !== said.length) {
+        const n = at >= 0 ? at : Math.min(lines.length, said.length);
+        faults.push(`notes.md is not what its record says (notesOf): the first line that differs is ${n + 1}: "${lines[n] ?? ""}"`);
+      }
+    }
   }
   if (record) {
-    faults.push(...identityFaults(record, id, run));
-    record = recheck(record, dir, files, faults);
+    faults.push(...identityFaults(record, id, run, stage));
+    record = recheck(record, dir, files, faults, run);
   }
-  return finish(id, record, faults);
-}
-
-function finish(id: string, record: FormRecord | null, faults: string[]): ReadForm {
-  const unique = [...new Set(faults)];
-  return { id, record, faults: unique, result: record === null || unique.length > 0 ? "failed" : formResult(record) };
+  return { record, faults: [...new Set(faults)] };
 }
 
 /** Why a value is not a record the runner writes, at the level of its fields; empty when it is one. */
@@ -423,6 +593,7 @@ function shapeFaults(raw: unknown): string[] {
   const textOrNull = (value: unknown) => value === null || typeof value === "string";
   const whole = (value: unknown, least: number) => typeof value === "number" && Number.isInteger(value) && value >= least;
   if (typeof raw.id !== "string" || raw.id === "") out.push("it has no id");
+  if (raw.run !== undefined && typeof raw.run !== "string") out.push("its run is not a run's name");
   if (raw.kind !== "scenario" && raw.kind !== "gate") out.push("it is neither a scenario's nor a gate's");
   if (raw.mode !== "rig" && raw.mode !== "live") out.push("it was played neither in the rig nor live");
   if (!(raw.number === null || whole(raw.number, 1))) out.push("its number is not a number");
@@ -430,6 +601,7 @@ function shapeFaults(raw: unknown): string[] {
   if (!(raw.line === null || whole(raw.line, 1))) out.push("its line is not a line");
   if (!whole(raw.plays, 1)) out.push("its plays are not a count");
   if (!Array.isArray(raw.stops) || !raw.stops.every((s) => isRecord(s) && whole(s.play, 1) && typeof s.why === "string")) out.push("its stops are not stops");
+  if (raw.stage !== undefined && !(isRecord(raw.stage) && isStageName(raw.stage.name) && Array.isArray(raw.stage.of) && raw.stage.of.every(isStageName))) out.push("its stage is not a stage of a scenario");
   if (!Array.isArray(raw.parts) || raw.parts.length === 0) return [...out, "it has no parts"];
   raw.parts.forEach((part, p) => {
     if (!isRecord(part) || typeof part.id !== "string" || typeof part.words !== "string" || (part.mark !== "code" && part.mark !== "as shipped") || !texts(part.pages) || !textOrNull(part.measured) || !(part.wants === null || (isRecord(part.wants) && whole(part.wants.hits, 1) && whole(part.wants.of, 1))) || !Array.isArray(part.instances)) {
@@ -443,7 +615,7 @@ function shapeFaults(raw: unknown): string[] {
         return;
       }
       instance.glances.forEach((glance, g) => {
-        const ok = isRecord(glance) && typeof glance.page === "string" && (glance.width === null || typeof glance.width === "number") && (glance.found === null || typeof glance.found === "boolean") && typeof glance.what === "string" && texts(glance.shows) && textOrNull(glance.screen) && textOrNull(glance.shotPage) && textOrNull(glance.shotText) && textOrNull(glance.unshown);
+        const ok = isRecord(glance) && typeof glance.page === "string" && (glance.width === null || typeof glance.width === "number") && (glance.found === null || typeof glance.found === "boolean") && typeof glance.what === "string" && texts(glance.shows) && textOrNull(glance.screen) && (glance.sha256 === undefined || textOrNull(glance.sha256)) && textOrNull(glance.shotPage) && textOrNull(glance.shotText) && textOrNull(glance.unshown);
         if (!ok) out.push(`${where}'s glance ${g + 1} is not a glance`);
       });
     });
@@ -453,13 +625,16 @@ function shapeFaults(raw: unknown): string[] {
   return out;
 }
 
-/** Whether the record is the folder's own scenario or gate, played in this run's way, carrying its row's words. */
-function identityFaults(record: FormRecord, id: string, run: RunRecord): string[] {
+/** Whether the record is the folder's own scenario, stage or gate, played in this run's way, carrying its row's words (a stage's are checked with its scenario's other stages). */
+function identityFaults(record: FormRecord, id: string, run: RunRecord, stage: string | null): string[] {
   const out: string[] = [];
   const of = record.kind === "gate" ? `gate ${record.id}` : `scenario ${record.number}`;
   if (/^\d{2}$/.test(id)) {
     if (record.kind !== "scenario" || record.number !== Number(id) || record.id !== id) out.push(`its record is of ${of}, not of scenario ${Number(id)}`);
   } else if (record.kind !== "gate" || record.id !== id) out.push(`its record is of ${of}, not of gate ${id}`);
+  if (stage !== null && record.stage?.name !== stage) out.push(`its record is of ${record.stage ? `stage ${record.stage.name}` : "a scenario played whole"}, not of stage ${stage}`);
+  if (stage === null && record.stage) out.push(`its record is of stage ${record.stage.name}, and its folder is that of a form played whole`);
+  if (record.run !== run.run) out.push(record.run === undefined ? "its record names no run, so nothing ties it to this run" : `its record is of run ${record.run}, and this bundle is run ${run.run}`);
   if (record.mode !== run.mode) out.push(`its record was played ${record.mode === "rig" ? "in the rig" : "live"}, and this run was played ${run.mode === "rig" ? "in the rig" : "live"}`);
   const shipped = record.parts.some((p) => p.mark === "as shipped");
   const plays = run.mode === "live" && record.kind === "scenario" && shipped ? run.repeats : 1;
@@ -470,9 +645,10 @@ function identityFaults(record: FormRecord, id: string, run: RunRecord): string[
     else {
       if (record.waves.length !== 1 || record.waves[0] !== row.wave) out.push(`its record gives wave ${record.waves.join(", ")}, and §18.3's table lists scenario ${row.number} at wave ${row.wave}`);
       if (record.line !== row.line) out.push(`its record gives line ${record.line}, and scenario ${row.number}'s row is at line ${row.line}`);
-      for (const fault of wordFaults(row, record.parts)) out.push(`its record: ${fault}`);
+      if (stage === null) for (const fault of wordFaults(row, record.parts)) out.push(`its record: ${fault}`);
     }
     for (const part of record.parts) if (part.measured !== null) out.push(`part ${part.id} is measured, and only what is seen on screen counts as proof of a scenario`);
+    for (const part of record.parts) if (part.wants !== null) out.push(`part ${part.id} asks a share, and a scenario's rates are findings with no share (plan §17.0)`);
   } else {
     const fault = gateIdFault(record.id);
     if (fault) out.push(`its record's gate ${fault.replace(/^its /, "")}`);
@@ -486,10 +662,11 @@ function identityFaults(record: FormRecord, id: string, run: RunRecord): string[
  * they are in the folder: each fault found is added to `faults`, and each look the folder does not
  * bear out is changed to what its screens make it (never to a pass).
  */
-function recheck(record: FormRecord, dir: string, files: string[], faults: string[]): FormRecord {
+function recheck(record: FormRecord, dir: string, files: string[], faults: string[], run: RunRecord): FormRecord {
   const parts = record.parts.map((part) => {
     const seenPart = part.measured === null;
-    const allowed = seenPart ? SEEN_OUTCOMES : MEASURED_OUTCOMES;
+    const trial = trialOf(run);
+    const allowed = seenPart ? SEEN_OUTCOMES : measuredOutcomes(trial);
     if (seenPart && part.pages.length === 0) faults.push(`part ${part.id} is seen on no page`);
     if (!seenPart && part.pages.length > 0) faults.push(`part ${part.id} is measured and names pages`);
     const instances = part.instances.map((instance): Instance => {
@@ -500,7 +677,8 @@ function recheck(record: FormRecord, dir: string, files: string[], faults: strin
         return broken("a play the record does not have");
       }
       if (!allowed.includes(instance.outcome)) {
-        const why = `is recorded "${instance.outcome}", which the runner ${!(SEEN_OUTCOMES as readonly string[]).concat(MEASURED_OUTCOMES).includes(instance.outcome) ? "never writes" : seenPart ? "writes only for a measured part of a gate" : "writes only for a part that is seen"}`;
+        const known = [...SEEN_OUTCOMES, ...measuredOutcomes(true), ...measuredOutcomes(false)].includes(instance.outcome);
+        const why = `is recorded "${instance.outcome}", which the runner ${!known ? "never writes" : seenPart ? "writes only for a measured part of a gate" : trial ? "never writes in a trial, which gives no verdict" : "writes only in a trial"}`;
         faults.push(`${where} ${why}`);
         return broken(why);
       }
@@ -584,10 +762,15 @@ function screenFault(glance: Glance, part: string, dir: string, files: string[])
   if (glance.screen === null) return "no screen was saved";
   if (!files.includes(glance.screen)) return `its screen ${glance.screen} is not in the folder`;
   if (statSync(join(dir, glance.screen)).size === 0) return `its screen ${glance.screen} is empty`;
+  if (!glance.sha256 || glance.sha256 !== digestOf(readFileSync(join(dir, glance.screen)))) return `its screen ${glance.screen} is not the image the run saved`;
   const name = parseScreen(glance.screen);
   if (!name) return `its screen ${glance.screen}'s name does not say what it shows`;
   if (name.page !== pageSlug(glance.page)) return `its screen ${glance.screen} is named for the ${name.page} page, not the ${glance.page} page`;
   if (glance.width !== null && name.width !== glance.width) return `its screen ${glance.screen} is named for ${name.width} wide, and it was looked at ${glance.width} wide`;
   if (partOfScreen(name.what, new Set([part])) === null) return `its screen ${glance.screen} is named for "${name.what}", not for this part`;
   return null;
+}
+
+function digestOf(bytes: string | Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }

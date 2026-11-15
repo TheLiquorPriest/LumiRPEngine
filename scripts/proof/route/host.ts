@@ -5,6 +5,7 @@
 // each by that path and asks it for the facts of the run, a fresh footing for every play and a browser
 // that reads pages as a person does. Every wait a host makes is on something shown, never a fixed time.
 
+import type { Layer, TreeFile } from "../lib/record";
 import type { SettingsReply } from "../../../src/shared/api";
 
 export type Mode = "rig" | "live";
@@ -44,8 +45,19 @@ export interface Shot {
 /**
  * The browser a form and its checks read pages with (PlanScenarios-2 item 2): open a page at a width,
  * find a control by its label or role, press, type, wait until a text or a control shows, read a
- * section's text, save a screen. A control or a page that is not there is an error naming it. The
- * terminal is a page too ("terminal"), opened with no width.
+ * section's text, bring a thing into view, scroll, save a screen. A control or a page that is not there
+ * is an error naming it. The terminal is a page too ("terminal"), opened with no width.
+ *
+ * One look at a part (`evidence.ts`, `lookAt`) opens its page at a width, runs the part's check, and
+ * then saves a screen: it never opens the page again or scrolls between the check and the screen, so
+ * the screen shows the window as the check left it. What may lie outside the window (below the fold at
+ * 390, further down a list), the check brings into view first, with `show`, before it answers.
+ *
+ * Text is taken from a page one way, by `read` and for `Shot.text` alike, since a check's words are
+ * found in a screen's text by exact comparison: the text as rendered for a person (hidden text left
+ * out), each block of the page on a line of its own, and every run of spaces within a line as one space.
+ * So words a check reads in the window and names are in the screen's text exactly when the screen
+ * shows them.
  */
 export interface Browser {
   open(page: string, width?: number): Promise<void>;
@@ -56,6 +68,19 @@ export interface Browser {
   waitFor(shown: Shown): Promise<void>;
   /** A section's text, or the whole page's when no section is named: what a check reads, which may hold more than one screen shows. */
   read(section?: string): Promise<string>;
+  /**
+   * Brings what is named into the window, as a person scrolls to it: the page, and any list or panel
+   * that holds it, are scrolled until the whole of it is in view, and stay so until the screen is saved.
+   * It waits for it to show as `waitFor` does, and rejects, naming it, when it never shows.
+   */
+  show(shown: Shown): Promise<void>;
+  /**
+   * Scrolls the list or panel named (the page when none is), as one flick of a person's finger: by
+   * one window of what it holds. It rejects, naming what was to scroll, when that does not scroll (it
+   * holds nothing beyond the window). A check that shows "it scrolls" scrolls, then names in `shows`
+   * words that came into view, and in `what` what it scrolled.
+   */
+  scroll(within?: Control): Promise<void>;
   /** Saves what the page shows now, with the text visible in that image (see `Shot`). */
   screen(): Promise<Shot>;
 }
@@ -81,11 +106,31 @@ export interface RunFacts {
   agents: AgentFacts[];
   /** The settings in force, as `GET /api/v1/settings` gave them. */
   settings: SettingsReply;
+  /**
+   * The guidance the run stood on, from which its standing is worked out (plan §17: a verdict comes
+   * only from shipped guidance on a clean build). A host that gives none, or gives null, makes the run
+   * a trial, with that as its why.
+   */
+  guidance?: GuidanceFacts | null;
+}
+
+/** The guidance a run stood on, every file by its path and the SHA-256 of its bytes (`scripts/proof/lib/record.ts`). */
+export interface GuidanceFacts {
+  /** The shipped level as RPE served it to the run's chats, by path below the level. */
+  served: TreeFile[];
+  /** The build's own shipped folders at the commits the run reports: RPH's `guidance/`, and RPE's, which RPE lays over it (`shippedOf`). */
+  build: { rph: TreeFile[]; rpe: TreeFile[] };
+  /** Every layer of the user's own the run stood on (the user's, a character's, a chat's), with all its files. */
+  layers: Layer[];
 }
 
 /** A form as the host is told of it when a play begins. */
 export interface FormBrief {
-  /** The scenario's number as text, or the gate's id. */
+  /**
+   * The scenario's number as text, the gate's id, or for one stage of a scenario played in stages
+   * `<number>:<stage>` (`40:before`). A chat may be named after it as it is; a file or folder named
+   * after it takes `folderOf` (`form.ts`), which holds no colon.
+   */
   id: string;
   kind: "scenario" | "gate";
   fixtures: string[];
@@ -152,7 +197,7 @@ export interface LiveGuard {
  */
 export interface RoundStage {
   name: string;
-  /** Scenario numbers as text and gate ids, in the order they are played. */
+  /** Scenario numbers as text, gate ids, and stages of a scenario played in stages as `<number>:<stage name>` (`40:before`), in the order they are played: each once in the whole order. */
   ids: string[];
   restoreGolden: boolean;
 }

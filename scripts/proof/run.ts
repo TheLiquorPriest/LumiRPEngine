@@ -12,7 +12,8 @@
 //   report <run folder>           the report, written again from a run's bundle alone
 //   checkpoint <w>                a wave's checkpoint (PlanScenarios-5's scripts/proof/checkpoint/checkpoint.ts)
 //
-// An id is a scenario's number or a gate's id, each asked once. A run plays no script `check` faults,
+// An id is a scenario's number, one stage of a staged scenario (`<number>:<stage>`) or a gate's id,
+// each asked once. A run plays no script `check` faults,
 // writes its bundle and its report under `--out` (or RPE_PROOF_OUT), a folder kept outside the
 // repository, and names who started it with `--by` (or RPE_PROOF_BY). `--repeats` sets how many plays
 // an "as shipped" part gets live, over scripts/proof/settings.json. `--root` is the proof folder to
@@ -25,7 +26,7 @@ import { check, describeCheck } from "./route/check";
 import { BundleRefused, readBundle } from "./route/evidence";
 import type { LiveGuard, Mode } from "./route/host";
 import { exitCode, writeReport } from "./route/report";
-import { isRepeats, loadCheckpoint, loadGuard, loadHost, loadOrder, play, readSettings, round, RunRefused, type RunOptions, type Selection } from "./route/runner";
+import { isRepeats, loadCheckpoint, loadGuard, loadHost, loadOrder, NothingToPlay, play, readSettings, round, RunRefused, type RunOptions, type Selection } from "./route/runner";
 
 const ROOT = import.meta.dir;
 
@@ -120,6 +121,7 @@ export async function main(argv: string[], deps: Deps = {}): Promise<number> {
         return usage(out, `unknown command "${args.command}"`);
     }
   } catch (error) {
+    if (error instanceof NothingToPlay) return usage(out, error.message);
     if (error instanceof RunRefused || error instanceof BundleRefused) {
       out(`Refused: ${error.message}.\n`);
       return 1;

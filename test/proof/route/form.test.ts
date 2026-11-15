@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { check, wordFaults } from "../../../scripts/proof/route/check";
-import type { Mark } from "../../../scripts/proof/route/form";
+import { gateIdFault, type Mark } from "../../../scripts/proof/route/form";
 import { LIST } from "../../../scripts/proof/route/list";
 
 const RUN = resolve(import.meta.dir, "../../../scripts/proof/run.ts");
@@ -38,6 +38,21 @@ const scenario22: Record<string, string> = {
   rig: "async () => {}",
   live: "async () => {}",
 };
+
+/** A gate file of one measured part with the id given. */
+function gateWithId(id: string): string {
+  return `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: ${JSON.stringify(id)}, waves: [1], parts: [{ id: "time", words: "a time", mark: "code", measured: "a time" }], fixtures: [], bed: [], live: async () => {} });\n`;
+}
+
+/** A proof folder of its own holding the files given. */
+function proofWith(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "proof-form-ids-"));
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  }
+  return dir;
+}
 function runCheck(at = root): { code: number; text: string } {
   const done = Bun.spawnSync({ cmd: [process.execPath, RUN, "check", "--root", at], stdout: "pipe", stderr: "pipe" });
   return { code: done.exitCode ?? -1, text: `${done.stdout.toString()}${done.stderr.toString()}` };
@@ -184,7 +199,7 @@ function marks(number: number, parts: [string, Mark][]): string[] {
   );
 }
 
-test("every clause an \"As shipped:\" opens is held to that mark, not only the first; row 62's means of code are left to the writer", () => {
+test("every clause an \"As shipped:\" opens is held to that mark, not only the first, row 62's included", () => {
   const under = (id: string, words: string) => `part ${id} is marked "code", and the plan's row puts "${words}" under "as shipped"`;
   expect(
     marks(7, [
@@ -210,15 +225,17 @@ test("every clause an \"As shipped:\" opens is held to that mark, not only the f
       ["the world state and the map panel show a room grid with everyone and everything on squares, marked assumed", "code"],
     ]),
   ).toEqual([under("p2", "the GM's `map_lay` and `map_place` are in the live view"), under("p3", "the world state and the map panel show a room grid with everyone and everything on squares, marked assumed")]);
-  // Row 62: the grid's owner, its time step and the press that keeps it are code (plan l.964, l.1020).
+  // Row 62: its outcomes appear only after the GM lays the grid as the shipped guidance asks, so every clause is "as shipped" (the lead's ruling on N6).
   expect(
     marks(62, [
-      ["the GM lays a grid of 5 ft squares for it", "code"],
+      ["the GM lays a grid of 5 ft squares for it", "as shipped"],
       ["it shows on the Places page as belonging to the chat", "code"],
       ["five rounds of the fight move the clock by seconds, not minutes", "code"],
       ['"keep in the world" copies it into the world\'s draft', "code"],
     ]),
-  ).toEqual([under("p1", "the GM lays a grid of 5 ft squares for it")]);
+  ).toEqual([under("p2", "it shows on the Places page as belonging to the chat"), under("p3", "five rounds of the fight move the clock by seconds, not minutes"), under("p4", '"keep in the world" copies it into the world\'s draft')]);
+  // Row 64: a scope stops at its own sentence ("After the swipe: …"; "With RPE stopped or late: …").
+  expect(marks(64, [["After the swipe: the chat is on the swiped reply", "code"]]).some((f) => f.startsWith("part p1 is marked"))).toBe(false);
   // "as shipped," holds its own clause; the next sentence or clause is the writer's to mark.
   expect(
     marks(1, [
@@ -233,4 +250,12 @@ test("every clause an \"As shipped:\" opens is held to that mark, not only the f
       ["No question to the Author", "code"],
     ]),
   ).toEqual([]);
+});
+
+test("a gate's id never names the bundle's own files, and two gates' ids never differ only in case", async () => {
+  expect(gateIdFault("report.md")).toBe("its id report.md is the name of the bundle's own report.md, so the gate's folder would take its place: give the gate a name of its own");
+  expect(gateIdFault("Run.JSON")).toBe("its id Run.JSON is the name of the bundle's own run.json, so the gate's folder would take its place: give the gate a name of its own");
+  const at = proofWith({ "floor/gate.ts": gateWithId("Floor"), "floor-b/gate.ts": gateWithId("floor") });
+  const found = (await check(at)).found.filter((f) => f.kind === "gate");
+  for (const f of found) expect(f.faults).toContain("2 gates have ids that differ only in case (Floor, floor), and one folder of the bundle would hold both: floor-b/gate.ts, floor/gate.ts");
 });

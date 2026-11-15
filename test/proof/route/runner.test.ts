@@ -341,3 +341,12 @@ test("--wave with no value, an option the command does not take, and an option w
   expect(host.begun).toEqual([]);
   expect(existsSync(join(out, "unused"))).toBe(false);
 });
+
+test("a run asked nothing is a usage error: nothing is played and no bundle is left", async () => {
+  const host = fakeHost("rig", { pages: PAGES });
+  const empty = await runOn(root, ["rig", "--wave", "0"], { openHost: async () => host });
+  expect(empty.code).toBe(2);
+  expect(empty.printed).toContain("Nothing was asked: wave 0 has no scenario and no gate here.");
+  expect(host.begun).toEqual([]);
+  expect(empty.dir).toBe("");
+});

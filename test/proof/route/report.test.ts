@@ -10,19 +10,20 @@ import { join } from "node:path";
 import { Bundle, readBundle, runRecord } from "../../../scripts/proof/route/evidence";
 import { summarize, writeReport } from "../../../scripts/proof/route/report";
 import type { FormRecord, Glance } from "../../../scripts/proof/route/results";
+import { sha256 } from "../../../scripts/proof/lib/record";
 import { fakeFacts } from "./fake";
 
 let out = "";
 let report = "";
 let bundle: Bundle;
 
-/** A look on the World page at a width, its screen named as the bundle names it. */
+/** A look on the World page at a width, its screen named as the bundle names it, with the digest of the bytes saved for it. */
 function glance(width: number, part: string): Glance {
-  return { page: "World", width, found: true, what: "time, place, coin and holder as before", shows: ["Coin: 40 silver"], screen: `play-01/world-${width}-${part}.png`, shotPage: "World", shotText: "Time: dusk. Place: the mill. Coin: 40 silver. Lantern: Oskar", unshown: null };
+  return { page: "World", width, found: true, what: "time, place, coin and holder as before", shows: ["Coin: 40 silver"], screen: `play-01/world-${width}-${part}.png`, sha256: sha256("png"), shotPage: "World", shotText: "Time: dusk. Place: the mill. Coin: 40 silver. Lantern: Oskar", unshown: null };
 }
 
 function record(id: string, number: number, line: number, part: string, words: string): FormRecord {
-  return { id, kind: "scenario", number, waves: [2], line, mode: "rig", plays: 1, stops: [], parts: [{ id: part, words, mark: "code", pages: ["World"], measured: null, wants: null, instances: [{ play: 1, at: 1, outcome: "shown", why: "time, place, coin and holder as before", page: null, glances: [glance(1440, part), glance(390, part)] }] }] };
+  return { run: bundle.run, id, kind: "scenario", number, waves: [2], line, mode: "rig", plays: 1, stops: [], parts: [{ id: part, words, mark: "code", pages: ["World"], measured: null, wants: null, instances: [{ play: 1, at: 1, outcome: "shown", why: "time, place, coin and holder as before", page: null, glances: [glance(1440, part), glance(390, part)] }] }] };
 }
 
 beforeAll(() => {

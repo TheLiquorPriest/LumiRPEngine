@@ -71,6 +71,33 @@ test("text the page holds outside the saved image does not count: a word below t
   expect(outcomeOf([glance], "code", "live").outcome).toBe("unseen");
 });
 
+test("a check brings a part below the fold into view before the screen is saved, and says it scrolled a list by what then shows", async () => {
+  const fold = { World: "Purse: 12 gold (exact, turn 16)" };
+  const shown: Sighting = {
+    page: "World",
+    check: async (look) => {
+      await look.show({ text: "12 gold" });
+      return (await look.read()).includes("12 gold") ? { found: true, shows: ["12 gold"] } : { found: false, what: "no gold" };
+    },
+  };
+  const brought = await lookAt(new FakeBrowser({ pages: PAGES, fold }), shown, 390, () => "play-01/world-390-coin.png");
+  expect(brought.unshown).toBeNull();
+  expect(outcomeOf([brought], "code", "live").outcome).toBe("shown");
+  // "It scrolls": the check scrolls the page once and names what came into view, which the screen then shows.
+  const scrolled: Sighting = {
+    page: "World",
+    check: async (look) => {
+      await look.scroll();
+      return (await look.read()).includes("12 gold") ? { found: true, shows: ["12 gold"], what: "scrolled the World page once: the purse came into view" } : { found: false, what: "nothing came into view" };
+    },
+  };
+  const flicked = await lookAt(new FakeBrowser({ pages: PAGES, fold }), scrolled, 390, () => "play-01/world-390-coin.png");
+  expect(flicked).toMatchObject({ found: true, unshown: null, what: "scrolled the World page once: the purse came into view" });
+  // Bringing into view what the page does not hold is an error naming it: the check could not look.
+  const absent: Sighting = { page: "World", check: async (look) => (await look.show({ text: "a dragon" }), { found: true, shows: ["a dragon"] }) };
+  expect((await lookAt(new FakeBrowser({ pages: PAGES }), absent, 390, () => "play-01/world-390-coin.png")).what).toBe("the check could not look: never showed: a dragon");
+});
+
 test("a check that names no words, or an empty or blank text, as what shows the part is refused as a fault of its script", async () => {
   for (const shows of [[""], ["   "], [], ["40 silver", ""]]) {
     const empty: Sighting = { page: "World", check: async () => ({ found: true, shows }) };
@@ -113,7 +140,7 @@ test("a bundle keeps screens named for page, width and part, notes naming them, 
   // Looked at again through the bundle, so the screens are on disk.
   const glances = [await lookAt(new FakeBrowser({ pages: PAGES }), coin, 1440, save), await lookAt(new FakeBrowser({ pages: PAGES }), coin, 390, save)];
   const saved: PartRecord = { ...part, instances: [{ play: 1, at: 1, ...outcomeOf(glances, "code", "live"), page: null, glances }] };
-  const record: FormRecord = { id: "04", kind: "scenario", number: 4, waves: [2], line: 1814, mode: "live", plays: 1, parts: [saved], stops: [] };
+  const record: FormRecord = { run: bundle.run, id: "04", kind: "scenario", number: 4, waves: [2], line: 1814, mode: "live", plays: 1, parts: [saved], stops: [] };
   bundle.keep("04", 1, "world-route", { coin: 40 });
   bundle.writeResult(record);
   bundle.writeNotes(record);

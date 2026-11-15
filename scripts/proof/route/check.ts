@@ -121,13 +121,18 @@ export function fixturesDir(root: string, file: string, form: ProofForm): string
  */
 export async function check(root: string, list: readonly Listed[] = LIST): Promise<CheckResult> {
   const found = await findForms(root);
-  const general = [...listFaults(list), ...leftFaults(list)];
+  const general = listFaults(list);
   const gates = found.filter((f) => f.kind === "gate" && f.id !== f.file);
-  for (const id of new Set(gates.map((f) => f.id))) {
-    const same = gates.filter((f) => f.id === id);
-    if (same.length > 1) for (const f of same) f.faults.push(`${same.length} gates have the id ${id}: ${same.map((g) => g.file).join(", ")}`);
+  // A gate's id is its folder in the bundle, and a disk may not tell case apart: ids that differ only in case are one folder.
+  for (const id of new Set(gates.map((f) => f.id.toLowerCase()))) {
+    const same = gates.filter((f) => f.id.toLowerCase() === id);
+    if (same.length < 2) continue;
+    const ids = [...new Set(same.map((g) => g.id))];
+    const files = same.map((g) => g.file).sort();
+    const fault = ids.length === 1 ? `${same.length} gates have the id ${ids[0]}: ${files.join(", ")}` : `${same.length} gates have ids that differ only in case (${ids.join(", ")}), and one folder of the bundle would hold both: ${files.join(", ")}`;
+    for (const f of same) f.faults.push(fault);
   }
-  const formsOf = (form: ProofForm) => (form.rig ? "rig and live" : "live");
+  const formsOf = (form: ProofForm) => (form.kind === "scenario" && form.stages ? `rig and live, in stages ${form.stages.map((stage) => stage.name).join(", ")}` : form.rig ? "rig and live" : "live");
   const scenarioFiles = found.filter((f) => f.kind === "scenario" && SCENARIO_FILE.test(basename(f.file)));
   const noFile: { where: string; what: string }[] = [];
   const scenarios = [...list].sort((a, b) => a.number - b.number).map((row) => {
@@ -153,25 +158,6 @@ export async function check(root: string, list: readonly Listed[] = LIST): Promi
 }
 
 /**
- * Clauses inside an "As shipped:" sentence that name a means the plan gives to code, left to the script
- * writer's mark. Row 62's sentence goes on, after the GM lays the grid, to three things code does: a map
- * made in play belongs to the chat until he chooses to keep it in the world (plan l.1020), a grid has a
- * time step of its own so a fight counts seconds (l.964), and keeping it in the world is his press
- * (l.1020). Held to "as shipped", a broken button would be counted as a miss of guidance.
- */
-const LEFT_TO_THE_WRITER: Record<number, readonly string[]> = {
-  62: ["it shows on the Places page as belonging to the chat", "five rounds of the fight move the clock by seconds, not minutes", '"keep in the world" copies it into the world\'s draft'],
-};
-
-/** A clause left to the writer that its row does not hold: the reading has gone stale against the list. */
-function leftFaults(list: readonly Listed[]): { where: string; what: string }[] {
-  return Object.entries(LEFT_TO_THE_WRITER).flatMap(([number, clauses]) => {
-    const row = list.find((r) => r.number === Number(number));
-    return clauses.filter((clause) => !row?.seen.includes(clause)).map((clause) => ({ where: `scenario ${number}`, what: `check.ts leaves "${clause}" to the writer's mark, and the row does not hold it` }));
-  });
-}
-
-/**
  * The stretches of a row the plan's "as shipped" governs, as [start, end) in its words. "as shipped,"
  * (or "as shipped" with nothing after it) governs its own clause, to the next ";" or the end of its
  * sentence. "As shipped:" (or "as shipped, with …:" or "as shipped (…):") opens the rest of its
@@ -194,8 +180,8 @@ export function shippedScopes(seen: string): [number, number][] {
 /**
  * Where a scenario's parts are not the plan's words of what must be seen: a part whose words are not
  * in the row as written; words of the row no part carries ("as shipped" itself aside, which the marks
- * carry); and a part the row's "as shipped" governs that is marked "code" (`shippedScopes`; a clause
- * `LEFT_TO_THE_WRITER` names is the writer's to mark). A part beginning inside a governed stretch, or
+ * carry); and a part the row's "as shipped" governs that is marked "code" (`shippedScopes`). A part
+ * beginning inside a governed stretch, or
  * holding the words "as shipped", is held to that mark. Any other part that rests on an agent following
  * a shipped file is "as shipped" by the writer's own mark, where the row does not say so.
  */
@@ -204,8 +190,7 @@ export function wordFaults(row: Listed, parts: readonly { id: string; words: str
   const out: string[] = [];
   const covered = new Array<boolean>(text.length).fill(false);
   const scopes = shippedScopes(text);
-  const left = (LEFT_TO_THE_WRITER[row.number] ?? []).map((clause) => [text.indexOf(clause), text.indexOf(clause) + clause.length] as const).filter(([start]) => start >= 0);
-  const governed = (i: number) => scopes.some(([start, end]) => i >= start && i < end) && !left.some(([start, end]) => i >= start && i < end);
+  const governed = (i: number) => scopes.some(([start, end]) => i >= start && i < end);
   for (const part of parts) {
     const at: number[] = [];
     for (let i = text.indexOf(part.words); part.words !== "" && i >= 0; i = text.indexOf(part.words, i + 1)) at.push(i);

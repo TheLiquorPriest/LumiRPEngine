@@ -11,6 +11,10 @@
 // play's result can stand behind another's. A wave run, `--all` and the round ask every gate that
 // belongs to them, a faulty one included, so none drops out of the report.
 //
+// A scenario played in stages (PlanScenarios-8) is played stage by stage, each stage a play of its own
+// parts with its own forms, its record and screens in its own folder: asked by its number, it plays
+// each of its stages in its order, each named `<number>:<stage>` in the run.
+//
 // A live run is never started without PlanScenarios-5's cheap gate and the bed's lock: the lock is
 // taken before the run's first step (before the bed's host is opened) and given back after its last,
 // and the commits the bed reports must be admitted by the gate. Plays run one at a time and nothing
@@ -20,8 +24,9 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import { check, fixturesDir, type Found } from "./check";
-import { Bundle, factFaults, lookAt, readBundle, runRecord, widthsOf } from "./evidence";
-import { isMeasured, pageSlug, scenarioId, type Form, type GatePart, type Play, type ProofForm } from "./form";
+import { guidanceOf, shippedOf, treeChanges, treeHash } from "../lib/record";
+import { Bundle, factFaults, lookAt, readBundle, runRecord, widthsOf, type RunRecord, type StandingFrom } from "./evidence";
+import { isMeasured, pageSlug, parseStageId, partsOfStage, scenarioId, stageId, stagesOf, type Form, type GatePart, type Play, type ProofForm } from "./form";
 import type { Host, HostOptions, Kept, LiveGuard, Mode, RoundStage, RunFacts, Session } from "./host";
 import { LIST, listFaults } from "./list";
 import { exitCode, reportOf } from "./report";
@@ -29,6 +34,9 @@ import { outcomeOf, type FormRecord, type Glance, type Instance, type PartRecord
 
 /** A run that may not go ahead, or that could not go on, with why. */
 export class RunRefused extends Error {}
+
+/** A run that would play nothing: a usage error, since nothing played proves nothing (`run.ts` exits 2). */
+export class NothingToPlay extends RunRefused {}
 
 /** The runner's own settings (`scripts/proof/settings.json`). */
 export interface Settings {
@@ -73,9 +81,22 @@ export interface RunDone {
 
 type Unplayed = { id: string; why: string }[];
 
-/** An id as asked: a scenario's number as two digits, anything else as written. */
+/** An id as asked: a scenario's number as two digits, a stage `<number>:<stage>` with its number as two digits, anything else as written. */
 export function normalId(word: string): string {
-  return /^\d{1,2}$/.test(word) ? scenarioId(Number(word)) : word;
+  const numbered = /^(\d{1,2})(:.*)?$/.exec(word);
+  return numbered ? `${scenarioId(Number(numbered[1]))}${numbered[2] ?? ""}` : word;
+}
+
+/**
+ * Each id a list asks for, as it plays: a scenario played in stages, asked by its number, as each of
+ * its stages. The first stage or id the list holds twice is returned with every way it was asked, so a
+ * run refuses it before anything plays: each stage, like each id, is played once in a run.
+ */
+function placedOnce(found: Found[], asked: { id: string; at?: string }[]): { units: string[]; twice: { unit: string; ways: { as: string; at?: string }[] } | null } {
+  const placed = asked.flatMap(({ id, at }) => unitsOf(found, id).map((unit) => ({ unit, as: id, at })));
+  const doubled = placed.find((p, i) => placed.findIndex((q) => q.unit === p.unit) !== i);
+  const twice = doubled ? { unit: doubled.unit, ways: placed.filter((p) => p.unit === doubled.unit).map(({ as, at }) => ({ as, at })) } : null;
+  return { units: placed.map((p) => p.unit), twice };
 }
 
 /** Every script as `run.ts check` finds and faults it; refused outright when the list of the 68 itself is damaged. */
@@ -90,36 +111,45 @@ function gateIds(found: Found[], keep: (f: Found) => boolean = () => true): stri
   return [...new Set(found.filter((f) => f.kind === "gate" && keep(f)).map((f) => f.id))];
 }
 
+/** What a run plays for an id: a scenario played in stages, asked by its number, is each of its stages in its order; anything else is itself. */
+function unitsOf(found: Found[], id: string): string[] {
+  if (!/^\d{2}$/.test(id)) return [id];
+  const files = filesOf(found, id);
+  const stages = files.length === 1 && files[0]?.form ? stagesOf(files[0].form) : null;
+  return stages ? stages.map((stage) => stageId(id, stage.name)) : [id];
+}
+
 /** Plays what was asked, in the order asked, and writes its bundle and report. */
 export async function play(options: RunOptions, selection: Selection): Promise<RunDone> {
   const found = await checked(options.root);
   let asked: string[];
   if ("ids" in selection) {
-    asked = selection.ids.map(normalId);
-    const twice = asked.find((id, i) => asked.indexOf(id) !== i);
-    if (twice !== undefined) throw new RunRefused(`${twice} is asked twice: each id is played once in a run, so ask it once`);
+    const { units, twice } = placedOnce(found, selection.ids.map((id) => ({ id: normalId(id) })));
+    if (twice) {
+      const ways = [...new Set(twice.ways.map((w) => w.as))];
+      const scenario = parseStageId(twice.unit)?.scenario;
+      throw new RunRefused(ways.length === 1 ? `${twice.unit} is asked twice: each id is played once in a run, so ask it once` : `${twice.unit} is asked twice, as ${ways.join(" and as ")} (asked by its number, scenario ${Number(scenario)} plays each of its stages): each stage is played once in a run, so ask it once`);
+    }
+    asked = units;
   } else {
     // A gate whose waves cannot be read may be this wave's: it is asked, and named as faulty, rather than left out.
     const inWave = (f: Found) => "all" in selection || f.waves === null || f.waves.includes(selection.wave);
-    asked = [...LIST.filter((row) => "all" in selection || row.wave === selection.wave).map((row) => scenarioId(row.number)), ...gateIds(found, inWave)];
+    asked = [...LIST.filter((row) => "all" in selection || row.wave === selection.wave).flatMap((row) => unitsOf(found, scenarioId(row.number))), ...gateIds(found, inWave)];
   }
+  if (asked.length === 0) throw new NothingToPlay("ids" in selection ? "nothing was asked" : `nothing was asked: ${"all" in selection ? "the proof folder holds" : `wave ${selection.wave} has`} no scenario and no gate here`);
   return run(options, found, asked, async (_host, playIds) => playIds(asked));
 }
 
 /** The formal round: every scenario and every gate, live, in the round's order, the bed restored from its golden copy where a stage says so. */
 export async function round(options: RunOptions, order: RoundStage[]): Promise<RunDone> {
   const found = await checked(options.root);
-  const placed = order.flatMap((stage) => stage.ids.map(normalId));
-  const twice = placed.find((id, i) => placed.indexOf(id) !== i);
-  if (twice !== undefined) {
-    const stages = order.filter((stage) => stage.ids.map(normalId).includes(twice)).map((stage) => `"${stage.name}"`);
-    throw new RunRefused(`the round's order places ${twice} twice (${stages.join(", ")}): each id is played once in a run`);
-  }
-  const known = [...LIST.map((row) => scenarioId(row.number)), ...gateIds(found)];
-  const asked = [...placed, ...known.filter((id) => !placed.includes(id))];
+  const { units, twice } = placedOnce(found, order.flatMap((stage) => stage.ids.map((id) => ({ id: normalId(id), at: stage.name }))));
+  if (twice) throw new RunRefused(`the round's order places ${twice.unit} twice (${twice.ways.map((w) => `"${w.at}"${w.as === twice.unit ? "" : ` as ${w.as}`}`).join(", ")}): each id is played once in a run`);
+  const known = [...LIST.flatMap((row) => unitsOf(found, scenarioId(row.number))), ...gateIds(found)];
+  const asked = [...units, ...known.filter((id) => !units.includes(id))];
   return run(options, found, asked, async (host, playIds, unplayed) => {
     for (const id of known) {
-      if (placed.includes(id)) continue;
+      if (units.includes(id)) continue;
       const refused = refusal(found, id);
       unplayed.push({ id, why: refused === null ? "the round's order does not place it" : `the round's order does not place it, and ${refused}` });
     }
@@ -128,7 +158,7 @@ export async function round(options: RunOptions, order: RoundStage[]): Promise<R
         if (!("restoreGolden" in host) || typeof host.restoreGolden !== "function") throw new RunRefused(`the round's stage "${stage.name}" restores the bed from its golden copy, and the bed's host cannot`);
         await host.restoreGolden();
       }
-      await playIds(stage.ids.map(normalId));
+      await playIds(stage.ids.map(normalId).flatMap((id) => unitsOf(found, id)));
     }
   });
 }
@@ -174,7 +204,7 @@ async function run(options: RunOptions, found: Found[], asked: string[], playAll
   const unplayed: Unplayed = [];
   const faults: string[] = [];
   const known = { scenarios: [...new Set(found.filter((f) => f.kind === "scenario" && /^\d{2}$/.test(f.id)).map((f) => f.id))], gates: gateIds(found) };
-  const record = runRecord(facts, { run: bundle.run, mode: options.mode, by: options.by, started: now().toISOString(), ended: null, asked, unplayed, known, repeats: options.repeats, faults });
+  const record = runRecord(facts, { run: bundle.run, mode: options.mode, by: options.by, started: now().toISOString(), ended: null, asked, unplayed, known, repeats: options.repeats, faults }, guidanceFrom(facts));
   bundle.writeRun(record);
   const played = new Set<string>();
   let broke: unknown = null;
@@ -183,7 +213,7 @@ async function run(options: RunOptions, found: Found[], asked: string[], playAll
       host,
       async (ids) => {
         for (const id of ids) {
-          const why = await playOne(options, bundle, host, found, id);
+          const why = await playOne(options, bundle, host, found, id, record);
           if (why === null) played.add(id);
           else if (!unplayed.some((u) => u.id === id)) unplayed.push({ id, why });
         }
@@ -215,6 +245,17 @@ function filesOf(found: Found[], id: string): Found[] {
 
 /** Why the runner will not play an id, in plain words; null when it will. */
 function refusal(found: Found[], id: string): string | null {
+  const asStage = parseStageId(id);
+  if (asStage) {
+    const whole = refusal(found, asStage.scenario);
+    if (whole !== null) return whole;
+    const form = filesOf(found, asStage.scenario)[0]?.form;
+    const stages = form ? stagesOf(form) : null;
+    if (!stages) return `scenario ${Number(asStage.scenario)} is played whole, not in stages: ask it as ${asStage.scenario}`;
+    if (!stages.some((stage) => stage.name === asStage.stage)) return `scenario ${Number(asStage.scenario)} has no stage ${asStage.stage}: its stages are ${stages.map((stage) => stage.name).join(", ")}`;
+    return null;
+  }
+  if (/^\d{2}:/.test(id)) return `${id} is not a stage: a stage is asked as its scenario's number and its name, lowercase words joined by hyphens (40:before)`;
   const files = filesOf(found, id);
   if (files.length === 0) {
     if (/^\d{2}$/.test(id)) return LIST.some((row) => scenarioId(row.number) === id) ? "no file plays it" : "it is not one of the 68";
@@ -237,21 +278,37 @@ function loadError(file: Found): string {
   return (file.faults[0] ?? "").replace(/^it does not load: /, "");
 }
 
-/** Plays one form as many times as its mode asks; returns why it was not played, or null. */
-async function playOne(options: RunOptions, bundle: Bundle, host: Host, found: Found[], id: string): Promise<string | null> {
+/** What one id plays: its form, the parts it looks for, the form it plays in this mode, and the id its evidence is kept by (`folderOf`). */
+interface Unit {
+  /** As the run asked it: a scenario's number, a gate's id, or a stage's `<number>:<stage>`. */
+  id: string;
+  file: Found;
+  form: ProofForm;
+  parts: GatePart[];
+  fn: Form;
+}
+
+/** Plays one form, or one stage of a scenario played in stages, as many times as its mode asks; returns why it was not played, or null. */
+async function playOne(options: RunOptions, bundle: Bundle, host: Host, found: Found[], id: string, run: RunRecord): Promise<string | null> {
   const refused = refusal(found, id);
   if (refused !== null) return refused;
-  const file = filesOf(found, id)[0];
+  const asStage = parseStageId(id);
+  const scenario = asStage ? asStage.scenario : id;
+  const file = filesOf(found, scenario)[0];
   const form = file?.form;
   if (!file || !form) return "no script has this id";
-  const fn: Form | undefined = options.mode === "rig" ? form.rig : form.live;
+  const stages = stagesOf(form);
+  const stage = asStage && stages ? stages.find((s) => s.name === asStage.stage) : undefined;
+  if (stages && !stage) return `scenario ${Number(scenario)} is played in stages, each by its own name: ${stages.map((s) => stageId(scenario, s.name)).join(", ")}`;
+  const parts: GatePart[] = stage && form.kind === "scenario" ? partsOfStage(form, stage) : form.parts;
+  const fn: Form | undefined = stage ? (options.mode === "rig" ? stage.rig : stage.live) : options.mode === "rig" ? form.rig : form.live;
   if (!fn) return "the rig cannot play it: it has no rig form";
-  const parts: GatePart[] = form.parts;
   // A scenario's "as shipped" part is a rate over fresh chats; a gate counts its own turns inside one play.
   const plays = options.mode === "live" && form.kind === "scenario" && parts.some((p) => p.mark === "as shipped") ? options.repeats : 1;
   bundle.formDir(id);
   const record: FormRecord = {
-    id,
+    run: run.run,
+    id: scenario,
     kind: form.kind,
     number: form.kind === "scenario" ? form.number : null,
     waves: form.kind === "scenario" ? [form.wave] : form.waves,
@@ -260,26 +317,50 @@ async function playOne(options: RunOptions, bundle: Bundle, host: Host, found: F
     plays,
     stops: [],
     parts: parts.map((p): PartRecord => ({ id: p.id, words: p.words, mark: p.mark, pages: isMeasured(p) ? [] : p.on.map((s) => s.page), measured: isMeasured(p) ? p.measured : null, wants: p.wants ?? null, instances: [] })),
+    ...(stage && stages ? { stage: { name: stage.name, of: stages.map((s) => s.name) } } : {}),
   };
-  for (let n = 1; n <= plays; n++) await onePlay(options, bundle, host, file, form, fn, record, n);
+  for (let n = 1; n <= plays; n++) await onePlay(options, bundle, host, { id, file, form, parts, fn }, record, n, run);
   bundle.writeResult(record);
-  bundle.writeNotes(record);
+  bundle.writeNotes(record, run.standing?.is !== "verdict");
   return null;
 }
 
-async function onePlay(options: RunOptions, bundle: Bundle, host: Host, file: Found, form: ProofForm, fn: Form, record: FormRecord, n: number): Promise<void> {
-  const { id, plays } = record;
+/**
+ * What the run stood on, for its standing: the shipped tree the host says RPE served and the build's
+ * (RPH's shipped folder with RPE's over it), by hash and by the paths they differ at, and each layer of
+ * the user's own with the guidance in it (the floor's own helpers, `scripts/proof/lib/record.ts`).
+ * Null when the host gave no account of it, or gave one that is not one: the run is then a trial.
+ */
+function guidanceFrom(facts: RunFacts): StandingFrom | null {
+  const given = facts.guidance;
+  const files = (list: unknown) => Array.isArray(list) && list.every((f) => isRecord(f) && typeof f.path === "string" && typeof f.sha256 === "string");
+  if (!given || !files(given.served) || !isRecord(given.build) || !files(given.build.rph) || !files(given.build.rpe) || !Array.isArray(given.layers) || !given.layers.every((l) => isRecord(l) && typeof l.level === "string" && files(l.files))) return null;
+  const build = shippedOf(given.build.rph, given.build.rpe);
+  return { served: treeHash(given.served), build: treeHash(build), changed: treeChanges(given.served, build), layers: given.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files), guidance: guidanceOf(layer) })) };
+}
+
+async function onePlay(options: RunOptions, bundle: Bundle, host: Host, unit: Unit, record: FormRecord, n: number, run: RunRecord): Promise<void> {
+  const { id, form, parts, fn } = unit;
+  const { plays } = record;
+  // A trial gives no verdict on what rests on guidance: a measured part's figure is kept, never met or unmet.
+  const trial = run.standing?.is !== "verdict";
   const keep = async (name: string, data: Kept) => bundle.keep(id, n, name, data);
-  const looked = new Map<string, Set<string>>(form.parts.map((p) => [p.id, new Set<string>()]));
+  const looked = new Map<string, Set<string>>(parts.map((p) => [p.id, new Set<string>()]));
   const looks = new Map<string, number>();
   const add = (part: string, entry: Omit<Instance, "play" | "at">) => {
     looks.set(part, (looks.get(part) ?? 0) + 1);
     record.parts.find((p) => p.id === part)?.instances.push({ play: n, at: looks.get(part) ?? 1, ...entry });
   };
+  const own = (partId: string) => {
+    const part = parts.find((p) => p.id === partId);
+    if (part) return part;
+    const other = stagesOf(form)?.find((s) => s.parts.includes(partId));
+    throw new Error(other ? `part ${partId} is seen in stage ${other.name}, not in this one` : `the form looked for a part it does not have: ${partId}`);
+  };
   let stopped: string | null = null;
   let session: Session | null = null;
   try {
-    session = await host.begin({ form: { id, kind: form.kind, fixtures: form.fixtures, fixturesDir: fixturesDir(options.root, file.file, form), bed: form.bed }, play: n, plays, keep });
+    session = await host.begin({ form: { id, kind: form.kind, fixtures: form.fixtures, fixturesDir: fixturesDir(options.root, unit.file.file, form), bed: form.bed }, play: n, plays, keep });
   } catch (error) {
     stopped = `the host could not set up play ${n}: ${message(error)}`;
   }
@@ -291,10 +372,10 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, file: Fo
       plays,
       acts: session.acts,
       look: browser,
+      run,
       keep,
       async see(partId, page) {
-        const part = form.parts.find((p) => p.id === partId);
-        if (!part) throw new Error(`the form looked for a part it does not have: ${partId}`);
+        const part = own(partId);
         if (isMeasured(part)) throw new Error(`part ${partId} is measured: its form judges it`);
         const sightings = page === undefined ? part.on : part.on.filter((s) => pageSlug(s.page) === pageSlug(page));
         if (sightings.length === 0) throw new Error(`part ${partId} is not seen on the ${page} page`);
@@ -306,10 +387,16 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, file: Fo
         add(partId, { ...outcomeOf(glances, part.mark, options.mode), page: null, glances });
       },
       async judge(partId, verdict) {
-        const part = form.parts.find((p) => p.id === partId);
+        const part = parts.find((p) => p.id === partId);
         if (!part || !isMeasured(part)) throw new Error(`the form judged ${partId}, which is not one of its measured parts`);
         looked.get(partId)?.add("");
-        add(partId, { outcome: verdict.pass ? "met" : "unmet", why: verdict.what, page: null, glances: [] });
+        add(partId, { outcome: trial ? "trial" : verdict.pass ? "met" : "unmet", why: verdict.what, page: null, glances: [] });
+      },
+      async notJudged(partId, why) {
+        const part = parts.find((p) => p.id === partId);
+        if (!part || !isMeasured(part)) throw new Error(`the form said ${partId} is not judged, which is not one of its measured parts`);
+        looked.get(partId)?.add("");
+        add(partId, { outcome: "not judged", why, page: null, glances: [] });
       },
     };
     try {
@@ -325,7 +412,7 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, file: Fo
   }
   if (stopped) record.stops.push({ play: n, why: stopped });
   // What the play never looked for is not seen; where the play stopped first, the stop broke it. Each is kept with the page it was owed on.
-  for (const part of form.parts) {
+  for (const part of parts) {
     const done = looked.get(part.id) ?? new Set<string>();
     if (isMeasured(part)) {
       if (!done.has("")) add(part.id, stopped ? { outcome: "broken", why: `${stopped}, before it was judged`, page: null, glances: [] } : { outcome: "unlooked", why: "its form never judged it", page: null, glances: [] });

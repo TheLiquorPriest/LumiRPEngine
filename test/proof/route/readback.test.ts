@@ -7,9 +7,10 @@
 // result it concerns. An honest record of the same shape passes.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { sha256 } from "../../../scripts/proof/lib/record";
 import { Bundle, notesOf, readBundle, runRecord } from "../../../scripts/proof/route/evidence";
 import { main } from "../../../scripts/proof/run";
 import { pageSlug, type Mark } from "../../../scripts/proof/route/form";
@@ -30,10 +31,10 @@ afterAll(() => {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** One look at a page at a width, its screen named as the bundle names it, its page showing the part. */
+/** One look at a page at a width, its screen named as the bundle names it, with the digest of the bytes `bundle` writes for it, its page showing the part. */
 function glance(page: string, width: number, part: string, play = 1, found: boolean | null = true): Glance {
   const text = `${page}: ${part} as recorded`;
-  return { page, width, found, what: found ? `${part} seen` : `${part} not there`, shows: found ? [text] : [], screen: `play-${pad(play)}/${pageSlug(page)}-${width}-${part}.png`, shotPage: page, shotText: found ? text : `${page}: nothing`, unshown: null };
+  return { page, width, found, what: found ? `${part} seen` : `${part} not there`, shows: found ? [text] : [], screen: `play-${pad(play)}/${pageSlug(page)}-${width}-${part}.png`, sha256: sha256("png"), shotPage: page, shotText: found ? text : `${page}: nothing`, unshown: null };
 }
 
 type PartSpec = { id: string; words: string; mark?: Mark; pages?: string[] };
@@ -70,8 +71,9 @@ function bundle(folders: FolderSpec[], fields: { mode?: "rig" | "live"; repeats?
   for (const spec of folders) {
     const dir = join(made.dir, spec.folder);
     mkdirSync(join(dir, "internal"), { recursive: true });
-    writeFileSync(join(dir, "result.json"), JSON.stringify(spec.record));
-    const rec = spec.record as FormRecord;
+    // A record is this run's unless the test says it is another's.
+    const rec = { run: made.run, ...(spec.record as FormRecord) };
+    writeFileSync(join(dir, "result.json"), JSON.stringify(spec.record !== null && typeof spec.record === "object" ? rec : spec.record));
     const named = rec.parts?.flatMap((p) => p.instances?.flatMap((i) => i.glances?.flatMap((g) => (g.screen ? [g.screen] : [])) ?? []) ?? []) ?? [];
     const screens = spec.screens === undefined || spec.screens === "all" ? named : spec.screens === "none" ? [] : spec.screens;
     for (const screen of screens) {
@@ -209,4 +211,35 @@ test("a screen no look names, and notes that leave out a screen the record names
   expect(await main(["report", quiet], { out: (text) => printed.push(text) })).toBe(1);
   expect(printed.join("")).toContain("- 4. \"She spent most of her coin\": failed: a fault of its evidence");
   expect(await main(["report", bundle([{ folder: "04", record: honest }])], { out: () => {} })).toBe(0);
+});
+
+test("a folder another run left, notes that say other than their record, and a screen whose bytes were changed are faults, never a pass", () => {
+  const other = bundle([{ folder: "04", record: record("04", 4, FOUR, { run: "rig-20261114T100000Z" }) }]);
+  expect(faultsOf(other, "04").some((f) => f.startsWith("its record is of run rig-20261114T100000Z, and this bundle is run "))).toBe(true);
+  expect(resultOf(other, "04")).toBe("failed");
+
+  const told = bundle([{ folder: "04", record: record("04", 4, FOUR) }]);
+  const notes = join(told, "04", "notes.md");
+  writeFileSync(notes, readFileSync(notes, "utf8").replace("Passed", "Failed"));
+  expect(faultsOf(told, "04").some((f) => f.startsWith("notes.md is not what its record says (notesOf): the first line that differs is "))).toBe(true);
+  expect(resultOf(told, "04")).toBe("failed");
+
+  const swapped = bundle([{ folder: "04", record: record("04", 4, FOUR) }]);
+  writeFileSync(join(swapped, "04", "play-01", "world-390-vague-fact.png"), "other bytes");
+  expect(faultsOf(swapped, "04")).toContain("play-01/world-390-vague-fact.png: its bytes are not the screen the run saved (their digest is not result.json's)");
+  expect(resultOf(swapped, "04")).toBe("failed");
+});
+
+test("a share written on a scenario's part is refused on read-back, and a run that broke off exits non-zero on its bundle alone", async () => {
+  const shared = record("04", 4, FOUR);
+  (shared.parts[0] as PartRecord).wants = { hits: 1, of: 1 };
+  const dir = bundle([{ folder: "04", record: shared }]);
+  expect(faultsOf(dir, "04")).toContain("part vague-fact asks a share, and a scenario's rates are findings with no share (plan §17.0)");
+  expect(resultOf(dir, "04")).toBe("failed");
+
+  const broke = bundle([{ folder: "04", record: record("04", 4, FOUR) }]);
+  expect(await main(["report", broke], { out: () => {} })).toBe(0);
+  const file = join(broke, "run.json");
+  writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), ended: null }));
+  expect(await main(["report", broke], { out: () => {} })).toBe(1);
 });
