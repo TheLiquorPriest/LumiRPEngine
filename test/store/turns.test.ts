@@ -5,10 +5,12 @@
 // answered from RPE's own store, on the path the question carries: the state where the coming turn
 // will start, as the turn's own comparison will then find it, and that path with the store's marks.
 
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { castAt } from "../../src/cast/path";
 import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
+import { migrateStore, STORE_MIGRATIONS } from "../../src/store/schema";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
 import { StoreInputError, type SeenMessage, type ShownMessage } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
@@ -466,6 +468,105 @@ describe("the question's call", () => {
     s.addChanges(next.id, engine(goTo(POV, "market_square")));
     expect(s.stateAt(next.id).state.world.entities[POV]?.fields.place).toBe("market_square");
     expect(answer.state.world.entities[POV]?.fields.place).toBe("cellar");
+  });
+});
+
+describe("heard between turns", () => {
+  test("an aside hidden between turns is not counted by the next question's window", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    play(s, "c", "m2", "She goes down to the cellar.", 2, engine(goTo(POV, "cellar")));
+    const lines: Line[] = [
+      ["u1", "in"],
+      ["m1", "Wren comes in from the rain.", 0],
+      ["u2", "(Marlow mutters about the weather.)"],
+      ["m2", "She goes down to the cellar.", 0],
+    ];
+    s.sync("c", asShown(seen(...lines), { m1: 1, m2: 2 }));
+    const path = seen(...lines, ["u3", "and then?"]);
+    // What the window counts: the question's messages that are not hidden (R-21).
+    const counted = (u: UserStore = s): string[] => u.turnStart("c", path, { follows: "u3" }).messages.flatMap((m) => (m.hidden ? [] : [m.id]));
+    expect(counted()).toEqual(["u1", "m1", "u2", "m2", "u3"]);
+    const held = s.turnStart("c", path, { follows: "u3" }).state;
+    // Between turns the player hides the aside. Lumiverse sets its `extra.hidden` (`bulkSetHidden`, `src/services/chats.service.ts:3087-3110`)
+    // and tells it, with the whole message, as `MESSAGE_EDITED`; RPE's event socket hears it before the next question.
+    expect(s.markHidden("c", "u2", true)).toBe(true);
+    expect(counted()).toEqual(["u1", "m1", "m2", "u3"]);
+    // A mark is kept by message id with the chat, on RPE's path or not yet: the newest line too, hidden before it is answered.
+    s.markHidden("c", "u3", true);
+    expect(counted()).toEqual(["u1", "m1", "m2"]);
+    // Shown again, each is counted again, after a restart too.
+    s.markHidden("c", "u2", false);
+    s.markHidden("c", "u3", false);
+    expect(counted(reopened(ts).user(USER))).toEqual(["u1", "m1", "u2", "m2", "u3"]);
+    // A mark changes no state: the turn that follows still starts from the state held.
+    expect(s.turnStart("c", path, { follows: "u3" }).state).toBe(held);
+    // The next comparison takes the marks the chat shows, a mark whose event RPE missed among them, in place of what was heard.
+    s.markHidden("c", "u3", true);
+    s.sync("c", asShown(path, { m1: 1, m2: 2 }).map((m) => ({ ...m, hidden: m.id === "u2" })));
+    expect(counted()).toEqual(["u1", "m1", "m2", "u3"]);
+    // A chat the store does not know keeps nothing: its first comparison takes the marks.
+    expect(s.markHidden("elsewhere", "x-u1", true)).toBe(false);
+  });
+
+  test("a store made before what is heard was kept comes up having heard nothing, and keeps what it hears after", () => {
+    const db = new Database(":memory:");
+    try {
+      // The store's tables as the build before this one left them, with a chat in them.
+      expect(migrateStore(db, STORE_MIGRATIONS.filter((m) => m.version <= 2))).toBe(2);
+      db.run("INSERT INTO chat (user, id, created) VALUES (?, 'old', 1)", [USER]);
+      expect(migrateStore(db)).toBe(3);
+      expect(db.query<{ heard: string }, []>("SELECT heard FROM chat").get()?.heard).toBe("{}");
+      const s = openStore({ db, registry: registry(), worlds: () => undefined }).user(USER);
+      const path = seen(["u1", "(an aside)"], ["u2", "go on"]);
+      expect(s.turnStart("old", path, { follows: "u2" }).messages.map((m) => m.hidden)).toEqual([false, false]);
+      expect(s.markHidden("old", "u1", true)).toBe(true);
+      expect(s.turnStart("old", path, { follows: "u2" }).messages.map((m) => m.hidden)).toEqual([true, false]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a reply edited between turns: the next question is answered with that turn's changes in, and the next comparison still records the edit as it does today", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const t2 = play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV)));
+    const lines: Line[] = [
+      ["u1", "in"],
+      ["m1", "Wren comes in from the rain.", 0],
+      ["u2", "light"],
+    ];
+    s.sync("c", asShown(seen(...lines, ["m2", "Bram lends her a lantern.", 0]), { m1: 1, m2: 2 }));
+    // Between turns the player edits the second reply: the text of the swipe it shows changes and that swipe keeps its date
+    // (`updateMessage`, `src/services/chats.service.ts:2922-3023`); RPE's event socket hears the whole message as `MESSAGE_EDITED`.
+    const text = "Bram lends her a lantern with a cracked pane.";
+    const path = seen(...lines, ["m2", text, 0], ["u3", "thank him"]);
+    // Unheard, the edited reply reads as a swipe no turn was played on, and the question stands before its turn.
+    expect(s.turnStart("c", path, { follows: "u3" }).at).toEqual({ message: "m1", turn: t1.id });
+    // Heard: the swipe is found by the message and its date, as the comparison finds it.
+    expect(s.heardEdit("c", "m2", 2, hashOf(text))).toBe(t2.id);
+    const answer = s.turnStart("c", path, { follows: "u3" });
+    expect([answer.at, answer.node]).toEqual([{ message: "m2", turn: t2.id }, t2.node]);
+    expect(carried(answer.state.world, POV)).toContain("lantern");
+    expect(reopened(ts).user(USER).turnStart("c", path, { follows: "u3" }).at).toEqual({ message: "m2", turn: t2.id });
+    // Kept apart from the turn's own edit mark, which only a comparison sets, so the next comparison still finds the edit,
+    // records it and tells it, as it does today.
+    expect(s.turn(t2.id)?.edited).toBeNull();
+    const report = s.sync("c", asShown(path, { m1: 1, m2: 2 }));
+    expect(report.edited).toEqual([{ turn: t2.id, message: "m2", saved: hashOf("Bram lends her a lantern."), now: hashOf(text) }]);
+    expect(s.turn(t2.id)?.edited).toBe(hashOf(text));
+    expect(s.turnStart("c", path, { follows: "u3" }).at).toEqual({ message: "m2", turn: t2.id });
+    // Edited again after that comparison: heard again, and known by the new text, the recorded edit kept beside it.
+    const again = "Bram lends her a lantern, its pane taped over.";
+    expect(s.heardEdit("c", "m2", 2, hashOf(again))).toBe(t2.id);
+    expect(s.turnStart("c", seen(...lines, ["m2", again, 0], ["u3", "thank him"]), { follows: "u3" }).at).toEqual({ message: "m2", turn: t2.id });
+    // A swipe no turn was played on, and one that shows its text as saved, are left to the comparison.
+    expect(s.heardEdit("c", "m3", 3, hashOf("A reply written elsewhere."))).toBeNull();
+    expect(s.heardEdit("c", "m1", 1, hashOf("Wren comes in from the rain."))).toBeNull();
   });
 });
 

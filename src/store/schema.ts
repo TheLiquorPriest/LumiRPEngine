@@ -149,6 +149,13 @@ CREATE TABLE job_end (
 CREATE INDEX change_job ON change (user, job) WHERE job IS NOT NULL;
 `,
   },
+  {
+    version: 3,
+    // What RPE heard of a chat's messages since its last comparison (plan §4.2, §6.3): hidden marks and edits, by message id, as
+    // JSON. The event's calls write it, the question reads it, and the next comparison clears it as it takes what the chat shows.
+    // The path column keeps the path and nothing else. A chat made before this comes up having heard nothing.
+    sql: `ALTER TABLE chat ADD COLUMN heard TEXT NOT NULL DEFAULT '{}';`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

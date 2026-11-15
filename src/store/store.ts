@@ -163,6 +163,8 @@ interface ChatDb {
   source_message: string | null;
   head: string | null;
   path: string;
+  /** What was heard of the chat's messages since its last comparison (`Heard`), as JSON. */
+  heard: string;
   created: number;
   deleted: number | null;
 }
@@ -237,6 +239,14 @@ function pathOf(json: string): PathEntry[] {
   for (const e of path) e.hidden ??= false;
   return path as PathEntry[];
 }
+
+/**
+ * What RPE heard of a chat's messages since its last comparison (plan §4.2, §6.3), by message id, kept in the chat's row until the
+ * next comparison takes what the chat shows: a hidden mark set or taken off, whether the message is on the path yet or not; and an
+ * edit of a reply, as the hash the text of the swipe a turn was played on now has, by turn. An edit heard is not the turn's own edit
+ * mark (`edited`), which only a comparison sets, so the comparison still finds the edit, records it and tells it.
+ */
+type Heard = Record<string, { hidden?: boolean; edits?: Record<string, string> }>;
 
 /** Opens a store over a database: a path it opens and brings up itself, or a database whose owner made its tables. */
 export function openStore(options: StoreOptions): Store {
@@ -435,7 +445,7 @@ export class UserStore {
   /** The user's chats, oldest first; a chat deleted while a branch still shares its turns is left out. Each chat's path is not read. */
   chats(): ChatRow[] {
     return this.db
-      .query<ChatDb, [string]>("SELECT id, world, revision, source_chat, source_message, head, '' AS path, created, deleted FROM chat WHERE user = ? AND deleted IS NULL ORDER BY created, rowid")
+      .query<ChatDb, [string]>("SELECT id, world, revision, source_chat, source_message, head, '' AS path, '{}' AS heard, created, deleted FROM chat WHERE user = ? AND deleted IS NULL ORDER BY created, rowid")
       .all(this.id)
       .map(chatOf);
   }
@@ -498,7 +508,7 @@ export class UserStore {
     const shared = this.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM message_link WHERE user = ? AND source_chat = ?").get(this.id, id);
     if ((shared?.n ?? 0) > 0) {
       this.write(false, () => {
-        this.db.run("UPDATE chat SET deleted = ?, path = '[]', head = NULL WHERE user = ? AND id = ?", [this.store.now(), this.id, id]);
+        this.db.run("UPDATE chat SET deleted = ?, path = '[]', heard = '{}', head = NULL WHERE user = ? AND id = ?", [this.store.now(), this.id, id]);
         this.db.run("DELETE FROM session WHERE user = ? AND chat = ?", [this.id, id]);
       });
       return { kept: true };
@@ -850,10 +860,54 @@ export class UserStore {
       for (const [turn, hash] of flags) flag.run(hash, this.id, turn);
       const put = this.db.query("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)");
       for (const [key, p, turn, d] of nodes) put.run(this.id, key, p, turn, d);
-      this.db.run("UPDATE chat SET path = ?, head = ? WHERE user = ? AND id = ?", [JSON.stringify(after), head, this.id, chat]);
+      // The chat as shown replaces what was heard of it since the last comparison.
+      this.db.run("UPDATE chat SET path = ?, head = ?, heard = '{}' WHERE user = ? AND id = ?", [JSON.stringify(after), head, this.id, chat]);
       return found.rebased ? this.headState(chat).notApplied : [];
     });
     return { ...found, edited, branched, notApplied };
+  }
+
+  /**
+   * A message hidden from the prompt, or shown again, as heard between comparisons (plan §4.2, R-21): kept with the chat by message
+   * id, whether the message is on RPE's path yet or not, and laid on by the question's answer (`turnStart`), until the next
+   * comparison takes the marks the chat shows, which it does whether this was heard or not. A chat the store does not know keeps
+   * nothing: its first comparison takes the marks. Whether the mark was kept. It changes no state.
+   */
+  markHidden(chat: string, message: string, hidden: boolean): boolean {
+    return this.write(false, () => {
+      const row = this.chatDb(chat);
+      if (row === null) return false;
+      const heard = JSON.parse(row.heard) as Heard;
+      heard[message] = { ...heard[message], hidden };
+      this.db.run("UPDATE chat SET heard = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), this.id, chat]);
+      return true;
+    });
+  }
+
+  /**
+   * A reply edited between comparisons (plan §6.3): its showing swipe, found by the message and that swipe's `date` as a comparison
+   * finds it (`matchTurn`), now has text whose hash is `hash`. Kept with the chat, apart from the turn's own edit mark, so the next
+   * question knows the turn by its new text (`turnStart`), while the next comparison still records the edit on the turn and tells it,
+   * and replaces what was heard. A swipe no turn was played on, and a chat the store does not know, are left to the comparison; a
+   * swipe that shows its saved text again takes back an edit heard for it. The turn the edit was kept for, or null. It changes no
+   * state.
+   */
+  heardEdit(chat: string, message: string, date: number | null, hash: string): string | null {
+    return this.write(false, () => {
+      const row = this.chatDb(chat);
+      if (row === null) return null;
+      const last = pathOf(row.path).find((e) => e.message === message)?.turn ?? null;
+      const match = matchTurn(this.tiedTo(chat, [message]).get(message) ?? [], { hash, date }, last);
+      if (match.turn === null) return null;
+      const heard = JSON.parse(row.heard) as Heard;
+      const edits = { ...heard[message]?.edits };
+      if (match.edited) edits[match.turn.id] = hash;
+      else if (edits[match.turn.id] !== undefined) delete edits[match.turn.id];
+      else return null;
+      heard[message] = { ...heard[message], edits };
+      this.db.run("UPDATE chat SET heard = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), this.id, chat]);
+      return match.edited ? match.turn.id : null;
+    });
   }
 
   /**
@@ -1003,19 +1057,32 @@ export class UserStore {
    * Where a turn not yet begun will start, on the path the question of where it starts carries (plan §4.2, §9.6 l.1121-1122, R-5):
    * the state at the point, folded along the chain of turns that path shows as the turn's own comparison will fold it (`sync`): the
    * turn of a message the path no longer has is off the chain, and after a reply deleted or a swipe flipped before the point the
-   * later turns stand rebased, their changes applied again. With it, that path up to the point, each message with the hidden mark the
-   * store holds for it, and where the answer stands. A path none of whose messages the tree ties to a turn, and a chat the store does
-   * not know, are answered at the world's start, and the answer says so. Where the store last compared the chat does not enter into
-   * it, and nothing is kept from one question to the next. It reads RPE's own store only (the state held in memory, else folded from
-   * the nearest snapshot), asks neither the chat application nor a model, and writes nothing. The state is held under the keys a
-   * comparison of that path will store, so the turn that follows starts from it; it may be the held state itself: read it, never
-   * change it.
+   * later turns stand rebased, their changes applied again. A reply edited since the last comparison is known by the edit heard for
+   * it (`heardEdit`). With it, that path up to the point, each message with the hidden mark the store holds for it (heard since the
+   * last comparison, else as that comparison took it), and where the answer stands. A path none of whose messages the tree ties to a
+   * turn, and a chat the store does not know, are answered at the world's start, and the answer says so. Where the store last compared
+   * the chat does not decide the point or the chain, and nothing is kept from one question to the next. It reads RPE's own store only
+   * (the state held in memory, else folded from the nearest snapshot), asks neither the chat application nor a model, and writes
+   * nothing. The state is held under the keys a comparison of that path will store, so the turn that follows starts from it; it may
+   * be the held state itself: read it, never change it.
    */
   turnStart(chat: string, path: readonly SeenMessage[], point: TurnPoint): TurnStart {
     const row = this.chatDb(chat);
-    const shown = turnsShown(path, point, this.tiedTo(chat, path.flatMap((m) => (m.user ? [] : [m.id]))));
+    const heard: Heard = row === null ? {} : (JSON.parse(row.heard) as Heard);
+    // A reply's turn is known by its saved text, by the edit the last comparison recorded on it, or by an edit heard since for it.
+    const tied = new Map(
+      [...this.tiedTo(chat, path.flatMap((m) => (m.user ? [] : [m.id])))].map(([message, turns]) => [
+        message,
+        turns.flatMap((t) => {
+          const edit = heard[message]?.edits?.[t.id];
+          return edit === undefined ? [t] : [t, { ...t, edited: edit }];
+        }),
+      ]),
+    );
+    const shown = turnsShown(path, point, tied);
     const marks = new Map(row === null ? [] : pathOf(row.path).map((e) => [e.message, e.hidden]));
-    const messages = shown.map(({ message, turn }) => ({ ...message, hidden: marks.get(message.id) ?? false, turn: turn?.id ?? null }));
+    // A mark heard since the last comparison is newer than the one it took.
+    const messages = shown.map(({ message, turn }) => ({ ...message, hidden: heard[message.id]?.hidden ?? marks.get(message.id) ?? false, turn: turn?.id ?? null }));
     const held = shown.flatMap(({ message, turn }): ShowingTurn[] => (turn === null ? [] : [{ turn: turn.id, message: message.id }]));
     const { nodes } = chainOf(held, null, 0, this.goesOn(chat, held, 0));
     const last = held.at(-1);
