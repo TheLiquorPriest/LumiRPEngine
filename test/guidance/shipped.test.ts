@@ -1,93 +1,282 @@
-// The shipped guidance is data a user edits and an agent's behaviour hangs on. A header that
-// does not parse silently takes a whole file out of force, so every shipped file is checked here
-// for what a loader needs of it: a header that is valid YAML, the fields its kind requires, and
-// `needs:` that names a file that ships.
+// The shipped guidance is the product's behaviour, and a user edits it. RPH's own loader is run over the
+// set as RPE lays it (RPH's `guidance/` first, RPE's over it, `chat-defaults/` at the root; `set.ts`),
+// so what is found here is what an agent is given. Each check names a way the set can depart from
+// Appendix E and D.2, and is shown to fail on a scratch copy of the set that breaks it. Words are the
+// next test file's (`texts.test.ts`); this one is the form, the files present, the rules in force, and
+// who reads what.
 
-import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { basename } from "node:path";
+import type { Guidance } from "rp-harness";
+import { changed, openSet, type OpenSet, shippedTexts, split } from "./set";
+import { HOME_FILES, REMINDERS } from "./homes";
 
-const ROOT = resolve(import.meta.dir, "../../guidance");
+/** Appendix E, file by file, as the shipped level holds them (E.1 to E.6). */
+const APPENDIX_E: readonly string[] = [
+  // E.1 and E.2
+  "ALL-AGENTS.md",
+  ".rules/consent.md",
+  ".agents/author.md",
+  "TURN.md",
+  "WRITING.md",
+  "SIMULATION.md",
+  "WORLD.md",
+  "SWIPE.md",
+  "DELETE.md",
+  "PRESET.md",
+  ".rules/perceptions.md",
+  // E.3: in force, then the examples
+  ".rules/perceptions-owed.md",
+  ".rules/perceptions-missing.md",
+  ".rules/unsourced.md",
+  ".rules/engine-silent.md",
+  ".rules/reply-missing.md",
+  ".rules/history-leaving.md",
+  ".rules/save-before-compaction.md",
+  ".rules/examples/no-player-voice.md",
+  ".rules/examples/banned-phrases.md",
+  ".rules/examples/memory-nudge.md",
+  ".rules/examples/scene-too-long.md",
+  // E.4
+  ".agents/gm.md",
+  ".agents/character.md",
+  ".agents/narrator.md",
+  ".agents/keeper.md",
+  ".agents/historian.md",
+  ".agents/indexer.md",
+  ".agents/mapper.md",
+  ".agents/assistant.md",
+  // E.5
+  ...["sandbox", "long-input", "scene-end", "chapter-pass", "bootstrap", "casting", "lore-proposals", "places-and-maps", "economy", "items-and-wardrobe", "vehicles", "ruleset-and-sheets", "combat", "quests", "time", "groups"].map((name) => `.skills/${name}/SKILL.md`),
+  // E.6
+  ...["reply-contract", "prompt-frame", "briefing", "world-state", "lore-map", "delegate-brief", "question", "compaction", "continue-after-rule", "carried", "progress", "notices", "judge", "engine-answers"].map((name) => `.prompts/${name}.md`),
+];
 
-function walk(dir: string): string[] {
+/** The rules in force at the shipped level (E.1, E.2, E.3): the two for the agents, and the seven. */
+const IN_FORCE = ["consent", "perceptions", "perceptions-owed", "perceptions-missing", "unsourced", "engine-silent", "reply-missing", "history-leaving", "save-before-compaction"];
+
+/** The two examples the build added beyond E.3's four, for the owner's approval. */
+const BUILD_EXAMPLES = [".rules/examples/intent-missing.md", ".rules/examples/turn-unrecorded.md"];
+
+const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * The header fields of a prompt part or a tool file that something reads besides a template of the file's
+ * own: its description and format; a tool's `arguments`; a lines part's `lines` and `keys` (RPE's words for a state line); and the fields code reads
+ * of one part by name (RPH's judge reads `yes`, its briefing `record`, its prompt map `views`, its turn the
+ * reply contract's `tags` and `intent_file`; RPE's briefing `on_stage_views`).
+ */
+const READ_BY_CODE: Record<string, true> = { description: true, format: true, arguments: true, lines: true, keys: true, yes: true, record: true, views: true, tags: true, intent_file: true, on_stage_views: true };
+
+/** The definitions' names, in the order E.4 lists them. */
+const AGENTS = ["author", "gm", "character", "narrator", "keeper", "historian", "indexer", "mapper", "assistant"];
+
+/** Whether a template in a file's text puts in or tests a field by this name. */
+function names(text: string, field: string): boolean {
+  return new RegExp(`\\{\\{[#^]?${field}[.}]`).test(text);
+}
+
+/** Every way the set departs from what these checks hold it to, each as `kind: where: what`. */
+async function departures(texts: ReadonlyMap<string, string>): Promise<string[]> {
   const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) out.push(...walk(path));
-    else if (name.endsWith(".md")) out.push(path);
+  for (const path of APPENDIX_E) if (!texts.has(path)) out.push(`missing: ${path}`);
+  const set = await openSet(texts);
+  try {
+    const guidance = set.guidance();
+    for (const problem of await guidance.problems()) out.push(`problem: ${problem.path}: ${problem.message}`);
+    out.push(...(await inForce(guidance)));
+    out.push(...(await reads(guidance, texts)));
+  } finally {
+    await set.close();
+  }
+  out.push(...fields(texts));
+  out.push(...tags(texts));
+  return out;
+}
+
+/** The rules in force are those of E.1 to E.3; a rule that needs a file names one in force. */
+async function inForce(guidance: Guidance): Promise<string[]> {
+  const out: string[] = [];
+  const rules = await guidance.rules();
+  const now = rules.filter((rule) => rule.inForce).map((rule) => rule.name).sort();
+  if (JSON.stringify(now) !== JSON.stringify([...IN_FORCE].sort())) out.push(`rules: in force are ${now.join(", ")}`);
+  for (const rule of rules) if (rule.why === "needs") out.push(`needs: ${rule.path} names a file that is not in force`);
+  return out;
+}
+
+/** Every definition names its model and effort; who holds a tool reads the file for every agent and the rules, and who holds none reads neither. */
+async function reads(guidance: Guidance, texts: ReadonlyMap<string, string>): Promise<string[]> {
+  const out: string[] = [];
+  for (const name of AGENTS) {
+    const path = `.agents/${name}.md`;
+    const definition = await guidance.definition(name);
+    if (definition === undefined) {
+      out.push(`definition: ${path} is not in force`);
+      continue;
+    }
+    if (typeof definition.model !== "string" || definition.model === "") out.push(`model: ${path} names no model`);
+    if (definition.effort === undefined || !EFFORTS.includes(definition.effort)) out.push(`effort: ${path} names no effort`);
+    const holds = definition.tools.length > 0;
+    for (const file of ["ALL-AGENTS", "rules"]) if (definition.reads.includes(file) !== holds) out.push(`reads: ${path} ${holds ? "holds a tool and does not read" : "holds none and reads"} ${file}`);
+    // Only a definition that names a reply tool reaches the reply family; the GM's and the keeper's searches find no sub-agent either.
+    const replies = definition.tools.some((tool) => tool === "write_reply" || tool === "reply_release");
+    if (holds && !replies && !definition.outOfReach.includes("reply")) out.push(`reach: ${path} does not keep the reply family out of its reach`);
+    if (replies && definition.outOfReach.includes("reply")) out.push(`reach: ${path} names a reply tool and keeps the family out`);
+    if ((name === "gm" || name === "keeper") && !definition.outOfReach.includes("agents")) out.push(`reach: ${path} does not keep the agents family out of its reach`);
   }
   return out;
 }
 
-interface Shipped {
-  rel: string;
-  header: Record<string, unknown> | null;
-  body: string;
-}
-
-function read(path: string): Shipped {
-  const text = readFileSync(path, "utf8");
-  const rel = relative(ROOT, path).split("\\").join("/");
-  if (!text.startsWith("---\n")) return { rel, header: null, body: text };
-  const end = text.indexOf("\n---\n", 4);
-  if (end < 0) throw new Error(`${rel}: the header is never closed`);
-  const header = Bun.YAML.parse(text.slice(4, end));
-  if (header === null || typeof header !== "object" || Array.isArray(header)) throw new Error(`${rel}: the header is not a set of fields`);
-  return { rel, header: header as Record<string, unknown>, body: text.slice(end + 5) };
-}
-
-const files = walk(ROOT).map(read);
-const byRel = (prefix: string) => files.filter((f) => f.rel.startsWith(prefix));
-
-/** What `needs:` may name: an instruction file or a rule, by its name without the extension. */
-const names = new Set(files.map((f) => basename(f.rel, ".md")));
-
-describe("the shipped guidance", () => {
-  test("instruction files are plain markdown with no header", () => {
-    const instructions = files.filter((f) => f.rel === "ALL-AGENTS.md" || f.rel.startsWith("chat-defaults/"));
-    expect(instructions.length).toBeGreaterThan(0);
-    expect(instructions.filter((f) => f.header !== null).map((f) => f.rel)).toEqual([]);
-  });
-
-  test("every agent definition names itself, says what it is for, and lists what it holds, reads and is given", () => {
-    const agents = byRel(".agents/");
-    expect(agents.length).toBeGreaterThan(0);
-    for (const agent of agents) {
-      const h = agent.header ?? {};
-      expect({ file: agent.rel, name: h.name }).toEqual({ file: agent.rel, name: basename(agent.rel, ".md") });
-      expect(typeof h.description).toBe("string");
-      for (const list of ["tools", "reads", "given"]) {
-        const value = h[list];
-        expect({ file: agent.rel, field: list, isList: Array.isArray(value) }).toEqual({ file: agent.rel, field: list, isList: true });
-        expect((value as unknown[]).every((item) => typeof item === "string")).toBe(true);
+/** A header field of a file that nothing reads, and the file does not describe. */
+function fields(texts: ReadonlyMap<string, string>): string[] {
+  const out: string[] = [];
+  for (const [path, text] of texts) {
+    if (!path.endsWith(".md")) continue;
+    // A header that does not parse is the loader's problem, reported by `problems()`.
+    const header = (() => {
+      try {
+        return split(text).header;
+      } catch {
+        return null;
       }
-      expect(agent.body.trim().length).toBeGreaterThan(0);
+    })();
+    if (header === null) continue;
+    // The loader reports a field of a definition, a skill or a rule it does not read; a part's or a tool's it takes without a word.
+    if (!path.startsWith(".prompts/") && !path.startsWith(".tools/")) continue;
+    for (const field of Object.keys(header)) {
+      const described = typeof header.description === "string" && header.description.includes(field);
+      if (READ_BY_CODE[field] !== true && !names(text, field) && !described) out.push(`field: ${path}: ${field} is read by nothing`);
+    }
+  }
+  return out;
+}
+
+/** The reply's tags are named in the reply contract and nowhere else (E.6). */
+function tags(texts: ReadonlyMap<string, string>): string[] {
+  const out: string[] = [];
+  const named = /<\/?(reply|intent)>/;
+  for (const [path, text] of texts) if (path !== ".prompts/reply-contract.md" && named.test(text)) out.push(`tags: ${path} names a tag of the reply`);
+  return out;
+}
+
+const SHIPPED = shippedTexts();
+
+let set: OpenSet;
+let guidance: Guidance;
+beforeAll(async () => {
+  set = await openSet(SHIPPED);
+  guidance = set.guidance();
+});
+afterAll(() => set.close());
+
+describe("the shipped set, as RPH's loader reads it, as RPE lays it", () => {
+  test("holds every file of Appendix E and nothing departs from what the checks below hold it to", async () => {
+    expect(await departures(SHIPPED)).toEqual([]);
+  });
+
+  test("every file loads with no problem reported", async () => {
+    expect(await guidance.problems()).toEqual([]);
+  });
+
+  test("the rules in force at the shipped level are `consent`, `perceptions` and the seven of E.3, and no others; the two the build added are examples", async () => {
+    const rules = await guidance.rules();
+    expect(rules.filter((rule) => rule.inForce).map((rule) => rule.name).sort()).toEqual([...IN_FORCE].sort());
+    for (const path of BUILD_EXAMPLES) expect(rules.find((rule) => rule.path.endsWith(path.slice(1)))).toMatchObject({ inForce: false, why: "example" });
+  });
+
+  test("every home D.2 names is a file of the shipped set, and every reminder's `needs:` names the home D.2 gives it", () => {
+    for (const home of HOME_FILES) expect({ home, ships: SHIPPED.has(home) }).toEqual({ home, ships: true });
+    for (const reminder of REMINDERS) {
+      const header = split(SHIPPED.get(reminder.file) ?? "").header;
+      expect({ file: reminder.file, needs: header?.needs ?? null }).toEqual({ file: reminder.file, needs: reminder.needs });
+    }
+    // The six reminders are the rules in force but the three that are no reminder: the two every agent reads, and the one before a compaction.
+    const reminding = IN_FORCE.filter((name) => !["consent", "perceptions", "save-before-compaction"].includes(name)).map((name) => `.rules/${name}.md`);
+    expect(reminding.sort()).toEqual(REMINDERS.map((reminder) => reminder.file).sort());
+  });
+
+  test("every definition names its model and effort, and nothing else sets them", async () => {
+    for (const name of AGENTS) {
+      const definition = await guidance.definition(name);
+      expect({ name, model: typeof definition?.model, effort: EFFORTS.includes(definition?.effort ?? "") }).toEqual({ name, model: "string", effort: true });
     }
   });
 
-  test("every skill has a name, a description and a body", () => {
-    for (const skill of byRel(".skills/")) {
-      expect(typeof skill.header?.name).toBe("string");
-      expect(typeof skill.header?.description).toBe("string");
-      expect(skill.body.trim().length).toBeGreaterThan(0);
+  test("every definition with a tool lists `ALL-AGENTS` and `rules` in `reads`; one with none lists neither", async () => {
+    for (const name of AGENTS) {
+      const definition = await guidance.definition(name);
+      const holds = (definition?.tools.length ?? 0) > 0;
+      expect({ name, holds, all: definition?.reads.includes("ALL-AGENTS"), rules: definition?.reads.includes("rules") }).toEqual({ name, holds, all: holds, rules: holds });
     }
+    expect((await guidance.definition("narrator"))?.tools).toEqual([]);
   });
 
-  test("every rule says who it is for, and a rule that needs a file names one that ships", () => {
-    const rules = byRel(".rules/");
-    expect(rules.length).toBeGreaterThan(0);
-    for (const rule of rules) {
-      const h = rule.header ?? {};
-      expect(typeof h.description).toBe("string");
-      expect({ file: rule.rel, agents: h.agents === "all" || Array.isArray(h.agents) }).toEqual({ file: rule.rel, agents: true });
-      if (h.needs !== undefined) expect({ file: rule.rel, needs: h.needs, ships: names.has(String(h.needs)) }).toEqual({ file: rule.rel, needs: h.needs, ships: true });
-    }
+  test("only the Author's definition reaches the reply family, and the GM's and the keeper's searches find no `delegate` or `agent_message`", async () => {
+    expect((await departures(SHIPPED)).filter((d) => d.startsWith("reach:"))).toEqual([]);
+    expect((await guidance.definition("author"))?.tools).toEqual(expect.arrayContaining(["write_reply", "reply_release"]));
+    for (const name of ["gm", "keeper"]) expect({ name, held: (await guidance.definition(name))?.tools.filter((tool) => tool === "delegate" || tool === "agent_message") }).toEqual({ name, held: [] });
   });
 
-  test("every prompt part says what it is, and the reply contract names its tags", () => {
-    const parts = byRel(".prompts/");
-    for (const part of parts) expect({ file: part.rel, described: typeof part.header?.description }).toEqual({ file: part.rel, described: "string" });
-    const contract = parts.find((f) => f.rel === ".prompts/reply-contract.md");
-    expect(contract?.header?.tags).toEqual({ reply: expect.any(String), intent: expect.any(String) });
+  test("the Author names its writer, and the writer is a definition in force", async () => {
+    const writer = (await guidance.definition("author"))?.writer;
+    expect(writer).toBe("narrator");
+    expect(await guidance.definition(writer ?? "")).toBeDefined();
   });
+
+  test("a header field that RPH's loader does not read and the file does not describe is found (the `family:` line of a tool file)", () => {
+    expect(fields(SHIPPED)).toEqual([]);
+    const withFamily = (SHIPPED.get(".tools/map_measure.md") ?? "").replace("---\n", "---\nfamily: map\n");
+    expect(fields(changed(SHIPPED, { ".tools/map_measure.md": withFamily }))).toEqual([".tools/map_measure.md: family is read by nothing"].map((m) => `field: ${m}`));
+  });
+
+  test("the reply's tags are named in the reply contract and nowhere else", () => {
+    expect(tags(SHIPPED)).toEqual([]);
+    expect(tags(changed(SHIPPED, { "WRITING.md": `${SHIPPED.get("WRITING.md")}\nWrite it between <reply> and </reply>.\n` }))).toEqual(["tags: WRITING.md names a tag of the reply"]);
+  });
+});
+
+describe("each check fails on a scratch copy of the set that breaks it", () => {
+  const one = async (texts: ReadonlyMap<string, string>, kind: string): Promise<string[]> => (await departures(texts)).filter((d) => d.startsWith(`${kind}:`));
+
+  test("a file of Appendix E taken away: `TURN.md`", async () => {
+    expect(await one(changed(SHIPPED, { "TURN.md": null }), "missing")).toEqual(["missing: TURN.md"]);
+  });
+
+  test("a rule put back in force that the plan does not list", async () => {
+    const back = changed(SHIPPED, { ".rules/turn-unrecorded.md": SHIPPED.get(".rules/examples/turn-unrecorded.md") ?? "" });
+    expect((await one(back, "rules"))[0]).toContain("turn-unrecorded");
+    const intent = changed(SHIPPED, { ".rules/intent-missing.md": SHIPPED.get(".rules/examples/intent-missing.md") ?? "" });
+    expect((await one(intent, "rules"))[0]).toContain("intent-missing");
+  });
+
+  test("a rule that needs a file that is gone: `engine-silent` with `TURN.md` taken away", async () => {
+    expect(await one(changed(SHIPPED, { "TURN.md": null }), "needs")).not.toEqual([]);
+  });
+
+  test("a definition with no effort, and a definition with a tool that does not read the rules", async () => {
+    const author = SHIPPED.get(".agents/author.md") ?? "";
+    expect(await one(changed(SHIPPED, { ".agents/author.md": author.replace("effort: high\n", "") }), "effort")).toEqual(["effort: .agents/author.md names no effort"]);
+    const indexer = SHIPPED.get(".agents/indexer.md") ?? "";
+    expect(await one(changed(SHIPPED, { ".agents/indexer.md": indexer.replace("reads: [ALL-AGENTS, rules]", "reads: []") }), "reads")).toEqual([
+      "reads: .agents/indexer.md holds a tool and does not read ALL-AGENTS",
+      "reads: .agents/indexer.md holds a tool and does not read rules",
+    ]);
+  });
+
+  test("a definition that releases no reply and does not keep the reply family out, and a GM that reaches the agents family", async () => {
+    const gm = SHIPPED.get(".agents/gm.md") ?? "";
+    expect(await one(changed(SHIPPED, { ".agents/gm.md": gm.replace("out_of_reach: [reply, agents]", "out_of_reach: [agents]") }), "reach")).toEqual(["reach: .agents/gm.md does not keep the reply family out of its reach"]);
+    expect(await one(changed(SHIPPED, { ".agents/gm.md": gm.replace("out_of_reach: [reply, agents]", "out_of_reach: [reply]") }), "reach")).toEqual(["reach: .agents/gm.md does not keep the agents family out of its reach"]);
+    const author = SHIPPED.get(".agents/author.md") ?? "";
+    expect(await one(changed(SHIPPED, { ".agents/author.md": author.replace("reads: [", "out_of_reach: [reply]\nreads: [") }), "reach")).toEqual(["reach: .agents/author.md names a reply tool and keeps the family out"]);
+  });
+
+  test("a header that does not parse is a problem reported", async () => {
+    const broken = (SHIPPED.get(".prompts/progress.md") ?? "").replace("---\n", "---\ndescription: [unclosed\n");
+    expect((await one(changed(SHIPPED, { ".prompts/progress.md": broken }), "problem")).length).toBeGreaterThan(0);
+  });
+});
+
+test("the shipped definitions are the nine of E.2 and E.4, and RPH's own lead", () => {
+  expect([...SHIPPED.keys()].filter((path) => path.startsWith(".agents/")).map((path) => basename(path, ".md")).sort()).toEqual([...AGENTS, "lead"].sort());
 });

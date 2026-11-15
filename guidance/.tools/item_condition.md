@@ -1,6 +1,5 @@
 ---
 description: item_condition as the model is told it - what the tool does, and what each of its arguments is.
-family: things
 arguments:
   item: "The thing."
   delta: "How much its condition changes: below 0 wears or breaks it, above 0 mends it."

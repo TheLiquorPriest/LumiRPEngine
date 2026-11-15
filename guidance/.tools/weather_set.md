@@ -1,6 +1,5 @@
 ---
 description: weather_set as the model is told it - what the tool does, and what each of its arguments is.
-family: time
 arguments:
   region: "A weather region, or a place, for the region it lies in."
   state: "The weather, as the region's climate names its states: rain, fog, snow and the like."

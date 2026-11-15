@@ -4,6 +4,7 @@ description: Bookkeeping after the reply. Give it a turn whose reply has gone ou
 model: default
 effort: low
 tools: [world_query, world_apply, story_query, story_record, cast_query, chat_read, file_read, tool_search, tool_use, ask_author]
+out_of_reach: [reply, agents]
 reads: [ALL-AGENTS, rules, SIMULATION]
 given:
   - turn:reply(saved)

@@ -1,6 +1,5 @@
 ---
 description: map_view as the model is told it - what the tool does, and what each of its arguments is.
-family: map
 arguments:
   at: "The place whose map to show, or someone or something standing on it."
   centre: "For a map too large to show whole, what to show around: a square [column, row], or someone or something on the map."

@@ -1,6 +1,5 @@
 ---
 description: orgs_who_may as the model is told it - what the tool does, and what each of its arguments is.
-family: groups
 arguments:
   org: "The group or organization."
   power: "The power, as the organizations name them: org.govern, money.spend, assets.use and the rest."

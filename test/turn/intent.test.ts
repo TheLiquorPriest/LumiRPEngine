@@ -1,37 +1,34 @@
-// The reminder of a missing intent record (plan §10.3, §17.2): a reply that went out with no intent record
-// written before it is said at the next turn's start by a rule of its own, `intent-missing`, which counts
-// on the fact `turn.last.without.intent` and needs TURN.md; with TURN.md switched off nothing is said.
-// Played through the composed application on the stand-in Lumiverse and the scripted model. Every name
-// is invented.
+// A reminder is in force only while the home it names is (plan §5.4 `needs:`, D.2): `history-leaving`,
+// shipped in force, names `TURN.md`, so it reminds at a turn's start while `TURN.md` is in force and
+// says nothing once the user switches that file off. RPH's loader and its rule engine run on the shipped
+// set as RPE lays it (`test/guidance/set.ts`), with RPE's story facts declared and one of them holding.
+// Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
-import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed } from "./bed";
+import type { AgentRef, FactValue } from "rp-harness/contract";
+import { STORY_FACT_DEFS } from "../../src/story";
+import { openSet, type OpenSet, shippedTexts } from "../guidance/set";
 
-const beds: TurnBed[] = [];
+const AUTHOR: AgentRef = { id: "author-1", definition: "author" };
+
+let open: OpenSet | null = null;
 afterEach(async () => {
-  for (const b of beds.splice(0)) await b.close();
+  await open?.close();
+  open = null;
 });
 
-/** The rule's own words, as shipped. */
-const REMINDER = "Your last turn's reply went out with no intent record written before it.";
-
-/** Three turns, the first replying with no intent record and the two after with one; what the Author was sent in each call, as text. */
-async function threeTurns(off: string[]): Promise<string[]> {
-  const b = await openTurnBed({ off, answers: [{ pieces: [{ text: "<reply>The lamp turns.</reply>" }] }, replying("Wren looks up."), replying("Wren nods.")] });
-  beds.push(b);
-  for (const said of ["I climb the stairs.", "I wave.", "I sit down."]) {
-    b.host.send(CHAT, said);
-    const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
-    expect(out.error).toBeNull();
-    await settledTurn(b, out.generationId!);
-  }
-  return b.model.requests.map((r) => JSON.stringify(r.messages));
+/** What the Author is reminded of at the start of a turn, when two messages are about to leave the prompt uncovered; `config` is the user's own global file. */
+async function remindedOf(config: string): Promise<string[]> {
+  const set = (open = await openSet(shippedTexts(), { defs: STORY_FACT_DEFS }));
+  if (config !== "") set.put("global", "config.yml", config);
+  const uncovered: FactValue = { count: 2, fields: { range: { ".": [1, 2], from: 1, to: 2 } } };
+  set.facts({ "history.leaving.uncovered": uncovered });
+  const facts = { defs: () => set.host.facts.defs(), read: (scope: typeof set.scope, _agent: AgentRef, names: readonly string[]) => set.host.facts.read(scope, [...names]) };
+  const run = await set.guidance().ruleRun({ facts });
+  return (await run.turnStart(AUTHOR)).map((fired) => fired.firing.rule);
 }
 
-test("a reply that went out with no intent record before it is said at the next turn's start, and to no turn after", async () => {
-  expect((await threeTurns(["rules/turn-unrecorded"])).map((sent) => sent.includes(REMINDER))).toEqual([false, true, false]);
-});
-
-test("with TURN.md switched off, a reply with no intent record before it is said to no turn", async () => {
-  expect((await threeTurns(["rules/turn-unrecorded", "TURN"])).map((sent) => sent.includes(REMINDER))).toEqual([false, false, false]);
+test("a reminder that needs TURN.md reminds at a turn's start, and says nothing once TURN.md is switched off", async () => {
+  expect(await remindedOf("")).toEqual(["history-leaving"]);
+  expect(await remindedOf("off: [TURN]\n")).toEqual([]);
 });

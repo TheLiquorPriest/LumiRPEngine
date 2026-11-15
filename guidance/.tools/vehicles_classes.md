@@ -1,6 +1,5 @@
 ---
 description: vehicles_classes as the model is told it - what the tool does, and what each of its arguments is.
-family: vehicles
 arguments:
   domain: "road, offroad, marine or air, to list only those."
   search: "Words a class's name or other names hold."

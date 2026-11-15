@@ -1,6 +1,5 @@
 ---
 description: world_apply as the model is told it - what the tool does, and what each of its arguments is.
-family: state
 arguments:
   operations: The operations, applied in order. A later one may name what an earlier one made.
   operations.op: "The operation: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn or horizon."

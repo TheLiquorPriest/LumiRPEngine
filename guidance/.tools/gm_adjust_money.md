@@ -1,6 +1,5 @@
 ---
 description: gm_adjust_money as the model is told it - what the tool does, and what each of its arguments is.
-family: money
 arguments:
   account: "The account."
   amount: "How much, in the world's main coin: above 0 puts money in, below 0 takes it out."

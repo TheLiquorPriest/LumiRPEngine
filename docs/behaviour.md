@@ -58,15 +58,13 @@ Shipped rules in force:
 | `guidance/.rules/perceptions.md` | Why perceptions matter, who gets one, what goes in it, and when it is written. |
 | `guidance/.rules/perceptions-owed.md` | Reminds the Author when someone on stage has no perception for this turn. |
 | `guidance/.rules/perceptions-missing.md` | Tells the Author at a turn's start when someone on stage in an earlier turn has no perception for it. |
-| `guidance/.rules/turn-unrecorded.md` | Tells the Author when a turn is about to end with nothing recorded in either lane. |
 | `guidance/.rules/engine-silent.md` | Notices when nothing has been recorded in the engine lane for a while. |
 | `guidance/.rules/history-leaving.md` | Warns the Author when messages are about to leave the prompt and the story record does not cover them. |
 | `guidance/.rules/unsourced.md` | Points out a write that named no source. |
 | `guidance/.rules/reply-missing.md` | Catches a turn that is about to end without a reply. |
-| `guidance/.rules/intent-missing.md` | Tells the Author, at a turn's start, when the last turn's reply went out with no intent record written before it. |
 | `guidance/.rules/save-before-compaction.md` | Gives the Author one call to save what matters before a session's earlier turns are summarized. |
 
-Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force.
+Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and two the build added, `intent-missing` (the last reply went out with no intent record before it) and `turn-unrecorded` (a turn is about to end with nothing recorded). `TURN.md` is the one home of both behaviours.
 
 ### Skills
 

@@ -4,7 +4,8 @@ description: Reads lore entries a batch at a time and writes one index line for 
 model: default
 effort: low
 tools: [lore_read, lore_index_write]
-reads: []
+out_of_reach: [reply]
+reads: [ALL-AGENTS, rules]
 given:
   - index:batch
 limits: { calls: 4 }

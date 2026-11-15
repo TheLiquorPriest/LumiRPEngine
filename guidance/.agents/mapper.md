@@ -4,7 +4,8 @@ description: Maps an assembled prompt into named slices on a first pass, so that
 model: default
 effort: medium
 tools: [prompt, prompt_map_write, file_read]
-reads: [PRESET]
+out_of_reach: [reply]
+reads: [ALL-AGENTS, rules, PRESET]
 given:
   - prompt:layout
 limits: { calls: 6 }

@@ -1,6 +1,5 @@
 ---
 description: map_place as the model is told it - what the tool does, and what each of its arguments is.
-family: map
 arguments:
   at: "The place whose map they go on."
   pieces: "Each person or thing to put on the map, in order."

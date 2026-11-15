@@ -1,6 +1,5 @@
 ---
 description: map_door as the model is told it - what the tool does, and what each of its arguments is.
-family: map
 arguments:
   at: "The place whose map the door is on."
   door: "The door's square, [column, row] from the top left."

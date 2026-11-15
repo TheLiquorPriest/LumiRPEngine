@@ -4,6 +4,7 @@ description: Reads a stretch of the chat's past for a stated purpose and records
 model: default
 effort: medium
 tools: [chat_read, chat_search, prompt, lore_read, lore_search, archive_search, story_record, world_apply, cast_update, perceive, gap_check, file_write, ask_author]
+out_of_reach: [reply]
 reads: [ALL-AGENTS, rules]
 given:
   - story:brief

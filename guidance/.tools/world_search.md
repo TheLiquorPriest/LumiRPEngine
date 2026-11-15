@@ -1,6 +1,5 @@
 ---
 description: world_search as the model is told it - what the tool does, and what each of its arguments is.
-family: state
 arguments:
   words: "The words to find."
   kind: "person, thing, place or group, to find only those."

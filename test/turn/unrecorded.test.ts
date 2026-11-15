@@ -1,9 +1,9 @@
-// The facts `turn.owes.record` and `turn.owes.reply` (plan §5.4 "Facts"): what a run that owes the player a
-// reply still owes at the end of the Author's run, which the shipped rules `turn-unrecorded` and
-// `reply-missing` name. A turn that recorded nothing is given the first rule's text and one more call; one
-// that called `story_record` or `world_apply` is not. A turn whose Author ends with no reply is given the
-// second's, and writes its reply in the call after. Played through the composed application on the
-// stand-in Lumiverse and the scripted model. Every name is invented.
+// The shipped rule `reply-missing` (plan §5.4 "Facts", E.3): a turn whose Author ends with no reply is
+// given the rule's text and one more call, and writes its reply in the call after. The rule tests RPH's
+// own fact `reply.owed`, 1 while the request owes a reply and none has gone out (R-204). A turn that
+// recorded nothing is asked nothing more: the shipped `turn-unrecorded` rule is an example now, and
+// `TURN.md` is the one home of what is recorded after a reply. Played through the composed application
+// on the stand-in Lumiverse and the scripted model. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { Answer } from "rp-harness/testing/rig";
@@ -14,39 +14,18 @@ afterEach(async () => {
   for (const b of beds.splice(0)) await b.close();
 });
 
-/** The rule's own words, as shipped. */
-const RULE = "This turn is about to end with nothing recorded";
-
 const say = (text: string): Answer => ({ pieces: [{ text }] });
 
-test("a turn that records nothing is given the rule's text and one more call at its end; one that called story_record or world_apply is not", async () => {
-  const b = await openTurnBed({
-    off: [],
-    answers: [
-      // Nothing recorded: the rule fires at the run's end, and the Author answers it.
-      say("<intent>Only words.</intent><reply>The lamp turns.</reply>"),
-      say("Nothing moved."),
-      // A beat recorded with the reply.
-      { pieces: [{ text: "<intent>Keep the record.</intent><reply>Wren lights the lamp.</reply>" }, { call: "story_record", args: { operations: [{ op: "beat", text: "Wren lit the lamp.", message: 1 }] } }] },
-      say("Recorded."),
-      // Time passed in the world.
-      { pieces: [{ text: "<intent>Time passes.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", minutes: 30, source: { from: "prose" } }] } }] },
-      say("<reply>The tide turns.</reply>"),
-    ],
-  });
+test("a turn that records nothing is given no rule's text at its end, and the call count is the reply's alone", async () => {
+  const b = await openTurnBed({ answers: [say("<intent>Only words.</intent><reply>The lamp turns.</reply>")] });
   beds.push(b);
-  for (const said of ["I climb the stairs.", "I watch her work.", "I wait."]) {
-    b.host.send(CHAT, said);
-    const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
-    expect(out.error).toBeNull();
-    const turn = await settledTurn(b, out.generationId!);
-    await b.until("the turn's run to be over", () => b.turns.runs.record(USER, turn.id)?.ended !== null && b.turns.runs.ofChat(USER, CHAT).length === 0);
-  }
-
-  // Two calls each: the first turn's second is the rule's; the others' second follows their tool's answer.
-  const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
-  expect(sent).toHaveLength(6);
-  expect(sent.map((text) => text.includes(RULE))).toEqual([false, true, false, false, false, false]);
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+  expect(out.error).toBeNull();
+  const turn = await settledTurn(b, out.generationId!);
+  await b.until("the turn's run to be over", () => b.turns.runs.record(USER, turn.id)?.ended !== null && b.turns.runs.ofChat(USER, CHAT).length === 0);
+  expect(b.model.requests).toHaveLength(1);
+  expect(b.turns.runs.record(USER, turn.id)).toMatchObject({ status: "released", reply: "The lamp turns." });
 });
 
 test("a turn whose Author ends with no reply is given the rule's text and one more call, and its reply then reaches the chat", async () => {
