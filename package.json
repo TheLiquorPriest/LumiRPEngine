@@ -29,6 +29,7 @@
     "templates": "bun scripts/templates/build.ts",
     "reference": "bun scripts/reference/build.ts",
     "api": "bun scripts/api/generate.ts",
+    "settings": "bun scripts/settings/generate.ts",
     "test": "\"$npm_execpath\" scripts/test-all.ts",
     "check": "\"$npm_execpath\" scripts/test/run.ts --check",
     "test:all": "\"$npm_execpath\" scripts/test-all.ts",
