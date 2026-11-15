@@ -15,9 +15,11 @@
 
 import type { Clock, HistoryRange } from "rp-harness/contract";
 import { AuthRefused, bearerOf, LIVE_USER, rawRoute, route, type App, type Area } from "../../app";
+import type { LumiverseAccounts } from "../../app/accounts";
 import type { SettingsReader } from "../../app/config-read";
 import { PAGE_SETTINGS } from "../../app/page-settings";
 import { isRecord } from "../../shared/json";
+import { lumiverseAccounts } from "./accounts";
 import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
 import { promptReads, type ModelRooms } from "./receipt";
 import { createChatReads, type ChatReads } from "./chat";
@@ -111,6 +113,8 @@ export interface LumiverseDoor {
   registration(): Registration | null;
   /** The question's answers, kept by generation until its request arrives, for the check on receipt. */
   readonly answers: KeptAnswers;
+  /** Lumiverse's accounts, for RPE's web app's sign-in with a Lumiverse account (`accounts.ts`): asked at Lumiverse's address in RPE's config at each call. */
+  readonly accounts: LumiverseAccounts;
 }
 
 const NOT_SET_UP = "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up).";
@@ -426,5 +430,5 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     },
   };
 
-  return { area, lumiverse: () => parts, extension, registration, answers };
+  return { area, lumiverse: () => parts, extension, registration, answers, accounts: lumiverseAccounts({ base: () => app?.config.lumiverse.url ?? null, fetch: deps.fetch, clock: deps.clock }) };
 }
