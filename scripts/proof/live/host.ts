@@ -13,7 +13,7 @@ import type { FloorActs } from "../floor/play";
 import { BrowserDriver } from "../browser/driver";
 import { type Chrome, launchChrome } from "../browser/chrome";
 import { RpeReader } from "../lib/read";
-import type { GuidanceFacts, Host, HostOptions, PlayStart, RunFacts, Session } from "../route/host";
+import type { GuidanceFacts, Host, HostOptions, PlayStart, RoundHost, RunFacts, Session } from "../route/host";
 import { pinSettingsFromEnv } from "../route/pin";
 import { CHAT_NAME, fileRecord, RECORD_FILE } from "../../testbed/floor-fixture";
 import { LIMITS, type PageTimes } from "../../testbed/floor-measure";
@@ -25,6 +25,7 @@ import { Instance, InstanceLumiverse } from "./instance";
 import { LIVE_NAME_OF, LUMIVERSE_CHAT, openLivePage, type Shared } from "./pages";
 import { ChatSteps } from "./steps";
 import { commandShell, shellWords, Terminal, WithTerminal, type Ran } from "./terminal";
+import { panelPreferences, type Preference, readGoldenEnv, recordBrowserPreferences, restoreGolden as restoreGoldenCopy } from "./golden";
 
 /** The acts a form on the bed plays with: the floor's, and the page's own. */
 export interface LiveActs extends FloorActs {
@@ -36,6 +37,11 @@ export interface LiveActs extends FloorActs {
   terminal: { run(command: string): Promise<Ran> };
   /** A fresh chat on the instance's own card, recorded as the instance's, which the pages are then on. Every play of a scenario begins on one. */
   freshChat(name: string): Promise<string>;
+  /**
+   * Sets today's panels' preferences in the driver's own browser on the instance's classic chat and records their keys in the instance's record (`browser:prefs`):
+   * the golden copy's last row (PlanScenarios-3 item 8). Done once, on the instance with today's build installed, before the copy is taken again.
+   */
+  panelPreferences(): Promise<Preference[]>;
 }
 
 /** How long a wait on what a page shows lasts, as the suite's runner sets it for a test, else the proof's own. */
@@ -52,7 +58,7 @@ async function connectionByNameOrId(host: Lumiverse, wanted: string): Promise<{ 
   return { id: one.id, name: one.name };
 }
 
-export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
+export async function openHost(options: HostOptions): Promise<Host<LiveActs> & RoundHost> {
   const env: LiveEnv = readLiveEnv();
   const repo = repoOf(options.root);
   // Lumiverse lower-cases user names (its login page does): the instance's user is named so everywhere here.
@@ -74,7 +80,10 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
   const shared: Shared = { cookies: null };
   let commit: string | null = null;
 
-  const host: Host<LiveActs> = {
+  // The server's terminal for the host's own commands (the golden copy's restore and read-back): the same refusals as a play's terminal.
+  const serverTerminal = new Terminal({ run: (command) => commandShell(shellWords()).run(command) }, env.bed.neverTouch);
+
+  const host: Host<LiveActs> & RoundHost = {
     mode: "live",
 
     async facts(): Promise<RunFacts> {
@@ -131,6 +140,14 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
           chatNow = made.id;
           return made.id;
         },
+        async panelPreferences(): Promise<Preference[]> {
+          const log = new RunLog(env.bed.instanceDir);
+          const chat = log.get<string>("chat:classic");
+          const target = log.get<string>("worldId");
+          if (typeof chat !== "string" || typeof target !== "string") throw new Error("the instance's record names no classic chat or world (chat:classic and worldId in state.json), which the panels' preferences are set for");
+          await acts.openChat(chat);
+          return await recordBrowserPreferences(browser, log, panelPreferences(chat, target));
+        },
         async openChat(chat: string): Promise<void> {
           // Before any step: the address, the user and the chat are the instance's, or the run stops.
           instance.check({ address: env.bed.hostUrl, user: signedInAs, named: owner, chat });
@@ -179,6 +196,10 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
           await browser.close();
         },
       };
+    },
+
+    async restoreGolden(): Promise<void> {
+      await restoreGoldenCopy({ run: (command) => serverTerminal.run(command) }, readGoldenEnv());
     },
 
     async close(): Promise<void> {
