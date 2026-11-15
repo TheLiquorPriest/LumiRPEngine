@@ -20,7 +20,7 @@
 // logged; and tested with one small call, whose answer never carries the key: RPH's model layer
 // takes every secret out of a provider's words, and nothing here does it again.
 
-import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, Log, ModelLimits, ModelsApi, ModelsPort, UserScope } from "rp-harness/contract";
+import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, Log, ModelLimits, ModelsApi, ModelsPort, SignInProvider, SignInStart, SignInState, UserScope } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { DataPaths } from "./config";
@@ -144,7 +144,7 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile, owner: () => 
 }
 
 /** What the routes need of the model layer: `harness.models`. */
-export type ConnectionsApi = Pick<ModelsApi, "list" | "save" | "remove" | "setDefault" | "test" | "limits">;
+export type ConnectionsApi = Pick<ModelsApi, "list" | "save" | "remove" | "setDefault" | "test" | "limits" | "signIn">;
 
 // What the routes take and answer. A connection is the model layer's (`rp-harness/contract`): each of its
 // types the routes carry is declared field by field here, so the pages' types and the reference say what a
@@ -269,10 +269,35 @@ async function layer<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
+// Signing in to a provider (plan §13.2 "sign-in for Anthropic and OpenAI"), over RPH's `SignInApi`: the token is kept in the
+// secrets file by the model layer and is in no answer and no log (§16); a page is given only the flow, the address to open,
+// and how the sign-in stands.
+const signInStart = shape.named(
+  "SignInStart",
+  "A sign-in started: its flow, to finish with what the user pastes back or to cancel; the address the user opens to sign in; and what to know first.",
+  shape.object({ flow: T, url: T, note: T }),
+);
+const signInState = shape.named(
+  "SignInState",
+  "Where a provider's sign-in stands: signed in or not, until when its token holds (RPH renews it when a call needs it), the flow open for it, and why its last flow ended without signing in.",
+  shape.object({ provider: shape.oneOf("anthropic", "openai"), signedIn: shape.yesNo(), until: shape.nullable(N), flow: shape.nullable(T), ended: shape.nullable(T) }),
+);
+type StartMirrored = Holds<Exactly<Infer<typeof signInStart>, SignInStart>>;
+type StateMirrored = Holds<Exactly<Infer<typeof signInState>, SignInState>>;
+
+/** The provider a connection signs in to; refused for a connection that does not sign in, or whose provider has no sign-in. */
+async function signInProvider(api: ConnectionsApi, user: string, id: string): Promise<SignInProvider> {
+  const connection = (await api.list(user)).connections.find((c) => c.id === id);
+  if (connection === undefined) throw new RouteError(404, `There is no connection ${id}.`);
+  if (connection.auth !== "signin") throw new RouteError(400, `The connection ${connection.name} does not sign in to its provider: set it to sign in first.`);
+  if (connection.provider !== "anthropic" && connection.provider !== "openai") throw new RouteError(400, `${connection.name}'s provider, ${connection.provider}, has no sign-in; Anthropic and OpenAI have.`);
+  return connection.provider;
+}
+
 /**
- * The routes to list, add, change and remove a connection, choose the default and test one, over the
- * model layer, each for the user this RPE belongs to (`owner`), whoever the caller's credential names.
- * `log` hears of a model's limits that could not be read.
+ * The routes to list, add, change and remove a connection, choose the default and test one, and to sign one in to its provider
+ * and out, over the model layer, each for the user this RPE belongs to (`owner`), whoever the caller's credential names. `log`
+ * hears of a model's limits that could not be read.
  */
 export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: Log) {
   return [
@@ -327,6 +352,75 @@ export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: 
         if (!test.ok) return { ...test, limits: null };
         const read = await limitsOf(api, log, user, params.id, test.model);
         return { ...test, limits: read.limits, limitsProblem: read.problem };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/connections/:id/signin",
+      access: "page",
+      group: "connections",
+      does: "Where the sign-in of a connection that signs in to its provider stands: signed in or not, until when, its open flow.",
+      reply: signInState,
+      handle: async ({ params }) => {
+        const user = owner();
+        const provider = await signInProvider(api, user, params.id);
+        return await layer(() => api.signIn(user).state(provider));
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/connections/:id/signin",
+      access: "page",
+      group: "connections",
+      does: "Starts signing a connection in to its provider: the flow, and the address the user opens to sign in.",
+      reply: signInStart,
+      handle: async ({ params }) => {
+        const user = owner();
+        const provider = await signInProvider(api, user, params.id);
+        return await layer(() => api.signIn(user).start(provider));
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/connections/:id/signin/finish",
+      access: "page",
+      group: "connections",
+      does: "Finishes a sign-in with what the user pasted back, and says how it stands; the token is kept by the model layer and never answered.",
+      body: shape.object({ flow: shape.text({ blank: false }), code: shape.text({ blank: false }) }),
+      reply: signInState,
+      // The provider is asked to trade the code for a token, which may take longer than the relay waits.
+      long: true,
+      handle: async ({ params, body }) => {
+        const user = owner();
+        await signInProvider(api, user, params.id);
+        return await layer(() => api.signIn(user).finish(body.flow, body.code));
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/connections/:id/signin/cancel",
+      access: "page",
+      group: "connections",
+      does: "Cancels a sign-in's open flow; nothing of it is kept.",
+      body: shape.object({ flow: shape.text({ blank: false }) }),
+      reply: shape.nothing(),
+      handle: async ({ params, body }) => {
+        const user = owner();
+        await signInProvider(api, user, params.id);
+        await layer(() => api.signIn(user).cancel(body.flow));
+      },
+    }),
+    route({
+      method: "DELETE",
+      path: "/api/v1/connections/:id/signin",
+      access: "page",
+      group: "connections",
+      does: "Signs a connection's provider out: its tokens are forgotten.",
+      reply: shape.nothing(),
+      handle: async ({ params }) => {
+        const user = owner();
+        const provider = await signInProvider(api, user, params.id);
+        await layer(() => api.signIn(user).out(provider));
       },
     }),
   ] as const;
