@@ -15,7 +15,7 @@
 
 import type { WorldInfoCandidate } from "../shared/host";
 import { textOf } from "../secrecy/lore-secrets";
-import type { PathStep, Question, QuestionEntry } from "../adapter/lumiverse/wire";
+import { textHash, type PathStep, type Question, type QuestionEntry } from "../adapter/lumiverse/wire";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { hasSecretMarks, unreadableMarks } from "../shared/secret-marks";
@@ -49,7 +49,8 @@ function contextOf(raw: unknown): WorldInfoContext | null {
   const path: PathStep[] = [];
   for (const m of Array.isArray(raw.messages) ? raw.messages : []) {
     if (!isRecord(m) || typeof m.id !== "string" || typeof m.index_in_chat !== "number") continue;
-    path.push({ id: m.id, index: m.index_in_chat, swipe: typeof m.swipe_id === "number" ? m.swipe_id : null });
+    // Whether it is the player's, and the hash of its shown text, as the tag's list hashes a text (§9.6 l.1121).
+    path.push({ id: m.id, index: m.index_in_chat, swipe: typeof m.swipe_id === "number" ? m.swipe_id : null, user: m.is_user === true, hash: textHash(typeof m.content === "string" ? m.content : "") });
   }
   // As today's build reads them (`backend/spindle-host.ts:596`).
   const candidates: WorldInfoCandidate[] = [];

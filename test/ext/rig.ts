@@ -3,7 +3,7 @@
 // question's route and the provider endpoint, given scripted secrecy rules, a scripted history window
 // and a scripted turn. Every name, chat and lore line is invented.
 
-import { questionRoute, type HistoryWindow, type SecrecyAsk, type WindowStep } from "../../src/adapter/lumiverse/answer";
+import { questionRoute, type HistoryWindow, type SecrecyAsk, type TurnStarts, type WindowStep } from "../../src/adapter/lumiverse/answer";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
 import { joiningOf } from "../../src/adapter/lumiverse/overlay";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
@@ -162,19 +162,21 @@ export class Rig {
     if (options.db !== undefined) this.lv.db = options.db;
     const hidden = new Set(harborMessages().filter((m) => m.hidden).map((m) => m.id));
     const keep = options.window ?? 4;
-    // The window as RPE counts it, the latest `keep`. The question's path carries no hidden mark yet, so the fixture's hidden ids are
-    // marked here; on receipt RPE's own rows have left them out already.
-    const counted = (path: readonly WindowStep[]) => historyWindow(path.map((s) => (hidden.has(s.id) ? { ...s, hidden: true } : s)), { ...WINDOW_DEFAULTS, size: keep, step: options.step ?? null }, new Set()).first;
+    // The window as RPE counts it, the latest `keep`, over the path as the turn lane gives it with its hidden marks (at the question), or
+    // over the rows read on receipt, which have left the hidden ones out already.
+    const counted = (path: readonly WindowStep[]) => historyWindow(path, { ...WINDOW_DEFAULTS, size: keep, step: options.step ?? null }, new Set()).first;
     const atQuestion: HistoryWindow = async (ask) => {
       if (options.windowFailsAtQuestion) throw new Error("the story record was busy");
       return counted(await ask.path());
     };
     const onReceipt: HistoryWindow = async (ask) => counted(await ask.path());
+    // RPE's state of the chat as the turn lane holds it: the fixture's hidden marks, heard; the path up to the question's point.
+    const start: TurnStarts = async ({ path, point }) => ({ messages: path.filter((s) => s.id !== point.replaces).map((s) => ({ ...s, hidden: hidden.has(s.id) })), at: null, known: true });
     const secrecy = async (ask: SecrecyAsk): Promise<SecrecyVerdict> => {
       if (options.secretsFail) throw new Error("RPE does not work out its lore's secrets yet");
       return harborSecrecy(ask);
     };
-    const question = questionRoute({ secrecy, window: atQuestion, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
+    const question = questionRoute({ secrecy, window: atQuestion, start, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
     const provider = providerEndpoint({
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,

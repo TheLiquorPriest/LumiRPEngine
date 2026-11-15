@@ -120,9 +120,9 @@ describe("the door, mounted in the app", () => {
 
   test("the extension's routes answer behind the key RPE registered with, for RPE's own user only; another key, the provider's, a page token or the web UI's key is refused, so no page is handed a token but through its start", async () => {
     const b = await bed();
-    const question: Question = { v: 1, user: USER, chat: "chat-harbor", purpose: "prompt", generation: null, path: [{ id: "m0", index: 0, swipe: 0 }], entries: [] };
+    const question: Question = { v: 1, user: USER, chat: "chat-harbor", purpose: "prompt", generation: null, path: [{ id: "m0", index: 0, swipe: 0, user: false, hash: "0".repeat(32) }], entries: [] };
     const ask = (key: string, user = USER): Promise<Response> => fetch(`${b.listening.url}${QUESTION_PATH}`, { method: "POST", headers: bearer(key, { [USER_HEADER]: user }), body: JSON.stringify(question) });
-    expect(await (await ask(b.registration.key)).json()).toEqual({ v: 1, secrecy: { disabled: [], enabled: [], mutated: [] }, cut: { keep: null } });
+    expect(await (await ask(b.registration.key)).json()).toEqual({ v: 1, secrecy: { disabled: [], enabled: [], mutated: [] }, cut: { keep: null }, start: { known: true, turn: null } });
     expect(b.heard.questions).toHaveLength(1);
     expect((await ask(b.registration.key, "user-wren")).status).toBe(401);
 

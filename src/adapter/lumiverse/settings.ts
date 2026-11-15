@@ -22,7 +22,7 @@
 //       lease: 60                        seconds a page's follow lasts unless the page asks again
 //       hold: 1024                       KiB of characters a page may have waiting before its chats' events are held
 //       retry: 30                        seconds before registering again with an extension that did not take it
-//     question: { body: 8192 }           KiB the extension's question may carry
+//     question: { body: 8192, wait: 3 }  KiB the extension's question may carry; seconds RPE works its answer out in before a half not worked out is not known
 //     search: { hits: 20, snippet: 80 }  a chat search's hits when the query names none; a hit's snippet in characters
 
 import { type ConfigRead, readConfig } from "../../app/config-read";
@@ -46,11 +46,15 @@ export interface LumiverseSettings {
   commentMs: number;
   relay: RelaySettings;
   questionBytes: number;
+  /** Appendix D.1 "How long the extension waits for RPE's answer before a generation": RPE answers within it. */
+  questionWaitMs: number;
   search: ChatSearchSettings;
 }
 
 /** Fixed: a question carries the chat's whole path and the marked lore's text, past the app's 1 MiB for other bodies. */
 export const QUESTION_BODY_BYTES = 8 * 1024 * 1024;
+/** Appendix D.1: the extension waits 3 seconds for RPE's answer. */
+export const QUESTION_WAIT_MS = 3_000;
 
 const KIB = 1024;
 const S = 1000;
@@ -71,11 +75,13 @@ const HOLD_MOST_KIB = Math.floor((8 * KIB) / 3);
 const PAGE_ROWS = 1000;
 /** Bun's server lets a connection sit idle ten seconds by default: a comment line goes out inside them. */
 const IDLE_S = 10;
+/** Lumiverse gives a World Info interceptor ten seconds before it goes on without it (`world-info-interceptor.ts:384-392`). */
+const INTERCEPTOR_S = 10;
 
 const setting = (key: string, value: number, takes: SettingTakes & { type: "whole" | "number" }, name: string, about: string, effect: Effect = "use") =>
   ({ key: `lumiverse.${key}`, default: value, takes, levels: GLOBAL, perConnection: false, name, about, effect }) as const;
 
-/** Each of the door's settings, by the name its reader takes it under. None has a row of Appendix D.1: each is listed for the owner's approval (N-10). */
+/** Each of the door's settings, by the name its reader takes it under. The question's wait has a row of Appendix D.1; each other is listed for the owner's approval (N-10). */
 export const LUMIVERSE_SETTING_DEFS = {
   sessionCheck: setting("session.check", KEEP_EVERY_MS / S, { type: "whole", least: 60, most: SESSION_DAYS_S - 1 }, "Session check", "Seconds between RPE asking Lumiverse after its sign-in, which renews it; Lumiverse ends a session seven days after its last renewal."),
   ping: setting("sockets.ping", SOCKET_DEFAULTS.pingMs / S, { type: "number", least: 1, most: SILENT_CLOSE_S - 1 }, "Socket ping", "Seconds between pings on the event and relay sockets; Lumiverse closes a socket silent for 120."),
@@ -95,6 +101,7 @@ export const LUMIVERSE_SETTING_DEFS = {
   hold: setting("relay.hold", RELAY_DEFAULTS.holdChars / KIB, { type: "whole", least: 1, most: HOLD_MOST_KIB }, "Relay hold", "KiB of characters a page may have waiting before its chats' events are held."),
   relayRetry: setting("relay.retry", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Registration retry", "Seconds before RPE registers again with an extension that did not take its registration."),
   questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
+  questionWait: { ...setting("question.wait", QUESTION_WAIT_MS / S, { type: "number", least: 0.1, most: INTERCEPTOR_S - 1 }, "Question wait", "Seconds RPE has to answer the extension's question before a generation; a half of the answer not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives."), row: "How long the extension waits for RPE's answer before a generation" },
   searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }, "Chat search hits", "Hits a chat search gives when the query names no number."),
   searchSnippet: setting("search.snippet", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }, "Chat search snippet", "Characters of a chat search hit's snippet."),
 } as const satisfies NumberSettings<string>;
@@ -114,6 +121,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     commentMs: v.comment * S,
     relay: { flushMs: v.flush * S, frameChars: v.frame * KIB, leaseMs: v.lease * S, holdChars: v.hold * KIB, retryMs: v.relayRetry * S },
     questionBytes: v.questionBody * KIB,
+    questionWaitMs: v.questionWait * S,
     search: { limit: v.searchHits, snippetChars: v.searchSnippet },
   };
 }

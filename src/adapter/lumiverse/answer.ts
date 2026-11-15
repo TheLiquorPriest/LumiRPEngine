@@ -1,17 +1,40 @@
-// RPE's answer to the extension's one question per generation (STANDALONE-PLAN §4.2, §9.6): what each
-// secret reads as in this prompt, and which history message is the first to keep. Both are worked out
-// by functions other parts of RPE give (the lore's secrecy, the history window); this only asks them,
-// at the point of the path the extension saw, and puts the answer in the extension's words.
+// RPE's answer to the extension's one question per generation (STANDALONE-PLAN §4.2, §9.6; READINGS R-5):
+// what each secret reads as in this prompt, and which history message is the first to keep. Both are
+// worked out from RPE's own state held in the process, with no call to Lumiverse or to a model, at the
+// point of the path the question carries: the turn lane gives where a turn not yet begun will start on
+// that path (`start`), with the hidden marks RPE holds laid on its messages, and the lore's secrecy and
+// the history window are asked there. Each half not worked out within the question's wait is answered
+// not known, and what it works out after is kept for that generation's check on receipt.
 
 import { readQuestion, type Answer, type GenerationFacts, type KeepPoint, type PathStep, type Question, type QuestionEntry, type SecrecyVerdict } from "./wire";
 
-/** What the secrecy rules are asked: the chat, the path as the extension saw it, and the candidate entries. */
+/**
+ * Where a turn not yet begun will start on the path it comes with (the store's `TurnPoint`): after the path's newest message, for a
+ * new reply, a continue and an impersonation (null on an empty path); or in place of the reply a swipe or a regenerate replaces.
+ */
+export type StartPoint = { follows: string | null; replaces?: never } | { replaces: string; follows?: never };
+
+/** The path the question carries at its point, as RPE's own state reads it (the store's `TurnStart`): each message with the hidden mark RPE holds for it, and where the answer stands. */
+export interface PathStart {
+  messages: readonly { id: string; index: number; user: boolean; hidden: boolean }[];
+  /** The message whose turn the coming turn follows, and that turn; null at the world's start. */
+  at: { message: string; turn: string } | null;
+  /** Whether RPE knows the chat: one it does not know is answered at the world's start. */
+  known: boolean;
+}
+
+/** What the turn lane is asked: where the coming turn starts on the path the question carries, from RPE's own state alone. A point that disagrees with the path's end is refused (throws). */
+export type TurnStarts = (ask: { user: string; chat: string; path: readonly PathStep[]; point: StartPoint }, signal: AbortSignal) => Promise<PathStart>;
+
+/** What the secrecy rules are asked: the chat, the path as the extension saw it, where the coming turn starts on it, and the candidate entries. */
 export interface SecrecyAsk {
   user: string;
   chat: string;
   purpose: "prompt" | "query";
   generation: GenerationFacts | null;
   path: readonly PathStep[];
+  /** The path at the question's point as RPE's state reads it; rejects where that point could not be worked out. */
+  start: Promise<PathStart>;
   entries: readonly QuestionEntry[];
 }
 
@@ -33,9 +56,10 @@ export interface WindowAsk {
   generation: GenerationFacts | null;
   /**
    * The messages the window counts, oldest first, read only when the window is on, so a window that is off is never kept waiting on
-   * them nor refused for them. At the question: the path the extension sends. On receipt of a request the extension had no answer
-   * for: the chat's rows read then through RPE's own read, less the hidden ones and the reply being written, as far as the prompt's
-   * history reaches (`receipt.ts`). A path that cannot be read throws, and the window's answer with it.
+   * them nor refused for them. At the question: the path the extension sends, up to the question's point, each message with the hidden
+   * mark RPE's own state holds for it (`TurnStarts`). On receipt of a request the extension had no answer for: the chat's rows read
+   * then through RPE's own read, less the hidden ones and the reply being written, as far as the prompt's history reaches
+   * (`receipt.ts`). A path that cannot be read throws, and the window's answer with it.
    */
   path(): Promise<readonly WindowStep[]>;
 }
@@ -43,24 +67,64 @@ export interface WindowAsk {
 /** The first history message to keep (the window, its step and its hold, §4.2); null keeps all. */
 export type HistoryWindow = (ask: WindowAsk, signal: AbortSignal) => Promise<KeepPoint | null>;
 
+/**
+ * The question's answers RPE worked out, by generation, kept until that generation's request arrives (its check on receipt): one
+ * generation a chat at a time, as Lumiverse runs them, the chat's next replacing it.
+ */
+export class KeptAnswers {
+  readonly #byChat = new Map<string, { generation: string; answer: Answer }>();
+
+  keep(chat: string, generation: string, answer: Answer): void {
+    this.#byChat.set(chat, { generation, answer });
+  }
+
+  /** The answer worked out for the generation, taken: none once taken, or after the chat's next question. */
+  take(chat: string, generation: string): Answer | null {
+    const kept = this.#byChat.get(chat);
+    if (kept === undefined || kept.generation !== generation) return null;
+    this.#byChat.delete(chat);
+    return kept.answer;
+  }
+}
+
 export interface AnswerDeps {
   secrecy: SecrecyRules;
   window: HistoryWindow;
+  start: TurnStarts;
+  /** The question's wait: each half not worked out within it is answered not known. Absent, none. */
+  waitMs?: () => number;
+  /** Timers for the wait. */
+  clock?: { setTimeout(run: () => void, ms: number): unknown; clearTimeout(handle: unknown): void };
+  /** Where an answer worked out is kept for its generation's check on receipt. */
+  kept?: KeptAnswers;
   log?(message: string): void;
 }
 
+/** The point of the path a question's generation starts at: in place of the reply a swipe or a regenerate replaces, else after the path's newest message. */
+function pointOf(q: Question): StartPoint {
+  const replaced = q.generation?.type === "swipe" || q.generation?.type === "regenerate" ? q.generation.target.message : null;
+  return replaced !== null ? { replaces: replaced } : { follows: q.path.at(-1)?.id ?? null };
+}
+
+/** Not worked out within the wait. */
+const LATE = Symbol("late");
+
 /**
- * The answer to one question. The window is asked only when a prompt is being built, the secrecy rules
- * at the same time, and neither's failure takes the other's answer with it. When the window fails, the
- * answer says the cut is not known, so the extension cuts nothing and RPE cuts on receipt. When the
- * secrecy rules fail, the answer says the secrets are not known (`secrecy: null`): the extension keeps
- * every marked secret out by its own fail-closed verdict, as with no answer at all, and still cuts
- * where the window says. `secretsFailed` hears why they failed.
+ * The answer to one question. Where the coming turn starts on the question's path is asked of the turn lane once; the window is asked
+ * there only when a prompt is being built, the secrecy rules at the same time, and neither's failure takes the other's answer with
+ * it. When the window fails, or the start it is counted from, the answer says the cut is not known, so the extension cuts nothing and
+ * RPE cuts on receipt. When the secrecy rules fail, the answer says the secrets are not known (`secrecy: null`): the extension keeps
+ * every marked secret out by its own fail-closed verdict, as with no answer at all, and still cuts where the window says. A half not
+ * worked out within the wait is answered not known; when it is worked out, the whole answer is kept for the generation's receipt.
+ * `secretsFailed` hears why the secrets failed.
  */
 export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal, secretsFailed: (error: unknown) => void): Promise<Answer> {
   const at = { user: q.user, chat: q.chat, generation: q.generation };
+  const start = deps.start({ user: q.user, chat: q.chat, path: q.path, point: pointOf(q) }, signal);
+  // Read by whichever half needs it; a refusal is each half's own failure.
+  start.catch(() => undefined);
   const cut = q.purpose === "prompt"
-    ? deps.window({ ...at, path: async () => q.path }, signal).then(
+    ? deps.window({ ...at, path: async () => (await start).messages }, signal).then(
         (keep) => ({ keep }),
         (error: unknown) => {
           deps.log?.(`the history window for chat ${q.chat} was not worked out, so RPE cuts it when the request arrives: ${words(error)}`);
@@ -68,12 +132,35 @@ export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal,
         },
       )
     : Promise.resolve(null);
-  const secrecy = deps.secrecy({ ...at, path: q.path, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
+  const secrecy = deps.secrecy({ ...at, path: q.path, start, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
     secretsFailed(error);
     return null;
   });
-  const [verdict, window] = await Promise.all([secrecy, cut]);
-  return { v: 1, secrecy: verdict, cut: window };
+  const from = start.then(
+    (s) => ({ known: s.known, turn: s.at?.turn ?? null }),
+    () => null,
+  );
+  const whole = Promise.all([secrecy, cut, from]).then(([verdict, window, began]): Answer => ({ v: 1, secrecy: verdict, cut: window, start: began }));
+  const ms = deps.waitMs?.();
+  if (ms === undefined || deps.clock === undefined) {
+    const done = await whole;
+    if (q.generation !== null) deps.kept?.keep(q.chat, q.generation.id, done);
+    return done;
+  }
+  const clock = deps.clock;
+  const { promise: late, resolve } = Promise.withResolvers<typeof LATE>();
+  const timer = clock.setTimeout(() => resolve(LATE), ms);
+  const within = <T>(half: Promise<T>): Promise<T | typeof LATE> => Promise.race([half, late]);
+  const [verdict, window, began] = await Promise.all([within(secrecy), within(cut), within(from)]);
+  clock.clearTimeout(timer);
+  if (verdict === LATE || window === LATE || began === LATE) {
+    deps.log?.(`RPE did not work out all of its answer for chat ${q.chat} within the question's ${ms} ms; what it works out after is kept for the reply's request.`);
+    if (q.generation !== null) {
+      const generation = q.generation.id;
+      void whole.then((done) => deps.kept?.keep(q.chat, generation, done));
+    }
+  } else if (q.generation !== null) deps.kept?.keep(q.chat, q.generation.id, { v: 1, secrecy: verdict, cut: window, start: began });
+  return { v: 1, secrecy: verdict === LATE ? null : verdict, cut: window === LATE ? null : window, start: began === LATE ? null : began };
 }
 
 function words(error: unknown): string {

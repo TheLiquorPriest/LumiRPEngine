@@ -17,7 +17,7 @@ import type { Clock, HistoryRange } from "rp-harness/contract";
 import { AuthRefused, bearerOf, rawRoute, route, type App, type Area } from "../../app";
 import type { SettingsReader } from "../../app/config-read";
 import { isRecord } from "../../shared/json";
-import { questionRoute, type HistoryWindow, type SecrecyRules } from "./answer";
+import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
 import { createChatReads, type ChatReads } from "./chat";
 import { createDbReader, type DbReader } from "./db";
 import { followChanges, type ChatChanges } from "./events";
@@ -42,6 +42,8 @@ export interface AdapterLanes {
   changes: ChatChanges;
   /** The history window: the first history message to keep. */
   window: HistoryWindow;
+  /** The turn lane: where a turn not yet begun will start on the path a question carries, from RPE's own state alone (R-5). */
+  start: TurnStarts;
   /** The lore lane: what each secret reads as in this prompt. */
   secrecy: SecrecyRules;
   /** A chat's setting: agents may read the messages the user hid. */
@@ -101,6 +103,8 @@ export interface LumiverseDoor {
   extension(): ExtensionStatus;
   /** What RPE tells the extension of itself; null until the server listens. */
   registration(): Registration | null;
+  /** The question's answers, kept by generation until its request arrives, for the check on receipt. */
+  readonly answers: KeptAnswers;
 }
 
 const NOT_SET_UP = "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up).";
@@ -124,6 +128,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   let key: string | null = null;
   let offChanges: (() => void) | null = null;
   const relaySession = newFrontendSession();
+  const answers = new KeptAnswers();
   const log = (message: string): void => app?.log.warn(`[lumiverse] ${message}`);
   /** The door's limits as the shared levels set them now. */
   const settings = (): LumiverseSettings => (deps.settings === undefined ? LUMIVERSE_DEFAULTS : lumiverseSettings(deps.settings.shared()));
@@ -246,7 +251,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             commentMs: () => settings().commentMs,
             log,
           }),
-          question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
+          question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, start: lanes.start, waitMs: () => settings().questionWaitMs, clock: deps.clock, kept: answers, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
         };
       } else status.why = NOT_SET_UP;
       at.routes.add("lumiverse", [
@@ -343,5 +348,5 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     },
   };
 
-  return { area, lumiverse: () => parts, extension, registration };
+  return { area, lumiverse: () => parts, extension, registration, answers };
 }

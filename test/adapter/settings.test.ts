@@ -10,7 +10,7 @@ import { DRY_RUN_MS } from "../../src/adapter/lumiverse/hint";
 import { BREAKDOWN_TRIES, REREADS } from "../../src/adapter/lumiverse/http-reads";
 import { RELAY_DEFAULTS } from "../../src/adapter/lumiverse/relay";
 import { KEEP_EVERY_MS } from "../../src/adapter/lumiverse/session";
-import { LUMIVERSE_DEFAULTS, LUMIVERSE_SETTING_DEFS, LUMIVERSE_SETTINGS, lumiverseSettings, QUESTION_BODY_BYTES } from "../../src/adapter/lumiverse/settings";
+import { LUMIVERSE_DEFAULTS, LUMIVERSE_SETTING_DEFS, LUMIVERSE_SETTINGS, lumiverseSettings, QUESTION_BODY_BYTES, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
 import { SOCKET_DEFAULTS } from "../../src/adapter/lumiverse/socket";
 import { COMMENT_MS } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, type Question } from "../../src/adapter/lumiverse/wire";
@@ -45,6 +45,7 @@ describe("the door's settings", () => {
       commentMs: COMMENT_MS,
       relay: RELAY_DEFAULTS,
       questionBytes: QUESTION_BODY_BYTES,
+      questionWaitMs: QUESTION_WAIT_MS,
       search: CHAT_SEARCH_DEFAULTS,
     });
     // Each is declared under `lumiverse:`, read from the levels every chat shares, with its name and its line for the Settings page.
@@ -74,7 +75,7 @@ describe("the door's settings", () => {
     beds.push(b);
     const ask = (question: Question): Promise<Response> =>
       fetch(`${b.listening.url}${QUESTION_PATH}`, { method: "POST", headers: { authorization: `Bearer ${b.registration.key}`, [USER_HEADER]: USER }, body: JSON.stringify(question) });
-    const small: Question = { v: 1, user: USER, chat: "chat-harbor", purpose: "prompt", generation: null, path: [{ id: "m0", index: 0, swipe: 0 }], entries: [] };
+    const small: Question = { v: 1, user: USER, chat: "chat-harbor", purpose: "prompt", generation: null, path: [{ id: "m0", index: 0, swipe: 0, user: false, hash: "0".repeat(32) }], entries: [] };
     expect((await ask(small)).status).toBe(200);
     const large: Question = { ...small, entries: [{ id: "e1", book: "book-harbor", disabled: false, key: "harbor", content: "The tide comes in over the harbor wall. ".repeat(40) }] };
     expect((await ask(large)).status).toBe(413);

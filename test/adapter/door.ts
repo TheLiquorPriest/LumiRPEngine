@@ -111,6 +111,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
         heard.windows.push(ask);
         return null;
       },
+      start: async ({ path, point }) => ({ messages: path.filter((s) => s.id !== point.replaces).map((s) => ({ ...s, hidden: false })), at: null, known: true }),
       secrecy: async (ask) => {
         heard.questions.push(ask);
         return { disabled: [], enabled: [], mutated: [] };

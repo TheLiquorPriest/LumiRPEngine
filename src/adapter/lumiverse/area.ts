@@ -37,6 +37,10 @@ const UNFILLED: AdapterLanes = {
   },
   changes: { changed: () => undefined, reopened: () => undefined },
   window: async () => null,
+  // No state to answer from: the question's cut is not known, and RPE makes it on receipt.
+  start: async () => {
+    throw none("start");
+  },
   secrecy: UNFILLED_SECRECY,
   hiddenReadable: async () => false,
   ranges: async () => ({}),
@@ -58,6 +62,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     turns: { play: (turn, out, signal) => lane("turns").play(turn, out, signal) },
     changes: { changed: (change) => lane("changes").changed(change), reopened: () => lane("changes").reopened() },
     window: (ask, signal) => lane("window")(ask, signal),
+    start: (ask, signal) => lane("start")(ask, signal),
     secrecy: (ask, signal) => lane("secrecy")(ask, signal),
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),
     ranges: (chat) => lane("ranges")(chat),

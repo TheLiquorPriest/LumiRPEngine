@@ -43,11 +43,18 @@ export interface GenerationFacts {
   model: string | null;
 }
 
-/** One message of the chat along the path the prompt is built from: oldest first. `swipe` is null where the speaker did not say. */
+/**
+ * One message of the chat along the path the prompt is built from, oldest first, as the World Info interceptor's context gives it
+ * (`prompt-assembly.service.ts:2289-2305`): its id, place and showing swipe (null where the speaker did not say), whether it is the
+ * player's (`is_user`), and the hash of its shown text (`content`), the same `textHash` the tag's list uses. RPE finds the point of
+ * the path from it, and the turn a reply's shown text is tied to.
+ */
 export interface PathStep {
   id: string;
   index: number;
   swipe: number | null;
+  user: boolean;
+  hash: string;
 }
 
 /** A candidate lore entry, as RPE needs to know it to answer for its secrets (§9.6). */
@@ -94,6 +101,8 @@ export interface Answer {
   secrecy: SecrecyVerdict | null;
   /** Where the history window starts (`keep` null: all history stays); null when RPE could not say, so the extension cuts nothing. */
   cut: { keep: KeepPoint | null } | null;
+  /** Where RPE answered from: whether it knows the chat, and the turn the coming one follows (null at the world's start); null when that could not be worked out. */
+  start?: { known: boolean; turn: string | null } | null;
 }
 
 /** One message of the prompt as the interceptor handed it on. Lengths are UTF-16 code units; the text is the content's text parts joined (Lumiverse's `getTextContent`, `llm/types.ts:109-115`). */
@@ -215,8 +224,8 @@ export function readQuestion(value: unknown): Question | null {
   if (generation === undefined || !Array.isArray(value.path) || !Array.isArray(value.entries)) return null;
   const path: PathStep[] = [];
   for (const s of value.path) {
-    if (!isRecord(s) || !str(s.id) || !int(s.index) || !intOrNull(s.swipe)) return null;
-    path.push({ id: s.id, index: s.index, swipe: s.swipe });
+    if (!isRecord(s) || !str(s.id) || !int(s.index) || !intOrNull(s.swipe) || typeof s.user !== "boolean" || !str(s.hash)) return null;
+    path.push({ id: s.id, index: s.index, swipe: s.swipe, user: s.user, hash: s.hash });
   }
   const entries: QuestionEntry[] = [];
   for (const e of value.entries) {
@@ -258,7 +267,8 @@ export function readAnswer(value: unknown): Answer | null {
     if (keep === undefined) return null;
     cut = { keep };
   } else return null;
-  return { v: 1, secrecy, cut };
+  const start = isRecord(value.start) && typeof value.start.known === "boolean" && strOrNull(value.start.turn) ? { known: value.start.known, turn: value.start.turn } : null;
+  return { v: 1, secrecy, cut, start };
 }
 
 function tagMessage(v: unknown): TagMessage | null {
