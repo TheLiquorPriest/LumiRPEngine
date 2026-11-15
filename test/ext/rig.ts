@@ -203,7 +203,8 @@ export class Rig {
         },
       },
       passConnection: () => null,
-      unpassable: () => null,
+      passWords: async (key) => key,
+      holdMs: () => 540_000,
       modelNames: () => ["rpe"],
       turns: {
         play: async (turn, out) => {

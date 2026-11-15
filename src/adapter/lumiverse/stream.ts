@@ -122,6 +122,7 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
 
   const out: ReplyStream = {
     reasoning(text) {
+      // No empty piece is written: Lumiverse drops a chunk with no text before it counts it (`llm/providers/openai-compatible.ts:278`).
       if (!ended && text !== "") thinking(text);
     },
     content(text) {

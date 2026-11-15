@@ -56,6 +56,8 @@ export interface AdapterLanes {
   models: OwnerPass;
   /** The connection a request with no tag goes on; null for RPH's default (a user's choice, kept with RPE's global settings). */
   passConnection(): string | null;
+  /** The turn lane, which reads the shipped files: a passed request's failure in `guidance/.prompts/reply-errors.md`'s words (key `pass-<code>`), its key alone where the file has no line for it. */
+  passWords(key: string, fields: { detail?: string }): Promise<string>;
 }
 
 export interface AdapterDeps {
@@ -109,8 +111,6 @@ export interface LumiverseDoor {
 
 const NOT_SET_UP = "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up).";
 const NOT_HEARD = "RPE has not heard from its extension in Lumiverse since it started.";
-/** The permission without which the extension sees no prompt, and so marks no reply (`src/ext/permissions.ts`). */
-const MARKS_REPLIES = "interceptor";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -239,12 +239,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => settings().dryRunMs }),
             models: lanes.models,
             passConnection: lanes.passConnection,
-            unpassable: () => {
-              if (!status.registered) return status.why;
-              // A chat reply comes as untagged as any other request while the extension may not see prompts.
-              const lacking = status.missing?.find((m) => m.permission === MARKS_REPLIES);
-              return lacking === undefined ? null : `RPE's extension in Lumiverse lacks the “${lacking.permission}” permission, which it needs ${lacking.why}.`;
-            },
+            passWords: lanes.passWords,
+            holdMs: () => settings().wholeHoldMs,
             modelNames,
             turns: lanes.turns,
             clock: deps.clock,

@@ -16,6 +16,7 @@
 //     reads: { rereads: 3, breakdownReplies: 10 }  a changing chat's rereads; newest replies asked for a stored breakdown
 //     dryRun: { wait: 10 }               seconds a dry run is waited for before the reply goes on without its names
 //     stream: { comment: 5 }             seconds a reply's stream may send nothing before a comment line keeps its connection
+//     reply: { hold: 540 }               seconds after a reply asked for whole arrives at which its turn stops with what it has
 //     relay:
 //       flush: 0.25                      seconds between a page's frames
 //       frame: 256                       KiB of characters in one frame; a longer list goes in parts
@@ -35,6 +36,7 @@ import { RELAY_DEFAULTS, type RelaySettings } from "./relay";
 import { KEEP_EVERY_MS } from "./session";
 import { SOCKET_DEFAULTS, type SocketSettings } from "./socket";
 import { COMMENT_MS } from "./stream";
+import { WHOLE_HOLD_MS } from "./provider";
 
 /** The door's limits, as its parts use them. */
 export interface LumiverseSettings {
@@ -44,6 +46,7 @@ export interface LumiverseSettings {
   reads: { rereads: number; breakdownReplies: number };
   dryRunMs: number;
   commentMs: number;
+  wholeHoldMs: number;
   relay: RelaySettings;
   questionBytes: number;
   /** Appendix D.1 "How long the extension waits for RPE's answer before a generation": RPE answers within it. */
@@ -77,6 +80,8 @@ const PAGE_ROWS = 1000;
 const IDLE_S = 10;
 /** Lumiverse gives a World Info interceptor ten seconds before it goes on without it (`world-info-interceptor.ts:384-392`). */
 const INTERCEPTOR_S = 10;
+/** Lumiverse ends a generation with no text for ten minutes (`services/generation/active-generation-registry.ts:140-158`). */
+const SILENT_GENERATION_S = 600;
 
 const setting = (key: string, value: number, takes: SettingTakes & { type: "whole" | "number" }, name: string, about: string, effect: Effect = "use") =>
   ({ key: `lumiverse.${key}`, default: value, takes, levels: GLOBAL, perConnection: false, name, about, effect }) as const;
@@ -100,6 +105,7 @@ export const LUMIVERSE_SETTING_DEFS = {
   lease: setting("relay.lease", RELAY_DEFAULTS.leaseMs / S, { type: "number", least: 1 }, "Relay lease", "Seconds a page's follow lasts unless the page asks again."),
   hold: setting("relay.hold", RELAY_DEFAULTS.holdChars / KIB, { type: "whole", least: 1, most: HOLD_MOST_KIB }, "Relay hold", "KiB of characters a page may have waiting before its chats' events are held."),
   relayRetry: setting("relay.retry", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Registration retry", "Seconds before RPE registers again with an extension that did not take its registration."),
+  wholeHold: setting("reply.hold", WHOLE_HOLD_MS / S, { type: "number", least: 1, most: SILENT_GENERATION_S - 1 }, "Whole reply hold", "Seconds after a reply asked for whole arrives at which its turn stops with what it has; Lumiverse ends a generation that has had no text for ten minutes, and nothing reaches it while a whole reply is written."),
   questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
   questionWait: { ...setting("question.wait", QUESTION_WAIT_MS / S, { type: "number", least: 0.1, most: INTERCEPTOR_S - 1 }, "Question wait", "Seconds RPE has to answer the extension's question before a generation; a half of the answer not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives."), row: "How long the extension waits for RPE's answer before a generation" },
   searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }, "Chat search hits", "Hits a chat search gives when the query names no number."),
@@ -119,6 +125,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     reads: { rereads: v.rereads, breakdownReplies: v.breakdownReplies },
     dryRunMs: v.dryRun * S,
     commentMs: v.comment * S,
+    wholeHoldMs: v.wholeHold * S,
     relay: { flushMs: v.flush * S, frameChars: v.frame * KIB, leaseMs: v.lease * S, holdChars: v.hold * KIB, retryMs: v.relayRetry * S },
     questionBytes: v.questionBody * KIB,
     questionWaitMs: v.questionWait * S,

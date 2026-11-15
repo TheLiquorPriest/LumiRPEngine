@@ -51,6 +51,7 @@ const UNFILLED: AdapterLanes = {
     },
   },
   passConnection: () => null,
+  passWords: async (key) => key,
 };
 
 /** The door, its lanes read from the app's hooks each time one is used. Mounting it reads what the areas filled. */
@@ -69,6 +70,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     summarized: (chat) => lane("summarized")(chat),
     models: { pass: (request, sink, signal) => lane("models").pass(request, sink, signal) },
     passConnection: () => lane("passConnection")(),
+    passWords: (key, fields) => lane("passWords")(key, fields),
   };
   const door = lumiverseDoor(lanes, deps);
   return {

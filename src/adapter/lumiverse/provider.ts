@@ -1,10 +1,11 @@
 // The provider endpoint Lumiverse calls on RPE's connection (STANDALONE-PLAN §4.2, §4.4): `POST
 // /v1/chat/completions` and `GET /v1/models`, behind RPE's provider key. A request with no tag (a title,
-// a summary, a quiet call, another extension's) is passed on as it came to the model set for such
-// requests, through RPH's model layer: RPE never calls a model itself. While RPE's extension does not
-// hold RPE's registration none is passed on, since a chat reply then comes with no tag too. A tagged
-// chat reply is read, its history window checked or made, its prompt laid out, and handed to the turn
-// lane, which writes the reply to the response as the turn goes, streamed or whole as the request asked.
+// a summary, a quiet call, another extension's) is passed on as it came, at every moment, to the model
+// set for such requests, through RPH's model layer: RPE never calls a model itself, and adds, cuts and
+// changes nothing in it (READINGS R-100); keeping an unplayed chat reply out is the extension's work. A
+// tagged chat reply is read, its history window checked or made, its prompt laid out, and handed to the
+// turn lane, which writes the reply to the response as the turn goes, streamed or whole as the request
+// asked; a reply asked for whole is given the hold, so its turn ends before Lumiverse's ten minutes.
 
 import type { Clock, PassError, PassRequest, PassSink, Usage as PassUsage } from "rp-harness/contract";
 import { isRecord, type JsonObject } from "../../shared/json";
@@ -67,13 +68,10 @@ export interface ProviderDeps {
   models: OwnerPass;
   /** The connection a request with no tag is passed on to; null for RPH's default. */
   passConnection(): string | null;
-  /**
-   * Why no request with no tag may be passed on now, in words a user is shown; null when one may.
-   * Not while RPE's extension in Lumiverse does not hold RPE's registration: it then cannot tell
-   * RPE's connection, so a chat reply on it comes untagged, and another model would play it with its
-   * secrets unchecked (§4.2, Permissions: no reply is passed through unplayed).
-   */
-  unpassable(): string | null;
+  /** A passed request's failure in the shipped file's words (`guidance/.prompts/reply-errors.md`, key `pass-<code>`, `{{detail}}`), read at each failure; the key alone where the file has no line for it. */
+  passWords(key: string, fields: { detail?: string }): Promise<string>;
+  /** For a reply asked for whole: milliseconds after its arrival at which its turn is stopped with what it has, below Lumiverse's ten minutes (the door's settings). */
+  holdMs(): number;
   /** The model names `GET /v1/models` lists: those RPE's connection in Lumiverse may name. */
   modelNames(): string[];
   turns: TurnPlayer;
@@ -89,22 +87,18 @@ function error(status: number, message: string): Response {
 
 const ROLES: readonly string[] = ["system", "user", "assistant"];
 
+/**
+ * The hold of a reply asked for whole: 9 minutes. Nothing reaches Lumiverse while a whole reply is written, and Lumiverse ends a
+ * generation that has had no text for ten minutes, checked each minute (`services/generation/active-generation-registry.ts:140-158`).
+ */
+export const WHOLE_HOLD_MS = 9 * 60_000;
+
 /** RPH's tokens as an OpenAI-compatible usage. */
 const usageOf = (u: PassUsage): Usage => ({ prompt_tokens: u.input, completion_tokens: u.output, total_tokens: u.input + u.output });
 
-/** Why a passed request has no answer, in words Lumiverse shows. */
-function passWords(e: PassError): string {
-  const detail = e.detail ? `: ${e.detail}` : "";
-  switch (e.code) {
-    case "no-connection":
-      return `RPE has no connection to pass this request on to${detail}. Add one on RPE's Connections page.`;
-    case "not-carried":
-      return `RPE's connection for such requests cannot carry this request${detail}.`;
-    case "stopped":
-      return `The request was stopped${detail}.`;
-    case "provider":
-      return `The model's provider failed${detail}.`;
-  }
+/** Why a passed request has no answer, in the shipped file's words: `pass-no-connection`, `pass-not-carried`, `pass-stopped`, `pass-provider`. */
+function passWords(deps: ProviderDeps, e: PassError): Promise<string> {
+  return deps.passWords(`pass-${e.code}`, e.detail ? { detail: e.detail } : {});
 }
 
 /** `POST /v1/chat/completions` as a handler from a request to its response. */
@@ -121,10 +115,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     if (!isRecord(body)) return error(400, "The request is not a chat completion.");
     const now = deps.clock.now();
     const read = readTag(body);
-    if ("absent" in read) {
-      const why = deps.unpassable();
-      return why === null ? passThrough(deps, body as JsonObject, request.signal, now) : error(503, `RPE answered nothing: it cannot tell a chat reply from other requests on its connection now. ${why}`);
-    }
+    if ("absent" in read) return passThrough(deps, body as JsonObject, request.signal, now);
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {
@@ -145,7 +136,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
       layout: rawLayout(received.tag, received.messages, received.cut.told, hint),
       cut: received.cut,
       model: typeof model === "string" ? model : null,
-      ...(stream === true ? {} : { whole: true }),
+      ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),
       parameters: parameters as JsonObject,
     };
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };
@@ -159,6 +150,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
 function passThrough(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, now: number): Promise<Response> | Response {
   const meta = { id: `rpe-pass-${now.toString(36)}`, model: typeof body.model === "string" ? body.model : "rpe", created: Math.floor(now / 1000) };
   const run = async (out: ReplyStream, stop: AbortSignal): Promise<void> => {
+    let failed: PassError | null = null;
     await deps.models.pass(
       { connection: deps.passConnection(), body },
       {
@@ -168,10 +160,14 @@ function passThrough(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, 
           out.toolCalls((result.toolCalls ?? []).map((c) => ({ id: c.id, name: c.name, arguments: JSON.stringify(c.args) })));
           out.finish({ reason: result.finishReason, usage: usageOf(result.usage) });
         },
-        error: (e) => out.error(passWords(e)),
+        error: (e) => {
+          failed = e;
+        },
       },
       stop,
     );
+    // Its words are read from the shipped file before the reply ends.
+    if (failed !== null) out.error(await passWords(deps, failed));
   };
   return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, turn: false, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) }) : wholeReply(run, meta, signal);
 }

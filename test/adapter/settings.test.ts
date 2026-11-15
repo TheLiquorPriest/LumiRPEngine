@@ -8,6 +8,7 @@ import { CHAT_SEARCH_DEFAULTS } from "../../src/adapter/lumiverse/chat";
 import { RETRY_MS, TRIES } from "../../src/adapter/lumiverse/db";
 import { DRY_RUN_MS } from "../../src/adapter/lumiverse/hint";
 import { BREAKDOWN_TRIES, REREADS } from "../../src/adapter/lumiverse/http-reads";
+import { WHOLE_HOLD_MS } from "../../src/adapter/lumiverse/provider";
 import { RELAY_DEFAULTS } from "../../src/adapter/lumiverse/relay";
 import { KEEP_EVERY_MS } from "../../src/adapter/lumiverse/session";
 import { LUMIVERSE_DEFAULTS, LUMIVERSE_SETTING_DEFS, LUMIVERSE_SETTINGS, lumiverseSettings, QUESTION_BODY_BYTES, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
@@ -43,6 +44,7 @@ describe("the door's settings", () => {
       reads: { rereads: REREADS, breakdownReplies: BREAKDOWN_TRIES },
       dryRunMs: DRY_RUN_MS,
       commentMs: COMMENT_MS,
+      wholeHoldMs: WHOLE_HOLD_MS,
       relay: RELAY_DEFAULTS,
       questionBytes: QUESTION_BODY_BYTES,
       questionWaitMs: QUESTION_WAIT_MS,

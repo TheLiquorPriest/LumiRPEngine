@@ -75,7 +75,7 @@ describe("the door, mounted in the app", () => {
     expect(b.heard.turns.map((t) => t.tag.chat)).toEqual(["chat-harbor"]);
   });
 
-  test("when the extension refuses RPE's registration, RPE says so in its log and on its status route, and passes nothing on its connection until the extension takes it again", async () => {
+  test("when the extension refuses RPE's registration, RPE says so in its log and on its status route, and still passes a request with no tag on", async () => {
     const b = await bed({ lumiverse: { relay: { retry: 0.1 } } });
     const page = bearer((await b.app.auth.mintPageToken(USER, "extension")).token);
     const status = async (): Promise<unknown> => await (await fetch(`${b.listening.url}${EXTENSION_STATUS_PATH}`, { headers: page })).json();
@@ -86,10 +86,9 @@ describe("the door, mounted in the app", () => {
     // The extension refuses one of RPE's registrations, as it does any it cannot confirm.
     b.installed.sendToFrontend({ rpe: "refused", why: "RPE did not confirm it.", missing: [] }, USER, { frontendSessionId: b.registration.relay });
     await b.until("RPE to hear the refusal", () => !b.door.extension().registered);
-    const refused = await untagged();
-    expect(refused.status).toBe(503);
-    expect(await refusalWords(refused)).toContain("RPE did not confirm it.");
-    expect(b.heard.passed).toEqual([]);
+    // A title asked for meanwhile is passed through and answered: keeping an unplayed reply out is the extension's work.
+    expect((await untagged()).status).toBe(200);
+    expect(b.heard.passed).toHaveLength(1);
     expect(await status()).toEqual({ registered: false, why: expect.stringContaining("RPE did not confirm it."), missing: [] });
     expect(b.logs.filter((line) => line.includes("RPE did not confirm it."))).toHaveLength(1);
 
@@ -97,7 +96,7 @@ describe("the door, mounted in the app", () => {
     await b.until("RPE to be registered again", () => b.door.extension().registered);
     expect(b.logs.filter((line) => line.includes("took its registration again"))).toHaveLength(1);
     expect((await untagged()).status).toBe(200);
-    expect(b.heard.passed).toHaveLength(1);
+    expect(b.heard.passed).toHaveLength(2);
   });
 
   test("the provider endpoint and the model list answer behind the provider key; another key, or the extension's, is refused", async () => {
@@ -295,18 +294,16 @@ describe("what the extension is missing, on RPE's own pages", () => {
     expect(await status()).toEqual({ registered: true, why: null, missing: [] });
   });
 
-  test("while the extension says it lacks the interceptor permission, it marks no reply, so RPE passes no untagged request on and says which permission; once the grant is reported, it passes again", async () => {
+  test("while the extension says it lacks the interceptor permission, a request with no tag is still passed on", async () => {
     const b = await bed({ granted: ALL.filter((p) => p !== "interceptor") });
     const untitled = { model: "rpe", messages: [{ role: "user", content: "Name this chat." }], stream: false };
     const untagged = (): Promise<Response> => fetch(`${b.listening.url}/v1/chat/completions`, { method: "POST", headers: bearer(b.providerKey), body: JSON.stringify(untitled) });
     expect(b.door.extension()).toMatchObject({ registered: true, missing: [{ permission: "interceptor" }] });
-    const refused = await untagged();
-    expect(refused.status).toBe(503);
-    expect(await refusalWords(refused)).toContain("interceptor");
-    expect(b.heard.passed).toEqual([]);
+    expect((await untagged()).status).toBe(200);
+    expect(b.heard.passed).toHaveLength(1);
     b.grant("interceptor");
     await b.until("RPE to hear the grant", () => b.door.extension().missing?.length === 0);
     expect((await untagged()).status).toBe(200);
-    expect(b.heard.passed).toHaveLength(1);
+    expect(b.heard.passed).toHaveLength(2);
   });
 });
