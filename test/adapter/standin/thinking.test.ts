@@ -62,6 +62,18 @@ describe("thinking kept with the message", () => {
     await generate(b);
     expect(carried(4).every((c) => c === undefined)).toBe(true);
   });
+
+  test("a reasoning prefill is streamed as thinking before anything and kept in front of the model's own thinking, the carrier holding only the model's (`services/generate.service.ts:3710-3712`, `:3455-3471`)", async () => {
+    const b = boat([{ thinking: ["Then the tide."], words: [" she begins."] }], { connection: { provider: "deepseek" }, preset: { reasoningPrefill: "REASON First the rope. ", assistantPrefill: "PREFILL Edda" } });
+    const out = await generate(b);
+    const frames = b.lv.events.filter((e) => e.event === "STREAM_TOKEN_RECEIVED").map((e) => e.payload as { token: string; type?: string });
+    expect(frames[0]).toMatchObject({ token: "REASON First the rope. ", type: "reasoning" });
+    const row = rowOf(b, out.messageId!);
+    expect(row.swipes).toEqual(["PREFILL Edda she begins."]);
+    expect(row.extra.reasoningBySwipe).toEqual(["REASON First the rope. Then the tide."]);
+    expect(row.extra.reasoningCarrierBySwipe).toEqual([{ type: "reasoning_content", content: "Then the tide." }]);
+    expect(out.reply).toMatchObject({ content: " she begins.", reasoning: "Then the tide." });
+  });
 });
 
 describe("what a failed or a stopped reply keeps", () => {

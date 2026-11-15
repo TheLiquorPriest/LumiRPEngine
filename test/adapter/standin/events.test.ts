@@ -169,4 +169,22 @@ describe("the breakdown", () => {
     expect(out.stored!.entries.at(-1)).toMatchObject({ ...entry, tokens: Math.ceil("TIDE the tide is out".length / 4) });
     expect(rowOf(b, out.messageId!)).toBeDefined();
   });
+
+  test("a delete wipes the later replies' breakdowns: the message's own, and those of every message after it, the earlier ones left (`services/chats.service.ts:3236-3240`; `services/breakdown.service.ts:35-55`)", async () => {
+    const b = boat([{ words: ["One."] }, { words: ["Two."] }, { words: ["Three."] }]);
+    const replies = [(await generate(b)).messageId!];
+    for (const line of ["USER-2 I row on.", "USER-3 I row further."]) {
+      b.lv.send("chat-boat", line);
+      replies.push((await generate(b)).messageId!);
+    }
+    const held = (): string[] => b.db.rows("SELECT message_id FROM message_breakdowns").map((r) => String(r.message_id)).sort();
+    expect(held()).toEqual([...replies].sort());
+    // The second reply goes: its breakdown and the third's, which was made from a history it was part of; the first stays.
+    b.lv.deleteMessage("chat-boat", replies[1]!);
+    expect(held()).toEqual([replies[0]!]);
+    expect([...b.lv.stored.keys()]).toEqual([replies[0]!]);
+    b.lv.deleteMessage("chat-boat", replies[0]!);
+    expect(held()).toEqual([]);
+    expect(b.lv.stored.size).toBe(0);
+  });
 });
