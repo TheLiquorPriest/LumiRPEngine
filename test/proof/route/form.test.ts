@@ -44,9 +44,13 @@ function gateWithId(id: string): string {
   return `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: ${JSON.stringify(id)}, waves: [1], parts: [{ id: "time", words: "a time", mark: "code", measured: "a time" }], fixtures: [], bed: [], live: async () => {} });\n`;
 }
 
+/** The proof folders `proofWith` made, removed with the rest when the file ends. */
+const made: string[] = [];
+
 /** A proof folder of its own holding the files given. */
 function proofWith(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "proof-form-ids-"));
+  made.push(dir);
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(join(dir, file, ".."), { recursive: true });
     writeFileSync(join(dir, file), text);
@@ -119,7 +123,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  for (const dir of [root, all]) if (dir !== "") rmSync(dir, { recursive: true, force: true });
+  for (const dir of [root, all, ...made]) if (dir !== "") rmSync(dir, { recursive: true, force: true });
 });
 
 /** One part carrying a row's whole words, marked as the row's own "as shipped" asks. */
