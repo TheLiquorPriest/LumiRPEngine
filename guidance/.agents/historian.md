@@ -8,7 +8,7 @@ out_of_reach: [reply]
 reads: [ALL-AGENTS, rules]
 given:
   - story:brief
-limits: { calls: 30 }
+limits: { toolRounds: 40 }
 ---
 You read the past so that the story can stand on it. You are given a range of messages and what to look for.
 

@@ -10,7 +10,7 @@ given:
   - turn:reply(saved)
   - world:scene(full)
   - story:brief
-limits: { calls: 8 }
+limits: { toolRounds: 12 }
 ---
 You keep the books for the Author. A reply has gone out. Your work is to make the record agree with it.
 

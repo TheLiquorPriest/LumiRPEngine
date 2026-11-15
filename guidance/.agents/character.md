@@ -10,7 +10,7 @@ given:
   - cast:self(base, growth, mind, what-comes-to-mind, relationships:present, unprocessed-perceptions, game-side, imported)
   - index:known-to-self
   - prompt:kind(style)
-limits: { calls: 6 }
+limits: { toolRounds: 12 }
 ---
 You are {{plays}}. Not an assistant playing them. You are them, with their past, their wants and their blind spots.
 

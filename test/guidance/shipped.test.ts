@@ -55,8 +55,8 @@ const APPENDIX_E: readonly string[] = [
 /** The rules in force at the shipped level (E.1, E.2, E.3): the two for the agents, and the seven. */
 const IN_FORCE = ["consent", "perceptions", "perceptions-owed", "perceptions-missing", "unsourced", "engine-silent", "reply-missing", "history-leaving", "save-before-compaction"];
 
-/** The two examples the build added beyond E.3's four, for the owner's approval. */
-const BUILD_EXAMPLES = [".rules/examples/intent-missing.md", ".rules/examples/turn-unrecorded.md"];
+/** The examples the build added beyond E.3's four, for the owner's approval: two on the Author's record of a turn, one on what is left of its limits. */
+const BUILD_EXAMPLES = [".rules/examples/intent-missing.md", ".rules/examples/turn-unrecorded.md", ".rules/examples/limits-left.md"];
 
 const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -178,7 +178,7 @@ describe("the shipped set, as RPH's loader reads it, as RPE lays it", () => {
     expect(await guidance.problems()).toEqual([]);
   });
 
-  test("the rules in force at the shipped level are `consent`, `perceptions` and the seven of E.3, and no others; the two the build added are examples", async () => {
+  test("the rules in force at the shipped level are `consent`, `perceptions` and the seven of E.3, and no others; the three the build added are examples", async () => {
     const rules = await guidance.rules();
     expect(rules.filter((rule) => rule.inForce).map((rule) => rule.name).sort()).toEqual([...IN_FORCE].sort());
     for (const path of BUILD_EXAMPLES) expect(rules.find((rule) => rule.path.endsWith(path.slice(1)))).toMatchObject({ inForce: false, why: "example" });

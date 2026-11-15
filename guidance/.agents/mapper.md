@@ -8,7 +8,7 @@ out_of_reach: [reply]
 reads: [ALL-AGENTS, rules, PRESET]
 given:
   - prompt:layout
-limits: { calls: 6 }
+limits: { toolRounds: 12 }
 ---
 You are given the raw layout of a prompt the chat application assembled: its messages in order, each with its role, its length and what is already known about it.
 
