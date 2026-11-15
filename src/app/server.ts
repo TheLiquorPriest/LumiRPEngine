@@ -4,10 +4,13 @@
 // may call RPE; it carries what its route's access asks for; and its body, whatever its method, is
 // within the route's limit. A route in the form is held to its declaration too: a query or a body it
 // does not take is refused with 400 before its handler runs, which is given only what was declared,
-// read and typed, and the caller's credential only where its route declares it. A page from an allowed
-// origin gets the CORS answers it needs to call RPE directly, the Lumiverse page among them. A body larger
-// than `server.workerParseBytes` is parsed on a worker thread, a JSON route's and a raw route's alike, so a
-// long prompt's parse never holds up another request.
+// read and typed, and what auth answered for its call, whole (`CallAuth`), never a credential's text. A page
+// from an allowed origin gets the CORS answers it needs to call RPE directly, the Lumiverse page among them. A
+// body larger than `server.workerParseBytes` is parsed on a worker thread, a JSON route's and a raw route's
+// alike, so a long prompt's parse never holds up another request. A connection that sends and is sent nothing
+// for `server.idleSeconds` is closed: a reply's stream and the live socket stay open by what they send, and a
+// reply asked for whole lifts the bound from itself. A route marked long is answered at once over TCP with an
+// id, and its answer read when ready (`answers.ts`), so nothing a page asks through the relay fails for time.
 //
 // Two kinds of listener. TCP, where pages, Lumiverse and the extension reach RPE, serves every route but
 // the command line's. The command socket, a Unix socket in the data folder that only the owner's account
@@ -22,11 +25,12 @@ import type { Log } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { Auth } from "./auth";
 import { AuthRefused, bearerOf } from "./auth";
+import type { Answers } from "./answers";
 import type { AppConfig } from "./config";
 import { OWNER_ONLY_FILE } from "./disk";
 import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
-import type { AnyShape, DeclaredRoute, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
+import type { AnyShape, CallAuth, DeclaredRoute, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
 import { JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
 import type { Workers } from "./workers/pool";
 
@@ -39,6 +43,8 @@ export interface ServerParts {
   now: () => number;
   /** The worker threads a large body is parsed on. */
   workers: Workers;
+  /** Where a long route's answer is kept for reading. */
+  answers: Answers;
   /** Where the command line's socket goes, in the data folder; absent, the command line's routes are served nowhere. */
   commandSocket?: string;
 }
@@ -238,18 +244,20 @@ interface Asked {
   params: Record<string, string>;
   search: URLSearchParams;
   user: string | null;
-  credential: string | null;
+  auth: CallAuth;
   bytes: Uint8Array<ArrayBuffer> | null;
   signal: AbortSignal;
   /** The body as JSON, parsed on a worker thread when it is large; rejects when it is not JSON. */
   json: () => Promise<unknown>;
+  /** For a long route's call: takes its work in hand and answers at once with an id (TCP); null where it is answered directly (the command socket). */
+  later: ((work: (signal: AbortSignal) => Promise<Response>) => Response) | null;
 }
 
 /**
  * A route in the form, answered: its query and its body held to its declaration (refused with 400 in RPE's
  * words), then its handler given what they hold; `cursorKey` seals and reads a paged route's cursors.
  */
-async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any, any>, asked: Asked, cursorKey: Uint8Array): Promise<Response> {
+async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>, asked: Asked, cursorKey: Uint8Array): Promise<Response> {
   const at = `${route.method} ${route.path}`;
   const fields: QueryFields = route.paged === undefined ? (route.query ?? {}) : { ...route.query, ...PAGE_QUERY };
   const read = readQuery(fields, asked.search, at);
@@ -283,12 +291,16 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any,
     const problems = problemsOf(declared, body, "body");
     if (problems.length > 0) return refusal(asked.path, 400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
   }
-  // The caller's credential reaches only the code of a route that declares it reads it.
-  const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, signal: asked.signal, ...(route.credential === true ? { credential: asked.credential } : {}) });
-  if ((route.reply as AnyShape).kind === "nothing") return new Response(null, { status: 204 });
-  // A page's `next` is the place of its last item; the page is handed it sealed, as its cursor.
-  const answered = route.paged !== undefined && isRecord(reply) && typeof reply.next === "string" ? { ...reply, next: cursorOf(cursorKey, at, asked.params, reply.next) } : reply;
-  return Response.json(answered, { headers: { "cache-control": "no-store" } });
+  const run = async (signal: AbortSignal): Promise<Response> => {
+    const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal });
+    if ((route.reply as AnyShape).kind === "nothing") return new Response(null, { status: 204 });
+    // A page's `next` is the place of its last item; the page is handed it sealed, as its cursor.
+    const answered = route.paged !== undefined && isRecord(reply) && typeof reply.next === "string" ? { ...reply, next: cursorOf(cursorKey, at, asked.params, reply.next) } : reply;
+    return Response.json(answered, { headers: { "cache-control": "no-store" } });
+  };
+  // A long route's work outlives the request it was asked by: it is never aborted with it.
+  if (route.long === true && asked.later !== null) return asked.later(run);
+  return await run(asked.signal);
 }
 
 export function startServer(parts: ServerParts): RunningServer {
@@ -298,6 +310,16 @@ export function startServer(parts: ServerParts): RunningServer {
   const cursorKey = randomBytes(32);
   let listening = config.port;
   const limits = [config.server.bodyBytes, config.server.providerBodyBytes, ...[...table.values()].flatMap((byMethod) => [...byMethod.values()].map((p) => p.route.maxBody ?? 0))];
+
+  /** A throw from a route's code as the answer it gives: a refusal, a joined turn, or a failure, logged. */
+  const failure = (error: unknown, path: string, at: string, area: string): Response => {
+    if (error instanceof RouteError || error instanceof AuthRefused) return refusal(path, error.status, error.message);
+    // A turn joined to another is a fact about the turn: the one answer for it, whichever route and whichever area's code threw it, logging no failure.
+    const joined = joinedOf(error);
+    if (joined !== null) return Response.json({ joined } satisfies JoinedAnswer, { status: JOINED_STATUS, headers: { "cache-control": "no-store" } });
+    log.error(`${at} failed`, { area, error: error instanceof Error ? error.message : String(error) });
+    return refusal(path, 500, "RPE could not answer this request; its log says why.");
+  };
 
   const answer = async (on: Listener, request: Request, server: Server<LiveSocketData> | null, byMethod: Map<Method, Placed> | null, params: Record<string, string>): Promise<Response | undefined> => {
     const url = new URL(request.url);
@@ -326,14 +348,11 @@ export function startServer(parts: ServerParts): RunningServer {
     const placed = byMethod.get((request.method === "HEAD" ? "GET" : request.method) as Method);
     if (placed === undefined) return withCors(refusal(path, 405, `${path} takes ${methods.join(", ")}.`, { allow: methods.join(", ") }), origin);
     const route = placed.route;
-    // Every call is the user's this RPE belongs to: it opens for no one before the install names him.
+    // Every call is the user's this RPE belongs to: it opens for no one before the install names him. On the owner's socket a page
+    // route is the owner's own call: only his account can open it.
     const user = auth.owner;
-    if (route.access === "page") {
-      // On the owner's socket a page route is the owner's own call: only his account can open it.
-      if (on === "tcp" && auth.pageUser(credentialOf(request)) === null) return withCors(refusal(path, 401, ACCESS_WORDS.page), origin);
-    } else if (route.access !== "public" && route.access !== "command" && !auth.holds(route.access, credentialOf(request))) {
-      return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "provider" | "extension"]), origin);
-    }
+    const call = auth.answer(route.access, credentialOf(request), on);
+    if (call === null) return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "page" | "provider" | "extension"]), origin);
     // Every request's body is held to its route's limit, whatever its method. Bun hands no route the body of a
     // GET or a HEAD, and no route takes one, so what such a request's headers say of a body refuses it.
     let bytes: Uint8Array<ArrayBuffer> | null = null;
@@ -347,7 +366,7 @@ export function startServer(parts: ServerParts): RunningServer {
       if ("tooLarge" in read) return withCors(refusal(path, 413, tooLargeWords(read.tooLarge, limit, `${request.method} ${route.path}`)), origin);
       bytes = read.bytes;
     }
-    const credential = credentialOf(request);
+    const at = `${request.method} ${route.path}`;
     // A body read is parsed here or, when large, on a worker thread; a JSON route's buffer is handed to the thread, a raw route's is kept with its request.
     const json = (handOver: boolean) => async (): Promise<unknown> => {
       if (bytes === null || bytes.byteLength === 0) throw new SyntaxError("The request has no body.");
@@ -358,20 +377,18 @@ export function startServer(parts: ServerParts): RunningServer {
     try {
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
-        const openLiveSocket = (headers?: Record<string, string>): boolean => server?.upgrade(request, { data: { follows: new Map(), credential, ends: undefined, catchUp: undefined }, ...(headers === undefined ? {} : { headers }) }) ?? false;
-        const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket, json: json(false) });
+        // A socket keeps what auth answered, its credential's hash and end, and never the credential's text.
+        const openLiveSocket = (headers?: Record<string, string>): boolean => server?.upgrade(request, { data: { follows: new Map(), auth: call, ends: undefined, catchUp: undefined, counted: false }, ...(headers === undefined ? {} : { headers }) }) ?? false;
+        const untimed = (): void => server?.timeout(request, 0);
+        const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, auth: call, openLiveSocket, json: json(false), untimed });
         return response === undefined ? undefined : withCors(response, origin);
       }
       if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
-      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal, json: json(true) };
+      const later = on === "tcp" ? (work: (signal: AbortSignal) => Promise<Response>): Response => parts.answers.start(work(new AbortController().signal).catch((error: unknown) => failure(error, path, at, placed.area))) : null;
+      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
-      if (error instanceof RouteError || error instanceof AuthRefused) return withCors(refusal(path, error.status, error.message), origin);
-      // A turn joined to another is a fact about the turn: the one answer for it, whichever route and whichever area's code threw it, logging no failure.
-      const joined = joinedOf(error);
-      if (joined !== null) return withCors(Response.json({ joined } satisfies JoinedAnswer, { status: JOINED_STATUS, headers: { "cache-control": "no-store" } }), origin);
-      log.error(`${request.method} ${route.path} failed`, { area: placed.area, error: error instanceof Error ? error.message : String(error) });
-      return withCors(refusal(path, 500, "RPE could not answer this request; its log says why."), origin);
+      return withCors(failure(error, path, at, placed.area), origin);
     }
   };
 
@@ -390,15 +407,15 @@ export function startServer(parts: ServerParts): RunningServer {
   const websocket = liveSockets(parts.live, {
     messageBytes: config.live.messageBytes,
     follows: config.live.follows,
-    holds: (credential) => {
-      const hold = auth.pageHold(credential);
-      return hold === null ? false : hold.until;
-    },
+    chatIdChars: config.live.chatIdChars,
+    sockets: config.live.sockets,
+    idleSeconds: config.server.idleSeconds,
+    holds: (hash) => auth.holdOf(hash),
     now: parts.now,
   });
   const common = {
     // Above every route's own limit, so that each route refuses in its own words first.
-    maxRequestBodySize: Math.max(...limits) + 1024 * 1024,
+    maxRequestBodySize: Math.max(...limits) + config.server.headroomBytes,
     error(error: Error) {
       log.error("a request failed before its route answered", { error: error.message });
       return Response.json({ error: "RPE could not answer this request; its log says why." }, { status: 500 });
@@ -409,9 +426,9 @@ export function startServer(parts: ServerParts): RunningServer {
       ...common,
       hostname,
       port,
-      // A turn can stay silent for minutes (plan §10.7 keeps it alive inside ten), longer than Bun's longest idle limit. A Unix
-      // socket has no idle limit to lift.
-      idleTimeout: 0,
+      // A connection that sends and is sent nothing for this long is closed (0: never). A reply's stream sends a comment line well
+      // inside it, and a reply asked for whole lifts it from itself (`untimed`).
+      idleTimeout: config.server.idleSeconds,
       routes: tcpRoutes,
       fetch: (request, server) => answer("tcp", request, server, null, {}),
       websocket,
@@ -440,6 +457,7 @@ export function startServer(parts: ServerParts): RunningServer {
       // The owner's alone from its first moment, whatever the process's umask, and said again in its mode.
       const umask = process.umask(0o177);
       try {
+        // The owner's own socket: a Unix socket has no idle bound in Bun, and no client of anyone else's can hold it open.
         command = Bun.serve({ ...common, unix: socket, routes: socketRoutes, fetch: (request) => onSocket(request, null, {}) });
       } finally {
         process.umask(umask);

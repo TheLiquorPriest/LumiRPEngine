@@ -120,6 +120,12 @@ export interface AppConfig {
     preflightSeconds: number;
     /** A request body larger than this, in bytes, is parsed on a worker thread. */
     workerParseBytes: number;
+    /** Seconds a connection may send and be sent nothing before it is closed; 0: no bound. */
+    idleSeconds: number;
+    /** Bytes above the largest route limit at which Bun itself refuses a body, before any route's words. */
+    headroomBytes: number;
+    /** Seconds the answer of a long request, given by id, is kept for reading once ready. */
+    answerKeepSeconds: number;
   };
   auth: {
     /** How long a page token holds, in minutes. */
@@ -136,6 +142,10 @@ export interface AppConfig {
     messageBytes: number;
     /** The most chats one live socket may follow at once. */
     follows: number;
+    /** The most characters of a chat id a page may follow. */
+    chatIdChars: number;
+    /** The most live sockets open at once. */
+    sockets: number;
   };
   database: {
     /** How long a write waits for another program's write to the file (the command line's) to finish, in milliseconds. */
@@ -150,6 +160,8 @@ export interface AppConfig {
     signInMs: number;
     /** How long `rpe up` waits for RPE to answer once it has started RPE's service, before it puts back what it did, in milliseconds. */
     startMs: number;
+    /** How often `rpe up` asks whether RPE answers yet while it waits for RPE's service to start, in milliseconds. */
+    askEveryMs: number;
   };
   service: {
     /** The highest port `rpe up` tries when the configured one is taken (`service.portLast`). */
@@ -184,11 +196,11 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   fromEnvironment: [],
   origins: [],
   hosts: [],
-  server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024 },
+  server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300 },
   auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null },
-  live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64 },
+  live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64, chatIdChars: 200, sockets: 64 },
   database: { busyMs: 5000, sliceMs: 10 },
-  commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000 },
+  commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000, askEveryMs: 250 },
   service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000 },
   workers: { threads: null },
   index: { batch: 500 },
@@ -224,12 +236,18 @@ export const SERVER_SETTING_DEFS = {
   webKeyDays: { key: "auth.webKeyDays", default: D.auth.webKeyDays, takes: { type: "whole", least: 1, most: 36_500 }, orNone: true, none: "no end: it holds until a new one replaces it", levels: GLOBAL, perConnection: false, name: "The web app's key holds", about: "Days the web app's key holds after it is made.", effect: "start" },
   queueEvents: { key: "liveSocket.queueEvents", default: D.live.queueEvents, takes: whole(1, 1_000_000), levels: GLOBAL, perConnection: false, name: "Events held for a slow page", about: "Events the live socket holds for one slow page following one chat; past it the oldest are dropped, and the page is told which.", effect: "start" },
   messageBytes: { key: "liveSocket.messageBytes", default: D.live.messageBytes, takes: whole(256, 16 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Largest live message", about: "Bytes of the largest message a page may send on the live socket.", effect: "start" },
-  follows: { key: "liveSocket.follows", default: D.live.follows, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once.", effect: "start" },
+  follows: { key: "liveSocket.follows", default: D.live.follows, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once; the user's jobs and his own events count as one each.", effect: "start" },
+  chatIdChars: { key: "liveSocket.chatIdChars", default: D.live.chatIdChars, takes: whole(1, 10_000), levels: GLOBAL, perConnection: false, name: "Longest chat id followed", about: "The most characters of a chat id a page may follow on the live socket; a longer one is refused.", effect: "start" },
+  sockets: { key: "liveSocket.sockets", default: D.live.sockets, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Live sockets open at once", about: "The most live sockets RPE keeps open at once; one more is closed at once with the reason.", effect: "start" },
+  idleSeconds: { key: "server.idleSeconds", default: D.server.idleSeconds, takes: whole(0, 255), levels: GLOBAL, perConnection: false, name: "Idle connection closed after", about: "Seconds a connection may send and be sent nothing before RPE closes it; 0 for no bound. A reply's stream and the live socket stay open by what they send.", effect: "start" },
+  headroomBytes: { key: "server.headroomBytes", default: D.server.headroomBytes, takes: whole(0, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Room above the largest request", about: "Bytes above the largest body any route takes at which the server itself refuses a request, so that each route refuses a body over its own limit in its own words first.", effect: "start" },
+  answerKeepSeconds: { key: "server.answerKeepSeconds", default: D.server.answerKeepSeconds, takes: whole(1, 86_400), levels: GLOBAL, perConnection: false, name: "A long request's answer kept", about: "Seconds the answer of a request RPE answered at once with an id is kept, once ready, for the page to read; one never read is dropped then.", effect: "start" },
   busyMs: { key: "database.busyMs", default: D.database.busyMs, takes: whole(0, 600_000), levels: GLOBAL, perConnection: false, name: "Wait for another writer", about: "Milliseconds a write waits for another program's write to RPE's database file to finish.", effect: "start" },
   sliceMs: { key: "database.sliceMs", default: D.database.sliceMs, takes: whole(1, 10_000), levels: GLOBAL, perConnection: false, name: "Writes run at a time", about: "Milliseconds the write queue runs writes before it lets other work in.", effect: "start" },
   waitMs: { key: "commandLine.waitMs", default: D.commandLine.waitMs, takes: whole(100, 600_000), levels: GLOBAL, perConnection: false, name: "The command line waits for RPE", about: "Milliseconds rpe status and rpe connection wait for the running server, and a command waits for the data folder's lock.", effect: "start" },
   signInMs: { key: "commandLine.signInMs", default: D.commandLine.signInMs, takes: whole(1000, 600_000), levels: GLOBAL, perConnection: false, name: "The command line waits for a sign-in", about: "Milliseconds rpe lumiverse waits for Lumiverse to answer its sign-in.", effect: "start" },
   startMs: { key: "commandLine.startMs", default: D.commandLine.startMs, takes: whole(1000, 600_000), levels: GLOBAL, perConnection: false, name: "rpe up waits for RPE to start", about: "Milliseconds rpe up waits for RPE to answer once it has started RPE's service, before it puts back what it did.", effect: "start" },
+  askEveryMs: { key: "commandLine.askEveryMs", default: D.commandLine.askEveryMs, takes: whole(10, 60_000), levels: GLOBAL, perConnection: false, name: "rpe up asks whether RPE answers every", about: "Milliseconds between rpe up's asks whether RPE answers yet, while it waits for RPE's service to start.", effect: "start" },
   portLast: { key: "service.portLast", default: D.service.portLast, takes: whole(1, 65_535), levels: GLOBAL, perConnection: false, name: "The highest port rpe up tries", about: "The highest port rpe up tries when RPE's port is taken, counting up from it; rpe up then keeps the first free one.", effect: "start" },
   memory: { key: "service.memory", default: D.service.memory, takes: { type: "text" }, levels: GLOBAL, perConnection: false, name: "Memory RPE's service may hold", about: "The most memory RPE's service may hold, as systemd reads a size (768M, 2G) or infinity for none, at least 256M: the unit's MemoryMax. rpe up --memory sets it; the service holds to it from the next rpe up --systemd.", effect: "start" },
   restartWait: { key: "service.restartWait", default: D.service.restartWait, takes: whole(1, 3600), levels: GLOBAL, perConnection: false, name: "Wait before the service starts RPE again", about: "Seconds the service manager waits before it starts RPE again once it has stopped: the unit's RestartSec, written by rpe up --systemd.", effect: "start" },
@@ -368,11 +386,11 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     address: checkedSetting(read, s.address, hostName, D.address, log),
     origins: checkedSetting(read, s.origins, listOf(origin), D.origins, log),
     hosts: checkedSetting(read, s.hosts, listOf(hostName), D.hosts, log),
-    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes) },
+    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds) },
     auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null },
-    live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows) },
+    live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows), chatIdChars: n(s.chatIdChars), sockets: n(s.sockets) },
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs) },
-    commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs) },
+    commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs), askEveryMs: n(s.askEveryMs) },
     service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000 },
     workers: { threads: read.value(s.threads) as number | null },
     index: { batch: n(s.batch) },
@@ -409,8 +427,11 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
     hosts: [listOf(hostName), l.hosts],
     server: [
       (value, at) => ({
-        // No build before this one wrote it to config.json: it is the setting's alone.
+        // No build before this one wrote these to config.json: they are the settings' alone.
         workerParseBytes: l.server.workerParseBytes,
+        idleSeconds: l.server.idleSeconds,
+        headroomBytes: l.server.headroomBytes,
+        answerKeepSeconds: l.server.answerKeepSeconds,
         ...readGroup(value, at, {
           bodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.bodyBytes],
           providerBodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.providerBodyBytes],
@@ -429,12 +450,15 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
       l.auth,
     ],
     live: [
-      (value, at) =>
-        readGroup(value, at, {
+      (value, at) => ({
+        chatIdChars: l.live.chatIdChars,
+        sockets: l.live.sockets,
+        ...readGroup(value, at, {
           queueEvents: [wholeIn(1, 1_000_000), l.live.queueEvents],
           messageBytes: [wholeIn(256, 16 * 1024 * 1024), l.live.messageBytes],
           follows: [wholeIn(1, 100_000), l.live.follows],
         }),
+      }),
       l.live,
     ],
     database: [
@@ -446,12 +470,15 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
       l.database,
     ],
     commandLine: [
-      (value, at) =>
-        readGroup(value, at, {
+      (value, at) => ({
+        // No build before this one wrote it to config.json: it is the setting's alone.
+        askEveryMs: l.commandLine.askEveryMs,
+        ...readGroup(value, at, {
           waitMs: [wholeIn(100, 600_000), l.commandLine.waitMs],
           signInMs: [wholeIn(1000, 600_000), l.commandLine.signInMs],
           startMs: [wholeIn(1000, 600_000), l.commandLine.startMs],
         }),
+      }),
       l.commandLine,
     ],
   });

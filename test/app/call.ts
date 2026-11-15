@@ -15,7 +15,7 @@ export interface Given {
 }
 
 /** A route in the form that answers in JSON, of any types. */
-type JsonRoute = DeclaredRoute<any, any, any, any, any, any, any>;
+type JsonRoute = DeclaredRoute<any, any, any, any, any, any>;
 
 /** `route` asked as the server asks it: its reply, or the `RouteError` its declaration or its handler refuses with. */
 export async function callRoute<R extends JsonRoute>(route: R, given: Given): Promise<RouteReply<R>> {
@@ -32,7 +32,7 @@ export async function callRoute<R extends JsonRoute>(route: R, given: Given): Pr
     if (problems.length > 0) throw new RouteError(400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
   }
   const handle = route.handle as (call: unknown) => unknown;
-  const reply = await handle({ params: given.params ?? {}, query: read.value, body, user: given.user, signal: new AbortController().signal });
+  const reply = await handle({ params: given.params ?? {}, query: read.value, body, user: given.user, auth: { user: given.user, access: route.access, listener: "tcp", credential: null }, signal: new AbortController().signal });
   const sent = reply === undefined ? undefined : JSON.parse(JSON.stringify(reply));
   const wrong = problemsOf(route.reply, sent, "reply");
   if (wrong.length > 0) throw new Error(`${at} answered what its declaration does not take: ${wrong.slice(0, 3).join(" ")}`);

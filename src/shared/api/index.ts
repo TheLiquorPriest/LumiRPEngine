@@ -19,6 +19,14 @@ export interface AgentRef {
   plays?: string;
 }
 
+/** Whether RPE took the build, and where it stands, in words. */
+export interface Arrived {
+  /** Whether RPE took the build: every file matched, and it started. */
+  taken: boolean;
+  /** Where the builds stand, in a sentence or two, with why a build was not taken. */
+  words: string;
+}
+
 /** The base's four documents. */
 export type BaseDocument = "seed" | "soul" | "inner_voice" | "background";
 
@@ -227,6 +235,20 @@ export interface ChatStorageRow {
   areas: { notes: number; turns: number; sessions: number; files: number };
 }
 
+/** A generation RPE's extension stopped because it could not tell whose chat it was: neither RPE's registration nor the connection's own record could be read. */
+export interface CheckStoppedShown {
+  /** When, epoch milliseconds by the extension's clock. */
+  at: number;
+  chat: string;
+  /** The generation; null where Lumiverse had not announced it. */
+  generation: string | null;
+  connection: string;
+  /** How the read of RPE's registration from the extension's storage failed. */
+  registration: string;
+  /** How the read of the connection's own record in Lumiverse failed. */
+  mark: string;
+}
+
 /** How RPE stands as its own command line is told: the keys in force, the switches and the builds in words. */
 export interface CommandStatus {
   /** Each key in force: the provider key by its last four characters (null for one taken from today's connection, whose were never known), when it was made and, for the web token, when it ends; never a key's text. */
@@ -390,6 +412,8 @@ export interface ExtensionStatusReply {
   why: string | null;
   /** The permissions it says it lacks, and why it needs each; null until it has said. */
   missing: MissingPermissionShown[] | null;
+  /** The generations it stopped because it could not tell whose chat they were: the latest, and how many since RPE started; null when none. */
+  stopped: { last: CheckStoppedShown; count: number } | null;
 }
 
 /** A fact of "done enough" that could not be read, and why, as a code: `unreadable`, its records could not be read (RPE's log has what failed). */
@@ -650,7 +674,7 @@ export interface LimitHit {
   connection?: string;
 }
 
-/** What a page sends on the live socket: to follow a chat's events from its next one, or to stop. */
+/** What a page sends on the live socket: to follow a chat's events from its next one, or to stop; in `chat`, a chat's id, or ~jobs for the user's jobs, ~user for his own events, or ~to: and an address RPE gave the caller. */
 export interface LiveAsk {
   op: "follow" | "unfollow";
   chat: string;
@@ -663,10 +687,10 @@ export interface LiveBatch {
   missed?: LiveMissed;
 }
 
-/** One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
+/** One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
 export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string } };
 
-/** What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
+/** What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
 
 /** The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than liveSocket.queueEvents holds for it. */
@@ -994,6 +1018,10 @@ export interface RunShown {
   nth: number;
   kind: TurnRunKind;
   status: TurnState;
+  /** The message its request named: the one a new reply is written into, the reply a swipe or a regenerate writes again, or the one a continue's tag named for it to go on, a first word only. A continue is tied where Lumiverse's end names the message, the turn's `message`: where the two differ, the tag had named another; where this is null, the message was learned at the end. */
+  target: string | null;
+  /** A continue's own turn, which held what it changed until Lumiverse's end decided its turn, and whose folder holds its files (its requests among them): the turn id its files are read under. Null for any other run. */
+  held: string | null;
   timings: TurnMoments;
   usage: Usage;
   /** What this run sent to the chat. */
@@ -1598,7 +1626,7 @@ export interface WorldsInBuildShown {
   names?: { [key: string]: string };
 }
 
-/** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, and whether it pages. */
+/** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, whether it pages, and whether it is long (answered at once with an id, its answer read from `ANSWERS_PATH`). */
 export interface ApiRoutes {
   /** Starts the bootstrap job for the chats named, or for every chat the last migration carried, one after another; says which started and which were refused, and why. */
   "POST /api/v1/bootstrap": {
@@ -1607,6 +1635,7 @@ export interface ApiRoutes {
     body: BootstrapBatchAsk;
     reply: BootstrapBatchReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Tunnel for the previous build's messages: Build's page sends one of today's messages as it sends it to the extension's backend, and is answered with today's answer and the pushes the request caused. */
@@ -1616,6 +1645,7 @@ export interface ApiRoutes {
     body: FrontendToBackend;
     reply: BuildTunnelReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** The chats RPE played, the most recently played first, then the chats its store holds that it has not played (a migration's), by name. */
@@ -1625,6 +1655,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: ChatsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Tunnel for the previous build's messages: a panel's action as a page sends it, answered with today's `lre.result` or `lre.error`. */
@@ -1634,6 +1665,7 @@ export interface ApiRoutes {
     body: FrontendToBackend;
     reply: ResultMessage | ErrorMessage;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Tunnel for the previous build's messages: the Undo of a tap, sent as the previous build's Undo chip is, answered with today's `lre.result` or `lre.error`; a tap of a turn joined to another is answered with the turn it joined. */
@@ -1643,6 +1675,7 @@ export interface ApiRoutes {
     body: UndoAsk;
     reply: ResultMessage | ErrorMessage;
     paged: false;
+    long: false;
     joined: true;
   };
   /** A chat's bootstrap: the six facts of "done enough", and the chat's bootstrap jobs, oldest first, each with how it stands or ended. */
@@ -1652,6 +1685,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: BootstrapChatReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Starts a chat's bootstrap job (taking on a story with a past), with the player's choice of what to relive; a start that is refused is answered in words, with nothing started. */
@@ -1661,6 +1695,7 @@ export interface ApiRoutes {
     body: BootstrapStartAsk;
     reply: JobView;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Every character a chat knows, with what each holds on the path read: at the chat's newest turn, or as it stood at one of its turns. */
@@ -1670,6 +1705,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: CastReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** Everything on one character's record, by kind: at the chat's newest turn, or as it stood at one of its turns. */
@@ -1679,6 +1715,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: CharacterReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** Strikes an entry of a character's record, or takes its strike back, as the player's own change on the chat's newest turn; says what it did, in the cast's words. */
@@ -1688,6 +1725,7 @@ export interface ApiRoutes {
     body: CastStrikeAsk;
     reply: CastStrikeReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** The user's jobs of one chat, as RPH last kept each, the newest started first. */
@@ -1697,6 +1735,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: JobsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Holds a panel's request as part of the player's next message, for the turn that answers it. */
@@ -1706,6 +1745,7 @@ export interface ApiRoutes {
     body: PanelRequestAsk;
     reply: { request: PanelRequestHeld };
     paged: false;
+    long: false;
     joined: false;
   };
   /** Settle now: a run on the chat's newest turn that writes nothing into the chat; answers the turn and the run begun, or a refusal in the turn-errors part's words. */
@@ -1715,6 +1755,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: SettleReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** A chat's state view, at its head or as it stood at one of its turns, in the shape the previous build's pages take. */
@@ -1724,6 +1765,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: StateView;
     paged: false;
+    long: false;
     joined: true;
   };
   /** A chat's story record, at its newest turn or as it stood at one of its turns: the timeline, the story model's parts, the Author's horizon and the futures; each list bounded by the story's own setting, read further back with `part` and `skip`. */
@@ -1733,6 +1775,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: StoryReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** Strikes an item of the story record, or takes its strike back, as the player's own change on the chat's newest turn; says whether anything was recorded and the item as it stands. */
@@ -1742,6 +1785,7 @@ export interface ApiRoutes {
     body: StoryStrikeAsk;
     reply: StoryStrikeReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. */
@@ -1751,6 +1795,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: TurnsReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** One turn, read on from where a page has read to: its intent record, what went to the chat, the lore of its prompt, its runs' records from the record numbered `from` of the run named, and each of its runs. */
@@ -1760,6 +1805,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: TurnReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** The whole of a turn's folder, every level down, each entry with its size; none for a turn that has no folder. */
@@ -1769,6 +1815,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: FolderReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** One file of a turn's folder, by its path below the folder, as text; no path leaves the folder. */
@@ -1778,6 +1825,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: FileReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** The lore Lumiverse activated for a turn's prompt, in the tag's order: each entry's lore map id, its id and book in Lumiverse, its title and how it activated where the tag says; none for a turn RPE holds no tag for, or one of another chat. */
@@ -1787,6 +1835,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: TurnLoreReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** One model call's request, by its file below the turn's folder (a run's `requests`), rebuilt exactly as it was sent; where it cannot be, it says so and shows nothing. */
@@ -1796,6 +1845,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: RequestReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** Stops a turn going on now; says whether it was running. */
@@ -1805,6 +1855,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: StopReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** The world's tree for a chat: the level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn. */
@@ -1814,6 +1865,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: WorldReply;
     paged: false;
+    long: false;
     joined: true;
   };
   /** The connections, each with whether a key is set (nothing of the key) and its model's limits as RPH uses them; the default; the providers offered. */
@@ -1823,6 +1875,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: ConnectionsShown;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Adds a connection, with its key when it has one. */
@@ -1832,6 +1885,7 @@ export interface ApiRoutes {
     body: SaveConnection;
     reply: ConnectionShown;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Changes a connection, whole: a field left out is cleared; its key stays when the body leaves it out, and goes when it is null. */
@@ -1841,6 +1895,7 @@ export interface ApiRoutes {
     body: SaveConnection;
     reply: ConnectionShown;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Removes a connection, and its key. */
@@ -1850,6 +1905,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: void;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Makes a connection the default. */
@@ -1859,6 +1915,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: void;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Tests a connection with one small call: how long it took, and the model that answered or the provider's words with its key taken out; and that model's limits. */
@@ -1868,6 +1925,17 @@ export interface ApiRoutes {
     body: undefined;
     reply: ConnectionTested;
     paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The extension's word that a new app file has arrived, with the hash stated for it: RPE reads the source it was set up from, takes the build only when every file matches, starts it for real, and swaps onto it once no turn or job runs. A word with no stated hash is not taken. */
+  "POST /api/v1/ext/arrived": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { hash?: string };
+    reply: Arrived;
+    paged: false;
+    long: false;
     joined: false;
   };
   /** Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own. */
@@ -1877,6 +1945,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: TreeListingReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** A file's difference from the shipped file of its name, and what the update that changed the shipped file since it was written changed of it. */
@@ -1886,6 +1955,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: TreeDiffReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Switches a file's name off or on again in the `off:` list of a level's config, which is what "Delete" on a shipped file does; says the file as the listing now shows it. */
@@ -1895,6 +1965,7 @@ export interface ApiRoutes {
     body: FileSwitchAsk;
     reply: FileWrittenReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Prunes a chat's old turn folders as the chat's retention setting says, never while a turn of it is going on; says what it took away. */
@@ -1904,6 +1975,7 @@ export interface ApiRoutes {
     body: PruneAsk;
     reply: { pruned: PrunedShown };
     paged: false;
+    long: false;
     joined: false;
   };
   /** The exact stack an agent gets in a chat, part by part, with the file each comes from. */
@@ -1913,6 +1985,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: StackReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** One file of the tree, as text. */
@@ -1922,6 +1995,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: TreeFileReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Writes a file's whole text as the user at a level (for a file of another level, the user's own file of its name there); says the file as the listing now shows it. */
@@ -1931,6 +2005,7 @@ export interface ApiRoutes {
     body: FileWriteAsk;
     reply: FileWrittenReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Removes a file of the user's; for one in place of a default, that is resetting to the default. */
@@ -1940,6 +2015,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: { removed: string };
     paged: false;
+    long: false;
     joined: false;
   };
   /** The user's jobs, of every chat, as RPH last kept each, the newest started first. */
@@ -1949,6 +2025,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: JobsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Cancels a job; one that has ended already is given as it ended. */
@@ -1958,6 +2035,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: JobCancelReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** The Migration page's data: the last run's report and its printed text, each chat's check, the backup, what waits on the user, and the steps of going back. */
@@ -1967,6 +2045,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: MigrationReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect and what it does. */
@@ -1976,6 +2055,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: SettingsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Writes one setting into one level's config file, as the user would write it, and answers every setting as it then stands. */
@@ -1985,6 +2065,7 @@ export interface ApiRoutes {
     body: SettingsWrite;
     reply: SettingsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Says that RPE answers here, and its build; nothing more, and no work to say it. */
@@ -1994,6 +2075,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: Status;
     paged: false;
+    long: false;
     joined: false;
   };
   /** When RPE started, and the builds that meet at it, its app file read again. */
@@ -2003,6 +2085,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: BuildsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** How RPE's extension in Lumiverse last said it stands with RPE. */
@@ -2012,6 +2095,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: ExtensionStatusReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Proves to a page that this is the RPE that holds its page token, before the page sends it the token: a keyed hash of the page's nonce. */
@@ -2021,6 +2105,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: PageProof;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Whose the page's credential is, and when it ends. */
@@ -2030,6 +2115,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: SessionReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** What the tree takes: each chat's folder by area, the user's own level, the shipped level, and RPE's database file. */
@@ -2039,6 +2125,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: StorageReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** A chat's largest notes, and those agents rewrote most. */
@@ -2048,6 +2135,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: NotesReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** A chat's suggestions from the agents (every chat's when none is named), newest first, each with what it would change. */
@@ -2057,6 +2145,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: SuggestionsReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Accepts a suggestion as it is or edited, writing it as the user at a level; says the suggestion as it now stands and the file. */
@@ -2066,6 +2155,7 @@ export interface ApiRoutes {
     body: SuggestionAcceptAsk;
     reply: SuggestionAcceptedReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Dismisses a suggestion; says the suggestion as it now stands. */
@@ -2075,6 +2165,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: SuggestionDismissedReply;
     paged: false;
+    long: false;
     joined: false;
   };
   /** "Update now": RPE restarts onto its new app file once no turn or job runs, whatever update.restart says, and answers where that stands. */
@@ -2084,6 +2175,7 @@ export interface ApiRoutes {
     body: undefined;
     reply: BuildsStatus;
     paged: false;
+    long: false;
     joined: false;
   };
 }
@@ -2097,6 +2189,7 @@ export interface CommandRoutes {
     body: undefined;
     reply: Busy;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Makes a new key of a kind, which retires the one before it; shown this once. */
@@ -2106,6 +2199,7 @@ export interface CommandRoutes {
     body: KeyAsk;
     reply: KeyMade;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Takes over the provider key today's connection holds, by its hash alone. */
@@ -2115,6 +2209,7 @@ export interface CommandRoutes {
     body: TakenKeyAsk;
     reply: void;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Keeps RPE's sign-in to Lumiverse and the config's Lumiverse block. */
@@ -2124,6 +2219,7 @@ export interface CommandRoutes {
     body: LumiverseSave;
     reply: void;
     paged: false;
+    long: false;
     joined: false;
   };
   /** The keys in force, the switches and the builds, for `rpe status`. */
@@ -2133,6 +2229,7 @@ export interface CommandRoutes {
     body: undefined;
     reply: CommandStatus;
     paged: false;
+    long: false;
     joined: false;
   };
   /** Switches a thing that runs a command or calls out on or off: the one road to it. */
@@ -2142,12 +2239,19 @@ export interface CommandRoutes {
     body: SwitchAsk;
     reply: Switched;
     paged: false;
+    long: false;
     joined: false;
   };
 }
 
 /** Every route in the form that answers in its own way (a stream, a socket, a file), and what it answers. */
 export interface RawRoutes {
+  /** The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, then the route's own answer, once. */
+  "GET /api/v1/answers/:id": {
+    params: { id: string };
+    answers: "202 with `{ answer: <id> }` while the work runs; then the route's own status and body, once; 404 for an id RPE does not hold";
+    joined: false;
+  };
   /** The extension asks whether the registration it holds is the one this RPE made. */
   "POST /api/v1/ext/confirm": {
     params: Record<string, never>;
@@ -2172,7 +2276,13 @@ export interface RawRoutes {
     answers: "JSON: the page's start-up facts (`StartFacts`, `src/adapter/lumiverse/pipe-wire.ts`)";
     joined: false;
   };
-  /** The live socket: a page follows chats on it, and is sent each one's events in order (the live kinds), held to the token it opened with. */
+  /** The extension's record of a generation it stopped because it could not tell whose chat it was: neither RPE's registration nor the connection's own record could be read. */
+  "POST /api/v1/ext/stopped": {
+    params: Record<string, never>;
+    answers: "JSON: `{ kept: true }`, or 400 for a record the extension does not send";
+    joined: false;
+  };
+  /** The live socket: a page follows chats on it (and ~jobs, ~user, or an address RPE gave it), and is sent each one's events in order (the live kinds), held to the token it opened with. */
   "GET /api/v1/live": {
     params: Record<string, never>;
     answers: "a WebSocket on the protocol rpe.live; 426 when the request is not a socket's, 400 when it offers protocols and not rpe.live";
@@ -2198,7 +2308,7 @@ export interface RawRoutes {
   };
 }
 
-/** Every kind a chat's live socket carries, and what each carries. */
+/** Every kind the live socket carries, the app's and the areas' own, and what each carries. */
 export interface LiveKinds {
   /** A record of RPH's trace, for a run played in the chat: every event of the run, as RPH gave it. */
   trace: TraceRecord;
@@ -2223,5 +2333,15 @@ export const LIVE_PROTOCOL = "rpe.live";
 export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";
 /** The code RPE closes a page's live socket with once the token it opened with has run out or been replaced, with the reason "The page's token has run out or was replaced: open the live socket again with a new one." */
 export const LIVE_TOKEN_ENDED = 4401;
+/** Followed in place of a chat id: the user's jobs, in every chat and in none. */
+export const LIVE_JOBS = "~jobs";
+/** Followed in place of a chat id: what concerns the user and no one chat (the extension's status). */
+export const LIVE_USER = "~user";
+/** Followed in place of a chat id, before an address RPE gave the caller: an outside client's check-in. */
+export const LIVE_ADDRESS_PREFIX = "~to:";
 /** The status a route that takes a turn's id answers a turn joined to another with: its answer is a `JoinedAnswer`. */
 export const JOINED_STATUS = 409;
+/** The status a long route answers at once with `{ answer: <id> }`, and its answer's route while the work runs. */
+export const ANSWER_STATUS = 202;
+/** Where a long route's answer is read, by the id it was answered with: `GET <this>/<id>`. */
+export const ANSWERS_PATH = "/api/v1/answers";

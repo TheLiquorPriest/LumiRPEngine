@@ -6,21 +6,30 @@
 // the reader has not taken yet), and, past a limit, the oldest of the other events dropped and named,
 // so the page can read again what it needs. A slow reader never holds up a turn.
 //
-// Each kind the socket carries is declared once, below (`LIVE_KINDS`), with what its data is and the key
-// it is coalesced by; the hub takes no other kind, and the pages' types and the API reference are
-// written from the same declaration (`bun run api`).
+// Each kind the socket carries is declared once, with what its data is and the key it is coalesced by: the
+// app's below (`LIVE_KINDS`), and an area's own in its area file (`liveKind`, `Area.liveKinds`); a kind
+// declared twice stops the app at composition. The hub takes no other kind, and the pages' types and the API
+// reference are written from the same declarations (`bun run api`).
 //
-// The socket itself is declared once too (`LIVE_SOCKET`): where it is, the protocol a page offers, how a
-// page that cannot set a header gives its token (as a second protocol, `rpe.token.<token>`), what a page
-// sends (follow or unfollow a chat), what it is sent (that following began, a chat's events with what was
-// missed, or a refusal), and the code and reason RPE closes it with once the token it opened with has run
-// out or been replaced. The server reads what a page sends by that declaration, and the generated types
-// and the reference are written from it. A socket follows at most `liveSocket.follows` chats.
+// A page follows chats, and besides them three names no chat id has (no chat id begins with `~`): the user's
+// jobs in every chat and in none (`LIVE_JOBS`), what concerns the user and no one chat (`LIVE_USER`: the
+// extension's status), and an address an area gave a caller (`LIVE_ADDRESS_PREFIX` and the address: an
+// outside client's check-in), which a socket follows only when the area that gave it says its caller holds it.
+// Each counts toward `liveSocket.follows`; an event published to one reaches the sockets that follow it alone.
+//
+// The socket itself is declared once too (`liveSocketDeclaration`): where it is, the protocol a page offers,
+// how a page that cannot set a header gives its token (as a second protocol, `rpe.token.<token>`), what a
+// page sends (follow or unfollow), what it is sent (that following began, events with what was missed, or a
+// refusal), and the code and reason RPE closes it with once the token it opened with has run out or been
+// replaced. The server reads what a page sends by that declaration, and the generated types and the
+// reference are written from it. A socket keeps what auth answered for it, its credential's hash and end,
+// never the credential's text; RPE keeps at most `liveSocket.sockets` open, and a chat id longer than
+// `liveSocket.chatIdChars` is refused.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
-import { type AnyShape, type Exactly, type Holds, type Infer, problemsOf, rawRoute, shape } from "./routes";
+import { type AnyShape, type CallAuth, type Exactly, type Holds, type Infer, problemsOf, rawRoute, shape } from "./routes";
 
 export const LIVE_PATH = "/api/v1/live";
 export const LIVE_PROTOCOL = "rpe.live";
@@ -239,20 +248,52 @@ export type LiveKind = keyof typeof LIVE_KINDS;
 /** What an event of a kind carries. */
 export type LiveData<K extends LiveKind> = Infer<(typeof LIVE_KINDS)[K]["data"]>;
 
+/** The user's jobs, in every chat and in none: followed and published to by this name, which no chat id has. */
+export const LIVE_JOBS = "~jobs";
+/** What concerns the user and no one chat or job (the extension's status): followed and published to by this name. */
+export const LIVE_USER = "~user";
+/** An address an area gave a caller is followed and published to as this, then the address. */
+export const LIVE_ADDRESS_PREFIX = "~to:";
+
+/** An area's own live kind, declared in its area file: its name, its declaration, and the typed handle it publishes through. */
+export interface AreaLiveKind<D extends AnyShape = AnyShape> {
+  readonly name: string;
+  readonly declaration: LiveKindDeclaration & { readonly data: D };
+  /** Publishes an event of this kind to `to`: a chat, `LIVE_JOBS`, `LIVE_USER`, or `LIVE_ADDRESS_PREFIX` and an address. */
+  publish(hub: LiveHub, to: string, data: Infer<D>): LiveEvent;
+}
+
+/** Declares an area's own live kind, for its area file's `liveKinds`. */
+export function liveKind<const D extends AnyShape>(name: string, declaration: { readonly data: D; readonly does: string; readonly key?: string }): AreaLiveKind<D> {
+  return {
+    name,
+    declaration,
+    // A kind's data is declared in shapes, which describe JSON values only.
+    publish: (hub, to, data) => hub.publishKind(to, name, data as JsonValue),
+  };
+}
+
+/** Every kind the hub carries: the app's, and each area's own, each declared once; a kind declared twice stops the app. */
+export function gatherLiveKinds(areas: readonly { readonly name: string; readonly liveKinds?: readonly AreaLiveKind[] }[]): Readonly<Record<string, LiveKindDeclaration>> {
+  const kinds: Record<string, LiveKindDeclaration> = { ...LIVE_KINDS };
+  const by = new Map<string, string>(Object.keys(LIVE_KINDS).map((kind) => [kind, "the app"]));
+  for (const area of areas) {
+    for (const kind of area.liveKinds ?? []) {
+      const before = by.get(kind.name);
+      if (before !== undefined) throw new Error(`The live kind "${kind.name}" is declared by ${before} and by the ${area.name} area: a kind is declared once.`);
+      by.set(kind.name, `the ${area.name} area`);
+      kinds[kind.name] = kind.declaration;
+    }
+  }
+  return kinds;
+}
+
 // ---------------------------------------------------------------- the socket's own messages
 
 const missedRange = shape.named(
   "LiveMissed",
   "The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than liveSocket.queueEvents holds for it.",
   shape.object({ from: N, to: N }),
-);
-/** One event of each kind as the socket sends it: the kind's data, and the key only where its kind is declared with one. */
-const liveEvent = shape.named(
-  "LiveEvent",
-  "One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.",
-  shape.union(
-    ...Object.entries(LIVE_KINDS).map(([kind, declared]: [string, LiveKindDeclaration]) => shape.object({ chat: T, seq: N, kind: shape.literal(kind), ...(declared.key === undefined ? {} : { key: shape.literal(declared.key) }), at: N, data: declared.data })),
-  ),
 );
 
 /** The live socket as a page meets it. */
@@ -264,6 +305,8 @@ export interface LiveSocketDeclaration {
   readonly tokenProtocolPrefix: string;
   /** How RPE closes a page's socket once the token it opened with has run out or been replaced. */
   readonly tokenEnded: { readonly code: number; readonly reason: string };
+  /** The names a page follows besides chats: the user's jobs, the user's own events, an address's prefix. */
+  readonly names: { readonly jobs: string; readonly user: string; readonly addressPrefix: string };
   /** What a page sends. */
   readonly asks: AnyShape;
   /** What a page is sent. */
@@ -272,24 +315,40 @@ export interface LiveSocketDeclaration {
   readonly batch: AnyShape;
 }
 
-/** The live socket, declared once: the server reads what a page sends by it, and the generated types and the reference are written from it. */
-export const LIVE_SOCKET = {
-  path: LIVE_PATH,
-  protocol: LIVE_PROTOCOL,
-  tokenProtocolPrefix: TOKEN_PROTOCOL_PREFIX,
-  tokenEnded: { code: LIVE_TOKEN_ENDED, reason: TOKEN_ENDED_WORDS },
-  asks: shape.named("LiveAsk", "What a page sends on the live socket: to follow a chat's events from its next one, or to stop.", shape.object({ op: shape.oneOf("follow", "unfollow"), chat: shape.text({ blank: false }) })),
-  answers: shape.named(
-    "LiveMessage",
-    "What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent.",
-    shape.union(
-      shape.object({ type: shape.literal("following"), chat: T, seq: N }),
-      shape.object({ type: shape.literal("events"), chat: T, events: shape.list(liveEvent), missed: opt(missedRange) }),
-      shape.object({ type: shape.literal("refused"), message: T }),
+/** The live socket, declared once over the kinds it carries: the server reads what a page sends by it, and the generated types and the reference are written from it. */
+export function liveSocketDeclaration(kinds: Readonly<Record<string, LiveKindDeclaration>>) {
+  /** One event of each kind as the socket sends it: the kind's data, and the key only where its kind is declared with one. */
+  const liveEvent = shape.named(
+    "LiveEvent",
+    `One event as the live socket sends it: of a chat (or of ${LIVE_JOBS}, ${LIVE_USER}, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.`,
+    shape.union(...Object.entries(kinds).map(([kind, declared]) => shape.object({ chat: T, seq: N, kind: shape.literal(kind), ...(declared.key === undefined ? {} : { key: shape.literal(declared.key) }), at: N, data: declared.data }))),
+  );
+  return {
+    path: LIVE_PATH,
+    protocol: LIVE_PROTOCOL,
+    tokenProtocolPrefix: TOKEN_PROTOCOL_PREFIX,
+    tokenEnded: { code: LIVE_TOKEN_ENDED, reason: TOKEN_ENDED_WORDS },
+    names: { jobs: LIVE_JOBS, user: LIVE_USER, addressPrefix: LIVE_ADDRESS_PREFIX },
+    asks: shape.named(
+      "LiveAsk",
+      `What a page sends on the live socket: to follow a chat's events from its next one, or to stop; in \`chat\`, a chat's id, or ${LIVE_JOBS} for the user's jobs, ${LIVE_USER} for his own events, or ${LIVE_ADDRESS_PREFIX} and an address RPE gave the caller.`,
+      shape.object({ op: shape.oneOf("follow", "unfollow"), chat: shape.text({ blank: false }) }),
     ),
-  ),
-  batch: shape.named("LiveBatch", "A chat's events in order, and the numbers of those the hub dropped before them for a page that fell behind: an events message without its type, as the relay hands it on.", shape.object({ chat: T, events: shape.list(liveEvent), missed: opt(missedRange) })),
-} as const satisfies LiveSocketDeclaration;
+    answers: shape.named(
+      "LiveMessage",
+      "What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent.",
+      shape.union(
+        shape.object({ type: shape.literal("following"), chat: T, seq: N }),
+        shape.object({ type: shape.literal("events"), chat: T, events: shape.list(liveEvent), missed: opt(missedRange) }),
+        shape.object({ type: shape.literal("refused"), message: T }),
+      ),
+    ),
+    batch: shape.named("LiveBatch", "A chat's events in order, and the numbers of those the hub dropped before them for a page that fell behind: an events message without its type, as the relay hands it on.", shape.object({ chat: T, events: shape.list(liveEvent), missed: opt(missedRange) })),
+  } as const satisfies LiveSocketDeclaration;
+}
+
+/** The live socket over the app's own kinds. */
+export const LIVE_SOCKET = liveSocketDeclaration(LIVE_KINDS);
 
 /** What the live socket sends a page, typed by its declaration. */
 type LiveMessage = Infer<typeof LIVE_SOCKET.answers>;
@@ -416,31 +475,59 @@ export interface LiveHubOptions {
   /** Events without a key held for one reader of one chat before the oldest are dropped. */
   queueEvents: number;
   now: () => number;
+  /** Every kind the hub carries (`gatherLiveKinds`); the app's alone where absent. */
+  kinds?: Readonly<Record<string, LiveKindDeclaration>>;
 }
+
+/** Whether a caller holds an address an area gave: each area that gives addresses says so of its own. */
+export type AddressHolder = (address: string, caller: CallAuth) => boolean;
 
 export class LiveHub {
   private readonly seqs = new Map<string, number>();
   private readonly followers = new Map<string, Set<Following>>();
+  private readonly holders: AddressHolder[] = [];
+  /** Every kind the hub carries, the app's and the areas' own. */
+  readonly kinds: Readonly<Record<string, LiveKindDeclaration>>;
+  /** The live socket as a page meets it, over every kind the hub carries. */
+  readonly socket: LiveSocketDeclaration;
 
-  constructor(private readonly options: LiveHubOptions) {}
+  constructor(private readonly options: LiveHubOptions) {
+    this.kinds = options.kinds ?? LIVE_KINDS;
+    this.socket = liveSocketDeclaration(this.kinds);
+  }
 
   /**
-   * Publishes an event of a declared kind to everyone following `chat`, and returns it with its number.
-   * Never waits. A kind the declaration does not hold is refused, so nothing reaches a page that its
-   * types and the reference do not describe.
+   * Publishes an event of a declared kind to everyone following `chat` (or `LIVE_JOBS`, `LIVE_USER`, an address), and returns it
+   * with its number. Never waits. A kind the declarations do not hold is refused, so nothing reaches a page that its types and the
+   * reference do not describe.
    */
   publish<K extends LiveKind>(chat: string, event: LivePublish<K>): LiveEvent {
-    if (!Object.hasOwn(LIVE_KINDS, event.kind)) throw new Error(`The live socket carries no "${String(event.kind)}" events: the kinds it carries are declared in src/app/live.ts (${Object.keys(LIVE_KINDS).join(", ")}).`);
-    const declared: LiveKindDeclaration = LIVE_KINDS[event.kind];
+    // A kind's data is declared in shapes, which describe JSON values only.
+    return this.publishKind(chat, event.kind, event.data as JsonValue);
+  }
+
+  /** @internal `publish` for any declared kind: an area's own publishes through its kind's handle (`liveKind`). */
+  publishKind(chat: string, kind: string, data: JsonValue): LiveEvent {
+    const declared = Object.hasOwn(this.kinds, kind) ? this.kinds[kind] : undefined;
+    if (declared === undefined) throw new Error(`The live socket carries no "${kind}" events: the kinds it carries are declared in src/app/live.ts and in the areas' files (${Object.keys(this.kinds).join(", ")}).`);
     const seq = (this.seqs.get(chat) ?? 0) + 1;
     this.seqs.set(chat, seq);
-    // A kind's data is declared in shapes, which describe JSON values only.
-    const out: LiveEvent = { chat, seq, kind: event.kind, ...(declared.key === undefined ? {} : { key: declared.key }), at: this.options.now(), data: event.data as JsonValue };
+    const out: LiveEvent = { chat, seq, kind, ...(declared.key === undefined ? {} : { key: declared.key }), at: this.options.now(), data };
     const followers = this.followers.get(chat);
     if (followers === undefined) return out;
     const json = JSON.stringify(out);
     for (const following of followers) following.give(out, json);
     return out;
+  }
+
+  /** An area that gives callers addresses says here whether a caller holds one, when a socket asks to follow it. */
+  addresses(holds: AddressHolder): void {
+    this.holders.push(holds);
+  }
+
+  /** Whether `caller` holds `address`: an area that gave it says so. */
+  holdsAddress(address: string, caller: CallAuth): boolean {
+    return this.holders.some((holds) => holds(address, caller));
   }
 
   /** The number of `chat`'s last event; 0 before any. */
@@ -475,26 +562,36 @@ export class LiveHub {
 }
 
 /**
- * What a live socket keeps: the chats it follows, the credential it opened with, the timer that closes it
- * when that runs out, and the catch-up it has coming on the event loop's next turn.
+ * What a live socket keeps: the chats it follows, what auth answered for it (its credential's hash and end, never the
+ * credential's text), the timer that closes it when that runs out, the catch-up it has coming on the event loop's next turn, and
+ * whether it is counted among the sockets open.
  */
 export interface LiveSocketData {
   follows: Map<string, Following>;
-  credential: string | null;
+  auth: CallAuth;
   ends: Timer | undefined;
   catchUp: ReturnType<typeof setImmediate> | undefined;
+  counted: boolean;
 }
 
 /** Fixed: the longest delay a timer takes; a later end is looked at again then. */
 const LONGEST_TIMER_MS = 2_147_483_647;
+/** The close code a socket past `liveSocket.sockets` is given: try again later (RFC 6455). */
+const TOO_MANY_SOCKETS = 1013;
 
 export interface LiveSocketOptions {
   /** The largest message a page may send, in bytes (`liveSocket.messageBytes`). */
   messageBytes: number;
-  /** The most chats one socket may follow at once (`liveSocket.follows`). */
+  /** The most chats (and names) one socket may follow at once (`liveSocket.follows`). */
   follows: number;
-  /** When a credential runs out (null: no end), or false when it holds no longer: retired, run out, or never one. */
-  holds(credential: string | null): number | null | false;
+  /** The most characters of a chat id a socket may follow (`liveSocket.chatIdChars`). */
+  chatIdChars: number;
+  /** The most sockets open at once (`liveSocket.sockets`). */
+  sockets: number;
+  /** Seconds a socket may send and be sent nothing (`server.idleSeconds`; 0: no bound): RPE pings it inside them, and a page that answers stays open. */
+  idleSeconds: number;
+  /** When a credential, by its hash, runs out (null: no end), or false when it holds no longer: retired, run out, or never one. */
+  holds(hash: string): number | null | false;
   now(): number;
 }
 
@@ -507,11 +604,16 @@ function refuse(ws: ServerWebSocket<LiveSocketData>, message: string): void {
   sendTo(ws, { type: "refused", message });
 }
 
-/** The server's socket handlers for the live hub. A socket is held to the credential it opened with: once that no longer holds, it is closed, and sent nothing more. */
+/**
+ * The server's socket handlers for the live hub. A socket is held to the credential it opened with: once that no longer holds, it is
+ * closed, and sent nothing more. Past `liveSocket.sockets` open, a new one is closed at once with the reason.
+ */
 export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocketHandler<LiveSocketData> {
+  let open = 0;
   /** Whether the socket's credential still holds; else the socket is closed. A credential's end does not move, so one timer looks again then. */
   const holding = (ws: ServerWebSocket<LiveSocketData>): boolean => {
-    const until = options.holds(ws.data.credential);
+    const credential = ws.data.auth.credential;
+    const until = credential === null ? false : options.holds(credential.hash);
     if (until === false) {
       clearTimeout(ws.data.ends);
       ws.data.ends = undefined;
@@ -528,11 +630,27 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
     }
     return true;
   };
+  /** Why a socket may not follow `name`, or null when it may: a chat id within its bound, one of the user's own names, or an address its caller holds. */
+  const refusalOf = (ws: ServerWebSocket<LiveSocketData>, name: string): string | null => {
+    if (name.length > options.chatIdChars) return `A chat id is at most ${options.chatIdChars} characters (the setting liveSocket.chatIdChars), and this one is ${name.length}.`;
+    if (!name.startsWith("~") || name === LIVE_JOBS || name === LIVE_USER) return null;
+    if (name.startsWith(LIVE_ADDRESS_PREFIX) && hub.holdsAddress(name.slice(LIVE_ADDRESS_PREFIX.length), ws.data.auth)) return null;
+    return `${name} is no chat id, and not ${LIVE_JOBS}, ${LIVE_USER} or an address RPE gave this socket's caller.`;
+  };
   return {
     maxPayloadLength: options.messageBytes,
     // A page that falls behind is held to its batch by the hub, never cut off.
     closeOnBackpressureLimit: false,
+    // Bun pings a socket that has been quiet, inside this bound; a page that answers stays open (0: no bound).
+    idleTimeout: options.idleSeconds,
+    sendPings: true,
     open(ws) {
+      if (open >= options.sockets) {
+        ws.close(TOO_MANY_SOCKETS, `RPE has ${open} live sockets open, the most it keeps (the setting liveSocket.sockets): close another page's first.`);
+        return;
+      }
+      open++;
+      ws.data.counted = true;
       holding(ws);
     },
     message(ws, message) {
@@ -544,8 +662,8 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
         refuse(ws, "Messages on the live socket are JSON.");
         return;
       }
-      if (problemsOf(LIVE_SOCKET.asks, asked).length > 0) {
-        refuse(ws, 'Send {"op":"follow","chat":"<chat id>"} or {"op":"unfollow","chat":"<chat id>"}.');
+      if (problemsOf(hub.socket.asks, asked).length > 0) {
+        refuse(ws, `Send {"op":"follow","chat":"<chat id>"} or {"op":"unfollow","chat":"<chat id>"}; in place of a chat id, ${LIVE_JOBS} follows your jobs and ${LIVE_USER} your own events.`);
         return;
       }
       // Held to the declaration just above.
@@ -558,8 +676,13 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
         return;
       }
       if (follows.has(chat)) return;
+      const refused = refusalOf(ws, chat);
+      if (refused !== null) {
+        refuse(ws, refused);
+        return;
+      }
       if (follows.size >= options.follows) {
-        refuse(ws, `This socket follows ${follows.size} chats, the most one socket may (the setting liveSocket.follows): unfollow one first.`);
+        refuse(ws, `This socket follows ${follows.size} chats and names, the most one socket may (the setting liveSocket.follows): unfollow one first.`);
         return;
       }
       sendTo(ws, { type: "following", chat, seq: hub.seq(chat) });
@@ -579,6 +702,10 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
       });
     },
     close(ws) {
+      if (ws.data.counted) {
+        ws.data.counted = false;
+        open--;
+      }
       clearTimeout(ws.data.ends);
       ws.data.ends = undefined;
       clearImmediate(ws.data.catchUp);
@@ -595,7 +722,7 @@ export const liveRoute = rawRoute({
   path: LIVE_PATH,
   access: "page",
   group: "live",
-  does: "The live socket: a page follows chats on it, and is sent each one's events in order (the live kinds), held to the token it opened with.",
+  does: `The live socket: a page follows chats on it (and ${LIVE_JOBS}, ${LIVE_USER}, or an address RPE gave it), and is sent each one's events in order (the live kinds), held to the token it opened with.`,
   answers: "a WebSocket on the protocol rpe.live; 426 when the request is not a socket's, 400 when it offers protocols and not rpe.live",
   raw(request, { openLiveSocket }) {
     const offered = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((p) => p.trim()).filter((p) => p !== "");

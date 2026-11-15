@@ -6,7 +6,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { type Area, dataPaths, LIVE_KINDS, lineLog, openApp } from "../../src/app";
+import { type Area, dataPaths, lineLog, openApp } from "../../src/app";
 import { compose } from "../../src/app/compose";
 import { configOf } from "../../src/app/config";
 import { renderReference, renderTypes, type Table } from "./render";
@@ -37,7 +37,7 @@ export async function readTable(extra: readonly Area[] = []): Promise<Table> {
       log: lineLog(() => undefined),
     });
     try {
-      return { routes: app.routes.list(), kinds: LIVE_KINDS, bodyBytes: app.config.server.bodyBytes, providerBodyBytes: app.config.server.providerBodyBytes };
+      return { routes: app.routes.list(), kinds: app.live.kinds, socket: app.live.socket, bodyBytes: app.config.server.bodyBytes, providerBodyBytes: app.config.server.providerBodyBytes };
     } finally {
       await app.close();
     }

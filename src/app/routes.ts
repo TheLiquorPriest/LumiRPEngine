@@ -9,8 +9,8 @@
 // (below), with the group of §4.4 it belongs to and one line saying what it does. A raw route declares
 // what it answers in words (an OpenAI stream, a socket, a file). The server holds each request to its
 // route's declaration before the handler runs, and refuses with 400, in RPE's words, what the route does
-// not take; the handler is given only what was declared, typed by the declaration, and the caller's
-// credential only where the route declares that its code reads it. The client's types
+// not take; the handler is given only what was declared, typed by the declaration, and what auth answered
+// for its call (`CallAuth`: whose call, on which listener, with which credential), never a credential's text. The client's types
 // and the API reference (`docs/api.md`) are written from the same declarations (`bun run api`,
 // `scripts/api/`), and a test holds every reply to its declaration, so no route's shape is kept by hand
 // anywhere else. Every route is in this form: the table holds no other.
@@ -55,6 +55,33 @@ export type PathParams<P extends string> = { readonly [K in ParamNames<P>]: stri
 
 /** The user a route acts for: on a page route, the user this RPE belongs to; elsewhere that user, or null before one is set. */
 export type UserFor<A extends Access> = A extends "page" ? string : string | null;
+
+/** The kinds of credential a call comes with: the provider key, a page token, the web UI's key, the extension's registration key. */
+export type CredentialKind = "provider" | "page" | "web" | "extension";
+
+/** The credential a call came with, as auth found it: never its text. */
+export interface CallCredential {
+  readonly kind: CredentialKind;
+  /** Its SHA-256, as RPE keeps it. */
+  readonly hash: string;
+  /** The client that made it, as RPE recorded it when it was made (the extension for a page, the command line for the web UI's key, RPE at its start for the extension's); null for the provider key. */
+  readonly madeBy: string | null;
+  /** When it runs out (epoch milliseconds); null: no end. */
+  readonly until: number | null;
+}
+
+/**
+ * What auth answered for one call, as every handler is handed it whole: whose call (the user this RPE belongs to), the access its
+ * route asked for, the listener it came on (a call on the command line's socket is the command line's, its socket its credential),
+ * and the credential it came with (none for a public route's call, nor on the command socket). Nothing a caller names in a header
+ * or a body changes it.
+ */
+export interface CallAuth {
+  readonly user: string;
+  readonly access: Access;
+  readonly listener: "tcp" | "command";
+  readonly credential: CallCredential | null;
+}
 
 // ---------------------------------------------------------------- shapes
 
@@ -423,22 +450,18 @@ type QueryOut<Q extends QueryFields, G> = [G] extends [Paging] ? Flat<FieldsOut<
 
 /**
  * What a declared route's handler is given: what its declaration takes, read and typed, and nothing else
- * of the request; the caller's credential only where the route declares that its code reads it.
+ * of the request, with what auth answered for its call.
  */
-export type DeclaredCall<P extends string, A extends Access, Q extends QueryFields, B extends AnyShape | undefined, G, C extends true | undefined = undefined> = {
+export type DeclaredCall<P extends string, A extends Access, Q extends QueryFields, B extends AnyShape | undefined, G> = {
   readonly params: PathParams<P>;
   readonly query: QueryOut<Q, G>;
   /** The body, held to its declaration; undefined for a route that takes none. */
   readonly body: B extends AnyShape ? Infer<B> : undefined;
   readonly user: UserFor<A>;
-  /** Aborts when the caller goes away. */
+  readonly auth: CallAuth;
+  /** Aborts when the caller goes away; never, for a long route's call, whose answer is kept for reading. */
   readonly signal: AbortSignal;
-} & (C extends true
-  ? {
-      /** The credential the request carried (its bearer, or a page's socket token), which the server has held to the route's access. */
-      readonly credential: string | null;
-    }
-  : Record<never, never>);
+};
 
 /**
  * A route in the form that answers in JSON: its group, what it does, its query, its body and its reply.
@@ -452,7 +475,6 @@ export interface DeclaredRoute<
   B extends AnyShape | undefined = AnyShape | undefined,
   R extends AnyShape = AnyShape,
   G extends Paging<P, A> | undefined = Paging<P, A> | undefined,
-  C extends true | undefined = true | undefined,
 > {
   readonly method: Method;
   readonly path: P;
@@ -468,20 +490,24 @@ export interface DeclaredRoute<
   readonly body?: B;
   readonly reply: R;
   readonly paged?: G;
-  /** Its code reads the caller's credential (to say whose it is); absent, it is handed none. */
-  readonly credential?: C;
+  /**
+   * It may take longer than the relay proxy's 30 seconds (R-4): a page's call to it over TCP is answered at once, status 202, with
+   * `{ answer: <id> }`, and its own answer is read from `GET /api/v1/answers/:id` once ready (`answers.ts`).
+   */
+  readonly long?: true;
   /**
    * It takes a turn's id (in its path, its query or its body), and a turn that was joined to another is answered as a fact:
    * `JoinedAnswer`, status 409, in the one place the server turns a throw into an answer.
    */
   readonly joined?: true;
-  readonly handle: (call: DeclaredCall<P, A, Q, B, G, C>) => Infer<R> | Promise<Infer<R>>;
+  readonly handle: (call: DeclaredCall<P, A, Q, B, G>) => Infer<R> | Promise<Infer<R>>;
 }
 
 /** What a raw route's handler is given besides the request. */
 export interface RawCall<P extends string, A extends Access> {
   readonly params: PathParams<P>;
   readonly user: UserFor<A>;
+  readonly auth: CallAuth;
   /**
    * Turns the request into a live socket, the one kind of socket RPE serves, sending `headers` with
    * the answer; false when the request is not a socket's.
@@ -492,6 +518,11 @@ export interface RawCall<P extends string, A extends Access> {
    * (a long prompt's parse holds up no other request); rejects when there is no body or it is not JSON.
    */
   readonly json: () => Promise<unknown>;
+  /**
+   * Lifts the server's idle bound (`server.idleSeconds`) from this request: for an answer that sends nothing until it is whole,
+   * which its own hold bounds (a reply asked for whole).
+   */
+  readonly untimed: () => void;
 }
 
 /**
@@ -515,12 +546,12 @@ export interface DeclaredRawRoute<P extends string = string, A extends Access = 
 }
 
 /** A route in the form, of any types. */
-export type Declared = DeclaredRoute<any, any, any, any, any, any, any> | DeclaredRawRoute<any, any>;
+export type Declared = DeclaredRoute<any, any, any, any, any, any> | DeclaredRawRoute<any, any>;
 // A table holds routes of every shape; each keeps its own types where it is written.
 export type Route = Declared;
 
 /** Writes a JSON route in the form, keeping its types. */
-export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined, C extends true | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G, C>): DeclaredRoute<P, A, Q, B, R, G, C> {
+export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G>): DeclaredRoute<P, A, Q, B, R, G> {
   return def;
 }
 
@@ -530,9 +561,9 @@ export function rawRoute<const P extends string, const A extends Access>(def: De
 }
 
 /** The reply a JSON route gives, for a client. */
-export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any, any> ? Infer<R> : never;
+export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any> ? Infer<R> : never;
 /** The body a JSON route takes, for a client. */
-export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : never;
+export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : never;
 
 /** A refusal a route's handler throws: its status and the words the caller is shown. */
 export class RouteError extends Error {
@@ -562,7 +593,7 @@ export type JoinedAnswer = Infer<typeof joinedAnswer>;
 
 /** A route's declaration as the table lists it: what a JSON route takes and answers, or what a raw route answers. */
 export type RouteDeclaration =
-  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean; readonly credential: boolean; readonly joined: boolean; readonly turn: boolean }
+  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean; readonly long: boolean; readonly joined: boolean; readonly turn: boolean }
   | { readonly group: RouteGroup; readonly does: string; readonly answers: string; readonly joined: boolean; readonly turn: boolean };
 
 /** A route as the table lists it. */
@@ -641,7 +672,7 @@ function declarationProblem(r: Declared): string | null {
     if (r.body.kind === "nothing") return "a route that takes no body leaves its body out.";
   }
   if (!isShape(r.reply)) return "it declares its reply as a shape.";
-  if (r.credential !== undefined && r.credential !== true) return "credential is true where its code reads the caller's token, and left out where it does not.";
+  if (r.long !== undefined && r.long !== true) return "long is true where the route may take longer than the relay's 30 seconds, and left out where it does not.";
   if (r.paged !== undefined) {
     if (r.method !== "GET") return "a route that pages is a GET.";
     if (r.query !== undefined && (Object.hasOwn(r.query, "limit") || Object.hasOwn(r.query, "cursor") || Object.hasOwn(r.query, "after"))) return "a route that pages takes limit and cursor already, and its handler is given after from the cursor: its query declares none of them.";
@@ -683,7 +714,7 @@ function declarationOf(r: Route): RouteDeclaration {
   const turn = takesTurn(r);
   const joined = r.joined === true;
   if ("answers" in r) return { group: r.group, does: r.does, answers: r.answers, joined, turn };
-  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined, credential: r.credential === true, joined, turn };
+  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined, long: r.long === true, joined, turn };
 }
 
 export class RouteTable {

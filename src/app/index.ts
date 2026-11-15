@@ -26,7 +26,8 @@ export { openDatabase, WriteQueue, WritesClosed, WriteWaited } from "./database"
 export { IndexFile, INDEXES, type ColumnKind, type ColumnValue, type IndexDoc, type IndexHit, type IndexName, type TableDef, type TableRow } from "./index-file/index-file";
 export { TaskFailed, Workers } from "./workers/pool";
 export type { TaskInput, TaskName, TaskOutput } from "./workers/tasks";
-export { agentRef, effort, Following, jobView, layerLevel, limitHit, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, replyError, scope, TOKEN_PROTOCOL_PREFIX, traceRecord, usage, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader } from "./live";
+export { agentRef, effort, Following, jobView, layerLevel, limitHit, LIVE_ADDRESS_PREFIX, LIVE_JOBS, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LIVE_USER, LiveHub, liveKind, replyError, scope, TOKEN_PROTOCOL_PREFIX, traceRecord, usage, type AddressHolder, type AreaLiveKind, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader, type LiveSocketDeclaration } from "./live";
+export { ANSWER_STATUS, ANSWERS_PATH } from "./answers";
 export { migrate, MIGRATION_AREAS, MigrationError, Migrations, type Migration, type MigrationArea, type MigrationOutcome } from "./migrations";
 export {
   METHODS,
@@ -44,6 +45,8 @@ export {
   shapeWords,
   TURN_PARAM,
   type Access,
+  type CallAuth,
+  type CallCredential,
   type AnyShape,
   type Declared,
   type DeclaredCall,

@@ -11,6 +11,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import type { WriteQueue } from "./database";
+import type { Access, CallAuth, CallCredential } from "./routes";
 
 export type KeyKind = "provider" | "extension" | "web";
 
@@ -155,10 +156,12 @@ export function keyEnds(kind: KeyKind, made: number, webKeyMs: number | null): n
   return kind === "web" && webKeyMs !== null ? made + webKeyMs : null;
 }
 
-/** A page's credential as it holds now: the user it stands for, and when it runs out (null: no end). */
-export interface PageHold {
+/** A page token's or the web UI's key's row, as auth reads it by its hash. */
+interface TokenRow {
   user: string;
-  until: number | null;
+  kind: TokenKind;
+  made_by: TokenMaker;
+  expires: number | null;
 }
 
 /** The server's checks. Every check reads the database, so a key the command line makes or retires counts at once. */
@@ -198,18 +201,48 @@ export class Auth {
    * his web UI's key in force and in time. Null for anything else.
    */
   pageUser(presented: string | null): string | null {
-    return this.pageHold(presented)?.user ?? null;
+    return presented === null || presented === "" ? null : this.pageCredential(secretHash(presented)) === null ? null : this.deps.owner;
   }
 
-  /** `pageUser`, with when the credential runs out: a socket opened with it closes then. */
-  pageHold(presented: string | null): PageHold | null {
-    const owner = this.deps.owner;
+  /** When a page's credential, by its hash, runs out (null: no end), or false when it holds no longer: a socket opened with it closes then. */
+  holdOf(hash: string): number | null | false {
+    const credential = this.pageCredential(hash);
+    return credential === null ? false : credential.until;
+  }
+
+  /**
+   * What auth answers for a call to a route of `access` that came on `listener` carrying `presented`: null when the call may not be
+   * made. On the command line's socket every call is the owner's own, the socket its credential; a public route's call carries none.
+   */
+  answer(access: Access, presented: string | null, listener: CallAuth["listener"]): CallAuth | null {
+    const user = this.deps.owner;
+    if (listener === "command" || access === "public" || access === "command") return { user, access, listener, credential: null };
     if (presented === null || presented === "") return null;
-    const now = this.deps.now();
     const hash = secretHash(presented);
-    // A page token holds for its short life, the web token until its end where it has one; the extension's key is no page's.
-    const token = this.deps.db.query<{ user: string; kind: TokenKind; expires: number | null }, [string]>("SELECT user, kind, expires FROM page_token WHERE hash = ?").get(hash);
-    if (token === null || token.kind === "extension" || token.user !== owner) return null;
-    return token.expires === null || token.expires > now ? { user: owner, until: token.expires } : null;
+    const credential = access === "page" ? this.pageCredential(hash) : access === "extension" ? this.tokenCredential(hash, "extension") : this.providerCredential(hash);
+    return credential === null ? null : { user, access, listener, credential };
+  }
+
+  /** A page token or the web UI's key, by its hash, made for the user this RPE belongs to and in time; the extension's key is no page's. */
+  private pageCredential(hash: string): CallCredential | null {
+    const token = this.tokenRow(hash);
+    return token === null || token.kind === "extension" ? null : { kind: token.kind, hash, madeBy: token.made_by, until: token.expires };
+  }
+
+  private tokenCredential(hash: string, kind: TokenKind): CallCredential | null {
+    const token = this.tokenRow(hash);
+    return token === null || token.kind !== kind ? null : { kind, hash, madeBy: token.made_by, until: token.expires };
+  }
+
+  private providerCredential(hash: string): CallCredential | null {
+    const held = this.deps.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM provider_key WHERE user = ? AND hash = ?").get(this.deps.owner, hash);
+    return (held?.n ?? 0) > 0 ? { kind: "provider", hash, madeBy: null, until: null } : null;
+  }
+
+  /** The token of `hash` in `page_token`, when it is the owner's and in time. */
+  private tokenRow(hash: string): TokenRow | null {
+    const token = this.deps.db.query<TokenRow, [string]>("SELECT user, kind, made_by, expires FROM page_token WHERE hash = ?").get(hash);
+    if (token === null || token.user !== this.deps.owner) return null;
+    return token.expires === null || token.expires > this.deps.now() ? token : null;
   }
 }

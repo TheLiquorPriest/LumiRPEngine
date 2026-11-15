@@ -717,6 +717,17 @@ The Migration page's data: the last run's report and its printed text, each chat
 
 ## Service
 
+### `GET /api/v1/answers/:id`
+
+The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, then the route's own answer, once.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Answers | 202 with `{ answer: <id> }` while the work runs; then the route's own status and body, once; 404 for an id RPE does not hold |
+
 ### `GET /api/v1/command/busy`
 
 How many turns and jobs run now: what a later `rpe up` waits to be none before it restarts RPE's service.
@@ -921,7 +932,7 @@ Whose the page's credential is, and when it ends.
 
 ### `GET /api/v1/live`
 
-The live socket: a page follows chats on it, and is sent each one's events in order (the live kinds), held to the token it opened with.
+The live socket: a page follows chats on it (and ~jobs, ~user, or an address RPE gave it), and is sent each one's events in order (the live kinds), held to the token it opened with.
 
 | | |
 |---|---|
@@ -958,7 +969,7 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 
 ## The live socket's messages
 
-A page opens `/api/v1/live` as a WebSocket, offering the protocol `rpe.live`. A page that cannot set the Authorization header offers its token as a second protocol: `rpe.token.` and then the token. Every message, either way, is JSON.
+A page opens `/api/v1/live` as a WebSocket, offering the protocol `rpe.live`. A page that cannot set the Authorization header offers its token as a second protocol: `rpe.token.` and then the token. Every message, either way, is JSON. Besides chats, a page follows `~jobs` (the user's jobs, in every chat and in none), `~user` (what concerns the user and no one chat) and `~to:` with an address RPE gave its caller.
 
 | | |
 |---|---|
@@ -1978,7 +1989,7 @@ export interface LimitHit {
 
 ### `LiveAsk`
 
-What a page sends on the live socket: to follow a chat's events from its next one, or to stop.
+What a page sends on the live socket: to follow a chat's events from its next one, or to stop; in `chat`, a chat's id, or ~jobs for the user's jobs, ~user for his own events, or ~to: and an address RPE gave the caller.
 
 ```ts
 export interface LiveAsk {
@@ -2001,7 +2012,7 @@ export interface LiveBatch {
 
 ### `LiveEvent`
 
-One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
+One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
 
 ```ts
 export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string } };
@@ -2009,7 +2020,7 @@ export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; 
 
 ### `LiveMessage`
 
-What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent.
+What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent.
 
 ```ts
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
@@ -2152,7 +2163,6 @@ export interface MigrationReportShown {
   unreadable: JsonValue;
   unsent: JsonValue;
   runtime?: JsonValue;
-  given?: JsonValue;
   standIn: JsonValue;
   lumiverse: JsonValue;
   disk: JsonValue;
@@ -2519,6 +2529,10 @@ export interface RunShown {
   nth: number;
   kind: TurnRunKind;
   status: TurnState;
+  /** The message its request named: the one a new reply is written into, the reply a swipe or a regenerate writes again, or the one a continue's tag named for it to go on, a first word only. A continue is tied where Lumiverse's end names the message, the turn's `message`: where the two differ, the tag had named another; where this is null, the message was learned at the end. */
+  target: string | null;
+  /** A continue's own turn, which held what it changed until Lumiverse's end decided its turn, and whose folder holds its files (its requests among them): the turn id its files are read under. Null for any other run. */
+  held: string | null;
   timings: TurnMoments;
   usage: Usage;
   /** What this run sent to the chat. */

@@ -6,6 +6,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, QueryFields, Route, RunningServer } from "../../src/app";
 import { appRoutes, connectionRoutes, lineLog, RouteTable, rawRoute, route, shape } from "../../src/app";
+import { Answers } from "../../src/app/answers";
+import { secretHash } from "../../src/app/auth";
 import { startServer } from "../../src/app/server";
 import { Builds } from "../../src/app/update";
 import { JoinedTurnError } from "../../src/store/types";
@@ -470,37 +472,30 @@ describe("the server", () => {
     }
   });
 
-  test("a handler whose route does not declare the credential is handed none, the public status route among them, and the session route, which declares it, is handed it", async () => {
+  test("a handler is handed what auth answered for its call, whole, and never a credential's text", async () => {
     // The app's own routes, each handler watched for what it is handed, on a server of their own over this app's auth and hub.
     const handed = new Map<string, unknown>();
-    const watched = appRoutes("1.0.0", 0, app.auth, null, new Builds({ version: "1.0.0", file: null, log: lineLog(() => undefined) })).map((r: Route): Route => {
+    const watched = appRoutes("1.0.0", 0, null, new Builds({ version: "1.0.0", file: null, log: lineLog(() => undefined) }), new Answers(60_000)).map((r: Route): Route => {
       if ("raw" in r) return r;
       const handle = r.handle as (call: Record<string, unknown>) => unknown;
-      return { ...r, handle: (call: Record<string, unknown>) => (handed.set(`${r.method} ${r.path}`, "credential" in call ? call.credential : "handed none"), handle(call)) } as Route;
+      return { ...r, handle: (call: Record<string, unknown>) => (handed.set(`${r.method} ${r.path}`, { auth: call.auth, credential: "credential" in call }), handle(call)) } as Route;
     });
     const table = new RouteTable();
     table.add("app", watched);
-    const own = startServer({ config: { ...app.config, port: 0 }, routes: table, auth: app.auth, live: app.live, log: lineLog(() => undefined), now: () => bed.clock.now, workers: app.workers });
+    const own = startServer({ config: { ...app.config, port: 0 }, routes: table, auth: app.auth, live: app.live, log: lineLog(() => undefined), now: () => bed.clock.now, workers: app.workers, answers: new Answers(60_000) });
     try {
       const token = await makeKey(app, "web");
-      for (const [method, path] of [["GET", "/api/v1/status"], ["GET", "/api/v1/status/builds"], ["POST", "/api/v1/update"], ["GET", "/api/v1/status/session"]] as const) {
+      for (const [method, path] of [["GET", "/api/v1/status"], ["GET", "/api/v1/status/session"]] as const) {
         expect({ path, status: (await fetch(`${own.url}${path}`, { method, headers: bearer(token) })).status }).toEqual({ path, status: 200 });
       }
-      expect(Object.fromEntries(handed)).toEqual({ "GET /api/v1/status": "handed none", "GET /api/v1/status/builds": "handed none", "POST /api/v1/update": "handed none", "GET /api/v1/status/session": token });
+      const user = app.auth.owner;
+      expect(Object.fromEntries(handed)).toEqual({
+        "GET /api/v1/status": { auth: { user, access: "public", listener: "tcp", credential: null }, credential: false },
+        "GET /api/v1/status/session": { auth: { user, access: "page", listener: "tcp", credential: { kind: "web", hash: secretHash(token), madeBy: "command line", until: null } }, credential: false },
+      });
     } finally {
       await own.stop();
     }
-    // A route that does not declare it is given none to read: its handler does not compile.
-    route({
-      method: "GET",
-      path: "/api/v1/probe/whose",
-      access: "page",
-      group: "service",
-      does: "Says whose the caller's credential is.",
-      reply: shape.object({ whose: shape.nullable(shape.text()) }),
-      // @ts-expect-error It declares no credential, so it is handed none to read.
-      handle: ({ credential }) => ({ whose: credential }),
-    });
   });
 
   test("a JoinedTurnError thrown under a route is answered 409 in the one place, never 500, and nothing more is read or written", async () => {

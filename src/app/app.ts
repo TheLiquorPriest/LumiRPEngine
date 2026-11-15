@@ -5,6 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
+import { Answers, answersRoute } from "./answers";
 import { Auth, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { moveLimits, prepareDataFolder } from "./config";
@@ -15,7 +16,7 @@ import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
 import { type Fills, gatherHooks, gatherSettings, type Hooks } from "./hooks";
 import { IndexFile } from "./index-file/index-file";
-import { LiveHub, liveRoute } from "./live";
+import { type AreaLiveKind, gatherLiveKinds, LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
 import { migrate, Migrations } from "./migrations";
 import { type Exactly, type Holds, type Infer, route, RouteError, RouteTable, shape } from "./routes";
@@ -61,6 +62,8 @@ export interface Area {
   readonly settings?: readonly Setting[];
   /** What it adds to the hooks of the other areas (`App.hooks`): a view an agent is given by name, a lane of the door. */
   readonly fills?: Fills;
+  /** Its own live kinds (`liveKind`), each declared once among every area's and the app's; it publishes through each kind's handle. */
+  readonly liveKinds?: readonly AreaLiveKind[];
   /** In the order of the areas. */
   readonly mount?: (app: App) => void | Promise<void>;
   /** Once every area is mounted, in the order of the areas: what is made from the parts of an area mounted after this one (its routes among them). */
@@ -164,7 +167,7 @@ const statusReply = shape.named("Status", "That RPE answers here, and its build:
  * page, which reads the app file again each time it is asked; "Update now", which answers what RPE
  * will do; when the page's own credential ends; the live socket; and the web app.
  */
-export function appRoutes(version: string, started: number, auth: Auth, ui: string | null, builds: Builds) {
+export function appRoutes(version: string, started: number, ui: string | null, builds: Builds, answers: Answers) {
   return [
     route({ method: "GET", path: STATUS_PATH, access: "public", group: "service", does: "Says that RPE answers here, and its build; nothing more, and no work to say it.", reply: statusReply, handle: () => ({ name: "rpe" as const, version }) }),
     route({ method: "POST", path: UPDATE_PATH, access: "page", group: "service", does: '"Update now": RPE restarts onto its new app file once no turn or job runs, whatever update.restart says, and answers where that stands.', reply: buildsStatus, handle: () => builds.now() }),
@@ -184,14 +187,12 @@ export function appRoutes(version: string, started: number, auth: Auth, ui: stri
       group: "service",
       does: "Whose the page's credential is, and when it ends.",
       reply: shape.named("SessionReply", "Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).", shape.object({ user: T, ends: shape.nullable(shape.number()) })),
-      // It says whose the credential is, so it is the one route of today's whose code reads it.
-      credential: true,
-      handle: ({ credential }) => {
-        const hold = auth.pageHold(credential);
-        if (hold === null) throw new RouteError(401, "This needs a page token or the web UI's token.");
-        return { user: hold.user, ends: hold.until };
+      handle: ({ auth }) => {
+        if (auth.credential === null) throw new RouteError(401, "This needs a page token or the web UI's token.");
+        return { user: auth.user, ends: auth.credential.until };
       },
     }),
+    answersRoute(answers),
     liveRoute,
     uiRoute(ui),
   ] as const;
@@ -200,9 +201,10 @@ export function appRoutes(version: string, started: number, auth: Auth, ui: stri
 export async function openApp(options: OpenAppOptions): Promise<App> {
   const { paths, config, version } = options;
   const areas = options.areas ?? [];
-  // Gathered first: a lane two areas fill, or a setting two areas list, stops the app before it has touched the data folder.
+  // Gathered first: a lane two areas fill, or a setting or a live kind two areas declare, stops the app before it has touched the data folder.
   const settings = gatherSettings(areas);
   const hooks = gatherHooks(areas);
+  const liveKinds = gatherLiveKinds(areas);
   const now = options.now ?? Date.now;
   const log = options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now);
   // No row is written without its user (R-179): with none named, the data folder is left as it was.
@@ -238,13 +240,14 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   }
   const auth = new Auth({ db, writes, owner: user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
   const routes = new RouteTable();
-  const live = new LiveHub({ queueEvents: config.live.queueEvents, now });
+  const live = new LiveHub({ queueEvents: config.live.queueEvents, now, kinds: liveKinds });
+  const answers = new Answers(config.server.answerKeepSeconds * 1000);
   const secrets = new SecretsFile(paths.secrets);
   // The model layer's documents written before they were kept by user are the install's user's, moved under him before anything reads them.
   await ownModels(paths, secrets, user, log);
   const builds = new Builds({ version, file: options.appFile ?? null, log });
   await builds.start();
-  routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui, builds));
+  routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers));
   // The web UI's sign-in: the proof a page asks for before it sends RPE its token.
   routes.add("signin", signinRoutes({ db, owner: user, now }));
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
@@ -285,7 +288,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
       if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");
       if (starting !== null) throw new Error("RPE's server is already started.");
       const run = (async () => {
-        const server = startServer({ config, routes, auth, live, log, now, workers, commandSocket: commandSocketPath(paths.root) });
+        const server = startServer({ config, routes, auth, live, log, now, workers, answers, commandSocket: commandSocketPath(paths.root) });
         running = server;
         for (const area of mounted) await hook(area, "started");
         return server;
@@ -309,6 +312,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
         running = null;
         await server?.stop();
         await writes.close();
+        answers.close();
         await index.close().catch((error: unknown) => log.error("the index file did not close cleanly", { error: error instanceof Error ? error.message : String(error) }));
         await workers.close();
         db.close();

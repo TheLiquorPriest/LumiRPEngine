@@ -3,14 +3,15 @@
 // (`docs/api.md`). Both are written from the declarations the server reads while it runs, in one order
 // that does not depend on the order areas mount, so the same table always writes the same text.
 
-import type { AnyShape, FieldShape, LiveKindDeclaration, Method, QueryFields, RouteGroup, RouteInfo } from "../../src/app";
+import type { AnyShape, FieldShape, LiveKindDeclaration, LiveSocketDeclaration, Method, QueryFields, RouteGroup, RouteInfo } from "../../src/app";
 import { JOINED_STATUS, joinedAnswer, METHODS, ROUTE_GROUPS } from "../../src/app";
-import { LIVE_SOCKET } from "../../src/app/live";
+import { ANSWER_STATUS, ANSWERS_PATH } from "../../src/app/answers";
 
-/** The table as the generator reads it: every route, every live kind, and the server's own body limits as shipped. */
+/** The table as the generator reads it: every route, every live kind (the app's and the areas'), the live socket over them, and the server's own body limits as shipped. */
 export interface Table {
   routes: readonly RouteInfo[];
   kinds: Readonly<Record<string, LiveKindDeclaration>>;
+  socket: LiveSocketDeclaration;
   /** The largest body a route takes where it names none: a page's or the extension's route, and the provider endpoint's. */
   bodyBytes: number;
   providerBodyBytes: number;
@@ -170,6 +171,7 @@ interface JsonEntry {
   body: AnyShape | null;
   reply: AnyShape;
   paged: boolean;
+  long: boolean;
   joined: boolean;
 }
 
@@ -197,7 +199,7 @@ function entries(table: Table): { json: JsonEntry[]; raw: RawEntry[] } {
   for (const info of [...table.routes].sort(byPath)) {
     const d = info.declared;
     if ("answers" in d) raw.push({ info, group: d.group, does: d.does, answers: d.answers, joined: d.joined });
-    else json.push({ info, group: d.group, does: d.does, query: d.query, body: d.body, reply: d.reply, paged: d.paged, joined: d.joined });
+    else json.push({ info, group: d.group, does: d.does, query: d.query, body: d.body, reply: d.reply, paged: d.paged, long: d.long, joined: d.joined });
   }
   return { json, raw };
 }
@@ -223,9 +225,8 @@ const TYPES_HEAD = `// RPE's API as its route table declares it: every route's p
 // writes this again. The reference for people is docs/api.md, written beside it.
 `;
 
-/** The live socket's constants as the generated types write them: where it is, how a page opens it and gives its token, and how RPE closes it. */
-function socketConstants(): string[] {
-  const s = LIVE_SOCKET;
+/** The live socket's constants as the generated types write them: where it is, how a page opens it and gives its token, the names it follows besides chats, and how RPE closes it; and the statuses of a joined turn's answer and of a long request's. */
+function socketConstants(s: LiveSocketDeclaration): string[] {
   return [
     "/** Where a page opens the live socket, as a WebSocket. */",
     `export const LIVE_PATH = ${JSON.stringify(s.path)};`,
@@ -235,8 +236,18 @@ function socketConstants(): string[] {
     `export const TOKEN_PROTOCOL_PREFIX = ${JSON.stringify(s.tokenProtocolPrefix)};`,
     `/** The code RPE closes a page's live socket with once the token it opened with has run out or been replaced, with the reason ${JSON.stringify(s.tokenEnded.reason)} */`,
     `export const LIVE_TOKEN_ENDED = ${s.tokenEnded.code};`,
+    "/** Followed in place of a chat id: the user's jobs, in every chat and in none. */",
+    `export const LIVE_JOBS = ${JSON.stringify(s.names.jobs)};`,
+    "/** Followed in place of a chat id: what concerns the user and no one chat (the extension's status). */",
+    `export const LIVE_USER = ${JSON.stringify(s.names.user)};`,
+    "/** Followed in place of a chat id, before an address RPE gave the caller: an outside client's check-in. */",
+    `export const LIVE_ADDRESS_PREFIX = ${JSON.stringify(s.names.addressPrefix)};`,
     "/** The status a route that takes a turn's id answers a turn joined to another with: its answer is a `JoinedAnswer`. */",
     `export const JOINED_STATUS = ${JOINED_STATUS};`,
+    "/** The status a long route answers at once with `{ answer: <id> }`, and its answer's route while the work runs. */",
+    `export const ANSWER_STATUS = ${ANSWER_STATUS};`,
+    "/** Where a long route's answer is read, by the id it was answered with: `GET <this>/<id>`. */",
+    `export const ANSWERS_PATH = ${JSON.stringify(ANSWERS_PATH)};`,
   ];
 }
 
@@ -245,7 +256,7 @@ export function renderTypes(table: Table): string {
   const names = new Names();
   const { json, raw } = entries(table);
   const routeLine = (e: JsonEntry): string => {
-    const lines = [`  /** ${e.does} */`, `  ${JSON.stringify(routeKey(e.info))}: {`, `    params: ${paramsType(e.info)};`, `    query: ${queryType(e, names)};`, `    body: ${e.body === null ? "undefined" : names.ts(e.body)};`, `    reply: ${names.ts(e.reply)};`, `    paged: ${e.paged};`, `    joined: ${e.joined};`, "  };"];
+    const lines = [`  /** ${e.does} */`, `  ${JSON.stringify(routeKey(e.info))}: {`, `    params: ${paramsType(e.info)};`, `    query: ${queryType(e, names)};`, `    body: ${e.body === null ? "undefined" : names.ts(e.body)};`, `    reply: ${names.ts(e.reply)};`, `    paged: ${e.paged};`, `    long: ${e.long};`, `    joined: ${e.joined};`, "  };"];
     return lines.join("\n");
   };
   // The command line's routes answer on its socket alone, so a page's client is never given a call to one.
@@ -254,7 +265,7 @@ export function renderTypes(table: Table): string {
   const rawLines = raw.map((e) => [`  /** ${e.does} */`, `  ${JSON.stringify(routeKey(e.info))}: {`, `    params: ${paramsType(e.info)};`, `    answers: ${JSON.stringify(e.answers)};`, `    joined: ${e.joined};`, "  };"].join("\n"));
   const kindLines = Object.entries(table.kinds).map(([kind, k]) => `  /** ${k.does}${k.key === undefined ? "" : ` A newer one replaces one a page has not taken yet (key "${k.key}").`} */\n  ${key(kind)}: ${names.ts(k.data)};`);
   // The socket's own messages, and the answer a joined turn gets, are named shapes: written once, with the rest, below.
-  for (const message of [LIVE_SOCKET.asks, LIVE_SOCKET.answers, LIVE_SOCKET.batch, joinedAnswer]) names.ts(message);
+  for (const message of [table.socket.asks, table.socket.answers, table.socket.batch, joinedAnswer]) names.ts(message);
   // The previous build's types a tunnel and the state view carry are taken from where they are defined, as types only.
   const taken = names.carried();
   const imports = [...new Set(taken.map((c) => c.from))].sort().map((from) => `import type { ${taken.filter((c) => c.from === from).map((c) => c.name).join(", ")} } from ${JSON.stringify(from)};`);
@@ -265,7 +276,7 @@ export function renderTypes(table: Table): string {
     "export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };",
     "",
     ...names.all().flatMap((n) => [`/** ${n.doc} */`, n.text, ""]),
-    "/** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, and whether it pages. */",
+    "/** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, whether it pages, and whether it is long (answered at once with an id, its answer read from `ANSWERS_PATH`). */",
     `export interface ApiRoutes {\n${routeLines.join("\n")}\n}`,
     "",
     "/** The server's own command line's routes, which answer on its socket in the data folder alone (`command` access), in the same form; on that socket the routes of `ApiRoutes` that a page calls answer too, as the owner's. */",
@@ -274,11 +285,11 @@ export function renderTypes(table: Table): string {
     "/** Every route in the form that answers in its own way (a stream, a socket, a file), and what it answers. */",
     `export interface RawRoutes {\n${rawLines.join("\n")}\n}`,
     "",
-    "/** Every kind a chat's live socket carries, and what each carries. */",
+    "/** Every kind the live socket carries, the app's and the areas' own, and what each carries. */",
     `export interface LiveKinds {\n${kindLines.join("\n")}\n}`,
     "",
     "// The live socket's own constants (what a page sends on it is a LiveAsk, and what it is sent a LiveMessage, above), and the status of a joined turn's answer.",
-    ...socketConstants(),
+    ...socketConstants(table.socket),
     "",
   ];
   return out.join("\n");
@@ -330,12 +341,11 @@ A route that pages takes \`limit\` and \`cursor\` in its query and answers \`{ i
 `;
 
 /** The live socket's own messages: how a page opens it and gives its token, what it sends and is sent, and how RPE closes it. */
-function socketSection(names: Names): string[] {
-  const s = LIVE_SOCKET;
+function socketSection(s: LiveSocketDeclaration, names: Names): string[] {
   return [
     "## The live socket's messages",
     "",
-    `A page opens \`${s.path}\` as a WebSocket, offering the protocol \`${s.protocol}\`. A page that cannot set the Authorization header offers its token as a second protocol: \`${s.tokenProtocolPrefix}\` and then the token. Every message, either way, is JSON.`,
+    `A page opens \`${s.path}\` as a WebSocket, offering the protocol \`${s.protocol}\`. A page that cannot set the Authorization header offers its token as a second protocol: \`${s.tokenProtocolPrefix}\` and then the token. Every message, either way, is JSON. Besides chats, a page follows \`${s.names.jobs}\` (the user's jobs, in every chat and in none), \`${s.names.user}\` (what concerns the user and no one chat) and \`${s.names.addressPrefix}\` with an address RPE gave its caller.`,
     "",
     "| | |",
     "|---|---|",
@@ -360,6 +370,7 @@ export function renderReference(table: Table): string {
       lines.push(`### \`${routeKey(e.info)}\``, "", e.does, "", "| | |", "|---|---|", `| Access | ${e.info.access}: ${ACCESS_WORDS[e.info.access]} |`, `| Body limit | ${bodyLimit(e.info, table)} |`, `| Params | ${paramsCell(e.info)} |`);
       if ("answers" in e) lines.push(`| Answers | ${e.answers} |`);
       else lines.push(`| Query | ${queryCell(e, names)} |`, `| Body | ${e.body === null ? "none" : typeCell(e.body, names)} |`, `| Reply | ${e.reply.kind === "nothing" ? "nothing (204)" : typeCell(e.reply, names)}${e.paged ? ", a page at a time" : ""} |`);
+      if ("long" in e && e.long) lines.push(`| Long | over TCP it answers at once, status ${ANSWER_STATUS}, with \`{ answer: <id> }\`, and its reply is read from \`GET ${ANSWERS_PATH}/:id\` once ready |`);
       if (e.joined) lines.push(`| Also answers | status ${JOINED_STATUS}, ${typeCell(joinedAnswer, names)}: the turn is joined to another, and the turn it joined is the one to ask for |`);
       lines.push("");
     }
@@ -367,7 +378,7 @@ export function renderReference(table: Table): string {
   }
   const kinds = ["## The live socket's kinds", "", "What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, seq, kind, key?, at, data }`, numbered from 1 per chat, and `data` is what its kind carries.", "", "| Kind | Carries | What it says |", "|---|---|---|"];
   for (const [kind, k] of Object.entries(table.kinds)) kinds.push(`| \`${kind}\` | ${typeCell(k.data, names)} | ${k.does}${k.key === undefined ? "" : ` A newer one replaces one a page has not taken yet.`} |`);
-  sections.push(kinds.join("\n"), "", socketSection(names).join("\n"));
+  sections.push(kinds.join("\n"), "", socketSection(table.socket, names).join("\n"));
   const types = ["## Types", "", "Every type a route, a live kind or the live socket's messages name, as the generated types write it. `JsonValue` is any JSON value.", ""];
   for (const n of names.all()) types.push(`### \`${n.name}\``, "", n.doc, "", "```ts", n.text, "```", "");
   for (const c of names.carried()) types.push(`### \`${c.name}\``, "", c.doc, "", `Carried as the previous build wrote it: the type \`${c.name}\` of \`src/shared/${c.from.replace(/^\.\.\//, "")}.ts\`.`, "");
