@@ -7,38 +7,28 @@
 // briefing's world state as its own part laid it out, and `turn.json` holds data only. A file whose part
 // is switched off, or that lays out nothing, is not written.
 //
-// The views of the prompt itself (the whole prompt, the history it holds, the preset's guidance) are the
-// harness's prompt map's: it writes them in this folder during the run, from the request. So is
-// `briefing.md`, what the lead was told at its run's start as it was sent, which a kept request points into.
+// The views of the prompt itself (the whole prompt, the history it holds, the preset's guidance, the
+// persona, the character) are the harness's prompt map's, their one writer: it writes them in this
+// folder during the run, from the request, on a prompt with no map yet from the raw layout's block names
+// and kinds, which the door gives. So is `briefing.md`, what the lead was told at its run's start as it
+// was sent, which a kept request points into.
 
 import type { Fields, Guidance, LinesPart, TemplatePart } from "rp-harness";
 import type { LiveApi, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
 import type { TaggedTurn } from "../adapter/lumiverse/provider";
-import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { ActivatedRead } from "../lore/indexing";
-import { isRecord } from "../shared/json";
 import type { TreeFiles } from "../tree";
-import { textOf } from "./request";
 
 /** The files, by their names in the turn's folder. */
 export const TURN_FILES = {
   lore: "active-wi-content.md",
-  persona: "persona.md",
-  character: "character.md",
   worldState: "world-state.md",
   turn: "turn.json",
   attempts: "previous-attempts/",
 } as const;
 
 /** The prompt parts the files are laid out by. */
-export const FOLDER_PARTS = { lore: "turn-lore", card: "turn-card", attempt: "turn-attempt" } as const;
-
-/**
- * Lumiverse's own markers of the preset blocks that put the persona and the character card in the
- * prompt (`PromptBlock.marker`; the structural markers of `prompt-assembly.service.ts:1255-1266`).
- */
-const PERSONA_MARKERS: Readonly<Record<string, true>> = { persona_description: true };
-const CHARACTER_MARKERS: Readonly<Record<string, true>> = { char_description: true, char_personality: true, scenario: true, dialogue_examples: true };
+export const FOLDER_PARTS = { lore: "turn-lore", attempt: "turn-attempt" } as const;
 
 /** An earlier attempt at the reply a swipe or regenerate writes again: its reply where RPE kept it, and its intent record where it wrote one. */
 export interface Attempt {
@@ -49,7 +39,6 @@ export interface Attempt {
 
 export interface FolderDeps {
   files: TreeFiles;
-  reads: LumiverseReads;
 }
 
 export interface AlongsideDeps extends FolderDeps {
@@ -70,32 +59,6 @@ export interface FolderAsk {
   lore: readonly ActivatedRead[];
   attempts: readonly Attempt[];
   received: number;
-}
-
-/** The preset's blocks by id, with Lumiverse's marker for each that has one. */
-async function markersOf(reads: LumiverseReads, preset: string | null): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  const row = preset === null ? null : await reads.preset(preset);
-  if (row !== null && Array.isArray(row.promptOrder)) {
-    for (const block of row.promptOrder) if (isRecord(block) && typeof block.id === "string" && typeof block.marker === "string") out.set(block.id, block.marker);
-  }
-  return out;
-}
-
-/** The text of the prompt's blocks that bear one of the `wanted` markers, where this prompt holds them, in the prompt's order, under each block's name. */
-function blocksMarked(ask: FolderAsk, texts: readonly string[], markers: ReadonlyMap<string, string>, wanted: Readonly<Record<string, true>>): { name: string; text: string }[] {
-  const { layout } = ask.tagged;
-  const found: { message: number; start: number; name: string; text: string }[] = [];
-  layout.messages.forEach((m, i) => {
-    for (const part of m.parts) {
-      for (const at of part.blocks) {
-        const block = layout.blocks[at.block];
-        const marker = block?.id === undefined ? undefined : markers.get(block.id);
-        if (block !== undefined && marker !== undefined && Object.hasOwn(wanted, marker)) found.push({ message: i, start: at.start, name: block.name, text: (texts[i] ?? "").slice(at.start, at.end) });
-      }
-    }
-  });
-  return found.sort((a, b) => a.message - b.message || a.start - b.start).map(({ name, text }) => ({ name, text }));
 }
 
 /** The lore map as the briefing holds it, then each entry that activated for the prompt, in full as intake read it (`FolderAsk.lore`). */
@@ -129,17 +92,17 @@ function turnData(ask: FolderAsk, written: readonly string[]): string {
 }
 
 /**
- * Writes the turn's folder; gives the files written, by their paths in the agents' view. What needs nothing of Lumiverse is written at
- * once, all together; the persona's and the character's files once the reads they need are in; `turn.json`, which lists the others,
- * last. A file that cannot be written leaves the others to be written: the error names each one that was not.
+ * Writes the turn's folder; gives the files written, by their paths in the agents' view. Every file is written at once, all
+ * together; `turn.json`, which lists the others, last. A file that cannot be written leaves the others to be written: the error
+ * names each one that was not.
  */
 export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<string[]> {
   const places = await d.files.places(ask.scope);
   const folder = places.turn;
   if (folder === undefined) return [];
-  const { guidance, tagged } = ask;
-  const [lorePart, cardPart, attemptPart] = await Promise.all(
-    [FOLDER_PARTS.lore, FOLDER_PARTS.card, FOLDER_PARTS.attempt].map(async (name): Promise<TemplatePart | undefined> => {
+  const { guidance } = ask;
+  const [lorePart, attemptPart] = await Promise.all(
+    [FOLDER_PARTS.lore, FOLDER_PARTS.attempt].map(async (name): Promise<TemplatePart | undefined> => {
       const part: TemplatePart | LinesPart | undefined = await guidance.part(name);
       return part?.format === "template" ? part : undefined;
     }),
@@ -150,25 +113,9 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
     if (result.status !== "written") throw new Error(`The turn's file ${name} could not be written (${result.status}).`);
     return result.path;
   };
-  // From the chat application's own markers, so here from the first turn; once a learned map names these slices, its view of them takes the file's place during the run, with the same text from the prompt.
-  const cards = (async (): Promise<{ persona?: string; character?: string }> => {
-    if (cardPart === undefined) return {};
-    const texts = ask.messages.map(textOf);
-    const markers = await markersOf(d.reads, tagged.tag.preset);
-    const persona = blocksMarked(ask, texts, markers, PERSONA_MARKERS);
-    const character = blocksMarked(ask, texts, markers, CHARACTER_MARKERS);
-    const personaName = persona.length === 0 || tagged.tag.persona === null ? null : ((await d.reads.persona(tagged.tag.persona))?.name ?? null);
-    return {
-      ...(persona.length === 0 ? {} : { persona: cardPart.render({ persona: true, ...(personaName !== null ? { name: personaName } : {}), blocks: persona }).text }),
-      ...(character.length === 0 ? {} : { character: cardPart.render({ character: true, ...(tagged.tag.speaker.name !== null ? { name: tagged.tag.speaker.name } : {}), blocks: character }).text }),
-    };
-  })();
-
   const loreMap = ask.request.briefing.find((b) => b.name === "lore-map")?.text;
   const settled = await Promise.allSettled([
     write(TURN_FILES.lore, lorePart?.render(loreFields(ask, loreMap)).text),
-    cards.then((c) => write(TURN_FILES.persona, c.persona)),
-    cards.then((c) => write(TURN_FILES.character, c.character)),
     write(TURN_FILES.worldState, ask.request.briefing.find((b) => b.name === "world-state")?.text),
     ...ask.attempts.map((a, i) =>
       write(`${TURN_FILES.attempts}attempt-${i + 1}.md`, attemptPart?.render({ n: i + 1, turn: a.turn, ...(a.intent !== null ? { intent: a.intent } : {}), ...(a.reply !== null ? { reply: a.reply } : {}) }).text),

@@ -597,7 +597,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // chat once its folder is written too: `#run` is given an `over` it resolves when the lead's run is over, which resolves the real
       // one only then, so the turn after this one and a stop wait for both, and the run's record keeps how the writing went.
       const ended = Promise.withResolvers<void>();
-      const folder = writeAlongside({ files: this.#d.files, reads, live: this.#d.harness().live }, ask, ended.promise, () => {
+      const folder = writeAlongside({ files: this.#d.files, live: this.#d.harness().live }, ask, ended.promise, () => {
         run.folder = { from: this.#d.clock.now(), to: null, error: null };
       })
         .then(

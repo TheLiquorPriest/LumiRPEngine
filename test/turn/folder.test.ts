@@ -12,6 +12,9 @@ import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type Turn
 /** The harness's views of the prompt in a turn's folder, as RPH's shipped `prompt-map` part names them. */
 const PROMPT_VIEW = "assembled-preset-prompt.md";
 const HISTORY_VIEW = "visible-chat-history.md";
+/** The persona's and the character's views, which the harness writes alone (one writer of each). */
+const PERSONA_VIEW = "persona.md";
+const CHARACTER_VIEW = "character.md";
 /** What the lead was told at its run's start, as sent: the harness's file of the turn's folder. */
 const BRIEFING_FILE = "briefing.md";
 
@@ -92,9 +95,10 @@ describe("the turn's folder", () => {
     expect(history).not.toContain("I climb the stairs.");
     expect(history).not.toContain("You narrate a lighthouse");
 
-    // The card and the persona, found by Lumiverse's own markers where this prompt holds them.
-    expect(await text(b, scope, `${folder}${TURN_FILES.character}`)).toBe(`# The character: Wren Hale\n\n## Wren's card\n\n${CARD}\n`);
-    expect(await text(b, scope, `${folder}${TURN_FILES.persona}`)).toBe(`# The player's persona\n\n## Who you are\n\n${PERSONA}\n`);
+    // The card and the persona, the harness's views of them alone, named by the kinds the door gives their blocks from Lumiverse's own markers.
+    expect(await text(b, scope, `${folder}${CHARACTER_VIEW}`)).toContain(CARD);
+    expect(await text(b, scope, `${folder}${PERSONA_VIEW}`)).toContain(PERSONA);
+    expect(await text(b, scope, `${folder}${CHARACTER_VIEW}`)).not.toContain(PERSONA);
 
     // The briefing as the Author was told it at its run's start, which the harness writes as it was sent.
     const briefing = await text(b, scope, `${folder}${BRIEFING_FILE}`);
@@ -108,7 +112,7 @@ describe("the turn's folder", () => {
 
     const data = JSON.parse(await text(b, scope, `${folder}${TURN_FILES.turn}`)) as { turn: string; kind: string; parent: string | null; files: string[]; prompt: { leftOut: unknown } };
     expect(data).toMatchObject({ turn: turn.id, kind: "new", parent: turn.parent, prompt: { leftOut: [{ from: 0, to: 2, covered: false }] } });
-    expect(data.files).toEqual([TURN_FILES.persona, TURN_FILES.character, TURN_FILES.worldState].map((f) => `${folder}${f}`));
+    expect(data.files).toEqual([`${folder}${TURN_FILES.worldState}`]);
 
     // Generated: an agent's write to any of them is refused, and changes nothing.
     for (const file of [PROMPT_VIEW, BRIEFING_FILE, TURN_FILES.turn]) {
