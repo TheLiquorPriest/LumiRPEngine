@@ -182,6 +182,10 @@ export const LIVE_KINDS = {
     ),
     does: "What went to the chat as the reply was written: its text, and the progress lines of its thinking block.",
   },
+  released: {
+    data: shape.named("ReplyReleased", "A run's reply began to go out to the chat: the run, by RPH's own id for it, and when, epoch ms.", shape.object({ run: T, at: N })),
+    does: "A run's reply began to go out to the chat (its first text, or the harness's release, whichever came first), told at that moment while the run may go on.",
+  },
   state: { data: shape.object({}), key: "state", does: "The chat's state changed, and a page reads it again." },
   handler_failed: { data: shape.object({ op: T, error: T }), does: "An engine handler failed on a change, which is recorded as not applied: the operation, and the handler's error." },
 } as const satisfies Readonly<Record<string, LiveKindDeclaration>>;
