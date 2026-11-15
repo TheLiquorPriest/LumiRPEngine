@@ -53,12 +53,13 @@ const HOMES = homes(readFates()).flatMap(({ from, home, by }) => {
 });
 
 /**
- * What PlanSwap-15 moves out of the agents engine's shared files into a home the kept code owns (the
- * pieces of fates.tsv by that package that name a file): until PlanSwap-10 and PlanSwap-9 remove today's
- * layers, those take them back from the new home, which is another layer's: the shared files from the
- * pure engine, the old backend and old pages from the review card.
+ * What PlanSwap-15 moves out of the agents engine's shared files into the pure engine (the pieces of
+ * fates.tsv by that package that name a file of `src/engine/` or `src/shared/`): until PlanSwap-10 removes
+ * today's shared files, those take them back from the new home. What went into a page's own file (the
+ * review card's label, the jobs page's time in words) is not taken back: no shared or backend file imports
+ * the frontend, so the old files keep what they read of it.
  */
-const MOVED_OUT = new Set(readFates().pieces.filter((piece) => piece.by === "PlanSwap-15" && !piece.home.endsWith("/")).map((piece) => piece.home.replace(/^src\//, "")));
+const MOVED_OUT = new Set(readFates().pieces.filter((piece) => piece.by === "PlanSwap-15" && !piece.home.endsWith("/") && !piece.home.startsWith("src/frontend/")).map((piece) => piece.home.replace(/^src\//, "")));
 
 function zoneOf(file: string): Zone {
   const rel = relative(SRC, file).split("\\").join("/");
@@ -261,12 +262,12 @@ describe("module boundaries", () => {
     expect(violationsOf(planted)).toEqual(["backend/planted.ts: imports outside today's layers (../build/worlds-routes)"]);
   });
 
-  test("today's layers take back what PlanSwap-15 moved out of the shared files from its new home, and nothing else of the engine", () => {
+  test("the shared files take back what PlanSwap-15 moved into the pure engine from its new home, and nothing else of the engine, and no shared or backend file takes anything from the frontend", () => {
     const planted = new Map([
       ["src/shared/planted.ts", 'import { isAgentKnowledge } from "../engine/workspace";\nimport { createRng } from "../engine/rng";'],
       ["src/backend/planted.ts", 'import { agentLabel } from "../frontend/review-card";\nimport { hud } from "../frontend/hud";'],
     ]);
-    expect(violationsOf(planted)).toEqual(["shared/planted.ts (shared) → engine/rng.ts (engine)", "backend/planted.ts (backend) → frontend/hud.tsx (frontend)"]);
+    expect(violationsOf(planted)).toEqual(["shared/planted.ts (shared) → engine/rng.ts (engine)", "backend/planted.ts (backend) → frontend/review-card.tsx (frontend)", "backend/planted.ts (backend) → frontend/hud.tsx (frontend)"]);
   });
 
   test("an import written with a .js name is read as the file it names", () => {

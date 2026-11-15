@@ -482,6 +482,11 @@ export const AGENT_ROLES: readonly { id: string; label: string }[] = [
   { id: MAIN_AGENT_ROLE, label: "Main agent" },
 ];
 
+/** An agent's name, by its role, as Settings → Agents names it: a turn role's label, the GM assistant's or the main agent's; else the role's id. What the drawer's live trace shows of it. The kept review card has a table of its own (`frontend/review-card.tsx`); this one goes with the agents engine. */
+export function agentLabel(role: string): string {
+  return hasOwn(ROLE_LABEL, role) ? ROLE_LABEL[role as RoleId] : (AGENT_ROLES.find((r) => r.id === role)?.label ?? role);
+}
+
 // ---------------------------------------------------------------- the page's words
 
 /** How a limit is set: tokens, milliseconds (shown in seconds), a count, characters, or minutes. */

@@ -9,12 +9,11 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
-import { AGENT_ROLES, MAIN_AGENT_ROLE } from "../../src/shared/agent-settings";
+import { AGENT_ROLES, agentLabel, MAIN_AGENT_ROLE } from "../../src/shared/agent-settings";
 import type { Activity } from "../../src/shared/diagnostics";
 import type { JsonObject } from "../../src/shared/json";
 import { liveItems, transcriptText } from "../../src/shared/live";
 import { Rig } from "../support/rig";
-import { agentLabel } from "../../src/frontend/review-card";
 
 const INTERPRET_MARK = "You map a player's typed input";
 const EXTRACT_MARK = "propose concrete state changes";

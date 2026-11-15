@@ -12,7 +12,7 @@
 
 import { PLAN_STATUS_WORDS, type PlanRow } from "./agent-pipeline";
 import type { JsonObject } from "./json";
-import { agentLabel } from "../frontend/review-card";
+import { agentLabel } from "./agent-settings";
 
 /** What an agent's call spent: tokens sent (of which read from the provider's cache) and written (of which reasoning). */
 export interface LiveUsage {

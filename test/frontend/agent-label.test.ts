@@ -1,15 +1,28 @@
 // The review card names the agent that staged a change (PlanSwap-15 item 2): its own table of labels
-// says what today's roles are called. While the agents engine's files are in the tree they say the
-// same; PlanSwap-10 removes this check with them.
+// says what each role is called, as Settings → Agents named them. The test holds the table to the
+// names as they were when it was moved, and loads nothing but the card.
 
 import { expect, test } from "bun:test";
 import { agentLabel } from "../../src/frontend/review-card";
-import { ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
-import { AGENT_ROLES } from "../../src/shared/agent-settings";
 
-test("a role is named as Settings → Agents names it, and a name nobody knows is shown as it is", () => {
-  for (const id of ROLE_IDS) expect(agentLabel(id)).toBe(ROLE_LABEL[id]);
-  for (const role of AGENT_ROLES) expect(agentLabel(role.id)).toBe(role.label);
+/** Each role's name as the old Settings → Agents page showed it (the turn roles, the GM assistant, the main agent). */
+const NAMED: Readonly<Record<string, string>> = {
+  intent: "Intent",
+  scene: "Scene and lore",
+  minds: "Minds",
+  knowledge: "Knowledge",
+  director: "Director",
+  read: "Read",
+  curator: "Curator",
+  memory: "Memory",
+  skip: "Skip beats",
+  world: "World steps",
+  assistant: "GM assistant",
+  main: "Main agent",
+};
+
+test("a role is named as Settings → Agents named it, and a name nobody knows is shown as it is", () => {
+  for (const [id, label] of Object.entries(NAMED)) expect(agentLabel(id)).toBe(label);
   expect(agentLabel("somebody-new")).toBe("somebody-new");
   expect(agentLabel("constructor")).toBe("constructor");
 });
