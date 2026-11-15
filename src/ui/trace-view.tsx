@@ -10,6 +10,7 @@ import { markdown } from "./markdown";
 import type { RunKind } from "./api";
 import { Badge, Fold, Pre, type Tone } from "./atoms";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
+import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
 import { counted, duration, json, num, tokenWords } from "./words";
 
 export const TURN_KIND_WORDS: Readonly<Record<RunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
@@ -61,7 +62,7 @@ export function replyErrorWords(error: ReplyError, status: RunStatus | "running"
 }
 
 /** What a run is, in a few words: "New reply, led by author". */
-export function runTitle(run: RunNode): string {
+export function runTitle(run: Pick<RunNode, "started">): string {
   const started = run.started;
   if (started === null) return "A run";
   const what = started.run === "turn" ? (started.turn === undefined ? RUN_WORDS.turn : TURN_KIND_WORDS[started.turn]) : RUN_WORDS[started.run];
@@ -126,12 +127,12 @@ export function ReplyBox(props: { run: RunNode }) {
 
 // ---------------------------------------------------------------- the tree
 
-/** The run's agents as a tree: the lead first, each agent under the one that started it. */
-export function AgentTree(props: { run: RunNode; now: number }) {
+/** The run's agents as a tree: the lead first, each agent under the one that started it. `notices` are the words of the notices file, for the records that are notices. */
+export function AgentTree(props: { run: RunNode; now: number; notices?: NoticeLines }) {
   return (
     <div class="rpe-tree">
       {props.run.roots.map((id) => (
-        <AgentBox key={id} run={props.run} id={id} now={props.now} depth={0} />
+        <AgentBox key={id} run={props.run} id={id} now={props.now} depth={0} notices={props.notices ?? NO_NOTICES} />
       ))}
     </div>
   );
@@ -141,7 +142,7 @@ function agentName(agent: AgentNode): string {
   return agent.ref.plays === undefined ? agent.ref.definition : `${agent.ref.definition}, playing ${agent.ref.plays}`;
 }
 
-export function AgentBox(props: { run: RunNode; id: string; now: number; depth: number }) {
+export function AgentBox(props: { run: RunNode; id: string; now: number; depth: number; notices: NoticeLines }) {
   const agent = props.run.agents.get(props.id);
   if (agent === undefined) return null;
   const state = agentState(agent, props.run);
@@ -167,14 +168,14 @@ export function AgentBox(props: { run: RunNode; id: string; now: number; depth: 
         <ol class="rpe-steps">
           {agent.steps.map((step) => (
             <li key={step.key} class={`rpe-step ${step.kind}`} data-seqs={step.seqs.join(",")}>
-              <StepView step={step} run={props.run} now={props.now} depth={props.depth} last={step.key === last} />
+              <StepView step={step} run={props.run} now={props.now} depth={props.depth} last={step.key === last} notices={props.notices} />
             </li>
           ))}
         </ol>
         {loose.length === 0 ? null : (
           <div class="rpe-children">
             {loose.map((id) => (
-              <AgentBox key={id} run={props.run} id={id} now={props.now} depth={props.depth + 1} />
+              <AgentBox key={id} run={props.run} id={id} now={props.now} depth={props.depth + 1} notices={props.notices} />
             ))}
           </div>
         )}
@@ -196,11 +197,11 @@ function TodoList(props: { items: readonly { text: string; done: boolean }[] }) 
   );
 }
 
-export function StepView(props: { step: Step; run: RunNode; now: number; depth: number; last: boolean }) {
+export function StepView(props: { step: Step; run: RunNode; now: number; depth: number; last: boolean; notices: NoticeLines }) {
   const { step } = props;
   if (step.kind === "call") return <CallView step={step} open={props.last} now={props.now} />;
-  if (step.kind === "tool") return <ToolView step={step} run={props.run} now={props.now} depth={props.depth} />;
-  return <NoteView step={step} />;
+  if (step.kind === "tool") return <ToolView step={step} run={props.run} now={props.now} depth={props.depth} notices={props.notices} />;
+  return <NoteView step={step} notices={props.notices} />;
 }
 
 function CallView(props: { step: CallStep; open: boolean; now: number }) {
@@ -241,7 +242,7 @@ export function resultText(result: ToolResult): string {
   return result.content.map((part) => (part.type === "text" ? part.text : `[a picture, ${part.mimeType}]`)).join("\n");
 }
 
-function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: number }) {
+function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: number; notices: NoticeLines }) {
   const { step } = props;
   const ended = step.ended;
   const result = ended?.result;
@@ -267,7 +268,7 @@ function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: num
       {step.agents.length === 0 ? null : (
         <div class="rpe-children">
           {step.agents.map((id) => (
-            <AgentBox key={id} run={props.run} id={id} now={props.now} depth={props.depth + 1} />
+            <AgentBox key={id} run={props.run} id={id} now={props.now} depth={props.depth + 1} notices={props.notices} />
           ))}
         </div>
       )}
@@ -331,8 +332,9 @@ function NoteHead(props: { icon: IconName; title: string; children?: ComponentCh
   );
 }
 
-function NoteView(props: { step: NoteStep }) {
+function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
   const record: TraceRecord = props.step.record;
+  const { notices } = props;
   const event = record.event;
   switch (event.kind) {
     case "run_started":
@@ -409,6 +411,12 @@ function NoteView(props: { step: NoteStep }) {
       );
     case "limit":
       return <NoteHead icon="alert" title={`Reached a limit: ${event.hit.limit} per ${event.hit.per}, ${num(event.hit.value)} of ${num(event.hit.max)}`} />;
+    case "progress_missing": {
+      // Its words are the notices file's, whatever they are; a line the file no longer holds leaves the event drawn as it came.
+      const words = noticeLine(notices, "progress_missing", { time: event.time });
+      if (words === undefined) return <NoteHead icon="code" title={`${event.kind}: ${json(event)}`} />;
+      return <NoteHead icon="alert" title={words} />;
+    }
     case "released":
       return <NoteHead icon="send" title={`Released the reply: ${FORM_WORDS[event.release.form]}, ${counted(event.release.length, "character")}${event.release.path === undefined ? "" : ` (${event.release.path})`}`} />;
     case "compacted":

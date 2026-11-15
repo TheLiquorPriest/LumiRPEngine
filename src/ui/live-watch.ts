@@ -1,21 +1,33 @@
-// Watching a chat as its pages show it. The Live page watches its latest turn, whichever that is; the
-// Turn page watches one turn, and every run of it (a continue runs it again), each under RPH's own id
-// for it: a run is the turn's when its records' scope names the turn, and its streaming text and what
-// it sent to the chat are known by that run. Either way: follow the chat's live events, read at once
-// (so the page shows something even while the live road is not up) and again once following has begun,
-// and read again wherever something was lost on the way (a hole in a run's records, read by that run,
-// events the hub dropped for a page that fell behind, a relay frame lost). The Turn page also reads its
-// turn again when one of its runs begins or ends, since what a read says beside the records (how the
-// turn stands, its moments, what it spent) changes then. What the page is shown changes at most once
-// each `renderMs`, however fast the events come, but a read's result shows at once.
+// Watching a chat as its pages show it. The Live page watches every run of the chat: whichever turn is
+// its latest, and any run going on beside it (a job a turn started, or one the user did); the Turn page
+// watches one turn, and every run of it (a continue runs it again), each under RPH's own id for it: a
+// run is the turn's when its records' scope names the turn, and its streaming text and what it sent to
+// the chat are known by that run. Either way: follow the chat's live events, read at once (so the page
+// shows something even while the live road is not up) and again once following has begun, and read
+// again wherever something was lost on the way (a hole in a run's records, read by that run, events the
+// hub dropped for a page that fell behind, a relay frame lost). The Turn page also reads its turn again
+// when one of its runs begins or ends, since what a read says beside the records (how the turn stands,
+// its moments, what it spent) changes then. What the page is shown changes at most once each
+// `renderMs`, however fast the events come, but a read's result shows at once. The Live page keeps
+// `keepRuns` runs: past that the oldest that ended is let go, and named, so its Turn page stays in reach.
 
+import type { RunStatus } from "rp-harness/contract";
 import type { LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
 import type { TurnDetail } from "./api";
 import { replyOf, type RpeClient } from "./client";
-import { applyLive, applyRead, EMPTY_LIVE, holeIn, lastRunOf, type LiveModel, type RunNode } from "./live-model";
+import { applyLive, applyRead, EMPTY_LIVE, type EventOf, holeIn, type LiveModel, type RunNode, runOf } from "./live-model";
 import type { Timers } from "./roads";
 import { errorWords } from "./words";
+
+/** A run the Live page let go (it kept `keepRuns` and this had ended): enough to name it and lead to its Turn page, which holds all of it. */
+export interface LetGo {
+  readonly run: string;
+  readonly turn: string | null;
+  readonly started: EventOf<"run_started"> | null;
+  readonly status: RunStatus | null;
+  readonly endedAt: number | null;
+}
 
 export interface Watched {
   model: LiveModel;
@@ -25,27 +37,32 @@ export interface Watched {
   problem: string | null;
   /** The last read of the turn watched, on the Turn page; null on the Live page, and until it has come. */
   detail: TurnDetail | null;
+  /** On the Live page: the runs let go, the one let go first first. */
+  letGo: readonly LetGo[];
+  /** How many events the hub dropped for this page because it fell behind, all told; 0 when none. */
+  behind: number;
 }
 
-export const NOTHING_WATCHED: Watched = { model: EMPTY_LIVE, loading: true, problem: null, detail: null };
+export const NOTHING_WATCHED: Watched = { model: EMPTY_LIVE, loading: true, problem: null, detail: null, letGo: [], behind: 0 };
 
-/** Fixed default: ten redraws a second at most while a busy turn streams. */
-export const WATCH_RENDER_MS = 100;
+/** What a watch is held to, read each time it is used so a change of the setting holds at once: the most often it redraws (ms) and the runs the Live page keeps. */
+export interface WatchLimits {
+  readonly renderMs: number;
+  readonly keepRuns: number;
+}
 
-/** Fixed: how many runs a page left open keeps; older ones that ended are let go (the Turns page has them all). */
-export const WATCH_KEEP_RUNS = 4;
-
-/** The model without its oldest ended runs past `keep`. */
-function pruned(model: LiveModel, keep: number): LiveModel {
+/** The model without its oldest ended runs past `keep`, and those it let go. */
+function pruned(model: LiveModel, keep: number): { model: LiveModel; dropped: RunNode[] } {
   let extra = model.runs.length - keep;
-  if (extra <= 0) return model;
-  return {
-    runs: model.runs.filter((run) => {
-      if (extra <= 0 || run.outcome === null) return true;
-      extra--;
-      return false;
-    }),
-  };
+  const dropped: RunNode[] = [];
+  if (extra <= 0) return { model, dropped };
+  const runs = model.runs.filter((run) => {
+    if (extra <= 0 || run.outcome === null) return true;
+    extra--;
+    dropped.push(run);
+    return false;
+  });
+  return { model: { runs }, dropped };
 }
 
 /** The run a live event is about: every kind a run publishes names it. */
@@ -89,21 +106,23 @@ export function onChatChange(client: Pick<RpeClient, "follow">, chat: string, on
   });
 }
 
-/** Watches a chat's latest turn, whichever it is, for the Live page. */
-export function watchChat(client: RpeClient, chat: string, timers: Timers, onChange: (watched: Watched) => void, renderMs: number = WATCH_RENDER_MS): () => void {
-  return watch(client, chat, null, timers, onChange, renderMs);
+/** Watches a chat's runs, every one going on and the latest turn's, for the Live page. */
+export function watchChat(client: RpeClient, chat: string, timers: Timers, onChange: (watched: Watched) => void, limits: () => WatchLimits): () => void {
+  return watch(client, chat, null, timers, onChange, limits);
 }
 
 /** Watches one turn of a chat, each of its runs, for the Turn page. */
-export function watchTurn(client: RpeClient, chat: string, turn: string, timers: Timers, onChange: (watched: Watched) => void, renderMs: number = WATCH_RENDER_MS): () => void {
-  return watch(client, chat, turn, timers, onChange, renderMs);
+export function watchTurn(client: RpeClient, chat: string, turn: string, timers: Timers, onChange: (watched: Watched) => void, limits: () => WatchLimits): () => void {
+  return watch(client, chat, turn, timers, onChange, limits);
 }
 
-function watch(client: RpeClient, chat: string, only: string | null, timers: Timers, onChange: (watched: Watched) => void, renderMs: number): () => void {
+function watch(client: RpeClient, chat: string, only: string | null, timers: Timers, onChange: (watched: Watched) => void, limits: () => WatchLimits): () => void {
   let model: LiveModel = EMPTY_LIVE;
   let loading = true;
   let problem: string | null = null;
   let detail: TurnDetail | null = null;
+  let letGo: readonly LetGo[] = [];
+  let behind = 0;
   let alive = true;
   let timer: unknown = null;
   /** Turns being read now, so one hole is not read twice at once. */
@@ -116,14 +135,23 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
   const publish = (): void => {
     timers.clearTimeout(timer);
     timer = null;
-    if (alive) onChange({ model, loading, problem, detail });
+    if (!alive) return;
+    if (only === null) {
+      // A run read again after it was let go is let go again, and named once.
+      const kept = pruned(model, limits().keepRuns);
+      model = kept.model;
+      const gone = kept.dropped.filter((run) => !letGo.some((l) => l.run === run.run));
+      if (gone.length > 0) letGo = [...letGo, ...gone.map((run): LetGo => ({ run: run.run, turn: run.turn, started: run.started, status: run.outcome?.status ?? null, endedAt: run.endedAt }))];
+    }
+    onChange({ model, loading, problem, detail, letGo, behind });
   };
   const soon = (): void => {
-    if (timer === null) timer = timers.setTimeout(publish, renderMs);
+    if (timer === null) timer = timers.setTimeout(publish, limits().renderMs);
   };
-  /** Where a read of a turn starts: past the records of the latest run of it the page holds records of. */
+  /** Where a read of a turn starts: past the records of the latest run of it the page holds records of, a turn's own run before a job's. */
   const nextOf = (turn: string): ReadFrom => {
-    const run = model.runs.findLast((r) => r.turn === turn && (r.seq > 0 || r.waiting.length > 0));
+    const held = (r: RunNode): boolean => r.turn === turn && (r.seq > 0 || r.waiting.length > 0);
+    const run = model.runs.findLast((r) => held(r) && r.started?.run !== "job") ?? model.runs.findLast(held);
     return run === undefined ? { from: 1 } : { run: run.run, from: run.seq + 1 };
   };
   /** Reads a turn's run on from `from`; for a run the page holds no record of yet (one read before its first), the turn on from where the page has it. */
@@ -153,17 +181,20 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
     }
     if (!alive) return;
     if (got !== null) {
-      model = applyRead(model, got);
+      // The Live page does not take back a run it let go.
+      const kept = only === null ? got : { ...got, trace: got.trace.filter((r) => !letGo.some((l) => l.run === r.run)), runs: got.runs.filter((view) => !letGo.some((l) => l.run === (view.run ?? view.id))) };
+      model = applyRead(model, kept);
       if (turn === only) {
         detail = got;
         for (const record of got.trace) ours.add(record.run);
+        for (const view of got.runs) if (view.run !== null) ours.add(view.run);
       }
       problem = null;
     }
     if (turn === only) loading = false;
     publish();
     // Events that came while the read was out may have left a hole in the run read that the read did not reach: read on, while each read gets further.
-    const run = at.run === undefined ? model.runs.findLast((r) => r.turn === turn) : lastRunOf(model, at.run);
+    const run = at.run === undefined ? model.runs.findLast((r) => r.turn === turn) : runOf(model, at.run);
     const hole = run === undefined ? null : holeIn(run);
     if (stale.delete(turn)) refresh(turn);
     else if (got !== null && run !== undefined && hole !== null && (at.run !== run.run || hole > at.from)) void read(turn, { run: run.run, from: hole });
@@ -201,7 +232,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
         model = applyLive(model, event);
         begunOrEnded ||= turning(event);
       }
-      if (only === null) model = pruned(model, WATCH_KEEP_RUNS);
+      if (missed !== null) behind += missed.to - missed.from + 1;
       soon();
       for (const run of model.runs) {
         const hole = holeIn(run);

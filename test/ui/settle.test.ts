@@ -7,12 +7,14 @@ import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { TurnDetail } from "../../src/ui/api";
 import { applyRead, EMPTY_LIVE, runsOf } from "../../src/ui/live-model";
-import { NO_FOLDER, NO_SETTLE, newestOnPath, type SettleShown, settleNow, TURNS_PAGE, TurnsView, type TurnsViewProps, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
+import { NO_FOLDER, NO_SETTLE, newestOnPath, type SettleShown, settleNow, TurnsView, type TurnsViewProps, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
 import { askingClient, settle } from "./asking";
 import { CHAT, EARLIER, turnAt } from "./recorded";
 import { banners, elements, expand, press, textOf } from "./vnodes";
 
 const REFUSED = "A run of this chat is going on: settle it once that ends.";
+/** The turns the list reads at a time. */
+const TURNS_PAGE = 30;
 
 function turns(over: Partial<TurnsViewProps>) {
   const pressed: unknown[] = [];
@@ -36,6 +38,7 @@ function turnPage(turn: TurnDetail, over: Partial<TurnViewProps> = {}) {
     onLive: () => undefined,
     onRead: () => undefined,
     onOpenFile: () => undefined,
+    onOpenRequest: () => undefined,
     onCloseFile: () => undefined,
     ...over,
   };
@@ -122,19 +125,19 @@ describe("Settle now", () => {
     // The player swiped back from turn-30 to turn-29's reply: turn-30 is the newest run's turn, and off the path now.
     const back = [{ ...swipe, onPath: false }, { ...earlier, onPath: true }, before];
     const { client, asked } = askingClient();
-    const one = newestOnPath(client, CHAT);
+    const one = newestOnPath(client, CHAT, TURNS_PAGE);
     expect(asked[0]).toMatchObject({ key: "GET /api/v1/chats/:chat/turns", params: { chat: CHAT }, query: { limit: TURNS_PAGE } });
     asked[0]?.answer({ turns: back, more: false });
     expect((await one)?.id).toBe("turn-29");
 
-    const paged = newestOnPath(client, CHAT);
+    const paged = newestOnPath(client, CHAT, TURNS_PAGE);
     asked[1]?.answer({ turns: back.slice(0, 1), more: true });
     await settle();
     expect(asked[2]).toMatchObject({ query: { limit: TURNS_PAGE, before: "turn-30" } });
     asked[2]?.answer({ turns: back.slice(1), more: false });
     expect((await paged)?.id).toBe("turn-29");
 
-    const none = newestOnPath(client, CHAT);
+    const none = newestOnPath(client, CHAT, TURNS_PAGE);
     asked[3]?.answer({ turns: back.slice(0, 1), more: false });
     expect(await none).toBeNull();
   });

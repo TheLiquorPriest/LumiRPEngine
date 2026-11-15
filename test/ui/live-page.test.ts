@@ -8,7 +8,7 @@ import { type Route, AppContext, type UiApp } from "../../src/ui/app";
 import type { LiveListener, RpeClient } from "../../src/ui/client";
 import { createGate } from "../../src/ui/gate";
 import { LivePage } from "../../src/ui/pages/live";
-import { WATCH_RENDER_MS } from "../../src/ui/live-watch";
+import { PAGE_DEFAULTS } from "../../src/shared/page-settings";
 import type { Timers } from "../../src/ui/roads";
 import { settle } from "./asking";
 import { openPage, type PageElement } from "./kept/dom";
@@ -45,7 +45,7 @@ describe("the Live page on a run with an id of its own", () => {
       const hear = async (from: number, to?: number): Promise<void> => {
         await act(() => {
           listener?.events(events.slice(from, to), null);
-          now += WATCH_RENDER_MS;
+          now += PAGE_DEFAULTS.redrawMs;
           for (const run of due.splice(0)) run();
         });
       };
@@ -64,7 +64,7 @@ describe("the Live page on a run with an id of its own", () => {
       // Once it has ended, its page.
       await hear(54);
       await act(() => button(root, "Its page").click());
-      expect(gone).toEqual([{ page: "turn", chat: CHAT, turn: RUN }]);
+      expect(gone).toEqual([{ page: "turns", chat: CHAT, at: [RUN] }]);
       await act(() => render(null, root as unknown as HTMLElement));
     } finally {
       page.close();

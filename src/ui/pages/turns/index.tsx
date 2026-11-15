@@ -9,21 +9,21 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useSelect } from "../store";
-import { isRecord } from "../../shared/json";
-import type { SettleAnswer, TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../api";
-import { useApp, useNow } from "../app";
-import { replyOf, type RpeClient } from "../client";
-import { Badge, Banner, Button, Empty, Gated, PageHeader, Pre, Row, Section } from "../atoms";
-import { agentUsage, type RunNode, runsOf } from "../live-model";
-import { NOTHING_WATCHED, onChatChange, watchTurn, type Watched } from "../live-watch";
-import { AgentTree, ReplyBox, replyErrorWords, RunHead, runTitle, statusWords, TURN_KIND_WORDS } from "../trace-view";
-import { liveTurn, momentsOf, spansOf } from "../turn-model";
-import { bytesWords, clock, counted, duration, errorWords, tokenWords, when } from "../words";
-import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "./jobs";
-
-/** Fixed: how many turns the list reads at a time. */
-export const TURNS_PAGE = 30;
+import type { RequestReply } from "../../../shared/api";
+import { useSelect } from "../../store";
+import type { SettleAnswer, TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../../api";
+import { useApp, useNow } from "../../app";
+import { replyOf, type RpeClient } from "../../client";
+import { Badge, Banner, Button, Empty, Gated, PageHeader, Pre, Row, Section } from "../../atoms";
+import { agentUsage, type RunNode, runsOf } from "../../live-model";
+import { NOTHING_WATCHED, onChatChange, watchTurn, type WatchLimits, type Watched } from "../../live-watch";
+import { type NoticeLines, useNoticeLines } from "../../notice-words";
+import { AgentTree, ReplyBox, replyErrorWords, RunHead, runTitle, statusWords, TURN_KIND_WORDS } from "../../trace-view";
+import { latestOf, liveTurn, momentsOf, spansOf, viewOf } from "../../turn-model";
+import { useUiSetting } from "../../ui-settings";
+import { bytesWords, clock, counted, duration, errorWords, tokenWords, when } from "../../words";
+import type { PageEntry } from "../../page-entry";
+import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "../jobs";
 
 function TurnLine(props: { turn: TurnSummary; onOpen: () => void }) {
   const { turn } = props;
@@ -74,10 +74,10 @@ export function settleNow(client: Pick<RpeClient, "call">, chat: string, onChang
  * The newest turn on the chat's path, the one Settle now settles; null where the list holds none. The list is newest run first, and
  * after a swipe back to an earlier swipe its first turns are off the path: it is read a page at a time past them.
  */
-export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string): Promise<TurnSummary | null> {
+export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string, limit: number): Promise<TurnSummary | null> {
   let before: string | undefined;
   for (;;) {
-    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }));
+    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit, ...(before === undefined ? {} : { before }) } }));
     const found = list.turns.find((t) => t.onPath);
     if (found !== undefined) return found;
     before = list.turns.at(-1)?.id;
@@ -198,7 +198,7 @@ export function withNewest(held: TurnsRead, page: { turns: readonly TurnSummary[
  * (`withNewest`) so the list never empties while it reads. Every answer is for this chat alone: once `stop()` is called (the page
  * has left the chat), what comes back is let go.
  */
-export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChange: (read: TurnsRead) => void): { more(): void; refresh(): void; stop(): void } {
+export function readTurns(client: Pick<RpeClient, "call">, chat: string, limit: number, onChange: (read: TurnsRead) => void): { more(): void; refresh(): void; stop(): void } {
   let read: TurnsRead = { turns: [], more: false, loading: true, problem: null };
   let alive = true;
   const show = (next: Partial<TurnsRead>): void => {
@@ -206,7 +206,7 @@ export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChang
     read = { ...read, ...next };
     onChange(read);
   };
-  const page = async (before: string | undefined) => replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }));
+  const page = async (before: string | undefined) => replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit, ...(before === undefined ? {} : { before }) } }));
   /** `first`: the first read, the one `loading` waits for before any turn is held. */
   const newest = (first: boolean): void => {
     page(undefined).then(
@@ -243,6 +243,7 @@ export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChang
 export function TurnsPage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
+  const turnsAtATime = useUiSetting("turnsAtATime");
   const [read, setRead] = useState<TurnsRead>({ turns: [], more: false, loading: true, problem: null });
   const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
   const [carried, setCarried] = useState<number | null>(null);
@@ -252,7 +253,7 @@ export function TurnsPage(props: { chat: string }) {
   useEffect(() => {
     setSettle(NO_SETTLE);
     setJobs(NO_JOBS);
-    const reading = readTurns(app.client, chat, setRead);
+    const reading = readTurns(app.client, chat, turnsAtATime, setRead);
     reader.current = reading;
     const jobsReading = readJobs(app.client, chat, setJobs);
     jobsReader.current = jobsReading;
@@ -266,7 +267,7 @@ export function TurnsPage(props: { chat: string }) {
       reading.stop();
       jobsReading.stop();
     };
-  }, [chat]);
+  }, [chat, turnsAtATime]);
   const none = !read.loading && read.problem === null && read.turns.length === 0;
   useEffect(() => {
     setCarried(null);
@@ -290,13 +291,24 @@ export function TurnsPage(props: { chat: string }) {
       carried={carried}
       settle={{ shown: settle, onSettle: () => settleNow(app.client, chat, setSettle) }}
       jobs={{ shown: jobs, onCancel: (job) => jobsReader.current?.cancel(job) }}
-      onOpen={(turn) => app.go({ page: "turn", chat, turn })}
+      onOpen={(turn) => app.go({ page: "turns", chat, at: [turn] })}
       onMore={() => reader.current?.more()}
     />
   );
 }
 
 // ---------------------------------------------------------------- one turn's folder
+
+/** A model call's request as the harness kept it and rebuilt it: every message as it was sent, and each tool declared with the file its words came from. */
+export type RequestShown = Pick<RequestReply, "same" | "messages" | "tools">;
+
+/** The file open: a file of the turn's folder by its text, or a model call's request rebuilt as it was sent; read, or RPE's reason it gave none. */
+export interface OpenShown {
+  name: string;
+  text: string | null;
+  request: RequestShown | null;
+  problem: string | null;
+}
 
 /**
  * A turn's folder as the page has read it: its entries as RPE lists them (null until read), why the
@@ -305,17 +317,19 @@ export function TurnsPage(props: { chat: string }) {
 export interface FolderShown {
   files: TurnFileEntry[] | null;
   problem: string | null;
-  open: { name: string; text: string | null; problem: string | null } | null;
+  open: OpenShown | null;
 }
 
 export const NO_FOLDER: FolderShown = { files: null, problem: null, open: null };
 
 /**
- * Reads a turn's folder: its list at once, and a file each time one is opened, by its path below the
- * folder. Only the file open now is shown: the answer for one opened before it is let go, and so is all
- * that comes back once `stop()` is called (the page has left the turn, or shut the spoiler gate).
+ * Reads a turn's folder: its list at once, a file each time one is opened, by its path below the folder,
+ * and a model call's request each time one is, by the file the run names it by (the harness keeps it as
+ * pointers into the turn's files, and RPE rebuilds it exactly). Only the one open now is shown: the answer
+ * for one opened before it is let go, and so is all that comes back once `stop()` is called (the page has
+ * left the turn, or shut the spoiler gate).
  */
-export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): { open(name: string): void; close(): void; stop(): void } {
+export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): { open(name: string): void; openRequest(name: string): void; close(): void; stop(): void } {
   let shown = NO_FOLDER;
   let alive = true;
   const show = (next: FolderShown): void => {
@@ -327,18 +341,24 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
     (list) => show({ ...shown, files: list.files, problem: null }),
     (error: unknown) => show({ ...shown, problem: errorWords(error) }),
   );
+  const begin = (name: string, read: () => Promise<Pick<OpenShown, "text" | "request">>): void => {
+    const opening: OpenShown = { name, text: null, request: null, problem: null };
+    show({ ...shown, open: opening });
+    const answered = (open: OpenShown): void => {
+      if (shown.open === opening) show({ ...shown, open });
+    };
+    read().then(
+      (got) => answered({ name, ...got, problem: null }),
+      (error: unknown) => answered({ name, text: null, request: null, problem: errorWords(error) }),
+    );
+  };
   return {
-    open(name) {
-      const opening = { name, text: null, problem: null };
-      show({ ...shown, open: opening });
-      const answered = (open: FolderShown["open"]): void => {
-        if (shown.open === opening) show({ ...shown, open });
-      };
-      client.call("GET /api/v1/chats/:chat/turns/:turn/files/*", { chat, turn, "*": name }).then(replyOf).then(
-        (file) => answered({ name, text: file.text, problem: null }),
-        (error: unknown) => answered({ name, text: null, problem: errorWords(error) }),
-      );
-    },
+    open: (name) => begin(name, async () => ({ text: replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn/files/*", { chat, turn, "*": name })).text, request: null })),
+    openRequest: (name) =>
+      begin(name, async () => {
+        const { same, messages, tools } = replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn/requests/*", { chat, turn, "*": name }));
+        return { text: null, request: { same, messages, tools } };
+      }),
     close() {
       show({ ...shown, open: null });
     },
@@ -346,23 +366,6 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
       alive = false;
     },
   };
-}
-
-/** The messages of a model call's request as the harness keeps it (`{"messages":[{"role","text"}]}`), in order; null for a file that is not one. */
-export function requestMessages(text: string): { role: string; text: string }[] | null {
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!isRecord(data) || !Array.isArray(data.messages)) return null;
-  const messages: { role: string; text: string }[] = [];
-  for (const m of data.messages) {
-    if (!isRecord(m) || typeof m.role !== "string" || typeof m.text !== "string") return null;
-    messages.push({ role: m.role, text: m.text });
-  }
-  return messages;
 }
 
 // ---------------------------------------------------------------- one turn
@@ -373,7 +376,10 @@ export interface TurnParts {
   runs: readonly RunNode[];
   now: number;
   folder: FolderShown;
+  /** The notices file's words, for the records of a run's trace that are notices. */
+  notices?: NoticeLines;
   onOpenFile(name: string): void;
+  onOpenRequest(name: string): void;
   onCloseFile(): void;
 }
 
@@ -383,11 +389,6 @@ export interface TurnSection {
   title: string;
   spoiler: boolean;
   body(parts: TurnParts): ComponentChildren | null;
-}
-
-/** A turn's runs that began, in order. The page's runs are made of the records each run wrote, so the one it numbers n is the nth of these. */
-function begun(views: readonly TurnRun[]): TurnRun[] {
-  return views.filter((view) => view.timings.started !== null);
 }
 
 /** Which run a part is of, where the turn has run more than once (a continue runs it again under an id of its own). */
@@ -401,17 +402,15 @@ function RunCaption(props: { nth: number; of: number; id: string | null; title: 
   );
 }
 
-/** Each run's own part, under its caption where there are several. */
+/** Each run's own part, under its caption where the turn has run more than once; a run no view of the turn names (a job the turn started) is captioned by what it is. */
 function EachRun(props: { runs: readonly RunNode[]; views: readonly TurnRun[]; part: (run: RunNode, view: TurnRun | undefined) => ComponentChildren }) {
-  const started = begun(props.views);
-  const of = Math.max(props.views.length, props.runs.length);
   return (
     <div class="lre-stack">
       {props.runs.map((run) => {
-        const view = started[run.nth - 1];
+        const view = viewOf(props.views, run);
         return (
-          <div key={run.nth} class="lre-stack" data-run-nth={run.nth}>
-            <RunCaption nth={view?.nth ?? run.nth} of={of} id={view?.id ?? null} title={view?.kind === "settle" ? TURN_KIND_WORDS.settle : runTitle(run)} />
+          <div key={run.run} class="lre-stack" data-run-of={run.run}>
+            {view === undefined ? <p class="rpe-caption">{runTitle(run)}</p> : <RunCaption nth={view.nth} of={props.views.length} id={view.id} title={view.kind === "settle" ? TURN_KIND_WORDS.settle : runTitle(run)} />}
             {props.part(run, view)}
           </div>
         );
@@ -460,13 +459,11 @@ function Tokens(props: { turn: TurnDetail }) {
 
 /** Each run of a turn run more than once, by its own id: how it went, and what it sent to the chat (the latest's is below, as it streams). */
 function Runs(props: { views: readonly TurnRun[]; runs: readonly RunNode[]; now: number }) {
-  const started = begun(props.views);
   const latest = props.views.at(-1);
   return (
     <div class="lre-stack">
       {props.views.map((view) => {
-        const at = started.indexOf(view);
-        const run = at < 0 ? undefined : props.runs.find((r) => r.nth === at + 1);
+        const run = props.runs.find((r) => r.run === (view.run ?? view.id));
         const status = statusWords(view.kind, view.status);
         return (
           <div key={view.id} class="lre-stack" data-run={view.id}>
@@ -507,8 +504,8 @@ function Given(props: { run: RunNode }) {
   return <p class="rpe-line">{info.given.length === 0 ? `${info.definition} was given nothing by name.` : `${info.definition} was given: ${info.given.join(", ")}.`}</p>;
 }
 
-/** What each agent of a run was sent on its first model call, where the harness kept it: a file of the turn's folder each, opened on demand. */
-function FirstCalls(props: { view: TurnRun | undefined; onOpenFile(name: string): void }) {
+/** What each agent of a run was sent on its first model call, where the harness kept it: its request rebuilt exactly as sent, opened on demand. */
+function FirstCalls(props: { view: TurnRun | undefined; onOpenRequest(name: string): void }) {
   const first = new Map<string, TurnRun["requests"][number]>();
   for (const request of props.view?.requests ?? []) {
     const held = first.get(request.agent);
@@ -520,7 +517,7 @@ function FirstCalls(props: { view: TurnRun | undefined; onOpenFile(name: string)
       <span class="rpe-caption">What each agent was sent first</span>
       <div class="rpe-files">
         {[...first.values()].map((r) => (
-          <Button key={r.agent} small kind="ghost" onClick={() => props.onOpenFile(r.file)}>
+          <Button key={r.agent} small kind="ghost" onClick={() => props.onOpenRequest(r.file)}>
             {`${r.definition} (${r.agent}), call ${r.call}`}
           </Button>
         ))}
@@ -545,11 +542,44 @@ function TurnLore(props: { lore: TurnDetail["lore"] }) {
   );
 }
 
-/** The file open: a kept request laid out as its messages, any other file as its text. */
-function OpenFile(props: { open: FolderShown["open"]; onClose(): void }) {
+/** A request rebuilt exactly as it was sent, laid out as its messages: each by its role and block, and whether it is text of the turn's files (the prompt, the briefing, a part given by name) or was added to them: the agent's opening block, the line that introduces the prompt, a brief, and the run's own conversation (a message with no block). */
+function RequestView(props: { request: RequestShown }) {
+  const { request } = props;
+  if (!request.same) {
+    return (
+      <Banner tone="warn" icon="alert" title="This request cannot be shown as it was sent">
+        <span>What the harness kept of it does not rebuild to what it sent, so none of it is shown.</span>
+      </Banner>
+    );
+  }
+  return (
+    <div class="lre-stack" data-request>
+      {request.messages.map((m, i) => {
+        const added = m.block === undefined || m.block === "opening" || m.block === "frame" || m.block === "brief";
+        return (
+          <div key={i} class="lre-stack" data-block={m.block ?? ""}>
+            <span class="lre-inline">
+              <span class="rpe-caption">{m.role}</span>
+              <Badge tone={added ? "gm" : undefined}>{added ? "added" : "the turn's files"}</Badge>
+              {m.block === undefined ? <span class="rpe-meta">its own conversation</span> : <span class="rpe-meta">{m.block}</span>}
+            </span>
+            <Pre text={m.text} mono={false} />
+          </div>
+        );
+      })}
+      {request.tools.length === 0 ? null : (
+        <p class="rpe-meta" data-tools>
+          Tools declared: {request.tools.map((t) => (t.file === undefined ? t.name : `${t.name} (${t.file})`)).join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The file open: a model call's request laid out as its messages, any other file as its text. */
+function OpenFile(props: { open: OpenShown | null; onClose(): void }) {
   const { open } = props;
   if (open === null) return null;
-  const messages = open.text === null ? null : requestMessages(open.text);
   return (
     <div class="lre-stack" data-file={open.name}>
       <div class="lre-spread">
@@ -562,17 +592,12 @@ function OpenFile(props: { open: FolderShown["open"]; onClose(): void }) {
         <Banner tone="neg" icon="alert" title="The file could not be read">
           <span>{open.problem}</span>
         </Banner>
+      ) : open.request !== null ? (
+        <RequestView request={open.request} />
       ) : open.text === null ? (
         <p class="lre-muted rpe-line">Reading the file…</p>
-      ) : messages === null ? (
-        <Pre text={open.text} />
       ) : (
-        messages.map((m, i) => (
-          <div key={i} class="lre-stack">
-            <span class="rpe-caption">{m.role}</span>
-            <Pre text={m.text} mono={false} />
-          </div>
-        ))
+        <Pre text={open.text} />
       )}
     </div>
   );
@@ -615,12 +640,20 @@ export const TURN_SECTIONS: readonly TurnSection[] = [
   { id: "timings", title: "Timings", spoiler: false, body: ({ turn }) => <Timings turn={turn} /> },
   { id: "tokens", title: "Tokens", spoiler: false, body: ({ turn }) => <Tokens turn={turn} /> },
   { id: "runs", title: "Its runs", spoiler: false, body: ({ turn, runs, now }) => (turn.runs.length < 2 ? null : <Runs views={turn.runs} runs={runs} now={now} />) },
-  { id: "reply", title: "What went to the chat", spoiler: false, body: ({ runs }) => runs.slice(-1).map((latest) => <ReplyBox key={latest.nth} run={latest} />) },
+  {
+    id: "reply",
+    title: "What went to the chat",
+    spoiler: false,
+    body: ({ turn, runs }) => {
+      const latest = latestOf(turn, runs);
+      return latest === undefined ? null : <ReplyBox run={latest} />;
+    },
+  },
   {
     id: "given",
     title: "What the Author was given",
     spoiler: true,
-    body: ({ turn, runs, folder, onOpenFile, onCloseFile }) => (
+    body: ({ turn, runs, folder, onOpenFile, onOpenRequest, onCloseFile }) => (
       <div class="lre-stack">
         <EachRun
           runs={runs}
@@ -628,7 +661,7 @@ export const TURN_SECTIONS: readonly TurnSection[] = [
           part={(run, view) => (
             <>
               <Given run={run} />
-              <FirstCalls view={view} onOpenFile={onOpenFile} />
+              <FirstCalls view={view} onOpenRequest={onOpenRequest} />
             </>
           )}
         />
@@ -639,7 +672,7 @@ export const TURN_SECTIONS: readonly TurnSection[] = [
   },
   { id: "intent", title: "Intent record", spoiler: true, body: ({ turn }) => (turn.intent === null ? null : <Pre text={turn.intent} mono={false} />) },
   { id: "agent-tokens", title: "Tokens by agent", spoiler: true, body: ({ turn, runs }) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} views={turn.runs} part={(run) => <TokensByAgent run={run} />} /> : null) },
-  { id: "trace", title: "The run, step by step", spoiler: true, body: ({ turn, runs, now }) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} views={turn.runs} part={(run) => <AgentTree run={run} now={now} />} /> : null) },
+  { id: "trace", title: "The run, step by step", spoiler: true, body: ({ turn, runs, now, notices }) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} views={turn.runs} part={(run) => <AgentTree run={run} now={now} notices={notices} />} /> : null) },
 ];
 
 function SectionsOf(props: { parts: TurnParts; sections: readonly TurnSection[] }) {
@@ -673,6 +706,9 @@ export interface TurnViewProps {
   onLive(): void;
   onRead(): void;
   onOpenFile(name: string): void;
+  /** The notices file's words, for the records of a run's trace that are notices. */
+  notices?: NoticeLines;
+  onOpenRequest(name: string): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
   /** Settle now, where this turn is the newest on the chat's path: what came of the last press, and whether a run of the chat goes on. */
@@ -686,7 +722,7 @@ export function TurnView(props: TurnViewProps) {
   const kind = turn.runs.at(-1)?.kind ?? turn.kind;
   const status = statusWords(kind, turn.status);
   const failure = turn.error === null || (kind === "settle" && turn.status === "no-reply") ? null : replyErrorWords(turn.error, turn.status);
-  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, onOpenFile: props.onOpenFile, onCloseFile: props.onCloseFile };
+  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
@@ -740,13 +776,18 @@ export function TurnPage(props: { chat: string; turn: string }) {
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
   const [reads, setReads] = useState(0);
   const [folder, setFolder] = useState<FolderShown>(NO_FOLDER);
-  const reader = useRef<{ open(name: string): void; close(): void } | null>(null);
+  const reader = useRef<{ open(name: string): void; openRequest(name: string): void; close(): void } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
   const [newest, setNewest] = useState<TurnSummary | null>(null);
   const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
+  const notices = useNoticeLines(chat);
+  const turnsAtATime = useUiSetting("turnsAtATime");
+  // What the watch is held to is read when it is used, so a setting changed meanwhile holds at once.
+  const limits = useRef<WatchLimits>({ renderMs: 0, keepRuns: 0 });
+  limits.current = { renderMs: useUiSetting("redrawMs"), keepRuns: useUiSetting("keepRuns") };
   useEffect(() => {
     setWatched(NOTHING_WATCHED);
-    return watchTurn(app.client, chat, turn, app.timers, setWatched);
+    return watchTurn(app.client, chat, turn, app.timers, setWatched, () => limits.current);
   }, [chat, turn, reads]);
   useEffect(() => {
     setSettle(NO_SETTLE);
@@ -754,7 +795,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
     // Which turn is the newest on the chat's path, and whether a run of it goes on: Settle now is offered on that turn alone. Read again when a run begins or ends.
     let alive = true;
     const read = (): void => {
-      newestOnPath(app.client, chat).then(
+      newestOnPath(app.client, chat, turnsAtATime).then(
         (found) => {
           if (alive) setNewest(found);
         },
@@ -767,7 +808,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
       alive = false;
       off();
     };
-  }, [chat, turn]);
+  }, [chat, turn, turnsAtATime]);
   useEffect(() => {
     setFolder(NO_FOLDER);
     if (!gateOpen) return;
@@ -779,7 +820,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
     };
   }, [chat, turn, reads, gateOpen]);
   const runs = runsOf(watched.model, turn);
-  const latest = runs.at(-1);
+  const latest = watched.detail === null ? runs.at(-1) : latestOf(watched.detail, runs);
   const detail = watched.detail === null ? null : liveTurn(watched.detail, latest);
   const now = useNow(detail?.status === "running");
   const back = (): void => app.go({ page: "turns", chat });
@@ -805,12 +846,14 @@ export function TurnPage(props: { chat: string; turn: string }) {
       problem={watched.problem}
       gateOpen={gateOpen}
       folder={folder}
+      notices={notices}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onBack={back}
       onLive={() => app.go({ page: "live", chat })}
       onRead={() => setReads((n) => n + 1)}
       onOpenFile={(name) => reader.current?.open(name)}
+      onOpenRequest={(name) => reader.current?.openRequest(name)}
       onCloseFile={() => reader.current?.close()}
       settle={
         newest?.id !== turn
@@ -829,3 +872,18 @@ export function TurnPage(props: { chat: string; turn: string }) {
     />
   );
 }
+
+/** The Turns page: the chat's turns, and a turn's own page as its inner place (`at: [turn]`), which is part of its address. */
+export const entry: PageEntry = {
+  id: "turns",
+  title: "Turns",
+  icon: "list",
+  shells: ["web", "drawer"],
+  needsChat: true,
+  often: true,
+  order: 30,
+  render: (route) => {
+    const turn = route.at?.[0];
+    return turn === undefined ? <TurnsPage chat={route.chat} /> : <TurnPage chat={route.chat} turn={turn} />;
+  },
+};

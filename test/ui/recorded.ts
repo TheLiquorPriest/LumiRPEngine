@@ -11,6 +11,9 @@ import type { ChatList, Reflection, TurnDetail, TurnList, TurnRun, TurnSummary, 
 export const USER = "user-1";
 export const CHAT = "chat-calder";
 export const RUN = "turn-31";
+/** RPH's own id for the turn's first run, and for the continue's run: each run of a turn has one, the turn is in its records' scope. */
+export const RUN_FIRST = "run-31a";
+export const RUN_SECOND = "run-31b";
 export const SESSION = "session-4";
 /** 12 Nov 2026, 20:15:00 UTC: when the Author's run began. */
 export const T0 = Date.UTC(2026, 10, 12, 20, 15, 0);
@@ -78,12 +81,12 @@ function record(): LiveEvent[] {
   };
   const trace = (ms: number, agent: AgentRef, event: TraceEvent, parent?: string): void => {
     now += ms;
-    const rec: TraceRecord = { seq: ++seq, run: RUN, scope, at: now, agent, ...(parent === undefined ? {} : { parent: { agent: AUTHOR.id, run: RUN, call: parent } }), event };
+    const rec: TraceRecord = { seq: ++seq, run: RUN_FIRST, scope, at: now, agent, ...(parent === undefined ? {} : { parent: { agent: AUTHOR.id, run: RUN_FIRST, call: parent } }), event };
     push("trace", rec);
   };
   const delta = (ms: number, agent: AgentRef, call: number, part: { text?: string; thinking?: string }): void => {
     now += ms;
-    const d: TraceDelta = { run: RUN, agent: agent.id, call, ...part, at: now };
+    const d: TraceDelta = { run: RUN_FIRST, agent: agent.id, call, ...part, at: now };
     push("delta", d);
   };
   let replyAt = 0;
@@ -91,9 +94,9 @@ function record(): LiveEvent[] {
     now += ms;
     let out: ReplyPiece;
     if ("text" in piece) {
-      out = { run: RUN, from: replyAt, text: piece.text };
+      out = { run: RUN_FIRST, from: replyAt, text: piece.text };
       replyAt += piece.text.length;
-    } else out = { run: RUN, line: piece.line, progress: piece.progress };
+    } else out = { run: RUN_FIRST, line: piece.line, progress: piece.progress };
     push("reply", out);
   };
 
@@ -185,14 +188,14 @@ function continued(): LiveEvent[] {
   };
   const trace = (ms: number, event: TraceEvent): void => {
     now += ms;
-    const rec: TraceRecord = { seq: ++seq, run: RUN, scope, at: now, agent: AUTHOR, event };
+    const rec: TraceRecord = { seq: ++seq, run: RUN_SECOND, scope, at: now, agent: AUTHOR, event };
     push("trace", rec);
   };
   trace(0, { kind: "run_started", run: "turn", turn: "continue", lead: "author" });
   trace(5, { kind: "agent_started", definition: "author", connection: "Deepseek", model: "deepseek-v4-flash", effort: "medium", session: SESSION, given: ["prompt:all", "story:brief"] });
   trace(4, { kind: "call_started", call: 1, connection: "Deepseek", model: "deepseek-v4-flash", messages: 20, tools: 30 });
   now += 900;
-  push("reply", { run: RUN, from: 0, text: CONTINUED_REPLY } satisfies ReplyPiece);
+  push("reply", { run: RUN_SECOND, from: 0, text: CONTINUED_REPLY } satisfies ReplyPiece);
   trace(40, { kind: "call_ended", call: 1, model: "deepseek-v4-flash", text: `<reply>\n${CONTINUED_REPLY}\n</reply>`, toolCalls: [], stop: "stop", usage: CONTINUED_USAGE, ms: 950 });
   trace(2, { kind: "released", release: { by: AUTHOR, form: "tags", length: CONTINUED_REPLY.length } });
   trace(2, { kind: "agent_ended", status: "done", usage: CONTINUED_USAGE });

@@ -4,15 +4,15 @@
 
 import { describe, expect, test } from "bun:test";
 import type { TraceRecord } from "rp-harness/contract";
-import { type AgentNode, applyLive, applyRead, applyRecord, EMPTY_LIVE, holeIn, latestRun, type LiveModel, type RunNode, runsOf, runTotals } from "../../src/ui/live-model";
-import { CHAT, CONTINUED, CONTINUED_RECORDS, CONTINUED_REPLY, continuedTurn, INTENT, PROGRESS, RECORDED, RECORDS, REPLY, RUN, TOTAL, turnAt } from "./recorded";
+import { type AgentNode, applyLive, applyRead, applyRecord, EMPTY_LIVE, holeIn, type LiveModel, type RunNode, runsOf, runTotals, shownRuns } from "../../src/ui/live-model";
+import { CHAT, CONTINUED, CONTINUED_RECORDS, CONTINUED_REPLY, continuedTurn, INTENT, PROGRESS, RECORDED, RECORDS, REPLY, RUN, RUN_FIRST, RUN_SECOND, TOTAL, turnAt } from "./recorded";
 
 function fold(events: readonly (typeof RECORDED)[number][], from: LiveModel = EMPTY_LIVE): LiveModel {
   return events.reduce((model, event) => applyLive(model, event), from);
 }
 
 function only(model: LiveModel): RunNode {
-  expect(model.runs.map((r) => r.run)).toEqual([RUN]);
+  expect(model.runs.map((r) => r.run)).toEqual([RUN_FIRST]);
   return model.runs[0] as RunNode;
 }
 
@@ -54,7 +54,7 @@ describe("a recorded stream becomes the tree the Live page draws", () => {
       { id: "call-story-1", agents: [] },
     ]);
     expect(agent(run, "a3").ref.plays).toBe("char-moira");
-    expect(agent(run, "a2").startedBy).toEqual({ agent: "a1", run: RUN, call: "call-gm-1" });
+    expect(agent(run, "a2").startedBy).toEqual({ agent: "a1", run: RUN_FIRST, call: "call-gm-1" });
   });
 
   test("every record is in the tree once, and each agent's steps are in the order they happened", () => {
@@ -159,17 +159,17 @@ describe("however the page came to hear it", () => {
 });
 
 describe("a turn a continue runs again", () => {
-  const runsShape = (model: LiveModel): unknown => runsOf(model, RUN).map((r) => ({ nth: r.nth, seq: r.seq, kind: r.started?.turn, status: r.outcome?.status }));
+  const runsShape = (model: LiveModel): unknown => runsOf(model, RUN).map((r) => ({ run: r.run, seq: r.seq, kind: r.started?.turn, status: r.outcome?.status }));
   const both = [
-    { nth: 1, seq: RECORDS.length, kind: "new", status: "released" },
-    { nth: 2, seq: CONTINUED_RECORDS.length, kind: "continue", status: "released" },
+    { run: RUN_FIRST, seq: RECORDS.length, kind: "new", status: "released" },
+    { run: RUN_SECOND, seq: CONTINUED_RECORDS.length, kind: "continue", status: "released" },
   ];
 
   test("heard live, its second run, numbered from 1 again under the same id, is a run of its own", () => {
     const model = fold([...RECORDED, ...CONTINUED]);
     expect(runsShape(model)).toEqual(both);
     expect(runsOf(model, RUN).map((r) => r.reply.text)).toEqual([REPLY, CONTINUED_REPLY]);
-    expect(latestRun(model)?.nth).toBe(2);
+    expect(shownRuns(model)[0]?.run).toBe(RUN_SECOND);
     expect(shape(runsOf(model, RUN)[0] as RunNode)).toEqual(shape(only(fold(RECORDED))));
   });
 

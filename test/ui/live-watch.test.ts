@@ -11,7 +11,10 @@ import type { ClientState, LiveListener, RpeClient } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE, type RunNode } from "../../src/ui/live-model";
 import { watchChat, watchTurn, type Watched } from "../../src/ui/live-watch";
 import type { Timers } from "../../src/ui/roads";
-import { CHAT, CONTINUED, CONTINUED_REPLY, continuedTurn, RECORDED, RECORDS, REPLY, RUN, T0, turnAt, turnListAt, turnOf, underRun } from "./recorded";
+import { CHAT, CONTINUED, CONTINUED_REPLY, continuedTurn, RECORDED, RECORDS, REPLY, RUN, RUN_FIRST, RUN_SECOND, T0, turnAt, turnListAt, turnOf, underRun } from "./recorded";
+
+/** What a watch is held to in these tests: redrawn at most each `renderMs`, the Live page keeping four runs. */
+const held = (renderMs: number) => () => ({ renderMs, keepRuns: 4 });
 
 /** A clock the test moves by hand. */
 function manualTimers(): Timers & { advance(ms: number): void } {
@@ -102,7 +105,7 @@ describe("watching a chat", () => {
     const client = heldClient();
     const timers = manualTimers();
     const seen: Watched[] = [];
-    const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), 50);
+    const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), held(50));
     const list = await client.call_(0);
     expect(list.key).toBe("GET /api/v1/chats/:chat/turns");
     expect(list.query).toEqual({ limit: 1 });
@@ -121,7 +124,7 @@ describe("watching a chat", () => {
     // The read following asked for: the list again, then only the records after those the page has.
     (await client.call_(2)).answer(turnListAt(55));
     const after = await client.call_(3);
-    expect(after.query).toEqual({ run: RUN, from: recordsIn(55) + 1 });
+    expect(after.query).toEqual({ run: RUN_FIRST, from: recordsIn(55) + 1 });
     after.answer(turnAt(55, recordsIn(55) + 1));
     await flush();
     client.listener().events(RECORDED.slice(55), null);
@@ -136,7 +139,7 @@ describe("watching a chat", () => {
     const client = heldClient();
     const timers = manualTimers();
     const seen: Watched[] = [];
-    const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), 50);
+    const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), held(50));
     (await client.call_(0)).answer({ turns: [], more: false } satisfies TurnList);
     await flush();
     client.listener().events(RECORDED.slice(0, 30), null);
@@ -144,7 +147,7 @@ describe("watching a chat", () => {
     client.listener().events(RECORDED.slice(40, 50), { from: 31, to: 40 });
     const asked = await Promise.all([client.call_(1), client.call_(2)]);
     const turnRead = asked.find((a) => a.key === "GET /api/v1/chats/:chat/turns/:turn");
-    expect(turnRead?.query).toEqual({ run: RUN, from: recordsIn(30) + 1 });
+    expect(turnRead?.query).toEqual({ run: RUN_FIRST, from: recordsIn(30) + 1 });
     turnRead?.answer(turnAt(50, recordsIn(30) + 1));
     for (const a of asked) if (a.key === "GET /api/v1/chats/:chat/turns") a.answer(turnListAt(50));
     await flush();
@@ -160,7 +163,7 @@ describe("watching a chat", () => {
     const client = heldClient();
     const timers = manualTimers();
     const seen: Watched[] = [];
-    const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), 100);
+    const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), held(100));
     (await client.call_(0)).answer({ turns: [], more: false } satisfies TurnList);
     await flush();
     const before = seen.length;
@@ -180,7 +183,7 @@ describe("watching one turn, for its page", () => {
     const client = heldClient();
     const timers = manualTimers();
     const seen: Watched[] = [];
-    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), 50);
+    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), held(50));
     const first = await client.call_(0);
     expect(first.key).toBe("GET /api/v1/chats/:chat/turns/:turn");
     expect(first.query).toEqual({ from: 1 });
@@ -190,7 +193,7 @@ describe("watching one turn, for its page", () => {
     // Following begins: the turn is read on from what the page has.
     client.listener().reset();
     const caught = await client.call_(1);
-    expect(caught.query).toEqual({ run: RUN, from: recordsIn(30) + 1 });
+    expect(caught.query).toEqual({ run: RUN_FIRST, from: recordsIn(30) + 1 });
     caught.answer(turnAt(30, recordsIn(30) + 1));
     await flush();
     // Its events, and one of another turn of the chat.
@@ -198,12 +201,12 @@ describe("watching one turn, for its page", () => {
     const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "turn-99", scope: { ...other.scope, turn: "turn-99" } } };
     client.listener().events([...RECORDED.slice(30, 60), elsewhere], null);
     timers.advance(50);
-    expect(seen.at(-1)?.model.runs.map((r) => r.run)).toEqual([RUN]);
+    expect(seen.at(-1)?.model.runs.map((r) => r.run)).toEqual([RUN_FIRST]);
     expect(seen.at(-1)?.model.runs[0]?.seq).toBe(recordsIn(60));
     // Its run ends live: the turn is read again, for how it ended.
     client.listener().events(RECORDED.slice(60), null);
     const after = await client.call_(2);
-    expect(after.query).toEqual({ run: RUN, from: RECORDS.length + 1 });
+    expect(after.query).toEqual({ run: RUN_FIRST, from: RECORDS.length + 1 });
     after.answer(turnAt(RECORDED.length, RECORDS.length + 1));
     await flush();
     expect(seen.at(-1)?.detail?.status).toBe("released");
@@ -216,18 +219,18 @@ describe("watching one turn, for its page", () => {
     const client = heldClient();
     const timers = manualTimers();
     const seen: Watched[] = [];
-    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), 50);
+    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), held(50));
     (await client.call_(0)).answer(turnAt());
     await flush();
     client.listener().events(CONTINUED.slice(0, 3), null);
     const again = await client.call_(1);
-    expect(again.query).toEqual({ run: RUN, from: 4 });
+    expect(again.query).toEqual({ run: RUN_SECOND, from: 4 });
     again.answer({ ...continuedTurn(), status: "running", trace: [] });
     timers.advance(50);
     await flush();
-    expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.nth, r.seq])).toEqual([
-      [RUN, 1, RECORDS.length],
-      [RUN, 2, 3],
+    expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.seq])).toEqual([
+      [RUN_FIRST, RECORDS.length],
+      [RUN_SECOND, 3],
     ]);
     expect(seen.at(-1)?.detail?.kind).toBe("continue");
     stop();
@@ -239,7 +242,7 @@ describe("watching one turn, for its page", () => {
     const seen: Watched[] = [];
     const first = underRun(RECORDED, "run-31a");
     const again = underRun(CONTINUED, "run-31b");
-    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), 50);
+    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), held(50));
     const opened = await client.call_(0);
     expect([opened.params, opened.query]).toEqual([{ chat: CHAT, turn: RUN }, { from: 1 }]);
     opened.answer(turnOf(first.slice(0, 30), { run: RUN, chat: CHAT, received: T0 }));

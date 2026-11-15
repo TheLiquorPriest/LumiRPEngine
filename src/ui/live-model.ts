@@ -4,6 +4,11 @@
 // result into one; every other record into a step of its own. Nothing an agent did is left out. Each
 // agent sits under the agent that started it, beside the tool call that did.
 //
+// Every run is held under RPH's own id for it, which each of its records, each piece of its streaming
+// text and each piece of what it sent to the chat carries; the turn it belongs to is in its records'
+// scope. A turn's continue is a run of its own under an id of its own, so records never go to a run by
+// a guess on order or time. A chat can have several runs going on at once (a turn and a job beside it).
+//
 // Records come in order from the live hub, and again from a read when the page catches up, so a record
 // already folded is passed over and one past a hole waits until the hole is filled. Every change makes
 // new objects only along its path (run, agent, step), so a view can tell what changed by identity.
@@ -77,11 +82,6 @@ export interface ReplySoFar {
 export interface RunNode {
   /** RPH's own id for the run, which its records, its streaming text and what it sent to the chat carry; RPE's own id for it, read before its first record is in. */
   readonly run: string;
-  /**
-   * Which run of its id this is, from 1. RPH names a turn's run by the turn, so a continue runs its turn
-   * again under the same name, its records numbered from 1 again (plan §10.10).
-   */
-  readonly nth: number;
   /** The turn it is a run of, as its records' scope names it, or the read that named the run; null for a run of no turn (a job the user started), or one heard of by nothing else yet. */
   readonly turn: string | null;
   readonly scope: Scope | null;
@@ -107,7 +107,7 @@ export interface RunNode {
 }
 
 export interface LiveModel {
-  /** In the order each was first heard of; the runs of one id in the order they ran. */
+  /** In the order each run was first heard of. */
   readonly runs: readonly RunNode[];
 }
 
@@ -116,37 +116,23 @@ export const EMPTY_LIVE: LiveModel = { runs: [] };
 const NO_STREAM = { text: "", thinking: "" } as const;
 const NO_REPLY: ReplySoFar = { text: "", progress: [], held: [] };
 
-function emptyRun(run: string, nth: number, turn: string | null = null): RunNode {
-  return { run, nth, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
+function emptyRun(run: string, turn: string | null = null): RunNode {
+  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
 }
 
 function withRun(model: LiveModel, next: RunNode): LiveModel {
-  const at = model.runs.findIndex((r) => r.run === next.run && r.nth === next.nth);
+  const at = model.runs.findIndex((r) => r.run === next.run);
   if (at < 0) return { runs: [...model.runs, next] };
   const runs = [...model.runs];
   runs[at] = next;
   return { runs };
 }
 
-/** The latest run of an id: the one a piece of streaming text, a piece of the reply or a read of the turn is about. */
-export function lastRunOf(model: LiveModel, run: string): RunNode | undefined {
-  return model.runs.findLast((r) => r.run === run);
+/** The run of an id: the one a record, a piece of streaming text, a piece of the reply or a read is about. */
+export function runOf(model: LiveModel, run: string): RunNode | undefined {
+  return model.runs.find((r) => r.run === run);
 }
 
-/**
- * The run a record is of. A continue begins only once the run before it has ended (the intake waits
- * for it), so the runs of one id are told apart by time: a record later than all the last run holds
- * that cannot follow on from it (the run had ended, or the record's number is one it has) begins the
- * next; any other is of the last run that began at or before it.
- */
-function runFor(model: LiveModel, record: TraceRecord): RunNode {
-  const runs = model.runs.filter((r) => r.run === record.run);
-  const last = runs.at(-1);
-  if (last === undefined) return emptyRun(record.run, 1);
-  const latest = Math.max(last.lastAt ?? Number.NEGATIVE_INFINITY, ...last.waiting.map((w) => w.at));
-  if (record.at > latest && (last.outcome !== null || record.seq <= last.seq || last.waiting.some((w) => w.seq === record.seq))) return emptyRun(record.run, last.nth + 1);
-  return runs.findLast((r) => (r.firstAt ?? Number.NEGATIVE_INFINITY) <= record.at) ?? last;
-}
 
 function lastIndex<T>(list: readonly T[], match: (item: T) => boolean): number {
   for (let i = list.length - 1; i >= 0; i--) if (match(list[i] as T)) return i;
@@ -268,7 +254,7 @@ function fold(run: RunNode, record: TraceRecord): RunNode {
 
 /** The model with one trace record in: folded when it follows its run's last, passed over when it is in already, held when it comes past a hole. */
 export function applyRecord(model: LiveModel, record: TraceRecord): LiveModel {
-  const found = runFor(model, record);
+  const found = runOf(model, record.run) ?? emptyRun(record.run);
   if (record.seq <= found.seq || found.waiting.some((w) => w.seq === record.seq)) return model;
   // Its turn is known from any record of it, one held past a hole included.
   const run = found.turn === null && record.scope.turn !== undefined ? { ...found, turn: record.scope.turn } : found;
@@ -287,7 +273,7 @@ export function applyRecord(model: LiveModel, record: TraceRecord): LiveModel {
 
 /** The model with a piece of a model call's streaming text in; a piece for a call not open here is let go, since the call's answer holds the whole. */
 export function applyDelta(model: LiveModel, delta: TraceDelta): LiveModel {
-  const run = lastRunOf(model, delta.run);
+  const run = runOf(model, delta.run);
   const agent = run?.agents.get(delta.agent);
   if (run === undefined || agent === undefined) return model;
   const i = lastIndex(agent.steps, (s) => s.kind === "call" && s.call === delta.call && s.answer === null);
@@ -321,7 +307,7 @@ function settleReply(text: string, progress: readonly string[], held: readonly {
 
 /** The model with a piece of what went to the chat in, at its place, so a piece heard twice changes nothing. */
 export function applyReply(model: LiveModel, piece: ReplyPiece): LiveModel {
-  const run = lastRunOf(model, piece.run) ?? emptyRun(piece.run, 1);
+  const run = runOf(model, piece.run) ?? emptyRun(piece.run);
   const reply = run.reply;
   if ("progress" in piece) {
     if (reply.progress[piece.line] === piece.progress) return model;
@@ -351,33 +337,34 @@ export function applyLive(model: LiveModel, event: LiveEvent): LiveModel {
 
 /**
  * The model with a read of one turn in: its records, and what went to the chat, which holds as far as it
- * goes. A read that says the turn has ended holds too, for a run whose records do not say so (a turn
- * read without its trace): its outcome is the read's. What a read says beside its records is of the
- * turn's latest run, by RPH's id for it; a run read before its first record is in goes under RPE's own
- * id for it, and gives way to RPH's once a read names that.
+ * goes. A read that says a run has ended holds too, for a run whose records do not say so (a turn read
+ * without its trace): its outcome is the read's. What a read says beside its records is of each of the
+ * turn's runs, by RPH's id for it; a run read before its first record is in goes under RPE's own id for
+ * it, and gives way to RPH's once a read names that.
  */
 export function applyRead(model: LiveModel, detail: TurnDetail): LiveModel {
   let next = model;
   for (const record of detail.trace) next = applyRecord(next, record);
   const named = new Set(detail.runs.flatMap((view) => (view.run === null ? [] : [view.id])));
   if (next.runs.some((r) => named.has(r.run))) next = { runs: next.runs.filter((r) => !named.has(r.run)) };
-  const latest = detail.runs.at(-1);
-  if (latest === undefined) return next;
-  const name = latest.run ?? latest.id;
-  const run = lastRunOf(next, name) ?? emptyRun(name, 1, detail.id);
-  const known = run.reply;
-  const text = known.text.length > detail.reply.text.length ? detail.reply.text + known.text.slice(detail.reply.text.length) : detail.reply.text;
-  const progress = Array.from({ length: Math.max(known.progress.length, detail.reply.progress.length) }, (_, i) => detail.reply.progress[i] ?? known.progress[i] ?? "");
-  const status = detail.status;
-  const outcome: RunOutcome | null = status !== "running" && run.outcome === null && run.waiting.length === 0 ? { status, released: detail.timings.released !== null, usage: detail.usage, ...(detail.error === null ? {} : { error: detail.error }) } : run.outcome;
-  const endedAt = outcome !== run.outcome ? detail.timings.ended : run.endedAt;
-  return withRun(next, { ...run, reply: settleReply(text, progress, known.held), outcome, endedAt, startedAt: run.startedAt ?? detail.timings.started });
+  for (const view of detail.runs) {
+    const name = view.run ?? view.id;
+    const run = runOf(next, name) ?? emptyRun(name, detail.id);
+    const known = run.reply;
+    const text = known.text.length > view.reply.text.length ? view.reply.text + known.text.slice(view.reply.text.length) : view.reply.text;
+    const progress = Array.from({ length: Math.max(known.progress.length, view.reply.progress.length) }, (_, i) => view.reply.progress[i] ?? known.progress[i] ?? "");
+    const status = view.status;
+    const outcome: RunOutcome | null = status !== "running" && run.outcome === null && run.waiting.length === 0 ? { status, released: view.timings.released !== null, usage: view.usage, ...(view.error === null ? {} : { error: view.error }) } : run.outcome;
+    const endedAt = outcome !== run.outcome ? view.timings.ended : run.endedAt;
+    next = withRun(next, { ...run, turn: run.turn ?? detail.id, reply: settleReply(text, progress, known.held), outcome, endedAt, startedAt: run.startedAt ?? view.timings.started });
+  }
+  return next;
 }
 
-/** A turn's runs as a read gives them, the first first, for the Turn page; one at least. */
+/** The runs of a turn, the first first, for the Turn page: each run its records' scope names the turn for; one at least. */
 export function runsOf(model: LiveModel, turn: string): RunNode[] {
-  const runs = model.runs.filter((r) => r.run === turn);
-  return runs.length > 0 ? runs : [emptyRun(turn, 1)];
+  const runs = model.runs.filter((r) => r.turn === turn);
+  return runs.length > 0 ? runs : [emptyRun(turn, turn)];
 }
 
 /** Where a read of the run should start to fill a hole, or null when nothing is missing. */
@@ -385,11 +372,26 @@ export function holeIn(run: RunNode): number | null {
   return run.waiting.length > 0 || run.reply.held.length > 0 ? run.seq + 1 : null;
 }
 
-/** The run heard of last that began, else the last heard of. */
-export function latestRun(model: LiveModel): RunNode | null {
-  let best: RunNode | null = null;
-  for (const run of model.runs) if (best === null || (run.startedAt ?? run.firstAt ?? 0) >= (best.startedAt ?? best.firstAt ?? 0)) best = run;
-  return best;
+/** The runs the Live page shows, in the order it shows them: those going on first, as each began, then those that ended, the one that ended last first. */
+export function shownRuns(model: LiveModel): RunNode[] {
+  const began = (run: RunNode): number => run.startedAt ?? run.firstAt ?? 0;
+  const going = model.runs.filter((run) => run.outcome === null).sort((a, b) => began(a) - began(b));
+  const ended = model.runs.filter((run) => run.outcome !== null).sort((a, b) => (b.endedAt ?? began(b)) - (a.endedAt ?? began(a)));
+  return [...going, ...ended];
+}
+
+/** What a run's Stop acts on: a turn's run stops its turn, a job's run cancels its job. */
+export type StopTarget = { readonly turn: string } | { readonly job: string };
+
+/** What a run's Stop acts on; null for a run nothing on the page stops (a talk with an agent, or a job or turn not yet named by a record). */
+export function stopOf(run: RunNode): StopTarget | null {
+  const kind = run.started?.run;
+  if (kind === "talk") return null;
+  if (kind === "job") {
+    const job = run.agents.get(run.roots[0] ?? "")?.ref.job;
+    return job === undefined ? null : { job };
+  }
+  return run.turn === null ? null : { turn: run.turn };
 }
 
 // ---------------------------------------------------------------- what the pages say of a run and its agents

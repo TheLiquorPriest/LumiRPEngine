@@ -3,8 +3,19 @@
 // the intent record costs before the reply begins (plan §10.3), shown beside the gate. And the turn as
 // its page shows it while it runs: its last read, with what the live road has said since.
 
-import type { TurnDetail, TurnTimings } from "./api";
+import type { TurnDetail, TurnRun, TurnTimings } from "./api";
 import { addUsage, type RunNode, runTotals } from "./live-model";
+
+/** The turn's view of a run the page holds the records of: the run the read names by RPH's id for it (RPE's own id before its first record), none for a run it does not list (a job the turn started). */
+export function viewOf(views: readonly TurnRun[], run: RunNode): TurnRun | undefined {
+  return views.find((view) => (view.run ?? view.id) === run.run);
+}
+
+/** The run the turn's head and reply are of: that of its latest view; the last the page holds where the read names none. */
+export function latestOf(detail: TurnDetail, runs: readonly RunNode[]): RunNode | undefined {
+  const last = detail.runs.at(-1);
+  return (last === undefined ? undefined : runs.find((run) => run.run === (last.run ?? last.id))) ?? runs.at(-1);
+}
 
 /**
  * The turn as its page shows it: its last read, with what its latest run has said on the live road

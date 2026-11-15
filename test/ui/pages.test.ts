@@ -8,15 +8,14 @@ import { h } from "preact";
 import type { TurnList, TurnSummary } from "../../src/ui/api";
 import type { Route } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
-import { applyLive, applyRead, EMPTY_LIVE, lastRunOf, latestRun, type RunNode, runsOf } from "../../src/ui/live-model";
+import { applyLive, applyRead, EMPTY_LIVE, runOf, runsOf } from "../../src/ui/live-model";
 import { ChatsView } from "../../src/ui/pages/chats";
-import { LiveView, type LiveViewProps, type StopPress } from "../../src/ui/pages/live";
 import { type FolderShown, NO_FOLDER, readFolder, readTurns, TURN_SECTIONS, TurnsView, TurnView, type TurnsRead, type TurnViewProps } from "../../src/ui/pages/turns";
 import { siteStorage } from "../../src/ui/ui-settings";
 import { hashOf, routeOfHash, storedTokens } from "../../src/ui/web";
 import { liveTurn } from "../../src/ui/turn-model";
-import { AUTHOR, CHAT, CHATS, CONTINUED, CONTINUED_REPLY, continuedTurn, EARLIER, earlierTurn, GM, INTENT, LORE, MOIRA, RECORDED, RECORDS, REPLY, requestFile, RUN, TOTAL, turnAt } from "./recorded";
-import { banners, elements, expand, press, textOf } from "./vnodes";
+import { AUTHOR, CHAT, CHATS, continuedTurn, CONTINUED_REPLY, EARLIER, earlierTurn, GM, INTENT, LORE, MOIRA, RECORDED, RECORDS, REPLY, requestFile, RUN, RUN_FIRST, RUN_SECOND, TOTAL, turnAt } from "./recorded";
+import { elements, expand, press, textOf } from "./vnodes";
 
 const RULING = "Ruling: her story does not hold.";
 const THINKING = "She lied to the harbourmaster";
@@ -44,6 +43,7 @@ function turnView(over: Partial<TurnViewProps> = {}): { text: string; tree: unkn
     onLive: () => pressed.push("live"),
     onRead: () => pressed.push("read"),
     onOpenFile: (name) => pressed.push(`file:${name}`),
+    onOpenRequest: (name) => pressed.push(`request:${name}`),
     onCloseFile: () => pressed.push("close-file"),
     ...over,
   };
@@ -140,11 +140,11 @@ describe("the Turn page", () => {
     expect(shut.text).not.toContain("is not shown");
     const open = turnView({ turn, gateOpen: true });
     const byRun = elements(open.tree)
-      .filter((e) => e.props["data-run-nth"] !== undefined && elements(e.props.children).some((c) => c.props["data-agent"] !== undefined))
-      .map((e) => [e.props["data-run-nth"], elements(e.props.children).flatMap((c) => (c.type === "details" && typeof c.props["data-agent"] === "string" ? [c.props["data-agent"]] : []))]);
+      .filter((e) => e.props["data-run-of"] !== undefined && elements(e.props.children).some((c) => c.props["data-agent"] !== undefined))
+      .map((e) => [e.props["data-run-of"], elements(e.props.children).flatMap((c) => (c.type === "details" && typeof c.props["data-agent"] === "string" ? [c.props["data-agent"]] : []))]);
     expect(byRun).toEqual([
-      [1, ["a1", "a2", "a3"]],
-      [2, ["a1"]],
+      [RUN_FIRST, ["a1", "a2", "a3"]],
+      [RUN_SECOND, ["a1"]],
     ]);
   });
 
@@ -160,22 +160,32 @@ describe("the Turn page", () => {
     const open = turnView({ folder, gateOpen: true });
     for (const name of ["briefing.md", "world-state.md", requestFile(AUTHOR, 1)]) expect(open.text).toContain(name);
     press(open.tree, "world-state.md");
-    // Each agent's first call, by the request file the run names for it.
+    // Each agent's first call, by the request file the run names for it: its request is rebuilt by RPE, not read as a file.
     for (const agent of [AUTHOR, GM, MOIRA]) press(open.tree, `${agent.definition} (${agent.id}), call 1`);
-    expect(open.pressed).toEqual(["file:world-state.md", ...[AUTHOR, GM, MOIRA].map((a) => `file:${requestFile(a, 1)}`)]);
+    expect(open.pressed).toEqual(["file:world-state.md", ...[AUTHOR, GM, MOIRA].map((a) => `request:${requestFile(a, 1)}`)]);
 
-    // A request kept as the harness writes it is laid out as its messages, in order.
-    const request = { messages: [{ role: "system", text: "You are the Author of this story." }, { role: "user", text: "Ash: Why did the lamp go dark?" }] };
-    const sent = turnView({ gateOpen: true, folder: { ...folder, open: { name: requestFile(AUTHOR, 1), text: JSON.stringify(request), problem: null } } });
-    expect(sent.text).toContain("systemYou are the Author of this story.");
-    expect(sent.text).toContain("userAsh: Why did the lamp go dark?");
+    // A request rebuilt exactly as it was sent is laid out as its messages, in order, each said to be the turn's files or added to them.
+    const request = {
+      same: true,
+      messages: [
+        { role: "system", text: "You are the Author of this story.", block: "opening" },
+        { role: "user", text: "Ash: Why did the lamp go dark?", block: "prompt" },
+      ],
+      tools: [{ name: "todo" }],
+    };
+    const sent = turnView({ gateOpen: true, folder: { ...folder, open: { name: requestFile(AUTHOR, 1), text: null, request, problem: null } } });
+    expect(sent.text).toContain("systemaddedopeningYou are the Author of this story.");
+    expect(sent.text).toContain("userthe turn's filespromptAsh: Why did the lamp go dark?");
+    // One that does not rebuild to what was sent shows none of it.
+    const unsure = turnView({ gateOpen: true, folder: { ...folder, open: { name: requestFile(AUTHOR, 1), text: null, request: { ...request, same: false, messages: [] }, problem: null } } });
+    expect(unsure.text).toContain("This request cannot be shown as it was sent");
     // Any other file is its text as written; one RPE would not give says why in its words.
-    const state = turnView({ gateOpen: true, folder: { ...folder, open: { name: "world-state.md", text: "## The lamp room\nDusk; wind from the north.", problem: null } } });
+    const state = turnView({ gateOpen: true, folder: { ...folder, open: { name: "world-state.md", text: "## The lamp room\nDusk; wind from the north.", request: null, problem: null } } });
     expect(state.text).toContain("## The lamp room\nDusk; wind from the north.");
     press(state.tree, "Close");
     expect(state.pressed).toEqual(["close-file"]);
     const refused = "Turn turn-31's folder has no file notes.md.";
-    expect(turnView({ gateOpen: true, folder: { ...folder, open: { name: "notes.md", text: null, problem: refused } } }).text).toContain(refused);
+    expect(turnView({ gateOpen: true, folder: { ...folder, open: { name: "notes.md", text: null, request: null, problem: refused } } }).text).toContain(refused);
   });
 
   test("the turn's folder is read when asked for, a file by its path; only the file open now is shown, and nothing once the page has left", async () => {
@@ -199,10 +209,10 @@ describe("the Turn page", () => {
     folder.open("briefing.md");
     asked[1]?.answer({ name: "world-state.md", text: "Dusk." });
     await settle();
-    expect(shown.at(-1)?.open).toEqual({ name: "briefing.md", text: null, problem: null });
+    expect(shown.at(-1)?.open).toEqual({ name: "briefing.md", text: null, request: null, problem: null });
     asked[2]?.fail(new Error("Turn turn-31's folder has no file briefing.md."));
     await settle();
-    expect(shown.at(-1)?.open).toEqual({ name: "briefing.md", text: null, problem: "Turn turn-31's folder has no file briefing.md." });
+    expect(shown.at(-1)?.open).toEqual({ name: "briefing.md", text: null, request: null, problem: "Turn turn-31's folder has no file briefing.md." });
     folder.close();
     expect(shown.at(-1)?.open).toBeNull();
     folder.open("turn.json");
@@ -217,74 +227,15 @@ describe("the Turn page", () => {
     const read = turnAt(20);
     expect(read.status).toBe("running");
     const heard = RECORDED.slice(20).reduce(applyLive, applyRead(EMPTY_LIVE, read));
-    const shown = liveTurn(read, lastRunOf(heard, RUN));
+    const shown = liveTurn(read, runOf(heard, RUN_FIRST));
     expect(shown.status).toBe("released");
     expect(shown.usage).toEqual(TOTAL);
     expect(shown.timings.released).toBe(RECORDS.find((r) => r.event.kind === "released")?.at as number);
     expect(shown.timings.ended).toBe(RECORDS.at(-1)?.at as number);
-    const midway = liveTurn(read, lastRunOf(RECORDED.slice(20, 54).reduce(applyLive, applyRead(EMPTY_LIVE, read)), RUN));
+    const midway = liveTurn(read, runOf(RECORDED.slice(20, 54).reduce(applyLive, applyRead(EMPTY_LIVE, read)), RUN_FIRST));
     expect(midway.status).toBe("running");
     expect(midway.usage.calls).toBe(4);
     expect(turnView({ turn: shown, gateOpen: false }).text).toContain("Reply released");
-  });
-});
-
-function liveView(run: RunNode | null, over: Partial<LiveViewProps> = {}): { text: string; tree: unknown; pressed: string[] } {
-  const pressed: string[] = [];
-  const props: LiveViewProps = {
-    chat: CHAT,
-    run,
-    loading: false,
-    problem: null,
-    now: run?.lastAt ?? 0,
-    gateOpen: false,
-    stop: null,
-    onStop: () => pressed.push("stop"),
-    onOpenGate: () => pressed.push("open"),
-    onCloseGate: () => pressed.push("close"),
-    onOpenTurn: () => pressed.push("turn"),
-    ...over,
-  };
-  const tree = expand(h(LiveView, props));
-  return { text: textOf(tree), tree, pressed };
-}
-
-describe("the Live page", () => {
-  // Midway through the Author's writing: three pieces of the reply have gone to the chat.
-  const midway = latestRun(RECORDED.slice(0, 54).reduce(applyLive, EMPTY_LIVE));
-
-  test("while a turn runs: its head, Stop, and the reply as far as it has streamed; the agents behind the gate", () => {
-    expect(midway?.outcome).toBeNull();
-    const shut = liveView(midway);
-    expect(shut.text).toContain("Running now");
-    expect(shut.text).toContain(midway?.reply.text.slice(0, 20) ?? "");
-    expect(shut.text).not.toContain(INTENT.split("\n")[0] as string);
-    press(shut.tree, "Stop");
-    expect(shut.pressed).toEqual(["stop"]);
-    expect(liveView(midway, { stop: { chat: CHAT, run: RUN, nth: 1, problem: null } }).text).toContain("Stopping…");
-
-    const open = liveView(midway, { gateOpen: true });
-    expect(open.text).toContain(INTENT.split("\n")[0] as string);
-    expect(elements(open.tree).filter((e) => e.type === "details" && e.props["data-agent"] !== undefined).length).toBe(3);
-  });
-
-  test("once it has ended, it shows the last turn, with no Stop", () => {
-    const ended = latestRun(RECORDED.reduce(applyLive, EMPTY_LIVE));
-    const { text, tree } = liveView(ended);
-    expect(text).toContain("The last turn");
-    expect(text).toContain("Reply released");
-    expect(elements(tree).some((e) => e.type === "button" && textOf(e.props.children) === "Stop")).toBe(false);
-  });
-
-  test("a chat with no turn on RPE yet says so", () => {
-    expect(liveView(null).text).toContain("No turn has run on RPE in this chat yet");
-    expect(liveView(null, { loading: true }).text).toContain("Reading this chat's turns");
-  });
-
-  test("when the chat's turns could not be read, it says so, and not that none has run", () => {
-    const { text } = liveView(null, { problem: "RPE did not answer: Failed to fetch" });
-    expect(text).toContain("RPE did not answer: Failed to fetch");
-    expect(text).not.toContain("No turn has run");
   });
 });
 
@@ -319,7 +270,7 @@ describe("the Turns page", () => {
       }) as RpeClient["call"],
     };
     const inFirst: TurnsRead[] = [];
-    const first = readTurns(client, CHAT, (read) => inFirst.push(read));
+    const first = readTurns(client, CHAT, 30, (read) => inFirst.push(read));
     asked[0]?.answer({ turns: EARLIER.slice(0, 2), more: true });
     await settle();
     expect(inFirst.at(-1)?.turns.map((t) => t.id)).toEqual(["turn-30", "turn-29"]);
@@ -329,7 +280,7 @@ describe("the Turns page", () => {
     first.stop();
     const shownBefore = inFirst.length;
     const inSecond: TurnsRead[] = [];
-    readTurns(client, "chat-orchard", (read) => inSecond.push(read));
+    readTurns(client, "chat-orchard", 30, (read) => inSecond.push(read));
     asked[2]?.answer({ turns: [{ ...EARLIER[0], id: "turn-o1" } as (typeof EARLIER)[number]], more: false });
     await settle();
     asked[1]?.answer({ turns: EARLIER.slice(2), more: false });
@@ -350,7 +301,7 @@ describe("the Turns page", () => {
     const [t30, t29, t28] = EARLIER as [TurnSummary, TurnSummary, TurnSummary];
     const t31: TurnSummary = { ...t30, id: "turn-31" };
     const shown: TurnsRead[] = [];
-    const reader = readTurns(client, CHAT, (read) => shown.push(read));
+    const reader = readTurns(client, CHAT, 30, (read) => shown.push(read));
     asked[0]?.answer({ turns: [t30, t29], more: true });
     await settle();
     reader.more();
@@ -385,46 +336,9 @@ describe("the Turns page", () => {
   });
 });
 
-describe("the Live page's Stop", () => {
-  const first = latestRun(RECORDED.slice(0, 54).reduce(applyLive, EMPTY_LIVE));
-  // The same turn, continued: a second run under the same id, going on now.
-  const continuing = latestRun([...RECORDED, ...CONTINUED.slice(0, 4)].reduce(applyLive, EMPTY_LIVE));
-  const ended = latestRun(RECORDED.reduce(applyLive, EMPTY_LIVE));
-  const pressed = (over: Partial<StopPress> = {}): StopPress => ({ chat: CHAT, run: RUN, nth: 1, problem: null, ...over });
-  /** The Stop button's words, and whether it can be pressed. */
-  const stopButton = (tree: unknown) =>
-    elements(tree)
-      .filter((e) => e.type === "button" && ["Stop", "Stopping…"].includes(textOf(e.props.children)))
-      .map((e) => ({ words: textOf(e.props.children), disabled: e.props.disabled === true }));
-
-  test("it says Stopping… only for the run it was pressed for, in its chat: a continue of the same turn can be stopped again", () => {
-    expect([first?.run, first?.nth, first?.outcome]).toEqual([RUN, 1, null]);
-    expect([continuing?.run, continuing?.nth, continuing?.outcome]).toEqual([RUN, 2, null]);
-    expect(stopButton(liveView(first, { stop: pressed() }).tree)).toEqual([{ words: "Stopping…", disabled: true }]);
-    expect(stopButton(liveView(continuing, { stop: pressed() }).tree)).toEqual([{ words: "Stop", disabled: false }]);
-    // A Stop pressed in another chat counts for nothing here.
-    expect(stopButton(liveView(first, { stop: pressed({ chat: "chat-orchard" }) }).tree)).toEqual([{ words: "Stop", disabled: false }]);
-  });
-
-  test("a Stop that did not go through says why in RPE's words, under its own title and not as a read problem, and can be pressed again", () => {
-    const refusal = "RPE answered 503.";
-    const unread = "RPE has no turn turn-31 in this chat.";
-    const shown = liveView(first, { stop: pressed({ problem: refusal }), problem: unread });
-    const said = banners(shown.tree).filter((b) => b.title !== "Spoilers are hidden");
-    expect(said.map((b) => [b.title, b.text.includes(refusal), b.text.includes(unread)])).toEqual([
-      ["Part of this chat could not be read", false, true],
-      ["Stop did not go through", true, false],
-    ]);
-    expect(stopButton(shown.tree)).toEqual([{ words: "Stop", disabled: false }]);
-    // It goes with the run it was pressed for: once that run has ended, or the turn runs again, it is not shown.
-    expect(liveView(ended, { stop: pressed({ problem: refusal }) }).text).not.toContain(refusal);
-    expect(liveView(continuing, { stop: pressed({ problem: refusal }) }).text).not.toContain(refusal);
-  });
-});
-
 describe("the web shell's addresses", () => {
   test("each page's address leads back to it", () => {
-    const routes: Route[] = [{ page: "chats" }, { page: "live", chat: CHAT }, { page: "turns", chat: "chat a/b" }, { page: "turn", chat: CHAT, turn: "turn-31" }];
+    const routes: Route[] = [{ page: "chats" }, { page: "live", chat: CHAT }, { page: "turns", chat: "chat a/b" }, { page: "turns", chat: CHAT, at: ["turn-31"] }];
     for (const route of routes) expect(routeOfHash(hashOf(route))).toEqual(route);
     expect(routeOfHash("")).toEqual({ page: "chats" });
     expect(routeOfHash("#/chats/x/nowhere/at/all")).toEqual({ page: "live", chat: "x" });
