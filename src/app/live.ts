@@ -107,9 +107,10 @@ const callPermission = shape.named(
 );
 const callRefusal = shape.named(
   "CallRefusal",
-  "Why a tool call never ran: a limit spent before it started, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, or a permission or rule that could not be asked.",
+  "Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, or a permission or rule that could not be asked.",
   shape.union(
     shape.object({ by: shape.literal("limit"), hit: limitHit }),
+    shape.object({ by: shape.literal("answer"), max: N }),
     shape.object({ by: shape.literal("switch"), thing: shape.object({ kind: shape.oneOf("hook", "rule-command", "command-tool", "mcp-server", "http-tool", "connection"), name: T, target: T }), state: shape.oneOf("on", "waiting", "off") }),
     shape.object({ by: shape.literal("never"), lane: T }),
     shape.object({ by: shape.literal("declined"), lane: T, reason: opt(T) }),
@@ -168,6 +169,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("call_started"), call: N, connection: T, model: T, sampling: opt(sampling), maxTokens: opt(N), messages: N, tools: N, request: opt(T), toolTokens: opt(N), openingTokens: opt(N) }),
     shape.object({ kind: shape.literal("call_ended"), call: N, model: T, text: T, thinking: opt(T), toolCalls: shape.list(toolCall), stop: T, usage, ms: N, error: opt(T) }),
     shape.object({ kind: shape.literal("connection_wait"), connection: T, for: shape.oneOf("minute", "place"), ms: opt(N) }),
+    shape.object({ kind: shape.literal("waiting"), for: shape.oneOf("tool", "agent"), callId: T, tool: T, ms: opt(N) }),
     shape.object({ kind: shape.literal("connection_stand_in"), named: T, used: T }),
     shape.object({ kind: shape.literal("tool_started"), callId: T, tool: T, args: shape.json(), closing: shape.yesNo(), via: opt(shape.literal("tool_use")) }),
     shape.object({ kind: shape.literal("tool_update"), callId: T, tool: T, partial: toolResult }),
