@@ -121,15 +121,11 @@ function bookTexts(books: LoreBooks): BookReader {
   };
 }
 
-/** The machine's clock, its day in the machine's own time zone. */
+/** The machine's clock. */
 export const MACHINE_CLOCK: Clock = {
   now: () => Date.now(),
   setTimeout: (run, ms) => setTimeout(run, ms),
   clearTimeout: (handle) => clearTimeout(handle as Timer),
-  day: (at) => {
-    const d = new Date(at ?? Date.now());
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  },
 };
 
 /**
