@@ -1,14 +1,17 @@
 // A continue as Lumiverse makes one (plan §10.8, §10.10 "Continue": the same turn, extended; its changes are added to). Lumiverse
-// announces a continue naming the swipe it goes on and no message, and saves the text that swipe held, the preset's continue postfix,
-// then the new text. RPE goes on with the turn the message is tied to, ties it again to the joined text, and tells the next turn
-// nothing of the join; a continue that saved only the join saved nothing new. And a continue plays in the session its turn played in,
-// even where that turn moved the story on to a new scene. Played through the stand-in Lumiverse, which makes a continue as Lumiverse
-// does (its postfix one space unless the preset says otherwise), on the scripted model. Every name is invented.
+// announces a continue naming the swipe it goes on and no message, sends the prompt with that reply moved to its end, the preset's
+// continue postfix on it and the continue nudge after it, and saves the text that swipe held, the postfix, then the new text. RPE goes
+// on with the turn the message is tied to, ties it again to the joined text, and tells the next turn nothing of the join; a continue
+// that saved only the join saved nothing new. And a continue plays in the session its turn played in, even where that turn moved the
+// story on to a new scene. Played through the stand-in Lumiverse on the scripted model. The postfix is the preset's own: where a test
+// leans on a single space, the bed's preset says it, as Lumiverse's default preset does (`src/auth/default-preset.ts:316`). Every
+// name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import { type Answer, gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import type { StopAnswer, TurnList } from "../../src/ui/api";
+import { CONTINUE_NUDGE } from "../standin/assembly";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -35,13 +38,25 @@ const PASS_TIME: Answer = { pieces: [{ text: "<intent>Then the storm.</intent>" 
 /** The kinds of what the harness was told had happened since the last turn, in its `n`th request. */
 const toldKinds = (b: TurnBed, n: number): string[] => b.requests[n]!.since.map((s) => s.kind);
 
+/** The last `n` messages of the request Lumiverse sent the connection. */
+const sentLast = (out: { body: Record<string, unknown> | null }, n: number): unknown[] => (out.body!.messages as unknown[]).slice(-n);
+
 test("a continue as Lumiverse announces and saves it extends the turn its reply is tied to: the same turn, on the path, tied to the joined text, with what it recorded; the next turn is told nothing of the join", async () => {
   const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, replying("And the sea calms."), replying("Wren nods.")] });
   const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  b.host.presets.get(PRESET)!.continuePostfix = " ";
   const store = b.turns.store.user(USER);
   const before = store.changes(turn.id);
 
-  const generation = await play(b, "continue");
+  const continuing = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
+  expect(continuing.error).toBeNull();
+  const generation = continuing.generationId!;
+  // The reply it goes on is sent last, out of the history, with the postfix on it, and the nudge after it (`prompt-assembly.service.ts:742-775`).
+  expect(sentLast(continuing, 3)).toEqual([
+    { role: "user", content: "I climb the stairs." },
+    { role: "assistant", content: "The lamp turns. " },
+    { role: "system", content: CONTINUE_NUDGE },
+  ]);
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, generation)?.settled ?? null) !== null && b.turns.runs.ofChat(USER, CHAT).length === 0);
   expect(String(b.db.rows("SELECT content FROM messages WHERE id = ?", turn.message!)[0]!.content)).toBe("The lamp turns. And the sea calms.");
   expect(b.turns.runs.byGeneration(USER, generation)).toMatchObject({ turn: turn.id, target: turn.message, saved: null });
@@ -55,12 +70,22 @@ test("a continue as Lumiverse announces and saves it extends the turn its reply 
   expect(toldKinds(b, 2)).not.toContain("saved-differs");
 });
 
-test("a continue Lumiverse saved with the preset's join is not told as saved otherwise than released", async () => {
+test.each([
+  ["its own postfix", "\n\n"],
+  ["no postfix, as the preset sets none", undefined],
+] as const)("a continue Lumiverse saved with %s is not told as saved otherwise than released", async (_, postfix) => {
   const b = await bed({ answers: [replying("The lamp turns."), replying("And the sea calms."), replying("Wren nods.")] });
-  b.host.presets.get(PRESET)!.continuePostfix = "\n\n";
+  if (postfix !== undefined) b.host.presets.get(PRESET)!.continuePostfix = postfix;
   const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
-  await settledTurn(b, await play(b, "continue"));
-  expect(b.turns.store.user(USER).turn(turn.id)).toMatchObject({ status: "done", hash: textHash("The lamp turns.\n\nAnd the sea calms.") });
+  const continuing = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
+  expect(continuing.error).toBeNull();
+  // The same postfix, or none, on the reply in the prompt and between the two texts when it is saved (`generate.service.ts:1969-1978`).
+  expect(sentLast(continuing, 2)).toEqual([
+    { role: "assistant", content: `The lamp turns.${postfix ?? ""}` },
+    { role: "system", content: CONTINUE_NUDGE },
+  ]);
+  await settledTurn(b, continuing.generationId!);
+  expect(b.turns.store.user(USER).turn(turn.id)).toMatchObject({ status: "done", hash: textHash(`The lamp turns.${postfix ?? ""}And the sea calms.`) });
   await settledTurn(b, await play(b, "normal", "I wait for the dawn."));
   expect(toldKinds(b, 2)).not.toContain("saved-differs");
 });
@@ -68,6 +93,7 @@ test("a continue Lumiverse saved with the preset's join is not told as saved oth
 test("a continue stopped before its first word, which Lumiverse saved as the text and the preset's join, saved nothing new: what it recorded is taken back, and the next turn is told nothing of it", async () => {
   const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, { pieces: [{ hold: gate() }, { text: "<reply> Then it stops.</reply>" }] }, replying("Wren nods.")] });
   const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  b.host.presets.get(PRESET)!.continuePostfix = " ";
   const store = b.turns.store.user(USER);
   const before = store.changes(turn.id);
   const continuing = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });

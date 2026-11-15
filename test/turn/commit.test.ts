@@ -1,13 +1,16 @@
 // Commit (plan §6.3, §10.8, §10.10): a turn is tied to what its generation saved, read back from the
 // swipe that generation wrote, whatever swipe the player looks at by then and whether or not the end
 // was heard; and what a continue recorded leaves with it when it saves nothing new. Played through the
-// stand-in Lumiverse as the player would. Every name is invented.
+// stand-in Lumiverse as the player would, a continue sent and saved as Lumiverse does it, with the
+// preset's own postfix: where a test leans on a single space, the bed's preset says it, as Lumiverse's
+// default preset does (`src/auth/default-preset.ts:316`). Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { type Answer, gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import type { ChangeRow, TurnRow } from "../../src/store";
 import type { StopAnswer } from "../../src/ui/api";
+import { CONTINUE_NUDGE } from "../standin/assembly";
 import type { Outcome } from "../standin/lumiverse";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
@@ -149,14 +152,21 @@ describe("what a continue recorded", () => {
     expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
     const out = await continuing;
     expect(out.stopped).toBe(true);
-    // Lumiverse keeps a stopped continue with a thinking block, here RPE's progress line: the text and the preset's join.
-    await asBefore(b, turn, before, out.generationId!, "The lamp turns. ");
+    // Lumiverse keeps a stopped continue with a thinking block, here RPE's progress line: the text and the preset's postfix, here none,
+    // as the preset sets none (`generate.service.ts:3638-3650`).
+    await asBefore(b, turn, before, out.generationId!, "The lamp turns.");
   });
 
   test("a continue whose model fails saves nothing new, and what it recorded on its turn is taken back", async () => {
     const { b, turn, before, continuing } = await continued({ pieces: [], end: { error: "The provider went away." } });
     const out = await continuing;
     expect(out.error).not.toBeNull();
+    // It was sent as Lumiverse sends a continue: the reply it goes on with last, out of the history, with no postfix, as the preset sets
+    // none, and the nudge after it (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`).
+    expect((out.body!.messages as unknown[]).slice(-2)).toEqual([
+      { role: "assistant", content: "The lamp turns." },
+      { role: "system", content: CONTINUE_NUDGE },
+    ]);
     await asBefore(b, turn, before, out.generationId!, "The lamp turns.");
   });
 
@@ -172,6 +182,7 @@ describe("what a continue recorded", () => {
   test("a continue that saves its text keeps what it recorded", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, replying("Then it stops.")] });
     const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    b.host.presets.get(PRESET)!.continuePostfix = " ";
     const store = b.turns.store.user(USER);
     const before = store.changes(turn.id);
     await play(b, "continue");

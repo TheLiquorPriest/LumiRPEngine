@@ -153,10 +153,12 @@ describe("the question before lore activates", () => {
 
 describe("the request's parts, told apart", () => {
   const MODES = ["", "merge", "semi", "strict", "single"];
+  /** The preset's prefill, which Lumiverse sends as a partial last message (`prompt-assembly.service.ts:4183-4192`). */
+  const PREFILL = "PREFILL-HARBOR Ilsa looks up from the nets and";
   for (const post of MODES) {
     for (const collapse of [false, true]) {
       test(`post-processing "${post || "none"}", collapse ${collapse ? "on" : "off"}: every part of the body is accounted for by the tag`, async () => {
-        const rig = await new Rig({ postProcessing: post, collapse, prefill: "", picture: true }).start();
+        const rig = await new Rig({ postProcessing: post, collapse, prefill: PREFILL, picture: true }).start();
         const out = await rig.generate("conn-rpe");
         expect(out.error).toBeNull();
         const turn = rig.turns[0]!;
@@ -176,10 +178,15 @@ describe("the request's parts, told apart", () => {
           expect(text.slice(at)).toBe("");
         });
         expect(historyOf(turn)).toEqual(["m8", "m9", "m10", "m11"]);
+        // The prefill is the body's last part, as the tag listed it: the partial assistant message that ends the prompt.
+        expect(turn.tag.messages.at(-1)).toMatchObject({ role: "assistant", partial: true, hash: textHash(PREFILL) });
+        const last = turn.layout.messages.at(-1)!.parts.at(-1)!;
+        expect([last.role, last.kind, last.hash]).toEqual(["assistant", "other", textHash(PREFILL)]);
+        expect(promptText([turn.prompt.at(-1)!]).endsWith(PREFILL)).toBe(true);
       });
 
       test(`post-processing "${post || "none"}", collapse ${collapse ? "on" : "off"}: a window RPE cuts on receipt gives the prompt Lumiverse makes when the extension cuts`, async () => {
-        const options = { postProcessing: post, collapse, prefill: "", picture: true };
+        const options = { postProcessing: post, collapse, prefill: PREFILL, picture: true };
         const cutByExtension = await new Rig(options).start();
         await cutByExtension.generate("conn-rpe");
         const cutByRpe = await new Rig({ ...options, windowFailsAtQuestion: true }).start();
@@ -193,6 +200,19 @@ describe("the request's parts, told apart", () => {
       });
     }
   }
+
+  test("an empty prefill sends nothing: no message ends the prompt but the player's, and the tag lists no partial one", async () => {
+    // `prompt-assembly.service.ts:4159-4162`, `:4183`: with no "Start Reply With" and an empty prefill, no assistant message is pushed.
+    const rig = await new Rig({ prefill: "" }).start();
+    const out = await rig.generate("conn-rpe");
+    expect(out.error).toBeNull();
+    const sent = out.body!.messages as { role: string; content: unknown }[];
+    expect(sent.at(-1)).toMatchObject({ role: "user" });
+    expect(promptText([sent.at(-1)!])).toContain("HIST-11 And I wait.");
+    const turn = rig.turns[0]!;
+    expect(turn.tag.messages.some((m) => m.partial === true)).toBe(false);
+    expect(turn.tag.messages.at(-1)).toMatchObject({ role: "user", history: true, source: { id: "m11" } });
+  });
 
   test("the second reply's layout names the prompt's blocks from the breakdown Lumiverse stored after the first", async () => {
     const rig = await new Rig().start();

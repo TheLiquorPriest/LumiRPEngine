@@ -2,14 +2,17 @@
 // start as they stood at that point. Its first turn plays in a session of the branch's own, forked from
 // the session its branch point played in, so the Author has what it did there. The branch is made as
 // Lumiverse makes one: each message copied in its place under a new id, the chat it came from and the
-// message it was made at in its metadata. Played through the stand-in Lumiverse on the scripted model.
-// Every name is invented.
+// message it was made at in its metadata. A continue in it is sent as Lumiverse sends one: the reply it
+// goes on with last, with the preset's postfix (here none, as the bed's preset sets none) and the
+// continue nudge after it. Played through the stand-in Lumiverse on the scripted model. Every name is
+// invented.
 
 import { afterEach, expect, test } from "bun:test";
 import { gate } from "rp-harness/testing/rig";
 import type { TurnRow } from "../../src/store";
 import { sceneSession } from "../../src/story";
 import type { TurnList } from "../../src/ui/api";
+import { CONTINUE_NUDGE } from "../standin/assembly";
 import { CHARACTER, CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -81,7 +84,14 @@ test("a continue in a branch of the reply it shares with the chat it was made fr
   const sourcePath = store.path(CHAT);
 
   branchAtLastReply(b);
-  const continued = await settledInBranch(b, (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET, type: "continue" })).generationId!);
+  const continuing = await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET, type: "continue" });
+  // The branch's reply is sent last, out of its history, with no postfix, as the preset sets none, and the nudge after it
+  // (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`).
+  expect((continuing.body!.messages as unknown[]).slice(-2)).toEqual([
+    { role: "assistant", content: "The lamp turns." },
+    { role: "system", content: CONTINUE_NUDGE },
+  ]);
+  const continued = await settledInBranch(b, continuing.generationId!);
   const saved = String(b.db.rows("SELECT content FROM messages WHERE id = ?", "m-again-2")[0]!.content);
   expect(saved).toStartWith("The lamp turns.");
   expect(saved).toEndWith("And the sea calms.");

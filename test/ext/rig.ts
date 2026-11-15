@@ -71,6 +71,7 @@ export interface RigOptions {
   deadlineMs?: number;
   postProcessing?: string;
   collapse?: boolean;
+  /** The preset's prefill (`completionSettings.assistantPrefill`). */
   prefill?: string;
   /** A picture on the player's last message but one. */
   picture?: boolean;
@@ -191,7 +192,7 @@ export class Rig {
     this.lv.councilBlock = options.council ?? null;
     this.lv.connections.set("conn-rpe", { id: "conn-rpe", base: `${RPE}/v1`, key: PROVIDER_KEY, model: "rpe" });
     this.lv.connections.set("conn-other", { id: "conn-other", base: `${OTHER}/v1`, key: "other-key", model: "other" });
-    this.lv.presets.set(PRESET.id, { ...PRESET, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { prefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });
+    this.lv.presets.set(PRESET.id, { ...PRESET, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { assistantPrefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });
     const messages = harborMessages();
     if (options.picture) messages[10] = { ...messages[10]!, images: [{ data: "aGFyYm9y", mime_type: "image/png" }] };
     this.chat = {

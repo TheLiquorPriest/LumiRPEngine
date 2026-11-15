@@ -4,7 +4,7 @@
 // stage that the briefing's header names; a secret a book attached to the chat marks can be held; the
 // cast's facts count who the open scene has on stage; and what a sub-agent the lead drops, or a continue
 // that saves nothing, wrote to the cast and the story is taken back with its changes. Played through the
-// stand-in Lumiverse on the scripted model. Every name is invented.
+// stand-in Lumiverse on the scripted model, a continue sent as Lumiverse sends one. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
@@ -12,6 +12,7 @@ import { type Answer, gate } from "rp-harness/testing/rig";
 import { knowersOf } from "../../src/packs/minds/core/knowledge";
 import type { TurnRow } from "../../src/store";
 import { world } from "../iface/rig";
+import { CONTINUE_NUDGE } from "../standin/assembly";
 import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -160,6 +161,12 @@ test("a continue that saves nothing new takes back what it wrote to the cast and
   expect(rowsOf(b, turn.id).cast.length).toBeGreaterThan(before.cast.length);
   const out = await continuing;
   expect(out.error).not.toBeNull();
+  // The continue was sent as Lumiverse sends it: the reply it goes on with last, out of the history, with no postfix, as the preset sets
+  // none, and the nudge after it (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`).
+  expect((out.body!.messages as unknown[]).slice(-2)).toEqual([
+    { role: "assistant", content: "The lamp turns." },
+    { role: "system", content: CONTINUE_NUDGE },
+  ]);
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, out.generationId!)?.settled ?? null) !== null);
 
   expect(rowsOf(b, turn.id)).toEqual(before);
