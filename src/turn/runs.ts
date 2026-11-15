@@ -6,7 +6,7 @@
 // earlier ones, and the turn as the pages show it is its latest run.
 
 import type { Database } from "bun:sqlite";
-import type { ReplyError, RunStatus, TurnKind, Usage } from "rp-harness/contract";
+import type { ReplyError, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { Writes } from "./kv";
 
 /** Where a run stands: going on, or how it ended. */
@@ -40,6 +40,8 @@ export interface FolderWrite {
 export interface RunRecord {
   /** The run's own id: a continue runs its turn again under a new one. */
   id: string;
+  /** RPH's own id for the run, which its trace records and streaming text carry as their `run`; null until its first record. */
+  traceRun: string | null;
   user: string;
   turn: string;
   chat: string;
@@ -106,6 +108,7 @@ export interface Run extends RunRecord {
 
 interface RunRow {
   id: string;
+  trace_run: string | null;
   turn: string;
   chat: string;
   session: string;
@@ -137,6 +140,7 @@ interface RunRow {
 function recordOf(user: string, r: RunRow): RunRecord {
   return {
     id: r.id,
+    traceRun: r.trace_run,
     user,
     turn: r.turn,
     chat: r.chat,
@@ -181,9 +185,9 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intake, wait, folder, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (user, id) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intake, wait, folder, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
          intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
          usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved,
@@ -191,6 +195,7 @@ export class Runs {
       [
         r.user,
         r.id,
+        r.traceRun,
         r.turn,
         r.chat,
         r.session,
@@ -250,10 +255,12 @@ export class Runs {
     return [...new Set([...this.#running.values()].map((r) => r.chat))];
   }
 
-  /** The chat a run is played in, for a piece of streaming text, which names only its run (the turn's id). */
-  chatOfRun(run: string): string | null {
-    for (const r of this.#running.values()) if (r.turn === run) return r.chat;
-    return null;
+  /** A turn's run began in RPH: the run of the turn going on now takes RPH's own id for it, from the run's `run_started` (a job's is none of RPE's runs). */
+  started(record: TraceRecord): void {
+    const turn = record.scope.turn;
+    if (record.event.kind !== "run_started" || record.event.run !== "turn" || turn === undefined) return;
+    const run = this.running(record.scope.user, turn);
+    if (run !== undefined) run.traceRun = record.run;
   }
 
   /** A turn's run as it stands: the one going on now, else its latest as kept. */

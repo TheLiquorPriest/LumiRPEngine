@@ -242,4 +242,12 @@ ALTER TABLE turn_run ADD COLUMN wait TEXT;
 ALTER TABLE turn_run ADD COLUMN folder TEXT;
 `,
   },
+  {
+    version: 9,
+    name: "RPH's own id for each run",
+    // The `run` its trace records and streaming text carry (`runs.ts` `traceRun`). A run kept before has none, and reads as null.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN trace_run TEXT;
+`,
+  },
 ];

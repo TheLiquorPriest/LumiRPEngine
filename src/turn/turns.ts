@@ -438,6 +438,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const over = Promise.withResolvers<void>();
       const run: Run = {
         id: crypto.randomUUID(),
+        traceRun: null,
         user,
         turn: begun.id,
         chat,
@@ -664,6 +665,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const over = Promise.withResolvers<void>();
       const run: Run = {
         id: crypto.randomUUID(),
+        traceRun: null,
         user,
         turn: turn.id,
         chat,
@@ -1273,16 +1275,21 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
+    // What went to the chat is published under RPH's own id for the run, as its records are, so a page hangs it on the run it belongs
+    // to; RPH gives the run's first record before any of it.
+    const piece = (data: { from: number; text: string } | { line: number; progress: string }): void => {
+      if (run.traceRun !== null) live.publish(run.chat, { kind: "reply", data: { run: run.traceRun, ...data } });
+    };
     const sink: ReplySink = {
       progress: (line) => {
         out.progress(line);
-        live.publish(run.chat, { kind: "reply", data: { run: run.turn, line: run.progress.length, progress: line } });
+        piece({ line: run.progress.length, progress: line });
         run.progress.push(line);
       },
       content: (delta) => {
         if (run.firstWord === null) run.firstWord = clock.now();
         out.content(delta);
-        live.publish(run.chat, { kind: "reply", data: { run: run.turn, from: run.reply.length, text: delta } });
+        piece({ from: run.reply.length, text: delta });
         run.reply += delta;
       },
       finish: (usage) => {

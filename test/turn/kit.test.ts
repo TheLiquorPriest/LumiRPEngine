@@ -88,7 +88,7 @@ runKitPart("RPE's trace", "trace", async (seed, place) => {
   const tree = await layTree(seed, place);
   const live = new LiveHub({ queueEvents: 100, now: () => 0 });
   const quiet = () => undefined;
-  const trace = turnTrace({ live, files: tree.port, chatOfRun: () => seed.scope.chat, log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
+  const trace = turnTrace({ live, files: tree.port, runStarted: quiet, log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
   return {
     trace,
     async close() {

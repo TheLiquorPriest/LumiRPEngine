@@ -250,7 +250,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: numbersOf(global, STORY_FACT_SETTING_DEFS, app.log) }));
-  const trace = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
+  const trace = turnTrace({ live: app.live, files, runStarted: (record) => runs.started(record), log: app.log });
   // The chat port's reads of Lumiverse; one that cannot be made fails in the words of the turn-errors part in force for the chat.
   const chatNow = async (scope: Scope): Promise<ChatReads> => {
     const parts = options.lumiverse();

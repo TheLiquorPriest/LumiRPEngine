@@ -1,7 +1,8 @@
 // RPE's trace port (`TracePort` in `rp-harness/contract`): everything RPH does goes to the live hub, on
 // the chat the run is played in, and into the turn's folder (plan §5.3 `transcripts/`): one file of
 // JSON lines per agent, each record as RPH gave it. Streaming text goes to the live hub only; the
-// call's `call_ended` holds it whole.
+// call's `call_ended` holds it whole. A piece of streaming text names only its run, by RPH's own id for
+// it: its chat is the one its run's records name, each run's first record coming before any piece of it.
 
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,8 +21,8 @@ export function transcriptName(agent: { id: string; definition: string }): strin
 export interface TraceDeps {
   live: LiveHub;
   files: TreeFiles;
-  /** The chat a run is played in, for a piece of streaming text, which names only its run. */
-  chatOfRun(run: string): string | null;
+  /** A run's `run_started`, its first record, as RPH gave it: the turn's runs learn RPH's own id for each of theirs from it. */
+  runStarted(record: TraceRecord): void;
   log: Log;
 }
 
@@ -36,6 +37,17 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
   const pending = new Set<Promise<unknown>>();
   /** Appends to one file run in the order given. */
   const tails = new Map<string, Promise<unknown>>();
+  /** The chat of each run going on, by RPH's id for the run, from its records; let go when the run ends. */
+  const chats = new Map<string, string>();
+
+  /** Follows which runs are going on, and where: a turn's run ends with its `run_ended`, a job's with the view that says it ended. */
+  const follow = (record: TraceRecord): void => {
+    const { event } = record;
+    if (event.kind === "run_started") deps.runStarted(record);
+    if (event.kind === "run_ended") chats.delete(record.run);
+    else if (event.kind === "job" && event.job.ended !== undefined) chats.delete(event.job.id);
+    else chats.set(record.run, record.scope.chat);
+  };
 
   const folderOf = (scope: Scope): Promise<string | null> => {
     const key = JSON.stringify([scope.user, scope.chat, scope.session, scope.turn ?? null]);
@@ -66,12 +78,13 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
 
   return {
     event(record) {
+      follow(record);
       deps.live.publish(record.scope.chat, { kind: "trace", data: record });
       keep(record);
     },
     delta(delta: TraceDelta) {
-      const chat = deps.chatOfRun(delta.run);
-      if (chat !== null) deps.live.publish(chat, { kind: "delta", data: delta });
+      const chat = chats.get(delta.run);
+      if (chat !== undefined) deps.live.publish(chat, { kind: "delta", data: delta });
     },
     async flush() {
       while (pending.size > 0) await Promise.allSettled([...pending]);
