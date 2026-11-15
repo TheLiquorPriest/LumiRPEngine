@@ -14,6 +14,7 @@ import { dataPaths, lineLog, openApp } from "../../src/app";
 import type { KeyKind } from "../../src/app/auth";
 import type { CliIO } from "../../src/app/cli";
 import { configOf } from "../../src/app/config";
+import { isRecord } from "../../src/shared/json";
 
 export const OWNER = "user-owner";
 export const LUMIVERSE = "http://127.0.0.1:7860";
@@ -91,6 +92,15 @@ export function cliIo(answers: { secret?: string | null } = {}): CliIO & { outs:
     stopped: () => stop.promise,
     stop: () => stop.resolve(),
     fetch: (url, init) => fetch(url, init),
+  };
+}
+
+/** A user's connection's key as the layer's secrets document keeps it (`keys`, by connection id); null where it has none. */
+export function storedKey(port: ModelsPort): (user: string, id: string) => Promise<string | null> {
+  return async (user, id) => {
+    const doc = await port.loadSecrets({ user });
+    const key = isRecord(doc) && isRecord(doc.keys) ? doc.keys[id] : undefined;
+    return typeof key === "string" ? key : null;
   };
 }
 

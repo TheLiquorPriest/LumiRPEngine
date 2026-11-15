@@ -16,8 +16,9 @@
 // writer. They act for the user this RPE belongs to, never for one a caller names. A key is written
 // through them and never read back: what they return shows only whether a key is set, none of the
 // key itself. A connection is shown with its model's limits as RPH uses them (the user's override,
-// else pi's, else what the provider's server reported), and tested with one small call, whose answer
-// never carries the key, even where the provider's words repeat it.
+// else pi's, else what the provider's server reported), or why they could not be read, which is
+// logged; and tested with one small call, whose answer never carries the key: RPH's model layer
+// takes every secret out of a provider's words, and nothing here does it again.
 
 import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, Log, ModelLimits, ModelsApi, ModelsPort, UserScope } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
@@ -214,12 +215,13 @@ type TestMirrored = Holds<Exactly<Infer<typeof connectionTest>, ConnectionTest>>
 type LimitsMirrored = Holds<Exactly<Infer<typeof limits>, ModelLimits>>;
 type InputMirrored = Holds<Exactly<Infer<typeof connectionInput>, ConnectionInput>>;
 
+const limitsProblem = opt(shape.nullable(T), "Why its model's limits could not be read; null where they were read, each of them known or not.");
 const connectionShown = shape.named(
   "ConnectionShown",
-  "A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them.",
-  shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo() })), limitsInForce: shape.nullable(limits) }),
+  "A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read, where they could not.",
+  shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo() })), limitsInForce: shape.nullable(limits), limitsProblem }),
 );
-/** A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them. */
+/** A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read. */
 export type ConnectionShown = Infer<typeof connectionShown>;
 
 const connectionsShown = shape.named("ConnectionsShown", "The connections as shown, the default, and the providers offered.", shape.object({ connections: shape.list(connectionShown), ...providers }));
@@ -227,39 +229,27 @@ export type ConnectionsShown = Infer<typeof connectionsShown>;
 
 const connectionTested = shape.named(
   "ConnectionTested",
-  "A connection's test: how long it took, and the model that answered or the provider's words; and that model's limits where RPH knows them.",
-  shape.union(shape.object({ ...tested.ok, limits: shape.nullable(limits) }), shape.object({ ...tested.failed, limits: shape.nullable(limits) })),
+  "A connection's test: how long it took, and the model that answered or the provider's words; and that model's limits where RPH knows them, or why they could not be read.",
+  shape.union(shape.object({ ...tested.ok, limits: shape.nullable(limits), limitsProblem }), shape.object({ ...tested.failed, limits: shape.nullable(limits) })),
 );
-/** A connection's test: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them. */
+/** A connection's test: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them, or why they could not be read. */
 export type ConnectionTested = Infer<typeof connectionTested>;
 
-/** A model's limits as RPH uses them; null for a connection whose model RPH cannot place (a provider no longer offered, say). */
-async function limitsOf(api: ConnectionsApi, user: string, id: string, model?: string): Promise<ModelLimits | null> {
+/** A model's limits as RPH uses them, or why they could not be read (a provider no longer offered, a catalogue that failed), which is logged. */
+async function limitsOf(api: ConnectionsApi, log: Log, user: string, id: string, model?: string): Promise<{ limits: ModelLimits | null; problem: string | null }> {
   try {
-    return await api.limits(user, id, model);
-  } catch {
-    return null;
+    return { limits: await api.limits(user, id, model), problem: null };
+  } catch (error) {
+    const problem = error instanceof Error ? error.message : String(error);
+    log.warn("a connection's model limits could not be read", { connection: id, ...(model === undefined ? {} : { model }), error: problem });
+    return { limits: null, problem };
   }
 }
 
-async function shown(api: ConnectionsApi, user: string, view: ConnectionView): Promise<ConnectionShown> {
+async function shown(api: ConnectionsApi, log: Log, user: string, view: ConnectionView): Promise<ConnectionShown> {
   const { key, ...rest } = view;
-  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: view.model === undefined ? null : await limitsOf(api, user, view.id) };
-}
-
-/** A provider's words with the key taken out, and the end of it a provider shows of one ("sk-…abcd"). */
-function withoutKey(words: string, key: string | null): string {
-  if (key === null || key === "") return words;
-  return words.replaceAll(key, "(the key)").replaceAll(key.slice(-4), "…");
-}
-
-/** A user's connection's key as the layer's secrets document keeps it (`keys`, by connection id); null where it has none. */
-export function storedKey(port: ModelsPort): (user: string, id: string) => Promise<string | null> {
-  return async (user, id) => {
-    const doc = await port.loadSecrets({ user });
-    const key = isRecord(doc) && isRecord(doc.keys) ? doc.keys[id] : undefined;
-    return typeof key === "string" ? key : null;
-  };
+  const read = view.model === undefined ? { limits: null, problem: null } : await limitsOf(api, log, user, view.id);
+  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: read.limits, limitsProblem: read.problem };
 }
 
 const saveConnection = shape.named(
@@ -282,9 +272,9 @@ async function layer<T>(call: () => Promise<T>): Promise<T> {
 /**
  * The routes to list, add, change and remove a connection, choose the default and test one, over the
  * model layer, each for the user this RPE belongs to (`owner`), whoever the caller's credential names.
- * `keyOf` gives a user's connection's stored key, only so that a test's answer can be cleared of it.
+ * `log` hears of a model's limits that could not be read.
  */
-export function connectionRoutes(api: ConnectionsApi, keyOf: (user: string, id: string) => Promise<string | null>, owner: () => string) {
+export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: Log) {
   return [
     route({
       method: "GET",
@@ -296,7 +286,7 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (user: string, id: 
       handle: async () => {
         const user = owner();
         const list = await api.list(user);
-        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, user, c))) };
+        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, log, user, c))) };
       },
     }),
     route({
@@ -309,7 +299,7 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (user: string, id: 
       reply: connectionShown,
       handle: async ({ body }) => {
         if (body.connection.id !== undefined) throw new RouteError(400, "A new connection has no id: to change one, PUT /api/v1/connections/<its id>.");
-        return await shown(api, owner(), await layer(() => api.save(owner(), body.connection, body.key)));
+        return await shown(api, log, owner(), await layer(() => api.save(owner(), body.connection, body.key)));
       },
     }),
     route({
@@ -320,7 +310,7 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (user: string, id: 
       does: "Changes a connection, whole: a field left out is cleared; its key stays when the body leaves it out, and goes when it is null.",
       body: saveConnection,
       reply: connectionShown,
-      handle: async ({ params, body }) => await shown(api, owner(), await layer(() => api.save(owner(), { ...body.connection, id: params.id }, body.key))),
+      handle: async ({ params, body }) => await shown(api, log, owner(), await layer(() => api.save(owner(), { ...body.connection, id: params.id }, body.key))),
     }),
     route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", group: "connections", does: "Removes a connection, and its key.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.remove(owner(), params.id)) }),
     route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", group: "connections", does: "Makes a connection the default.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.setDefault(owner(), params.id)) }),
@@ -334,8 +324,9 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (user: string, id: 
       handle: async ({ params, signal }) => {
         const user = owner();
         const test = await api.test(user, params.id, signal);
-        if (test.ok) return { ...test, limits: await limitsOf(api, user, params.id, test.model) };
-        return { ...test, error: withoutKey(test.error, await keyOf(user, params.id)), limits: null };
+        if (!test.ok) return { ...test, limits: null };
+        const read = await limitsOf(api, log, user, params.id, test.model);
+        return { ...test, limits: read.limits, limitsProblem: read.problem };
       },
     }),
   ] as const;

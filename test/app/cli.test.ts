@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes, rawRoute, storedKey } from "../../src/app";
+import { connectionRoutes, rawRoute } from "../../src/app";
 import { runCli, USAGE } from "../../src/app/cli";
 import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
 
@@ -42,7 +42,7 @@ describe("rpe", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", group: "provider", does: "A test's provider endpoint.", answers: "a chat completion", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);
+            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", group: "provider", does: "A test's provider endpoint.", answers: "a chat completion", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), () => OWNER, a.log)]);
           },
         },
       ],

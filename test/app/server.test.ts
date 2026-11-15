@@ -188,7 +188,7 @@ describe("the server", () => {
       config: { hosts: ["rpe.example"], origins: ["https://lumiverse.example"] },
       areas: [
         { name: "probe", mount: (a) => a.routes.add("probe", [echo, ...notes, places, moored, lights, ...joinedProbes]) },
-        { name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models), async () => null, () => a.config.lumiverse.user ?? "")) },
+        { name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models), () => a.config.lumiverse.user ?? "", a.log)) },
       ],
     });
     server = await app.start();

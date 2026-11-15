@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, te
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import type { App } from "../../src/app";
-import { connectionRoutes, storedKey } from "../../src/app";
+import { connectionRoutes } from "../../src/app";
 import { runCli } from "../../src/app/cli";
 import { withWriter } from "../../src/app/commands/writer";
 import { DataFolderBusy, lockHolder, takeFolderLock } from "../../src/app/data-folder";
@@ -177,7 +177,7 @@ describe("one writer, while RPE runs", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => ACCOUNT.id));
+            a.routes.add("probe", connectionRoutes(testModelLayer(a.models), () => ACCOUNT.id, a.log));
             captured.resolve(a);
           },
         },

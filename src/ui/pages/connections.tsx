@@ -13,8 +13,9 @@ import { duration, errorWords, num } from "../words";
 
 const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
 
-/** A model's limits as RPH uses them, and where each comes from. */
-export function limitsWords(limits: ModelLimits | null): string {
+/** A model's limits as RPH uses them, and where each comes from; or, where they could not be read, why, apart from a limit nobody knows. */
+export function limitsWords(limits: ModelLimits | null, problem: string | null = null): string {
+  if (problem !== null) return `Its limits could not be read: ${problem.replace(/\.$/, "")}`;
   const one = (label: string, limit: ModelLimit | null | undefined): string => (limit === null || limit === undefined ? `${label}: not known` : `${label}: ${num(limit.tokens)} tokens, ${FROM_WORDS[limit.from]}`);
   return `${one("Context window", limits?.contextWindow)} · ${one("Longest reply", limits?.maxTokens)}`;
 }
@@ -276,7 +277,7 @@ function TestShown(props: { test: ConnectionTestShown; view: ConnectionShown; on
   const other = view.model !== undefined && view.model !== null && tested.model !== view.model && Object.keys(fill).length > 0;
   return (
     <div class="lre-stack">
-      <p class="rpe-line" data-tested="ok">{`It answered in ${duration(tested.ms)}, as ${tested.model}. ${limitsWords(tested.limits)}.`}</p>
+      <p class="rpe-line" data-tested="ok">{`It answered in ${duration(tested.ms)}, as ${tested.model}. ${limitsWords(tested.limits, tested.limitsProblem ?? null)}.`}</p>
       {other ? (
         <div class="lre-inline rpe-wrap" data-offer="limits">
           <span class="rpe-meta">{`The provider answered as ${tested.model}, not ${view.model}, so RPH does not use these figures for this connection unless you take them as its own.`}</span>
@@ -301,7 +302,7 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
       <div class="lre-section-body lre-stack">
         <p class="rpe-line">{said}</p>
         <p class="rpe-meta">{keyWords(view)}</p>
-        <p class="rpe-meta" data-limits={view.id}>{`${limitsWords(view.limitsInForce)}.`}</p>
+        <p class="rpe-meta" data-limits={view.id}>{`${limitsWords(view.limitsInForce, view.limitsProblem ?? null)}.`}</p>
         {action.kind === "remove" && action.id === view.id ? (
           <div class="lre-inline rpe-wrap">
             <span>Remove {view.name}?</span>

@@ -250,7 +250,7 @@ export interface ConnectionInput {
   limits?: { [key: string]: ModelLimitsEntry } | null;
 }
 
-/** A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them. */
+/** A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read, where they could not. */
 export interface ConnectionShown {
   id: string;
   name: string;
@@ -282,6 +282,8 @@ export interface ConnectionShown {
   signedIn?: boolean;
   key: { set: boolean } | null;
   limitsInForce: ModelLimits | null;
+  /** Why its model's limits could not be read; null where they were read, each of them known or not. */
+  limitsProblem?: string | null;
 }
 
 /** The connections as shown, the default, and the providers offered. */
@@ -291,8 +293,8 @@ export interface ConnectionsShown {
   providers: ProviderOffer[];
 }
 
-/** A connection's test: how long it took, and the model that answered or the provider's words; and that model's limits where RPH knows them. */
-export type ConnectionTested = { ok: true; ms: number; model: string; limits: ModelLimits | null } | { ok: false; ms: number; error: string; limits: ModelLimits | null };
+/** A connection's test: how long it took, and the model that answered or the provider's words; and that model's limits where RPH knows them, or why they could not be read. */
+export type ConnectionTested = { ok: true; ms: number; model: string; limits: ModelLimits | null; limitsProblem?: string | null } | { ok: false; ms: number; error: string; limits: ModelLimits | null };
 
 /** One line of a difference between two texts: in both, only in the second, or only in the first. */
 export interface DiffRow {

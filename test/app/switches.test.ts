@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes, METHODS, route, shape, storedKey } from "../../src/app";
+import { connectionRoutes, METHODS, route, shape } from "../../src/app";
 import { runCli } from "../../src/app/cli";
 import { bearer, type Bed, cliIo, LUMIVERSE, makeBed, makeKey, OWNER, testModelLayer, writeConfig } from "./helpers";
 
@@ -43,7 +43,7 @@ describe("the switches", () => {
               reply: shape.object({ changed: shape.number() }),
               handle: async ({ body }) => ({ changed: await a.writes.run((db) => db.run(body.sql).changes) }),
             });
-            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);
+            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), () => OWNER, a.log)]);
           },
         },
       ],

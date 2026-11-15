@@ -21,7 +21,7 @@ export {
   type DataPaths,
   type Env,
 } from "./config";
-export { connectionRoutes, MODELS_KEY, modelsPort, storedKey, type ConnectionShown, type ConnectionsApi, type ConnectionsShown, type ConnectionTested, type SaveConnection } from "./connections";
+export { connectionRoutes, MODELS_KEY, modelsPort, type ConnectionShown, type ConnectionsApi, type ConnectionsShown, type ConnectionTested, type SaveConnection } from "./connections";
 export { openDatabase, WriteQueue, WritesClosed, WriteWaited } from "./database";
 export { agentRef, effort, Following, jobView, layerLevel, limitHit, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, replyError, scope, TOKEN_PROTOCOL_PREFIX, traceRecord, usage, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader } from "./live";
 export { migrate, MIGRATION_AREAS, MigrationError, Migrations, type Migration, type MigrationArea, type MigrationOutcome } from "./migrations";

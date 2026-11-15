@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, draftOf, testConnection } from "../../src/ui/pages/connections";
+import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, draftOf, limitsWords, testConnection } from "../../src/ui/pages/connections";
 import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../../src/shared/api";
 import { duration } from "../../src/ui/words";
 import { askingClient, settle } from "./asking";
@@ -151,5 +151,11 @@ describe("the Connections page", () => {
     expect([values.contextWindow?.value, values.maxTokens?.value]).toEqual(["", ""]);
     type("deepseek-v4-flash");
     expect([values.contextWindow?.value, values.maxTokens?.value]).toEqual(["64000", ""]);
+  });
+
+  test("limits that could not be read say why, apart from limits nobody knows", () => {
+    const unread = view({ list: { ...LIST, connections: [{ ...KEYED, limitsInForce: null, limitsProblem: "The model catalogue could not be read: its file is not JSON." }] } });
+    expect(textOf(elements(unread.tree).find((e) => e.props["data-limits"] === "c-flash")?.props.children)).toBe("Its limits could not be read: The model catalogue could not be read: its file is not JSON.");
+    expect(limitsWords(null)).toBe("Context window: not known · Longest reply: not known");
   });
 });
