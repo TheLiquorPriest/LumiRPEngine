@@ -80,6 +80,8 @@ export class Fixtures {
   preset(spec: { id: string; name: string; blocks: readonly Block[]; more?: Partial<Preset> }): string {
     const blocks = spec.blocks.some((b) => b.marker === "chat_history") ? [...spec.blocks] : [...spec.blocks, { id: "b-history", name: "Chat History", role: "system" as const, content: "", marker: "chat_history" as const }];
     this.host.presets.set(spec.id, { id: spec.id, name: spec.name, blocks, ...spec.more });
+    // Lumiverse's routes read the preset's row, a generation the host's map: both are kept.
+    this.host.db?.run("INSERT INTO presets (id, name, provider, user_id) VALUES (?, ?, 'custom', ?)", spec.id, spec.name, RIG_USER);
     return spec.id;
   }
 

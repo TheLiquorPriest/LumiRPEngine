@@ -142,6 +142,8 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
         { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" },
       ],
     });
+    // Generation reads the preset from the host's map; Lumiverse's own routes (the drawer's Preset tab, the floor's reader) read its row: both are kept.
+    db.run("INSERT INTO presets (id, name, provider, user_id) VALUES (?, ?, 'custom', ?)", RIG_PRESET, "Lamp", RIG_USER);
     if (options.messages !== null) host.addChat({ id: RIG_CHAT, user: RIG_USER, name: RIG_CHAT_NAME, character: RIG_CHARACTER, messages: options.messages ?? [{ id: "m-greeting", role: "assistant", content: RIG_GREETING }] });
 
     return { app, listening, composition, turns, host, server, db, data, pageToken, webToken, until, close };
