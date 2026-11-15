@@ -4,8 +4,8 @@
 // view can't land after a newer one.
 
 import { describe, expect, test } from "bun:test";
-import type { ContextHandlerInput, ContextVerdict, HostPort, QuietRequest } from "../../src/backend/host";
-import { OPEN_CHATS_CAP, toChain } from "../../src/backend/ledger-io";
+import type { ContextHandlerInput, ContextVerdict, HostPort, QuietRequest } from "../../src/shared/host";
+import { OPEN_CHATS_CAP, toChain } from "../../src/migrate/today/ledger-io";
 import { StatePush, VIEWS_KEPT } from "../../src/backend/push";
 import { placeOfEntity } from "../../src/engine/scope";
 import { applyDelta } from "../../src/frontend/delta";

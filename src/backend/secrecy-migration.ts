@@ -32,10 +32,10 @@ import { bookLoreFieldsOf, engineWroteEntry, loreIsSecret, type BookLoreFields }
 import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView, SecrecyState } from "../shared/protocol";
 import { hasSecretMarks, secretMarkProblem, writeSecretMark } from "../shared/secret-marks";
 import { bookEntryTitle } from "./book-lore";
-import type { HostBookEntry, HostEntryPatch, HostPort } from "./host";
+import type { HostBookEntry, HostEntryPatch, HostPort } from "../shared/host";
 import { pinBooks } from "./lore-pins";
 import { secretCopyOf } from "../shared/lore";
-import { CORRUPT_SUFFIX, setAside } from "./stored-json";
+import { CORRUPT_SUFFIX, setAside } from "../worlds/stored-json";
 
 type Host = Pick<HostPort, "books" | "chats" | "storage" | "log">;
 

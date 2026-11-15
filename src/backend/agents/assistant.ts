@@ -42,8 +42,8 @@ import type { AssistantMessage, AssistantProposal, AssistantProposalOp, Assistan
 import { PROTOCOL_VERSION, WRITE_REFUSED } from "../../shared/protocol";
 import type { ErrorCode } from "../../shared/protocol";
 import { tokensOf } from "../book";
-import { messageOf } from "../diagnostics";
-import { toChain } from "../ledger-io";
+import { messageOf } from "../../migrate/today/diagnostics";
+import { toChain } from "../../migrate/today/ledger-io";
 import { renderPrompt } from "../prompts";
 import { ACTIVE_CONNECTION, type LandedWrites, type Runtime } from "../runtime";
 import { recordOutcome } from "../settings-store";

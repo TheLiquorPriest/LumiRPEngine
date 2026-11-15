@@ -22,18 +22,9 @@ import { PROTOCOL_VERSION } from "../shared/protocol";
 import { blobHash, DAY_MS, isBlobHash, RETENTION_DEFAULTS } from "../shared/stores";
 import type { TimeoutFired } from "../shared/timeouts";
 import type { BlobStore } from "./agents/blobs";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
-
-/** Where a record belongs: the chat, its owner, and the generation (null outside a turn). */
-export interface DiagAt {
-  chatId: ChatId;
-  userId: UserId;
-  turn: string | null;
-}
-
-/** A step's verdict when it returned without throwing but didn't do its work. */
-export type DiagVerdict = { status: "skipped" | "failed"; reason: string; fix?: string } | null;
+import type { HostPort } from "../shared/host";
+import { readStoredJson } from "../worlds/stored-json";
+import { type DiagAt, type DiagVerdict, messageOf } from "../migrate/today/diagnostics";
 
 export type DiagHost = Pick<HostPort, "storage" | "log" | "frontend">;
 
@@ -134,10 +125,6 @@ function storedRecord(raw: unknown): DiagRecord | null {
   const call = agent === undefined ? null : agentCallOf(agent);
   const own = steps === undefined ? [] : stepsOf(steps);
   return { ...rest, ...(call ? { agent: call } : {}), ...(own.length > 0 ? { steps: own } : {}) };
-}
-
-export function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

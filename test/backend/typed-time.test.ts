@@ -13,7 +13,7 @@ import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { resolveTarget } from "../../src/engine/time";
 import { TIME_LIMITS } from "../../src/engine/time-limits";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { interpretedTarget } from "../../src/backend/runtime";
 import type { BeatMinds } from "../../src/backend/skip";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";

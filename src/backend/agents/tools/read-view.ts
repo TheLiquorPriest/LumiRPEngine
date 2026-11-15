@@ -38,10 +38,10 @@ import { applyMarks, type SecretMarkWording, secretMarkText } from "../../../sha
 import type { LoreEntryDef, WorldDoc } from "../../../shared/world";
 import { loreBookIds } from "../../book-lore";
 import { markWording } from "../../prompts";
-import type { HostBookEntry } from "../../host";
+import type { HostBookEntry } from "../../../shared/host";
 import { latestTexts } from "../../gm";
 import { chatRead } from "../../chat-read";
-import { toChain } from "../../ledger-io";
+import { toChain } from "../../../migrate/today/ledger-io";
 import { renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
 import type { ToolOutcome } from "../runtime";

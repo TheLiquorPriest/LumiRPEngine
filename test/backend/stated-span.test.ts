@@ -3,8 +3,8 @@
 // the rest (§9.2); the Timelapse it offers holds the POV in the span it stated, as a typed span does.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { objOf } from "../../src/engine/pack-kit";
 import { placeOfEntity } from "../../src/engine/scope";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";

@@ -19,7 +19,7 @@ import { UI_VERSION } from "lumi-ah/shared";
 import { mountHarness } from "../../src/backend/harness/mount";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { ENGINE_EXTENSION } from "../../src/shared/protocol";
-import type { HostEventName } from "../../src/backend/host";
+import type { HostEventName } from "../../src/shared/host";
 import type { FakeHost, Generation } from "./fake-host";
 import { hostChatOf, hostMessageOf, lumiverseRows, rowToChat, rowToMessage } from "./lumiverse-rows";
 import type { Rig } from "./rig";

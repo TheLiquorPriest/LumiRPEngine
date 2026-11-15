@@ -5,8 +5,8 @@
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { HostPort } from "../shared/host";
+import { readStoredJson } from "../worlds/stored-json";
 
 export interface PlanLines {
   outcome: string[];

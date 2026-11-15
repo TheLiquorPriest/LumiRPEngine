@@ -1,7 +1,7 @@
 // The whole backend on the fake host: runtime, dispatcher and job runner, driven over the protocol.
 
 import type { BuildInfo } from "../../src/backend/agents";
-import type { HostPort, QuietRequest } from "../../src/backend/host";
+import type { HostPort, QuietRequest } from "../../src/shared/host";
 import { isRecord } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
 import type { BackendToFrontend, FrontendToBackend } from "../../src/shared/protocol";
@@ -10,7 +10,7 @@ import { enginePack } from "../../src/engine/engine-pack";
 import { planTurn, postTurn } from "../../src/engine/turn";
 import { Dispatcher } from "../../src/backend/dispatch";
 import { JobRunner } from "../../src/backend/jobs";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { Runtime } from "../../src/backend/runtime";
 import { applyDelta } from "../../src/frontend/delta";
 import { FakeHost } from "./fake-host";

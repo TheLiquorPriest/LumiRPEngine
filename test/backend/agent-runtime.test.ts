@@ -3,7 +3,7 @@
 // acceptance guard, cancel mid-call, streaming, effort and thinking with tools, caching, usage, and the settings.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietMessage, QuietRequest, QuietResult, QuietToolCall } from "../../src/backend/host";
+import type { QuietMessage, QuietRequest, QuietResult, QuietToolCall } from "../../src/shared/host";
 import { ACCEPTANCE_PATH, type AccountsClock, AgentAccounts, effortChoice, ownBreakpoints, recoverToolCalls } from "../../src/backend/agents/provider";
 import { type AgentSpec, type AgentTool, AgentTurn, SCRATCH_READ, startAgent } from "../../src/backend/agents/runtime";
 import { parseUsage } from "../../src/backend/agents/usage";

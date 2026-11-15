@@ -25,7 +25,7 @@ import { WORLD_TOOL } from "../../src/shared/harness-texts-world";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { promptDef, type PromptTexts } from "../../src/shared/prompts";
 import type { UserSettings } from "../../src/shared/settings";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { stateOf } from "../support/mind-chat";
 import { alderChat, toolEnv } from "../support/tools";
 

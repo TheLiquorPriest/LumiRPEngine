@@ -13,7 +13,7 @@
 // 4979-4989`, `world-info-interceptor.ts:384-392`), so it never throws and its deadline is well inside
 // that.
 
-import type { WorldInfoCandidate } from "../backend/host";
+import type { WorldInfoCandidate } from "../shared/host";
 import { textOf } from "../backend/lore-secrets";
 import type { PathStep, Question, QuestionEntry } from "../adapter/lumiverse/wire";
 import { isRecord, type JsonObject } from "../shared/json";

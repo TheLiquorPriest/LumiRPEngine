@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { noFacts, runsOf } from "../../src/backend/turn-steps";
 import { baseWorld } from "../packs/support";
 import { Rig } from "../support/rig";

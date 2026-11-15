@@ -18,7 +18,7 @@ import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { ChangeType, UserSettings } from "../../../shared/settings";
 import type { WorldState } from "../../../engine/state";
-import type { HostPort } from "../../host";
+import type { HostPort } from "../../../shared/host";
 import type { StageBook } from "../../story/narration";
 import type { StoryPort } from "../../story/record";
 import type { OpRefusal } from "./writer";

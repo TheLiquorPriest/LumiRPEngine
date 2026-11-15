@@ -19,16 +19,16 @@ import type { LoreBooks, StepConfig } from "../shared/settings";
 import type { Limit } from "../shared/minds";
 import { firedTimeout, formatMs, HOST_LIMITS, hostBound, timeoutSignal, TIMEOUTS } from "../shared/timeouts";
 import type { Registry } from "../engine/registry-impl";
-import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
+import type { HostPort, ProcessEvent, ProcessHandle } from "../shared/host";
 import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import { MAP_PROSE_MAX, mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
 import { afterRepair, checkRoutineReply, finishRoutines, loreCutMessage, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
 import { own } from "../engine/pack-kit";
-import type { SettingsStore } from "./settings-store";
+import type { SettingsStore } from "../migrate/today/settings-store";
 import type { Steps } from "./steps";
-import { readStoredJson } from "./stored-json";
-import { WORLD_COLLECTIONS, type WorldStore } from "./worlds";
+import { readStoredJson } from "../worlds/stored-json";
+import { WORLD_COLLECTIONS, type WorldStore } from "../worlds/worlds";
 import { liveLore } from "./book-lore";
 
 /** The background lane's entry, relative to the extension root (the host requires it to start with `dist/`; DESIGN §18.7). */

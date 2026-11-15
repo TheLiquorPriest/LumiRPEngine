@@ -17,8 +17,8 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { BLOB_HASH, DOC_PATH, EXTENSION_IDENTIFIER, MARK_PATH, RUNTIME_NAME, unitName } from "lumi-ah/link";
-import { configDir, configOf, type RuntimeConfig } from "lumi-ah/runtime";
+import { BLOB_HASH, DOC_PATH, EXTENSION_IDENTIFIER, MARK_PATH, RUNTIME_NAME, unitName } from "./today/lumiah/link/contract";
+import { configDir, configOf, type RuntimeConfig } from "./today/lumiah/runtime/config";
 import { isRecord } from "../shared/json";
 import { walk, type FoundFile } from "../app/archive";
 import { missing, readText, sha256 } from "./files";

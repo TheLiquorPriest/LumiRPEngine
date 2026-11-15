@@ -5,7 +5,7 @@
 // preset that places some of the world's section outlets but not all sends the rest in outside its
 // blocks, where it doesn't mean them to be (DESIGN §6.8).
 
-import type { DryRun } from "./host";
+import type { DryRun } from "../shared/host";
 
 export interface PresetCaveat {
   /**

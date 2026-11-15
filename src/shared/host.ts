@@ -6,13 +6,13 @@
 // Shapes mirror the observed payloads: event payloads carry no userId, which the host passes
 // as the handler's second argument.
 
-import type { ListedTool } from "../shared/agents";
-import type { JsonObject, JsonValue } from "../shared/json";
-import type { ReasoningChoice, SamplingParams } from "../shared/settings";
-import type { Limit } from "../shared/minds";
-import type { ChatId, GenerationId, MessageId, UserId } from "../shared/ids";
-import type { BackendToFrontend } from "../shared/protocol";
-import type { Answers, Questions } from "../engine/decide";
+import type { ListedTool } from "./agents";
+import type { JsonObject, JsonValue } from "./json";
+import type { ReasoningChoice, SamplingParams } from "./settings";
+import type { Limit } from "./minds";
+import type { ChatId, GenerationId, MessageId, UserId } from "./ids";
+import type { BackendToFrontend } from "./protocol";
+import type { Answers, Questions } from "./decide";
 
 export type HostGenerationType = "normal" | "regenerate" | "swipe" | "continue" | "impersonate";
 

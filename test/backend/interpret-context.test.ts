@@ -5,10 +5,10 @@
 // message that hangs on the reply before it is read from it; nothing the POV can't see is named.
 
 import { describe, expect, test } from "bun:test";
-import type { DecideRequest, QuietRequest } from "../../src/backend/host";
+import type { DecideRequest, QuietRequest } from "../../src/shared/host";
 import { interpretCatalog, interpretScene, type CatalogEntry } from "../../src/backend/interpret-context";
-import { toChain } from "../../src/backend/ledger-io";
-import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
+import { toChain } from "../../src/migrate/today/ledger-io";
+import { defaultSettings, SettingsStore } from "../../src/migrate/today/settings-store";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
 import type { Answers } from "../../src/engine/decide";
 import { createRegistry } from "../../src/engine/registry-impl";

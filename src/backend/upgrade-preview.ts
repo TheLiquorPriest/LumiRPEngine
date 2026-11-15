@@ -27,7 +27,7 @@ import type { WorldState } from "../engine/state";
 import { definitionsLag, PLACEMENT_FIELDS, planUpgrade, type EntityDiff, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, trackKnown, visibilityOf } from "../engine/visibility";
 import type { Runtime } from "./runtime";
-import { WorldError } from "./worlds";
+import { WorldError } from "../worlds/worlds";
 
 const ASPECT_LABEL: Record<UpgradeAspect, string> = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags", life: "Life state" };
 

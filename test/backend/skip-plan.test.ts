@@ -4,8 +4,8 @@
 // leaves a note, a Continue inside the planned span asks nothing, and no one to plan means no call.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { planSkip, skipPlanSystem } from "../../src/backend/skip-plan";
 import { SKIP_PLAN_ANSWER } from "../../src/shared/skip-plan";
 import { CallMeter, Steps } from "../../src/backend/steps";

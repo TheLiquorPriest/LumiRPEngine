@@ -8,9 +8,9 @@ import { runDir } from "../../src/shared/ids";
 import type { JobSummary } from "../../src/shared/protocol";
 import { InspectorLog, INSPECTOR_RUNS, type InspectorRecord } from "../../src/backend/inspector-log";
 import { JOBS_KEPT, JOBS_PATH } from "../../src/backend/jobs";
-import type { QuietResult } from "../../src/backend/host";
+import type { QuietResult } from "../../src/shared/host";
 import { CallMeter, METER_PATH } from "../../src/backend/steps";
-import { CORRUPT_SUFFIX } from "../../src/backend/stored-json";
+import { CORRUPT_SUFFIX } from "../../src/worlds/stored-json";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
 

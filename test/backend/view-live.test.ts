@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { fixRequest, paletteRequest } from "../../src/frontend/requests";
 import type { FieldFixTarget, StateView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { POV } from "../support/test-pack";
 import { turnLines } from "../../src/backend/view";
 import { createRegistry } from "../../src/engine/registry-impl";

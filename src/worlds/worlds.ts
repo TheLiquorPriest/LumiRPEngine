@@ -32,7 +32,7 @@ import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import { shippedVersion } from "../engine/table-updates";
 import type { StarterTable } from "../shared/tables";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 import { readStoredJson } from "./stored-json";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
 

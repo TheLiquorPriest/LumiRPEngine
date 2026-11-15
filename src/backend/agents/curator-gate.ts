@@ -23,7 +23,7 @@ import { isGone, placeOfEntity } from "../../engine/scope";
 import type { WorldState } from "../../engine/state";
 import { thingIndex } from "../../engine/thing-index";
 import { holdersOf } from "../../engine/things";
-import type { DiagAt } from "../diagnostics";
+import type { DiagAt } from "../../migrate/today/diagnostics";
 import type { Runtime } from "../runtime";
 
 /** What a turn's world gives the gate to read the words against. */

@@ -3,13 +3,13 @@
 // every process, and Restore brings it back.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";
 import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { lifeOf } from "../../src/engine/life";
 import { paramCandidates } from "../../src/engine/resolve";

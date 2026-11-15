@@ -3,7 +3,7 @@
 // on the purpose; a world's `effects` templates, calls of their own, still run beside it.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { noFacts, runsOf } from "../../src/backend/turn-steps";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
 import type { JsonValue } from "../../src/shared/json";

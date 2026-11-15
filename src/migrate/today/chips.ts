@@ -3,13 +3,13 @@
 // lapse. Chips derived from the fold (Re-read edit, Retry, Keep report, pending) are built by the
 // view, not stored.
 
-import type { ChatId, ChipId, MessageId, UserId } from "../shared/ids";
-import { runDir } from "../shared/ids";
-import type { JsonObject } from "../shared/json";
-import { isRecord } from "../shared/json";
-import type { Chip } from "../shared/state-view";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { ChatId, ChipId, MessageId, UserId } from "../../shared/ids";
+import { runDir } from "../../shared/ids";
+import type { JsonObject } from "../../shared/json";
+import { isRecord } from "../../shared/json";
+import type { Chip } from "../../shared/state-view";
+import type { HostPort } from "../../shared/host";
+import { readStoredJson } from "../../worlds/stored-json";
 
 export interface StoredChip extends Chip {
   /** What acting on the chip needs (a proposal, a mode change). Never sent to the frontend. */

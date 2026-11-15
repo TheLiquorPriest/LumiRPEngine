@@ -6,7 +6,7 @@
 // again; and with persistence off every call is today's.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { lastSceneOf, type PersistAsk, sceneBasis, ScenePersistence } from "../../src/backend/agents/persist";
 import { calendarOf, dayPartAt } from "../../src/engine/calendar";
 import { outputsOf } from "../../src/engine/outputs";

@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { BlobStore } from "../../src/backend/agents/blobs";
 import { type SessionMessage, Sessions, sessionAt } from "../../src/backend/agents/sessions";
-import { decodeLedger } from "../../src/backend/ledger-io";
+import { decodeLedger } from "../../src/migrate/today/ledger-io";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId, MessageId } from "../../src/shared/ids";
 import type { ChainMessage } from "../../src/engine/ledger/chain";

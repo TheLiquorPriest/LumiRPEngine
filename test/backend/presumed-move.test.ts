@@ -5,8 +5,8 @@
 // says so on screen, offering the POV's move there for Apply (DESIGN §9.4).
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";

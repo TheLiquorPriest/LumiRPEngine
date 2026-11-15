@@ -10,7 +10,7 @@
 import type { Database } from "bun:sqlite";
 import type { Log } from "rp-harness/contract";
 import type { WriteQueue } from "../app";
-import type { HostPort } from "../backend/host";
+import type { HostPort } from "../shared/host";
 
 export type BuildStorage = HostPort["storage"];
 

@@ -4,8 +4,8 @@
 // player edited it is the one the narrator is told.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import type { JsonObject } from "../../src/shared/json";

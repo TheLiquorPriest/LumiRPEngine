@@ -9,7 +9,7 @@
 // didn't, and gives an overdraft link nothing back where only its transfer didn't land.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { keepSummary } from "../../src/backend/view";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { referenceFold } from "../../src/engine/ledger/reference";

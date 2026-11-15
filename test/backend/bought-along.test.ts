@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { ReadContext } from "../../src/engine/registry";
 import type { LedgerEvent } from "../../src/shared/ledger";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { boughtAlong } from "../../src/backend/runtime";
 import { Rig } from "../support/rig";
 

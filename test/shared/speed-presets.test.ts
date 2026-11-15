@@ -4,7 +4,7 @@
 // every other setting the user changed as it was.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings, mergePatch } from "../../src/backend/settings-store";
+import { defaultSettings, mergePatch } from "../../src/migrate/today/settings-store";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { currentSpeedPreset, PHASE_CONTROL, PRESET_ROWS, presetChanges, rowChanged, rowDefault, SPEED_PRESET_VALUES, SPEED_PRESETS, SPEED_ROWS, speedChanged, speedRow, speedValueText, valueAt } from "../../src/shared/speed-presets";
 import { TURN_PHASES } from "../../src/shared/diagnostics";

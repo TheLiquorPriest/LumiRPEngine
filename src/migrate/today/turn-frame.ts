@@ -9,8 +9,8 @@
 // chat as it stands, reads outside it.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ChatId, UserId } from "../shared/ids";
-import type { UserSettings } from "../shared/settings";
+import type { ChatId, UserId } from "../../shared/ids";
+import type { UserSettings } from "../../shared/settings";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 
 export interface TurnFrame {

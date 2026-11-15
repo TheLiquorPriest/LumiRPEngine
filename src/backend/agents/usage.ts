@@ -9,7 +9,7 @@
 import type { JsonObject } from "../../shared/json";
 import { isRecord } from "../../shared/json";
 import { tokensOf } from "../book";
-import type { QuietMessage, QuietTool } from "../host";
+import type { QuietMessage, QuietTool } from "../../shared/host";
 
 export type UsageField = "in" | "cachedIn" | "out" | "reasoningOut";
 

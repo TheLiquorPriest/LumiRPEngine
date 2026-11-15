@@ -7,7 +7,8 @@
 // test ends by checking it never was.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { recHarnessOf, unplayedOf } from "../../src/backend/harness/record";
+import { unplayedOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import type { JsonObject } from "../../src/shared/json";
 import { cast, offers, PageRefused } from "../support/lumiah-bed";
 import { plainMinds } from "../support/rig";

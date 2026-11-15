@@ -6,7 +6,7 @@
 // the generation with a flag that says why.
 
 import { describe, expect, test } from "bun:test";
-import type { HostPresetBlock, QuietRequest } from "../../src/backend/host";
+import type { HostPresetBlock, QuietRequest } from "../../src/shared/host";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { FakeHost, type AssembledEntry } from "../support/fake-host";

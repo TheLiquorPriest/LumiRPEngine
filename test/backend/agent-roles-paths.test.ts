@@ -12,7 +12,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { roleContract } from "../../src/backend/agents/roles/contracts";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { calendarOf, formatStamp } from "../../src/engine/calendar";
 import { editRequest } from "../../src/frontend/requests";
 import { noteOp } from "../../src/packs/minds/ui/ops";

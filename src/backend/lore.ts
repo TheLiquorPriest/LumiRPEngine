@@ -7,9 +7,9 @@ import { hasOwn } from "../shared/json";
 import { topicIdOf } from "../shared/lore";
 import { neutralizeMacros } from "../shared/macros";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 import { readableReply } from "./json-hiding";
-import { type DraftNotice, WorldError, type WorldStore } from "./worlds";
+import { type DraftNotice, WorldError, type WorldStore } from "../worlds/worlds";
 
 /** The most of a chat's text a saved entry keeps. */
 export const SAVED_MAX_CHARS = 20_000;

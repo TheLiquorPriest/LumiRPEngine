@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { listWorkspace } from "../../src/backend/agents/tools/workspace";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";

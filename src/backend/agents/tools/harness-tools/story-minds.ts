@@ -25,7 +25,7 @@ import type { JsonObject } from "../../../../shared/json";
 import { AGENT_CHANGE_LABEL, MIND_FILE_IDS, MIND_FILE_TITLES, type MindFileId, type UserSettings } from "../../../../shared/settings";
 import { castOn } from "../../../../engine/story/record";
 import { renderPrompt } from "../../../prompts";
-import { effectiveMode } from "../../../settings-store";
+import { effectiveMode } from "../../../../migrate/today/settings-store";
 import { castFor, markDigested } from "../../../story/cast";
 import { appendTo, baseOf, CHARACTER_FILES, characterSelf, fileNamed, filesOf, mindCall, mindEntity, mindPath, PRINCIPAL_FILES, readMind, standingIn, standingWords, whoNamed } from "../../../story/minds";
 import type { ToolOutcome } from "../../runtime";

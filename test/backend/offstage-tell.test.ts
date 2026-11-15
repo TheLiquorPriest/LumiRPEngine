@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { actionRequest, blankFlowForm, flowCreateAction, flowStatusAction, transferAction, type ActionBody } from "../../src/packs/economy/ui/requests";
 import { flowSources } from "../../src/packs/economy/ui/layout";
 import { account, MoneyChat } from "../support/money-chat";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { TELL_FIXED } from "../../src/backend/view";
 import { provenance } from "../../src/packs/economy/core/flows";
 import { thingsFix } from "../../src/frontend/things/at-once";

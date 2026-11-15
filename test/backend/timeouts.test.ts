@@ -3,7 +3,7 @@
 // diagnostics, naming its setting.
 
 import { afterEach, describe, expect, test, vi } from "bun:test";
-import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
+import { defaultSettings, SettingsStore } from "../../src/migrate/today/settings-store";
 import { phaseBudget } from "../../src/backend/turn-steps";
 import type { JsonObject } from "../../src/shared/json";
 import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";

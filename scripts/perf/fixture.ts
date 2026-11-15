@@ -5,7 +5,7 @@
 // reading or emptying a private field by name.
 
 import { heapStats } from "bun:jsc";
-import type { HostPort } from "../../src/backend/host";
+import type { HostPort } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import { FakeHost, type FakeChat } from "../../test/support/fake-host";
 import type { Rig } from "../../test/support/rig";

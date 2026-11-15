@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { HostPort } from "../../src/backend/host";
+import type { HostPort } from "../../src/shared/host";
 import { seedKnowledge } from "../../src/backend/knowledge-seed";
 import { lintWorld } from "../../src/engine/authoring";
 import { buildGmWorld } from "../../src/engine/gm-view";

@@ -3,7 +3,7 @@
 // its limits, either of which may be no limit.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { recentMessages } from "../../src/backend/interpret-context";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
 import type { ChainMessage } from "../../src/engine/ledger/chain";

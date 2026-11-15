@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { HARNESS_LISTED, harnessTools } from "../../src/backend/agents/tools/harness";
 import { HARNESS_AGENT, harnessDefinitions, harnessRole, READER_PROMPT_TOKENS, worldGuidance } from "../../src/backend/harness/definitions";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { runtimeBed } from "../support/runtime-bed";
 import { Rig } from "../support/rig";
 import { LUMIAH_FAMILY, LUMIAH_TOOL } from "../../src/backend/harness/definitions/lumiah";

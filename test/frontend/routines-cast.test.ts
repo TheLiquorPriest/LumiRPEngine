@@ -2,7 +2,7 @@
 // proposals offered, ticked, edited and applied into a real backend's draft) and Cast's usual day.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { placeOfEntity } from "../../src/engine/scope";
 import { Working } from "../../src/engine/working";

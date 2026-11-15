@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import schemaJson from "../../schemas/lre-world-v1.schema.json";
 import { worldBuild, type WorldBuild } from "../../src/backend/agents/tools/harness-ports";
 import type { ToolEnv } from "../../src/backend/agents/tools/registry";
-import { WORLD_COLLECTIONS } from "../../src/backend/worlds";
+import { WORLD_COLLECTIONS } from "../../src/worlds/worlds";
 import { renderPrompt } from "../../src/backend/prompts";
 import { COLLECTION_SHAPES, PART_SHAPES, shapeTextId } from "../../src/shared/harness-texts-shapes";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";

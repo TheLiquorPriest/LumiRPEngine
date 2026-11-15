@@ -2,7 +2,7 @@
 // first memory records it, everyone in it holds it under one id, and the second records no copy.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { MINDS_EVENTS } from "../../src/shared/minds";
 import { readCharacter } from "../../src/packs/minds/core/state";

@@ -4,8 +4,8 @@
 // and lint suggests one for a plain requirement that reads like a lock.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { lintWorld } from "../../src/engine/authoring";
 import { CheckField } from "../../src/frontend/build/form-kit";
 import { COLLECTION_SPECS, type FieldSpec } from "../../src/frontend/build/schema";

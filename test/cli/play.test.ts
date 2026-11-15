@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { chatHead } from "../../src/backend/agents/tools/workspace";
-import type { QuietResult } from "../../src/backend/host";
+import type { QuietResult } from "../../src/shared/host";
 import { toolsFor } from "../../src/cli/tools";
 import { madePlaces } from "../../src/engine/places-in-play";
 import { isRecord } from "../../src/shared/json";

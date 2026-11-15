@@ -2,7 +2,7 @@
 // tab lists them, and a table param's rows kept inside that param.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { Rig } from "../support/rig";
 
 describe("interpret's catalog", () => {

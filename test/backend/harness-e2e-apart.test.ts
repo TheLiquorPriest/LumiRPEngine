@@ -5,7 +5,8 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { createBackend } from "lumi-ah/extension/backend";
-import { recHarnessOf, unplayedOf } from "../../src/backend/harness/record";
+import { unplayedOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { isRecord } from "../../src/shared/json";
 import { agentChat, replyText, scripted, userText } from "../support/agent-chat";
 import { cast, heard, offers, PageRefused, seatOf, told, toolCall } from "../support/lumiah-bed";

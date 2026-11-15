@@ -18,8 +18,9 @@ import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord } from "../../engine/ledger/path";
 import { castOn, recStoryOf, type StoryPart, type StoryPath, type StoryRecordAt, storedStory, walkStory, withStory } from "../../engine/story/record";
 import { turnRecord } from "../harness/record";
-import type { HostMessage } from "../host";
-import { type LedgerService, toChain } from "../ledger-io";
+import type { HostMessage } from "../../shared/host";
+import type { LedgerService } from "../ledger-io";
+import { toChain } from "../../migrate/today/ledger-io";
 import type { Runtime } from "../runtime";
 
 /** Why the story record took no write: the call reaches none (`none`); the turn is over (`closed`); the job's turn record left the chat's path (`off_path`); the engine never saw that turn write a record, or the chat has no reply to write on (`no_basis`). */

@@ -25,20 +25,11 @@
 //   * The Decider/DecideOptions interfaces are dropped: they were tied to Warp's two providers
 //     ("jev" | "llm"), and the engine's provider abstraction lives elsewhere.
 
+import type { Answer } from "../shared/decide";
 import type { Rng } from "./rng";
 
-export type Question =
-  | { type: "choice"; instructions: string; criteria: Record<string, string> }
-  | { type: "score"; instructions: string; criteria: string[] }
-  | { type: "noul"; instructions: string; criteria?: { true: string; false: string } };
-
-export type Answer =
-  | { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
-  | { type: "score"; score: number; probabilities: Record<string, number>; confidence: number }
-  | { type: "noul"; noul: number };
-
-export type Questions = Record<string, Question>;
-export type Answers = Record<string, Answer>;
+// The question and answer shapes are data the host's shapes carry too, so they live in shared.
+export type { Answer, Answers, Question, Questions } from "../shared/decide";
 
 /** A probability map or answer that cannot be used. */
 export class DecideError extends Error {

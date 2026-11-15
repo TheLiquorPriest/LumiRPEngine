@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
-import type { Delivered } from "../../src/backend/ledger-io";
+import type { Delivered } from "../../src/migrate/today/ledger-io";
 import { markedText } from "../../src/engine/feed";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";

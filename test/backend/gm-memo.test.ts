@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readGmPart, type GmReadSteps } from "../../src/backend/gm-memo";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { GM_PARTS, GM_ROSTER } from "../../src/shared/gm-parts";
 import { deepFreeze } from "../../src/shared/json";
 import { MINDS_DEFAULTS } from "../../src/shared/minds";

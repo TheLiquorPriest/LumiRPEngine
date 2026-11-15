@@ -9,7 +9,7 @@ import type { ToolOutcome } from "../../src/backend/agents/runtime";
 import { LORE_TOOLS } from "../../src/backend/agents/tools/lore";
 import { outsideReader, type ViewLore } from "../../src/backend/agents/tools/read-view";
 import { bookLoreId, bookMarkLoreId } from "../../src/backend/book-lore";
-import type { HostBookEntryInput } from "../../src/backend/host";
+import type { HostBookEntryInput } from "../../src/shared/host";
 import type { ToolView } from "../../src/shared/agent-tools";
 import { Rig } from "../support/rig";
 

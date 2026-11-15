@@ -10,8 +10,8 @@ import { isRecord } from "../shared/json";
 import type { DeltaOp } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
-import { giveWay } from "./give-way";
-import type { HostPort } from "./host";
+import { giveWay } from "../migrate/today/give-way";
+import type { HostPort } from "../shared/host";
 
 /** Set/delete operations turning `from` into `to`; arrays are replaced whole when they differ. A part that is the same object in both is unchanged. */
 export function diff(from: JsonValue, to: JsonValue, path: (string | number)[] = [], out: DeltaOp[] = []): DeltaOp[] {

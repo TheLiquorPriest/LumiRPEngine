@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import { MockBackend } from "../../dev/preview/mock-backend";
 import { LoreIndexBody, type LoreIndexProps } from "../../src/frontend/build/lore-editor";
 import { Banner, Button, HostSelect, ListRow } from "../../src/frontend/components";
-import type { HostBookEntryInput } from "../../src/backend/host";
+import type { HostBookEntryInput } from "../../src/shared/host";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { LoreBookView, LoreIndexView } from "../../src/shared/protocol";
 import { Rig } from "../support/rig";

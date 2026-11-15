@@ -29,7 +29,7 @@
 // the earlier run imported of it.
 
 import type { Database } from "bun:sqlite";
-import { readRun } from "../backend/runtime";
+import { readRun } from "./today/run";
 import type { ChainMessage, FoldInput } from "../engine/ledger/chain";
 import { activeText, contentId, isTombstoned, sameContent } from "../engine/ledger/path";
 import type { Registry } from "../engine/registry-impl";

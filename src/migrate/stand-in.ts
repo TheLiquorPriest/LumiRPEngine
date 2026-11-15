@@ -13,7 +13,7 @@
 
 import { lstat, readdir } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import type { HostCapabilities, HostChat, HostMessage, HostPort } from "../backend/host";
+import type { HostCapabilities, HostChat, HostMessage, HostPort } from "../shared/host";
 import type { ChatId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { missing, readText } from "./files";

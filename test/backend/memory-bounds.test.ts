@@ -3,10 +3,10 @@
 // chats' ledgers, the views pushed to pages, and the lore an engine run read live.
 
 import { describe, expect, test } from "bun:test";
-import { OPEN_CHATS_CAP } from "../../src/backend/ledger-io";
+import { OPEN_CHATS_CAP } from "../../src/migrate/today/ledger-io";
 import { VIEWS_KEPT } from "../../src/backend/push";
 import { LIVE_LORES_KEPT } from "../../src/backend/runtime";
-import { REVISION_CACHE_CAP } from "../../src/backend/worlds";
+import { REVISION_CACHE_CAP } from "../../src/worlds/worlds";
 import type { BackendToFrontend } from "../../src/shared/protocol";
 import { Rig } from "../support/rig";
 import { POV } from "../support/test-pack";

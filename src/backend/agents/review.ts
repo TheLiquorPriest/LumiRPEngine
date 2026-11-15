@@ -26,7 +26,7 @@ import { isRecord, type JsonObject } from "../../shared/json";
 import { type GenerateAs, PROTOCOL_VERSION, type ReviewCardView, type ReviewItemView } from "../../shared/protocol";
 import { CHANGE_TYPES } from "../../shared/settings";
 import { activeRecord } from "../../engine/ledger/path";
-import type { StoredChip } from "../chips";
+import type { StoredChip } from "../../migrate/today/chips";
 import type { LandedWrites, Runtime } from "../runtime";
 import { recordOutcome } from "../settings-store";
 import { fixChip } from "../view";

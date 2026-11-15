@@ -13,7 +13,7 @@
 // at 0 every read asks the host. What a turn's own steps read of the chat is not this.
 
 import type { ChatId, UserId } from "../shared/ids";
-import type { HostMessage, HostPort } from "./host";
+import type { HostMessage, HostPort } from "../shared/host";
 
 /** A chat as it was read, with what is worked out of it. */
 export interface ChatRead {

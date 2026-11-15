@@ -2,7 +2,7 @@
 // where they were: the shift their routine or the planner gave them stays behind (DESIGN §9.4).
 
 import { expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import { Rig } from "../support/rig";
 

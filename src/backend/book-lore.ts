@@ -19,7 +19,7 @@ import type { LoreMarkChange } from "../shared/protocol";
 import { parseSecretMarks, publicText, SecretMarkError, unreadableMarks, wholeEntrySecret, writeSecretMark, type MarkNamesSource, type SecretMark, type SecretMarkInput } from "../shared/secret-marks";
 import type { LoreEntryDef, LorePin, WorldDoc } from "../shared/world";
 import type { LoreBooks } from "../shared/settings";
-import type { HostBookEntry, HostPort } from "./host";
+import type { HostBookEntry, HostPort } from "../shared/host";
 import { copiedOriginals, heldTextOf, heldTo, markFields, secrecyParts, secretTexts, textOf, textParts } from "./lore-secrets";
 
 /** The words a book entry with no comment is titled by. */

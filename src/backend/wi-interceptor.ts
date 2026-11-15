@@ -31,7 +31,7 @@ import { loreGateReader } from "../engine/visibility";
 import { bookLoreId, bookMarkLoreId } from "./book-lore";
 import type { NarratorView } from "../shared/settings";
 import { bookSecrecy, secretTexts, switchedOffForSecrecy, textOf, type MarkAt } from "./lore-secrets";
-import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "./host";
+import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "../shared/host";
 
 /** What the interceptor reads of the engine. */
 export interface WorldInfoGate {

@@ -14,7 +14,7 @@ import type { TableUpdate } from "../../src/shared/protocol";
 import type { DataTable } from "../../src/shared/tables";
 import { tableRevision } from "../../src/shared/tables";
 import type { WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { WorldState } from "../../src/engine/state";
 import { matchCatalog } from "../../src/packs/economy/core/index";
 import { STARTER_TABLES, STARTER_WORLDS } from "../../src/packs/index";

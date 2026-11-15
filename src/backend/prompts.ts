@@ -13,9 +13,9 @@ import { MARK_TEXT_IDS, PROMPT_BRACES, promptDef, promptProblems, PROMPTS, senda
 import type { SecretMarkWording } from "../shared/secret-marks";
 import type { Schema } from "../shared/schema-check";
 import { checkSchema, pathText } from "../shared/schema-check";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 import { parseJsonReply } from "./steps";
-import { readStoredJson } from "./stored-json";
+import { readStoredJson } from "../worlds/stored-json";
 
 /** Whose a resolved text is. */
 export type PromptSource = "user" | "world" | "default";

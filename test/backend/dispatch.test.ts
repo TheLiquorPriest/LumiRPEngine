@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { Rig } from "../support/rig";
 import { POV } from "../support/test-pack";
 

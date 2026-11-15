@@ -21,7 +21,7 @@ import { defaultAgentSettings } from "../../shared/agent-settings";
 import type { UserId } from "../../shared/ids";
 import type { JsonValue } from "../../shared/json";
 import { blobHash, isBlobHash } from "../../shared/stores";
-import type { HostPort } from "../host";
+import type { HostPort } from "../../shared/host";
 
 /** Where the blobs live in the user's storage (a fixed path, AGENT-LOOP-PLAN §16). */
 export const BLOBS_DIR = "agents/blobs/";

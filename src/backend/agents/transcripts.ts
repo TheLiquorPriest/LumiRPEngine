@@ -5,7 +5,8 @@
 // sends, the main agent's stages and the roles' tasks record so.
 
 import type { DiagAgentOutcome, DiagPhase } from "../../shared/diagnostics";
-import type { DiagAt, Diagnostics } from "../diagnostics";
+import type { Diagnostics } from "../diagnostics";
+import type { DiagAt } from "../../migrate/today/diagnostics";
 import type { AgentStatus, AgentTranscript } from "./runtime";
 
 /** Each call's outcome as Diagnostics records it, by how the answer ended there; the loop detector's stop is a refusal to run the call. */

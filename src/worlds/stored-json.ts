@@ -4,7 +4,7 @@
 // the caller starts from a fresh value.
 
 import type { UserId } from "../shared/ids";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 
 /** What a damaged file's kept copy appends to its path, before the epoch milliseconds of the set-aside. */
 export const CORRUPT_SUFFIX = ".corrupt-";

@@ -4,7 +4,7 @@
 // reply the chat changed under says so on the chat, with a Retry that runs the engine again, never silently.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";
 import type { FakeMessage } from "../support/fake-host";

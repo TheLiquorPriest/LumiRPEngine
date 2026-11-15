@@ -15,7 +15,7 @@ import { runYield } from "../../src/backend/agents/yields";
 import { liveLore } from "../../src/backend/book-lore";
 import { loreFactOf } from "../../src/backend/lore-ids";
 import { checkKnowledge, knowledgeBatches, knowledgeContext, knowledgeSpent, type KnowledgeChecked, type KnowledgeTurn } from "../../src/backend/knowledge-step";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { personNamed, postKnowledge, postMinds, postOpening } from "../../src/backend/minds";
 import { buildSections } from "../../src/backend/sections-build";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";

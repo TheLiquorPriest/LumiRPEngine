@@ -7,7 +7,7 @@
 // transcript's, never the line's. The models are scripted, as in the main agent's tests.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
 import { AGENT_ROLES, agentLabel, MAIN_AGENT_ROLE } from "../../src/shared/agent-settings";
 import type { Activity } from "../../src/shared/diagnostics";

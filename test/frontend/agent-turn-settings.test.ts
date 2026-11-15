@@ -8,7 +8,7 @@
 // shipped defaults. The pages are walked as rendered trees (no DOM).
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
 import { AcceptanceSection, AgentsHub, agentsSummary, BudgetsSection, CallSwitches, CompactionSection, PipelineSection, RecordingSection, ReviewSection, SystemSection, TurnGlance, turnGlance } from "../../src/frontend/settings/agents";
 import { mainChanged, roleChanged } from "../../src/frontend/settings/changed";

@@ -7,7 +7,7 @@
 // Port Alder's Kowalczyk household and Alder Automotive; Harrowmere's Thorne Trust.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { WorldState } from "../../src/engine/state";
 import { orgConversion, type ConvertTo } from "../../src/frontend/build/org-convert";

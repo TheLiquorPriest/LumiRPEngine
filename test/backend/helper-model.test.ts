@@ -5,11 +5,11 @@
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
 import { createSpindleHost } from "../../src/backend/spindle-host";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import type { StepLore } from "../../src/backend/lore-steps";
 import type { ModelUseSettings, UserSettings } from "../../src/shared/settings";
 import { MINDS_PRESETS, type MindsSettings } from "../../src/shared/minds";
-import { MODEL_USE_PRESETS } from "../../src/backend/settings-store";
+import { MODEL_USE_PRESETS } from "../../src/migrate/today/settings-store";
 import { Rig } from "../support/rig";
 
 const signal = () => new AbortController().signal;

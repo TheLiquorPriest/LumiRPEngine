@@ -4,7 +4,7 @@
 // The engine run's own time limit is the user's to set, with no ceiling.
 
 import { describe, expect, test } from "bun:test";
-import { SettingsStore } from "../../src/backend/settings-store";
+import { SettingsStore } from "../../src/migrate/today/settings-store";
 import { HOST_LIMITS } from "../../src/shared/timeouts";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";

@@ -20,6 +20,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { NEW_ZONES } from "./removal/fates";
+import { scan } from "./removal/imports";
 
 const ROOT = resolve(import.meta.dir, "..");
 const SRC = join(ROOT, "src");
@@ -91,20 +92,15 @@ function sharedWithExtension(): Set<string> {
   return out;
 }
 
-const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s+(type\s+)?(?:[^'";]*?\sfrom\s+)?["']([^"']+)["']/g;
-const DYNAMIC_RE = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-
 interface Edge {
   spec: string;
   /** `import type` or `export type`: erased when the code is built. */
   typeOnly: boolean;
 }
 
+/** Every module the source loads, read the way the fence reads it: every form TypeScript and Bun load (test/removal/imports.ts). */
 function specsOf(source: string): Edge[] {
-  const out: Edge[] = [];
-  for (const m of source.matchAll(IMPORT_RE)) out.push({ spec: m[2] ?? "", typeOnly: m[1] !== undefined });
-  for (const m of source.matchAll(DYNAMIC_RE)) out.push({ spec: m[1] ?? "", typeOnly: false });
-  return out;
+  return scan(source).loads.map(({ spec, typeOnly }) => ({ spec, typeOnly }));
 }
 
 function files(dir: string): string[] {
@@ -118,9 +114,12 @@ function files(dir: string): string[] {
   return out;
 }
 
+/** The file a relative specifier names, as TypeScript and Bun resolve it: `.js` names the `.ts` file. */
 function resolveLocal(file: string, spec: string): string {
   const base = resolve(dirname(file), spec);
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) {
+  const stem = base.replace(/\.(m|c)?jsx?$/, "");
+  const candidates = [base, ...(stem !== base ? [`${stem}.ts`, `${stem}.tsx`] : []), `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
+  for (const candidate of candidates) {
     try {
       if (statSync(candidate).isFile()) return candidate;
     } catch {
@@ -206,5 +205,14 @@ describe("the standalone application's boundaries", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  test("every way a module is loaded is read: a .js name, require(), import =, import() in a type, a second import on one line", () => {
+    for (const source of ['import { readRun } from "../backend/runtime.js";', 'const r = require("../backend/runtime");', 'import r = require("../backend/runtime");', 'type R = import("../backend/runtime").ChatRun;', 'const a = 1; import { readRun } from "../backend/runtime";']) {
+      expect(specsOf(source).map(({ spec }) => spec)).toEqual([expect.stringMatching(/^\.\.\/backend\/runtime(\.js)?$/)]);
+    }
+    expect(relative(SRC, resolveLocal(join(SRC, "play/planted.ts"), "../shared/json.js"))).toBe("shared/json.ts");
+    // Text that only looks like an import is none: a comment, a string.
+    expect(specsOf('// import { a } from "../backend/runtime";\nconst s = \'import { b } from "../backend/view";\';')).toEqual([]);
   });
 });

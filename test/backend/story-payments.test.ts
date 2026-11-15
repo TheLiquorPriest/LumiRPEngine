@@ -5,7 +5,7 @@
 // prices is owned with nothing charged until a price is set. No note tells the next reply otherwise.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { heldBy } from "../../src/shared/finance";
 import type { JsonObject } from "../../src/shared/json";

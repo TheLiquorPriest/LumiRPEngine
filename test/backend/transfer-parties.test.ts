@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { Rig } from "../support/rig";
 import { heldBy } from "../../src/shared/finance";
 

@@ -4,8 +4,8 @@
 // the turn didn't play is offered as a chip that sends it as the next message.
 
 import { describe, expect, test } from "bun:test";
-import type { DecideRequest, QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { DecideRequest, QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { Answers } from "../../src/engine/decide";
 import { placeOfEntity } from "../../src/engine/scope";
 import { unrevealedSecrets } from "../../src/engine/visibility";

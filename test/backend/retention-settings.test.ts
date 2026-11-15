@@ -3,7 +3,7 @@
 // and kept within what each takes.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
+import { defaultSettings, SettingsStore } from "../../src/migrate/today/settings-store";
 import { DIAG_RING } from "../../src/shared/diagnostics";
 import { RETENTION_DEFAULTS } from "../../src/shared/stores";
 import { FakeHost } from "../support/fake-host";

@@ -20,7 +20,7 @@
 import type { ChatId, UserId, WorldId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import type { HostPort, HostRegexScript, HostRegexScriptInput } from "./host";
+import type { HostPort, HostRegexScript, HostRegexScriptInput } from "../shared/host";
 
 /** What a world chat's replies are saved with around each block: an exclusion from World Info's scans, nothing hidden. */
 const EXCLUDE_OPEN = "<span wi-exclude>";

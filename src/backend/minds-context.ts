@@ -49,7 +49,7 @@ import { faded, openCommitments, openPlans, readCharacter, readKnowledge, readSl
 import { planMemoryLines } from "../packs/orgs/core/agenda";
 import { orgMindLines } from "../packs/orgs/core/feed";
 import { CHARS_PER_TOKEN, sectionTokens } from "./book";
-import type { HostMessage } from "./host";
+import type { HostMessage } from "../shared/host";
 import { recentMessages } from "./interpret-context";
 import { readableReply } from "./json-hiding";
 

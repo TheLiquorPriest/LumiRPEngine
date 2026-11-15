@@ -6,7 +6,7 @@
 // backend rig.
 
 import { describe, expect, test } from "bun:test";
-import type { HostBookEntryInput, QuietRequest } from "../../src/backend/host";
+import type { HostBookEntryInput, QuietRequest } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView } from "../../src/shared/protocol";

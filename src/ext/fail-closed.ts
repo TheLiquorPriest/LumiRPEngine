@@ -7,7 +7,7 @@
 // that message is still on the path. That memory is the extension's only one: per chat, in memory,
 // lost when its worker restarts.
 
-import type { WorldInfoCandidate, WorldInfoVerdict } from "../backend/host";
+import type { WorldInfoCandidate, WorldInfoVerdict } from "../shared/host";
 import { bookSecrecy, secretTexts, textOf } from "../backend/lore-secrets";
 import type { Answer, KeepPoint } from "../adapter/lumiverse/wire";
 import { engineWroteEntry, loreIsSecret } from "../shared/lore";

@@ -15,8 +15,8 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { decodeMessage } from "../backend/spindle-host";
-import type { HostMessage } from "../backend/host";
+import { decodeMessage } from "./today/host-message";
+import type { HostMessage } from "../shared/host";
 import { isRecord, type JsonObject } from "../shared/json";
 import { openQuiet } from "./quiet-db";
 

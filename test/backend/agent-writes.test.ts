@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { AgentOp, ApplyResult } from "../../src/backend/agents/tools/writer";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { recordOutcome } from "../../src/backend/settings-store";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";

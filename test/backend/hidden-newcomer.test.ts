@@ -5,7 +5,7 @@
 // is told nothing (DESIGN §9.5); a name nobody has spawns.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";
 

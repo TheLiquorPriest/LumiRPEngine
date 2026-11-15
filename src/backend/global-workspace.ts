@@ -10,8 +10,8 @@
 import type { UserId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { isGlobalPath, type KeptFile, keptFileJson, keptFileOf } from "../shared/stores";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { HostPort } from "../shared/host";
+import { readStoredJson } from "../worlds/stored-json";
 
 /** Where the index lives in the user's storage (a fixed path, beside `agents/blobs/`). */
 export const GLOBAL_INDEX_PATH = "agents/global.json";

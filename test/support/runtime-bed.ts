@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { createHarness } from "lumi-ah/core";
 import { LINK, RUNTIME_DEFAULTS, type RuntimeTuning } from "lumi-ah/link";
 import { createRuntime, createUpdate, type Http, type HttpReply, type OpenSocket, type Runtime, type RuntimeConfig, type RuntimeDeps, type Update, type UpdateDeps } from "lumi-ah/runtime";
-import type { HostGenerationType } from "../../src/backend/host";
+import type { HostGenerationType } from "../../src/shared/host";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Generation } from "./fake-host";
 import { type Bed, lumiahBed, type Seat } from "./lumiah-bed";

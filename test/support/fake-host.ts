@@ -35,9 +35,9 @@ import type {
   QuietToolCall,
   WorldInfoInput,
   WorldInfoVerdict,
-} from "../../src/backend/host";
+} from "../../src/shared/host";
 import { decodeEvent } from "../../src/backend/spindle-host";
-import { outsideTurns } from "../../src/backend/turn-frame";
+import { outsideTurns } from "../../src/migrate/today/turn-frame";
 
 export interface FakeMessage {
   id: MessageId;

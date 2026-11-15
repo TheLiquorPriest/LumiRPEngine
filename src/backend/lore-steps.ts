@@ -32,9 +32,9 @@ import type { LoreEntryDef, StepPurpose } from "../shared/world";
 import { loreGet, loreList, loreReadable, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
 import { fitPins, type PinnedText } from "../engine/lore-pins";
 import { findLeaks, loreGateReader, namesAny } from "../engine/visibility";
-import type { HostPort, QuietResult, QuietTool } from "./host";
+import type { HostPort, QuietResult, QuietTool } from "../shared/host";
 import { parseJsonReply } from "./steps";
-import { readStoredJson } from "./stored-json";
+import { readStoredJson } from "../worlds/stored-json";
 
 /** What a step's prefetch searches with: its own inputs. */
 export interface LoreInputs {

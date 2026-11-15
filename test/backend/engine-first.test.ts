@@ -7,12 +7,12 @@
 // after a reply keeps the choices and the minds' thoughts it asked for, as any turn does.
 
 import { describe, expect, test } from "bun:test";
-import type { DecideRequest, HostPresetBlock, QuietRequest } from "../../src/backend/host";
+import type { DecideRequest, HostPresetBlock, QuietRequest } from "../../src/shared/host";
 import type { Answers } from "../../src/engine/decide";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { placeOfEntity } from "../../src/engine/scope";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { readCharacter } from "../../src/packs/minds/core/state";
 import { NOT_LAST_REPLY } from "../../src/shared/diagnostics";
 import { Rig } from "../support/rig";

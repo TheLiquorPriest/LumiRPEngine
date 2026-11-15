@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
-import type { DecideRequest, QuietRequest } from "../../src/backend/host";
+import type { DecideRequest, QuietRequest } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import { BRIEF_CHARS } from "../../src/backend/turn-steps";
 import { ROLE_IDS } from "../../src/shared/agent-roles";

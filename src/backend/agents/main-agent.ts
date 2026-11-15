@@ -61,7 +61,7 @@ import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord } from "../../engine/ledger/path";
 import { tokensOf } from "../book";
-import type { DiagAt } from "../diagnostics";
+import type { DiagAt } from "../../migrate/today/diagnostics";
 import { perceivers } from "../knowledge-step";
 import type { RunMindsResult } from "../minds";
 import { markWording, renderPrompt } from "../prompts";

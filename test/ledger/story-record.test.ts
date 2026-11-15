@@ -6,7 +6,7 @@
 // newest reply leaves it.
 
 import { describe, expect, test } from "bun:test";
-import { decodeLedger } from "../../src/backend/ledger-io";
+import { decodeLedger } from "../../src/migrate/today/ledger-io";
 import { chatStoryPort, type StoryRuntime } from "../../src/backend/story/record";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";

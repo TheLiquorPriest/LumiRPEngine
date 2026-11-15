@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test";
 import { commitReview, reviewTools } from "../../src/backend/agents/final-review";
 import type { ToolCtx } from "../../src/backend/agents/runtime";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { cacheBreakpoints } from "../../src/backend/spindle-host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";

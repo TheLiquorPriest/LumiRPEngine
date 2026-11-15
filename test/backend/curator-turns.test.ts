@@ -9,7 +9,7 @@
 // says, the read always giving the reply's handover.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { madePlaces } from "../../src/engine/places-in-play";
 import type { WorldState } from "../../src/engine/state";
 import { CURATOR_TOOL_TURNS, ROLE_LABEL } from "../../src/shared/agent-roles";

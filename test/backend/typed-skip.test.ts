@@ -5,8 +5,8 @@
 // never becomes one, whatever time words it holds, and an ordinary action stays one.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { interpretedTarget } from "../../src/backend/runtime";
 import { calendarOf, clockOfStamp } from "../../src/engine/calendar";
 import { createRegistry } from "../../src/engine/registry-impl";

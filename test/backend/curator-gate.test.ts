@@ -7,7 +7,7 @@
 // connection whose throttle sets no calls at once takes the global limit.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { AgentAccounts } from "../../src/backend/agents/provider";
 import { curatorGate, gateWords } from "../../src/backend/agents/curator-gate";
 import type { WorldState } from "../../src/engine/state";

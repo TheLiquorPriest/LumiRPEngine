@@ -19,8 +19,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { contentId } from "../../src/engine/ledger/path";
 import type { JsonObject, JsonValue } from "../../src/shared/json";

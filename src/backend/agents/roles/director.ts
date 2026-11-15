@@ -28,7 +28,7 @@ import { heldKnowledge } from "../../minds-context";
 import { FAILED_TEXT } from "../../../shared/agent-failures";
 import { renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
-import { effectiveMode } from "../../settings-store";
+import { effectiveMode } from "../../../migrate/today/settings-store";
 import { decisionAnswers } from "../../steps";
 import { npcOddsOf, npcQuestions, OUTLINE_BEATS_MAX, proseAnswer, type TieOdds } from "../../turn-steps";
 import type { ChoicesTask, ChooseTask, DirectorProse, ProseTask, RoleResult, TurnAgentCtx } from "../turn-ctx";

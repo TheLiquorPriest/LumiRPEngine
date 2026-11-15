@@ -13,21 +13,7 @@ import type { Rec, RecHarness } from "../../shared/ledger";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord, isTombstoned } from "../../engine/ledger/path";
-
-/** A record's harness part as stored; null when it has none, or what it holds names no turn (a reply no turn was played for has only its mark, `unplayedOf`). */
-export function recHarnessOf(rec: Pick<Rec, "harness"> | null | undefined): RecHarness | null {
-  const raw: unknown = rec?.harness;
-  if (!isRecord(raw) || !Array.isArray(raw.turns)) return null;
-  const turns = raw.turns.filter((t): t is string => typeof t === "string" && t !== "");
-  if (turns.length === 0) return null;
-  return {
-    turns,
-    ...(isRecord(raw.record) ? { record: raw.record as JsonObject } : {}),
-    ...(typeof raw.defaultTick === "number" && Number.isFinite(raw.defaultTick) && raw.defaultTick > 0 ? { defaultTick: raw.defaultTick } : {}),
-    // Kept through a later write of LumiAH's record (a job of the turn ending): only a turn that writes the record again clears it.
-    ...(typeof raw.unplayed === "string" && raw.unplayed !== "" ? { unplayed: raw.unplayed } : {}),
-  };
-}
+import { recHarnessOf } from "../../migrate/today/harness-record";
 
 /** A reply's mark that no turn was played for it, as its record holds it: why, and whether it is about only what a Continue added to a reply a turn was played for (`added`) or the whole reply. Null for a reply with no such mark. */
 export function unplayedOf(rec: Pick<Rec, "harness"> | null | undefined): { why: string; added: boolean } | null {

@@ -5,8 +5,8 @@
 // anyone's books. Real turns on the fake host, with fake minds and memory.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { timelapseRequest } from "../../src/frontend/requests";
 import { mindsReadPatch } from "../../src/frontend/settings/minds-patch";
 import { placeOfEntity } from "../../src/engine/scope";

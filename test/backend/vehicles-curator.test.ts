@@ -8,7 +8,7 @@
 // card, and the GM's Apply makes it a vehicle of its class. The models are scripted.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import type { WorldState } from "../../src/engine/state";
 import type { JsonObject } from "../../src/shared/json";
 import type { ReviewCardView } from "../../src/shared/protocol";

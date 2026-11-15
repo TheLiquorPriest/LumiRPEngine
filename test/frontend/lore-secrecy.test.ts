@@ -3,7 +3,7 @@
 // entries LumiRPEngine switched off, and offers only the presses that step takes, Restore asking first.
 
 import { describe, expect, test } from "bun:test";
-import type { HostBookEntryInput } from "../../src/backend/host";
+import type { HostBookEntryInput } from "../../src/shared/host";
 import { MoveSteps, MoveView } from "../../src/frontend/build/lore-secrecy";
 import { Button } from "../../src/frontend/components";
 import { ActionRow } from "../../src/frontend/gm/ui";

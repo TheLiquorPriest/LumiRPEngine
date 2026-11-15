@@ -16,7 +16,7 @@ import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from 
 import type { LorePin, WorldDoc } from "../shared/world";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../shared/secret-marks";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";
-import type { HostBookEntry, HostPort } from "./host";
+import type { HostBookEntry, HostPort } from "../shared/host";
 import { bookEntryLore, bookEntryTitle } from "./book-lore";
 import { copiedOriginals, secrecyParts, secretTexts, type SecretTexts } from "./lore-secrets";
 

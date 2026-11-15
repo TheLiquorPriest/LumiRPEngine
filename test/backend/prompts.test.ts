@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { sectionsOf } from "../../src/backend/book";
 import { markWording, PromptSets, renderPrompt, resolvePrompt, testPrompt, turnPromptSet, type PromptContract } from "../../src/backend/prompts";
-import { SettingsStore } from "../../src/backend/settings-store";
+import { SettingsStore } from "../../src/migrate/today/settings-store";
 import { turnTimeLine } from "../../src/backend/turn-steps";
 import { hasOwn, type JsonObject } from "../../src/shared/json";
 import { ELAPSED_TEXT_IDS, FINAL_OUTPUT_PAGE, FINAL_OUTPUT_PROMPTS, MARK_TEXT_IDS, PROMPT_PAGES, PROMPTS, promptDef, promptProblems, sectionPromptId, type PromptDef } from "../../src/shared/prompts";

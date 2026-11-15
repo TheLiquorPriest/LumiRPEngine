@@ -15,7 +15,7 @@ import { own } from "../engine/pack-kit";
 import { fixChip } from "./view";
 import { fidelityOf } from "../packs/minds/core/fidelity";
 import { latestTexts } from "./gm";
-import { toChain } from "./ledger-io";
+import { toChain } from "../migrate/today/ledger-io";
 import { knowledgeOn } from "./chat-knowledge-prefs";
 import { mindsStepConfig, runMinds } from "./minds";
 import { TimeoutFired, within } from "../shared/timeouts";

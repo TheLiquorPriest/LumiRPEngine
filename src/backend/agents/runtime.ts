@@ -28,7 +28,7 @@ import { limitOf } from "../../shared/minds";
 import type { PromptTexts } from "../../shared/prompts";
 import { timerMs } from "../../shared/timeouts";
 import { counted, nounFor } from "../../shared/words";
-import type { HostPort, QuietMessage, QuietTool } from "../host";
+import type { HostPort, QuietMessage, QuietTool } from "../../shared/host";
 import { renderPrompt } from "../prompts";
 import { type AgentAccounts, type AgentCall, AgentStop, type AgentStopCode, type ModelReply, NATIVE_TURNS, type PreparedCall, ProviderSession, TEXT_TURNS, type ToolResult, ToolsRefused } from "./provider";
 import { type AgentUsage, addCall, type CallUsage, emptyUsage, toolTokens } from "./usage";

@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
 import { Working } from "../../src/engine/working";
-import type { DecideRequest, QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { DecideRequest, QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { LookupBudget, StepLore, TOOL_SUPPORT_PATH } from "../../src/backend/lore-steps";
 import { sectionTokens } from "../../src/backend/book";
 import { runDir } from "../../src/shared/ids";

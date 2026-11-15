@@ -46,7 +46,7 @@ import { capCounted, capText, firstCounted } from "../packs/minds/core/edit";
 import { fidelityOf, type MindPick, pickMinds, quietMind } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { sectionsOf } from "./book";
-import type { HostMessage, HostPort } from "./host";
+import type { HostMessage, HostPort } from "../shared/host";
 import { seedKnowledge } from "./knowledge-seed";
 import { checkKnowledge, knowledgeBatches, knowledgeContext, knowledgeSpent, type KnowledgeTurn } from "./knowledge-step";
 import { askMind, type MindAsk } from "./mind-ask";
@@ -54,7 +54,7 @@ import { pinReader, readPins } from "./lore-pins";
 import { loreFactOf } from "./lore-ids";
 import { consolidateContext, memoryContext, mindContext, pinnedLines, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
-import type { SettingsStore } from "./settings-store";
+import type { SettingsStore } from "../migrate/today/settings-store";
 import { NotNeeded, type Steps } from "./steps";
 import { renderTemplate } from "./turn-steps";
 

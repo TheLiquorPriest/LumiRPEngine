@@ -7,7 +7,7 @@
 // thing theirs, by type, by what it is or a vehicle's class, as the chat's claims policy allows.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { FIX_THINGS_MAX } from "../../src/shared/protocol";

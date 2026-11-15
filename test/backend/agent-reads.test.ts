@@ -9,8 +9,8 @@
 import { describe, expect, test } from "bun:test";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { AgentOp } from "../../src/backend/agents/tools/writer";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
-import { decodeLedger, toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
+import { decodeLedger, toChain } from "../../src/migrate/today/ledger-io";
 import { sessionAt } from "../../src/backend/agents/sessions";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import { isRecord, type JsonObject } from "../../src/shared/json";

@@ -2,9 +2,9 @@
 // The randomized gate is properties.test.ts; these name the cases a reader checks first.
 
 import { describe, expect, test } from "bun:test";
-import { decodeJournal, decodeLedger, journalPath, toChain } from "../../src/backend/ledger-io";
-import { defaultSettings } from "../../src/backend/settings-store";
-import { startMarkersFrom } from "../../src/backend/start-markers";
+import { decodeJournal, decodeLedger, journalPath, toChain } from "../../src/migrate/today/ledger-io";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
+import { startMarkersFrom } from "../../src/migrate/today/start-markers";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId, MessageId } from "../../src/shared/ids";

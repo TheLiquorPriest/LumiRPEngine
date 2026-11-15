@@ -3,7 +3,7 @@
 // what RPE last kept out of the chat added.
 
 import { describe, expect, test } from "bun:test";
-import type { WorldInfoCandidate } from "../../src/backend/host";
+import type { WorldInfoCandidate } from "../../src/shared/host";
 import { worldInfoVerdict, type WorldInfoGate } from "../../src/backend/wi-interceptor";
 import { failClosed, KeptOut } from "../../src/ext/fail-closed";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";

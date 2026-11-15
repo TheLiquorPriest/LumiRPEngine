@@ -6,7 +6,7 @@
 // back into its blocks resolves each block alone.
 
 import { describe, expect, test } from "bun:test";
-import type { HostPresetBlock, HostPromptValues } from "../../src/backend/host";
+import type { HostPresetBlock, HostPromptValues } from "../../src/shared/host";
 import { presetFor, readStoryPreset, type StoryPresetHost } from "../../src/backend/story/preset";
 import { STORY_PRESET_DEFAULTS, type StoryPresetSettings } from "../../src/shared/settings";
 import { HOST_REPO, hostTwoPass } from "../support/host-macros";

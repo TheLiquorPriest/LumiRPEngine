@@ -9,7 +9,7 @@ import { AgentAccounts } from "../../src/backend/agents/provider";
 import { type AgentSpec, type AgentTool, cutShort, SCRATCH_READ, startAgent } from "../../src/backend/agents/runtime";
 import { recordAgentCalls } from "../../src/backend/agents/transcripts";
 import { toolTokens } from "../../src/backend/agents/usage";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { type AgentSettings, defaultAgentSettings } from "../../src/shared/agent-settings";
 import type { DiagAgentCall, DiagRecord } from "../../src/shared/diagnostics";
 import { FakeHost, type QuietScript } from "../support/fake-host";

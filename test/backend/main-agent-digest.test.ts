@@ -6,10 +6,10 @@
 // pipeline, every role prompt-only, the scene role at the GM tier.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import { digestOf } from "../../src/backend/agents/turn-task";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
 import type { ReviewCardView } from "../../src/shared/protocol";

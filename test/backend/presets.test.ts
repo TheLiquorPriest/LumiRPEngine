@@ -7,7 +7,7 @@
 // lore policies existed load with their preset's.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings, MODEL_USE_PRESETS, SettingsStore } from "../../src/backend/settings-store";
+import { defaultSettings, MODEL_USE_PRESETS, SettingsStore } from "../../src/migrate/today/settings-store";
 import { PRESET_NOTE } from "../../src/frontend/settings/steps";
 import type { ModelUseSettings, StepConfig } from "../../src/shared/settings";
 import { DEFAULT_STEP_LORE, stepLoreOf } from "../../src/shared/settings";

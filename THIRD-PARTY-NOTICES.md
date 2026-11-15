@@ -51,6 +51,54 @@ Bundling drops the comments of the files it takes in, and with them the copyrigh
 
 None of the Apache-2.0 packages ships a `NOTICE` file.
 
+## Source carried from LumiAH
+
+The migration's readers of today's runtime folders and the swap read LumiAH's link and runtime the way LumiAH writes them, so they carry their own copy of that code instead of depending on the `lumi-ah` package. The files below are taken from LumiAH (https://github.com/TheLiquorPriest/LumiAH) at commit `6a38779a5e33fe563f0c8c617640343473617569`, unchanged but for one header line in each naming its source path and the commit. They keep LumiAH's layout under `src/migrate/today/lumiah/`, so their imports of each other resolve as they did in LumiAH.
+
+| LumiAH file | Carried to |
+|---|---|
+| `src/link/contract.ts` | `src/migrate/today/lumiah/link/contract.ts` |
+| `src/link/json.ts` | `src/migrate/today/lumiah/link/json.ts` |
+| `src/link/settings.ts` | `src/migrate/today/lumiah/link/settings.ts` |
+| `src/link/waits.ts` | `src/migrate/today/lumiah/link/waits.ts` |
+| `src/runtime/config.ts` | `src/migrate/today/lumiah/runtime/config.ts` |
+| `src/runtime/lumiverse.ts` | `src/migrate/today/lumiah/runtime/lumiverse.ts` |
+| `src/runtime/update/memory.ts` | `src/migrate/today/lumiah/runtime/update/memory.ts` |
+| `src/core/ports.ts` | `src/migrate/today/lumiah/core/ports.ts` |
+| `src/core/recall/ports.ts` | `src/migrate/today/lumiah/core/recall/ports.ts` |
+| `src/core/recall/shapes.ts` | `src/migrate/today/lumiah/core/recall/shapes.ts` |
+| `src/core/story.ts` | `src/migrate/today/lumiah/core/story.ts` |
+| `src/host/rows.ts` | `src/migrate/today/lumiah/host/rows.ts` |
+| `src/shared/timeouts.ts` | `src/migrate/today/lumiah/shared/timeouts.ts` |
+
+These files import nothing outside themselves but the language's own types. LumiAH's `NOTICE` names third-party code only in its built bundles, none of which is carried here.
+
+LumiAH's licence, from `LICENSE` at that commit:
+
+```text
+MIT License
+
+Copyright (c) 2026 TheLiquorPriest
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Licence texts
 
 ### lumi-ah (LumiAH) 0.0.1

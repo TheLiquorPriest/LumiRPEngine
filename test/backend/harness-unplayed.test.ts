@@ -6,7 +6,8 @@
 // is the runtime's: `harness-runtime.test.ts`.)
 
 import { describe, expect, test } from "bun:test";
-import { recHarnessOf, unplayedOf } from "../../src/backend/harness/record";
+import { unplayedOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { renderPrompt } from "../../src/backend/prompts";
 import { HARNESS_AGENT, HARNESS_NOTE, HARNESS_TEXT } from "../../src/shared/harness-texts";
 import type { Chip } from "../../src/shared/state-view";

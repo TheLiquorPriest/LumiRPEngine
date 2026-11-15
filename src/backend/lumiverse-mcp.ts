@@ -8,7 +8,7 @@
 import type { ListedTool } from "../shared/agents";
 import { KIT_MARKS, toolsFingerprint } from "../shared/agents";
 import type { UserId } from "../shared/ids";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 
 /** A profile Lumiverse's client is connected to and holds lumirpengine's tools for. */
 export interface LreProfile {

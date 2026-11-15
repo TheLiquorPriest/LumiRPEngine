@@ -27,7 +27,7 @@ import { nameOf } from "../../../../shared/world-diff";
 import { baseWorld } from "../../../../engine/places-in-play";
 import { DRAFT_COLLECTIONS, type DraftCollection, type DraftEdit } from "../../../../engine/world-draft";
 import { keepInWorld, madeInPlay } from "../../../gm";
-import { WORLD_COLLECTIONS, WorldError } from "../../../worlds";
+import { WORLD_COLLECTIONS, WorldError } from "../../../../worlds/worlds";
 import type { ToolOutcome } from "../../runtime";
 import { closedChanges, type WorldActDetail } from "../harness-ports";
 import { boolArg, missing, propose, wordsArg } from "../propose";

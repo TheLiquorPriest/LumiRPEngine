@@ -14,8 +14,8 @@ import { LORE_POLICIES } from "../shared/settings";
 import type { ContextGeneration, LoreStepTrace } from "../shared/state-view";
 import type { MindCallTrace, PinnedTrace } from "../shared/minds";
 import { FIDELITIES, MIND_PURPOSES } from "../shared/minds";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { HostPort } from "../shared/host";
+import { readStoredJson } from "../worlds/stored-json";
 
 /** One engine run's sections (`core.context`, DESIGN §6.5), with what the activation check needs. */
 export interface InspectorRecord extends ContextGeneration {

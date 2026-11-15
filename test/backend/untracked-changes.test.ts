@@ -8,10 +8,10 @@
 // (DESIGN §9.4).
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { chipRole } from "../../src/frontend/chip-roles";
 import type { JsonObject } from "../../src/shared/json";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { Rig } from "../support/rig";
 import type { WorldState } from "../../src/engine/state";
 import { knows } from "../../src/engine/visibility";

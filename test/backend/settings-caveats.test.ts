@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import type { DryRun } from "../../src/backend/host";
+import type { DryRun } from "../../src/shared/host";
 import { Rig } from "../support/rig";
 
 describe("Settings → Caveats apart from settings", () => {

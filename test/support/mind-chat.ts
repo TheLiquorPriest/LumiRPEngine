@@ -3,8 +3,8 @@
 // asked for Live beside the player character, and a story whose memories leave a note, a commitment,
 // a plan, a summary and something another character told them.
 
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
 import { placeOfEntity } from "../../src/engine/scope";

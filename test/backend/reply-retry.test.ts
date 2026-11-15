@@ -4,8 +4,8 @@
 // card, the reply's or the engine run's, starts its reply the way the stopped one started.
 
 import { describe, expect, test } from "bun:test";
-import type { ContextHandlerInput, ContextVerdict } from "../../src/backend/host";
-import { OPEN_CHATS_CAP, toChain } from "../../src/backend/ledger-io";
+import type { ContextHandlerInput, ContextVerdict } from "../../src/shared/host";
+import { OPEN_CHATS_CAP, toChain } from "../../src/migrate/today/ledger-io";
 import type { Chip } from "../../src/shared/state-view";
 import { press } from "../support/chip-press";
 import type { AssembledEntry, Generation } from "../support/fake-host";

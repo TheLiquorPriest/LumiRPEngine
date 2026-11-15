@@ -3,13 +3,16 @@
 // three files at the top of src/) is classified by zone and checked against the allowed edges; the
 // `spindle` global is confined to the backend adapter, and the page reaches Lumiverse only through
 // Spindle's messages. The standalone application's folders, Build and the play area among them, are
-// the standalone boundaries test's. Until PlanSwap-8 and PlanSwap-9 remove today's backend and
-// frontend, each may import the homes fates.tsv names for what moves out of it (test/removal/).
+// the standalone boundaries test's; a folder of src/ that is neither today's nor one of theirs fails
+// here, so no folder is read by neither test. Until PlanSwap-8 and PlanSwap-9 remove today's backend
+// and frontend, each may import the homes PlanSwap-5 and PlanSwap-6 make for what moves out of it
+// (fates.tsv, test/removal/), and nothing else of the new tree.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { atHome, homes, OLD_FILES, OLD_FOLDERS, readFates } from "./removal/fates";
+import { join, relative, resolve } from "node:path";
+import { atHome, homes, NEW_ZONES, OLD_FILES, OLD_FOLDERS, readFates } from "./removal/fates";
+import { resolveSpec, scan } from "./removal/imports";
 
 const ROOT = resolve(import.meta.dir, "..");
 const SRC = join(ROOT, "src");
@@ -35,13 +38,17 @@ type Zone =
   | { kind: "outside" };
 
 /**
- * The homes fates.tsv names for what leaves today's backend and frontend, each with the folder it
- * leaves: a move leaves one copy (PlanSwap-5), so until the old folder goes it imports its moved code
- * there. A home that is a whole folder opens it to the backend only; what leaves the frontend is
- * named file by file, so the panels do not reach into the new pages.
+ * The homes PlanSwap-5 and PlanSwap-6 make for what leaves today's backend and frontend, each with
+ * the folder it leaves: a move leaves one copy (PlanSwap-5), so until the old folder goes it imports
+ * its moved code there. The homes other packages make are the new tree's own: the old dispatcher
+ * reaching a typed route's handler would be a second road to it. A home that is a whole folder opens
+ * it to the backend only; what leaves the frontend is named file by file, so the panels do not reach
+ * into the new pages.
  */
-const HOMES = homes(readFates()).flatMap(({ from, home }) => {
+const MAKERS = new Set(["PlanSwap-5", "PlanSwap-6"]);
+const HOMES = homes(readFates()).flatMap(({ from, home, by }) => {
   const leaving = from.split("/")[1] ?? "";
+  if (!MAKERS.has(by)) return [];
   return leaving === "backend" || (leaving === "frontend" && !home.endsWith("/")) ? [{ leaving, home }] : [];
 });
 
@@ -72,14 +79,9 @@ interface Edge {
   typeOnly: boolean;
 }
 
-const IMPORT_RE = /(?:^|\n)\s*(import|export)\s+(type\s+)?(?:[^'";]*?\sfrom\s+)?["']([^"']+)["']/g;
-const DYNAMIC_RE = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-
+/** Every module the source loads, read the way the fence reads it (test/removal/imports.ts). */
 function edgesOf(source: string): Edge[] {
-  const out: Edge[] = [];
-  for (const m of source.matchAll(IMPORT_RE)) out.push({ spec: m[3] ?? "", typeOnly: m[2] !== undefined });
-  for (const m of source.matchAll(DYNAMIC_RE)) out.push({ spec: m[1] ?? "", typeOnly: false });
-  return out;
+  return scan(source).loads.map(({ spec, typeOnly }) => ({ spec, typeOnly }));
 }
 
 function files(dir: string): string[] {
@@ -164,17 +166,10 @@ function allowedLocal(from: Zone, to: Zone, typeOnly: boolean, targetRel: string
   }
 }
 
+/** The file a relative specifier names, as TypeScript and Bun resolve it, the planted files among the files there. */
 function resolveLocal(file: string, spec: string, planted: ReadonlySet<string>): string {
-  const base = resolve(dirname(file), spec);
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) {
-    if (planted.has(candidate)) return candidate;
-    try {
-      if (statSync(candidate).isFile()) return candidate;
-    } catch {
-      // try the next candidate
-    }
-  }
-  return base;
+  const there = (path: string) => planted.has(join(ROOT, path)) || (existsSync(join(ROOT, path)) && statSync(join(ROOT, path)).isFile());
+  return join(ROOT, resolveSpec(relative(ROOT, file).split("\\").join("/"), spec, there, ROOT));
 }
 
 /** Files allowed to reference the `spindle` global. */
@@ -207,10 +202,9 @@ function violationsOf(planted: ReadonlyMap<string, string> = new Map()): string[
           if (!(from.kind === "cli" && CLI_BUNDLED.test(relative(ROOT, target).split("\\").join("/")))) violations.push(`${rel}: imports outside today's layers (${edge.spec})`);
         } else if (!allowedLocal(from, to, edge.typeOnly, targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
       } else if (edge.spec.startsWith("node:") || edge.spec.startsWith("bun:")) {
-        // The CLI's entry is the one file that touches the disk, the terminal and the process; the
-        // backend's turn frame is the one that carries a turn's settings across its async work.
+        // The CLI's entry is the one file that touches the disk, the terminal and the process.
         const spec = rel.split("\\").join("/");
-        if (!(spec === "cli/main.ts" && edge.spec.startsWith("node:")) && !(spec === "backend/turn-frame.ts" && edge.spec === "node:async_hooks")) violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort, and only the CLI's entry may use node:, but for the turn frame's node:async_hooks)`);
+        if (!(spec === "cli/main.ts" && edge.spec.startsWith("node:"))) violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort, and only the CLI's entry may use node:)`);
       } else if (HARNESS_PACKAGE.test(edge.spec)) {
         const door = HARNESS_DOORS.find((d) => rel.split("\\").join("/").startsWith(d.under));
         if (!door) violations.push(`${rel}: ${edge.spec} is imported only under ${HARNESS_DOORS.map((d) => `src/${d.under}`).join(" and ")}`);
@@ -248,6 +242,28 @@ describe("module boundaries", () => {
       ["src/frontend/planted-page.tsx", 'import { WebShell } from "../ui/web";'],
     ]);
     expect(violationsOf(planted)).toEqual(["backend/planted-turn.ts: imports outside today's layers (../turn/turns)", "shared/planted.ts (shared) → migrate/today/reader.ts (home)", "frontend/planted-page.tsx: imports outside today's layers (../ui/web)"]);
+  });
+
+  test("only the homes PlanSwap-5 and PlanSwap-6 make are open to the old backend, not every piece's home", () => {
+    // Build's typed routes are PlanChatUI-B6's home: the old dispatcher reaching them would be a second road.
+    const planted = new Map([
+      ["src/build/worlds-routes.ts", "export const worldsRoutes = 1;"],
+      ["src/backend/planted.ts", 'import { worldsRoutes } from "../build/worlds-routes";'],
+    ]);
+    expect(violationsOf(planted)).toEqual(["backend/planted.ts: imports outside today's layers (../build/worlds-routes)"]);
+  });
+
+  test("an import written with a .js name is read as the file it names", () => {
+    expect(violationsOf(new Map([["src/shared/planted.ts", 'import { createRng } from "../engine/rng.js";']]))).toEqual(["shared/planted.ts (shared) → engine/rng.ts (engine)"]);
+  });
+
+  test("every folder of src/ is today's or one of the standalone application's zones, so each is read by a boundaries test", () => {
+    const folders = (planted: readonly string[]) =>
+      [...new Set([...readdirSync(SRC).filter((name) => statSync(join(SRC, name)).isDirectory()), ...planted.map((path) => path.split("/")[1] ?? "")])]
+        .filter((name) => !(OLD_FOLDERS as readonly string[]).includes(name) && !(NEW_ZONES as readonly string[]).includes(name))
+        .sort();
+    expect(folders([])).toEqual([]);
+    expect(folders(["src/elsewhere/planted.ts"])).toEqual(["elsewhere"]);
   });
 
   test("only the backend adapter touches the spindle global", () => {

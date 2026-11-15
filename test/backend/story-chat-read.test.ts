@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { ToolEnv } from "../../src/backend/agents/tools/registry";
 import { chatRead } from "../../src/backend/chat-read";
 import type { HarnessCore } from "../../src/backend/harness/extension";
-import type { HostPort } from "../../src/backend/host";
+import type { HostPort } from "../../src/shared/host";
 import { preparePage } from "../../src/backend/story/prepare";
 import { chatStoryPort } from "../../src/backend/story/record";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";

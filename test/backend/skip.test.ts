@@ -4,7 +4,7 @@
 // the beat scan and the beats cap on their own.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindPlan } from "../../src/shared/minds";
@@ -16,8 +16,8 @@ import type { WorldState } from "../../src/engine/state";
 import { clockFix, replaySkip, runTimelapse } from "../../src/engine/time";
 import { timelapseIntent, turnStart } from "../../src/engine/turn";
 import { Working } from "../../src/engine/working";
-import { toChain } from "../../src/backend/ledger-io";
-import { readRun } from "../../src/backend/runtime";
+import { toChain } from "../../src/migrate/today/ledger-io";
+import { readRun } from "../../src/migrate/today/run";
 import { capBeats, runSkip, scanBeats, type Beat, type BeatMinds } from "../../src/backend/skip";
 import { ALL_PACKS } from "../../src/packs/index";
 import { encounterOf } from "../../src/packs/combat/core/model";

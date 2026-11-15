@@ -47,17 +47,17 @@ import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, storyLocke
 import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import { thingsConfigOf } from "../shared/things";
-import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
-import type { StoredChip } from "./chips";
+import type { ChatKnowledgePrefs } from "../migrate/today/chat-knowledge-prefs";
+import type { StoredChip } from "../migrate/today/chips";
 import { TURN_FOOTER, WORLD_MADE } from "./harness/card";
 import { unplayedOf } from "./harness/record";
-import type { ReplyFailure } from "./ledger-io";
+import type { ReplyFailure } from "../migrate/today/ledger-io";
 import { OFFSTAGE_TEXT_ID, type PromptTexts } from "../shared/prompts";
 import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
 import { renderPrompt } from "./prompts";
 import { chatCashRule, toggles } from "../packs/economy/core/pay";
 import { FEATURE_DEFS } from "../shared/finance";
-import { turnFrame } from "./turn-frame";
+import { turnFrame } from "../migrate/today/turn-frame";
 import { gmKeyOf } from "./gm-memo";
 import type { DiagStep } from "../shared/diagnostics";
 

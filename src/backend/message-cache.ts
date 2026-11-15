@@ -21,7 +21,7 @@
 
 import type { ChatId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
-import type { HostMessage, HostPort } from "./host";
+import type { HostMessage, HostPort } from "../shared/host";
 
 /** How many copies are kept, by (chat, user): the open chat, and a few the user moved between. */
 const CHATS_KEPT = 8;

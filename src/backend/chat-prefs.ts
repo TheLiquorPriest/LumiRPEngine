@@ -10,8 +10,8 @@ import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { MapDisplay } from "../shared/world";
 import type { LastScene, SceneStore } from "./agents/persist";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { HostPort } from "../shared/host";
+import { readStoredJson } from "../worlds/stored-json";
 
 /** How many left findings a chat keeps; past it, the oldest left shows again. */
 const TIDY_LEFT_MAX = 1000;

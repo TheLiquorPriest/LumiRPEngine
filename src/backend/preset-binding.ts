@@ -16,7 +16,7 @@
 import type { ChatId, UserId } from "../shared/ids";
 import { neutralizeMacros } from "../shared/macros";
 import type { StepPurpose } from "../shared/world";
-import type { HostPort, HostPresetBlock } from "./host";
+import type { HostPort, HostPresetBlock } from "../shared/host";
 
 /** What a preset may guide: each helper step, and the narrator. */
 export type GuidanceTarget = StepPurpose | "narrator";

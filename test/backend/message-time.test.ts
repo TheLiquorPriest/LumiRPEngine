@@ -3,8 +3,8 @@
 // narrates is the turn's whole, so only what goes beyond the time the turn already took applies.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import { dayPlan } from "../../src/packs/castlife/core/index";

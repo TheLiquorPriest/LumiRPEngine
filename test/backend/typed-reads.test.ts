@@ -4,8 +4,8 @@
 // world's step template saved on the retired `classifier` signal runs on every typed message.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { lintWorld, migrateWorld } from "../../src/engine/authoring";
 import { placeOfEntity } from "../../src/engine/scope";

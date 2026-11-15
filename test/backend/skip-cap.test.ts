@@ -2,8 +2,8 @@
 // time a reply narrates and time the player types alike. A longer skip is the Timelapse chip.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { ASK_BEYOND_DEFAULT, TIMELAPSE_REACH_MINUTES } from "../../src/shared/settings";
 import { Rig } from "../support/rig";

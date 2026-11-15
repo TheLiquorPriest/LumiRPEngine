@@ -6,7 +6,7 @@
 import { Database } from "bun:sqlite";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { decodeLedger, encodeLedger } from "../../src/backend/ledger-io";
+import { decodeLedger, encodeLedger } from "../../src/migrate/today/ledger-io";
 import { docKey } from "../../src/migrate/history";
 import { sha256 } from "../../src/migrate/files";
 import type { JsonObject } from "../../src/shared/json";

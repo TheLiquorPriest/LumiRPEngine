@@ -8,7 +8,7 @@
 // and swipe, Branch and Undo fold identically, the reference fold with them.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../../src/backend/ledger-io";
+import { toChain } from "../../../src/migrate/today/ledger-io";
 import { applyProposals, type ProposalOutcome } from "../../../src/backend/turn-model";
 import type { LedgerCore } from "../../../src/engine/ledger/journal";
 import { referenceFold } from "../../../src/engine/ledger/reference";

@@ -18,7 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sessionAt } from "../../src/backend/agents/sessions";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { ChainMessage } from "../../src/engine/ledger/chain";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import { PROTOCOL_VERSION, type FrontendToBackend } from "../../src/shared/protocol";

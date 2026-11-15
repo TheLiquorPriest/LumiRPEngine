@@ -4,9 +4,9 @@
 // change types' modes, with the old pins carried over, and a fact naming someone unknown told so.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
-import { SettingsStore } from "../../src/backend/settings-store";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
+import { SettingsStore } from "../../src/migrate/today/settings-store";
 import { accessFor } from "../../src/engine/access";
 import type { ReadContext } from "../../src/engine/registry";
 import type { WorldState } from "../../src/engine/state";

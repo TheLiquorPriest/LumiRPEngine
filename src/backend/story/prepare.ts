@@ -50,7 +50,7 @@ import { chatRead } from "../chat-read";
 import type { OpRefusal } from "../agents/tools/writer";
 import { knowledgeOn } from "../chat-knowledge-prefs";
 import type { TurnAgent } from "../harness/turn";
-import type { HostMessage } from "../host";
+import type { HostMessage } from "../../shared/host";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import { mindPath } from "./minds";

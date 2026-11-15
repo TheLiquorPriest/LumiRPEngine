@@ -76,7 +76,7 @@ import { Working } from "../../../engine/working";
 import { wsDelete, wsPin, wsWrite } from "../../../engine/workspace";
 import { markWording, renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
-import { effectiveMode } from "../../settings-store";
+import { effectiveMode } from "../../../migrate/today/settings-store";
 import { appliedEvents, clockFixLine, fixChip, unseenFixLine } from "../../view";
 import { makeWorldActs, type WorldAct, type WorldActDetail, worldActLines, worldActOf, worldActShown } from "./harness-ports";
 import { readView, type ToolReadView } from "./read-view";

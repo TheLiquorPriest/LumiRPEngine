@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import { proseClashes } from "../../src/backend/agents/roles/prose-check";
 import { runYield } from "../../src/backend/agents/yields";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { factLines, sceneClock } from "../../src/backend/turn-steps";
 import { clockMinutes } from "../../src/backend/view";
 import { calendarOf, formatClock, formatTimeOfDay, parseHHMM } from "../../src/engine/calendar";

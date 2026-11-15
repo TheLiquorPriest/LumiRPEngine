@@ -10,7 +10,7 @@ import { Sweep, SWEEP_PATH } from "../../src/backend/agents/sweep";
 import { ChatAgentMeta } from "../../src/backend/chat-agent-meta";
 import { Diagnostics } from "../../src/backend/diagnostics";
 import { GLOBAL_INDEX_PATH, GlobalWorkspace } from "../../src/backend/global-workspace";
-import { decodeLedger } from "../../src/backend/ledger-io";
+import { decodeLedger } from "../../src/migrate/today/ledger-io";
 import type { DiagAgentCall } from "../../src/shared/diagnostics";
 import type { ChatId, MessageId } from "../../src/shared/ids";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";

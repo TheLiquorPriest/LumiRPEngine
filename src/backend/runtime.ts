@@ -94,16 +94,19 @@ import { BlobStore } from "./agents/blobs";
 import { Sessions } from "./agents/sessions";
 import { CompactionMemo } from "./agents/compaction-memo";
 import { Sweep } from "./agents/sweep";
-import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView, tidyOn } from "./chat-knowledge-prefs";
-import { ChipStore, type StoredChip } from "./chips";
-import type { DryRun, HostPort } from "./host";
-import { EngineFailure, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "./ledger-io";
-import { outsideTurns, turnFrame, type TurnFrame } from "./turn-frame";
+import { ChatKnowledge, knowledgeOn, narratorView, tidyOn } from "./chat-knowledge-prefs";
+import { chatKnowledgePrefsOf } from "../migrate/today/chat-knowledge-prefs";
+import { ChipStore, type StoredChip } from "../migrate/today/chips";
+import type { DryRun, HostPort } from "../shared/host";
+import { EngineFailure, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "../migrate/today/ledger-io";
+import { LedgerService } from "./ledger-io";
+import { outsideTurns, turnFrame, type TurnFrame } from "../migrate/today/turn-frame";
 import type { TrimReport } from "./memory-budget";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
-import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
-import { startMarkersFrom } from "./start-markers";
+import { recordOutcome } from "./settings-store";
+import { effectiveMode, SettingsStore } from "../migrate/today/settings-store";
+import { startMarkersFrom } from "../migrate/today/start-markers";
 import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
@@ -119,7 +122,7 @@ import { CallMeter, dedupeProposals, extract, type ExtractRead, interpret, NotNe
 import { renderPrompt } from "./prompts";
 import { EXTRACT_ITEM_TEXT, EXTRACT_ORG_TEXT, ORG_FACT_TYPES } from "../shared/role-prompts";
 import { PlanNotes, type PlanLines } from "./plan-notes";
-import { StagedActions } from "./staged";
+import { StagedActions } from "../migrate/today/staged";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
@@ -128,8 +131,10 @@ import { applyProposals, applyRead, type EnginePipeline, type PlannedRead, type 
 import { agentsActHere, factLines, handedCash, judge, keepLine, noFacts, npcAsked, npcOdds, oddsDecisions, paidOutside, payeeOf, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, sceneClock, slotVars, type EarlierMessage, type StepBudget, tiesOf, turnTimeLine, unfitRef, type PlanStart, type ProseMark, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION, ViewMemo } from "./view";
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
-import { WorldStore } from "./worlds";
-import { Diagnostics, type DiagAt } from "./diagnostics";
+import { WorldStore } from "../worlds/worlds";
+import { Diagnostics } from "./diagnostics";
+import type { DiagAt } from "../migrate/today/diagnostics";
+import { readRun } from "../migrate/today/run";
 import { Orchestrator, type TurnCalls } from "./agents/orchestrator";
 import { Review } from "./agents/review";
 import { HarnessEngine } from "./harness/extension";
@@ -265,13 +270,6 @@ const TOKEN_COUNT_CAP = 4;
 export const LIVE_LORES_KEPT = 8;
 /** What Settings → Caveats' timer gives when the Preset check timeout (`caveatsMs`) fires first. */
 const LATE: unique symbol = Symbol("late");
-
-/** The chat's run as its metadata holds it (DESIGN §4.1), or null for a chat that plays no world. */
-export function readRun(meta: JsonObject): ChatRun | null {
-  const raw = meta[LEDGER_NAMESPACE];
-  if (!isRecord(raw) || raw.v !== 1 || typeof raw.worldId !== "string" || typeof raw.revision !== "string" || typeof raw.runSeed !== "string") return null;
-  return { v: 1, worldId: raw.worldId, revision: raw.revision, runSeed: raw.runSeed, startedAt: typeof raw.startedAt === "number" ? raw.startedAt : 0 };
-}
 
 /** The world as the POV may know it, for model prompts that list entities and places (`interpret`, `extract`). */
 function povWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): WorldDoc {

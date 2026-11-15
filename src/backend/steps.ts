@@ -25,10 +25,10 @@ import { TRY_ACTION } from "../engine/inferred";
 import { TIMELAPSE_ACTION } from "../engine/turn";
 import { cashGift } from "../packs/gear/core/index";
 import { axesOf } from "../packs/relationships/core/index";
-import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
+import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "../shared/host";
 import type { CatalogEntry, InterpretScene } from "./interpret-context";
 import type { LookupTransport, StepLore } from "./lore-steps";
-import { readStoredJson } from "./stored-json";
+import { readStoredJson } from "../worlds/stored-json";
 
 export interface CallRecord {
   purpose: StepPurpose;

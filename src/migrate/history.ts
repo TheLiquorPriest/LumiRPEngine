@@ -10,7 +10,7 @@
 // else the index the record names. A turn no generation played holds the files of the turn before it.
 
 import type { Database } from "bun:sqlite";
-import { recHarnessOf } from "../backend/harness/record";
+import { recHarnessOf } from "./today/harness-record";
 import { isRecord } from "../shared/json";
 import type { Rec } from "../shared/ledger";
 import type { TurnRow, UserStore } from "../store";

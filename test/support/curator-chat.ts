@@ -5,7 +5,7 @@
 // only.
 
 import { expect } from "bun:test";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import type { WorldState } from "../../src/engine/state";
 import { heldBy } from "../../src/shared/finance";
 import type { JsonObject } from "../../src/shared/json";

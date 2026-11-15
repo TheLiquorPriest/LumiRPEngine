@@ -4,15 +4,15 @@
 // narrator and the roll chip are told what the policy decided.
 
 import { describe, expect, test } from "bun:test";
-import type { DecideRequest } from "../../src/backend/host";
+import type { DecideRequest } from "../../src/shared/host";
 import type { Answers } from "../../src/engine/decide";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import type { JsonObject } from "../../src/shared/json";
 import type { AdjudicationDef, WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { planLines, rollChip } from "../../src/backend/runtime";
-import { defaultSettings } from "../../src/backend/settings-store";
-import { startMarkersFrom } from "../../src/backend/start-markers";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
+import { startMarkersFrom } from "../../src/migrate/today/start-markers";
 import { resolveOn } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import type { EngineTurnPlan } from "../../src/engine/turn";

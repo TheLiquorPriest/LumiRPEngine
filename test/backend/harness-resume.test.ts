@@ -6,7 +6,7 @@
 // with it, and follows LumiAH's own switch for the chat.
 
 import { describe, expect, test } from "bun:test";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { renderPrompt } from "../../src/backend/prompts";
 import { HARNESS_NOTE } from "../../src/shared/harness-texts";
 import { placeOfEntity } from "../../src/engine/scope";

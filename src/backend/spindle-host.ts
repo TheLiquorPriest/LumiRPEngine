@@ -6,7 +6,7 @@
 import type { GenerationReasoningOverrideDTO, GenerationRequestDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, StreamChunkDTO, ToolSchemaDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import { MCP_PERMISSION } from "../shared/agents";
-import type { HostPresetBlockInput } from "./host";
+import type { HostPresetBlockInput } from "../shared/host";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, UserId } from "../shared/ids";
@@ -36,39 +36,12 @@ import type {
   WorldInfoCandidate,
   HostPromptValues,
   HostPromptVariable,
-} from "./host";
+} from "../shared/host";
+import { decodeMessage, num, str, toJson, toJsonObject } from "../migrate/today/host-message";
 
 declare const spindle: HostSpindleAPI;
 
 // ---------------------------------------------------------------- decoding
-
-/** A deep copy of host data as JSON (dropping functions, undefined and non-finite numbers). */
-export function toJson(value: unknown): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) return value.map(toJson);
-  if (isRecord(value)) return toJsonObject(value);
-  return null;
-}
-
-export function toJsonObject(value: unknown): JsonObject {
-  const out: JsonObject = {};
-  if (!isRecord(value)) return out;
-  for (const [k, v] of Object.entries(value)) if (v !== undefined && typeof v !== "function") out[k] = toJson(v);
-  return out;
-}
-
-function str(o: unknown, key: string): string | undefined {
-  if (!isRecord(o)) return undefined;
-  const v = o[key];
-  return typeof v === "string" ? v : undefined;
-}
-
-function num(o: unknown, key: string): number | undefined {
-  if (!isRecord(o)) return undefined;
-  const v = o[key];
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
 
 const GENERATION_TYPES: Record<string, HostGenerationType> = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
 
@@ -118,34 +91,6 @@ function promptVariablesOf(raw: unknown): HostPromptVariable[] {
 function promptValuesOf(metadata: unknown): HostPromptValues {
   const raw = isRecord(metadata) && isRecord(metadata.promptVariables) ? metadata.promptVariables : {};
   return Object.fromEntries(Object.entries(raw).flatMap(([id, bucket]) => (isRecord(bucket) ? [[id, { ...bucket }]] : [])));
-}
-
-/** A host message (`getMessages` row or event DTO). `spindle_metadata` arrives as `metadata` or inside `extra`. */
-export function decodeMessage(raw: unknown, chatId: ChatId): HostMessage | null {
-  if (!isRecord(raw)) return null;
-  const id = str(raw, "id");
-  if (!id) return null;
-  const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => (typeof s === "string" ? s : "")) : [];
-  const stored = str(raw, "content") ?? "";
-  const swipeId = num(raw, "swipe_id") ?? 0;
-  if (swipes.length === 0) swipes.push(stored);
-  // The host keeps the shown swipe's text as `content` too: a message kept holds that text once.
-  const shown = swipes[swipeId];
-  const content = shown === stored ? shown : stored;
-  const extra = isRecord(raw.extra) ? raw.extra : {};
-  const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
-  const role = str(raw, "role");
-  return {
-    id,
-    chatId: str(raw, "chat_id") ?? chatId,
-    index: num(raw, "index_in_chat") ?? 0,
-    isUser: raw.is_user === true || role === "user",
-    name: str(raw, "name") ?? "",
-    content,
-    swipeId,
-    swipes,
-    metadata: toJsonObject(metadata),
-  };
 }
 
 const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };

@@ -3,7 +3,7 @@
 // chat that plays no world. Nothing is written.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { ENGINE_VERSION } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 

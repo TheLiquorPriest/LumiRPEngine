@@ -4,7 +4,7 @@
 // connection, else its step's, else the helper model's, else Lumiverse's default connection.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { defaultRoleSettings, ROLE_IDS } from "../../src/shared/agent-roles";
 import { ROLE_TASKS } from "../../src/shared/role-prompts";
 import { ROLE_TASK_ROUTES, roleRoutes, stepUsers, taskRoute, taskStep, type RouteSettings } from "../../src/shared/role-routes";

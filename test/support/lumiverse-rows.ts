@@ -21,7 +21,7 @@
 // `diffChatChangedFields`, Spindle's reshape of a message).
 
 import type { HostChat, HostMessage } from "lumi-ah/extension/backend";
-import type { HostEventName, HostMessage as EngineMessage } from "../../src/backend/host";
+import type { HostEventName, HostMessage as EngineMessage } from "../../src/shared/host";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import type { FakeChat, FakeHost } from "./fake-host";
 

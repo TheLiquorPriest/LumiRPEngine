@@ -9,7 +9,7 @@
 // backend and its runtime linked (`support/runtime-bed.ts`).
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { preparePage } from "../../src/backend/story/prepare";
 import { RUNTIME_WAITS } from "../../src/frontend/settings/timeouts";
 import { isRecord } from "../../src/shared/json";

@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { movedAlong } from "../../src/backend/runtime";
 import { placeOfEntity } from "../../src/engine/scope";
 import { STARTER_WORLDS } from "../../src/packs/index";

@@ -2,13 +2,13 @@
 // tap with no words waits here instead of playing blind, so the player can say how they go about
 // it. One per chat; kept in `userStorage/runs/<chatId>/staged.json`, so a reload and every tab see it.
 
-import type { ChatId, MessageId, UserId } from "../shared/ids";
-import { runDir } from "../shared/ids";
-import type { JsonObject } from "../shared/json";
-import { isRecord } from "../shared/json";
-import type { ActionRequest } from "../shared/protocol";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { ChatId, MessageId, UserId } from "../../shared/ids";
+import { runDir } from "../../shared/ids";
+import type { JsonObject } from "../../shared/json";
+import { isRecord } from "../../shared/json";
+import type { ActionRequest } from "../../shared/protocol";
+import type { HostPort } from "../../shared/host";
+import { readStoredJson } from "../../worlds/stored-json";
 
 export interface StagedAction {
   action: string;

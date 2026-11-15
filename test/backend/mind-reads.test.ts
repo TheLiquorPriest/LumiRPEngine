@@ -6,7 +6,7 @@
 // of another mind, whatever it reads of its own.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindsRunView } from "../../src/shared/minds";
 import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";

@@ -3,7 +3,7 @@
 // outline and the review gate both on, the outline shows first; and the Engine switch waits for a
 // turn that waits at a gate, so what it kept (approved changes among it) still lands.
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { AgentOp } from "../../src/backend/agents/tools/writer";
 import { ROLE_IDS } from "../../src/shared/agent-roles";

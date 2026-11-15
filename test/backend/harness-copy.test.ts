@@ -9,7 +9,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChatDataView } from "lumi-ah/shared";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { isRecord } from "../../src/shared/json";
 import { ENGINE_EXTENSION } from "../../src/shared/protocol";
 import { type Answer, cast, offers } from "../support/lumiah-bed";

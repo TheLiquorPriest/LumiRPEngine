@@ -17,7 +17,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Log } from "rp-harness/contract";
 import type { WriteQueue } from "../app";
-import { type DraftNotice, WorldError, WorldStore } from "../backend/worlds";
+import { type DraftNotice, WorldError, WorldStore } from "../worlds/worlds";
 import { previewSheet, previewSkills } from "../engine/authoring";
 import { buildCharacter } from "../engine/character";
 import type { Registry } from "../engine/registry-impl";

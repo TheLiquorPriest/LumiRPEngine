@@ -29,12 +29,12 @@ import { nounFor } from "../shared/words";
 import type { LoreEntryDef, WorldDoc } from "../shared/world";
 import { bookEntryTitle, bookStamps, booksLore, loreBookIds, type BookReads } from "./book-lore";
 import { tokensOf } from "./book";
-import type { HostBookEntry, HostPort } from "./host";
+import type { HostBookEntry, HostPort } from "../shared/host";
 import { LoreIds } from "./lore-ids";
 import { markWording, renderPrompt } from "./prompts";
-import type { SettingsStore } from "./settings-store";
-import { outsideTurns } from "./turn-frame";
-import type { WorldStore } from "./worlds";
+import type { SettingsStore } from "../migrate/today/settings-store";
+import { outsideTurns } from "../migrate/today/turn-frame";
+import type { WorldStore } from "../worlds/worlds";
 
 /** The label the index entry Build writes goes by in Lumiverse's World Info editor (its comment, which no prompt holds). */
 const BUILT_COMMENT = "LumiRPEngine lore index";

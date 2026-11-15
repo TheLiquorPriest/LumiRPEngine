@@ -7,10 +7,10 @@
 // text; an older Story chat rolls without pausing; and a catalog action with its own check is never doubled.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
-import { defaultSettings } from "../../src/backend/settings-store";
-import { startMarkersFrom } from "../../src/backend/start-markers";
+import type { QuietRequest } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
+import { startMarkersFrom } from "../../src/migrate/today/start-markers";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { INFERRED_PRESETS, type InferredChecks } from "../../src/shared/inferred";
 import { isRecord, type JsonObject } from "../../src/shared/json";

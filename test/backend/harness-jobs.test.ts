@@ -6,7 +6,7 @@
 // and changes nothing. A job's agents are held to whoever started the job (`harness-gates.test.ts`).
 
 import { describe, expect, test } from "bun:test";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { renderPrompt } from "../../src/backend/prompts";
 import { recStoryOf } from "../../src/engine/story/record";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";

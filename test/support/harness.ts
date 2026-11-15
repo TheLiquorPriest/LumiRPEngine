@@ -1,10 +1,11 @@
 // Wires the fake host, the engine, test and combat packs and the real backend ledger service for tests.
 
-import { ChatSnapshots, LedgerService, toChain } from "../../src/backend/ledger-io";
+import { LedgerService } from "../../src/backend/ledger-io";
+import { ChatSnapshots, toChain } from "../../src/migrate/today/ledger-io";
 import { MessageCache } from "../../src/backend/message-cache";
-import { defaultSettings } from "../../src/backend/settings-store";
-import { startMarkersFrom } from "../../src/backend/start-markers";
-import type { TurnFrame } from "../../src/backend/turn-frame";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
+import { startMarkersFrom } from "../../src/migrate/today/start-markers";
+import type { TurnFrame } from "../../src/migrate/today/turn-frame";
 import type { ChatId } from "../../src/shared/ids";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";

@@ -40,7 +40,7 @@ import type { ChatId, UserId } from "../../shared/ids";
 import { PRESET_NOTE } from "../../shared/harness-texts-preset";
 import type { PromptTexts } from "../../shared/prompts";
 import { type StoryPart, type StoryPresetSettings, storyCategoryKey } from "../../shared/settings";
-import type { HostPort, HostPresetBlock, HostPromptValues, HostPromptVariable } from "../host";
+import type { HostPort, HostPresetBlock, HostPromptValues, HostPromptVariable } from "../../shared/host";
 import { renderPrompt } from "../prompts";
 
 /** What the reader asks of the host: the preset Lumiverse generates the chat with, its blocks and saved values, and its macro engine. A `HostPort` is one. */

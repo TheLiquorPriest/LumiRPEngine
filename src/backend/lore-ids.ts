@@ -13,8 +13,8 @@ import { entryKey, tagOf } from "../shared/lore-routing";
 import { factId, type FactId, wiFactIdOfLiveLore } from "../shared/minds";
 import { isShortId, type LoreIndexSettings, tagPatternOf } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
-import type { HostPort } from "./host";
-import { readStoredJson } from "./stored-json";
+import type { HostPort } from "../shared/host";
+import { readStoredJson } from "../worlds/stored-json";
 
 /**
  * The fact a lore id names (DESIGN §24.11), as the knowledge step and the knowledge tools read one:

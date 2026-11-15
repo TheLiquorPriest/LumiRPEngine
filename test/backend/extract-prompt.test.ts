@@ -5,7 +5,7 @@
 // for as far as the prose moves them, on the world's own axes and ranges.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { CallMeter, extract, shippedThingTexts, Steps, type ExtractThingTexts } from "../../src/backend/steps";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";

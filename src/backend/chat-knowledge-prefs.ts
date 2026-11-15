@@ -18,24 +18,11 @@ import { narratorViewOf, type NarratorView, type UserSettings } from "../shared/
 import { thingsConfigOf } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
 import { ChatMetaQueue } from "./chat-meta-queue";
-import type { HostPort } from "./host";
-import { turnFrame } from "./turn-frame";
+import type { HostPort } from "../shared/host";
+import { turnFrame } from "../migrate/today/turn-frame";
+import { type ChatEngine, type ChatKnowledgePrefs, chatKnowledgePrefsOf, PREFS_KEY } from "../migrate/today/chat-knowledge-prefs";
 
-/** Which engine plays a chat's turns (GM → This chat): its classic steps, the agent loop, or the harness, where the author and the agents it starts play the turn through tools. */
-export type ChatEngine = "classic" | "agents" | "harness";
 export const CHAT_ENGINES: readonly ChatEngine[] = ["classic", "agents", "harness"];
-
-/** A chat's own choices; a part left out follows its world's default, else the user's Settings; the engine left out is classic. */
-export interface ChatKnowledgePrefs {
-  /** Knowledge tracking in this chat, on or off; absent, Settings → Minds → Knowledge's. */
-  knowledge?: boolean;
-  /** What the narrator knows in this chat; absent, the world's default, else Settings → Narrator's. */
-  narrator?: NarratorView;
-  /** The engine that plays this chat's turns; absent, classic. */
-  engine?: ChatEngine;
-  /** Tidy impossible holds automatically in this chat (the one-time Things tidied fix); absent, the world's (Build → Packs → gear → Tidy up). */
-  tidy?: boolean;
-}
 
 /** A change to a chat's own choices: a value sets one, null returns it to what it follows, and a part left out stays as it is. */
 export interface ChatKnowledgeChange {
@@ -45,22 +32,8 @@ export interface ChatKnowledgeChange {
   tidy?: boolean | null;
 }
 
-/** Where a chat's own choices sit inside LRE's key of its metadata. */
-const PREFS_KEY = "prefs";
-
 /** Chats whose choices are kept read, as the runtime keeps their runs. */
 const KEPT = 512;
-
-/** A chat's own choices as its metadata holds them; a malformed part is left out, so it follows. */
-export function chatKnowledgePrefsOf(meta: JsonObject): ChatKnowledgePrefs {
-  const own = meta[LEDGER_NAMESPACE];
-  const raw = isRecord(own) ? own[PREFS_KEY] : undefined;
-  if (!isRecord(raw)) return {};
-  const narrator = narratorViewOf(raw.narrator);
-  // Classic is what a chat with no choice plays, so only the others are stored and read.
-  const engine = raw.engine === "agents" || raw.engine === "harness" ? raw.engine : null;
-  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}), ...(engine ? { engine } : {}), ...(typeof raw.tidy === "boolean" ? { tidy: raw.tidy } : {}) };
-}
 
 /** What the narrator knows: this chat's choice, else its world's default (when it is a whole one), else the user's. */
 export function narratorView(chat: ChatKnowledgePrefs | null, world: Pick<WorldDoc, "narrator"> | null, settings: Pick<UserSettings, "narrator">): NarratorView {

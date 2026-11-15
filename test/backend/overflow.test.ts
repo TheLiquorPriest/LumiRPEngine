@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { MessageLedger } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import { decodeLedger, encodeLedger, METADATA_CAP_BYTES } from "../../src/backend/ledger-io";
+import { decodeLedger, encodeLedger, METADATA_CAP_BYTES } from "../../src/migrate/today/ledger-io";
 
 function ledger(events: number): MessageLedger {
   return {

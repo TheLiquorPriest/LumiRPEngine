@@ -5,7 +5,7 @@
 // offers a skip its added text tells that is too long to run unasked.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";

@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { CHARS_PER_TOKEN } from "../../src/backend/book";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
 import { defaultContextSettings } from "../../src/shared/agent-context";
 import type { JsonObject } from "../../src/shared/json";

@@ -3,7 +3,7 @@
 // would for anyone, so it never tells of a death or a revival the POV hasn't heard of.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { lifeKnownTo, lifeOf } from "../../src/engine/life";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";

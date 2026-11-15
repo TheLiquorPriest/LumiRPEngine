@@ -6,7 +6,7 @@
 // model naming the roles of an agent chat that run where they do.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { settingsBack, settingsFocus, type SettingsRoute } from "../../src/frontend/app";
 import { AgentsHub, AgentsSubPage } from "../../src/frontend/settings/agents";
 import { AssistantPage } from "../../src/frontend/settings/assistant";

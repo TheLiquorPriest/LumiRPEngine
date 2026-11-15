@@ -7,7 +7,7 @@ import type { JsonObject } from "../../src/shared/json";
 import type { UpgradePicks } from "../../src/shared/ledger";
 import type { MarkerPreview } from "../../src/shared/protocol";
 import type { EntityDef, WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { WorldState } from "../../src/engine/state";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { Rig } from "../support/rig";

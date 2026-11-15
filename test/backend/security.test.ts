@@ -7,12 +7,13 @@ import { PROTOCOL_VERSION, type FrontendToBackend } from "../../src/shared/proto
 import { renderSection } from "../../src/backend/book";
 import { neutralizeMacros } from "../../src/shared/macros";
 import { HOST_REPO, hostTwoPass } from "../support/host-macros";
-import { decodeJournal, decodeLedger, encodeLedger, journalPath, snapshotsPath, toChain } from "../../src/backend/ledger-io";
-import { defaultSettings, effectiveMode, mergePatch, recordOutcome, SettingsStore } from "../../src/backend/settings-store";
-import { ChipStore } from "../../src/backend/chips";
+import { decodeJournal, decodeLedger, encodeLedger, journalPath, snapshotsPath, toChain } from "../../src/migrate/today/ledger-io";
+import { defaultSettings, effectiveMode, mergePatch, SettingsStore } from "../../src/migrate/today/settings-store";
+import { recordOutcome } from "../../src/backend/settings-store";
+import { ChipStore } from "../../src/migrate/today/chips";
 import { JOBS_PATH } from "../../src/backend/jobs";
 import { PlanNotes } from "../../src/backend/plan-notes";
-import { CORRUPT_SUFFIX } from "../../src/backend/stored-json";
+import { CORRUPT_SUFFIX } from "../../src/worlds/stored-json";
 import { proposalKnown } from "../../src/backend/runtime";
 import { applyMarker, TIME_BOUNDS, validMarkerBody } from "../../src/engine/events";
 import { markersHash } from "../../src/engine/ledger/path";

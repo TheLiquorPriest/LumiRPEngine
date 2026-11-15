@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { decodeLedger, encodeLedger, journalPath, toChain } from "../../src/backend/ledger-io";
+import { decodeLedger, encodeLedger, journalPath, toChain } from "../../src/migrate/today/ledger-io";
 import type { Journal, LedgerEvent, MessageLedger } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/protocol";
 import type { GmThingExtras, KeepResult, MadeInPlay, TidyRun } from "../../src/shared/thing-gm";

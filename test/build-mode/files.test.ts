@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { BuildFiles, worldHost } from "../../src/build/files";
-import { WorldStore } from "../../src/backend/worlds";
+import { WorldStore } from "../../src/worlds/worlds";
 import { STARTER_TABLES } from "../../src/packs/index";
 import { type Bed, makeBed, OTHER, registry, starter, USER } from "./bed";
 

@@ -3,7 +3,7 @@
 // correction, the world's cap on narrated prices, and an action the helper couldn't read.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { splitAlongBuy } from "../../src/backend/runtime";
 import { transientFailure } from "../../src/backend/steps";
 import { lintWorld, migrateWorld } from "../../src/engine/authoring";

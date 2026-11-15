@@ -7,8 +7,8 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import { runDir } from "../../src/shared/ids";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import { journalPath, REASSERTS_PER_LEDGER } from "../../src/backend/ledger-io";
-import { CORRUPT_SUFFIX, readStoredJson } from "../../src/backend/stored-json";
+import { journalPath, REASSERTS_PER_LEDGER } from "../../src/migrate/today/ledger-io";
+import { CORRUPT_SUFFIX, readStoredJson } from "../../src/worlds/stored-json";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
 

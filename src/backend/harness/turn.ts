@@ -59,11 +59,12 @@ import { contextOf, landKept, type OpRefusal, withKept, type WriterCtx } from ".
 import { type CommitCtx, commitStaged, stagedWorkspace, type StagedOp, TurnDraft, turnReader, turnWriter } from "../agents/turn-writer";
 import { recordCommit } from "../agents/yields";
 import { knowledgeOn } from "../chat-knowledge-prefs";
-import type { StoredChip } from "../chips";
+import type { StoredChip } from "../../migrate/today/chips";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
-import { effectiveMode, recordOutcome } from "../settings-store";
-import type { TurnFrame } from "../turn-frame";
+import { recordOutcome } from "../settings-store";
+import { effectiveMode } from "../../migrate/today/settings-store";
+import type { TurnFrame } from "../../migrate/today/turn-frame";
 import { cardedChange, cardLines, stagedBy, worldMadeChip } from "./card";
 import { StageBook } from "../story/narration";
 import { readStoryPreset } from "../story/preset";

@@ -6,7 +6,7 @@
 import type { AgentTool, ToolOutcome } from "../../src/backend/agents/runtime";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
 import { type ToolEnv, toolsFor } from "../../src/backend/agents/tools/registry";
-import type { HostBookEntryInput } from "../../src/backend/host";
+import type { HostBookEntryInput } from "../../src/shared/host";
 import type { ToolTier, ToolView } from "../../src/shared/agent-tools";
 import type { JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";

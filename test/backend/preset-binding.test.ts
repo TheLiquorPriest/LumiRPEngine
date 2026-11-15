@@ -10,7 +10,7 @@ import { MARKED_FACTS_RULE, NARRATOR_AUTHORITY, NARRATOR_SOURCE, PRESET_RULES_LE
 import { GUIDANCE_MAX_CHARS } from "../../src/backend/preset-binding";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { isRecord } from "../../src/shared/json";
-import type { HostPresetBlock } from "../../src/backend/host";
+import type { HostPresetBlock } from "../../src/shared/host";
 import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "You read a narrator's roleplay reply";

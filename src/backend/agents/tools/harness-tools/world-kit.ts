@@ -34,7 +34,7 @@ import { own } from "../../../../engine/pack-kit";
 import { baseWorld } from "../../../../engine/places-in-play";
 import { Working } from "../../../../engine/working";
 import { chatDraftOf, type DraftCollection, type DraftEdit, draftChanges, draftEvent } from "../../../../engine/world-draft";
-import { type EditorResult, WorldError } from "../../../worlds";
+import { type EditorResult, WorldError } from "../../../../worlds/worlds";
 import type { ToolOutcome } from "../../runtime";
 import { closedChanges, type WorldActDetail, type WorldBuild, type WorldEdit } from "../harness-ports";
 import type { HarnessTurn } from "../harness-turn";

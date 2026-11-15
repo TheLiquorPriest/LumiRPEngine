@@ -32,7 +32,7 @@ import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../shared/json";
 import { ENGINE_EXTENSION } from "../../shared/protocol";
 import type { HarnessFile, HarnessFiles } from "../agents/tools/harness-ports";
-import { OPEN_CHATS_CAP } from "../ledger-io";
+import { OPEN_CHATS_CAP } from "../../migrate/today/ledger-io";
 import type { Runtime } from "../runtime";
 import { EngineRefused } from "./extension";
 

@@ -25,12 +25,12 @@ import type { RevisionNote, WorldDoc } from "../../../shared/world";
 import { stamped } from "../../../engine/authoring";
 import { validMarkerBody } from "../../../engine/events";
 import type { WorldState } from "../../../engine/state";
-import { toChain } from "../../ledger-io";
+import { toChain } from "../../../migrate/today/ledger-io";
 import { renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
-import { effectiveMode } from "../../settings-store";
+import { effectiveMode } from "../../../migrate/today/settings-store";
 import { previewUpgrade } from "../../upgrade-preview";
-import { type DraftNotice, type EditorResult, WorldError } from "../../worlds";
+import { type DraftNotice, type EditorResult, WorldError } from "../../../worlds/worlds";
 
 /**
  * One write of the world's draft, as Build's editor makes it: an `EditorRequest` without its

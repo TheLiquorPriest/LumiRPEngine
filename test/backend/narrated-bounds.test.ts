@@ -4,7 +4,7 @@
 // a thing's count and condition answer to the bound the world's author set on them in Build.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import type { WorldState } from "../../src/engine/state";
 import { regardAxes } from "../../src/packs/relationships/core/index";
 import type { JsonObject, JsonValue } from "../../src/shared/json";

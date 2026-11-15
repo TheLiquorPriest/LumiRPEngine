@@ -6,7 +6,7 @@
 
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { WorldStore } from "../backend/worlds";
+import { WorldStore } from "../worlds/worlds";
 import type { Registry } from "../engine/registry-impl";
 import { STARTER_TABLES } from "../packs/index";
 import { readBytes, sha256 } from "./files";

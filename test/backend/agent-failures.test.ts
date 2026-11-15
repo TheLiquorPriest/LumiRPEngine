@@ -3,7 +3,7 @@
 // ends the run at once, with no later role and no gate hiding it; and minds or a prompt-only role's
 // classic call that fail stop an agent turn under `stop` exactly as they stop a classic one.
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { AgentOp } from "../../src/backend/agents/tools/writer";
 import { emptyUsage } from "../../src/backend/agents/usage";

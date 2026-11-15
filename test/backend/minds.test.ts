@@ -11,10 +11,10 @@ import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, MINDS_EVENTS, MINDS_PRESETS, 
 import type { UserSettings } from "../../src/shared/settings";
 import { sectionTokens } from "../../src/backend/book";
 import type { WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
-import type { QuietRequest } from "../../src/backend/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
+import type { QuietRequest } from "../../src/shared/host";
 import { localTime } from "../../src/backend/minds";
-import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
+import { defaultSettings, SettingsStore } from "../../src/migrate/today/settings-store";
 import { FakeHost } from "../support/fake-host";
 import { mindContext, presentTurns, recallFor } from "../../src/backend/minds-context";
 import { calendarOf, clockOfStamp } from "../../src/engine/calendar";

@@ -4,7 +4,7 @@
 // points at one the turn didn't fill loses what names it.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { withoutMissing } from "../../src/backend/section-refs";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";

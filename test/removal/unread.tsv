@@ -1,0 +1,10 @@
+# Loads that cannot be read: an import() or a require() of something that is not one plain string
+# (PlanSwap-4, the fix of its landing review). The fence fails every other such load, since what it
+# loads cannot be checked. Each line names the file, the source of what it loads (its spaces
+# collapsed) and why that is safe. Read by fence.ts; like the fence's list, it only shrinks.
+#
+# file	what it loads	why
+src/cli/main.ts	new URL(KIT_FILE, import.meta.url).href	the CLI's agent kit, the bundle beside the CLI's own file (KIT_FILE), loaded at run time so that the core does not bundle every tool
+src/cli/follow.ts	`data:text/javascript;base64,${Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64")}`	the agent kit's own bytes, hashed and loaded as a data URL, so nothing can swap the file between the check and the load
+scripts/proof/route/check.ts	join(root, file)	the proof's own scripts, found on disk when the check runs
+scripts/proof/route/runner.ts	file	the proof's own scripts, found on disk when a run loads them

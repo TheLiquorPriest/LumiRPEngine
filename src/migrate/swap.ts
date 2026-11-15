@@ -15,7 +15,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { loopbackModel, loopsBack, runtimeBase } from "lumi-ah/link";
+import { loopbackModel, loopsBack, runtimeBase } from "./today/lumiah/link/contract";
 import { STATUS_PATH } from "../app/app";
 import { dataPaths } from "../app/config";
 import { localUrl, mustRun, removeRpeService, type RpeService, startRpeService, type Systemctl } from "../app/up";

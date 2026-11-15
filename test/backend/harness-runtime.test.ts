@@ -4,7 +4,7 @@
 // nothing and its pages say why.
 
 import { describe, expect, test } from "bun:test";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { AUTHOR, beginTurn, claimOf, harnessChat, noModelCalls, recordOn, stateOf } from "./harness-driver";
 import type { Rig } from "../support/rig";
 

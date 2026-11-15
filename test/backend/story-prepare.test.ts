@@ -14,7 +14,7 @@ import type { HarnessFiles } from "../../src/backend/agents/tools/harness-ports"
 import type { JobSpent } from "../../src/backend/agents/tools/harness-turn";
 import type { ToolEnv } from "../../src/backend/agents/tools/registry";
 import type { HarnessCore, RunSpent } from "../../src/backend/harness/extension";
-import type { HostBookEntryInput } from "../../src/backend/host";
+import type { HostBookEntryInput } from "../../src/shared/host";
 import { renderPrompt } from "../../src/backend/prompts";
 import { estimateOf, preparationSpent, preparePage, readPrepare, updatePrepare } from "../../src/backend/story/prepare";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";

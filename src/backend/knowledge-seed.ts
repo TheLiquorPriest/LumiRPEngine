@@ -31,7 +31,7 @@ import type { Registry } from "../engine/registry-impl";
 import { fieldDef, kindIs } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { readKnowledge } from "../packs/minds/core/state";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 
 /** An entry's text as a seeded claim keeps it: whole, whitespace collapsed. */
 function entryText(text: string): string {

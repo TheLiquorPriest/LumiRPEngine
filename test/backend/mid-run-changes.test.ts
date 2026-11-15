@@ -9,7 +9,7 @@
 // on agents with a main agent.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import { FRAME_UNREAD } from "../../src/shared/diagnostics";
 import type { JsonObject } from "../../src/shared/json";

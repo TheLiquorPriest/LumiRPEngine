@@ -5,14 +5,14 @@
 // test makes as an agent; the engine makes no model call (`noModelCalls`).
 
 import { describe, expect, test } from "bun:test";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { renderPrompt } from "../../src/backend/prompts";
 import { recStoryOf } from "../../src/engine/story/record";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
 import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";
 import type { JsonObject } from "../../src/shared/json";
 import { placeOfEntity } from "../../src/engine/scope";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { plainMinds, Rig } from "../support/rig";
 import { HOME } from "../support/tools";
 import { memoryFiles } from "./harness-cast-kit";

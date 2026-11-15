@@ -27,7 +27,7 @@ import type { InterpretOutput } from "../engine/steps";
 import { TimelapseRun, type SkipRecord } from "../engine/time";
 import { skipPastFight, timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 import { readPins } from "./lore-pins";
 import { capCounted } from "../packs/minds/core/edit";
 import { askMind, type MindAsk } from "./mind-ask";

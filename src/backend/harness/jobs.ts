@@ -41,7 +41,7 @@ import { opTier } from "../agents/turn-writer";
 import { knowledgeOn } from "../chat-knowledge-prefs";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
-import { effectiveMode } from "../settings-store";
+import { effectiveMode } from "../../migrate/today/settings-store";
 import { cardedChange, stagedBy } from "./card";
 import { type OffPath, turnRecord, type TurnRecordAt } from "./record";
 import { jobStoryPort } from "../story/record";

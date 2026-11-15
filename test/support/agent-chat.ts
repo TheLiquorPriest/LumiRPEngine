@@ -8,7 +8,7 @@
 // in it comes from any player's data.
 
 import { SCRATCH_READ } from "../../src/backend/agents/runtime";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import type { QuietScript } from "./fake-host";
 import { alderChat, DANNY, PRIYA } from "./mind-chat";

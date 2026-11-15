@@ -17,7 +17,7 @@ import { placeOfEntity } from "../../engine/scope";
 import { treatmentsOn } from "../../engine/story/budget";
 import { type FeedItem, feedOf, storyName } from "../../engine/story/feed";
 import { castOn, type StoryPath, walkStory } from "../../engine/story/record";
-import { toChain } from "../ledger-io";
+import { toChain } from "../../migrate/today/ledger-io";
 import type { Runtime } from "../runtime";
 import { mindFolder } from "./minds";
 import { castOnReplies, storyRecords } from "./record";

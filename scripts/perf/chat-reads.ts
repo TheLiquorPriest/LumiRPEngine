@@ -24,7 +24,7 @@
 
 import { writeFileSync } from "node:fs";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
-import type { HostMessage } from "../../src/backend/host";
+import type { HostMessage } from "../../src/shared/host";
 import { MEMORY_LIMIT_BYTES, watchMemory } from "../../src/backend/memory-budget";
 import { createSpindleHost } from "../../src/backend/spindle-host";
 import { FakeHost } from "../../test/support/fake-host";

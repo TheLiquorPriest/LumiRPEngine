@@ -18,9 +18,9 @@ import type { PromptTexts } from "../shared/prompts";
 import { NARRATOR_RULE_IDS, PRESET_RULES_LEAD_ID, PRICES_RULE_ID, sectionPromptId } from "../shared/prompts";
 import { secretMarkForms } from "../shared/secret-marks";
 import { ChatMetaQueue } from "./chat-meta-queue";
-import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
+import type { HostBookEntry, HostEntryPlacement, HostPort } from "../shared/host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
-import type { WorldStore } from "./worlds";
+import type { WorldStore } from "../worlds/worlds";
 import { markWording, renderPrompt, resolvePrompt } from "./prompts";
 
 /**

@@ -6,7 +6,7 @@
 // too, in its sections, its rules and the World Info in its prompt alike.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import { ELAPSED_TEXT_IDS, MARK_TEXT_IDS, MARKED_FACTS_RULE, NARRATOR_AUTHORITY, NARRATOR_SOURCE, sectionPromptId } from "../../src/shared/prompts";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";

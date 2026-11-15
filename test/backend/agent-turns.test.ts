@@ -7,11 +7,11 @@
 // the chips or at a gate. Classic chats are untouched.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { TurnRoles } from "../../src/backend/agents/turn-ctx";
 import type { AgentOp, ApplyResult as Applied } from "../../src/backend/agents/tools/writer";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { outputsOf } from "../../src/engine/outputs";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { LedgerEvent, Rec } from "../../src/shared/ledger";

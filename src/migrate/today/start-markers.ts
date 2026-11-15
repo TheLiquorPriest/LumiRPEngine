@@ -7,18 +7,18 @@
 // user's own check rules replace them or the world sets none; with neither, inferred checks play as
 // the chat's starting realism preset does at its Sheets level.
 
-import { readAdjudication } from "../shared/adjudication";
-import { readClaims } from "../shared/claims";
-import { inferredDefaults, readInferred } from "../shared/inferred";
-import type { Level } from "../shared/ids";
-import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
-import { hasOwn, isRecord, safeKey } from "../shared/json";
-import type { MarkerBody } from "../shared/ledger";
-import type { TimeSettings, UserSettings } from "../shared/settings";
-import type { WorldDoc } from "../shared/world";
-import { presetOf } from "../engine/realism";
-import { rulesetFloor } from "../engine/registry-impl";
-import type { RealismState } from "../engine/state";
+import { readAdjudication } from "../../shared/adjudication";
+import { readClaims } from "../../shared/claims";
+import { inferredDefaults, readInferred } from "../../shared/inferred";
+import type { Level } from "../../shared/ids";
+import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../../shared/ids";
+import { hasOwn, isRecord, safeKey } from "../../shared/json";
+import type { MarkerBody } from "../../shared/ledger";
+import type { TimeSettings, UserSettings } from "../../shared/settings";
+import type { WorldDoc } from "../../shared/world";
+import { presetOf } from "../../engine/realism";
+import { rulesetFloor } from "../../engine/registry-impl";
+import type { RealismState } from "../../engine/state";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 

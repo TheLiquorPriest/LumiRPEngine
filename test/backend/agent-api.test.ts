@@ -15,7 +15,7 @@ import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world"
 import { mapTemplate } from "../../src/shared/maps";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { createSpindleHost } from "../../src/backend/spindle-host";
-import { DOC_DEPTH_CAP } from "../../src/backend/worlds";
+import { DOC_DEPTH_CAP } from "../../src/worlds/worlds";
 import { Rig } from "../support/rig";
 import { testWorld } from "../support/test-pack";
 

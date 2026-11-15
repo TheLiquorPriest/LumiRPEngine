@@ -6,7 +6,7 @@
 // fake host with Port Alder, the fake model scripted per call.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { JobRunner } from "../../src/backend/jobs";
 import { ROUTINE_MAX_CALLS, ROUTINE_OWNERS_PER_CALL } from "../../src/backend/routine-proposals";
 import { isRecord } from "../../src/shared/json";

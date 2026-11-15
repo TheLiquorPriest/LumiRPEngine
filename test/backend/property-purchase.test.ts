@@ -10,7 +10,7 @@
 // price, refused at a place that is one already or is no place. The models are scripted.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import type { PlaceDef } from "../../src/shared/world";
 import { boughtLines, call, curatedTurn, curatorChat, resultsOf } from "../support/curator-chat";

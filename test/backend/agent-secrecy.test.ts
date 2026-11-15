@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { AgentOp, ApplyResult } from "../../src/backend/agents/tools/writer";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { markWording, renderPrompt } from "../../src/backend/prompts";
 import { outputsOf } from "../../src/engine/outputs";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";

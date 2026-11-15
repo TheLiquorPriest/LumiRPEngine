@@ -10,7 +10,7 @@
 
 import { expect } from "bun:test";
 import type { AgentUsage, ChatInfo, ModelMessage, RemoteTool, RunKind, StorySource, TurnKind, TurnRecord, TurnStatus } from "../../src/backend/harness/shapes";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import type { JsonObject } from "../../src/shared/json";
 import type { Rec } from "../../src/shared/ledger";

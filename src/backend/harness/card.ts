@@ -33,11 +33,11 @@ import type { ReadContext } from "../../engine/registry";
 import type { StoredReviewItem } from "../agents/review";
 import { draftNotice, syncWorldBook, worldBuild } from "../agents/tools/harness-ports";
 import type { HarnessChange } from "../agents/tools/harness-turn";
-import type { StoredChip } from "../chips";
-import { toChain } from "../ledger-io";
+import type { StoredChip } from "../../migrate/today/chips";
+import { toChain } from "../../migrate/today/ledger-io";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
-import { WorldError } from "../worlds";
+import { WorldError } from "../../worlds/worlds";
 
 /** The lines a card tells a change in: its proposal as the player character may read it, or, where it has none, the plain words its tool gave it. */
 export function cardLines(rt: Runtime, change: HarnessChange, view: Pick<ReadContext, "registry" | "world" | "state">): string[] {

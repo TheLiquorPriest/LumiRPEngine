@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { RetentionPage, RetentionRow, retentionSummary } from "../../src/frontend/settings/retention";
 import { Button, HostSwitch, NumberStepper } from "../../src/frontend/components";
-import { SettingsStore } from "../../src/backend/settings-store";
+import { SettingsStore } from "../../src/migrate/today/settings-store";
 import type { JsonObject } from "../../src/shared/json";
 import { RETENTION_DEFAULTS, type RetentionSettings } from "../../src/shared/stores";
 import { FakeHost } from "../support/fake-host";

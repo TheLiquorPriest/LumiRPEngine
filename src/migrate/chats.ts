@@ -9,16 +9,16 @@
 // a temporary file mid-write. None of that is a turn yet. It is counted as under way, the record it
 // would make isn't, and the next run of the migration reads it as it stands then.
 
-import { agentMetaOf } from "../backend/chat-agent-meta";
-import { chatKnowledgePrefsOf } from "../backend/chat-knowledge-prefs";
-import { ChipStore } from "../backend/chips";
-import type { HostPort } from "../backend/host";
-import { decodeJournal, journalPath, LedgerService, toChain, type EnvResolver } from "../backend/ledger-io";
-import { readRun } from "../backend/runtime";
-import { SettingsStore } from "../backend/settings-store";
-import { StagedActions } from "../backend/staged";
-import { startMarkersFrom } from "../backend/start-markers";
-import { WorldStore } from "../backend/worlds";
+import { agentMetaOf } from "./today/chat-agent-meta";
+import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
+import { ChipStore } from "./today/chips";
+import type { HostPort } from "../shared/host";
+import { decodeJournal, journalPath, LedgerService, toChain, type EnvResolver } from "./today/ledger-io";
+import { readRun } from "./today/run";
+import { SettingsStore } from "./today/settings-store";
+import { StagedActions } from "./today/staged";
+import { startMarkersFrom } from "./today/start-markers";
+import { WorldStore } from "../worlds/worlds";
 import { resolveFix } from "../engine/edits";
 import type { ChainMessage, FoldInput } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";

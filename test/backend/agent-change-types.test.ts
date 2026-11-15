@@ -3,7 +3,8 @@
 // the extract step's per-connection learning, which stays as it was.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings, effectiveMode, recordOutcome, SettingsStore, undoModeChange, type ModeChange } from "../../src/backend/settings-store";
+import { recordOutcome, undoModeChange, type ModeChange } from "../../src/backend/settings-store";
+import { defaultSettings, effectiveMode, SettingsStore } from "../../src/migrate/today/settings-store";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, CHANGE_TYPES, EXTRACTION_LEARNING, EXTRACTION_TYPES, type ChangeType, type ExtractionLearning } from "../../src/shared/settings";
 import { FakeHost } from "../support/fake-host";

@@ -30,7 +30,7 @@ import { checkSkipPlan, skipPlanBrief, skipPlanText } from "../packs/castlife/co
 import { skipLifeOf, skipPlanOf } from "../packs/castlife/core/routines";
 import { livesPlans } from "../packs/castlife/core/commitments";
 import { povSafe } from "../packs/castlife/core/usual";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 import { readPins } from "./lore-pins";
 import { askMind, type MindAsk } from "./mind-ask";
 import { chatBefore } from "./minds";

@@ -5,9 +5,9 @@
 // the lint names a flag nothing sets. Played through the starters, as the player and the GM would.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { interpretCatalog } from "../../src/backend/interpret-context";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";

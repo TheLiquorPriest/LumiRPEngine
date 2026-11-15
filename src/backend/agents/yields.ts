@@ -15,7 +15,7 @@ import type { DiagPhase } from "../../shared/diagnostics";
 import type { MainRequestKind } from "../../shared/main-agent-prompts";
 import { MINDS_EVENTS } from "../../shared/minds";
 import type { PromptTexts } from "../../shared/prompts";
-import type { DiagAt } from "../diagnostics";
+import type { DiagAt } from "../../migrate/today/diagnostics";
 import type { RunMindsResult } from "../minds";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";

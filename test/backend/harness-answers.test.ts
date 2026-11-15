@@ -12,7 +12,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { harnessDefinitions } from "../../src/backend/harness/definitions";
-import { recHarnessOf } from "../../src/backend/harness/record";
+import { recHarnessOf } from "../../src/migrate/today/harness-record";
 import { renderPrompt } from "../../src/backend/prompts";
 import { HARNESS_AGENT, HARNESS_TEXT } from "../../src/shared/harness-texts";
 import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";

@@ -13,7 +13,7 @@ import { AgentTurn } from "../../src/backend/agents/runtime";
 import type { ToolReader } from "../../src/backend/agents/tools/read-view";
 import type { ToolWriter } from "../../src/backend/agents/tools/writer";
 import type { ChooseTask, RoleResult, TurnAgentCtx } from "../../src/backend/agents/turn-ctx";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { renderPrompt } from "../../src/backend/prompts";
 import type { TieOdds } from "../../src/backend/turn-steps";
 import type { JsonObject } from "../../src/shared/json";

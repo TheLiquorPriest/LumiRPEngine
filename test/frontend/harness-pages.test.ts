@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { CSS as LUMIAH_CSS, GROUPS, type KnownConnections as LumiahKnown, Shell } from "lumi-ah/extension/frontend";
 import { TRANSPORT_SCHEMA } from "lumi-ah/link";
 import type { VNode } from "preact";
-import type { ChatKnowledgePrefs } from "../../src/backend/chat-knowledge-prefs";
+import type { ChatKnowledgePrefs } from "../../src/migrate/today/chat-knowledge-prefs";
 import { buildView, notWorldView, ViewMemo } from "../../src/backend/view";
 import { resolveFix } from "../../src/engine/edits";
 import { enginePack } from "../../src/engine/engine-pack";

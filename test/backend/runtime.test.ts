@@ -4,11 +4,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { loreOfEntry, slotOfEntry } from "../../src/backend/book";
-import type { HostBookEntryInput } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
+import type { HostBookEntryInput } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { playerReason } from "../../src/backend/requirement-words";
 import { describeProposal } from "../../src/backend/runtime";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { keepSummary, playerDrops, TIMELAPSE_ACTION } from "../../src/backend/view";
 import { compactSpan, spanText } from "../../src/engine/action-words";
 import { UNSEEN_DROP } from "../../src/engine/player-events";

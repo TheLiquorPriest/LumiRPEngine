@@ -5,7 +5,7 @@
 // one the reply doesn't describe moving.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";

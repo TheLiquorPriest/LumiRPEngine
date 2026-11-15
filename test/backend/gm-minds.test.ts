@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { commitmentDraft, commitmentOp, deleteOp, intentOp, noteDraft, noteOp, pinOp, planDraft, planOp, refreshOp, startPlanIn } from "../../src/packs/minds/ui/ops";
 import { editRequest, timelapseRequest } from "../../src/frontend/requests";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { journalOf } from "../../src/packs/economy/core/journal";
 import type { MindsGmCharacter, MindsGmView } from "../../src/shared/minds";
 import { MIND_LENGTH_DEFAULTS } from "../../src/shared/minds";

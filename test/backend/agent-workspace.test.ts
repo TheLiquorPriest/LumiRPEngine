@@ -14,7 +14,7 @@ import type { ToolDefinition, ToolEnv } from "../../src/backend/agents/tools/reg
 import { listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
 import { type AgentOp, opKey, outsideWriter, type ToolWriter } from "../../src/backend/agents/tools/writer";
 import { GLOBAL_INDEX_PATH } from "../../src/backend/global-workspace";
-import type { QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/shared/host";
 import { renderPrompt } from "../../src/backend/prompts";
 import { ROLE_LABEL } from "../../src/shared/agent-roles";
 import type { ToolView } from "../../src/shared/agent-tools";

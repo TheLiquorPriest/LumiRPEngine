@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import { dedupeProposals, inMinorUnits } from "../../src/backend/steps";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";

@@ -29,7 +29,7 @@ import type { StoryPath } from "../../../../engine/story/record";
 import { readSlice } from "../../../../packs/minds/core/state";
 import { bookEntryTitle } from "../../../book-lore";
 import { type ChatRead, chatRead } from "../../../chat-read";
-import type { HostBookEntry, HostMessage } from "../../../host";
+import type { HostBookEntry, HostMessage } from "../../../../shared/host";
 import { renderPrompt } from "../../../prompts";
 import { mindPath } from "../../../story/minds";
 import { CALL_NOTE, callWeight, chatKind, DEPTH_NOTE, depthOf, depthsOffered, estimateOf, logPrepare, messageTokens, planned, planStretches, preparationLeft, type PrepareFile, type PrepareState, type PrepareStretch, readPrepare, reachedBy, reckonLeft, relivingNow, spanOf, stillToRelive, type StretchAsked, stretchMessages, stretchStands, SURVEY_PARTS, unanswered, unplanned, type Updated, updatePrepare, waits, withRelived, within, wordFor } from "../../../story/prepare";

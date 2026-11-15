@@ -5,8 +5,8 @@
 // it was decoded from. Readers only read what they're given.
 
 import type { ChainMessage } from "../engine/ledger/chain";
-import type { HostMessage } from "./host";
-import { toChain } from "./ledger-io";
+import type { HostMessage } from "../shared/host";
+import { toChain } from "../migrate/today/ledger-io";
 
 const decoded = new WeakMap<HostMessage, ChainMessage>();
 

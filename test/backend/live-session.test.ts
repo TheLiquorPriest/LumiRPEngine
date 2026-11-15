@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { transcriptFiles } from "../../src/backend/agents/tools/transcript-files";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
 import { chatHead, listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
 import { followLive, type LiveChange, type LiveEntry, type LiveView } from "../../src/shared/live";

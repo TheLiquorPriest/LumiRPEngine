@@ -10,7 +10,7 @@ import type { StateView } from "../../src/shared/state-view";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { applyDelta } from "../../src/frontend/delta";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { Rig } from "../support/rig";
 
 const authored = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");

@@ -17,7 +17,7 @@ import type { UserId } from "../shared/ids";
 import { bookLoreFieldsOf, engineWroteEntry, LORE_AUDIENCE, loreIsSecret, loreSourceOf, secretCopyOf, withoutOldSecrecy, type BookLoreFields, type SecretCopy } from "../shared/lore";
 import { hasSecretMarks, parseSecretMarks, resolveMarkNames, wholeEntrySecret, type MarkNamesSource, type SecretMark } from "../shared/secret-marks";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
-import type { HostBookEntry, HostPort } from "./host";
+import type { HostBookEntry, HostPort } from "../shared/host";
 
 /** The key a text is known by: each run of whitespace one space, the ends trimmed, hashed; "" for none. */
 export function textOf(content: string): string {

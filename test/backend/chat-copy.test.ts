@@ -4,7 +4,7 @@
 // what a fresh read would, however the host's events and answers interleave.
 
 import { describe, expect, test } from "bun:test";
-import type { HostPort } from "../../src/backend/host";
+import type { HostPort } from "../../src/shared/host";
 import { MessageCache } from "../../src/backend/message-cache";
 import { FakeHost } from "../support/fake-host";
 import { plainMinds, Rig } from "../support/rig";

@@ -20,9 +20,9 @@ import type { Limit } from "../shared/minds";
 import type { AgentsRequest, ResultBodies } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import { timerMs } from "../shared/timeouts";
-import type { HostPort } from "./host";
+import type { HostPort } from "../shared/host";
 import { holdsBuild, lreProfiles } from "./lumiverse-mcp";
-import { readStoredJson } from "./stored-json";
+import { readStoredJson } from "../worlds/stored-json";
 
 export interface BuildInfo {
   /** The id `bun run build` gives every bundle of one build; "dev" when run from source. */

@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { readEngineSlice } from "../../src/engine/engine-pack";
 import { decodeQuestsView, type QuestTrack } from "../../src/packs/story/ui/panel";
 import { STARTER_WORLDS } from "../../src/packs/index";

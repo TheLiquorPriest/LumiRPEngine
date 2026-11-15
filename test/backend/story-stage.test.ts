@@ -13,7 +13,7 @@ import { describe, expect, test } from "bun:test";
 import { WHOLE_READ_MOST } from "../../src/backend/agents/tools/harness-tools/kit";
 import { harnessTools } from "../../src/backend/agents/tools/harness";
 import { renderPrompt } from "../../src/backend/prompts";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { releaseGate, releaseNoted, StageBook, unreleasedReply } from "../../src/backend/story/narration";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import { STAGE_NOTE, STAGE_TOOL } from "../../src/shared/harness-texts-stage";

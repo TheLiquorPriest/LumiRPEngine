@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { WorldState } from "../../src/engine/state";
 import { isRecord } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
-import { toChain } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/migrate/today/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import { ranTo } from "../../src/engine/simulate";
 import { Rig } from "../support/rig";

@@ -13,7 +13,7 @@ import type { SectionFeed } from "../../../../shared/world";
 import { chatFeed, feedOf } from "../../../../engine/feed";
 import { own } from "../../../../engine/pack-kit";
 import { sectionsOf } from "../../../book";
-import { WorldError } from "../../../worlds";
+import { WorldError } from "../../../../worlds/worlds";
 import { boolArg, needId } from "../propose";
 import { resolvePerson, resolvePlace } from "../resolve";
 import { needText, objectSchema, text, textArg } from "../schema";

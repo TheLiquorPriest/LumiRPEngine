@@ -10,9 +10,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
-import type { HostBookEntryInput, QuietRequest, WorldInfoCandidate, WorldInfoVerdict } from "../../src/backend/host";
-import { toChain } from "../../src/backend/ledger-io";
-import { defaultSettings } from "../../src/backend/settings-store";
+import type { HostBookEntryInput, QuietRequest, WorldInfoCandidate, WorldInfoVerdict } from "../../src/shared/host";
+import { toChain } from "../../src/migrate/today/ledger-io";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
 import { worldInfoVerdict, type WorldInfoGate } from "../../src/backend/wi-interceptor";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";

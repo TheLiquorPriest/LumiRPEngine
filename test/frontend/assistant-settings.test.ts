@@ -7,7 +7,7 @@
 // no choice of whose knowledge it reads.
 
 import { describe, expect, test } from "bun:test";
-import { defaultSettings } from "../../src/backend/settings-store";
+import { defaultSettings } from "../../src/migrate/today/settings-store";
 import type { SettingsRoute } from "../../src/frontend/app";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
 import { AssistantPage, assistantBudgetPatch, assistantPatch, assistantSummary } from "../../src/frontend/settings/assistant";

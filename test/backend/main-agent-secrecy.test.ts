@@ -10,7 +10,7 @@ import { historyOf, sessionTokens } from "../../src/backend/agents/compaction";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import { roleCtx } from "../../src/backend/agents/roles/agent";
 import type { TurnAgentCtx } from "../../src/backend/agents/turn-ctx";
-import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { povMayKnow } from "../../src/engine/player-events";
 import { kindIs, placeOfEntity } from "../../src/engine/scope";
 import { ROLE_IDS } from "../../src/shared/agent-roles";

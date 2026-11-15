@@ -16,7 +16,7 @@ import type { ChatId, UserId } from "../../shared/ids";
 import type { LiveChange, LiveEndState, LiveEntry, LiveEntryBody, LiveView } from "../../shared/live";
 import { transcriptText } from "../../shared/live";
 import { PROTOCOL_VERSION } from "../../shared/protocol";
-import type { HostPort } from "../host";
+import type { HostPort } from "../../shared/host";
 import type { AgentStarted, AgentTrace, TranscriptEntry } from "./runtime";
 import type { CommitOutcome, DraftWatch, StagedOp } from "./turn-writer";
 
