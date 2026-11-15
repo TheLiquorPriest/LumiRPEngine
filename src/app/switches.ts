@@ -33,14 +33,31 @@ const GUARD_WORDS = "Only the command line on the server (rpe allow, rpe deny) c
 /**
  * Holds the server's connection to adding definitions as waiting. Run once on it, after the
  * migrations and before anything else uses it. The triggers are the connection's own (TEMP), so no
- * other connection to the file is held by them.
+ * other connection to the file is held by them. They give way only inside `asCommand`, which the
+ * server's command routes alone call: the command line's own switching, made by the one writer.
  */
 export function guardSwitches(db: Database): void {
   // A REPLACE takes the old row away without firing its delete trigger unless triggers recurse.
   db.run("PRAGMA recursive_triggers = ON");
-  db.run(`CREATE TEMP TRIGGER switch_added_waiting BEFORE INSERT ON main.switch WHEN NEW.state <> 'waiting' BEGIN SELECT RAISE(ABORT, '${GUARD_WORDS}'); END`);
-  db.run(`CREATE TEMP TRIGGER switch_kept BEFORE UPDATE ON main.switch BEGIN SELECT RAISE(ABORT, '${GUARD_WORDS}'); END`);
-  db.run(`CREATE TEMP TRIGGER switch_not_removed BEFORE DELETE ON main.switch BEGIN SELECT RAISE(ABORT, '${GUARD_WORDS}'); END`);
+  db.run("CREATE TEMP TABLE IF NOT EXISTS switch_command (held INTEGER)");
+  const unlessCommand = "NOT EXISTS (SELECT 1 FROM temp.switch_command)";
+  db.run(`CREATE TEMP TRIGGER switch_added_waiting BEFORE INSERT ON main.switch WHEN NEW.state <> 'waiting' AND ${unlessCommand} BEGIN SELECT RAISE(ABORT, '${GUARD_WORDS}'); END`);
+  db.run(`CREATE TEMP TRIGGER switch_kept BEFORE UPDATE ON main.switch WHEN ${unlessCommand} BEGIN SELECT RAISE(ABORT, '${GUARD_WORDS}'); END`);
+  db.run(`CREATE TEMP TRIGGER switch_not_removed BEFORE DELETE ON main.switch WHEN ${unlessCommand} BEGIN SELECT RAISE(ABORT, '${GUARD_WORDS}'); END`);
+}
+
+/**
+ * Runs `change` as the server's own command line: the guard of `guardSwitches` does not hold for it.
+ * Inside a write of the queue; on a connection that is not guarded it changes nothing.
+ */
+export function asCommand<T>(db: Database, change: () => T): T {
+  db.run("CREATE TEMP TABLE IF NOT EXISTS switch_command (held INTEGER)");
+  db.run("INSERT INTO temp.switch_command (held) VALUES (1)");
+  try {
+    return change();
+  } finally {
+    db.run("DELETE FROM temp.switch_command");
+  }
 }
 
 /** What keys a definition besides its name: the hash of its kind and what it runs or calls. */
