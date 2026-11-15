@@ -7,7 +7,7 @@
     "lumi-ah": "github:TheLiquorPriest/LumiAH#6a38779a5e33fe563f0c8c617640343473617569",
     "lumiverse-spindle-types": "0.6.79",
     "preact": "11.0.1",
-    "rp-harness": "git+https://rph.invalid/RPHarness.git#063cb6d58bcfe23dc0349603cd02297568f445cb",
+    "rp-harness": "git+https://rph.invalid/RPHarness.git#6ca92995b1cd6e10c3978439871e8b72e527ecf8",
     "typescript": "7.0.2"
   },
   "exports": {
