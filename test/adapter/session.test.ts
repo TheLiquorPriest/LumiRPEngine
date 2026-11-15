@@ -119,6 +119,30 @@ describe("signing in", () => {
   });
 });
 
+describe("a refusal by Lumiverse", () => {
+  test("a 403 from a role check is told as a role check", async () => {
+    const { session, server } = bed();
+    await session.signIn("tamsin", PASSWORD);
+    const refused = await failure(session.json("GET", "/api/v1/users"));
+    expect(refused).toMatchObject({ problem: "refused", status: 403, refusedBy: "role" });
+    expect(refused.message).toContain("a role check refused it");
+    expect(refused.message).toContain("a user");
+    expect(refused.message).not.toContain("trusted hosts");
+    expect(server.requests.map((r) => `${r.path} ${r.status}`).slice(-2)).toEqual(["/api/v1/users 403", "/api/auth/get-session 200"]);
+  });
+
+  test("a 403 from Lumiverse's trusted-host check is told as that, at the sign-in and at any later call", async () => {
+    const { session, server } = bed();
+    await session.signIn("tamsin", PASSWORD);
+    server.untrustedHost = true;
+    const read = await failure(session.json("GET", "/api/v1/users"));
+    expect(read).toMatchObject({ problem: "refused", status: 403, refusedBy: "host" });
+    expect(read.message).toContain("not one of its trusted hosts");
+    const signIn = await failure(session.signIn("tamsin", PASSWORD));
+    expect(signIn).toMatchObject({ problem: "refused", refusedBy: "host" });
+  });
+});
+
 describe("a session Lumiverse ended", () => {
   test("is said plainly at the next read, forgotten, and not asked about again until a new sign-in recovers it", async () => {
     const { server, session, saved, logs, read } = bed();

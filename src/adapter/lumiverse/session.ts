@@ -31,12 +31,17 @@ export type SessionState =
   /** Lumiverse no longer takes the token; `why` says so in words the user can act on. */
   | { state: "lost"; username: string; why: string; at: number };
 
+/** What in Lumiverse refused a request with 403: its trusted-host check, a role check or an extension's check. */
+export type Refuser = "host" | "role" | "extension";
+
 /** Why a call to Lumiverse failed, in words the user can act on. */
 export class LumiverseError extends Error {
   constructor(
     readonly problem: "lost" | "signed-out" | "refused" | "locked" | "unreachable" | "protocol" | "owner",
     message: string,
     readonly status: number | null = null,
+    /** For a 403: what refused it, when Lumiverse's answers tell it. */
+    readonly refusedBy: Refuser | null = null,
   ) {
     super(message);
     this.name = "LumiverseError";
@@ -70,10 +75,16 @@ function parse(text: string): unknown {
   }
 }
 
-/** The words a Lumiverse error answer carries, if any (`{error}` or `{message}`). */
+/** The words a Lumiverse error answer carries (`{error}` or `{message}`), or null. */
+function words(body: unknown): string | null {
+  const told = isRecord(body) ? (body.error ?? body.message) : null;
+  return typeof told === "string" && told !== "" ? told : null;
+}
+
+/** The words a Lumiverse error answer carries, if any, after a colon. */
 function said(body: unknown): string {
-  const words = isRecord(body) ? (body.error ?? body.message) : null;
-  return typeof words === "string" && words !== "" ? `: ${words}` : "";
+  const told = words(body);
+  return told === null ? "" : `: ${told}`;
 }
 
 type Listener = (state: SessionState) => void;
@@ -138,12 +149,49 @@ export class LumiverseSession {
       throw new LumiverseError("unreachable", `Lumiverse at ${this.deps.base} cannot be reached: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (res.status >= 300 && res.status < 400) throw new LumiverseError("unreachable", `Lumiverse at ${this.deps.base} answered with a redirect to ${res.headers.get("location") ?? "another address"}. Give RPE the address Lumiverse redirects to.`, res.status);
-    if (res.status === 403) throw new LumiverseError("refused", `Lumiverse at ${this.deps.base} refused RPE (403): the address RPE uses is not one of its trusted hosts. Use the address you open Lumiverse at, or add it to Lumiverse's trusted hosts.`, 403);
+    if (res.status === 403) throw await this.refusal(method, path, token, res);
     if (res.status === 429) {
       const wait = Number(res.headers.get("retry-after"));
       throw new LumiverseError("locked", `Lumiverse is refusing requests from RPE's address${Number.isFinite(wait) && wait > 0 ? ` for about ${Math.ceil(wait / 60)} minutes` : " for a while"}${said(parse(await res.text()))}. It does this after repeated failed sign-ins.`, 429);
     }
     return res;
+  }
+
+  /**
+   * A 403, told by what refused it. Lumiverse words three of its checks alike, `{error: "Forbidden"}`: the trusted-host
+   * check before every route under `/api` (`app.ts:208-240`), the role checks (`auth/middleware.ts:99-100`, `:117-118`)
+   * and an extension's check of who may manage it (`routes/spindle.routes.ts:273`, `:318`). Other words are Lumiverse's
+   * own and are said as they are. Else RPE asks after its session (`/api/auth/` itself is refused by the host check
+   * alone): a host Lumiverse does not trust is refused that too; an answer means the route refused, and the account's
+   * role (`user.role`, Better Auth's admin plugin, `auth/index.ts:117-125`; at times left out, `auth/middleware.ts:53-58`)
+   * tells which check: an owner or admin may manage every extension (`spindle/manager.service.ts:1970-1982`).
+   */
+  private async refusal(method: string, path: string, token: string | null, res: Response): Promise<LumiverseError> {
+    const told = words(parse(await res.text()));
+    const at = `Lumiverse at ${this.deps.base} refused RPE's ${method} ${path} (403)`;
+    if (told !== null && told !== "Forbidden") return new LumiverseError("refused", `${at}: ${told}.`, 403);
+    const role = path.startsWith("/api/auth/") ? "host" : await this.roleOf(token);
+    if (role === "host") return new LumiverseError("refused", `${at}: the address RPE uses is not one of its trusted hosts. Use the address you open Lumiverse at, or add it to Lumiverse's trusted hosts.`, 403, "host");
+    if (role === "unknown") return new LumiverseError("refused", `${at}, and RPE could not ask Lumiverse whether its address, the account's role or an extension's check refused it.`, 403);
+    const privileged = role === "owner" || role === "admin";
+    const account = role === null ? "the account RPE signs in as" : `the account RPE signs in as, ${role === "admin" || role === "owner" ? "an" : "a"} ${role}`;
+    if (!privileged && path.startsWith("/api/v1/spindle/")) return new LumiverseError("refused", `${at}: an extension's check refused it. In Lumiverse ${account}, may manage only the extensions it installed itself, and installing, updating or enabling one is for an owner or an admin.`, 403, "extension");
+    return new LumiverseError("refused", `${at}: a role check refused it. That route is for ${privileged ? "Lumiverse's owner alone" : "an owner or an admin of Lumiverse"}, and ${account}, is not one. Sign RPE in as an account with that role, or ask Lumiverse's owner to give this one it.`, 403, "role");
+  }
+
+  /** The account's role, as Lumiverse's session answer gives it: "host" when that is refused too, "unknown" when there is no answer. */
+  private async roleOf(token: string | null): Promise<string | null | "host" | "unknown"> {
+    let res: Response;
+    try {
+      res = await this.deps.fetch(`${this.deps.base}/api/auth/get-session`, { method: "GET", headers: { accept: "application/json", ...(token !== null ? { authorization: `Bearer ${token}` } : {}) }, redirect: "manual" });
+    } catch {
+      return "unknown";
+    }
+    if (res.status === 403) return "host";
+    if (res.status !== 200) return "unknown";
+    const body = parse(await res.text());
+    const role = isRecord(body) && isRecord(body.user) ? body.user.role : null;
+    return typeof role === "string" && role !== "" ? role : null;
   }
 
   /**
