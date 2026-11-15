@@ -9,6 +9,7 @@ import { Auth, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { moveLimits, prepareDataFolder } from "./config";
 import { commandRoutes } from "./command-routes";
+import { signinRoutes } from "./signin-routes";
 import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
@@ -244,6 +245,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const builds = new Builds({ version, file: options.appFile ?? null, log });
   await builds.start();
   routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui, builds));
+  // The web UI's sign-in: the proof a page asks for before it sends RPE its token.
+  routes.add("signin", signinRoutes({ db, owner: user, now }));
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
   routes.add("command", commandRoutes({ paths, secrets, db, user, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
   let running: RunningServer | null = null;
