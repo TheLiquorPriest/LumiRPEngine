@@ -115,13 +115,39 @@ export interface StreamSeen {
   reasoning: string;
 }
 
+/** What a read of a provider's answer tells its generation: that text came (`touchActiveGeneration`, `services/generate.service.ts:3867-3873`), and the signal that ends the read. */
+export interface StreamHooks {
+  touch?: () => void;
+  signal?: AbortSignal;
+}
+
+/** A read of a fetched body that ends with its signal, as Lumiverse races each read of the stream against the abort (`services/generate.service.ts:3830-3850`): the signal's reason when it comes first. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("This operation was aborted", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason ?? new DOMException("This operation was aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
  * What Lumiverse reads of a streamed reply: `readProviderSse` (`llm/provider-sse.ts:25-72`) and the
  * chunk handling of `generateStream` (`llm/providers/openai-compatible.ts:233-303`), including a
  * chunk that carries `error` (`provider-sse.ts:11-21`) and a stream that ends with no finish reason.
  * Each line is read as it comes, into `seen`, so a generation stopped half way has what came before.
  */
-export async function readStream(res: Response, seen: StreamSeen = { content: "", reasoning: "" }): Promise<StreamedReply> {
+export async function readStream(res: Response, seen: StreamSeen = { content: "", reasoning: "" }, hooks: StreamHooks = {}): Promise<StreamedReply> {
   if (!res.ok) throw new Error(`Provider error ${res.status}: ${await res.text()}`);
   let reasoningKey: "reasoning" | "reasoning_content" | null = null;
   let finishReason: string | undefined;
@@ -160,6 +186,8 @@ export async function readStream(res: Response, seen: StreamSeen = { content: ""
         seen.content += c;
         seen.reasoning += r;
       }
+      // Only a chunk with reply or thinking text touches the generation (`:3867-3873`); the stream's own comment and empty lines do not.
+      if (c !== "" || r !== "") hooks.touch?.();
       if (data.usage && typeof data.usage === "object") usage = data.usage as Record<string, unknown>;
     } else if (line === "" && dataLines.length) throw new Error("The provider sent an invalid JSON stream event.");
     return false;
@@ -171,7 +199,7 @@ export async function readStream(res: Response, seen: StreamSeen = { content: ""
   // The stream is read to its end, as `res.text()` would; nothing after `[DONE]` is taken. A chunk with an error ends the read there.
   try {
     for (;;) {
-      const next = reader === undefined ? { done: true as const, value: undefined } : await reader.read();
+      const next = reader === undefined ? { done: true as const, value: undefined } : await untilAborted(reader.read(), hooks.signal);
       buffer += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true });
       const lines = buffer.split("\n");
       buffer = next.done ? "" : (lines.pop() ?? "");
@@ -191,17 +219,20 @@ export async function readStream(res: Response, seen: StreamSeen = { content: ""
  * `llm/providers/openai-compatible.ts:146-205`): the first choice's text and its reasoning, the finish
  * reason (`stop` when none is given), and the usage.
  */
-export async function readWhole(res: Response): Promise<StreamedReply> {
+export async function readWhole(res: Response, hooks: StreamHooks = {}): Promise<StreamedReply> {
   if (!res.ok) throw new Error(`Provider error ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as { choices?: { message?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown }; finish_reason?: unknown }[]; usage?: unknown };
+  const data = (await untilAborted(res.json(), hooks.signal)) as { choices?: { message?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown }; finish_reason?: unknown }[]; usage?: unknown };
   const choice = data.choices?.[0];
   const reasoning = choice?.message?.reasoning ?? choice?.message?.reasoning_content;
-  return {
+  const reply: StreamedReply = {
     content: typeof choice?.message?.content === "string" ? choice.message.content : "",
     reasoning: typeof reasoning === "string" ? reasoning : "",
     finishReason: typeof choice?.finish_reason === "string" && choice.finish_reason !== "" ? choice.finish_reason : "stop",
     usage: typeof data.usage === "object" && data.usage !== null ? (data.usage as Record<string, unknown>) : null,
   };
+  // The one chunk a whole reply makes (`:3793-3815`) touches the generation as it comes, never before.
+  if (reply.content !== "" || reply.reasoning !== "") hooks.touch?.();
+  return reply;
 }
 
 /**
@@ -230,7 +261,7 @@ export interface Watched {
  * when it has text (`llm/providers/openai-compatible.ts:278`), touches the generation on reply or
  * thinking text (`services/generate.service.ts:3867-3873`), and every minute ends one untouched for
  * more than ten (`services/generation/active-generation-registry.ts:140-153`). Comment lines are
- * skipped (`llm/provider-sse.ts:52`).
+ * skipped (`llm/provider-sse.ts:52`). Kept until `StandIn.generate` runs this cut itself and the tests that watch a stream by hand move onto it.
  */
 export async function watchGeneration(res: Response, clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">): Promise<Watched> {
   const out: Watched = { started: clock.now(), texts: [], content: "", aborted: false };

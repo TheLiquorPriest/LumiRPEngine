@@ -11,7 +11,7 @@ import { promptInterceptor } from "../../src/ext/prompt";
 import { worldInfoInterceptor } from "../../src/ext/question";
 import { PRIORITY } from "../../src/ext/start";
 import { ALL, FERRY_SECRET, FERRY_SHOWN, harborBooks, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
-import { settle } from "../standin/clock";
+import { FakeClock, settle } from "../standin/clock";
 
 const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
 const WINDOW = [8, 9, 10, 11];
@@ -105,10 +105,16 @@ describe("the question before lore activates", () => {
   });
 
   test("past Lumiverse's own limit for a World Info interceptor the extension's answer is not waited for, and the unmarked copy of a secret reaches the prompt: why the deadline is well inside it", async () => {
-    const rig = await new Rig({ questionDelayMs: 1_000, deadlineMs: 400 }).start();
-    rig.lv.worldInfoTimeoutMs = 200;
-    const out = await rig.generate("conn-other");
-    expect(out.worldInfo.ms).toBeLessThan(400);
+    // Lumiverse's own ten seconds, on the clock the test moves, against an extension told to wait eleven for RPE, which answers at twelve.
+    const clock = new FakeClock();
+    const rig = await new Rig({ questionDelayMs: 12_000, deadlineMs: 11_000, clock }).start();
+    const generating = rig.generate("conn-other");
+    // Lumiverse's limit and RPE's delay are both set when the generation reaches the interceptor.
+    for (let i = 0; i < 1_000 && clock.pending < 2; i++) await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    await clock.advance(10_000);
+    const out = await generating;
+    expect(out.error).toBeNull();
+    expect(rig.lv.log).toContain("World-info interceptor timed out after 10s; skipping");
     const text = bodyText(rig.otherBodies[0]!);
     expect(text).toContain(VAULT_SECRET);
     // Lumiverse strips a marked passage by itself.

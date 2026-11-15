@@ -9,9 +9,12 @@
 // since the stand-in has no embeddings; and Lumiverse's activation cache (`:197-356`), of which it keeps
 // nothing, so a probability or a group is drawn afresh at every generation.
 
-import { quietTimer, type Registration, type WorldInfoHandler } from "./host";
+import type { HostClock, Registration, WorldInfoHandler } from "./host";
 import { indexInChat, type Chat, type ChatMessage } from "./rows";
 import type { Role } from "./steps";
+
+/** A World Info interceptor's limit (`spindle/worker-host.ts:4937-4943`): fixed, as Lumiverse has it. */
+const WORLD_INFO_INTERCEPTOR_TIMEOUT_MS = 10_000;
 
 export interface Entry {
   id: string;
@@ -218,7 +221,7 @@ export interface WorldInfoResult {
  * `outputOrder`), `captured`, `additionalEntries` and `activationOverrides`; one whose added entry is malformed ends the assembly (`:384-385`).
  * `bookSources` is where each book is attached (`bookSourceMap`), told to a handler as each entry's `book_source`.
  */
-export async function worldInfoChain(registrations: readonly Registration<WorldInfoHandler>[], entries: readonly Entry[], ctx: Record<string, unknown> & { activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } }, userId: string, bookSources: ReadonlyMap<string, BookSource>, limit: { timeoutMs: number; log: string[] }): Promise<ChainResult> {
+export async function worldInfoChain(registrations: readonly Registration<WorldInfoHandler>[], entries: readonly Entry[], ctx: Record<string, unknown> & { activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } }, userId: string, bookSources: ReadonlyMap<string, BookSource>, limit: { clock: HostClock; log: string[] }): Promise<ChainResult> {
   const placementByEntryId = new Map<string, Placement>();
   const insertionOrderByEntryId = new Map<string, string>();
   const additionalBookSources = new Map<string, BookSource>();
@@ -289,12 +292,12 @@ export async function worldInfoChain(registrations: readonly Registration<WorldI
         return undefined;
       });
       const waited = Promise.withResolvers<undefined>();
-      const timer = quietTimer(limit.timeoutMs, () => {
+      const timer = limit.clock.setTimeout(() => {
         limit.log.push("World-info interceptor timed out after 10s; skipping");
         waited.resolve(undefined);
-      });
+      }, WORLD_INFO_INTERCEPTOR_TIMEOUT_MS);
       const result = await Promise.race([call, waited.promise]);
-      clearTimeout(timer);
+      limit.clock.clearTimeout(timer);
       // What crosses from the worker is a copy.
       const copy = (result === undefined || result === null ? undefined : structuredClone(result)) as WorldInfoResult | undefined;
       const supplied = copy?.additionalEntries ?? [];

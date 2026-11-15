@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { streamedReply } from "../../../src/adapter/lumiverse/stream";
 import type { PromptMessageDTO } from "../../../src/ext/spindle";
+import { FakeClock } from "../../standin/clock";
 import { StandInDb } from "../../standin/db";
 import type { ActivatedWorldInfoEntry, Entry, VectorSearch } from "../../standin/lore";
 import { StandIn, type ChatMessage, type Outcome } from "../../standin/lumiverse";
@@ -396,17 +397,24 @@ describe("what Lumiverse tells of it (`services/generate.service.ts:1217-1231`, 
 
     // Budgets: 10 seconds unless asked, else held between 1 and 120 seconds; one that runs out is passed over.
     const { lv: timed } = fen(fenLines(), book);
+    // The budgets run on the clock the test moves: each is the delay a timer is set for, and each runs out in its turn.
+    const clock = new FakeClock();
+    timed.clock = clock;
     const budgets: number[] = [];
-    timed.budgetTimer = (ms, fire) => {
-      budgets.push(ms);
-      queueMicrotask(fire);
-      return () => undefined;
+    const setTimer = clock.setTimeout.bind(clock);
+    clock.setTimeout = (run, ms) => {
+      if (ms > 0) budgets.push(ms);
+      return setTimer(run, ms);
     };
     const hang = (): Promise<unknown> => Promise.withResolvers<unknown>().promise;
     timed.install(["context_handler"]).registerContextHandler(hang, 1, { timeoutMs: 600_000 });
     timed.install(["context_handler"]).registerContextHandler(hang, 2, { timeoutMs: 50 });
     timed.install(["context_handler"]).registerContextHandler(hang, 3);
-    await play(timed, "I pole the punt.");
+    const playing = play(timed, "I pole the punt.");
+    // The generation sets its first budget when it reaches the handlers; each next one when the one before has run out.
+    for (let i = 0; i < 1_000 && budgets.length === 0; i++) await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    await clock.advance(120_000 + 1_000 + 10_000);
+    await playing;
     expect(budgets).toEqual([120_000, 1_000, 10_000]);
 
     // A required one that fails fails the generation with its error: its empty message removed, nothing sent.

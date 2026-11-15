@@ -66,12 +66,26 @@ export type ContextHandler = (context: unknown, signal?: AbortSignal) => Promise
 /** Events that need `generation` (`spindle/worker-host.ts:2877-2883`). */
 const GENERATION_EVENTS: Record<string, true> = { GENERATION_STARTED: true, GENERATION_IN_PROGRESS: true, GENERATION_ENDED: true, GENERATION_STOPPED: true, STREAM_TOKEN_RECEIVED: true };
 
-/** A timer that does not keep the test process alive. */
-export function quietTimer(ms: number, fn: () => void): Timer {
-  const timer = setTimeout(fn, ms);
-  timer.unref();
-  return timer;
+/** What the host's timers run on: the three calls of RPH's `Clock`. A test gives its own to move time by hand. */
+export interface HostClock {
+  now(): number;
+  setTimeout(run: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
 }
+
+/** The process's own clock, where a test gives none; its timers do not keep the test process alive. */
+export const PROCESS_CLOCK: HostClock = {
+  now: () => Date.now(),
+  setTimeout: (run, ms) => {
+    const timer = setTimeout(run, ms);
+    timer.unref();
+    return timer;
+  },
+  clearTimeout: (handle) => clearTimeout(handle as Timer),
+};
+
+/** Spindle's proxy limit (`spindle/worker-host.ts:771`): fixed, as Lumiverse has it. */
+export const PROXY_TIMEOUT_MS = 30_000;
 
 export class ExtensionHost {
   readonly servers = new Map<string, Server>();
@@ -85,23 +99,16 @@ export class ExtensionHost {
     return this.frontends?.(message) ?? false;
   }
   protected readonly installed: Ext[] = [];
-  /** How a later task is run: on the process's own timers unless a test runs a clock of its own. */
-  later: (run: () => void) => void = (run) => void setTimeout(run, 0);
+  /** The clock every timer of the host runs on: the process's own unless a test gives one it moves by hand. */
+  clock: HostClock = PROCESS_CLOCK;
+  /** How a later task is run: on the host's clock, so a test that moves time runs the worker's tasks too. */
+  later: (run: () => void) => void = (run) => void this.clock.setTimeout(run, 0);
   /** `DEFAULT_INTERCEPTOR_TIMEOUT_MS` (`services/spindle-settings.service.ts:6`). */
   interceptorTimeoutMs = 10_000;
-  /** A World Info interceptor's limit (`spindle/worker-host.ts:4937-4943`). */
-  worldInfoTimeoutMs = 10_000;
-  /** Spindle's proxy limit (`spindle/worker-host.ts:771`). */
-  proxyTimeoutMs = 30_000;
   protected worldInfo: Registration<WorldInfoHandler>[] = [];
   protected interceptors: Registration<PromptHandler>[] = [];
   /** The context handlers (`spindle/context-handler.ts`), each with its wall-clock budget. */
   protected contextHandlers: (Registration<ContextHandler> & { timeoutMs: number })[] = [];
-  /** The timer a context handler's budget runs on: the process's own unless a test gives one; gives what clears it. */
-  budgetTimer: (ms: number, fire: () => void) => () => void = (ms, fire) => {
-    const timer = quietTimer(ms, fire);
-    return () => clearTimeout(timer);
-  };
 
   /** Installs an extension with these permissions granted, and gives its worker's view of Spindle; its manifest `identifier` is its id unless one is given. */
   install(granted: readonly string[], identifier?: string): Installed {
@@ -258,12 +265,25 @@ export class ExtensionHost {
 
   // ---------------------------------------------------------------- the network
 
-  /** A request on the stand-in's network: the handler at its origin, or a refused connection. */
+  /**
+   * A request on the stand-in's network: the handler at its origin, or a refused connection. A request given a signal ends when the signal does, as a
+   * `fetch` does, whether or not the handler heeds it.
+   */
   async fetch(url: string, init: RequestInit): Promise<Response> {
     const origin = new URL(url).origin;
     const server = this.servers.get(origin);
     if (server === undefined) throw new Error("Unable to connect. Is the computer able to access the url?");
-    return await server(new Request(url, init));
+    const signal = init.signal;
+    if (signal === undefined || signal === null) return await server(new Request(url, init));
+    if (signal.aborted) throw signal.reason ?? new DOMException("This operation was aborted", "AbortError");
+    const aborted = Promise.withResolvers<never>();
+    const onAbort = (): void => aborted.reject(signal.reason ?? new DOMException("This operation was aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await Promise.race([server(new Request(url, init)), aborted.promise]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
   }
 
   /** Spindle's proxy (`spindle/worker-host.ts:4641-4741`): needs `cors_proxy`; loopback allowed (`allowPrivate`, `utils/safe-fetch.ts:267-286`); 30 seconds; the body as text. */
@@ -272,12 +292,12 @@ export class ExtensionHost {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error(`Only http and https URLs are allowed, got: ${parsed.protocol}`);
     const timeout = Promise.withResolvers<never>();
-    const timer = quietTimer(this.proxyTimeoutMs, () => timeout.reject(new Error("The operation timed out.")));
+    const timer = this.clock.setTimeout(() => timeout.reject(new Error("The operation timed out.")), PROXY_TIMEOUT_MS);
     try {
       const res = await Promise.race([this.fetch(url, { method: init.method, headers: init.headers, body: init.body }), timeout.promise]);
       return { status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()), body: await res.text() };
     } finally {
-      clearTimeout(timer);
+      this.clock.clearTimeout(timer);
     }
   }
 
@@ -294,11 +314,11 @@ export class ExtensionHost {
     for (const registration of this.contextHandlers) {
       const controller = new AbortController();
       const timeout = Promise.withResolvers<never>();
-      const clear = this.budgetTimer(registration.timeoutMs, () => {
+      const timer = this.clock.setTimeout(() => {
         const error = new Error(`Context handler from ${registration.ext.id} timed out (${Math.round(registration.timeoutMs / 1000)}s)`);
         controller.abort(error);
         timeout.reject(error);
-      });
+      }, registration.timeoutMs);
       try {
         const call = (async () => {
           try {
@@ -317,7 +337,7 @@ export class ExtensionHost {
         this.log.push(`[Spindle] Context handler error from ${registration.ext.id} (user ${userId}): ${error instanceof Error ? error.message : String(error)}`);
         if (registration.required) throw error;
       } finally {
-        clear();
+        this.clock.clearTimeout(timer);
       }
     }
     return result;
@@ -359,11 +379,11 @@ export class ExtensionHost {
       });
       const controller = new AbortController();
       const timeout = Promise.withResolvers<never>();
-      const timer = quietTimer(this.interceptorTimeoutMs, () => {
+      const timer = this.clock.setTimeout(() => {
         const error = new Error(`Interceptor from extension timed out (${Math.round(this.interceptorTimeoutMs / 1000)}s)`);
         controller.abort(error);
         timeout.reject(error);
-      });
+      }, this.interceptorTimeoutMs);
       try {
         const call = (async () => {
           let returned: InterceptorReturn;
@@ -387,7 +407,7 @@ export class ExtensionHost {
         this.log.push(`[Spindle] Interceptor error: ${error instanceof Error ? error.message : String(error)}`);
         if (registration.required) throw error;
       } finally {
-        clearTimeout(timer);
+        this.clock.clearTimeout(timer);
       }
     }
     return { messages: result, parameters: merged };

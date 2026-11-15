@@ -13,6 +13,7 @@ import { NEEDS } from "../../src/ext/permissions";
 import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
 import { textOf as textKey } from "../../src/secrecy/lore-secrets";
 import type { JsonObject } from "../../src/shared/json";
+import { FakeClock } from "../standin/clock";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
 import type { Book } from "../standin/books";
 
@@ -108,6 +109,8 @@ export interface RigOptions {
   secretsFail?: true;
   /** Lumiverse's council block, which it splices into the prompt after its interceptors (`StandIn.councilBlock`). */
   council?: string;
+  /** A clock the test moves by hand, for everything of Lumiverse's that waits (its limits, its later tasks) and for RPE's delay to answer; the process's own where none is given. */
+  clock?: FakeClock;
 }
 
 /** RPE's scripted secrecy rules: the ferry's mark shown as RPE words it; the vault (a whole-entry secret), its unmarked copy and the entry a world secret was indexed from kept out. */
@@ -141,6 +144,7 @@ export class Rig {
   private readonly rpe: (request: Request) => Promise<Response>;
 
   constructor(readonly options: RigOptions = {}) {
+    if (options.clock !== undefined) this.lv.clock = options.clock;
     const hidden = new Set(harborMessages().filter((m) => m.hidden).map((m) => m.id));
     const keep = options.window ?? 4;
     const window: HistoryWindow = async (ask) => {
@@ -190,9 +194,9 @@ export class Rig {
         const asked = readQuestion(await request.clone().json());
         if (asked) this.questions.push(asked);
         if (options.questionDelayMs) {
-          // A slow RPE: the timer does not keep the test process alive after the test has moved on.
+          // A slow RPE: it answers when the host's clock says so, and a timer of the process's own does not keep the test process alive.
           const slow = Promise.withResolvers<void>();
-          setTimeout(slow.resolve, options.questionDelayMs).unref();
+          this.lv.clock.setTimeout(slow.resolve, options.questionDelayMs);
           await slow.promise;
         }
         return await question(request);
@@ -242,6 +246,8 @@ export class Rig {
     this.running = await startExtension(this.ext, this.options.deadlineMs !== undefined ? { deadlineMs: this.options.deadlineMs } : {});
     const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connection: "conn-rpe", relay: RELAY_SESSION, build: "test" };
     this.ext.fromFrontend({ rpe: "register", registration }, USER, RELAY_SESSION);
+    // The worker's later task runs on the host's clock: where the test moves it, it runs now.
+    await this.options.clock?.advance(0);
     await registered.promise;
     return this;
   }

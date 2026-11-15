@@ -257,7 +257,7 @@ export class StandIn extends ChatRows {
       }
       const configured = (this.library.setting(chat.user, "worldInfoSettings") as Partial<WorldInfoSettings> | undefined) ?? this.worldInfoSettings;
       const normalized = normalizeWorldInfoSettings(configured);
-      const chain = await worldInfoChain(this.worldInfo, wiEntries, worldInfoContext(chat, messages, { userId: chat.user, metadata, characterId: speaker.id, activationSettings: { globalScanDepth: normalized.globalScanDepth, maxRecursionPasses: normalized.maxRecursionPasses } }), chat.user, sources.bookSourceMap, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
+      const chain = await worldInfoChain(this.worldInfo, wiEntries, worldInfoContext(chat, messages, { userId: chat.user, metadata, characterId: speaker.id, activationSettings: { globalScanDepth: normalized.globalScanDepth, maxRecursionPasses: normalized.maxRecursionPasses } }), chat.user, sources.bookSourceMap, { clock: this.clock, log: this.log });
       for (const [book, source] of chain.additionalBookSources) sources.bookSourceMap.set(book, source);
       const wiMs = performance.now() - wiStarted;
       const activation = { ...normalized, maxRecursionPasses: chain.activationOverrides.disableRecursion === true ? 0 : normalized.maxRecursionPasses };

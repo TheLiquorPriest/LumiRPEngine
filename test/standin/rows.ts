@@ -76,8 +76,8 @@ export class ChatRows extends ExtensionHost {
   sockets: ((event: string, payload: unknown, user: string) => void) | null = null;
   /** The database Lumiverse's chat service writes the chats' rows to; with none, the chats are held in memory only. */
   db: StandInDb | null = null;
-  /** The host's clock, for its rows' stamps: Lumiverse stamps seconds (`services/chats.service.ts:2640`). */
-  now: () => number = () => Date.now();
+  /** The time for its rows' stamps: the host's clock (a test that moves time moves it), unless a test gives another; Lumiverse stamps seconds (`services/chats.service.ts:2640`). */
+  now: () => number = () => this.clock.now();
   /** The books, characters, personas and settings a generation reads its lore sources from: kept here and, with a database, written to it and read from it. Set `db` before adding any. */
   readonly library = new Library(() => this.db, () => this.now());
 
