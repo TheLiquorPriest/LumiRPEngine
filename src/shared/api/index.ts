@@ -844,8 +844,8 @@ export interface NotesReply {
   rewritten: NoteRow[];
 }
 
-/** Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, pictures in a system or assistant message (which carries text only), or parts that are neither text nor a picture by its data, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why. */
-export type NotGiven = { what: "pictures" | "textOnly" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
+/** Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, or parts that are neither text nor a picture, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why. */
+export type NotGiven = { what: "pictures" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
 
 /** A panel's request: what was pressed, and what it was pressed on, where it was pressed on something. */
 export interface PanelRequestAsk {

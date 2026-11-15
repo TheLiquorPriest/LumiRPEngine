@@ -86,9 +86,9 @@ export const turnsReply = shape.named("TurnsReply", "A chat's turns, newest firs
 
 const notGiven = shape.named(
   "NotGiven",
-  "Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, pictures in a system or assistant message (which carries text only), or parts that are neither text nor a picture by its data, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why.",
+  "Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, or parts that are neither text nor a picture, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why.",
   shape.union(
-    shape.object({ what: shape.oneOf("pictures", "textOnly", "parts"), messages: field(shape.list(N), "The messages of the prompt that held them, by place from 0."), count: N }),
+    shape.object({ what: shape.oneOf("pictures", "parts"), messages: field(shape.list(N), "The messages of the prompt that held them, by place from 0."), count: N }),
     shape.object({ what: shape.oneOf("world-state", "on-stage"), error: field(T, "Why it could not be made.") }),
   ),
 );

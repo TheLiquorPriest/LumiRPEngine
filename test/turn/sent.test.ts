@@ -1,5 +1,5 @@
-// What the lead is given of the prompt Lumiverse sent and of its briefing (plan §4.2 "A prompt with pictures", §10.2, Y6): a picture
-// goes to a model known to take pictures, and only in the player's message; what is left out, and a part of the briefing that could not
+// What the lead is given of the prompt Lumiverse sent and of its briefing (plan §4.2 "A prompt with pictures", §10.2, Y6): a picture,
+// by its data or its web address and in any message, goes to a model known to take pictures; what is left out, and a part of the briefing that could not
 // be made, is told in the briefing by a line of the notices part and kept on the run, never left out in silence. The one means that
 // leaves things out is the Author's and a narrator's alike. Played through the stand-in Lumiverse on the scripted model, the prompt
 // handed to the turn as the door hands it with a picture added. Every name is invented.
@@ -27,34 +27,29 @@ description: Test words.
 format: lines
 ---
 pictures_not_taken: PICTURES-LEFT {{count}} in messages {{messages}}.
-pictures_text_only: TEXT-ONLY {{count}} in messages {{messages}}.
 parts_not_carried: PARTS-LEFT {{count}} in messages {{messages}}.
 world_state_failed: STATE-FAILED {{error}}
 on_stage_failed: STAGE-FAILED {{error}}
 `;
 
-test("the one means, for the Author's prompt and a narrator's: a player's picture goes only to a model that takes pictures; pictures in a system or assistant message and parts that are neither text nor a picture by its data are left out, by message", () => {
+test("the one means, for the Author's prompt and a narrator's: every picture, by its data or its web address and in any message, goes only to a model that takes pictures; parts that are neither text nor a picture are left out, by message", () => {
   const prompt = [
     { role: "system" as const, content: [{ type: "text", text: "The preset." }, picture()] },
     { role: "user" as const, content: [{ type: "text", text: "Look." }, picture(), picture()] },
     { role: "assistant" as const, content: [{ type: "text", text: "I see." }, picture()] },
     { role: "user" as const, content: [{ type: "text", text: "And this." }, picture("https://pictures.example.invalid/gull.png"), { type: "input_audio", input_audio: { data: "AAAA", format: "wav" } }] },
   ];
-  const texts = (messages: PromptMessage[]) => messages.map((m) => (typeof m.content === "string" ? m.content : m.content.map((p) => (p.type === "text" ? p.text : `[${p.mimeType}]`)).join("")));
+  const texts = (messages: PromptMessage[]) => messages.map((m) => (typeof m.content === "string" ? m.content : m.content.map((p) => (p.type === "text" ? p.text : "url" in p ? `[${p.url}]` : `[${p.mimeType}]`)).join("")));
 
   const taking = promptOf(prompt, true);
-  expect(texts(taking.messages)).toEqual(["The preset.", "Look.[image/png][image/png]", "I see.", "And this."]);
-  expect(taking.left).toEqual([
-    { what: "textOnly", messages: [0, 2], count: 2 },
-    { what: "parts", messages: [3], count: 2 },
-  ]);
+  expect(texts(taking.messages)).toEqual(["The preset.[image/png]", "Look.[image/png][image/png]", "I see.[image/png]", "And this.[https://pictures.example.invalid/gull.png]"]);
+  expect(taking.left).toEqual([{ what: "parts", messages: [3], count: 1 }]);
 
   const textOnly = promptOf(prompt, false);
   expect(texts(textOnly.messages)).toEqual(["The preset.", "Look.", "I see.", "And this."]);
   expect(textOnly.left).toEqual([
-    { what: "pictures", messages: [1], count: 2 },
-    { what: "textOnly", messages: [0, 2], count: 2 },
-    { what: "parts", messages: [3], count: 2 },
+    { what: "pictures", messages: [0, 1, 2, 3], count: 5 },
+    { what: "parts", messages: [3], count: 1 },
   ]);
   // Roles, order and text stand as Lumiverse sent them.
   expect(textOnly.messages.map((m) => m.role)).toEqual(["system", "user", "assistant", "user"]);

@@ -188,7 +188,6 @@ function lines(part: TemplatePart | LinesPart | undefined): LinesPart | undefine
 /** The notices part's line that tells each thing a lead was not given (`NotGiven`). */
 const NOT_GIVEN_LINES: Readonly<Record<NotGiven["what"], string>> = {
   pictures: "pictures_not_taken",
-  textOnly: "pictures_text_only",
   parts: "parts_not_carried",
   "world-state": "world_state_failed",
   "on-stage": "on_stage_failed",
@@ -468,11 +467,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         this.#d.log.error("The chat's notes could not be put as they stand at this turn's start.", { turn: begun.id, error: words(error) }),
       );
 
-      // The prompt as the lead's model takes it (plan §4.2 "A prompt with pictures"): a picture of the player's goes to it only where its
+      // The prompt as the lead's model takes it (plan §4.2 "A prompt with pictures"): a picture, in any message, goes to it only where its
       // model is known to take pictures. Its limits are read once, and only where something needs them.
       let leadLimits: Promise<ModelLimits | null> | undefined;
       const limits = (): Promise<ModelLimits | null> => (leadLimits ??= this.#leadLimits(guidance, settings.lead, user, begun.id));
-      const pictured = tagged.prompt.some((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((part) => isRecord(part) && part.type === "image_url"));
+      const pictured = tagged.prompt.some((m) => typeof m.content !== "string" && m.content.some((part) => isRecord(part) && part.type === "image_url"));
       const { messages, left } = promptOf(tagged.prompt, pictured && (await limits())?.pictures?.takes === true);
       const prefill = prefillOf(tagged, messages);
       // What Lumiverse puts in front of the reply when it saves it: for a continue, the text the swipe it goes on held, else the prefill.

@@ -53,11 +53,11 @@ export type StoppedBy = { limit: LimitHit } | { hold: number };
 
 /**
  * What a run's lead was not given, as facts, each told in its briefing by a line of the notices part (plan §4.2 "A prompt with
- * pictures", §10.2, Y6): pictures its model does not take (`pictures`), pictures in a system or assistant message, which carries text
- * only (`textOnly`), and parts that are neither text nor a picture by its data (`parts`), each with the messages of the prompt that held
- * them (places from 0) and how many; and a part of the briefing that could not be made (`world-state`, `on-stage`), with why.
+ * pictures", §10.2, Y6): pictures its model does not take (`pictures`), and parts that are neither text nor a picture (`parts`), each
+ * with the messages of the prompt that held them (places from 0) and how many; and a part of the briefing that could not be made
+ * (`world-state`, `on-stage`), with why.
  */
-export type NotGiven = { what: "pictures" | "textOnly" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
+export type NotGiven = { what: "pictures" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
 
 /** A run as it is kept. */
 export interface RunRecord {
