@@ -1,7 +1,7 @@
 // The cast's public face: what the application registers (its tables), and what the turn lane calls
 // (the tools for a chat, the views a definition's `given` list names, the views of those on stage the
-// Author is given, the facts rules count by, and the take-backs it calls beside the store's own), and
-// what a page sets (the player's pinned casting).
+// Author is given, the facts rules count by, and the take-backs and the continue's join it calls beside
+// the store's own), and what a page sets (the player's pinned casting).
 
 export { CAST_MIGRATIONS } from "./schema";
 export { castTools, CAST_TOOLS } from "./tools";
@@ -24,6 +24,7 @@ export {
   dropCastStaged,
   dropLeftoverCast,
   findCharacter,
+  joinCast,
   MIND_KINDS,
   pinCasting,
   ROW_PARTS,
