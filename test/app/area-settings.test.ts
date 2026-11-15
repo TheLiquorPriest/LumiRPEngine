@@ -13,7 +13,8 @@ import { LORE_SETTINGS } from "../../src/lore";
 import { STORE_DEFAULTS, STORE_SETTING_DEFS, STORE_SETTINGS } from "../../src/store";
 import { STORY_SETTINGS } from "../../src/story";
 import { pruneChat, TREE_SETTINGS } from "../../src/tree";
-import { NO_SESSION } from "../../src/turn";
+import { NO_SESSION, type TurnSettings, turnSettings } from "../../src/turn";
+import { bootstrapSettings } from "../../src/turn/bootstrap";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "../turn/bed";
 
 /** Every setting of the areas, by the area that reads it. */
@@ -116,4 +117,39 @@ test("an area's settings are read from a config through its list: a value it tak
   expect(numbersIn(config, STORE_SETTING_DEFS, tell)).toEqual({ snapshotEvery: 10, foldsKept: STORE_DEFAULTS.foldsKept, notable: STORE_DEFAULTS.notable });
   expect(numbersIn(config, CAST_SETTING_DEFS, tell)).toEqual({ ...CAST_DEFAULTS, faintBelow: 0.5 });
   expect(told).toEqual(["store.foldsKept takes a whole number, at least 1, not 0.", 'cast.topOfMind takes a whole number, at least 0, not "nine".']);
+});
+
+test("for each area, a value changed through PUT /api/v1/settings is what that area reads at its next turn, or after a restart where its row says so", async () => {
+  const b = await playedBed();
+  const scope = { user: USER, chat: CHAT, session: NO_SESSION };
+  const effectOf = async (key: string): Promise<string | undefined> => (await settings(b, "GET", `?chat=${CHAT}`)).body.settings.find((s) => s.key === key)?.effect;
+  const put = async (body: Record<string, unknown>): Promise<void> => {
+    expect({ body, status: (await settings(b, "PUT", "", body)).status }).toEqual({ body, status: 200 });
+  };
+
+  // At the next turn: the cast's, the story lane's, the world state's and the engine's tools', each read through the one reader as a turn begins.
+  const nextTurn: readonly [string, number, (t: TurnSettings) => number][] = [
+    ["cast.topOfMind", 4, (t) => t.cast.topOfMind],
+    ["story.soFar.floor", 3000, (t) => t.storySoFar.floor],
+    ["worldState.budget", 2500, (t) => t.worldState.budget],
+    ["engine.searchHits", 7, (t) => t.engine.searchHits],
+  ];
+  for (const [key, value, read] of nextTurn) {
+    expect({ key, effect: await effectOf(key) }).toEqual({ key, effect: "turn" });
+    await put({ level: "chat", chat: CHAT, key, value });
+    expect({ key, read: read(await turnSettings(b.turns.files, scope, b.turns.env.log)) }).toEqual({ key, read: value });
+  }
+
+  // At its next use: the bootstrap's limit, read as a bootstrap job starts.
+  expect(await effectOf("bootstrap.tokenLimit")).toBe("use");
+  await put({ level: "chat", chat: CHAT, key: "bootstrap.tokenLimit", value: 150_000 });
+  expect((await bootstrapSettings(b.turns.files, scope, b.turns.env.log)).tokenLimit).toBe(150_000);
+
+  // From the next start: the store's own, read once as RPE opens the store; this RPE keeps what it opened with until it starts again.
+  expect(await effectOf("store.snapshotEvery")).toBe("start");
+  const opened = b.turns.store.snapshotEvery;
+  await put({ level: "global", key: "store.snapshotEvery", value: opened + 7 });
+  expect(b.turns.store.snapshotEvery).toBe(opened);
+  await b.restart();
+  expect(b.turns.store.snapshotEvery).toBe(opened + 7);
 });
