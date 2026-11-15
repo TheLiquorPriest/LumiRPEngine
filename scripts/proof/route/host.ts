@@ -96,11 +96,36 @@ export interface AgentFacts {
   streams: boolean;
 }
 
+/** Where the installed `rp-harness` came from: RPH's own repository on the Mac (`build/pin.sh install`), the bed's mirror fed by bundle, or GitHub. */
+export type PinFrom = "rph-repository" | "bed-mirror" | "github";
+/** Whether RPH is published yet, as the lead's publishing step sets it: it decides which name RPE's manifest holds. */
+export type PinStage = "before-publishing" | "after-publishing";
+
+/** How the pin was held (PlanScenarios-3 item 7, R-19, R-196): what the run's record says of it, beside the commit. */
+export interface PinHeld {
+  /** The whole name RPE's `package.json` gives `rp-harness`; null when the manifest names none. */
+  name: string | null;
+  from: PinFrom;
+  stage: PinStage;
+  /** On the bed: the commit ids of the bundles the mirrors were fed from; null where nothing was fed by bundle. */
+  bundles: { rpe: string; rph: string } | null;
+}
+
+/** The instance a live run was on: its Lumiverse's address and its name. */
+export interface InstanceFacts {
+  address: string;
+  name: string;
+}
+
 /** What a run stood on, for `run.json` (plan §17.0 l.1751: what is seen counts, and where it was seen). */
 export interface RunFacts {
   rpe: { commit: string; dirty: boolean };
-  /** RPH's commit as installed, and the commit RPE's manifest pins (null when it pins none). */
-  rph: { commit: string; pin: string | null };
+  /** RPH's commit as installed, the commit RPE's manifest pins (null when it pins none), and how the pin was held. */
+  rph: { commit: string; pin: string | null; held: PinHeld };
+  /** A live run's own: the instance it was on, the user it acted as, and the never-touch list in force (the paths, ports and units its scripts refuse to touch). A rig run needs none. */
+  instance?: InstanceFacts;
+  user?: string;
+  neverTouch?: string[];
   lumiverse: { version: string };
   browser: { name: string; version: string };
   agents: AgentFacts[];

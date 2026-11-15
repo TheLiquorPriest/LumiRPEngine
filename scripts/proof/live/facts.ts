@@ -10,7 +10,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { ConnectionShown } from "../../../src/shared/api";
-import type { AgentFacts, GuidanceFacts } from "../route/host";
+import type { AgentFacts, GuidanceFacts, PinHeld } from "../route/host";
+import { heldOf, type PinHow } from "../route/pin";
 import type { RpeReader } from "../lib/read";
 import { folderTree, gitTree, installedRph } from "../lib/record";
 import type { Lumiverse } from "../../testbed/lib/lumiverse";
@@ -61,9 +62,10 @@ export function installedRphCommit(repo: string): string | null {
 
 /**
  * RPE's and RPH's commits for a run: the running build's, which must be this checkout's (the scripts run from the
- * checkout the build was made from: a build that is not it proves nothing here), RPH's from the install.
+ * checkout the build was made from: a build that is not it proves nothing here), RPH's from the install, and how
+ * the pin was held (`how`: where it came from, the stage, the bundles' file; PlanScenarios-3 item 7).
  */
-export function commitsOf(repo: string, running: string): { rpe: { commit: string; dirty: boolean }; rph: { commit: string; pin: string | null } } {
+export function commitsOf(repo: string, running: string, how: PinHow): { rpe: { commit: string; dirty: boolean }; rph: { commit: string; pin: string | null; held: PinHeld } } {
   const build = parseBuild(running);
   if (build === null) throw new Error(`RPE says it runs build "${running}", which names no commit: the run's RPE does not report its commits`);
   const head = git(repo, ["rev-parse", "HEAD"]);
@@ -73,7 +75,7 @@ export function commitsOf(repo: string, running: string): { rpe: { commit: strin
   if (installed === null) throw new Error(`${join(repo, "node_modules", "rp-harness")} holds no .bun-tag: RPH is not installed from a commit, so the run's RPH commit is not known`);
   if (build.rph !== null && !installed.startsWith(build.rph)) throw new Error(`the running RPE says its RPH is ${build.rph}, and the installed one is ${installed.slice(0, 8)}`);
   const manifest: unknown = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
-  return { rpe: { commit: head, dirty: build.dirty }, rph: { commit: installed, pin: manifestPin(manifest) } };
+  return { rpe: { commit: head, dirty: build.dirty }, rph: { commit: installed, pin: manifestPin(manifest), held: heldOf(manifest, how) } };
 }
 
 /** Lumiverse's version, as its diagnostics give it. */

@@ -17,7 +17,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isRecord } from "../../../src/shared/json";
-import type { LiveGuard, RunFacts } from "../route/host";
+import type { LiveGuard, PinStage, RunFacts } from "../route/host";
+import { pinReasons } from "../route/pin";
 import { pinProblems, WHOLE_COMMIT } from "./pin";
 import { readGate, recordsDir } from "./record";
 
@@ -33,6 +34,8 @@ export interface GuardPlaces {
   lock: string | null;
   /** The never-touch list in force. */
   neverTouch: string[];
+  /** The pin's stage, which the lead's publishing step sets (`RPE_PROOF_PIN_STAGE`): it decides which name RPE's manifest is held to. Null when nothing says. */
+  stage: PinStage | null;
   /** Whether a process of this machine is alive (injected by a test). */
   alive?: (pid: number) => boolean;
 }
@@ -49,7 +52,8 @@ export function neverTouch(env: Record<string, string | undefined> = process.env
 export function placesFromEnv(env: Record<string, string | undefined> = process.env): GuardPlaces {
   const instance = env.LRE_INSTANCE_DIR?.trim();
   const lock = env.RPE_PROOF_LOCK?.trim() || (instance ? join(instance, "proof.lock") : null);
-  return { repo: resolve(import.meta.dir, "..", "..", ".."), rphRepo: env.RPE_PROOF_RPH_REPO?.trim() || null, records: recordsDir(env), lock, neverTouch: neverTouch(env) };
+  const stage = env.RPE_PROOF_PIN_STAGE?.trim();
+  return { repo: resolve(import.meta.dir, "..", "..", ".."), rphRepo: env.RPE_PROOF_RPH_REPO?.trim() || null, records: recordsDir(env), lock, neverTouch: neverTouch(env), stage: stage === "before-publishing" || stage === "after-publishing" ? stage : null };
 }
 
 /** A git command's output in `repo`, or null where git fails. */
@@ -135,11 +139,12 @@ export function makeGuard(places: () => GuardPlaces, now: () => Date = () => new
       if (facts.rpe.dirty) fault.push("the build the run stood on had changes not committed");
       if (fault.length > 0) return refuse(fault.join("; "));
       if (!WHOLE_COMMIT.test(facts.rph.commit)) return refuse(`RPH's commit is ${facts.rph.commit}, which is not one whole commit`);
-      if (facts.rph.pin !== facts.rph.commit) return refuse(`RPH is ${facts.rph.commit.slice(0, 8)} and RPE's manifest pins ${facts.rph.pin === null ? "none" : facts.rph.pin.slice(0, 8)}: a shared prefix is no pin`);
+      const unpinned = pinReasons(facts.rph);
+      if (unpinned.length > 0) return refuse(`RPH is ${facts.rph.commit.slice(0, 8)} and RPE's manifest pins ${facts.rph.pin === null ? "none" : facts.rph.pin.slice(0, 8)}: ${unpinned.join("; ")}`);
       const record = readGate(where.records, facts.rpe.commit, facts.rph.commit);
       if (record === null) return refuse(`there is no gate record for RPE ${facts.rpe.commit.slice(0, 8)} with RPH ${facts.rph.commit.slice(0, 8)}: run scripts/proof/gate/cheap.ts on exactly these commits first`);
       if (!record.passed) return refuse(`the gate did not pass on RPE ${facts.rpe.commit.slice(0, 8)} with RPH ${facts.rph.commit.slice(0, 8)}: ${[...record.steps.filter((s) => !s.ok).map((s) => `${s.name} (${s.note})`), ...record.pin].join("; ")}`);
-      const pin = pinProblems(where.repo, where.rphRepo);
+      const pin = pinProblems(where.repo, where.rphRepo, facts.rph.held.stage);
       if (pin.length > 0) return refuse(`RPH is not held as the plan says: ${pin.join("; ")}`);
       return { ok: true as const };
     },

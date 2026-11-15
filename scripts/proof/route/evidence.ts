@@ -31,7 +31,8 @@ import { isRecord } from "../../../src/shared/json";
 import type { SettingsReply } from "../../../src/shared/api";
 import { wordFaults } from "./check";
 import { folderOf, gateIdFault, isStageName, pageSlug, parseStageId, scenarioId, stageId, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
-import type { AgentFacts, Browser, Kept, Mode, NamesFacts, RunFacts, Shot } from "./host";
+import type { AgentFacts, Browser, InstanceFacts, Kept, Mode, NamesFacts, PinHeld, RunFacts, Shot } from "./host";
+import { heldFaults, isPinned, pinReasons } from "./pin";
 import { LIST } from "./list";
 import { describeVerdict, formResult, measuredOutcomes, outcomeOf, partTrial, restsOnGuidance, SEEN_OUTCOMES, wholeResult, type FormRecord, type FormResult, type Glance, type Instance, type Outcome, type PartRecord, type PlayStanding } from "./results";
 
@@ -63,7 +64,12 @@ export interface RunRecord {
   /** Whether the run gives a verdict or is a trial, and why: its one home. A record without it gives no verdict. */
   standing?: Standing;
   rpe: { commit: string; dirty: boolean };
-  rph: { commit: string; pin: string | null; pinned: boolean };
+  /** RPH as installed, the commit RPE's manifest pins, whether that is the pinned commit (`isPinned`, worked out again whenever the record is read), and how the pin was held. */
+  rph: { commit: string; pin: string | null; pinned: boolean; held: PinHeld };
+  /** A live run's own: where it was, who it acted as, and what its scripts refused to touch (`RunFacts`). A rig run has none. */
+  instance?: InstanceFacts;
+  user?: string;
+  neverTouch?: string[];
   lumiverse: { version: string };
   browser: { name: string; version: string };
   agents: AgentFacts[];
@@ -114,11 +120,6 @@ export interface Standing {
   from: StandingFrom | null;
   /** What each play's own chat stood on, play by play, as the run went. */
   plays?: PlayGuidance[];
-}
-
-/** Whether RPH as installed is the commit RPE pins: the one rule, worked out when a run is made and again whenever its bundle is read. Seven characters is the shortest form git writes a commit in, and either may be the shorter. */
-export function isPinned(commit: string, pin: string | null): boolean {
-  return pin !== null && Math.min(pin.length, commit.length) >= 7 && (pin.startsWith(commit) || commit.startsWith(pin));
 }
 
 /** Every name a `NamesFacts` holds, as the words a run's reasons give: `off: TURN (global)`, `layered: AGENTS`, `added: notes.md`. */
@@ -185,7 +186,7 @@ export function playReasons(play: PlayGuidance): string[] {
 function startReasons(rpe: RunRecord["rpe"], rph: RunRecord["rph"], from: StandingFrom | null): string[] {
   const why: string[] = [];
   if (rpe.dirty) why.push(`RPE's tree held changes beyond its commit ${rpe.commit}`);
-  if (!rph.pinned) why.push(`RPH as installed (${rph.commit}) is not the commit RPE pins (${rph.pin ?? "none"})`);
+  if (!rph.pinned) why.push(`RPH as installed (${rph.commit}) is not the commit RPE pins (${rph.pin ?? "none"}): ${pinReasons(rph).join("; ")}`);
   return [...why, ...reasonsOf(from, "the run stood on")];
 }
 
@@ -219,7 +220,7 @@ export function standingOfPlay(rpe: RunRecord["rpe"], rph: RunRecord["rph"], fro
 
 /** The run's RPH as its commit and pin make it, never as its record says. */
 function rphOf(run: RunRecord): RunRecord["rph"] {
-  return { ...run.rph, pinned: isPinned(run.rph.commit, run.rph.pin) };
+  return { ...run.rph, pinned: isPinned(run.rph) };
 }
 
 /** The standing a bundle gives, worked out again from what its run.json says the run and its plays stood on, whether RPH is the pinned commit among it, never taken on its word; a run.json without one gives no verdict. */
@@ -331,19 +332,30 @@ export function askedIdOf(record: Pick<FormRecord, "id" | "stage">): string {
 }
 
 /** The run's record from the host's facts, its standing worked out from what the host said the run stood on (none said: a trial). RPH is the pinned commit by `isPinned`. */
-export function runRecord(facts: RunFacts, fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing">, from: StandingFrom | null = null): RunRecord {
-  const { commit, pin } = facts.rph;
-  const rph = { commit, pin, pinned: isPinned(commit, pin) };
-  return { ...fields, standing: standingOf(facts.rpe, rph, from), rpe: facts.rpe, rph, lumiverse: facts.lumiverse, browser: facts.browser, agents: facts.agents, settings: facts.settings };
+export function runRecord(facts: RunFacts, fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing" | "instance" | "user" | "neverTouch">, from: StandingFrom | null = null): RunRecord {
+  const { commit, pin, held } = facts.rph;
+  const rph = { commit, pin, pinned: isPinned(facts.rph), held };
+  const own = { ...(facts.instance === undefined ? {} : { instance: facts.instance }), ...(facts.user === undefined ? {} : { user: facts.user }), ...(facts.neverTouch === undefined ? {} : { neverTouch: facts.neverTouch }) };
+  return { ...fields, ...own, standing: standingOf(facts.rpe, rph, from), rpe: facts.rpe, rph, lumiverse: facts.lumiverse, browser: facts.browser, agents: facts.agents, settings: facts.settings };
 }
 
-/** What is missing from a host's facts, which would leave a run without its provenance. */
-export function factFaults(facts: unknown): string[] {
+/**
+ * What is missing from a host's facts, which would leave a run without its provenance (PlanScenarios-3 item 7). Every run
+ * names how the pin was held; a live run names besides the instance it was on, the user it acted as and the never-touch list
+ * in force (a rig run needs none of those). The run's mode is handed in, so a refusal closes the host and gives back the lock.
+ */
+export function factFaults(facts: unknown, mode: Mode): string[] {
   if (!isRecord(facts)) return ["the host gave no facts"];
   const out: string[] = [];
   const text = (value: unknown) => typeof value === "string" && value.trim() !== "";
   if (!isRecord(facts.rpe) || !text(facts.rpe.commit) || typeof facts.rpe.dirty !== "boolean") out.push("RPE's commit, and whether its tree is changed");
   if (!isRecord(facts.rph) || !text(facts.rph.commit) || !(facts.rph.pin === null || text(facts.rph.pin))) out.push("RPH's commit and the commit RPE pins");
+  else out.push(...heldFaults(facts.rph.held, mode));
+  if (mode === "live") {
+    if (!isRecord(facts.instance) || !text(facts.instance.address) || !text(facts.instance.name)) out.push("the instance the run was on (its Lumiverse's address and its name)");
+    if (!text(facts.user)) out.push("the user the run acted as");
+    if (!Array.isArray(facts.neverTouch) || facts.neverTouch.length === 0 || !facts.neverTouch.every(text)) out.push("the never-touch list in force (the paths, ports and units the run's scripts refuse to touch)");
+  }
   if (!isRecord(facts.lumiverse) || !text(facts.lumiverse.version)) out.push("Lumiverse's version");
   if (!isRecord(facts.browser) || !text(facts.browser.name) || !text(facts.browser.version)) out.push("the browser and its version");
   if (!Array.isArray(facts.agents) || facts.agents.length === 0) out.push("every agent's connection, model, reply form, effort and streaming");
@@ -532,7 +544,7 @@ export function readBundle(dir: string): ReadBundle {
   const faults: string[] = [...(run.faults ?? [])];
   const standing = standingOfRun(run);
   const said = run.standing;
-  const pinned = isPinned(run.rph.commit, run.rph.pin);
+  const pinned = isPinned(run.rph);
   if (run.rph.pinned !== pinned) faults.push(`run.json says RPH ${run.rph.pinned ? "is" : "is not"} the commit RPE pins, and its commit ${run.rph.commit} and pin ${run.rph.pin ?? "none"} make it ${pinned ? "the pinned commit" : "not the pinned commit"}`);
   if (said && (said.is !== standing.is || said.why.join("\n") !== standing.why.join("\n"))) faults.push(said.is === "verdict" ? `run.json says the run gives a verdict, and what it stood on makes it a trial: ${standing.why.join("; ")}` : `run.json gives the run's standing as ${said.is} (${said.why.join("; ") || "no why"}), and what it stood on makes it ${standing.is === "verdict" ? "a verdict" : `a trial (${standing.why.join("; ")})`}`);
   const folders = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
@@ -551,7 +563,7 @@ export function readBundle(dir: string): ReadBundle {
 
 function runFaults(raw: unknown): string[] {
   if (!isRecord(raw)) return ["everything"];
-  const out = factFaults(raw);
+  const out = factFaults(raw, raw.mode === "live" ? "live" : "rig");
   const text = (value: unknown) => typeof value === "string" && value.trim() !== "";
   if (!text(raw.run)) out.push("the run's name");
   if (raw.mode !== "rig" && raw.mode !== "live") out.push("rig or bed");

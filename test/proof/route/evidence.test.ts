@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { Bundle, BundleRefused, lookAt, readBundle, runRecord, SUPPORTING, unshownBy } from "../../../scripts/proof/route/evidence";
 import type { Sighting } from "../../../scripts/proof/route/form";
 import { outcomeOf, verdictOf, type FormRecord, type PartRecord } from "../../../scripts/proof/route/results";
-import { FakeBrowser, fakeFacts, fakePlays, fakeRun } from "./fake";
+import { FakeBrowser, FAKE_RPH, fakeFacts, fakeHeld, fakePlays, fakeRun } from "./fake";
+import type { RunFacts } from "../../../scripts/proof/route/host";
+import { pinName } from "../../../scripts/proof/route/pin";
 
 let out = "";
 
@@ -110,12 +112,20 @@ test("a check that names no words, or an empty or blank text, as what shows the 
   expect(unshownBy({ page: "World", shows: [""], shotPage: "World", shotText: PAGES.World })).toBe("the check named an empty text as what shows it");
 });
 
-test("RPH is the pinned commit when both name one commit, short or whole, and not otherwise", () => {
+test("RPH is the pinned commit only when the manifest names the whole commit, it is the installed one, and the name is the stage's own", () => {
   const fields = { run: "r", mode: "rig" as const, by: "a test", started: "2026-11-15T00:00:00.000Z", ended: null, asked: [], unplayed: [], known: { scenarios: [], gates: [] }, repeats: 10 };
-  const whole = "9a8b7c6d5e4f30211203f4e5d6c7b8a9f0e1d2c3";
-  expect(runRecord({ ...fakeFacts(), rph: { commit: "9a8b7c6", pin: whole } }, fields).rph.pinned).toBe(true);
-  expect(runRecord({ ...fakeFacts(), rph: { commit: "9a8b7c7", pin: whole } }, fields).rph.pinned).toBe(false);
-  expect(runRecord({ ...fakeFacts(), rph: { commit: whole, pin: null } }, fields).rph.pinned).toBe(false);
+  const pinnedWith = (rph: RunFacts["rph"]): boolean => runRecord({ ...fakeFacts(), rph }, fields).rph.pinned;
+  const held = fakeHeld();
+  expect(pinnedWith({ commit: FAKE_RPH, pin: FAKE_RPH, held })).toBe(true);
+  // A shared prefix is no pin, whichever side is the shorter; nor is a manifest that names none, or a link.
+  expect(pinnedWith({ commit: FAKE_RPH.slice(0, 7), pin: FAKE_RPH, held })).toBe(false);
+  expect(pinnedWith({ commit: FAKE_RPH, pin: FAKE_RPH.slice(0, 7), held })).toBe(false);
+  expect(pinnedWith({ commit: FAKE_RPH, pin: null, held: { ...held, name: "link:../RPHarness-pin" } })).toBe(false);
+  expect(pinnedWith({ commit: "0".repeat(40), pin: FAKE_RPH, held })).toBe(false);
+  // The name is the one the stage gives: rph.invalid's until publishing, GitHub's after.
+  expect(pinnedWith({ commit: FAKE_RPH, pin: FAKE_RPH, held: { ...held, stage: "after-publishing" } })).toBe(false);
+  expect(pinnedWith({ commit: FAKE_RPH, pin: FAKE_RPH, held: { ...held, stage: "after-publishing", name: pinName("after-publishing", FAKE_RPH) } })).toBe(true);
+  expect(pinnedWith({ commit: FAKE_RPH, pin: FAKE_RPH, held: { ...held, name: pinName("after-publishing", FAKE_RPH) } })).toBe(false);
 });
 
 test("a bundle without run.json is refused, and so is one whose run.json lacks RPH's commit", () => {
@@ -126,7 +136,7 @@ test("a bundle without run.json is refused, and so is one whose run.json lacks R
   const facts = fakeFacts();
   const partial = join(out, "partial");
   mkdirSync(partial);
-  const record = runRecord({ ...facts, rph: { commit: "", pin: null } }, { run: "partial", mode: "rig", by: "a test", started: "2026-11-15T00:00:00.000Z", ended: null, asked: [], unplayed: [], known: { scenarios: [], gates: [] }, repeats: 10 });
+  const record = runRecord({ ...facts, rph: { commit: "", pin: null, held: fakeHeld() } }, { run: "partial", mode: "rig", by: "a test", started: "2026-11-15T00:00:00.000Z", ended: null, asked: [], unplayed: [], known: { scenarios: [], gates: [] }, repeats: 10 });
   writeFileSync(join(partial, "run.json"), JSON.stringify(record));
   expect(() => readBundle(partial)).toThrow("lacks RPH's commit and the commit RPE pins");
 });

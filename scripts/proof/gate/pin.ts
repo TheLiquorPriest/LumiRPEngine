@@ -7,9 +7,10 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
+import type { PinStage } from "../route/host";
+import { pinName, WHOLE_COMMIT } from "../route/pin";
 
-/** A whole commit: forty hex digits. */
-export const WHOLE_COMMIT = /^[0-9a-f]{40}$/;
+export { WHOLE_COMMIT };
 
 /** What RPE's manifest names for `rp-harness`: the whole name, and the commit after its `#`. */
 export interface Named {
@@ -41,12 +42,14 @@ function git(repo: string, args: string[], stdin?: string): string | null {
  * commit (RPH's own, or its mirror on the bed): without one the installed files cannot be held to the commit's, and
  * that is a fault, never a pass.
  */
-export function pinProblems(repo: string, rphRepo: string | null): string[] {
+export function pinProblems(repo: string, rphRepo: string | null, stage: PinStage): string[] {
   const problems: string[] = [];
   const manifest: unknown = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
   const named = manifestName(manifest);
   if (named === null) return ["RPE's package.json names no rp-harness"];
   if (named.commit === null || !WHOLE_COMMIT.test(named.commit)) problems.push(`package.json names rp-harness as ${named.name}, which is not one whole commit (forty hex digits)`);
+  // The name's host is the one the run's record says the pin's stage gives: `rph.invalid`'s until publishing, GitHub's after it.
+  else if (named.name !== pinName(stage, named.commit)) problems.push(`package.json names rp-harness as ${named.name}, and the name ${stage === "before-publishing" ? "before" : "after"} publishing is ${pinName(stage, named.commit)}`);
   const installed = join(repo, "node_modules", "rp-harness");
   if (!existsSync(installed)) return [...problems, "rp-harness is not installed"];
   if (lstatSync(installed).isSymbolicLink()) problems.push("the installed rp-harness is a link, not a real folder: a link is no pin");

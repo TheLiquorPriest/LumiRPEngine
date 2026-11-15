@@ -13,7 +13,7 @@ import { readBundle } from "../../../scripts/proof/route/evidence";
 import { refusals } from "../../../scripts/proof/route/form";
 import type { Host, PlayStart, Session } from "../../../scripts/proof/route/host";
 import { main, type Deps } from "../../../scripts/proof/run";
-import { FakeBrowser, fakeFacts, type FakeOptions } from "./fake";
+import { FakeBrowser, fakeFacts, withLive, type FakeOptions } from "./fake";
 
 const FORM = resolve(import.meta.dir, "../../../scripts/proof/route/form.ts");
 
@@ -70,7 +70,7 @@ function stagedHost(pages: Record<string, Record<string, string>>, options: Reco
     mode: "rig" as const,
     begun: [] as PlayStart[],
     async facts() {
-      return fakeFacts();
+      return withLive(fakeFacts());
     },
     async begin(start: PlayStart): Promise<Session> {
       host.begun.push(start);

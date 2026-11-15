@@ -17,7 +17,7 @@ import { sha256, shippedOf } from "../../../scripts/proof/lib/record";
 import { readBundle } from "../../../scripts/proof/route/evidence";
 import type { LiveGuard, RunFacts } from "../../../scripts/proof/route/host";
 import { main, type Deps } from "../../../scripts/proof/run";
-import { FAKE_BUILD, fakeFacts, fakeGuidance, fakeHost, type SessionGuidance } from "./fake";
+import { FAKE_BUILD, FAKE_RPH, fakeFacts, fakeGuidance, fakeHeld, fakeHost, type SessionGuidance } from "./fake";
 
 const FORM = resolve(import.meta.dir, "../../../scripts/proof/route/form.ts");
 const made: string[] = [];
@@ -157,10 +157,10 @@ test("a trial exits 3 for any reason, a run of code parts only included, where a
   expect(clean.code).toBe(0);
   // RPE's tree changed, and RPH not the commit RPE pins: each a trial, whatever its forms hold.
   const dirty = { ...CLEAN, rpe: { commit: "0f1e2d3c", dirty: true } };
-  const offPin = { ...CLEAN, rph: { commit: "9a8b7c6d", pin: "1234567890abcdef" } };
+  const offPin = { ...CLEAN, rph: { commit: FAKE_RPH, pin: "1234567890abcdef", held: fakeHeld() } };
   for (const facts of [SERVED_OTHER, CHAT_LAYER, fakeFacts({ none: true }), dirty, offPin]) {
     if (facts === dirty) expect((await runOn(root, facts, { id: "gate-seen" })).printed).toContain("This run is a trial, and gives no verdict on what rests on guidance: RPE's tree held changes beyond its commit 0f1e2d3c");
-    if (facts === offPin) expect((await runOn(root, facts, { id: "gate-seen" })).printed).toContain("RPH as installed (9a8b7c6d) is not the commit RPE pins (1234567890abcdef)");
+    if (facts === offPin) expect((await runOn(root, facts, { id: "gate-seen" })).printed).toContain(`RPH as installed (${FAKE_RPH}) is not the commit RPE pins (1234567890abcdef)`);
     const trial = await runOn(root, facts, { id: "gate-seen" });
     // Its one part is a code part: it passes, and the run is a trial all the same.
     expect(trial.printed).toContain("- Gate gate-seen: passed");
@@ -299,13 +299,14 @@ test("read back alone, every fact is worked out again: RPH's pin from the commit
   const clean = await runOn(root, CLEAN);
   expect(clean.code).toBe(0);
   const file = join(clean.dir, "run.json");
-  const run = json(file) as { rph: { commit: string; pin: string | null; pinned: boolean } };
+  const run = json(file) as { rph: { commit: string; pin: string | null; pinned: boolean; held: unknown } };
   // A commit and a pin that name two commits, written as pinned: the claim is not taken.
-  writeFileSync(file, JSON.stringify({ ...run, rph: { commit: "aaaaaaa1", pin: "bbbbbbb2", pinned: true } }));
+  const [one, other] = ["a".repeat(40), "b".repeat(40)];
+  writeFileSync(file, JSON.stringify({ ...run, rph: { ...run.rph, commit: one, pin: other, pinned: true } }));
   const read = readBundle(clean.dir);
-  expect(read.faults).toContain("run.json says RPH is the commit RPE pins, and its commit aaaaaaa1 and pin bbbbbbb2 make it not the pinned commit");
+  expect(read.faults).toContain(`run.json says RPH is the commit RPE pins, and its commit ${one} and pin ${other} make it not the pinned commit`);
   expect(read.standing.is).toBe("trial");
-  expect(read.standing.why).toContain("RPH as installed (aaaaaaa1) is not the commit RPE pins (bbbbbbb2)");
+  expect(read.standing.why.some((why) => why.startsWith(`RPH as installed (${one}) is not the commit RPE pins (${other})`))).toBe(true);
   expect(await main(["report", clean.dir], { out: () => {} })).toBe(1);
 
   // A results file that calls a play a verdict where run.json's account of it makes it a trial changes nothing.

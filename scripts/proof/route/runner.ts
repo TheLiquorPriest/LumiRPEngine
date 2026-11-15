@@ -193,7 +193,7 @@ async function run(options: RunOptions, found: Found[], asked: string[], playAll
     facts = await opened.facts().catch((error: unknown) => {
       throw new RunRefused(`${ground} could not say what the run stands on: ${message(error)}`);
     });
-    const missing = factFaults(facts);
+    const missing = factFaults(facts, options.mode);
     if (missing.length > 0) throw new RunRefused(`${ground} does not report ${missing.join("; ")}, so the run would prove nothing`);
     if (options.guard && options.mode === "live") {
       const admitted = await options.guard.admit(facts);

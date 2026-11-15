@@ -52,8 +52,8 @@ export function plan(places: GuardPlaces, out: string, bun: string = process.exe
 export async function play(places: GuardPlaces, run: (command: string[], cwd: string) => Promise<{ code: number | null; tail: string }>, now: () => Date = () => new Date()): Promise<{ record: GateRecord } | { refused: string[] }> {
   const head = Bun.spawnSync(["git", "-C", places.repo, "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString().trim();
   const tag = installedTag(places.repo);
-  const refused = [...checkoutProblems(places.repo, head), ...(tag === null ? ["the installed rp-harness holds no .bun-tag: its commit is not known"] : [])];
-  if (refused.length > 0) return { refused };
+  const refused = [...checkoutProblems(places.repo, head), ...(tag === null ? ["the installed rp-harness holds no .bun-tag: its commit is not known"] : []), ...(places.stage === null ? ["RPE_PROOF_PIN_STAGE names no stage (before-publishing or after-publishing): the lead's publishing step sets it, and the gate holds the manifest's name for rp-harness to it"] : [])];
+  if (refused.length > 0 || places.stage === null) return { refused };
   const out = mkdtempSync(join(tmpdir(), "rpe-gate-"));
   try {
     const steps: GateStep[] = [];
@@ -63,7 +63,7 @@ export async function play(places: GuardPlaces, run: (command: string[], cwd: st
       const judged = done.code === null ? { ok: false, note: `could not start: ${done.tail}` } : step.judge(done.code);
       steps.push({ name: step.name, command: step.command.map((word, i) => (i === 0 ? "bun" : word)), cwd: step.cwd, code: done.code, seconds: Math.round((Date.now() - started) / 100) / 10, ok: judged.ok, note: judged.ok ? judged.note : `${judged.note}${done.tail === "" ? "" : `: ${done.tail}`}` });
     }
-    const pin = pinProblems(places.repo, places.rphRepo);
+    const pin = pinProblems(places.repo, places.rphRepo, places.stage);
     return { record: { rpe: head, rph: tag ?? "", at: now().toISOString(), passed: steps.every((s) => s.ok) && pin.length === 0, steps, pin } };
   } finally {
     rmSync(out, { recursive: true, force: true });

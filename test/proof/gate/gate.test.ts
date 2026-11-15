@@ -4,7 +4,7 @@
 // with no never-touch list in force is refused; the gate's own record is made only from steps that all passed.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { play } from "../../../scripts/proof/gate/cheap";
@@ -12,7 +12,8 @@ import { checkoutProblems, type GuardPlaces, makeGuard, neverTouch, placesFromEn
 import { pinProblems } from "../../../scripts/proof/gate/pin";
 import { gateFile, type GateRecord, readGate, writeGate } from "../../../scripts/proof/gate/record";
 import type { RunFacts } from "../../../scripts/proof/route/host";
-import { fakeFacts } from "../route/fake";
+import { pinName } from "../../../scripts/proof/route/pin";
+import { fakeFacts, fakeHeld } from "../route/fake";
 
 const git = (repo: string, ...args: string[]): string => {
   const done = Bun.spawnSync(["git", "-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", ...args], { stdout: "pipe", stderr: "pipe" });
@@ -58,8 +59,8 @@ function install(): void {
   writeFileSync(join(into, ".bun-tag"), rphCommit);
 }
 
-const places = (over: Partial<GuardPlaces> = {}): GuardPlaces => ({ repo: rpe, rphRepo: rph, records: join(dir, "records"), lock: join(dir, "bed.lock"), neverTouch: ["chat-bed-", "bed-unit"], ...over });
-const facts = (over: Partial<RunFacts> = {}): RunFacts => ({ ...fakeFacts(), rpe: { commit: rpeCommit, dirty: false }, rph: { commit: rphCommit, pin: rphCommit }, ...over });
+const places = (over: Partial<GuardPlaces> = {}): GuardPlaces => ({ repo: rpe, rphRepo: rph, records: join(dir, "records"), lock: join(dir, "bed.lock"), neverTouch: ["chat-bed-", "bed-unit"], stage: "before-publishing", ...over });
+const facts = (over: Partial<RunFacts> = {}): RunFacts => ({ ...fakeFacts(), rpe: { commit: rpeCommit, dirty: false }, rph: { commit: rphCommit, pin: rphCommit, held: fakeHeld(rphCommit) }, ...over });
 const passing = (): GateRecord => ({ rpe: rpeCommit, rph: rphCommit, at: "2026-11-15T20:00:00.000Z", passed: true, steps: [{ name: "RPE typecheck", command: ["bun"], cwd: rpe, code: 0, seconds: 1, ok: true, note: "passed" }], pin: [] });
 
 test("a live run on a commit with no gate record is refused, and one with a record that passed is admitted", async () => {
@@ -101,23 +102,23 @@ test("a live run from a tree with changes not committed is refused", async () =>
 });
 
 test("RPH held as a link, with a file that is not the commit's, or pinned by a prefix, fails the gate", async () => {
-  expect(pinProblems(rpe, rph)).toEqual([]);
+  expect(pinProblems(rpe, rph, "before-publishing")).toEqual([]);
   // A prefix of the commit is no pin.
   const guard = makeGuard(() => places());
-  const prefix = await guard.admit(facts({ rph: { commit: rphCommit, pin: rphCommit.slice(0, 8) } }));
+  const prefix = await guard.admit(facts({ rph: { commit: rphCommit, pin: rphCommit.slice(0, 8), held: fakeHeld(rphCommit) } }));
   expect(prefix.ok).toBe(false);
   if (!prefix.ok) expect(prefix.why).toContain("a shared prefix is no pin");
 
   // A file of the installed package that differs from the commit's.
   writeFileSync(join(rpe, "node_modules", "rp-harness", "guidance", "rules.md"), "Keep to something else.\n");
-  expect(pinProblems(rpe, rph).join(" ")).toContain("differs from the commit's: guidance/rules.md");
+  expect(pinProblems(rpe, rph, "before-publishing").join(" ")).toContain("differs from the commit's: guidance/rules.md");
   const differs = await guard.admit(facts());
   expect(differs.ok).toBe(false);
   install();
 
   // A file of the commit that is missing.
   rmSync(join(rpe, "node_modules", "rp-harness", "guidance", "rules.md"));
-  expect(pinProblems(rpe, rph).join(" ")).toContain("missing from the installed rp-harness: guidance/rules.md");
+  expect(pinProblems(rpe, rph, "before-publishing").join(" ")).toContain("missing from the installed rp-harness: guidance/rules.md");
   install();
 
   // A link in place of the package.
@@ -126,13 +127,27 @@ test("RPH held as a link, with a file that is not the commit's, or pinned by a p
   cpSync(join(rpe, "node_modules", "rp-harness"), real, { recursive: true });
   rmSync(join(rpe, "node_modules", "rp-harness"), { recursive: true });
   symlinkSync(real, join(rpe, "node_modules", "rp-harness"));
-  expect(pinProblems(rpe, rph).join(" ")).toContain("is a link");
+  expect(pinProblems(rpe, rph, "before-publishing").join(" ")).toContain("is a link");
   rmSync(join(rpe, "node_modules", "rp-harness"));
   install();
 
   // No repository to hold the files against is a fault, never a pass.
-  expect(pinProblems(rpe, null).join(" ")).toContain("RPE_PROOF_RPH_REPO");
-  expect(pinProblems(rpe, rph)).toEqual([]);
+  expect(pinProblems(rpe, null, "before-publishing").join(" ")).toContain("RPE_PROOF_RPH_REPO");
+  expect(pinProblems(rpe, rph, "before-publishing")).toEqual([]);
+  // The name RPE's manifest holds is the stage's own: rph.invalid's before publishing passes, and fails in a run recorded after it; GitHub's the other way round.
+  expect(pinProblems(rpe, rph, "after-publishing").join(" ")).toContain(`after publishing is ${pinName("after-publishing", rphCommit)}`);
+  const github = await guard.admit(facts({ rph: { commit: rphCommit, pin: rphCommit, held: { ...fakeHeld(rphCommit), name: pinName("after-publishing", rphCommit), stage: "after-publishing" } } }));
+  expect(github.ok).toBe(false);
+  // Once published, the manifest holds GitHub's name: it passes the after stage and fails the before one.
+  const manifest = join(rpe, "package.json");
+  const was = readFileSync(manifest, "utf8");
+  writeFileSync(manifest, JSON.stringify({ dependencies: { "rp-harness": pinName("after-publishing", rphCommit) } }));
+  try {
+    expect(pinProblems(rpe, rph, "after-publishing")).toEqual([]);
+    expect(pinProblems(rpe, rph, "before-publishing").join(" ")).toContain(`before publishing is ${pinName("before-publishing", rphCommit)}`);
+  } finally {
+    writeFileSync(manifest, was);
+  }
 });
 
 test("a run with no never-touch list in force is refused, and the list is the one the variable names", async () => {

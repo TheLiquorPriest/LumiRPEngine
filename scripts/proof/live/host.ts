@@ -8,12 +8,13 @@
 // Every value of the machine comes from the environment (`env.ts`); nothing here names a host, a user or a key.
 // The lead runs it, one run at a time, through `run.ts live`, behind PlanScenarios-5's gate and lock.
 
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { FloorActs } from "../floor/play";
 import { BrowserDriver } from "../browser/driver";
 import { type Chrome, launchChrome } from "../browser/chrome";
 import { RpeReader } from "../lib/read";
 import type { GuidanceFacts, Host, HostOptions, PlayStart, RunFacts, Session } from "../route/host";
+import { pinSettingsFromEnv } from "../route/pin";
 import { CHAT_NAME, fileRecord, RECORD_FILE } from "../../testbed/floor-fixture";
 import { LIMITS, type PageTimes } from "../../testbed/floor-measure";
 import { Lumiverse, savedToken } from "../../testbed/lib/lumiverse";
@@ -72,11 +73,16 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
 
     async facts(): Promise<RunFacts> {
       const running = await runningBuild(env.rpe);
-      const { rpe, rph } = commitsOf(repo, running);
+      const how = pinSettingsFromEnv();
+      if (how.from === null) throw new Error("set RPE_PROOF_PIN_FROM to where rp-harness was installed on the bed from (bed-mirror, rph-repository or github): a live run records how the pin was held");
+      const { rpe, rph } = commitsOf(repo, running, { from: how.from, stage: how.stage, bundlesFile: how.bundlesFile });
       commit = rpe.commit;
       return {
         rpe,
         rph,
+        instance: { address: env.bed.hostUrl, name: basename(env.bed.instanceDir) },
+        user: signedInAs,
+        neverTouch: env.bed.neverTouch,
         lumiverse: { version: await lumiverseVersion(lumiverse) },
         browser: { name: chrome.name, version: chrome.version },
         agents: await agentFacts(reader),

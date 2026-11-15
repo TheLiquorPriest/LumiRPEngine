@@ -6,7 +6,8 @@
 
 import { sha256, shippedOf, type Layer, type TreeFile } from "../../../scripts/proof/lib/record";
 import { runRecord, standingOf, type PlayGuidance, type RunRecord, type StandingFrom } from "../../../scripts/proof/route/evidence";
-import type { Browser, Control, GuidanceFacts, Host, NamesFacts, PlayStart, RunFacts, Session, Shot, Shown } from "../../../scripts/proof/route/host";
+import type { Browser, Control, GuidanceFacts, Host, NamesFacts, PinHeld, PlayStart, RunFacts, Session, Shot, Shown } from "../../../scripts/proof/route/host";
+import { pinName } from "../../../scripts/proof/route/pin";
 import { standingFromFacts } from "../../../scripts/proof/route/runner";
 
 export interface FakeOptions {
@@ -120,11 +121,19 @@ export function fakeGuidance(asked: GuidanceAsked = {}): GuidanceFacts {
   return { served: asked.served ?? shippedOf(FAKE_BUILD.rph, FAKE_BUILD.rpe), build: FAKE_BUILD, layers: asked.layers ?? [], ...(asked.noNames ? {} : { names: asked.names ?? NO_NAMES }) };
 }
 
+/** A whole commit of RPH, invented: forty hex digits. */
+export const FAKE_RPH = "9a8b7c6d5e4f3a2190817263544f3e2d1c0b9a87";
+
+/** How a pin was held on the Mac before publishing, for `commit`: the manifest's name for it, RPH's own repository, the stage. */
+export function fakeHeld(commit: string = FAKE_RPH): PinHeld {
+  return { name: pinName("before-publishing", commit), from: "rph-repository", stage: "before-publishing", bundles: null };
+}
+
 /** Invented facts of a run: commits, versions, one agent, one setting, and by default a clean run on the build's shipped guidance with no layer of the user's own. */
 export function fakeFacts(guidance: GuidanceAsked = {}): RunFacts {
   return {
     rpe: { commit: "0f1e2d3c", dirty: false },
-    rph: { commit: "9a8b7c6d", pin: "9a8b7c6d" },
+    rph: { commit: FAKE_RPH, pin: FAKE_RPH, held: fakeHeld() },
     lumiverse: { version: "0.0.0-stand-in" },
     browser: { name: "fake", version: "1" },
     agents: [{ agent: "author", connection: "Scripted", model: "scripted-author", replyForm: "tags", effort: "medium", streams: true }],
@@ -138,6 +147,12 @@ export function fakeFrom(facts: RunFacts = fakeFacts()): StandingFrom | null {
   return standingFromFacts(facts.guidance);
 }
 
+/** What a live run names besides a rig run's facts: the instance it was on, the user it acted as, the never-touch list. A fake run of the bed gets them unless its facts say (even with nothing) what they are. */
+export function withLive(facts: RunFacts): RunFacts {
+  const said = (["instance", "user", "neverTouch"] as const).some((key) => Object.hasOwn(facts, key));
+  return said ? facts : { ...facts, instance: { address: "http://lumiverse.test:7860", name: "bed-instance" }, user: "user-marlow", neverTouch: ["chat-bed-", "7744"] };
+}
+
 /** The accounts a runner leaves of plays whose chat stood on the guidance `facts` give, before and after alike, for each of `plays` plays of `id`. */
 export function fakePlays(id: string, plays = 1, facts: RunFacts = fakeFacts(), rests = false): PlayGuidance[] {
   const from = fakeFrom(facts);
@@ -145,9 +160,9 @@ export function fakePlays(id: string, plays = 1, facts: RunFacts = fakeFacts(), 
 }
 
 /** A run's record as the runner writes it for a run that stood on `facts`, with the accounts of `plays` in its standing. */
-export function fakeRun(fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing">, plays: PlayGuidance[] = [], facts: RunFacts = fakeFacts()): RunRecord {
+export function fakeRun(fields: Omit<RunRecord, "rpe" | "rph" | "lumiverse" | "browser" | "agents" | "settings" | "standing" | "instance" | "user" | "neverTouch">, plays: PlayGuidance[] = [], facts: RunFacts = fakeFacts()): RunRecord {
   const from = fakeFrom(facts);
-  const run = runRecord(facts, fields, from);
+  const run = runRecord(fields.mode === "live" ? withLive(facts) : facts, fields, from);
   return { ...run, standing: standingOf(run.rpe, run.rph, from, plays) };
 }
 
@@ -161,7 +176,7 @@ export function fakeHost(mode: "rig" | "live", options: FakeOptions, facts: RunF
     begun: [] as PlayStart[],
     closed: 0,
     async facts() {
-      return facts;
+      return mode === "live" ? withLive(facts) : facts;
     },
     async begin(start: PlayStart): Promise<Session> {
       host.begun.push(start);

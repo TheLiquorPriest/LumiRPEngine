@@ -15,6 +15,10 @@ import { RpeReader } from "../../../scripts/proof/lib/read";
 import { folderTree, gitTree, sha256, shippedOf, type Layer, type TreeFile } from "../../../scripts/proof/lib/record";
 import { standingFromFacts } from "../../../scripts/proof/route/runner";
 import { standingOf } from "../../../scripts/proof/route/evidence";
+import type { PinHow } from "../../../scripts/proof/route/pin";
+import { fakeHeld } from "../route/fake";
+
+const HOW: PinHow = { from: "rph-repository", stage: "before-publishing", bundlesFile: null };
 
 const git = (repo: string, ...args: string[]): string => {
   const done = Bun.spawnSync(["git", "-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", ...args], { stdout: "pipe", stderr: "pipe" });
@@ -52,7 +56,7 @@ test("a build id is read for the commits it names, and a build that names none i
 });
 
 test("a run whose RPE does not report its commits is refused, whichever way it fails to", async () => {
-  expect(() => commitsOf(repo, "1731700000")).toThrow("does not report its commits");
+  expect(() => commitsOf(repo, "1731700000", HOW)).toThrow("does not report its commits");
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (request) => (new URL(request.url).pathname === "/api/v1/status/builds" ? Response.json({ builds: {} }) : new Response("no", { status: 404 })) });
   try {
     await expect(runningBuild({ base: `http://127.0.0.1:${server.port}`, token: "key" })).rejects.toThrow("does not report its commits");
@@ -62,12 +66,12 @@ test("a run whose RPE does not report its commits is refused, whichever way it f
   }
 });
 
-test("RPE's commit is the running build's, held to the checkout, and RPH's is the installed commit against the manifest's pin", () => {
-  const facts = commitsOf(repo, head.slice(0, 8));
-  expect(facts).toEqual({ rpe: { commit: head, dirty: false }, rph: { commit: RPH_COMMIT, pin: RPH_COMMIT } });
-  expect(commitsOf(repo, `${head.slice(0, 8)}-dirty.1731700000`).rpe.dirty).toBe(true);
-  expect(() => commitsOf(repo, "ffffffff")).toThrow("would prove nothing");
-  expect(() => commitsOf(repo, `${head.slice(0, 8)}-rph.ffffffff`)).toThrow("the installed one is 6ca92995");
+test("RPE's commit is the running build's, held to the checkout, and RPH's is the installed commit against the manifest's pin, with how the pin was held", () => {
+  const facts = commitsOf(repo, head.slice(0, 8), HOW);
+  expect(facts).toEqual({ rpe: { commit: head, dirty: false }, rph: { commit: RPH_COMMIT, pin: RPH_COMMIT, held: { name: `git+https://rph.invalid/RPHarness.git#${RPH_COMMIT}`, from: "rph-repository", stage: "before-publishing", bundles: null } } });
+  expect(commitsOf(repo, `${head.slice(0, 8)}-dirty.1731700000`, HOW).rpe.dirty).toBe(true);
+  expect(() => commitsOf(repo, "ffffffff", HOW)).toThrow("would prove nothing");
+  expect(() => commitsOf(repo, `${head.slice(0, 8)}-rph.ffffffff`, HOW)).toThrow("the installed one is 6ca92995");
   expect(manifestPin({ dependencies: { "rp-harness": "github:TheLiquorPriest/RPHarness#abc123" } })).toBe("abc123");
   expect(manifestPin({ dependencies: {} })).toBeNull();
 });
@@ -87,7 +91,7 @@ class Recorded extends RpeReader {
 }
 
 const served = (): TreeFile[] => shippedOf(folderTree(join(repo, "node_modules", "rp-harness", "guidance")), gitTree(repo, head, "guidance"));
-const RPH = { commit: RPH_COMMIT, pin: RPH_COMMIT, pinned: true };
+const RPH = { commit: RPH_COMMIT, pin: RPH_COMMIT, pinned: true, held: fakeHeld(RPH_COMMIT) };
 const RPE = { commit: "x", dirty: false };
 
 test("a recorded bed with a guidance file in the chat's own level gives facts that make the run a trial, a clean one a verdict", async () => {
