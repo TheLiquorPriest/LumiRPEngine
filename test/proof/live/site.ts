@@ -28,6 +28,8 @@ export interface Site {
   /** Chats made through the REST, by id. */
   chats: Map<string, { id: string; name: string; character_id: string }>;
   script: SiteScript;
+  /** The messages the chat already holds when its page opens, the first the player's and then each in turn the character's: a chat long enough to run below the window. */
+  history: string[];
   stop(): void;
 }
 
@@ -55,12 +57,12 @@ document.getElementById("f").addEventListener("submit", async (e) => {
 });
 </script>`;
 
-const chatPage = (script: SiteScript): string => `<!doctype html><meta charset="utf-8"><title>Lumiverse</title>
+const chatPage = (script: SiteScript, history: readonly string[]): string => `<!doctype html><meta charset="utf-8"><title>Lumiverse</title>
 <style>
   body { margin: 0; font: 15px/1.4 sans-serif; }
   [hidden] { display: none !important; }
-  #drawer { position: fixed; top: 0; left: 0; width: 280px; height: 300px; background: #eee; transform: translateX(-2000px); }
-  #drawer.open { transform: none; }
+  #drawer { position: fixed; top: 0; left: 0; width: 280px; height: 300px; background: #eee; transform: translateX(-2000px); visibility: hidden; }
+  #drawer.open { transform: none; visibility: visible; }
   #drawerBtn { position: fixed; top: 0; right: 0; width: 28px; height: 28px; }
   #composer { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #aaa; padding: 6px; }
   #list { padding: 8px 8px 160px; }
@@ -89,6 +91,7 @@ const chatPage = (script: SiteScript): string => `<!doctype html><meta charset="
 </div>
 <script>
 const SCRIPT = ${JSON.stringify(script)};
+const HISTORY = ${JSON.stringify(history)};
 // What Lumiverse keeps on its server (the active connection and preset, the chat's persona) is kept here in the browser's storage, so a reloaded page has it.
 const kept = JSON.parse(localStorage.getItem("kept") ?? "{}");
 const state = { connection: kept.connection ?? null, persona: kept.persona ?? null, preset: kept.preset ?? null, streaming: false, n: 0 };
@@ -130,6 +133,12 @@ function message(part) {
   row.append(bubble); $("list").append(row);
   return bubble;
 }
+// The chat as it was when the page was opened: each earlier message a paragraph of its own, in the content's own element.
+HISTORY.forEach((text, i) => {
+  const bubble = message(i % 2 === 0 ? "user" : "character");
+  const content = document.createElement("div"); content.setAttribute("data-component", "MessageContent"); content.textContent = text;
+  bubble.append(content);
+});
 $("send").addEventListener("click", async () => {
   if (state.streaming) return;
   const area = document.querySelector("textarea");
@@ -152,7 +161,7 @@ $("send").addEventListener("click", async () => {
 
 /** Serves the site on a free loopback port. */
 export function serveSite(script: SiteScript = DEFAULT_SCRIPT): Site {
-  const site: Site = { base: "", sent: [], signIns: 0, chats: new Map(), script, stop: () => undefined };
+  const site: Site = { base: "", sent: [], signIns: 0, chats: new Map(), script, history: [], stop: () => undefined };
   let made = 0;
   const json = (value: unknown, status = 200): Response => Response.json(value, { status });
   const server = Bun.serve({
@@ -164,7 +173,7 @@ export function serveSite(script: SiteScript = DEFAULT_SCRIPT): Site {
       const html = (body: string): Response => new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
       if (url.pathname === "/login") return html(LOGIN);
       if (url.pathname === "/") return html(signedIn ? "<title>Lumiverse</title><p>Landing</p>" : '<script>location.href = "/login"</script>');
-      if (url.pathname.startsWith("/chat/")) return html(signedIn ? chatPage(site.script) : '<script>location.href = "/login"</script>');
+      if (url.pathname.startsWith("/chat/")) return html(signedIn ? chatPage(site.script, site.history) : '<script>location.href = "/login"</script>');
       if (url.pathname === "/api/auth/sign-in/username" && request.method === "POST") {
         site.signIns += 1;
         return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": "lumiverse_session=ok; Path=/" } });
