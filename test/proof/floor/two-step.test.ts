@@ -29,7 +29,7 @@ describe("first words on a two-step connection", () => {
 
   test("a run whose setting names RPE's connection by its id, so that run.json says it streams, is not judged: streamed", () => {
     const facts = factsOf(recordedRun({ form: "two-step" }), (f) => {
-      f.settings.settings.push({ key: "reply.streamAnyway", value: ["c0nn-rpe-floor-id"], default: [], from: "global", file: "RPE-global.yml", takes: { type: "texts" }, takesWords: "a list of texts", none: null, orNone: false, levels: [], passed: null });
+      f.settings.settings.push({ key: "reply.streamAnyway", name: "reply.streamAnyway", about: "Two-step connections that stream.", effect: "turn", effectWords: "from the next turn", row: null, set: [], joined: false, value: ["c0nn-rpe-floor-id"], default: [], from: "global", file: "RPE-global.yml", takes: { type: "texts" }, takesWords: "a list of texts", none: null, orNone: false, levels: [], passed: null });
       // RPH streams a connection named by its id as by its name; the runner's host reads that RPE streams it.
       f.agents = f.agents.map((a) => ({ ...a, streams: true }));
     });
