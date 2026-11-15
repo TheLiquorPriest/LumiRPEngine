@@ -19,12 +19,14 @@
 // git; RPE's at the commit `run.json` names, from RPE's own repository.
 //
 // The floor's own reasons for a trial (PlanGates-4-fix1 item 4), found before its first pair:
-// `floorTrials`, from the floor chat's view of the tree as RPE serves it.
+// `floorTrials`, from the floor chat's view of the tree as RPE serves it, and from who RPE says leads
+// the turn (PlanGates-4-fix2 item 2: the floor is "where the Author writes").
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { shippedPlaces } from "../../../src/tree/shipped";
+import type { SettingsReply } from "../../../src/shared/api";
 import { isRecord } from "../../../src/shared/json";
 import { readBundle, standingOfRun, type RunRecord } from "../route/evidence";
 
@@ -197,16 +199,65 @@ export interface OffFile {
 }
 
 /**
+ * Who leads the floor's turns, as RPE's own settings say (PlanGates-4-fix2 item 2): `expected` is the
+ * shipped default of the `lead` setting as RPE serves it, written nowhere in the script; `inForce` is
+ * the value RPE holds for the floor's chat and `from` the level whose file decides it (null: the
+ * default holds); `levels` is what each level's own settings file sets `lead` to, read from the file.
+ */
+export interface Leads {
+  expected: string | null;
+  inForce: string | null;
+  from: string | null;
+  levels: { level: string; file: string; lead: string | null; problem: string | null }[];
+}
+
+/** What a settings file's text sets `lead` to: the name, null where it sets none, and why a file that does not parse is passed over. */
+export function leadInFile(text: string): { lead: string | null; problem: string | null } {
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(text);
+  } catch (error) {
+    return { lead: null, problem: `its text does not parse: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const lead = isRecord(parsed) ? parsed.lead : undefined;
+  return { lead: typeof lead === "string" && lead.trim() !== "" ? lead.trim() : null, problem: null };
+}
+
+/** The leads from RPE's settings reply and each level's own settings file as read (`text` null where it was not). */
+export function leadsOf(settings: Pick<SettingsReply, "settings">, read: readonly { level: string; file: string; text: string | null; problem: string | null }[]): Leads {
+  const view = settings.settings.find((s) => s.key === "lead");
+  const name = (value: unknown): string | null => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
+  return {
+    expected: name(view?.default),
+    inForce: name(view?.value),
+    from: view?.from ?? null,
+    levels: read.map((r) => {
+      const own = r.text === null ? { lead: null, problem: r.problem } : leadInFile(r.text);
+      return { level: r.level, file: r.file, lead: own.lead, problem: own.problem ?? r.problem };
+    }),
+  };
+}
+
+/** The floor's own trial where the turn's lead is not the Author: the lead RPE holds for the chat is not the shipped default of its `lead` setting, or either is not known. */
+export function leadTrials(leads: Leads): string[] {
+  if (leads.expected === null) return ["RPE's settings give no `lead` setting with a default, so who leads the turn is not known"];
+  if (leads.inForce === null) return ["RPE's settings give no value in force for `lead`, so who leads the turn is not known"];
+  if (leads.inForce === leads.expected) return [];
+  return [`the turn's lead is ${leads.inForce}, not the Author (the shipped default of the lead setting is ${leads.expected}; ${leads.from === null ? "no file sets it" : `the ${leads.from} level's file sets it`})`];
+}
+
+/**
  * What the floor's form saw of its own chat before its first pair, which `run.json` cannot hold (the
  * chat is made after the runner took the run's facts): kept in its `internal/` as `observed.json`. The
  * shipped level as RPE serves it to the chat, by path below the level; each layer of the user's own in
- * the chat's view; each shipped file switched off at any level; plain generation's reasoning.
+ * the chat's view; each shipped file switched off at any level; plain generation's reasoning; who leads.
  */
 export interface Observed {
   plain: PlainReasoning | null;
   shipped: TreeFile[];
   layers: Layer[];
   off: OffFile[];
+  leads: Leads;
 }
 
 /** The record's addition, `<bundle>/<gate>/internal/record.json`: only what `run.json` lacks. */
@@ -243,15 +294,17 @@ export function additionOf(gate: string, run: RunRecord, observed: Observed, bui
 
 /**
  * The floor's own reasons for a trial, found before its first pair (PlanGates-4-fix1 item 4): guidance
- * in a layer of the user's own; a shipped file switched off at any level by an `off:` list; a shipped
- * tree served to the floor's chat that is not the build's (held to the build's hash in `run.json`, or,
- * where `run.json` lacks it, to the build `build` lays). Empty when there is none.
+ * in a layer of the user's own; a shipped file switched off at any level by an `off:` list; a lead that
+ * is not the Author (PlanGates-4-fix2 item 2); a shipped tree served to the floor's chat that is not
+ * the build's (held to the build's hash in `run.json`, or, where `run.json` lacks it, to the build
+ * `build` lays). Empty when there is none.
  */
-export function floorTrials(run: RunRecord, observed: Pick<Observed, "shipped" | "layers" | "off">, build: BuildReader | null): string[] {
+export function floorTrials(run: RunRecord, observed: Pick<Observed, "shipped" | "layers" | "off" | "leads">, build: BuildReader | null): string[] {
   const out: string[] = [];
   const guidance = observed.layers.flatMap(guidanceOf);
   if (guidance.length > 0) out.push(`a layer of the user's own holds guidance: ${guidance.join(", ")}`);
   if (observed.off.length > 0) out.push(`shipped guidance is switched off by an off: list: ${observed.off.map((f) => `${f.path} (off in ${f.offIn.length > 0 ? f.offIn.join(", ") : "a level the route does not name"})`).join(", ")}`);
+  out.push(...leadTrials(observed.leads));
   const served = treeHash(observed.shipped);
   const from = run.standing?.from ?? null;
   if (from !== null) {
@@ -354,14 +407,20 @@ export function standingLines(run: RunRecord): string[] {
   return [head, `The shipped tree the server ran (${served.slice(0, 12)}) is the build's own and no layer of the user's holds guidance: this run gives a verdict.`];
 }
 
-/** Runs counted apart by the runner's standing: those that give a verdict and the trials, each by name (plan §17.1 l.1757; AuProof-12). */
-export function countApart(runs: readonly RunRecord[]): { verdicts: string[]; trials: { run: string; why: string }[] } {
+/**
+ * Runs counted apart: a run gives a verdict only where the runner's standing in `run.json` says so and
+ * the gate's own record of it (`own`: the trial or stop it names, or that its record could not be read)
+ * names none; every other run is a trial, with the reasons of both (plan §17.1 l.1757; AuProof-12;
+ * PlanGates-4-fix2 item 4).
+ */
+export function countApart(runs: readonly { run: RunRecord; own: readonly string[] }[]): { verdicts: string[]; trials: { run: string; why: string }[] } {
   const verdicts: string[] = [];
   const trials: { run: string; why: string }[] = [];
-  for (const run of runs) {
+  for (const { run, own } of runs) {
     const standing = standingOfRun(run);
-    if (standing.is === "verdict") verdicts.push(run.run);
-    else trials.push({ run: run.run, why: standing.why.join("; ") });
+    const why = [...(standing.is === "trial" ? standing.why : []), ...own];
+    if (why.length === 0) verdicts.push(run.run);
+    else trials.push({ run: run.run, why: why.join("; ") });
   }
   return { verdicts, trials };
 }

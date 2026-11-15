@@ -4,8 +4,11 @@
 // forms play the same ten pairs through Lumiverse's chat page and read the same records (`play.ts`); the
 // table is `scripts/testbed/floor-measure.ts`. A row the plan reports rather than gates is met once it is
 // reported with its figures; a row with no figure, or one that cannot be judged on this run, goes to the
-// runner as not judged with why; with the floor's own trial every measured part does, "trial: " and why.
-// The share of the calls row is `PASS.share`, kept once.
+// runner as not judged with why. The conditions the plan's floor sentence names are a part of their own,
+// judged by code from the run's own record (`floorConditions`); with the floor's own trial, or a stop
+// before the last pair, every measured part goes as not judged, "trial: " or "stopped: " and why, that
+// one with them. The parts seen on screen are looked at all the same, and each claims only what its
+// screen shows. The share of the calls row is `PASS.share`, kept once.
 
 import { gate } from "../route/form";
 import { PASS } from "../../testbed/floor-measure";
@@ -15,6 +18,7 @@ export default gate({
   id: "floor",
   waves: [1, 5],
   parts: [
+    { id: "conditions", words: "Same chat, same preset, same model, under the shipped guidance, where the Author writes. Plain generation against a simple turn: ten pairs, interleaved, each turn sent after the previous one has finished", mark: "code", measured: "from the run's own record: ten pairs of a plain turn and then an RPE turn in order; one chat and one preset; one model on one provider; no trial, the shipped guidance only; the Author leading every turn (the shipped default of RPE's lead setting, and each turn's trace); each line sent after the turn before it had finished; not judged on a trial or a stop" },
     { id: "first-words", words: "First words on screen: from the request to the reply's first word, less the time the model spent writing its intent record: median within 3 s of plain generation's time from request to first word, on the same model at the same thinking effort. Thinking time is reported for both, and the intent record's own time beside them", mark: "code", measured: "per turn on the chat page, from Send to the reply's first word (tag form) or to its message shown whole (two-step form), less timings.intent; the median of ten RPE turns against plain's to its first word (tag) or last word (two-step), only when all ten pairs were measured on both sides" },
     { id: "per-token", words: "Time per output token: median within 15% of plain", mark: "code", measured: "tag form: first word to last word on the page over the shown reply's tokens less one, both arms counted by Lumiverse's own count of the shown text for the one model; two-step form: the reply call's streamed pieces over the same count, reported, not gated" },
     { id: "calls", words: "Model calls on the reply's path: exactly 1 in at least 9 of 10", mark: "as shipped", wants: PASS.share, measured: "each RPE turn: calls begun by any agent before the reply's first piece left RPE (tag form) or before its release (two-step form, exactly 2); a failed turn is a miss" },
@@ -24,8 +28,8 @@ export default gate({
     { id: "tools", words: "The Author's tools: under 8,000 tokens", mark: "code", measured: "the largest call_started.toolTokens over every call of the Author in the run" },
     { id: "stack", words: "The Author's guidance stack: reported at every wave, against a target of about 6,000 tokens", mark: "code", measured: "call_started.openingTokens of the Author's first call in each turn" },
     { id: "after-reply", words: "The run after the reply: its time is reported on its own, with how long a next message would have waited", mark: "code", measured: "timings.released to timings.ended of each RPE turn, median and longest, a run still going at the floor's limit counted as longer than it" },
-    { id: "replies-shown", words: "Same chat, same preset, same model, under the shipped guidance, where the Author writes. Plain generation against a simple turn: ten pairs, interleaved, each turn sent after the previous one has finished", mark: "code", on: [{ page: CHAT_PAGE, check: seeReplies }] },
-    { id: "stack-shown", words: "The Author's guidance stack: reported at every wave", mark: "code", on: [{ page: FILES_PAGE, check: seeStack }] },
+    { id: "replies-shown", words: "The chat page shows RPE's last reply, whole, as the chat's last message", mark: "code", on: [{ page: CHAT_PAGE, check: seeReplies }] },
+    { id: "stack-shown", words: "The Files page's stack view of the floor's chat shows the Author's parts in its opening block", mark: "code", on: [{ page: FILES_PAGE, check: seeStack }] },
   ],
   fixtures: [],
   bed: [

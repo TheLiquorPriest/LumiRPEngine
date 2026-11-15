@@ -48,10 +48,15 @@ export interface Shape {
   plainLast?: number;
   /** The RPE connection the Author ran on, as its trace names it. Default "rpe-floor". */
   connection?: string;
+  /** The provider each arm's connection is of, where it differs from the default "deepseek": plain's as Lumiverse holds it, RPE's as RPE's own connections do (null: not read). */
+  plainProvider?: string | null;
+  rpeProvider?: string | null;
 }
 
 const PAGE0 = 5_000_000;
 const RPE0 = 1_763_000_000_000;
+/** The script's own clock, apart from the page's and RPE's: when each line was sent and its turn read. */
+const SCRIPT0 = 1_700_000_000_000;
 
 function plainTurn(pair: number, shape: Shape): FloorTurn {
   const sent = PAGE0 + pair * 100_000;
@@ -64,6 +69,10 @@ function plainTurn(pair: number, shape: Shape): FloorTurn {
     socket: { started: null, firstReasoning: null, firstToken: null, lastToken: null, ended: null, tokens: shape.tokens?.plain ?? 120, messageId: `m-${pair}a`, error: null, lore: [] },
     visible: shape.visible?.plain ?? 120,
     visibleWhy: null,
+    chat: "chat-floor",
+    preset: "preset-floor",
+    began: SCRIPT0 + pair * 10_000,
+    finished: SCRIPT0 + pair * 10_000 + 4_000,
     rpe: null,
     error: null,
   };
@@ -133,6 +142,10 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
     socket: { started: null, firstReasoning: null, firstToken: null, lastToken: null, ended: null, tokens: shape.tokens?.rpe ?? 150, messageId: `m-${pair}b`, error: null, lore: [] },
     visible: shape.visible?.rpe ?? 150,
     visibleWhy: null,
+    chat: "chat-floor",
+    preset: "preset-floor",
+    began: SCRIPT0 + pair * 10_000 + 5_000,
+    finished: SCRIPT0 + pair * 10_000 + 9_000,
     rpe: {
       turn,
       status: "done",
@@ -161,8 +174,9 @@ export function recordedRun(shape: Shape): FloorRun {
     form: shape.form,
     formWhy: null,
     streams: shape.streams ?? shape.streamed ?? false,
+    lead: "author",
     plain: { connection: "conn-plain-floor", preset: "preset-floor", source: "connection", apiReasoning: true, effort: "low", customBody: null, model: MODEL, ...shape.plain },
-    arms: { plain: { connection: "conn-plain-floor", provider: "deepseek", model: MODEL }, rpe: { connection: shape.connection ?? "rpe-floor", provider: null, model: MODEL } },
+    arms: { plain: { connection: "conn-plain-floor", provider: shape.plainProvider === undefined ? "deepseek" : shape.plainProvider, providerWhy: null, model: MODEL }, rpe: { connection: shape.connection ?? "rpe-floor", provider: shape.rpeProvider === undefined ? "deepseek" : shape.rpeProvider, providerWhy: null, model: MODEL } },
     option: null,
     previousRun: 20,
     book: null,

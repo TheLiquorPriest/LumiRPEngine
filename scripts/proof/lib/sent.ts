@@ -27,9 +27,18 @@
 //   Lumiverse's nor the framing line is taken as the opening block.
 // - A message after the last of Lumiverse's passes only when the kept request names it as RPH's own
 //   block (the session's carry, the briefing: its `block`); any other is an extra and fails.
-// - A stored message whose content is not text is named "not text: not compared", never taken as empty,
-//   and leaves the turn not judged unless something else fails it; a request message with no text (pi's
-//   text of a message of pictures alone) is taken as one such message's, as many as there are.
+// - Pictures are compared on neither side. Lumiverse stores a message's content as one string, its text
+//   parts joined and a picture giving no text (`src/services/generate.service.ts:4448-4459`), so a message
+//   of pictures alone is "" there; RPH's kept request holds each message as its text, a picture giving
+//   none, and RPE leaves out a picture given by a web address (`src/turn/request.ts:27-31`). The two
+//   texts cannot tell a picture passed faithfully from one RPE dropped, and the row does not try: a
+//   picture is never judged, so neither a pass nor a failure of this row says anything of it.
+// - A stored message whose content is not text (the breakdown gives anything but a string) is named "not
+//   text: not compared", never taken as empty, and leaves the turn not judged unless something else fails
+//   it; the turn is never failed for it. The request's message at its place is passed over, never called
+//   an extra: the one of its role between the request messages matched to the owed messages either side
+//   of it that the kept request does not name as RPH's own block, one with no text first (pi's text of a
+//   message of pictures alone).
 // - With the hold on, the turn is judged only when the caller gives the story record's reach for it.
 //
 // Where the prompt starts. The opening block is the request's leading system message: pi folds the
@@ -503,12 +512,27 @@ export function compareSent(input: SentInput): SentVerdict {
     }
   });
 
-  // A message of pictures alone leaves no text on either side: as many textless request messages as stored messages that are not text are theirs, not compared.
-  let textless = notText.length;
-  for (let j = start; j < sent.length && textless > 0; j++) {
-    if (claimed.has(j) || (sent[j] as RequestMessage).text.trim() !== "") continue;
-    claimed.add(j);
-    textless--;
+  // A stored message that is not text is not compared, and the request's message at its place is passed
+  // over, never called an extra: the message of its role between the request messages matched to the
+  // owed messages either side of it that the kept request does not name as RPH's own block, one with no
+  // text first (pi's text of a message of pictures alone, `""`).
+  for (const named of notText) {
+    const k = named.place - 1;
+    let lo = start - 1;
+    let hi = sent.length;
+    owed.forEach((o, e) => {
+      const j = at[e];
+      if (j === undefined) return;
+      if (o < k && j > lo) lo = j;
+      if (o > k && j < hi) hi = j;
+    });
+    const here: number[] = [];
+    for (let j = lo + 1; j < hi; j++) {
+      const message = sent[j] as RequestMessage;
+      if (!claimed.has(j) && message.role === (stored[k] as StoredMessage).role && (typeof message.block !== "string" || message.block === "")) here.push(j);
+    }
+    const found = here.find((j) => (sent[j] as RequestMessage).text.trim() === "") ?? here[0];
+    if (found !== undefined) claimed.add(found);
   }
 
   const extra: Named[] = [];

@@ -8,11 +8,15 @@
 //
 // What the run stood on is `run.json`'s (`play.run`): the runner's standing, the Author's reply form and
 // whether its connection streams (`agents[].replyForm`, `agents[].streams`). The floor adds only its
-// own reasons for a trial, found before the first pair (`floorTrials`): with any of them every measured
-// part goes to the runner as not judged, "trial: " and the reason, and the table prints the trial first
-// and no verdict. A row the floor measures and cannot judge goes to the runner as not judged with why
-// (`play.notJudged`, PlanScenarios-8 item 5), so the runner's report says why; a reported row goes with
-// its figures, and one with no figure is not judged, never met.
+// own reasons for a trial, found before the first pair (`floorTrials`) or in the turns' traces (a turn
+// led by another definition than the Author): with any of them, and on a run stopped before its last
+// pair, no part goes to the runner as met (PlanGates-4-fix2 item 5): every measured part goes as not
+// judged, "trial: " or "stopped: " and the reason, the conditions of the whole test (the plan's floor
+// sentence, `floorConditions`) with them, and the table prints no verdict. The two parts seen on
+// screen are looked at all the same (a gate's folder holds the screens of what was seen), each
+// claiming only what its screen shows, never the floor's sentence. A row the floor measures and cannot judge goes to the runner as not judged with
+// why (`play.notJudged`, PlanScenarios-8 item 5), so the runner's report says why; a reported row goes
+// with its figures, and one with no figure is not judged, never met.
 //
 // What the floor needs of a host, `FloorActs`, is what neither host's plan names in so many words: the
 // moments of a reply timed in the page. The rig's host (PlanScenarios-2) and the bed's (PlanScenarios-3)
@@ -28,17 +32,17 @@
 import { resolve } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { Check, Play } from "../route/form";
-import { standingOfRun, type RunRecord } from "../route/evidence";
-import { findFixture, LINES } from "../../testbed/floor-fixture";
-import { floorHead, floorTable, intentCrossCheck, LIMITS, PASS, pathCalls, tableText, type Arm, type FloorRun, type FloorTurn, type Form, type PageTimes, type RpeSide, type Row, type SocketTimes } from "../../testbed/floor-measure";
+import type { RunRecord } from "../route/evidence";
+import { findFixture, LINES, recordOfEnv } from "../../testbed/floor-fixture";
+import { floorConditions, floorHead, floorTable, intentCrossCheck, ledByOthers, LIMITS, noVerdict, noVerdictKind, PASS, pathCalls, tableText, type Arm, type FloorRun, type FloorTurn, type Form, type PageTimes, type RpeSide, type Row, type SocketTimes } from "../../testbed/floor-measure";
 import { Lumiverse } from "../../testbed/lib/lumiverse";
 import { RpeApi, RpeLive } from "../../testbed/lib/rpe";
 import { EngineSocket, type HostEvent } from "../../testbed/lib/socket";
 import type { ActivatedEntry, BookDesign } from "../lib/lore";
 import { noteOf, renderFrame } from "../lib/frame";
 import { LumiverseReader, RpeReader } from "../lib/read";
-import { buildFrom, floorTrials, installedRph, standingLines, type BuildReader, type Observed } from "../lib/record";
-import { keptRequest, leadOf, leadStart, recordTimes } from "../lib/turn";
+import { buildFrom, floorTrials, installedRph, leadsOf, standingLines, type BuildReader, type Observed } from "../lib/record";
+import { callsOf, keptRequest, leadOf, leadStart, recordTimes } from "../lib/turn";
 
 /** What the floor plays with, from the host's acts. */
 export interface FloorActs {
@@ -118,6 +122,27 @@ export const seeStack: Check = async (look) => {
   return section.includes("in the opening block") ? { found: true, shows: ["in the opening block"], what: "the Author's stack, its parts in the opening block" } : { found: false, what: "the stack view shows no part of the Author's opening block" };
 };
 
+/** RPE's own connections as the floor reads them, or why they could not be read. */
+export interface RpeConnections {
+  list: { id: string; name: string; provider: string }[] | null;
+  why: string | null;
+}
+
+/**
+ * The provider of the connection the Author's first call used, by the name RPE's trace gives it (else
+ * by its id), from RPE's own connections; or why it is not known (PlanGates-4-fix2 item 8).
+ */
+export function providerOf(connection: string | null, known: RpeConnections): { provider: string | null; why: string | null } {
+  if (connection === null) return { provider: null, why: "no call of the Author names the connection it went to" };
+  if (known.list === null) return { provider: null, why: known.why ?? "RPE's connections were not read" };
+  const named = known.list.filter((c) => c.name === connection);
+  const found = named.length > 0 ? named : known.list.filter((c) => c.id === connection);
+  const [one] = found;
+  if (one === undefined) return { provider: null, why: `RPE's connections hold none named ${connection}` };
+  if (found.length > 1) return { provider: null, why: `RPE's connections hold ${found.length} named ${connection}` };
+  return { provider: one.provider, why: null };
+}
+
 /** What the floor found of its chat before the first pair. */
 export interface Ground {
   observed: Observed;
@@ -126,6 +151,8 @@ export interface Ground {
   history: RpeSide["history"];
   /** `limits.previousRun` as RPE's settings give it for the chat, in seconds. */
   previousRun: number | null;
+  /** RPE's own connections, which say what provider the Author's connection is of. */
+  rpeConnections: RpeConnections;
 }
 
 /** One turn as read back: what the page timed, Lumiverse told, Lumiverse counted, and RPE's side. */
@@ -194,17 +221,24 @@ export async function playWith(play: Play, acts: FloorActs, reader: FloorReader,
       const line = LINES[next++];
       if (line === undefined) throw new Error(`the fixture has ${LINES.length} lines and ${PASS.pairs} pairs need ${PASS.pairs * 2}`);
       const connection = arm === "plain" ? plainConnection : acts.connections.rpe;
+      const began = Date.now();
       const read = await reader.turn(chat, arm, () => acts.send(chat, connection, line, { preset: fixture.preset.id, persona: fixture.persona.id }), ground.history, ground.plain.model);
-      turns.push({ pair, arm, line, ...read });
+      turns.push({ pair, arm, line, chat, preset: fixture.preset.id, began, finished: Date.now(), ...read });
       if (read.rpe?.status === "running") stopped = `pair ${pair}: RPE's run was still going ${LIMITS.runEnd / 60_000} min after the reply (LIMITS.runEnd), so no later pair was sent over it`;
     }
   }
   const lead = turns.find((t) => t.rpe !== null)?.rpe;
   const start = lead ? leadStart(lead.trace) : null;
+  // The Author's first call names the connection it went to; RPE's own connections say what provider that is of.
+  const first = lead ? callsOf(lead.trace).find((c) => c.agent === leadOf(lead.trace)?.id && c.call === 1) : undefined;
+  const rpeProvider = providerOf(first?.connection ?? start?.connection ?? null, ground.rpeConnections);
+  // A turn the trace shows led by another definition than the Author makes the run a trial, as a lead the settings name does.
+  trials.push(...ledByOthers(ground.observed.leads.expected, turns));
   const run: FloorRun = {
     ...author,
+    lead: ground.observed.leads.expected,
     plain: ground.observed.plain === null ? null : { ...ground.observed.plain, model: ground.plain.model ?? "" },
-    arms: { plain: ground.plain, rpe: { connection: start?.connection ?? acts.connections.rpe, provider: null, model: start?.model ?? null } },
+    arms: { plain: ground.plain, rpe: { connection: start?.connection ?? acts.connections.rpe, provider: rpeProvider.provider, providerWhy: rpeProvider.why, model: start?.model ?? null } },
     option,
     previousRun: ground.previousRun,
     book: fixture.book,
@@ -214,9 +248,10 @@ export async function playWith(play: Play, acts: FloorActs, reader: FloorReader,
   };
   await play.keep("turns", { ...run });
   const rows = floorTable(run);
-  const trial = trials.length > 0 || standingOfRun(play.run).is === "trial";
-  await play.keep("table.txt", tableText(rows, [...standingLines(play.run), ...floorHead(run)], trial, intentCrossCheck(run)));
+  const none = noVerdictKind(run, play.standing.is === "trial");
+  await play.keep("table.txt", tableText(rows, [...standingLines(play.run), ...floorHead(run)], none, intentCrossCheck(run)));
   await judge(play, run, rows);
+  // The parts seen on screen are looked at whatever the run's standing, for a gate's folder holds the screens of what was seen; each claims only what its screen shows.
   const messages = await reader.messages(chat);
   const last = turns.filter((t) => t.arm === "rpe").at(-1);
   const reply = last?.socket.messageId === undefined || last.socket.messageId === null ? undefined : messages.find((m) => m.id === last.socket.messageId);
@@ -231,15 +266,22 @@ export async function playWith(play: Play, acts: FloorActs, reader: FloorReader,
 const figures = (row: Row): string => `${row.measured}; stands on ${row.stands}`;
 
 /**
- * Each row to the runner: with the floor's own trial, every measured part not judged, "trial: " and why;
- * else pass or fail as judged, a reported row met with its figures, a row not judged with why. Calls are
- * judged turn by turn, as the plan's share is counted.
+ * Each part to the runner: with the floor's own trial, or a stop before the last pair, every part not
+ * judged ("trial: " or "stopped: " and why), the conditions of the whole test among them; else the
+ * conditions held or not judged, each row pass or fail as judged, a reported row met with its figures,
+ * a row not judged with why. Calls are judged turn by turn, as the plan's share is counted.
  */
 export async function judge(play: Pick<Play, "judge" | "notJudged">, run: FloorRun, rows: readonly Row[]): Promise<void> {
-  if (run.trials.length > 0) {
-    for (const row of rows) await play.notJudged(row.id, `trial: ${run.trials.join("; ")}; figures: ${figures(row)}`);
+  const none = noVerdict(run);
+  if (none !== null) {
+    const said = `${none.kind}: ${none.why}`;
+    for (const row of rows) await play.notJudged(row.id, none.kind === "trial" ? `${said}; figures: ${figures(row)}` : `${said}; ${row.why.map((w) => `${w}; `).join("")}figures: ${figures(row)}`);
+    await play.notJudged("conditions", said);
     return;
   }
+  const unmet = floorConditions(run);
+  if (unmet.length > 0) await play.notJudged("conditions", unmet.join("; "));
+  else await play.judge("conditions", { pass: true, what: `held: ${PASS.pairs} pairs of a plain turn and an RPE turn in order, one chat, one preset, one model on one provider, the Author leading every turn, no trial; each line sent after the turn before it had finished` });
   for (const row of rows) {
     if (row.verdict === "not judged") {
       await play.notJudged(row.id, `${row.why.join("; ")}; figures: ${figures(row)}`);
@@ -350,12 +392,31 @@ export function liveReader(acts: FloorActs): FloorReader {
   let socket: EngineSocket | null = null;
   let live: RpeLive | null = null;
   return {
-    fixture: () => findFixture(host),
+    fixture: () => findFixture(host, recordOfEnv(process.env)),
     async ground(chat, plainConnection, preset) {
       const trees = await reader.trees(chat);
       const plain = await lumiverse.plain(plainConnection, preset);
       const arm = await lumiverse.connection(plainConnection);
       const settings = await reader.settings(chat);
+      // Who leads, at every level of settings: each level's own file, and the value RPE holds for the chat.
+      const levelFiles: { level: string; file: string; text: string | null; problem: string | null }[] = [];
+      for (const f of settings.files) {
+        if (f.problem !== null) levelFiles.push({ level: f.level, file: f.file, text: null, problem: f.problem });
+        else {
+          try {
+            levelFiles.push({ level: f.level, file: f.file, text: await reader.viewFile(chat, f.file), problem: null });
+          } catch (error) {
+            levelFiles.push({ level: f.level, file: f.file, text: null, problem: `it could not be read: ${words(error)}` });
+          }
+        }
+      }
+      const leads = leadsOf(settings, levelFiles);
+      let rpeConnections: RpeConnections;
+      try {
+        rpeConnections = { list: (await reader.connections()).connections.map((c) => ({ id: c.id, name: c.name, provider: c.provider })), why: null };
+      } catch (error) {
+        rpeConnections = { list: null, why: `RPE's connections could not be read: ${words(error)}` };
+      }
       const setting = (key: string) => settings.settings.find((s) => s.key === key)?.value;
       const whole = (value: unknown) => (typeof value === "number" ? value : null);
       // The framing line RPH sends immediately before the prompt (plan §10.2 l.1160): the chat's own file where it has one, as RPH renders it.
@@ -379,10 +440,11 @@ export function liveReader(acts: FloorActs): FloorReader {
       // Reply text is streamed only to a socket that says it is showing this chat.
       socket.focus(chat);
       return {
-        observed: { plain, shipped: trees.shipped, layers: trees.layers, off: trees.off },
-        plain: { connection: plainConnection, provider: arm.provider, model: arm.model },
+        observed: { plain, shipped: trees.shipped, layers: trees.layers, off: trees.off, leads },
+        plain: { connection: plainConnection, provider: arm.provider, providerWhy: arm.provider === null ? "Lumiverse's connection names no provider" : null, model: arm.model },
         history: { keep: whole(setting("history.window")), step: whole(setting("history.step")), hold: setting("history.hold.on") === true ? whole(setting("history.hold.cap")) : null, framing, framingNote, framingWhy },
         previousRun: whole(setting("limits.previousRun")),
+        rpeConnections,
       };
     },
     async turn(chat, arm, send, history, model) {

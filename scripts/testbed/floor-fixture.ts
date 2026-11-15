@@ -8,10 +8,12 @@
 // one-character chat's books from (character, persona, chat metadata, the user's global list: Lumiverse
 // `src/services/world-info-sources.service.ts:120-129`, `src/services/prompt-assembly.service.ts:2243-2260`).
 // Each made thing carries a mark: in the metadata of the preset, the persona and the book, and in the
-// extensions of the card, which has no metadata; `findFixture` finds the fixture by it. Setup never takes
-// a thing as its own by its name: what it makes, and the marked things it finds and goes on with, it
-// lists by id in the fixture's record (`RecordStore`), and `removeFixture` deletes only what that record
-// lists (PlanGates-4-fix1 item 12).
+// extensions of the card, which has no metadata; `findFixture` finds the fixture by it. Setup adopts
+// nothing: a marked thing is gone on with only where its id is in the fixture's record (`RecordStore`),
+// the id of what setup made itself; a marked thing the record does not list, a user's card that once
+// took the mark, is left alone, and setup makes its own. Setup lists each thing it made or goes on
+// with by id, `removeFixture` deletes only what that record lists, and `findFixture`, given the record,
+// finds only what it lists (PlanGates-4-fix1 item 12, PlanGates-4-fix2 item 7).
 //
 // The book (`LORE`) is made so the floor's row "Activated lore" (§17.1 l.1765) sees every way an entry
 // comes in (plan §4.2 l.216, READINGS N-5) on the floor's own lines, whichever connection plays which
@@ -33,7 +35,7 @@
 // reasoning binding to it (`setPlainThinking`).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { Effort } from "rp-harness/contract";
 import { isRecord } from "../../src/shared/json";
 import type { BookDesign, LoreHow, PlannedEntry } from "../proof/lib/lore";
@@ -442,6 +444,17 @@ export function fileRecord(path: string): RecordStore {
   };
 }
 
+/** The record's file in an instance's folder. */
+export const RECORD_FILE = "floor-fixture.json";
+
+/** The fixture's record the environment points at (`LRE_INSTANCE_DIR`), where that folder holds one; null where it names none or holds none, and the fixture is then found by its mark alone (the rig's stand-in holds none). */
+export function recordOfEnv(env: Record<string, string | undefined>): FixtureRecord | null {
+  const dir = env.LRE_INSTANCE_DIR?.trim();
+  if (!dir) return null;
+  const path = join(dir, RECORD_FILE);
+  return existsSync(path) ? fileRecord(path).read() : null;
+}
+
 type Row = { id: string; name: string; metadata?: unknown; extensions?: unknown };
 
 /** Every row of a paged list route (`{ data, total }`, or a bare array). */
@@ -466,9 +479,16 @@ async function marked(host: FixtureHost, path: string, where: "metadata" | "exte
 const CARDS = "/api/v1/characters";
 const BOOKS = "/api/v1/world-books";
 
-/** The fixture `setupFixture` made; throws when any of it is missing, doubled, or not as designed. */
-export async function findFixture(host: FixtureHost): Promise<Fixture> {
-  const [presets, personas, cards, books] = await Promise.all([marked(host, "/api/v1/presets"), marked(host, "/api/v1/personas"), marked(host, CARDS, "extensions"), marked(host, BOOKS)]);
+/** The marked rows of a list route whose ids the fixture's record lists: a thing that only carries the mark is not the fixture's. */
+async function listed(host: FixtureHost, path: string, ids: readonly string[], where: "metadata" | "extensions" = "metadata"): Promise<Row[]> {
+  return (await marked(host, path, where)).filter((row) => ids.includes(row.id));
+}
+
+/** The fixture `setupFixture` made, found by the record's ids where one is given, else by its mark; throws when any of it is missing, doubled, or not as designed. */
+export async function findFixture(host: FixtureHost, record: FixtureRecord | null): Promise<Fixture> {
+  const [presets, personas, cards, books] = await Promise.all(
+    record === null ? [marked(host, "/api/v1/presets"), marked(host, "/api/v1/personas"), marked(host, CARDS, "extensions"), marked(host, BOOKS)] : [listed(host, "/api/v1/presets", record.presets), listed(host, "/api/v1/personas", record.personas), listed(host, CARDS, record.cards, "extensions"), listed(host, BOOKS, record.books)],
+  );
   const [preset, persona, card, book] = [presets[0], personas[0], cards[0], books[0]];
   if (presets.length !== 1 || personas.length !== 1 || cards.length !== 1 || books.length !== 1 || !preset || !persona || !card || !book) {
     throw new Error(`the floor fixture has ${presets.length} preset(s), ${personas.length} persona(s), ${cards.length} card(s) and ${books.length} book(s), not one of each: run floor.ts setup (or remove, then setup)`);
@@ -510,16 +530,17 @@ export async function setPlainThinking(host: FixtureHost, connectionId: string, 
 /**
  * Makes what is missing of the fixture and a new floor chat, sets the plain connection to think at
  * `effort` (the Author's, as `authorEffort` read it; setup never chooses one), and gives the fixture as
- * `findFixture` then finds it, with the chat's id and the lines to print. A thing is setup's own only by
- * its mark: an unmarked card of the floor's name is someone else's, and setup makes its own beside it.
+ * `findFixture` then finds it, with the chat's id and the lines to print. Setup adopts nothing: a thing
+ * is gone on with only where the fixture's record lists its id, and a marked thing it does not list (a
+ * user's card of the floor's name that took the mark) is left alone, setup making its own beside it.
  * Each thing it made or went on with is listed in the fixture's record.
  */
 export async function setupFixture(host: FixtureHost, effort: string, plainConnectionId: string, store: RecordStore): Promise<{ fixture: Fixture; chat: string; lines: string[] }> {
   // Refused before anything is made: an effort no definition takes is never set in its place.
   if (!isEffort(effort)) throw new Error(`"${effort}" is not an effort an agent definition takes (${Object.keys(EFFORTS).join(", ")})`);
-  const [presets, personas, cards, books] = await Promise.all([marked(host, "/api/v1/presets"), marked(host, "/api/v1/personas"), marked(host, CARDS, "extensions"), marked(host, BOOKS)]);
-  if (presets.length > 1 || personas.length > 1 || cards.length > 1 || books.length > 1) throw new Error(`${presets.length} floor presets, ${personas.length} personas, ${cards.length} cards and ${books.length} books: run floor.ts remove first`);
   const record = store.read();
+  const [presets, personas, cards, books] = await Promise.all([listed(host, "/api/v1/presets", record.presets), listed(host, "/api/v1/personas", record.personas), listed(host, CARDS, record.cards, "extensions"), listed(host, BOOKS, record.books)]);
+  if (presets.length > 1 || personas.length > 1 || cards.length > 1 || books.length > 1) throw new Error(`${presets.length} floor presets, ${personas.length} personas, ${cards.length} cards and ${books.length} books the record lists: run floor.ts remove first`);
   const keep = (kind: (typeof KINDS)[number], id: string) => {
     if (!record[kind].includes(id)) record[kind].push(id);
     store.write(record);
@@ -556,7 +577,7 @@ export async function setupFixture(host: FixtureHost, effort: string, plainConne
   const chat = await host.createChat(card.id, CHAT_NAME);
   keep("chats", chat.id);
   const plain = await setPlainThinking(host, plainConnectionId, effort);
-  const fixture = await findFixture(host);
+  const fixture = await findFixture(host, record);
   const lines = [
     `card     ${card.id} "${card.name}" (${was(cards[0])}), holding the book`,
     `persona  ${persona.id} "${persona.name}" (${was(personas[0])}): the traveller of the card's scenario; not made default or active`,

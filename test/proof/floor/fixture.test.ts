@@ -7,8 +7,11 @@
 // modelled below from its own source, each rule with its file and line.
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
-import { authorEffort, CARD, cardBooks, designedLines, detachBooks, embeddingBlockers, entriesToMake, entryBody, LINES, LORE, MARK, markedCard, readBook, removeFixture, setupFixture, thinkingMetadata, type EntryBody, type FixtureHost, type FixtureRecord, type RecordStore } from "../../../scripts/testbed/floor-fixture";
+import { authorEffort, CARD, cardBooks, designedLines, detachBooks, embeddingBlockers, entriesToMake, entryBody, fileRecord, findFixture, LINES, LORE, MARK, markedCard, readBook, RECORD_FILE, recordOfEnv, removeFixture, setupFixture, thinkingMetadata, type EntryBody, type FixtureHost, type FixtureRecord, type RecordStore } from "../../../scripts/testbed/floor-fixture";
 import type { TestbedEnv } from "../../../scripts/testbed/lib/env";
 import { HttpError } from "../../../scripts/testbed/lib/lumiverse";
 
@@ -343,5 +346,75 @@ describe("the fixture removes only what it made, and says only what it does", ()
     expect(cardBooks(stand.rows.characters.find((c) => c.id === made.fixture.card.id)?.extensions)).toEqual([]);
     expect(removed).toContain(`left card-marked-elsewhere "Another card": it carries the floor's mark, and the fixture's record does not list it`);
     expect(record.held.cards).toEqual([made.fixture.card.id]);
+  });
+});
+
+describe("the fixture adopts nothing (PlanGates-4-fix2 item 7)", () => {
+  const env = { neverTouch: [] } as unknown as TestbedEnv;
+
+  test("a card named Marta Venn that no chat uses is left alone by setup and by remove, whether or not it carries the mark's name; setup makes its own", async () => {
+    // A user's own card of the same name, with no chat on it: only the record's ids are the fixture's.
+    const stand = new Stand();
+    stand.rows.characters.push({ id: "card-users-own", name: CARD.name, extensions: { talkativeness: "0.5" } });
+    const record = memoryRecord();
+    const made = await setupFixture(stand.host, "low", "conn-plain", record);
+    expect(made.fixture.card.id).not.toBe("card-users-own");
+    expect(record.held.cards).toEqual([made.fixture.card.id]);
+    expect(stand.rows.characters.find((c) => c.id === "card-users-own")?.extensions).toEqual({ talkativeness: "0.5" });
+    const removed = await removeFixture(stand.host, env, record);
+    expect(stand.rows.characters.map((c) => c.id)).toEqual(["card-users-own"]);
+    expect(removed).toEqual(expect.not.arrayContaining([expect.stringContaining("card-users-own")]));
+  });
+
+  test("a card that carries the floor's mark and is not in the record, with no chat on it, is not adopted: setup makes its own, remove leaves the other, and the play finds only the listed one", async () => {
+    // What the earlier setup left on a user's card it adopted by name: the mark, and the floor's book.
+    const stand = new Stand();
+    stand.rows.characters.push({ id: "card-users-marked", name: CARD.name, extensions: { talkativeness: "0.5", [MARK]: true } });
+    const record = memoryRecord();
+    const made = await setupFixture(stand.host, "low", "conn-plain", record);
+    expect(made.fixture.card.id).not.toBe("card-users-marked");
+    expect(record.held.cards).toEqual([made.fixture.card.id]);
+    expect(made.lines.join("\n")).toContain(`(made), holding the book`);
+    expect(stand.rows.characters.find((c) => c.id === "card-users-marked")?.extensions).toEqual({ talkativeness: "0.5", [MARK]: true });
+    // By the mark alone two cards are the fixture; by the record's ids, one.
+    await expect(findFixture(stand.host, null)).rejects.toThrow("2 card(s)");
+    expect((await findFixture(stand.host, record.held)).card.id).toBe(made.fixture.card.id);
+    // Setup run again goes on with what the record lists and makes nothing twice.
+    const again = await setupFixture(stand.host, "low", "conn-plain", record);
+    expect(again.fixture.card.id).toBe(made.fixture.card.id);
+    expect(again.lines.join("\n")).toContain("(already there, carrying the floor's mark)");
+    expect(stand.rows.characters).toHaveLength(2);
+    const removed = await removeFixture(stand.host, env, record);
+    expect(stand.rows.characters.map((c) => c.id)).toEqual(["card-users-marked"]);
+    expect(removed).toContain(`left card-users-marked "${CARD.name}": it carries the floor's mark, and the fixture's record does not list it`);
+    expect(removed).not.toContain(`deleted card card-users-marked "${CARD.name}"`);
+  });
+
+  test("a preset, a persona or a book that carries the mark and is not in the record is not adopted either", async () => {
+    const stand = new Stand();
+    stand.rows.presets.push({ id: "preset-users-marked", name: "A user's preset", metadata: { [MARK]: true } });
+    stand.rows.personas.push({ id: "persona-users-marked", name: "A user's persona", metadata: { [MARK]: true } });
+    stand.rows["world-books"].push({ id: "book-users-marked", name: "A user's book", metadata: { [MARK]: true } });
+    const record = memoryRecord();
+    const made = await setupFixture(stand.host, "low", "conn-plain", record);
+    expect(record.held.presets).toHaveLength(1);
+    expect(record.held.presets).not.toContain("preset-users-marked");
+    expect(record.held.personas).not.toContain("persona-users-marked");
+    expect(record.held.books).not.toContain("book-users-marked");
+    expect([made.fixture.preset.id, made.fixture.persona.id, made.fixture.book.id]).toEqual(record.held.presets.concat(record.held.personas, record.held.books));
+    await removeFixture(stand.host, env, record);
+    expect([stand.rows.presets, stand.rows.personas, stand.rows["world-books"]].map((l) => l.map((r) => r.id))).toEqual([["preset-users-marked"], ["persona-users-marked"], ["book-users-marked"]]);
+  });
+
+  test("the fixture's record is found where the environment points, and a folder that holds none finds nothing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "floor-record-env-"));
+    try {
+      expect(recordOfEnv({})).toBeNull();
+      expect(recordOfEnv({ LRE_INSTANCE_DIR: dir })).toBeNull();
+      fileRecord(join(dir, RECORD_FILE)).write({ presets: ["p1"], personas: [], books: ["b1"], cards: ["c1"], chats: [] });
+      expect(recordOfEnv({ LRE_INSTANCE_DIR: dir })).toEqual({ presets: ["p1"], personas: [], books: ["b1"], cards: ["c1"], chats: [] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

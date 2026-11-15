@@ -57,6 +57,8 @@ export interface Call {
   call: number;
   startedAt: number;
   endedAt: number | null;
+  /** The connection the call went to, by the name RPE's trace gives it. */
+  connection: string;
   model: string;
   tools: number;
   /** The tokens of the tool list as sent and of the agent's opening block, by RPH's own estimate; null in records made before RPH gave them. */
@@ -83,6 +85,7 @@ export function callsOf(trace: readonly TraceRecord[]): Call[] {
         call: r.event.call,
         startedAt: r.at,
         endedAt: end?.at ?? null,
+        connection: r.event.connection,
         model: r.event.model,
         tools: r.event.tools,
         toolTokens: r.event.toolTokens ?? null,
@@ -101,8 +104,15 @@ export function leadOf(trace: readonly TraceRecord[]): { id: string; definition:
   return started ? { id: started.agent.id, definition: started.agent.definition } : null;
 }
 
+/** What the lead began at (`agent_started`): its effort (null where the record says none), model and connection. */
+export interface LeadStart {
+  effort: string | null;
+  model: string;
+  connection: string;
+}
+
 /** The effort and model the lead began at (`agent_started`); effort null where the record says none. */
-export function leadStart(trace: readonly TraceRecord[]): { effort: string | null; model: string; connection: string } | null {
+export function leadStart(trace: readonly TraceRecord[]): LeadStart | null {
   const lead = leadOf(trace);
   const started = trace.find((r) => r.event.kind === "agent_started" && r.agent.id === lead?.id);
   return started?.event.kind === "agent_started" ? { effort: started.event.effort ?? null, model: started.event.model, connection: started.event.connection } : null;

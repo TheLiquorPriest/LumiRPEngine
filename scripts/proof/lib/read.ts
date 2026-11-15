@@ -13,7 +13,7 @@
 //   `POST /api/v1/tokenizers/count` (`src/routes/tokenizers.routes.ts:86-93`): `tokenizerSvc.countForModel`, the count Lumiverse's
 //   own speed figure takes of a response's visible text (`src/services/generate.service.ts:4340-4356`).
 
-import type { SettingsReply } from "../../../src/shared/api";
+import type { ConnectionsShown, SettingsReply } from "../../../src/shared/api";
 import type { TreeFileEntry, TreeFileText, TurnFile } from "../../../src/ui/api";
 import { isRecord } from "../../../src/shared/json";
 import { HttpError, type Lumiverse } from "../../testbed/lib/lumiverse";
@@ -81,6 +81,11 @@ export class RpeReader {
 
   settings(chat: string): Promise<SettingsReply> {
     return this.get(`/api/v1/settings?chat=${encodeURIComponent(chat)}`) as Promise<SettingsReply>;
+  }
+
+  /** RPE's own connections, as its route shows them (no key): the provider each is of, by name and id. */
+  connections(): Promise<ConnectionsShown> {
+    return this.get("/api/v1/connections") as Promise<ConnectionsShown>;
   }
 
   /** The shipped level as RPE serves it to a chat, by path below the level; each layer of the user's own: their files the user can write; and each shipped file an `off:` list switches off, with the levels whose list does. */

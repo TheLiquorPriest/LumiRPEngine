@@ -9,8 +9,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { standingOf, type RunRecord } from "../../../scripts/proof/route/evidence";
 import { buildFrom, buildTree, countApart, floorTrials, folderTree, gitTree, plainReasoning, readRun, recordPath, repeated, sha256, shippedOf, standingLines, treeChanges, treeHash, writeRecord, type Observed, type TreeFile } from "../../../scripts/proof/lib/record";
-import { table } from "../../../scripts/testbed/floor";
+import { runs, table } from "../../../scripts/testbed/floor";
+import type { FloorRun } from "../../../scripts/testbed/floor-measure";
 import { recordedRun } from "./recorded";
+import { LEADS } from "./replay";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "bundle-trial");
 const REPO = resolve(import.meta.dir, "../../..");
@@ -99,7 +101,7 @@ describe("the standing read from run.json, never worked out again", () => {
     const dir = bundle();
     const verdict = bundle(clean);
     try {
-      const counted = countApart([{ ...readRun(dir), run: "live-a" }, { ...readRun(verdict), run: "live-b" }, { ...readRun(dir), run: "live-c", standing: undefined }]);
+      const counted = countApart([{ run: { ...readRun(dir), run: "live-a" }, own: [] }, { run: { ...readRun(verdict), run: "live-b" }, own: [] }, { run: { ...readRun(dir), run: "live-c", standing: undefined }, own: [] }]);
       expect(counted.verdicts).toEqual(["live-b"]);
       expect(counted.trials).toEqual([
         { run: "live-a", why: "RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61" },
@@ -161,7 +163,7 @@ describe("the build's shipped tree, laid by RPE's one rule", () => {
       const input = trees(root);
       const build = { rph: folderTree(input.rph), rpe: gitTree(input.repo, input.commit, "guidance") };
       const laid = shippedOf(build.rph, build.rpe);
-      const fromOf = (served: TreeFile[]) => ({ served: treeHash(served), build: treeHash(laid), changed: treeChanges(served, laid), layers: [] });
+      const fromOf = (served: TreeFile[]) => ({ served: treeHash(served), build: treeHash(laid), changed: treeChanges(served, laid), layers: [], files: { served: served.length, build: laid.length }, names: { off: [], layered: [], added: [] } });
       const rpe = { commit: input.commit, dirty: false };
       const rph = { commit: "9a8b7c6d5e4f3a21", pin: "9a8b7c6d5e4f3a21", pinned: true };
       expect(standingOf(rpe, rph, fromOf(laid)).is).toBe("verdict");
@@ -170,8 +172,8 @@ describe("the build's shipped tree, laid by RPE's one rule", () => {
       // Where run.json gives no account of the guidance, the floor lays the build itself and finds the same.
       const run = { ...JSON.parse(readFileSync(join(FIXTURE, "run.json"), "utf8")), rpe, standing: undefined } as RunRecord;
       const reader = buildFrom(input.repo, input.rph);
-      expect(floorTrials(run, { shipped: laid, layers: [], off: [] }, reader)).toEqual([]);
-      expect(floorTrials(run, { shipped: changed, layers: [], off: [] }, reader)).toEqual(["the shipped tree RPE serves the floor's chat is not the build's: 1 path differs (TURN.md)"]);
+      expect(floorTrials(run, { shipped: laid, layers: [], off: [], leads: LEADS }, reader)).toEqual([]);
+      expect(floorTrials(run, { shipped: changed, layers: [], off: [], leads: LEADS }, reader)).toEqual(["the shipped tree RPE serves the floor's chat is not the build's: 1 path differs (TURN.md)"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -195,6 +197,72 @@ describe("the build's shipped tree, laid by RPE's one rule", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("floor.ts runs counts the floor's own trials (PlanGates-4-fix2 item 4)", () => {
+  /** A folder of bundles, each a clean recorded run whose floor record `edit` changes (or, for "none", takes away). */
+  function folderOf(edits: Record<string, ((floor: FloorRun) => void) | "none">): string {
+    const folder = mkdtempSync(join(tmpdir(), "floor-runs-"));
+    for (const [name, edit] of Object.entries(edits)) {
+      const dir = bundle(clean);
+      const run = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
+      writeFileSync(join(dir, "run.json"), JSON.stringify({ ...run, run: name }));
+      const turns = join(dir, "floor", "internal", "play-01", "turns.json");
+      if (edit === "none") rmSync(turns);
+      else {
+        const floor = JSON.parse(readFileSync(turns, "utf8")) as FloorRun;
+        edit(floor);
+        writeFileSync(turns, JSON.stringify(floor));
+      }
+      cpSync(dir, join(folder, name), { recursive: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+    return folder;
+  }
+
+  test("a run whose run.json says verdict is counted a verdict only where the floor's own record names no trial and no stop", () => {
+    const off = "shipped guidance is switched off by an off: list: .prompts/reply-contract.md (off in chat)";
+    const folder = folderOf({
+      "live-clean": () => undefined,
+      "live-off": (floor) => {
+        floor.trials = [off];
+      },
+      "live-stopped": (floor) => {
+        floor.stopped = "pair 5: RPE's run was still going 15 min after the reply (LIMITS.runEnd), so no later pair was sent over it";
+      },
+      "live-lead": (floor) => {
+        floor.trials = ["a turn was led by another definition than the Author (author): pair 3 by gm"];
+      },
+      "live-norecord": "none",
+    });
+    try {
+      const printed = runs(folder);
+      expect(printed).toContain("1 give a verdict, 4 are trials.");
+      expect(printed).toContain("\n  verdict  live-clean\n");
+      expect(printed).toContain(`\n  trial    live-off: the floor's own trial: ${off}\n`);
+      expect(printed).toContain("\n  trial    live-stopped: the floor's own stopped: pair 5: RPE's run was still going 15 min after the reply");
+      expect(printed).toContain("\n  trial    live-lead: the floor's own trial: a turn was led by another definition than the Author (author): pair 3 by gm\n");
+      expect(printed).toMatch(/\n {2}trial {4}live-norecord: the floor's own record of the run could not be read: .*holds no floor run/);
+      expect(printed).not.toContain("verdict  live-off");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  test("a trial of the runner's own is still a trial beside the floor's: both reasons are named", () => {
+    const folder = folderOf({
+      "live-both": (floor) => {
+        floor.trials = ["a layer of the user's own holds guidance: TURN.md"];
+      },
+    });
+    try {
+      const run = JSON.parse(readFileSync(join(folder, "live-both", "run.json"), "utf8")) as Record<string, unknown>;
+      writeFileSync(join(folder, "live-both", "run.json"), JSON.stringify({ ...run, rpe: { commit: "4f1c2a9e7b3d5a61", dirty: true }, standing: { ...(run.standing as object), is: "trial", why: ["RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61"] } }));
+      expect(runs(folder)).toContain("trial    live-both: RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61; the floor's own trial: a layer of the user's own holds guidance: TURN.md");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
     }
   });
 });

@@ -12,6 +12,14 @@
 // turns its figure stands on. Where the floor found its own reasons for a trial before the first pair
 // (`trials`), the table prints them first and no verdict.
 //
+// What a verdict needs besides, and never gives without (PlanGates-4-fix2): both arms on one provider
+// and one model, each arm's provider named in the table (`armsRefusal`); a time per token only on a
+// reply that streamed on the page, never on one that appeared whole (`appearedWhole`); the Author
+// leading every turn, the Author being the agent the shipped default of RPE's own `lead` setting names
+// (`FloorRun.lead`, read from RPE, written nowhere here); the chat's rows read for the sent row, whose
+// window needs them. A run with a trial or a stop gives no verdict on any part, the conditions of the
+// whole test included (`noVerdict`, `floorConditions`).
+//
 // The rows, as the floor's packages set them (PlanGates-4, PlanGates-4-fix1):
 // - First words on screen: per turn, from Send to the reply's first word on the chat page (tag form) or
 //   to the moment its message ended and was shown whole (two-step form, l.1773), less exactly the intent
@@ -40,7 +48,7 @@ import { compareLore, loreFold, type ActivatedEntry, type BookDesign } from "../
 import type { LoreEntry } from "../proof/lib/read";
 import type { PlainReasoning } from "../proof/lib/record";
 import { compareSent, sentFold, type ChatRow, type StoredMessage } from "../proof/lib/sent";
-import { callsBefore, callsOf, leadOf, leadStart, releaseOf, replyCall, spanMs, traceIntentMs, type Call, type KeptRequest, type RecordTimes } from "../proof/lib/turn";
+import { callsBefore, callsOf, leadOf, leadStart, releaseOf, replyCall, spanMs, traceIntentMs, type Call, type KeptRequest, type LeadStart, type RecordTimes } from "../proof/lib/turn";
 import type { TurnTimings } from "../../src/ui/api";
 
 /** The form RPE's connection replies in (plan §10.7): the tags in one call, or the record and the reply as two. */
@@ -144,6 +152,12 @@ export interface FloorTurn {
   visible: number | null;
   visibleWhy: string | null;
   rpe: RpeSide | null;
+  /** The chat the line was sent to and the preset it was sent with: the floor's one chat and one preset. */
+  chat: string;
+  preset: string;
+  /** On the script's clock: when the line was sent, and when everything of the turn was read (an RPE turn once its run had ended). The next line is sent after it. */
+  began: number;
+  finished: number;
   /** Why the turn failed, when it did. */
   error: string | null;
 }
@@ -152,6 +166,8 @@ export interface FloorTurn {
 export interface Arm {
   connection: string;
   provider: string | null;
+  /** Why the provider could not be read, when it could not. */
+  providerWhy: string | null;
   model: string | null;
 }
 
@@ -163,6 +179,8 @@ export interface FloorRun {
   formWhy: string | null;
   /** Whether the Author's connection streams, from `run.json` (`agents[].streams`). */
   streams: boolean;
+  /** The agent definition the floor expects to lead each turn: the shipped default of RPE's `lead` setting, read from RPE (null where it could not be read). */
+  lead: string | null;
   plain: (PlainReasoning & { model: string }) | null;
   /** Each arm's connection, provider and model (PlanGates-4-fix1 item 13). */
   arms: { plain: Arm; rpe: Arm };
@@ -240,28 +258,62 @@ function plainThinking(turn: FloorTurn): number | null {
   return p === null || p.firstThinking === null || p.firstWord === null ? null : p.firstWord - p.firstThinking;
 }
 
+/** The Author's agent_started of each RPE turn, or why none is known. */
+function authorStarts(run: FloorRun): { starts: LeadStart[] } | { why: string } {
+  const starts = run.turns.flatMap((t) => (t.rpe ? [leadStart(t.rpe.trace)] : []));
+  if (starts.length === 0) return { why: "no RPE turn says what the Author ran at" };
+  const named = starts.filter((st) => st !== null);
+  if (named.length < starts.length) return { why: "an RPE turn's trace has no agent_started for its lead" };
+  return { starts: named };
+}
+
+/** A provider's name as both sides spell it: Lumiverse's and RPE's meet where they differ only in case or in `_` against `-`. */
+const providerKey = (provider: string): string => provider.trim().toLowerCase().replaceAll("_", "-");
+
+/**
+ * Why no comparison of the two arms is judged: both must have run on one model and one provider
+ * (PlanGates-4-fix2 item 8). RPE's provider is read from RPE's own connections, by the connection the
+ * Author's first call used; where either arm's cannot be read, that arm is named; null when they hold.
+ */
+export function armsRefusal(run: FloorRun): string | null {
+  const got = authorStarts(run);
+  if ("why" in got) return got.why;
+  const models = new Set(got.starts.map((st) => st.model));
+  if (models.size > 1) return `the Author ran on more than one model (${[...models].join(", ")})`;
+  const model = [...models][0] as string;
+  const plainModels = new Set([run.plain?.model, run.arms.plain.model].filter((m): m is string => typeof m === "string" && m !== ""));
+  if (plainModels.size === 0) return "plain generation's model was not read";
+  for (const plain of plainModels) if (plain !== model) return `plain generation ran on ${plain} and the Author on ${model}: not the same model`;
+  const { plain, rpe } = run.arms;
+  if (plain.provider === null || rpe.provider === null) {
+    const unread = [plain.provider === null ? `plain generation's provider could not be read${plain.providerWhy === null ? "" : ` (${plain.providerWhy})`}` : null, rpe.provider === null ? `RPE's provider could not be read${rpe.providerWhy === null ? "" : ` (${rpe.providerWhy})`}` : null];
+    return unread.filter(isString).join("; ");
+  }
+  if (providerKey(plain.provider) !== providerKey(rpe.provider)) return `plain generation ran on ${plain.provider} and the Author on ${rpe.provider}: not the same provider`;
+  return null;
+}
+
 /**
  * Why the comparison rows cannot be judged on this run's connections, models and effort: one model on
- * both arms and the same thinking effort (R-92), and, given the owner's connections by option, both arms
- * on them (PlanGates-4-fix1 item 13); null when they hold.
+ * one provider on both arms (`armsRefusal`) and the same thinking effort (R-92), and, given the owner's
+ * connections by option, both arms on them (PlanGates-4-fix1 item 13); null when they hold.
  */
 export function effortRefusal(run: FloorRun): string | null {
-  const starts = run.turns.flatMap((t) => (t.rpe ? [leadStart(t.rpe.trace)] : []));
-  if (starts.length === 0) return "no RPE turn says what the Author ran at";
-  if (starts.some((st) => st === null)) return "an RPE turn's trace has no agent_started for its lead";
-  const efforts = new Set(starts.map((st) => st?.effort ?? "not said"));
-  const models = new Set(starts.map((st) => st?.model ?? ""));
-  const connections = new Set(starts.map((st) => st?.connection ?? ""));
+  const got = authorStarts(run);
+  if ("why" in got) return got.why;
+  const efforts = new Set(got.starts.map((st) => st.effort ?? "not said"));
+  const models = new Set(got.starts.map((st) => st.model));
+  const connections = new Set(got.starts.map((st) => st.connection));
   if (efforts.size > 1) return `the Author ran at more than one effort (${[...efforts].join(", ")})`;
   if (models.size > 1) return `the Author ran on more than one model (${[...models].join(", ")})`;
   const effort = [...efforts][0] as string;
-  const model = [...models][0] as string;
   if (run.option !== null && (connections.size > 1 || !connections.has(run.option.rpe))) return `the Author ran on ${[...connections].join(", ")}, not on the owner's connection the option names (${run.option.rpe})`;
   if (run.option !== null && run.arms.plain.connection !== run.option.plain) return `plain generation ran on ${run.arms.plain.connection}, not on the owner's connection the option names (${run.option.plain})`;
   if (effort === "not said") return "the Author's agent_started names no effort, so its thinking effort is not known";
   const plain = run.plain;
   if (plain === null) return "plain generation's reasoning setting was not read";
-  if (plain.model !== model) return `plain generation ran on ${plain.model} and the Author on ${model}: not the same model`;
+  const arms = armsRefusal(run);
+  if (arms !== null) return arms;
   if (plain.customBody !== null && plain.customBody.reasoningKeys.length > 0) return `a custom request body (${plain.customBody.from}'s) sets ${plain.customBody.reasoningKeys.join(", ")} for plain generation, so its effort is not the one named`;
   if (plain.apiReasoning === null) return "plain generation's reasoning is not set in Lumiverse, so it thinks at the provider's own effort";
   if (effort === "off" && plain.apiReasoning) return `RPE's thinking is off while plain generation's is on (at ${plain.effort ?? "auto"})`;
@@ -400,39 +452,59 @@ export function intentCrossCheck(run: FloorRun): CrossCheck[] {
   });
 }
 
-/** One turn's time per output token on the page: first word to last word over the shown reply's tokens less one. */
+/**
+ * Whether a turn's reply appeared whole on the page: its first and last word arrive together, to the
+ * page's resolution, and it holds more than one token. No time runs between its words, so a time per
+ * token is not measured on it (PlanGates-4-fix2 item 1).
+ */
+export function appearedWhole(t: FloorTurn): boolean {
+  const p = t.page;
+  return p !== null && p.firstWord !== null && p.lastWord !== null && t.visible !== null && t.visible > 1 && p.lastWord - p.firstWord <= p.resolution;
+}
+
+/** One turn's time per output token on the page: first word to last word over the shown reply's tokens less one; none on a reply that appeared whole. */
 export function pagePerToken(t: FloorTurn): number | null {
   const p = t.page;
-  if (p === null || t.visible === null || t.visible < 2 || p.firstWord === null || p.lastWord === null) return null;
+  if (p === null || t.visible === null || t.visible < 2 || p.firstWord === null || p.lastWord === null || appearedWhole(t)) return null;
   return (p.lastWord - p.firstWord) / (t.visible - 1);
 }
 
-/** Why a turn has no time per token on the page, or null when it has one. */
+/** Why a turn has no time per token on the page, or null when it has one: the arm is named where its reply appeared whole. */
 function pageTokenNeed(t: FloorTurn): string | null {
   if (t.page === null) return "the page timed nothing";
   if (t.page.firstWord === null || t.page.lastWord === null) return "the page never showed its first and last word";
   if (t.visible === null) return t.visibleWhy ?? "Lumiverse gave no count of its shown text";
   if (t.visible < 2) return `its shown text is ${t.visible} token(s), too few to time between words`;
+  if (appearedWhole(t)) return `${t.arm === "rpe" ? "RPE's" : "plain generation's"} reply appeared whole: nothing streamed`;
   return null;
+}
+
+/** The time from the reply call's first streamed piece on RPE's live socket to its last, or why there is none: its pieces were not heard, or all arrived together. */
+function replySpan(t: FloorTurn): { span: number } | { none: string } {
+  if (t.rpe === null) return { none: "no RPE turn was matched to it" };
+  const call = replyCall(callsOf(t.rpe.trace), releaseOf(t.rpe.trace));
+  if (call === null) return { none: "the reply call's streamed pieces were not heard" };
+  const pieces = t.rpe.deltas.filter((d) => d.run === t.rpe?.turn && d.agent === call.agent && d.call === call.call && (d.text ?? "") !== "");
+  const first = pieces[0];
+  const last = pieces.at(-1);
+  if (first === undefined || last === undefined) return { none: "the reply call's streamed pieces were not heard" };
+  return last.at <= first.at ? { none: "RPE's reply call's pieces arrived together: nothing streamed" } : { span: last.at - first.at };
 }
 
 /** The reply call's own time per output token from RPE's live socket: its first streamed piece to its last, over the shown reply's tokens less one. */
 export function replyCallPerToken(t: FloorTurn): number | null {
   if (t.rpe === null || t.rpe.deltasMissed || t.visible === null || t.visible < 2) return null;
-  const release = releaseOf(t.rpe.trace);
-  const call = replyCall(callsOf(t.rpe.trace), release);
-  if (call === null) return null;
-  const pieces = t.rpe.deltas.filter((d) => d.run === t.rpe?.turn && d.agent === call.agent && d.call === call.call && (d.text ?? "") !== "");
-  const first = pieces[0];
-  const last = pieces.at(-1);
-  return first === undefined || last === undefined ? null : (last.at - first.at) / (t.visible - 1);
+  const got = replySpan(t);
+  return "span" in got ? got.span / (t.visible - 1) : null;
 }
 
 function replyCallNeed(t: FloorTurn): string | null {
   if (t.rpe === null) return "no RPE turn was matched to it";
   if (t.rpe.deltasMissed) return "RPE's live socket missed pieces of the turn";
   if (t.visible === null) return t.visibleWhy ?? "Lumiverse gave no count of its shown text";
-  return replyCallPerToken(t) === null ? "the reply call's streamed pieces were not heard" : null;
+  if (t.visible < 2) return `its shown text is ${t.visible} token(s), too few to time between words`;
+  const got = replySpan(t);
+  return "none" in got ? got.none : null;
 }
 
 function perTokenRow(run: FloorRun, refusal: string | null): Row {
@@ -445,7 +517,7 @@ function perTokenRow(run: FloorRun, refusal: string | null): Row {
   const stands = `${rpeFigures.length} RPE turn(s) and ${plainFigures.length} plain turn(s), of ${count.measured.length} pair(s) measured`;
   const counted = "both arms' shown reply counted by Lumiverse's own tokenizer for the model both ran on, never a provider's completion count (it holds plain's reasoning) nor the count RPE reports (RPH's turn budget)";
   if (twoStep) {
-    const why = [run.formWhy, pairsWhy(count), rpe === null || plain === null ? "no figure on one arm" : null].filter(isString);
+    const why = [run.formWhy, armsRefusal(run), pairsWhy(count), rpe === null || plain === null ? "no figure on one arm" : null].filter(isString);
     return {
       id: "per-token",
       measure: "Time per output token",
@@ -623,7 +695,7 @@ function readWhy(t: FloorTurn, reads: readonly RpeRead[]): string | null {
 function sentRow(run: FloorRun): Row {
   const rpe = run.turns.filter((t) => t.arm === "rpe");
   const turns = rpe.map((t) => {
-    const why = readWhy(t, ["request", "stored"]) ?? (t.rpe?.request && t.rpe.stored ? null : "the kept request or the stored prompt is missing");
+    const why = readWhy(t, ["request", "stored", "rows"]) ?? (t.rpe?.request && t.rpe.stored ? null : "the kept request or the stored prompt is missing");
     const side = t.rpe;
     return { turn: label(t), why, verdict: why === null && side?.request && side.stored ? compareSent({ request: side.request.messages, stored: side.stored, rows: side.rows ?? undefined, keep: side.history.keep, step: side.history.step, hold: side.history.hold, framing: side.history.framing, framingNote: side.history.framingNote }) : null };
   });
@@ -645,7 +717,7 @@ function sentRow(run: FloorRun): Row {
 function loreRow(run: FloorRun): Row {
   const rpe = run.turns.filter((t) => t.arm === "rpe");
   const turns = rpe.map((t) => {
-    const why = readWhy(t, ["lore"]) ?? (t.socket.lore === null ? "Lumiverse's socket told no WORLD_INFO_ACTIVATED for the generation" : null);
+    const why = readWhy(t, ["lore"]) ?? (t.socket.lore === null ? "the event was not heard: Lumiverse's socket told no WORLD_INFO_ACTIVATED for the generation" : null);
     const side = t.rpe;
     return { turn: label(t), line: 2 * t.pair, verdict: why === null && side?.lore.entries && t.socket.lore ? compareLore({ lumiverse: t.socket.lore, map: side.lore.map, entries: side.lore.entries }) : null, why };
   });
@@ -668,22 +740,77 @@ export function floorTable(run: FloorRun): Row[] {
   return [rows["first-words"], rows["per-token"], rows.calls, sentRow(run), loreRow(run), rows.intake, rows.tools, rows.stack, rows["after-reply"]];
 }
 
-/** The lines the table starts with after the run's standing: the floor's own trials, a stop, and each arm's connection. */
+/** The turns whose trace shows a lead other than the Author: one reason for a trial, naming them; none where the lead is not known (the floor's own reads then name it) or every turn was the Author's. */
+export function ledByOthers(lead: string | null, turns: readonly FloorTurn[]): string[] {
+  if (lead === null) return [];
+  const others = turns.flatMap((t) => {
+    if (t.rpe === null) return [];
+    const led = leadOf(t.rpe.trace);
+    return led !== null && led.definition === lead ? [] : [`pair ${t.pair} by ${led === null ? "no one the trace names" : led.definition}`];
+  });
+  return others.length === 0 ? [] : [`a turn was led by another definition than the Author (${lead}): ${others.join(", ")}`];
+}
+
+/** Why the run gives no verdict on any part: a trial the floor found, or a stop before its last pair (a trial first where both hold); null when it gives one. */
+export function noVerdict(run: FloorRun): { kind: "trial" | "stopped"; why: string } | null {
+  if (run.trials.length > 0) return { kind: "trial", why: run.trials.join("; ") };
+  return run.stopped === null ? null : { kind: "stopped", why: run.stopped };
+}
+
+/** The word the table prints for a run with no verdict: a trial where the runner's own standing says so, else the floor's own. */
+export function noVerdictKind(run: FloorRun, standingIsTrial: boolean): "trial" | "stopped" | null {
+  return standingIsTrial ? "trial" : (noVerdict(run)?.kind ?? null);
+}
+
+/**
+ * The conditions of the whole test as the plan's floor sentence gives them (§17.1 l.1757), judged from
+ * the run's own record (PlanGates-4-fix2 item 5): ten pairs, a plain turn then an RPE turn each, in
+ * order; one chat and one preset; one model on one provider; the Author leading every turn; each line
+ * sent after the turn before it had finished. A trial or a stop is not among them (`noVerdict` is
+ * asked first). Each that does not hold, or cannot be told, is named; empty when all hold.
+ */
+export function floorConditions(run: FloorRun): string[] {
+  const why: string[] = [];
+  const inOrder = run.turns.every((t, i) => t.pair === (i >> 1) + 1 && t.arm === (i % 2 === 0 ? "plain" : "rpe"));
+  if (run.turns.length !== PASS.pairs * 2 || !inOrder) why.push(`the run does not hold ${PASS.pairs} pairs of a plain turn and then an RPE turn, in order: ${run.turns.length} turn(s) were played`);
+  const chats = new Set(run.turns.map((t) => t.chat));
+  if (chats.size > 1) why.push(`the lines went to ${chats.size} chats, not one`);
+  const presets = new Set(run.turns.map((t) => t.preset));
+  if (presets.size > 1) why.push(`the lines were sent with ${presets.size} presets, not one`);
+  const arms = armsRefusal(run);
+  if (arms !== null) why.push(arms);
+  if (run.lead === null) why.push("who the Author is was not read from RPE's lead setting");
+  why.push(...ledByOthers(run.lead, run.turns));
+  run.turns.forEach((t, i) => {
+    if (t.error !== null) why.push(`${label(t)} failed (${t.error}), so that it had finished before the next line was sent is not known`);
+    else if (t.rpe?.status === "running") why.push(`${label(t)}: RPE's run was still going when the next line was sent`);
+    const before = run.turns[i - 1];
+    if (before !== undefined && t.began < before.finished) why.push(`${label(t)} was sent before ${label(before)} had finished`);
+  });
+  return why;
+}
+
+/** The lines the table starts with after the run's standing: the floor's own trials, a stop, each arm's connection and provider, the conditions of the whole test, and whether RPE's replies streamed. */
 export function floorHead(run: FloorRun): string[] {
-  const arm = (a: Arm) => `${a.provider ?? "provider not known"} / ${a.model ?? "model not known"} (connection ${a.connection})`;
+  const arm = (a: Arm) => `${a.provider ?? `provider not known${a.providerWhy === null ? "" : ` (${a.providerWhy})`}`} / ${a.model ?? "model not known"} (connection ${a.connection})`;
+  const none = noVerdict(run);
+  const unmet = none === null ? floorConditions(run) : [`${none.kind}: ${none.why}`];
+  const whole = run.form === "tag" ? run.turns.filter((t) => t.arm === "rpe" && appearedWhole(t)).map((t) => `pair ${t.pair}`) : [];
   return [
     ...(run.trials.length > 0 ? [`TRIAL: no verdict. ${run.trials.join("; ")}.`] : []),
     ...(run.stopped === null ? [] : [`STOPPED: ${run.stopped}.`]),
     `Played on ${run.option === null ? "the floor's own connections (N-15)" : "the owner's connections, by option"}: plain ${arm(run.arms.plain)}; RPE ${arm(run.arms.rpe)}, the Author's model by its trace.`,
+    `The conditions of the whole test (one chat, one preset, one model, the shipped guidance, the Author leading, ten pairs interleaved, each sent after the previous had finished): ${unmet.length === 0 ? "held" : `not judged: ${unmet.join("; ")}`}.`,
+    ...(whole.length > 0 ? [`RPE's replies did not stream in the tag form: ${whole.join(", ")} appeared whole on the page, so no time was measured between their first word and their last.`] : []),
   ];
 }
 
-/** The table in words, after the run's standing; a trial prints its figures and no verdict. */
-export function tableText(rows: readonly Row[], head: readonly string[], trial: boolean, crossCheck: readonly CrossCheck[]): string {
+/** The table in words, after the run's standing; a run with no verdict (a trial, or a stop) prints its figures and no verdict, and a trial none of its reasons beside them. */
+export function tableText(rows: readonly Row[], head: readonly string[], none: "trial" | "stopped" | null, crossCheck: readonly CrossCheck[]): string {
   const out = ["§17.1 The floor test", ...head];
   for (const r of rows) {
-    out.push("", `${r.measure}: ${trial ? "no verdict (trial)" : r.verdict.toUpperCase()}`, `  pass:      ${r.pass}`, `  measured:  ${r.measured}`, `  stands on: ${r.stands}`);
-    if (!trial) for (const why of r.why) out.push(`  not judged: ${why}`);
+    out.push("", `${r.measure}: ${none === null ? r.verdict.toUpperCase() : `no verdict (${none})`}`, `  pass:      ${r.pass}`, `  measured:  ${r.measured}`, `  stands on: ${r.stands}`);
+    if (none !== "trial") for (const why of r.why) out.push(`  not judged: ${why}`);
     for (const note of r.notes) out.push(`  note:      ${note}`);
   }
   if (crossCheck.length > 0) {

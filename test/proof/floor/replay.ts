@@ -11,9 +11,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CHAT_PAGE, FILES_PAGE, playWith, type FloorActs, type FloorReader, type Ground } from "../../../scripts/proof/floor/play";
 import type { Play } from "../../../scripts/proof/route/form";
-import type { Host, RunFacts } from "../../../scripts/proof/route/host";
-import { guidanceOf, sha256, shippedOf, treeChanges, treeHash, type TreeFile } from "../../../scripts/proof/lib/record";
+import type { GuidanceFacts, Host, RunFacts } from "../../../scripts/proof/route/host";
+import { sha256, shippedOf, type Leads, type TreeFile } from "../../../scripts/proof/lib/record";
 import { runRecord, type RunRecord } from "../../../scripts/proof/route/evidence";
+import { standingFromFacts } from "../../../scripts/proof/route/runner";
 import { main } from "../../../scripts/proof/run";
 import type { FloorRun, PageTimes } from "../../../scripts/testbed/floor-measure";
 import { FakeBrowser } from "../route/fake";
@@ -27,6 +28,9 @@ export const BUILD: { rph: TreeFile[]; rpe: TreeFile[] } = {
   rpe: [{ path: "chat-defaults/TURN.md", sha256: sha256("Weigh intent first.") }],
 };
 export const SERVED = shippedOf(BUILD.rph, BUILD.rpe);
+
+/** Who leads, as RPE's settings give it for a clean chat: the shipped default, held, no level setting another. */
+export const LEADS: Leads = { expected: "author", inForce: "author", from: null, levels: [] };
 
 /** What a test gives a replay: the recorded run, and what the floor's chat stood on before the first pair. */
 export interface Replay {
@@ -59,7 +63,7 @@ export function factsOf(run: FloorRun, edit?: (facts: RunFacts) => void): RunFac
     browser: { name: "fake", version: "1" },
     agents: [{ agent: "author", connection: "rpe-floor", model: MODEL, replyForm: run.form === "two-step" ? "two-step" : "tags", effort: "low", streams: run.streams }],
     settings: { chat: null, files: [], settings: [] },
-    guidance: { served: SERVED, build: BUILD, layers: [] },
+    guidance: { served: SERVED, build: BUILD, layers: [], names: { off: [], layered: [], added: [] } },
   };
   edit?.(facts);
   return facts;
@@ -67,9 +71,7 @@ export function factsOf(run: FloorRun, edit?: (facts: RunFacts) => void): RunFac
 
 /** run.json as the runner writes it for these facts: its standing worked out from the guidance they give, as the runner works it out. */
 export function recordOf(facts: RunFacts): RunRecord {
-  const given = facts.guidance;
-  const from = given ? { served: treeHash(given.served), build: treeHash(shippedOf(given.build.rph, given.build.rpe)), changed: treeChanges(given.served, shippedOf(given.build.rph, given.build.rpe)), layers: given.layers.map((l) => ({ level: l.level, hash: treeHash(l.files), guidance: guidanceOf(l) })) } : null;
-  return runRecord(facts, { run: "rig-invented", mode: "rig", by: "a test", started: "2026-11-20T10:15:00.000Z", ended: null, asked: ["floor"], unplayed: [], known: { scenarios: [], gates: ["floor"] }, repeats: 10 }, from);
+  return runRecord(facts, { run: "rig-invented", nonce: "invented-nonce", mode: "rig", by: "a test", started: "2026-11-20T10:15:00.000Z", ended: null, asked: ["floor"], unplayed: [], known: { scenarios: [], gates: ["floor"] }, repeats: 10 }, standingFromFacts(facts.guidance));
 }
 
 /** What the chat holds of a turn: its reply's text, invented. */
@@ -92,10 +94,11 @@ function replayOf(replay: Replay, sent: Sent[]): { acts: FloorActs; reader: Floo
     },
   };
   const ground: Ground = {
-    observed: { plain: replay.run.plain, shipped: SERVED, layers: [], off: [] },
+    observed: { plain: replay.run.plain, shipped: SERVED, layers: [], off: [], leads: LEADS },
     plain: replay.run.arms.plain,
     history: { keep: null, step: null, hold: null, framing: null, framingNote: null, framingWhy: null },
     previousRun: replay.run.previousRun,
+    rpeConnections: { list: [{ id: "id-rpe-floor", name: "rpe-floor", provider: "deepseek" }], why: null },
     ...replay.ground,
   };
   const reader: FloorReader = {
@@ -149,10 +152,14 @@ export default gate({ ...floor, rig: replayed, live: replayed });
       },
       [FILES_PAGE]: "Files\nAgent\nAn agent's stack\nauthor: the reply contract, in the opening block",
     };
+    const facts = replay.facts ?? factsOf(replay.run);
+    // What the play's chat stands on, as a bed's host would read it from RPE's view of that chat: the tree the floor saw there, and the names its configs switch off.
+    const seen = replay.ground?.observed;
+    const standing: GuidanceFacts | null = seen === undefined ? (facts.guidance ?? null) : { served: seen.shipped, build: BUILD, layers: seen.layers, names: { off: seen.off.map((f) => ({ name: f.path, levels: f.offIn })), layered: [], added: [] } };
     const host: Host = {
       mode: "rig",
-      facts: async () => replay.facts ?? factsOf(replay.run),
-      begin: async () => ({ acts: current?.acts, browser: new FakeBrowser({ pages }), close: async () => undefined }),
+      facts: async () => facts,
+      begin: async () => ({ acts: current?.acts, browser: new FakeBrowser({ pages }), guidance: async () => standing, close: async () => undefined }),
       close: async () => undefined,
     };
     const out = join(scratch, "out");

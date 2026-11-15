@@ -4,28 +4,80 @@
   "by": "the lead",
   "started": "2026-11-20T10:15:00.000Z",
   "ended": "2026-11-20T10:52:41.000Z",
-  "asked": ["floor"],
+  "asked": [
+    "floor"
+  ],
   "unplayed": [],
-  "known": { "scenarios": [], "gates": ["floor"] },
+  "known": {
+    "scenarios": [],
+    "gates": [
+      "floor"
+    ]
+  },
   "repeats": 10,
   "standing": {
     "is": "trial",
-    "why": ["RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61"],
+    "why": [
+      "RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61"
+    ],
     "from": {
       "served": "b4c7d06aab966e6952a9b4b1f83c27b0593034791041b34610ce61c3abe2a738",
       "build": "b4c7d06aab966e6952a9b4b1f83c27b0593034791041b34610ce61c3abe2a738",
       "changed": [],
-      "layers": [{ "level": "global", "hash": "d3e59f87ef35cdce03e6ad1eca3744124fea813270bff3d1800b803c4f89a334", "guidance": [] }]
+      "layers": [
+        {
+          "level": "global",
+          "hash": "d3e59f87ef35cdce03e6ad1eca3744124fea813270bff3d1800b803c4f89a334",
+          "guidance": []
+        }
+      ],
+      "files": {
+        "served": 3,
+        "build": 3
+      },
+      "names": {
+        "off": [],
+        "layered": [],
+        "added": []
+      }
     }
   },
-  "rpe": { "commit": "4f1c2a9e7b3d5a61", "dirty": true },
-  "rph": { "commit": "9a8b7c6d5e4f3a21", "pin": "9a8b7c6d5e4f3a21", "pinned": true },
-  "lumiverse": { "version": "a70f4ed2" },
-  "browser": { "name": "chromium", "version": "131.0.6778.0" },
-  "agents": [{ "agent": "author", "connection": "rpe-floor", "model": "deepseek-v4-flash", "replyForm": "two-step", "effort": "low", "streams": false }],
+  "rpe": {
+    "commit": "4f1c2a9e7b3d5a61",
+    "dirty": true
+  },
+  "rph": {
+    "commit": "9a8b7c6d5e4f3a21",
+    "pin": "9a8b7c6d5e4f3a21",
+    "pinned": true
+  },
+  "lumiverse": {
+    "version": "a70f4ed2"
+  },
+  "browser": {
+    "name": "chromium",
+    "version": "131.0.6778.0"
+  },
+  "agents": [
+    {
+      "agent": "author",
+      "connection": "rpe-floor",
+      "model": "deepseek-v4-flash",
+      "replyForm": "two-step",
+      "effort": "low",
+      "streams": false
+    }
+  ],
   "settings": {
     "chat": null,
-    "files": [{ "level": "global", "file": "RPE-global.yml", "problem": null }],
+    "files": [
+      {
+        "level": "global",
+        "file": "RPE-global.yml",
+        "problem": null
+      }
+    ],
     "settings": []
-  }
+  },
+  "nonce": "invented-nonce-0001"
 }

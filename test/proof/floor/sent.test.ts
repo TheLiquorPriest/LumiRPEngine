@@ -268,3 +268,18 @@ test("the row passes only when every RPE turn passes: a failing turn fails it an
   expect(sentFold([{ turn: "t-04", verdict: held, why: null }])).toMatchObject({ verdict: "not judged", why: [`1 RPE turn(s): ${held.unjudged[0]}`] });
   expect(sentFold([])).toEqual({ verdict: "not judged", measured: "no RPE turn to compare", notes: ["the run gave no RPE turn to compare"], why: ["the run gave no RPE turn to compare"] });
 });
+
+test("a stored message that is not text, where the request holds that message's text, is named and not compared: the request's message at its place is passed over, never an extra, and the turn is not failed", () => {
+  // The check's case: stored {user, null} against a request holding that message's text.
+  const alone = compareSent({ request: [{ role: "system", text: "You are the Author of this roleplay." }, { role: "user", text: "Look at this map." }], stored: [{ role: "user", content: null }] });
+  expect(alone).toMatchObject({ pass: false, faulty: false, extra: [], unnamed: [], notText: [{ place: 1, role: "user", text: "not text" }] });
+  expect(alone.words).toBe("Not judged: not text: not compared: stored 1 (user)");
+  // In the middle of a whole prompt: its neighbours still match in order, the one message at its place is passed over, and nothing else is.
+  const whole = pair("whole");
+  const middle = compareSent({ ...whole, stored: whole.stored.map((m, k) => (k === 4 ? { ...m, content: null } : m)) });
+  expect(middle).toMatchObject({ pass: false, faulty: false, extra: [], unnamed: [], missing: [], reordered: [], owed: 9, inOrder: 9, notText: [{ place: 5, role: "user", text: "not text" }] });
+  // A request message that is not at its place is not passed over: an extra beside the unreadable one still fails the turn.
+  const added = compareSent({ ...whole, stored: whole.stored.map((m, k) => (k === 4 ? { ...m, content: null } : m)), request: [...whole.request.slice(0, 6), { role: "user", text: "A line nobody sent." }, ...whole.request.slice(6)] });
+  expect(added.faulty).toBe(true);
+  expect(added.extra.map((m) => m.text)).toEqual(["A line nobody sent."]);
+});

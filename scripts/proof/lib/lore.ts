@@ -11,7 +11,15 @@
 // - What Lumiverse activated is its own account: each generation's `WORLD_INFO_ACTIVATED` event
 //   (Lumiverse `src/services/generate.service.ts:2868-2879`, entries `ActivatedWorldInfoEntry`,
 //   `src/llm/types.ts:416-433`), heard on the socket the play reads, never RPE's record of the tag.
-//   It says keyword or vector and nothing else (plan §4.2 l.216).
+//   It says keyword or vector and nothing else (plan §4.2 l.216). Lumiverse sends the event only when
+//   something activated: the prompt's assembly gives `activatedWorldInfo` as undefined for an empty
+//   list (`src/services/prompt-assembly.service.ts:4455-4456`) and the send is guarded by it
+//   (`src/services/generate.service.ts:2869`), whatever the comment above it says of always emitting.
+//   So no event heard for a generation is not "nothing activated": the floor's book holds a constant
+//   entry that activates on every line, so a generation with none heard lost the event or the
+//   constant did not activate, and that turn is not judged ("the event was not heard"), never judged
+//   on an empty list. The floor's own entries stay "not played" where a heard event lacks one made to
+//   activate on its line.
 // - `TurnDetail.lore.map` (RPE `src/ui/api.ts`): the lore-map ids (`e-112`) the Author's map showed.
 // - A turn's activated lore as RPE's lore route serves it: `LoreEntry` (`./read.ts`, the lead's ruling of
 //   PlanLore-13's route, 15 Nov), each entry with its lore-map id, Lumiverse's entry and book ids, its

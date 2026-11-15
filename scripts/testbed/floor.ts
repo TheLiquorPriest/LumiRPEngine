@@ -2,14 +2,15 @@
 // plays (`scripts/proof/floor/gate.ts`: `bun scripts/proof/run.ts live floor`, or in the rig); this file
 // sets its fixture up, takes it away, prints a played run's table from its bundle with the runner's
 // standing first (read from `run.json`, never worked out again: PlanGates-42), and counts runs that give
-// a verdict apart from trials. Where `run.json` gives no account of the guidance, the record lays the
+// a verdict apart from trials, a run giving one only where `run.json` says so and the floor's own
+// record of it names no trial and no stop (PlanGates-4-fix2 item 4). Where `run.json` gives no account of the guidance, the record lays the
 // build's shipped tree from RPE's repository at the run's commit and RPH's installed folder, which is no
 // git repository (R-196), and says whether the floor's chat was served it.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { authorEffort, fileRecord, removeFixture, setupFixture } from "./floor-fixture";
-import { floorHead, floorTable, intentCrossCheck, tableText, type FloorRun } from "./floor-measure";
+import { authorEffort, fileRecord, RECORD_FILE, removeFixture, setupFixture } from "./floor-fixture";
+import { floorHead, floorTable, intentCrossCheck, noVerdict, noVerdictKind, tableText, type FloorRun } from "./floor-measure";
 import { readEnv } from "./lib/env";
 import { Lumiverse, savedToken } from "./lib/lumiverse";
 import { RpeReader } from "../proof/lib/read";
@@ -33,7 +34,7 @@ environment, besides what scripts/testbed/README.md lists for every script (setu
   FLOOR_PLAIN_CONNECTION  the Lumiverse connection that calls the model directly, by name
   FLOOR_RPE_URL           RPE's address, as its server listens (rpe status prints it)
   FLOOR_RPE_TOKEN         a token RPE's pages are let in with (rpe key web)
-the fixture's record is kept in LRE_INSTANCE_DIR as floor-fixture.json`;
+the fixture's record is kept in LRE_INSTANCE_DIR as ${RECORD_FILE}; the floor's play finds its fixture by the ids it lists`;
 
 const GATE = "floor";
 const RPE_ROOT = resolve(import.meta.dir, "..", "..");
@@ -45,7 +46,7 @@ function need(name: string): string {
 }
 
 /** The fixture's record of an instance: in the scripts' own folder for it. */
-const recordFile = (instanceDir: string): string => join(instanceDir, "floor-fixture.json");
+const recordFile = (instanceDir: string): string => join(instanceDir, RECORD_FILE);
 
 async function setup(): Promise<void> {
   const env = readEnv();
@@ -75,15 +76,25 @@ export function table(bundle: string, rph: string = installedRph(RPE_ROOT)): str
   const addition = writeRecord(bundle, GATE, buildFrom(RPE_ROOT, rph));
   const run = readRun(bundle);
   const floor = keptRun(bundle);
-  const trial = standingOfRun(run).is === "trial" || floor.trials.length > 0;
-  return tableText(floorTable(floor), [...standingLines(run), ...additionLines(addition), ...floorHead(floor)], trial, intentCrossCheck(floor));
+  const kind = noVerdictKind(floor, standingOfRun(run).is === "trial");
+  return tableText(floorTable(floor), [...standingLines(run), ...additionLines(addition), ...floorHead(floor)], kind, intentCrossCheck(floor));
 }
 
-/** The floor runs under a folder, counted apart by the runner's standing. */
+/** Why the floor's own record of a bundle's run gives it no verdict: the floor's trial or stop it names, or the record that could not be read; empty when it names none. */
+function floorReasons(bundle: string): string[] {
+  try {
+    const none = noVerdict(keptRun(bundle));
+    return none === null ? [] : [`the floor's own ${none.kind}: ${none.why}`];
+  } catch (error) {
+    return [`the floor's own record of the run could not be read: ${error instanceof Error ? error.message : String(error)}`];
+  }
+}
+
+/** The floor runs under a folder, counted apart by the runner's standing and by the floor's own record: a run gives a verdict only where both say so. */
 export function runs(folder: string): string {
   const bundles = readdirSync(folder, { withFileTypes: true })
     .filter((e) => e.isDirectory() && existsSync(join(folder, e.name, "run.json")) && existsSync(join(folder, e.name, GATE)))
-    .map((e) => readRun(join(folder, e.name)));
+    .map((e) => ({ run: readRun(join(folder, e.name)), own: floorReasons(join(folder, e.name)) }));
   const counted = countApart(bundles);
   return [`Floor runs under ${folder}: ${counted.verdicts.length} give a verdict, ${counted.trials.length} are trials.`, ...counted.verdicts.map((run) => `  verdict  ${run}`), ...counted.trials.map((t) => `  trial    ${t.run}: ${t.why}`)].join("\n");
 }
