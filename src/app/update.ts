@@ -16,9 +16,9 @@
 // `update.startWindow` seconds (`rpe up` writes them into it).
 
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import type { JsonValue, Log } from "rp-harness/contract";
 import { isMapping, type Mapping, mergedConfig, type SettingDef, settingIn } from "./setting-list";
 
@@ -73,8 +73,28 @@ export function updateSettings(texts: readonly (string | null)[], log: Log): Upd
   return { restart: value(DEFS.restart) as boolean, versionWaitMs: (value(DEFS.versionWait) as number) * 1000, lookEveryMs: (value(DEFS.lookEvery) as number) * 1000, startTries: value(DEFS.startTries) as number, startWindowMs: (value(DEFS.startWindow) as number) * 1000, checkWaitMs: (value(DEFS.checkWait) as number) * 1000 };
 }
 
-/** `bun <file> --version`, as the build writes it (`rpe <build>`); a file that does not answer within `waitMs` is stopped and counts as not starting. */
+/** A regular expression's text that matches `text` as it is. */
+function literally(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * `words` with every absolute path in them named by its place under the install, the folder the app file
+ * is in (`folders`: as given, and as the system resolves it), and any other by its last part: what a build
+ * says of itself reaches a page, which is told no absolute path.
+ */
+function placedIn(words: string, folders: readonly string[]): string {
+  // A file's URL is its path.
+  let out = words.replace(/file:\/\//g, "");
+  // The longest first, so that a folder inside another's path is not taken for it.
+  for (const folder of [...new Set(folders)].sort((a, b) => b.length - a.length)) out = out.replace(new RegExp(`(^|[\\s'"(=])${literally(`${folder}${sep}`)}`, "g"), "$1");
+  return out.replace(/(^|[\s'"(=])(\/[^\s'"():]+)/g, (_all, before: string, path: string) => `${before}${basename(path)}`);
+}
+
+/** `bun <file> --version`, as the build writes it (`rpe <build>`); a file that does not answer within `waitMs` is stopped and counts as not starting. Why it gave none names no absolute path. */
 export async function versionOf(bun: string, file: string, waitMs: number): Promise<BuildOf> {
+  const install = dirname(file);
+  const folders = [install, await realpath(install).catch(() => install)];
   try {
     const proc = Bun.spawn([bun, file, "--version"], { stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout: waitMs, killSignal: "SIGKILL" });
     const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -84,9 +104,9 @@ export async function versionOf(bun: string, file: string, waitMs: number): Prom
     // Bun ends what it writes of an error with its own version and the machine's: the error's own line says why.
     const lines = (err.trim() || out.trim()).split("\n").map((line) => line.trim());
     const why = lines.find((line) => /^\w*error:/i.test(line)) ?? lines.at(-1) ?? "";
-    return { failed: code === 0 ? `it said "${out.trim()}" for its build` : `it exited with ${code}${why === "" ? "" : `: ${why}`}` };
+    return { failed: placedIn(code === 0 ? `it said "${out.trim()}" for its build` : `it exited with ${code}${why === "" ? "" : `: ${why}`}`, folders) };
   } catch (error) {
-    return { failed: error instanceof Error ? error.message : String(error) };
+    return { failed: placedIn(error instanceof Error ? error.message : String(error), folders) };
   }
 }
 

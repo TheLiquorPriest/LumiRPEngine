@@ -85,7 +85,8 @@ export function servedRpe(): ServedRpe {
       follow(chat: string, listener: LiveListener) {
         const following = live.follow(chat, {
           take: (batch) => {
-            listener.events(batch.events, batch.missed ?? null);
+            // The hub's events, as the socket would carry them to the page.
+            listener.events(batch.events as unknown as Parameters<LiveListener["events"]>[0], batch.missed ?? null);
             return true;
           },
         });

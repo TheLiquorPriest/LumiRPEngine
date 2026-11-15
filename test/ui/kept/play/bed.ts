@@ -2,9 +2,9 @@
 // answers (recorded.ts) and telling the chat's followers what its live hub would, every body going and
 // coming back as JSON, as over a road. Each call is kept, so a test can say what the page asked.
 
+import type { LiveEvent } from "../../../../src/shared/api";
 import type { FrontendToBackend } from "../../../../src/shared/protocol";
 import type { StateView } from "../../../../src/shared/state-view";
-import type { LiveEvent } from "../../../../src/ui/api";
 import { type LiveListener, type RpeClient, RpeError } from "../../../../src/ui/client";
 
 /** A call the page made: its route as the route map keys it, the chat it named, and the body it sent. */
@@ -76,7 +76,7 @@ export function recordedRpe(chat: string, first: StateView): RecordedRpe {
   return rpe;
 }
 
-/** The trace record of a run of the chat beginning or ending, as the turn lane publishes it. */
+/** The trace record of a run of the chat beginning or ending, as the turn lane publishes it: only what the page reads of it, so not a whole record. */
 export function runTrace(kind: "run_started" | "run_ended"): Pick<LiveEvent, "kind" | "data"> {
-  return { kind: "trace", data: { run: "run-1", seq: 1, event: { kind } } };
+  return { kind: "trace", data: { run: "run-1", seq: 1, event: { kind } } } as unknown as Pick<LiveEvent, "kind" | "data">;
 }

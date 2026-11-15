@@ -1,11 +1,32 @@
 // The generated types and the API reference (plan §4.4 l.308) are written by `bun run api` from the route
 // table the server runs, read as the app composes it with nothing listening: the committed files are
-// what it writes now, and a route an area adds reaches both with nothing else edited.
+// what it writes now, a route an area adds reaches both with nothing else edited, the live socket's own
+// messages are in both, and the pages take every type the generated file holds from it alone.
 
+import { Glob } from "bun";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { generateApi, REFERENCE_FILE, TYPES_FILE } from "../../scripts/api/generate";
 import { type Area, route, shape } from "../../src/app";
+
+const ROOT = resolve(import.meta.dir, "../..");
+const GENERATED = join(ROOT, "src/shared/api");
+const UI_API = join(ROOT, "src/ui/api");
+
+/** The names a module's file exports. */
+function exportsOf(file: string): string[] {
+  return [...readFileSync(file, "utf8").matchAll(/^export (?:type |interface |const )([A-Za-z_$][\w$]*)/gm)].map((m) => m[1] ?? "");
+}
+
+/** What a file's import lines take: the module each names (a relative one resolved from the file's folder), and the names taken from it. */
+function importsOf(file: string): { from: string; names: string[] }[] {
+  return [...readFileSync(file, "utf8").matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)";/gm)].map((m) => {
+    const from = m[2] ?? "";
+    const names = (m[1] ?? "").split(",").map((part) => part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0] ?? "");
+    return { from: from.startsWith(".") ? resolve(dirname(file), from) : from, names: names.filter((name) => name !== "") };
+  });
+}
 
 /** Where a committed file first parts from what the table writes now; null where they are the same. */
 function firstDifference(committed: string, now: string): string | null {
@@ -58,5 +79,41 @@ describe("the generated types and the API reference", () => {
     expect(reference).toContain("| Query | `day` (may be left out): `number` |");
     expect(reference).toContain("### `TideTable`\n\nWhen each high and low water comes on a day.");
     expect(before.reference).not.toContain("TideTable");
+  });
+
+  test("the generated types and the reference hold the socket's messages: follow, unfollow, following, events with missed, refused, the 4401 close and the token protocol", async () => {
+    const { types, reference } = await generateApi();
+    expect(types).toContain('export interface LiveAsk {\n  op: "follow" | "unfollow";\n  chat: string;\n}');
+    expect(types).toContain('export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };');
+    expect(types).toContain("export interface LiveMissed {\n  from: number;\n  to: number;\n}");
+    expect(types).toContain("export interface LiveBatch {\n  chat: string;\n  events: LiveEvent[];\n  missed?: LiveMissed;\n}");
+    expect(types).toContain('kind: "handler_failed"; at: number; data: { op: string; error: string } }');
+    for (const line of ['export const LIVE_PATH = "/api/v1/live";', 'export const LIVE_PROTOCOL = "rpe.live";', 'export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";', "export const LIVE_TOKEN_ENDED = 4401;"]) expect(types).toContain(line);
+    const section = reference.slice(reference.indexOf("## The live socket's messages"), reference.indexOf("## Routes not yet declared"));
+    expect(section).toContain("offering the protocol `rpe.live`");
+    expect(section).toContain("as a second protocol: `rpe.token.` and then the token");
+    expect(section).toContain("| A page sends | [`LiveAsk`](#liveask) |");
+    expect(section).toContain("| A page is sent | [`LiveMessage`](#livemessage) |");
+    expect(section).toContain("| Closed | with the code 4401 and the reason ");
+    for (const name of ["LiveAsk", "LiveMessage", "LiveMissed", "LiveBatch", "LiveEvent"]) expect(reference).toContain(`### \`${name}\``);
+    expect(reference).toContain("- [The live socket's messages](#the-live-sockets-messages)");
+  });
+
+  test("a file under src/ui that takes types from the generated file takes none of the same names from rp-harness/contract or from src/ui/api.ts", () => {
+    const generated = new Set(exportsOf(TYPES_FILE));
+    const files = [...new Glob("src/ui/**/*.{ts,tsx}").scanSync(ROOT)].map((file) => join(ROOT, file)).sort();
+    const takers: string[] = [];
+    const doubled: string[] = [];
+    for (const file of files) {
+      const imports = importsOf(file);
+      if (!imports.some((i) => i.from === GENERATED)) continue;
+      takers.push(relative(ROOT, file));
+      for (const i of imports) if (i.from === "rp-harness/contract" || i.from === UI_API) for (const name of i.names.filter((n) => generated.has(n))) doubled.push(`${relative(ROOT, file)} takes ${name} from ${i.from === UI_API ? "src/ui/api.ts" : i.from}`);
+    }
+    expect(doubled).toEqual([]);
+    // Every file that reads the live socket is among them.
+    expect(takers).toEqual(expect.arrayContaining(["src/ui/client.ts", "src/ui/roads.ts", "src/ui/live-model.ts", "src/ui/live-watch.ts", "src/ui/pages/connections.tsx", "src/ui/pages/settings.tsx"]));
+    // Nor does src/ui/api.ts keep a copy of one for a page to take.
+    expect(exportsOf(`${UI_API}.ts`).filter((name) => generated.has(name))).toEqual([]);
   });
 });

@@ -9,9 +9,9 @@
 // why.
 
 import { createStore, type Readable } from "../frontend/store";
-import type { ApiRoutes } from "../shared/api";
+import type { ApiRoutes, LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
-import { type LiveEvent, type MissingPermission, type RouteKey, type Routes, SESSION_PATH } from "./api";
+import { type MissingPermission, type RouteKey, type Routes, SESSION_PATH } from "./api";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
 import { errorWords } from "./words";
 
@@ -153,7 +153,10 @@ function readAnswer(answer: RoadAnswer): unknown {
 
 /**
  * Every item of a paged route, its pages read one after another from the first to the end, each of
- * `limit` items where the query gives one, else of the route's own size.
+ * `limit` items where the query gives one, else of the route's own size. Each page's cursor names the
+ * place after its last item, never a count, so an item that stays in the list while it is walked comes
+ * once, however the list changes between pages; a cursor the route refuses (one from before RPE last
+ * started) ends the walk with RPE's words.
  */
 export async function walk<K extends PagedKey>(client: Pick<RpeClient, "call">, key: K, params: ParamsOf<K>, options: { query?: Omit<NonNullable<CallOptions<K>["query"]>, "cursor"> } = {}): Promise<PageItem<K>[]> {
   const items: PageItem<K>[] = [];

@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type Area, BUILDS_PATH, lineLog, openApp } from "../../src/app";
@@ -162,6 +162,22 @@ test("a file that does not start is never restarted onto, and is reported", asyn
   expect(stand.restarts).toBe(0);
   expect(await statusLine()).toBe(`Builds: RPE runs build ${RUNNING}. Its app file on disk was replaced by one that does not start (it exited with 1: error: half written), so RPE goes on running build ${RUNNING}; the extension is build ${NEW}.`);
   expect(bed.logs.some((line) => line.includes("replaced by one that does not start"))).toBe(true);
+});
+
+test("a build whose app file fails to start is shown by its place under the install, and the reply holds no absolute path", async () => {
+  const running = await rpe();
+  // The new file reaches for a part of the install that is not there, and Bun names the file it came from in full.
+  await writeFile(file, 'import "./parts/tide-table.js";\n');
+  expect((await running.builds.check()).broken).toBe("it exited with 1: error: Cannot find module './parts/tide-table.js' from 'rpe.js'");
+  const reply = JSON.stringify(await statusRoute());
+  expect(reply).toContain("from 'rpe.js'");
+  const absolute = [bed.root, await realpath(bed.root), tmpdir(), await realpath(tmpdir())];
+  expect(absolute.filter((path) => reply.includes(path))).toEqual([]);
+  // A spawn that fails words its error the same: the program it could not start by its last part.
+  const spawned = await versionOf(join(bed.root, "no-such-bun"), file, 10_000);
+  const words = "failed" in spawned ? spawned.failed : "";
+  expect(words).toContain("no-such-bun");
+  expect(absolute.filter((path) => words.includes(path))).toEqual([]);
 });
 
 test("a new build that says its build and does not start on this RPE's data is never restarted onto, rpe status says why, and its check leaves no copy behind", async () => {

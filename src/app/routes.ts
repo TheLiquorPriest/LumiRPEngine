@@ -9,7 +9,8 @@
 // (below), with the group of §4.4 it belongs to and one line saying what it does. A raw route declares
 // what it answers in words (an OpenAI stream, a socket, a file). The server holds each request to its
 // route's declaration before the handler runs, and refuses with 400, in RPE's words, what the route does
-// not take; the handler is given only what was declared, typed by the declaration. The client's types
+// not take; the handler is given only what was declared, typed by the declaration, and the caller's
+// credential only where the route declares that its code reads it. The client's types
 // and the API reference (`docs/api.md`) are written from the same declarations (`bun run api`,
 // `scripts/api/`), and a test holds every reply to its declaration, so no route's shape is kept by hand
 // anywhere else.
@@ -367,34 +368,57 @@ export interface PageSizes {
  * `sizes` gives the page's size when the caller names none and the most it may name, each from a setting
  * of the route's own area; absent, the route hands the caller's limit to the list it reads (one of RPH's),
  * which holds it to its own.
+ *
+ * What a cursor is. A list is read in its own order, and every item has its place in that order (an id, a
+ * time and an id: whatever the list is ordered by), never a count of items before it. The handler is given
+ * `after`, the place after which its page starts (absent for the first page), and answers its items and,
+ * as `next`, the place of its last item, or null at the end. The server seals that place to the route
+ * and the list it was given for (the route's params), with a key of its own start, and hands the page the
+ * seal as its cursor: a cursor this route did not give for this list (another route's, another list's,
+ * one changed, one from before the server last started) is refused with 400 before the handler runs. So
+ * a walk over a list that changes between its pages neither repeats nor skips an item that stayed.
  */
 export interface Paging<P extends string = string, A extends Access = Access> {
   readonly sizes?: (at: { readonly params: PathParams<P>; readonly user: UserFor<A> }) => PageSizes | Promise<PageSizes>;
 }
 
-/** What a paged route's handler finds in its query beside what it declared: the size asked for (with `sizes`, the default when none was), and where to start. */
-type PageQuery<G> = G extends { readonly sizes: (...args: never[]) => unknown } ? { limit: number; cursor?: string } : { limit?: number; cursor?: string };
+/** What a paged route's handler finds in its query beside what it declared: the size asked for (with `sizes`, the default when none was), and the place its page starts after. */
+type PageQuery<G> = G extends { readonly sizes: (...args: never[]) => unknown } ? { limit: number; after?: string } : { limit?: number; after?: string };
 type QueryOut<Q extends QueryFields, G> = [G] extends [Paging] ? Flat<FieldsOut<Q> & PageQuery<G>> : FieldsOut<Q>;
 
-/** What a declared route's handler is given: what its declaration takes, read and typed, and nothing else of the request. */
-export interface DeclaredCall<P extends string, A extends Access, Q extends QueryFields, B extends AnyShape | undefined, G> {
+/**
+ * What a declared route's handler is given: what its declaration takes, read and typed, and nothing else
+ * of the request; the caller's credential only where the route declares that its code reads it.
+ */
+export type DeclaredCall<P extends string, A extends Access, Q extends QueryFields, B extends AnyShape | undefined, G, C extends true | undefined = undefined> = {
   readonly params: PathParams<P>;
   readonly query: QueryOut<Q, G>;
   /** The body, held to its declaration; undefined for a route that takes none. */
   readonly body: B extends AnyShape ? Infer<B> : undefined;
   readonly user: UserFor<A>;
-  /** The credential the request carried (its bearer, or a page's socket token), which the server has held to the route's access. */
-  readonly credential: string | null;
   /** Aborts when the caller goes away. */
   readonly signal: AbortSignal;
-}
+} & (C extends true
+  ? {
+      /** The credential the request carried (its bearer, or a page's socket token), which the server has held to the route's access. */
+      readonly credential: string | null;
+    }
+  : Record<never, never>);
 
 /**
  * A route in the form that answers in JSON: its group, what it does, its query, its body and its reply.
  * The handler returns the reply (sent with 200; nothing, for a reply of `shape.nothing()`, with 204), or
  * throws a `RouteError` to refuse.
  */
-export interface DeclaredRoute<P extends string = string, A extends Access = Access, Q extends QueryFields = QueryFields, B extends AnyShape | undefined = AnyShape | undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = Paging<P, A> | undefined> {
+export interface DeclaredRoute<
+  P extends string = string,
+  A extends Access = Access,
+  Q extends QueryFields = QueryFields,
+  B extends AnyShape | undefined = AnyShape | undefined,
+  R extends AnyShape = AnyShape,
+  G extends Paging<P, A> | undefined = Paging<P, A> | undefined,
+  C extends true | undefined = true | undefined,
+> {
   readonly method: Method;
   readonly path: P;
   readonly access: A;
@@ -409,7 +433,9 @@ export interface DeclaredRoute<P extends string = string, A extends Access = Acc
   readonly body?: B;
   readonly reply: R;
   readonly paged?: G;
-  readonly handle: (call: DeclaredCall<P, A, Q, B, G>) => Infer<R> | Promise<Infer<R>>;
+  /** Its code reads the caller's credential (to say whose it is); absent, it is handed none. */
+  readonly credential?: C;
+  readonly handle: (call: DeclaredCall<P, A, Q, B, G, C>) => Infer<R> | Promise<Infer<R>>;
 }
 
 /** What a raw route's handler is given besides the request. */
@@ -473,12 +499,12 @@ export interface RawRoute<P extends string = string, A extends Access = Access> 
 }
 
 /** A route in the form, of any types. */
-export type Declared = DeclaredRoute<any, any, any, any, any, any> | DeclaredRawRoute<any, any>;
+export type Declared = DeclaredRoute<any, any, any, any, any, any, any> | DeclaredRawRoute<any, any>;
 // A table holds routes of every shape; each keeps its own types where it is written.
 export type Route = Declared | JsonRoute<any, any, any, any> | RawRoute<any, any>;
 
 /** Writes a JSON route in the form, keeping its types; a route written before the form is taken as it was. */
-export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G>): DeclaredRoute<P, A, Q, B, R, G>;
+export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined, C extends true | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G, C>): DeclaredRoute<P, A, Q, B, R, G, C>;
 export function route<const P extends string, const A extends Access, B = undefined, R = unknown>(def: JsonRoute<P, A, B, R>): JsonRoute<P, A, B, R>;
 export function route(def: Route): Route {
   return def;
@@ -497,9 +523,9 @@ export function isDeclared(r: Route): r is Declared {
 }
 
 /** The reply a JSON route gives, for a client. */
-export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any> ? Infer<R> : T extends JsonRoute<any, any, any, infer R> ? Exclude<Awaited<R>, Response> : never;
+export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any, any> ? Infer<R> : T extends JsonRoute<any, any, any, infer R> ? Exclude<Awaited<R>, Response> : never;
 /** The body a JSON route takes, for a client. */
-export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : T extends JsonRoute<any, any, infer B, any> ? B : never;
+export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : T extends JsonRoute<any, any, infer B, any> ? B : never;
 
 /** A refusal a route's handler throws: its status and the words the caller is shown. */
 export class RouteError extends Error {
@@ -515,7 +541,7 @@ export class RouteError extends Error {
 
 /** A route's declaration as the table lists it: what a JSON route takes and answers, or what a raw route answers. */
 export type RouteDeclaration =
-  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean }
+  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean; readonly credential: boolean }
   | { readonly group: RouteGroup; readonly does: string; readonly answers: string };
 
 /** A route as the table lists it. */
@@ -592,9 +618,10 @@ function declarationProblem(r: Declared): string | null {
     if (r.body.kind === "nothing") return "a route that takes no body leaves its body out.";
   }
   if (!isShape(r.reply)) return "it declares its reply as a shape.";
+  if (r.credential !== undefined && r.credential !== true) return "credential is true where its code reads the caller's token, and left out where it does not.";
   if (r.paged !== undefined) {
     if (r.method !== "GET") return "a route that pages is a GET.";
-    if (r.query !== undefined && (Object.hasOwn(r.query, "limit") || Object.hasOwn(r.query, "cursor"))) return "a route that pages takes limit and cursor already: its query declares neither.";
+    if (r.query !== undefined && (Object.hasOwn(r.query, "limit") || Object.hasOwn(r.query, "cursor") || Object.hasOwn(r.query, "after"))) return "a route that pages takes limit and cursor already, and its handler is given after from the cursor: its query declares none of them.";
     if (r.reply.kind !== "object" || r.reply.page !== true) return "a route that pages answers a page (shape.page).";
   }
   return null;
@@ -604,7 +631,7 @@ function declarationProblem(r: Declared): string | null {
 function declarationOf(r: Route): RouteDeclaration | null {
   if (!isDeclared(r)) return null;
   if ("answers" in r) return { group: r.group, does: r.does, answers: r.answers };
-  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined };
+  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined, credential: r.credential === true };
 }
 
 export class RouteTable {

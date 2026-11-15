@@ -7,8 +7,9 @@
 // records (how the turn stands, its moments, what it spent) changes then. What the page is shown changes
 // at most once each `renderMs`, however fast the events come, but a read's result shows at once.
 
+import type { LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
-import type { LiveEvent, TurnDetail } from "./api";
+import type { TurnDetail } from "./api";
 import type { RpeClient } from "./client";
 import { applyLive, applyRead, EMPTY_LIVE, holeIn, lastRunOf, type LiveModel } from "./live-model";
 import type { Timers } from "./roads";
@@ -47,7 +48,9 @@ function pruned(model: LiveModel, keep: number): LiveModel {
 
 /** The run a live event is about: every kind a run publishes names it. */
 function runOfEvent(event: LiveEvent): string | null {
-  return isRecord(event.data) && typeof event.data.run === "string" ? event.data.run : null;
+  // Read as whatever came, the declared kinds' data or not.
+  const data: unknown = event.data;
+  return isRecord(data) && typeof data.run === "string" ? data.run : null;
 }
 
 /** Whether a live event is a run of its turn beginning or ending. */

@@ -5,8 +5,9 @@
 // (client.ts) and the page says which.
 
 import type { Clock } from "rp-harness/contract";
+import { type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, TOKEN_PROTOCOL_PREFIX } from "../shared/api";
 import { isRecord } from "../shared/json";
-import { type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, type MissingPermission, STATUS_PATH, TOKEN_PROTOCOL_PREFIX } from "./api";
+import { type MissingPermission, STATUS_PATH } from "./api";
 import { errorWords } from "./words";
 
 /** What a road hands on from RPE's live hub: a chat's events, a loss the page must read past, RPE's refusal (or why the live updates stopped), or the end of the credential the page holds, with none to take its place. */

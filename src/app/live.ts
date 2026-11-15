@@ -10,24 +10,24 @@
 // it is coalesced by; the hub takes no other kind, and the pages' types and the API reference are
 // written from the same declaration (`bun run api`).
 //
-// The socket's messages, as JSON:
-// - from the page: `{"op":"follow","chat":…}`, `{"op":"unfollow","chat":…}`;
-// - to the page: `{"type":"following","chat":…,"seq":…}` (the chat's last number when following
-//   began), `{"type":"events","chat":…,"events":[…],"missed":{"from":…,"to":…}}` (`missed` only when
-//   events between those numbers were dropped), `{"type":"refused","message":…}`.
-// A page that cannot set a header gives its token as a protocol: `["rpe.live", "rpe.token.<token>"]`.
-// A socket follows at most `live.follows` chats, and holds only while the token it opened with does:
-// once that runs out or is replaced, RPE closes it with code 4401 and a reason the page can show.
+// The socket itself is declared once too (`LIVE_SOCKET`): where it is, the protocol a page offers, how a
+// page that cannot set a header gives its token (as a second protocol, `rpe.token.<token>`), what a page
+// sends (follow or unfollow a chat), what it is sent (that following began, a chat's events with what was
+// missed, or a refusal), and the code and reason RPE closes it with once the token it opened with has run
+// out or been replaced. The server reads what a page sends by that declaration, and the generated types
+// and the reference are written from it. A socket follows at most `live.follows` chats.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
-import { type AnyShape, type Exactly, type Holds, type Infer, rawRoute, shape } from "./routes";
+import { type AnyShape, type Exactly, type Holds, type Infer, problemsOf, rawRoute, shape } from "./routes";
 
 export const LIVE_PATH = "/api/v1/live";
 export const LIVE_PROTOCOL = "rpe.live";
 export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";
+/** The close code a page is given when the credential its socket opened with no longer holds (a code of an application's own: 4000-4999). */
+export const LIVE_TOKEN_ENDED = 4401;
+const TOKEN_ENDED_WORDS = "The page's token has run out or was replaced: open the live socket again with a new one.";
 
 // ---------------------------------------------------------------- the kinds the socket carries
 
@@ -184,6 +184,61 @@ export type LiveKind = keyof typeof LIVE_KINDS;
 /** What an event of a kind carries. */
 export type LiveData<K extends LiveKind> = Infer<(typeof LIVE_KINDS)[K]["data"]>;
 
+// ---------------------------------------------------------------- the socket's own messages
+
+const missedRange = shape.named(
+  "LiveMissed",
+  "The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than live.queueEvents holds for it.",
+  shape.object({ from: N, to: N }),
+);
+/** One event of each kind as the socket sends it: the kind's data, and the key only where its kind is declared with one. */
+const liveEvent = shape.named(
+  "LiveEvent",
+  "One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.",
+  shape.union(
+    ...Object.entries(LIVE_KINDS).map(([kind, declared]: [string, LiveKindDeclaration]) => shape.object({ chat: T, seq: N, kind: shape.literal(kind), ...(declared.key === undefined ? {} : { key: shape.literal(declared.key) }), at: N, data: declared.data })),
+  ),
+);
+
+/** The live socket as a page meets it. */
+export interface LiveSocketDeclaration {
+  readonly path: string;
+  /** The protocol a page offers to open it. */
+  readonly protocol: string;
+  /** A page that cannot set a header offers its token as a second protocol: this, then the token. */
+  readonly tokenProtocolPrefix: string;
+  /** How RPE closes a page's socket once the token it opened with has run out or been replaced. */
+  readonly tokenEnded: { readonly code: number; readonly reason: string };
+  /** What a page sends. */
+  readonly asks: AnyShape;
+  /** What a page is sent. */
+  readonly answers: AnyShape;
+  /** A chat's events in order, as an `events` message carries them and the relay hands them on. */
+  readonly batch: AnyShape;
+}
+
+/** The live socket, declared once: the server reads what a page sends by it, and the generated types and the reference are written from it. */
+export const LIVE_SOCKET = {
+  path: LIVE_PATH,
+  protocol: LIVE_PROTOCOL,
+  tokenProtocolPrefix: TOKEN_PROTOCOL_PREFIX,
+  tokenEnded: { code: LIVE_TOKEN_ENDED, reason: TOKEN_ENDED_WORDS },
+  asks: shape.named("LiveAsk", "What a page sends on the live socket: to follow a chat's events from its next one, or to stop.", shape.object({ op: shape.oneOf("follow", "unfollow"), chat: shape.text({ blank: false }) })),
+  answers: shape.named(
+    "LiveMessage",
+    "What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent.",
+    shape.union(
+      shape.object({ type: shape.literal("following"), chat: T, seq: N }),
+      shape.object({ type: shape.literal("events"), chat: T, events: shape.list(liveEvent), missed: opt(missedRange) }),
+      shape.object({ type: shape.literal("refused"), message: T }),
+    ),
+  ),
+  batch: shape.named("LiveBatch", "A chat's events in order, and the numbers of those the hub dropped before them for a page that fell behind: an events message without its type, as the relay hands it on.", shape.object({ chat: T, events: shape.list(liveEvent), missed: opt(missedRange) })),
+} as const satisfies LiveSocketDeclaration;
+
+/** What the live socket sends a page, typed by its declaration. */
+type LiveMessage = Infer<typeof LIVE_SOCKET.answers>;
+
 export interface LiveEvent {
   chat: string;
   /** Rises by one with each of the chat's events, from 1. */
@@ -288,6 +343,11 @@ export class Following {
     if (!this.reader.take(batch, messageOf(this.chat, held, missed))) this.full = true;
   }
 
+  /** Whether the reader fell behind: the chat's events are held for it until it is ready again. */
+  get behind(): boolean {
+    return this.full && !this.stopped;
+  }
+
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
@@ -350,18 +410,26 @@ export class LiveHub {
   readers(chat: string): number {
     return this.followers.get(chat)?.size ?? 0;
   }
+
+  /** How many of `chat`'s readers fell behind, so that the hub holds its events for them until each is ready again. */
+  behind(chat: string): number {
+    let count = 0;
+    for (const following of this.followers.get(chat) ?? []) if (following.behind) count++;
+    return count;
+  }
 }
 
-/** What a live socket keeps: the chats it follows, the credential it opened with, and the timer that closes it when that runs out. */
+/**
+ * What a live socket keeps: the chats it follows, the credential it opened with, the timer that closes it
+ * when that runs out, and the catch-up it has coming on the event loop's next turn.
+ */
 export interface LiveSocketData {
   follows: Map<string, Following>;
   credential: string | null;
   ends: Timer | undefined;
+  catchUp: ReturnType<typeof setImmediate> | undefined;
 }
 
-/** The close code a page is given when the credential its socket opened with no longer holds (a code of an application's own: 4000-4999). */
-export const LIVE_TOKEN_ENDED = 4401;
-const TOKEN_ENDED_WORDS = "The page's token has run out or was replaced: open the live socket again with a new one.";
 /** Fixed: the longest delay a timer takes; a later end is looked at again then. */
 const LONGEST_TIMER_MS = 2_147_483_647;
 
@@ -375,8 +443,13 @@ export interface LiveSocketOptions {
   now(): number;
 }
 
+/** Sends a page one of the socket's own messages, as its declaration holds them. */
+function sendTo(ws: ServerWebSocket<LiveSocketData>, message: LiveMessage): void {
+  ws.send(JSON.stringify(message));
+}
+
 function refuse(ws: ServerWebSocket<LiveSocketData>, message: string): void {
-  ws.send(JSON.stringify({ type: "refused", message }));
+  sendTo(ws, { type: "refused", message });
 }
 
 /** The server's socket handlers for the live hub. A socket is held to the credential it opened with: once that no longer holds, it is closed, and sent nothing more. */
@@ -389,7 +462,7 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
       ws.data.ends = undefined;
       for (const following of ws.data.follows.values()) following.stop();
       ws.data.follows.clear();
-      ws.close(LIVE_TOKEN_ENDED, TOKEN_ENDED_WORDS);
+      ws.close(LIVE_SOCKET.tokenEnded.code, LIVE_SOCKET.tokenEnded.reason);
       return false;
     }
     if (until !== null && ws.data.ends === undefined) {
@@ -416,13 +489,15 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
         refuse(ws, "Messages on the live socket are JSON.");
         return;
       }
-      if (!isRecord(asked) || (asked.op !== "follow" && asked.op !== "unfollow") || typeof asked.chat !== "string" || asked.chat === "") {
+      if (problemsOf(LIVE_SOCKET.asks, asked).length > 0) {
         refuse(ws, 'Send {"op":"follow","chat":"<chat id>"} or {"op":"unfollow","chat":"<chat id>"}.');
         return;
       }
-      const chat = asked.chat;
+      // Held to the declaration just above.
+      const ask = asked as Infer<typeof LIVE_SOCKET.asks>;
+      const chat = ask.chat;
       const follows = ws.data.follows;
-      if (asked.op === "unfollow") {
+      if (ask.op === "unfollow") {
         follows.get(chat)?.stop();
         follows.delete(chat);
         return;
@@ -432,16 +507,27 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
         refuse(ws, `This socket follows ${follows.size} chats, the most one socket may (live.follows in RPE's config): unfollow one first.`);
         return;
       }
-      ws.send(JSON.stringify({ type: "following", chat, seq: hub.seq(chat) }));
+      sendTo(ws, { type: "following", chat, seq: hub.seq(chat) });
       // Bun takes a message it cannot write at once and says so (-1); 0 means the socket is going.
       follows.set(chat, hub.follow(chat, { take: (_batch, text) => holding(ws) && ws.send(text) > 0 }));
     },
     drain(ws) {
-      for (const following of ws.data.follows.values()) following.ready();
+      // A page that fell behind is caught up once its socket has sent everything it held, so the hub, not the
+      // socket, holds what came meanwhile, to its own bound, with what it dropped named. And never from inside
+      // this callback: Bun 1.4.0 does not send what is sent here once that backs up, when the socket's first
+      // backlog came from a send outside any socket handler, as every publish of a turn's is; sent on the event
+      // loop's next turn, it goes whatever made the backlog.
+      if (ws.data.catchUp !== undefined || ws.getBufferedAmount() > 0) return;
+      ws.data.catchUp = setImmediate(() => {
+        ws.data.catchUp = undefined;
+        for (const following of ws.data.follows.values()) following.ready();
+      });
     },
     close(ws) {
       clearTimeout(ws.data.ends);
       ws.data.ends = undefined;
+      clearImmediate(ws.data.catchUp);
+      ws.data.catchUp = undefined;
       for (const following of ws.data.follows.values()) following.stop();
       ws.data.follows.clear();
     },

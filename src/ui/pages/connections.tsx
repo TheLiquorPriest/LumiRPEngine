@@ -4,9 +4,8 @@
 // model shows its limits as RPH uses them and where each comes from, and the form sets the user's own in
 // their place. What the layer or the provider refuses is shown in its own words.
 
-import type { ConnectionAuth, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { ConnectionShown, ConnectionsShown, ConnectionTested, SaveConnection } from "../../shared/api";
+import type { ConnectionAuth, ConnectionShown, ConnectionsShown, ConnectionTested, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer, SaveConnection } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";

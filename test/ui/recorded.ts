@@ -5,8 +5,8 @@
 // the chat before the Author's closing calls. Every name, id and number here is made up.
 
 import type { AgentRef, TraceDelta, TraceEvent, TraceRecord, Usage } from "rp-harness/contract";
-import type { ChatList, LiveEvent, ReplyPiece, Reflection, TurnDetail, TurnList, TurnRun, TurnSummary, ValuesShown, WorldAnswer, WorldNode } from "../../src/ui/api";
-import type { JsonValue } from "../../src/shared/json";
+import type { LiveEvent, ReplyPiece } from "../../src/shared/api";
+import type { ChatList, Reflection, TurnDetail, TurnList, TurnRun, TurnSummary, ValuesShown, WorldAnswer, WorldNode } from "../../src/ui/api";
 
 export const USER = "user-1";
 export const CHAT = "chat-calder";
@@ -73,8 +73,8 @@ function record(): LiveEvent[] {
   const events: LiveEvent[] = [];
   let seq = 0;
   let now = T0;
-  const push = (kind: string, data: unknown): void => {
-    events.push({ chat: CHAT, seq: events.length + 1, kind, at: now, data: data as JsonValue });
+  const push = (kind: LiveEvent["kind"], data: unknown): void => {
+    events.push({ chat: CHAT, seq: events.length + 1, kind, at: now, data } as LiveEvent);
   };
   const trace = (ms: number, agent: AgentRef, event: TraceEvent, parent?: string): void => {
     now += ms;
@@ -180,8 +180,8 @@ function continued(): LiveEvent[] {
   const events: LiveEvent[] = [];
   let seq = 0;
   let now = (RECORDS.at(-1)?.at ?? T0) + 30_000;
-  const push = (kind: string, data: unknown): void => {
-    events.push({ chat: CHAT, seq: RECORDED.length + events.length + 1, kind, at: now, data: data as JsonValue });
+  const push = (kind: LiveEvent["kind"], data: unknown): void => {
+    events.push({ chat: CHAT, seq: RECORDED.length + events.length + 1, kind, at: now, data } as LiveEvent);
   };
   const trace = (ms: number, event: TraceEvent): void => {
     now += ms;

@@ -21,9 +21,8 @@
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { ConnectionView, ModelLimit, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
-import type { ConnectionShown, SaveConnection } from "../../../src/shared/api";
-import type { JsonValue } from "../../../src/shared/json";
-import type { ExtensionStatus, LiveEvent, ReplyPiece, TurnDetail, TurnRun } from "../../../src/ui/api";
+import type { ConnectionShown, LiveEvent, ReplyPiece, SaveConnection } from "../../../src/shared/api";
+import type { ExtensionStatus, TurnDetail, TurnRun } from "../../../src/ui/api";
 import { buildAnswer, buildControl } from "./mock-build";
 import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
 import { migrationAnswer, migrationControl } from "./mock-migration";
@@ -91,7 +90,7 @@ function retarget(event: LiveEvent, play: Playing, shift: number): LiveEvent {
     const delta = event.data as unknown as TraceDelta;
     data = { ...delta, run: play.run, at: delta.at + shift };
   } else if (event.kind === "reply") data = { ...(event.data as unknown as ReplyPiece), run: play.run };
-  return { chat: play.chat, seq, kind: event.kind, at: event.at + shift, data: data as JsonValue };
+  return { chat: play.chat, seq, kind: event.kind, at: event.at + shift, data } as LiveEvent;
 }
 
 /** Plays `recording` for the play from `begins`, in real time. */
@@ -186,7 +185,7 @@ function stop(chat: string, run: string): boolean {
   const record: TraceRecord = { seq: (last?.seq ?? 0) + 1, run: p.run, scope: { user: "user-1", chat, session: "session-4", turn: p.run }, at: Date.now(), agent: { id: "a1", definition: "author" }, event: { kind: "run_ended", outcome: { status: "stopped", released: false, usage: playedTurn(p).usage, error: { code: "stopped" } } } };
   const seq = (seqs.get(chat) ?? 0) + 1;
   seqs.set(chat, seq);
-  const event: LiveEvent = { chat, seq, kind: "trace", at: record.at, data: record as unknown as JsonValue };
+  const event: LiveEvent = { chat, seq, kind: "trace", at: record.at, data: record };
   p.events.push(event);
   publish(event);
   return true;

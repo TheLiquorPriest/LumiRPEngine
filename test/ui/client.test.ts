@@ -6,7 +6,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { h } from "preact";
 import { pageRoad } from "../../src/ext/page";
-import type { ExtensionStatus, LiveEvent } from "../../src/ui/api";
+import type { LiveEvent } from "../../src/shared/api";
+import type { ExtensionStatus } from "../../src/ui/api";
 import { type ClientState, createClient, extensionConnector, KEY_LET_GO, type LiveListener, pathOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";

@@ -5,8 +5,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { createStore } from "../../src/frontend/store";
-import type { JsonValue } from "../../src/shared/json";
-import type { LiveEvent, MissingPermission, RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
+import type { LiveEvent } from "../../src/shared/api";
+import type { MissingPermission, RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
 import type { ClientState, LiveListener, RpeClient } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE, type RunNode } from "../../src/ui/live-model";
 import { watchChat, watchTurn, type Watched } from "../../src/ui/live-watch";
@@ -194,7 +194,7 @@ describe("watching one turn, for its page", () => {
     caught.answer(turnAt(30, recordsIn(30) + 1));
     await flush();
     // Its events, and one of another turn of the chat.
-    const elsewhere = { ...(RECORDED[0] as LiveEvent), seq: 9_999, data: { ...(RECORDED[0]?.data as object), run: "turn-99" } as JsonValue };
+    const elsewhere = { ...(RECORDED[0] as LiveEvent), seq: 9_999, data: { ...(RECORDED[0]?.data as object), run: "turn-99" } } as LiveEvent;
     client.listener().events([...RECORDED.slice(30, 60), elsewhere], null);
     timers.advance(50);
     expect(seen.at(-1)?.model.runs.map((r) => r.run)).toEqual([RUN]);

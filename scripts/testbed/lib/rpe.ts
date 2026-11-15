@@ -4,7 +4,8 @@
 // trace keeps no record of when a call's text began. Address and token come from the environment.
 
 import type { TraceDelta } from "rp-harness/contract";
-import type { LiveBatch, TurnDetail, TurnList, TurnSummary } from "../../../src/ui/api";
+import type { LiveBatch } from "../../../src/shared/api";
+import type { TurnDetail, TurnList, TurnSummary } from "../../../src/ui/api";
 
 export class RpeApi {
   constructor(

@@ -5,6 +5,7 @@
 
 import type { AnyShape, FieldShape, LiveKindDeclaration, Method, QueryFields, RouteGroup, RouteInfo } from "../../src/app";
 import { METHODS, ROUTE_GROUPS } from "../../src/app";
+import { LIVE_SOCKET } from "../../src/app/live";
 
 /** The table as the generator reads it: every route, every live kind, and the server's own body limits as shipped. */
 export interface Table {
@@ -199,12 +200,27 @@ function queryType(entry: JsonEntry, names: Names): string {
   return parts.length === 0 ? "Record<string, never>" : `{ ${parts.join("; ")} }`;
 }
 
-const TYPES_HEAD = `// RPE's API as its route table declares it: every route's params, query, body and reply, and every kind
-// the live socket carries. Written by \`bun run api\` (scripts/api/) from the table the server runs, for
-// every road to RPE: both shells, the command line, the MCP server. Do not edit it: a route's
-// declaration is where a type changes, and \`bun run api\` writes this again. The reference for people
-// is docs/api.md, written beside it.
+const TYPES_HEAD = `// RPE's API as its route table declares it: every route's params, query, body and reply, every kind the
+// live socket carries, and the live socket's own messages and constants. Written by \`bun run api\`
+// (scripts/api/) from the table the server runs, for every road to RPE: both shells, the command line,
+// the MCP server. Do not edit it: a route's declaration is where a type changes, and \`bun run api\`
+// writes this again. The reference for people is docs/api.md, written beside it.
 `;
+
+/** The live socket's constants as the generated types write them: where it is, how a page opens it and gives its token, and how RPE closes it. */
+function socketConstants(): string[] {
+  const s = LIVE_SOCKET;
+  return [
+    "/** Where a page opens the live socket, as a WebSocket. */",
+    `export const LIVE_PATH = ${JSON.stringify(s.path)};`,
+    "/** The protocol a page offers to open the live socket. */",
+    `export const LIVE_PROTOCOL = ${JSON.stringify(s.protocol)};`,
+    "/** A page that cannot set the Authorization header offers its token as a second protocol: this, then the token. */",
+    `export const TOKEN_PROTOCOL_PREFIX = ${JSON.stringify(s.tokenProtocolPrefix)};`,
+    `/** The code RPE closes a page's live socket with once the token it opened with has run out or been replaced, with the reason ${JSON.stringify(s.tokenEnded.reason)} */`,
+    `export const LIVE_TOKEN_ENDED = ${s.tokenEnded.code};`,
+  ];
+}
 
 /** The generated types: one file that imports nothing, so the pages and the command line may both import it. */
 export function renderTypes(table: Table): string {
@@ -216,6 +232,8 @@ export function renderTypes(table: Table): string {
   });
   const rawLines = raw.map((e) => [`  /** ${e.does} */`, `  ${JSON.stringify(routeKey(e.info))}: {`, `    params: ${paramsType(e.info)};`, `    answers: ${JSON.stringify(e.answers)};`, "  };"].join("\n"));
   const kindLines = Object.entries(table.kinds).map(([kind, k]) => `  /** ${k.does}${k.key === undefined ? "" : ` A newer one replaces one a page has not taken yet (key "${k.key}").`} */\n  ${key(kind)}: ${names.ts(k.data)};`);
+  // The socket's own messages are named shapes: written once, with the rest, below.
+  for (const message of [LIVE_SOCKET.asks, LIVE_SOCKET.answers, LIVE_SOCKET.batch]) names.ts(message);
   const out = [
     TYPES_HEAD,
     "/** Any JSON value. */",
@@ -231,8 +249,8 @@ export function renderTypes(table: Table): string {
     "/** Every kind a chat's live socket carries, and what each carries. */",
     `export interface LiveKinds {\n${kindLines.join("\n")}\n}`,
     "",
-    "/** One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds above. */",
-    "export type LiveEvent = { [K in keyof LiveKinds]: { chat: string; seq: number; kind: K; key?: string; at: number; data: LiveKinds[K] } }[keyof LiveKinds];",
+    "// The live socket's own constants. What a page sends on it is a LiveAsk, and what it is sent a LiveMessage (above).",
+    ...socketConstants(),
     "",
   ];
   return out.join("\n");
@@ -251,10 +269,10 @@ function typeCell(s: AnyShape, names: Names): string {
   return s.name === undefined ? `\`${text}\`` : `[\`${text}\`](#${slug(text)})`;
 }
 
-/** The largest body a route takes: none for a route in the form that declares none, or for a GET or a DELETE. */
+/** The largest body a route takes: none on a GET; none on a DELETE that answers in JSON, nor on a route in the form that declares none. */
 function bodyLimit(info: RouteInfo, table: Table): string {
   const declared = info.declared;
-  if (info.method === "GET" || info.method === "DELETE" || (declared !== null && "reply" in declared && declared.body === null)) return "takes no body";
+  if (info.method === "GET" || (info.method === "DELETE" && !info.raw) || (declared !== null && "reply" in declared && declared.body === null)) return "takes no body";
   if (info.maxBody !== null) return `at most ${sizeWords(info.maxBody)}`;
   return info.access === "provider" ? `the server's \`server.providerBodyBytes\` (${sizeWords(table.providerBodyBytes)} as shipped)` : `the server's \`server.bodyBytes\` (${sizeWords(table.bodyBytes)} as shipped)`;
 }
@@ -274,16 +292,34 @@ function queryCell(entry: JsonEntry, names: Names): string {
 
 const REFERENCE_HEAD = `# RPE's API
 
-Every route RPE's server holds, as its route table declares it, and every kind its live socket carries. \`bun run api\` (\`scripts/api/\`) writes this page and \`src/shared/api/index.ts\`, the types the pages, the command line and the MCP server call RPE with, from the table the server runs. A route changes in its own declaration, and both are written again from it; a test fails while either is behind the table. Do not edit this page by hand.
+Every route RPE's server holds, as its route table declares it, every kind its live socket carries, and the live socket's own messages. \`bun run api\` (\`scripts/api/\`) writes this page and \`src/shared/api/index.ts\`, the types the pages, the command line and the MCP server call RPE with, from the table the server runs. A route changes in its own declaration, and both are written again from it; a test fails while either is behind the table. Do not edit this page by hand.
 
 Who may call a route: **public**, anyone who reaches RPE; **page**, a page of the Lumiverse user this RPE belongs to, with a page token or the web UI's token; **provider**, Lumiverse on RPE's connection, with the provider key; **extension**, the light extension, with its registration key.
 
-A request a route does not take (a name or a value in its query that it does not declare, a body it does not take) is refused with 400, and the answer's \`error\` says why, before the route's code runs. A refusal is \`{ "error": "<why>" }\` on every route but the provider endpoint's, which answers as OpenAI does.
+Every request's body is held to its route's limit, whatever its method: one over it is refused with 413. A GET takes no body on any route, nor does a DELETE on a route that answers in JSON, so either is refused with 400 when it carries one. A route in the form that answers in JSON is held to its declaration before its code runs: a name or a value in its query that it does not declare, or a body it does not take, is refused with 400, and the answer's \`error\` says why. A route that answers in its own way (the provider endpoint, the extension's routes, the live socket, the web UI's files, and the raw routes not yet declared) is handed the request within its body limit, reads its query and its body itself, and says in its own words what it does not take. A route not yet declared that answers in JSON, listed at the end, is held to its access and its body limit, and to no declaration yet. A refusal is \`{ "error": "<why>" }\` on every route but the provider endpoint's, which answers as OpenAI does.
 
-A route that pages takes \`limit\` and \`cursor\` in its query and answers \`{ items, next }\`: \`next\` is where the next page starts, given back as \`cursor\`, and null at the end.
+A route that pages takes \`limit\` and \`cursor\` in its query and answers \`{ items, next }\`: \`next\` is where the next page starts, given back as \`cursor\`, and null at the end. A cursor names the place after the last item a page gave, by that item's place in the list's own order, never by a count of items, so a walk over a list that changes between its pages neither repeats nor skips an item that stayed. A route refuses with 400 a cursor it did not give for that list: another route's, another list's, one changed, or one given before RPE last started.
 `;
 
-/** The API reference: each route under its §4.4 group, then the live socket's kinds, then every named type. */
+/** The live socket's own messages: how a page opens it and gives its token, what it sends and is sent, and how RPE closes it. */
+function socketSection(names: Names): string[] {
+  const s = LIVE_SOCKET;
+  return [
+    "## The live socket's messages",
+    "",
+    `A page opens \`${s.path}\` as a WebSocket, offering the protocol \`${s.protocol}\`. A page that cannot set the Authorization header offers its token as a second protocol: \`${s.tokenProtocolPrefix}\` and then the token. Every message, either way, is JSON.`,
+    "",
+    "| | |",
+    "|---|---|",
+    `| A page sends | ${typeCell(s.asks, names)} |`,
+    `| A page is sent | ${typeCell(s.answers, names)} |`,
+    `| A chat's events, as the relay hands them on | ${typeCell(s.batch, names)} |`,
+    `| Closed | with the code ${s.tokenEnded.code} and the reason "${s.tokenEnded.reason}", once the token it opened with has run out or been replaced |`,
+    "",
+  ];
+}
+
+/** The API reference: each route under its §4.4 group, then the live socket's kinds and messages, then every named type. */
 export function renderReference(table: Table): string {
   const names = new Names();
   const { json, raw, undeclared } = entries(table);
@@ -302,14 +338,14 @@ export function renderReference(table: Table): string {
   }
   const kinds = ["## The live socket's kinds", "", "What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, seq, kind, key?, at, data }`, numbered from 1 per chat, and `data` is what its kind carries.", "", "| Kind | Carries | What it says |", "|---|---|---|"];
   for (const [kind, k] of Object.entries(table.kinds)) kinds.push(`| \`${kind}\` | ${typeCell(k.data, names)} | ${k.does}${k.key === undefined ? "" : ` A newer one replaces one a page has not taken yet.`} |`);
-  sections.push(kinds.join("\n"), "");
+  sections.push(kinds.join("\n"), "", socketSection(names).join("\n"));
   if (undeclared.length > 0) {
     const lines = ["## Routes not yet declared", "", "The table holds these as their areas wrote them before the route form: the server holds each to its access, its Origin and Host and its body limit, and its query, body and reply are not declared yet, so they are in no generated type.", "", "| Route | Access | Area | Params | Body limit |", "|---|---|---|---|---|"];
     for (const info of undeclared) lines.push(`| \`${routeKey(info)}\` | ${info.access} | ${info.area} | ${paramsCell(info)} | ${bodyLimit(info, table)} |`);
     sections.push(lines.join("\n"), "");
   }
-  const types = ["## Types", "", "Every type a route or a live kind names, as the generated types write it. `JsonValue` is any JSON value.", ""];
+  const types = ["## Types", "", "Every type a route, a live kind or the live socket's messages name, as the generated types write it. `JsonValue` is any JSON value.", ""];
   for (const n of names.all()) types.push(`### \`${n.name}\``, "", n.doc, "", "```ts", n.text, "```", "");
-  const contents = ["## Contents", "", ...groups.map((g) => `- [${HEADINGS[g]}](#${slug(HEADINGS[g])})`), "- [The live socket's kinds](#the-live-sockets-kinds)", ...(undeclared.length > 0 ? ["- [Routes not yet declared](#routes-not-yet-declared)"] : []), "- [Types](#types)", ""];
+  const contents = ["## Contents", "", ...groups.map((g) => `- [${HEADINGS[g]}](#${slug(HEADINGS[g])})`), "- [The live socket's kinds](#the-live-sockets-kinds)", "- [The live socket's messages](#the-live-sockets-messages)", ...(undeclared.length > 0 ? ["- [Routes not yet declared](#routes-not-yet-declared)"] : []), "- [Types](#types)", ""];
   return [REFERENCE_HEAD, contents.join("\n"), ...sections, types.join("\n")].join("\n");
 }

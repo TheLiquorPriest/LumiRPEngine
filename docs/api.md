@@ -1,12 +1,12 @@
 # RPE's API
 
-Every route RPE's server holds, as its route table declares it, and every kind its live socket carries. `bun run api` (`scripts/api/`) writes this page and `src/shared/api/index.ts`, the types the pages, the command line and the MCP server call RPE with, from the table the server runs. A route changes in its own declaration, and both are written again from it; a test fails while either is behind the table. Do not edit this page by hand.
+Every route RPE's server holds, as its route table declares it, every kind its live socket carries, and the live socket's own messages. `bun run api` (`scripts/api/`) writes this page and `src/shared/api/index.ts`, the types the pages, the command line and the MCP server call RPE with, from the table the server runs. A route changes in its own declaration, and both are written again from it; a test fails while either is behind the table. Do not edit this page by hand.
 
 Who may call a route: **public**, anyone who reaches RPE; **page**, a page of the Lumiverse user this RPE belongs to, with a page token or the web UI's token; **provider**, Lumiverse on RPE's connection, with the provider key; **extension**, the light extension, with its registration key.
 
-A request a route does not take (a name or a value in its query that it does not declare, a body it does not take) is refused with 400, and the answer's `error` says why, before the route's code runs. A refusal is `{ "error": "<why>" }` on every route but the provider endpoint's, which answers as OpenAI does.
+Every request's body is held to its route's limit, whatever its method: one over it is refused with 413. A GET takes no body on any route, nor does a DELETE on a route that answers in JSON, so either is refused with 400 when it carries one. A route in the form that answers in JSON is held to its declaration before its code runs: a name or a value in its query that it does not declare, or a body it does not take, is refused with 400, and the answer's `error` says why. A route that answers in its own way (the provider endpoint, the extension's routes, the live socket, the web UI's files, and the raw routes not yet declared) is handed the request within its body limit, reads its query and its body itself, and says in its own words what it does not take. A route not yet declared that answers in JSON, listed at the end, is held to its access and its body limit, and to no declaration yet. A refusal is `{ "error": "<why>" }` on every route but the provider endpoint's, which answers as OpenAI does.
 
-A route that pages takes `limit` and `cursor` in its query and answers `{ items, next }`: `next` is where the next page starts, given back as `cursor`, and null at the end.
+A route that pages takes `limit` and `cursor` in its query and answers `{ items, next }`: `next` is where the next page starts, given back as `cursor`, and null at the end. A cursor names the place after the last item a page gave, by that item's place in the list's own order, never by a count of items, so a walk over a list that changes between its pages neither repeats nor skips an item that stayed. A route refuses with 400 a cursor it did not give for that list: another route's, another list's, one changed, or one given before RPE last started.
 
 ## Contents
 
@@ -16,6 +16,7 @@ A route that pages takes `limit` and `cursor` in its query and answers `{ items,
 - [The live socket](#the-live-socket)
 - [The web UI](#the-web-ui)
 - [The live socket's kinds](#the-live-sockets-kinds)
+- [The live socket's messages](#the-live-sockets-messages)
 - [Routes not yet declared](#routes-not-yet-declared)
 - [Types](#types)
 
@@ -219,6 +220,17 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 | `state` | `Record<string, never>` | The chat's state changed, and a page reads it again. A newer one replaces one a page has not taken yet. |
 | `handler_failed` | `{ op: string; error: string }` | An engine handler failed on a change, which is recorded as not applied: the operation, and the handler's error. |
 
+## The live socket's messages
+
+A page opens `/api/v1/live` as a WebSocket, offering the protocol `rpe.live`. A page that cannot set the Authorization header offers its token as a second protocol: `rpe.token.` and then the token. Every message, either way, is JSON.
+
+| | |
+|---|---|
+| A page sends | [`LiveAsk`](#liveask) |
+| A page is sent | [`LiveMessage`](#livemessage) |
+| A chat's events, as the relay hands them on | [`LiveBatch`](#livebatch) |
+| Closed | with the code 4401 and the reason "The page's token has run out or was replaced: open the live socket again with a new one.", once the token it opened with has run out or been replaced |
+
 ## Routes not yet declared
 
 The table holds these as their areas wrote them before the route form: the server holds each to its access, its Origin and Host and its body limit, and its query, body and reply are not declared yet, so they are in no generated type.
@@ -258,7 +270,7 @@ The table holds these as their areas wrote them before the route form: the serve
 | `GET /api/v1/files-stack` | page | tree | none | takes no body |
 | `GET /api/v1/files/*` | page | tree | `*` (the rest of the path) | takes no body |
 | `PUT /api/v1/files/*` | page | tree | `*` (the rest of the path) | the server's `server.bodyBytes` (1 MiB as shipped) |
-| `DELETE /api/v1/files/*` | page | tree | `*` (the rest of the path) | takes no body |
+| `DELETE /api/v1/files/*` | page | tree | `*` (the rest of the path) | the server's `server.bodyBytes` (1 MiB as shipped) |
 | `GET /api/v1/jobs` | page | turn | none | takes no body |
 | `POST /api/v1/jobs/:job/cancel` | page | turn | `job` | the server's `server.bodyBytes` (1 MiB as shipped) |
 | `GET /api/v1/migration` | page | migration | none | takes no body |
@@ -273,7 +285,7 @@ The table holds these as their areas wrote them before the route form: the serve
 
 ## Types
 
-Every type a route or a live kind names, as the generated types write it. `JsonValue` is any JSON value.
+Every type a route, a live kind or the live socket's messages name, as the generated types write it. `JsonValue` is any JSON value.
 
 ### `AgentRef`
 
@@ -463,6 +475,56 @@ export interface LimitHit {
   value: number;
   agent?: AgentRef;
   connection?: string;
+}
+```
+
+### `LiveAsk`
+
+What a page sends on the live socket: to follow a chat's events from its next one, or to stop.
+
+```ts
+export interface LiveAsk {
+  op: "follow" | "unfollow";
+  chat: string;
+}
+```
+
+### `LiveBatch`
+
+A chat's events in order, and the numbers of those the hub dropped before them for a page that fell behind: an events message without its type, as the relay hands it on.
+
+```ts
+export interface LiveBatch {
+  chat: string;
+  events: LiveEvent[];
+  missed?: LiveMissed;
+}
+```
+
+### `LiveEvent`
+
+One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
+
+```ts
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string } };
+```
+
+### `LiveMessage`
+
+What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent.
+
+```ts
+export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
+```
+
+### `LiveMissed`
+
+The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than live.queueEvents holds for it.
+
+```ts
+export interface LiveMissed {
+  from: number;
+  to: number;
 }
 ```
 

@@ -152,6 +152,8 @@ export function appRoutes(version: string, started: number, auth: Auth, ui: stri
       group: "service",
       does: "Whose the page's credential is, and when it ends.",
       reply: shape.named("SessionReply", "Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).", shape.object({ user: T, ends: shape.nullable(shape.number()) })),
+      // It says whose the credential is, so it is the one route of today's whose code reads it.
+      credential: true,
       handle: ({ credential }) => {
         const hold = auth.pageHold(credential);
         if (hold === null) throw new RouteError(401, "This needs a page token or the web UI's token.");

@@ -21,8 +21,8 @@ import { storyRoutes } from "../../src/story";
 import { type BootstrapChat, type BootstrapStart, bootstrapRoutes } from "../../src/turn/bootstrap";
 import { turnRoutes } from "../../src/turn/routes";
 import { type TreeFileDiff as SentFileDiff, type TreeFileEntry as SentFileEntry, type TreeFileText as SentFileText, treeRoutes } from "../../src/tree";
-import type { SettingsReply } from "../../src/shared/api";
-import { type LiveEvent, LIVE_TOKEN_ENDED, type Routes, SESSION_PATH, type TurnList } from "../../src/ui/api";
+import { type LiveEvent, LIVE_TOKEN_ENDED, type SettingsReply } from "../../src/shared/api";
+import { type Routes, SESSION_PATH, type TurnList } from "../../src/ui/api";
 import { createClient, KEY_LET_GO, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
 import { readSession } from "../../src/ui/pages/builds";
@@ -152,11 +152,15 @@ const turnsRoute = route({
   handle: ({ params, query }): TurnList & { asked: { chat: string; limit: string | null } } => ({ ...turnListAt(), asked: { chat: params.chat, limit: query.get("limit") } }),
 });
 
-const HARBOR = ["the quay", "the lighthouse", "the chandlery", "the ropewalk", "the fish market", "the customs house", "the tide pool"];
+/** The harbor's places as the fixture's list starts, in the list's own order: by name, which is each one's place in it. */
+const HARBOR = ["the chandlery", "the customs house", "the fish market", "the lighthouse", "the quay", "the ropewalk", "the tide pool"];
 const PLACES = "GET /api/v1/probe/places";
+let harbor: readonly string[] = HARBOR;
 let pagesRead = 0;
+/** What becomes of the list before the `page`th page is read: nothing, unless a test changes it between pages. */
+let beforePage: (page: number) => void = () => undefined;
 
-/** A route of the fixture's own that pages: the harbor's places, 3 a page unless the caller asks, and at most 4. */
+/** A route of the fixture's own that pages by place: the harbor's places, 3 a page unless the caller asks, and at most 4. */
 const places = route({
   method: "GET",
   path: "/api/v1/probe/places",
@@ -167,9 +171,12 @@ const places = route({
   reply: shape.page(shape.text()),
   handle: ({ query }) => {
     pagesRead++;
-    const from = query.cursor === undefined ? 0 : Number(query.cursor);
-    const to = from + query.limit;
-    return { items: HARBOR.slice(from, to), next: to < HARBOR.length ? String(to) : null };
+    beforePage(pagesRead);
+    const list = [...harbor].sort();
+    const after = query.after;
+    const from = after === undefined ? 0 : list.filter((name) => name <= after).length;
+    const items = list.slice(from, from + query.limit);
+    return { items, next: from + query.limit < list.length ? (items.at(-1) ?? null) : null };
   },
 });
 
@@ -325,6 +332,27 @@ describe("the direct road, against RPE's own server", () => {
     expect(run?.seq).toBe(RECORDS.length);
   });
 
+  test("a handler_failed event reaches the page through the client, typed by the generated file", async () => {
+    const client = webClient(token);
+    const failed = Promise.withResolvers<Extract<LiveEvent, { kind: "handler_failed" }>>();
+    const began = Promise.withResolvers<void>();
+    const off = client.follow("chat-ledger", {
+      events(events) {
+        for (const event of events) if (event.kind === "handler_failed") failed.resolve(event);
+      },
+      reset: () => began.resolve(),
+      refused: (words) => began.reject(new Error(words)),
+    });
+    await began.promise;
+    app.live.publish("chat-ledger", { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } });
+    const event = await failed.promise;
+    off();
+    // Its data is typed by its kind in the generated file: the operation, and the handler's error.
+    const typed: Same<typeof event.data, { op: string; error: string }> = true;
+    expect(typed).toBe(true);
+    expect({ chat: event.chat, seq: event.seq, data: event.data }).toEqual({ chat: "chat-ledger", seq: 1, data: { op: "pay", error: "The purse named holds no coin." } });
+  });
+
   test("each of these routes answers, through the client on a running app, a reply its declaration takes", async () => {
     const client = webClient(token);
     const declared = new Map(app.routes.list().map((r) => [`${r.method} ${r.path}`, r.declared]));
@@ -361,5 +389,25 @@ describe("the direct road, against RPE's own server", () => {
     const items = await walk(client, PLACES as never, {} as never, { query: { limit: 2 } as never });
     expect(items).toEqual(HARBOR);
     expect(pagesRead).toBe(4);
+  });
+
+  test("with items added and removed between pages, walk returns every item that stayed exactly once", async () => {
+    const client = webClient(token);
+    pagesRead = 0;
+    const gone = ["the customs house", "the ropewalk"];
+    // Before the second page: one place gone behind where the walk stands and one ahead of it, two added behind it and one ahead.
+    beforePage = (page) => {
+      if (page === 2) harbor = [...harbor.filter((place) => !gone.includes(place)), "the anchorage", "the boathouse", "the sail loft"];
+    };
+    try {
+      const items = await walk(client, PLACES as never, {} as never, { query: { limit: 2 } as never });
+      const stayed = HARBOR.filter((place) => !gone.includes(place));
+      expect(stayed.map((place) => ({ place, times: items.filter((item) => item === place).length }))).toEqual(stayed.map((place) => ({ place, times: 1 })));
+      expect(new Set(items).size).toBe(items.length);
+      expect(items).not.toContain("the ropewalk");
+    } finally {
+      beforePage = () => undefined;
+      harbor = HARBOR;
+    }
   });
 });

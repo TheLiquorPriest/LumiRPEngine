@@ -8,9 +8,10 @@
 // already folded is passed over and one past a hole waits until the hole is filled. Every change makes
 // new objects only along its path (run, agent, step), so a view can tell what changed by identity.
 
-import type { AgentRef, AgentStatus, Release, RunOutcome, Scope, TodoItem, ToolResult, TraceDelta, TraceEvent, TraceRecord, Usage } from "rp-harness/contract";
+import type { AgentStatus, TodoItem } from "rp-harness/contract";
+import type { AgentRef, LiveEvent, Release, ReplyPiece, RunOutcome, Scope, ToolResult, TraceDelta, TraceEvent, TraceRecord, Usage } from "../shared/api";
 import { isRecord } from "../shared/json";
-import type { LiveEvent, ReplyPiece, TurnDetail } from "./api";
+import type { TurnDetail } from "./api";
 
 export type EventOf<K extends TraceEvent["kind"]> = Extract<TraceEvent, { kind: K }>;
 

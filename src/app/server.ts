@@ -1,13 +1,14 @@
 // RPE's server (plan §4.4, §16): Bun's own server and router over the one route table. Before a
 // route's code runs, every request is held to four things: it is addressed to RPE by a name RPE
 // answers to (the Host check, which a page on a rebound DNS name fails); a page's Origin is one that
-// may call RPE; it carries what its route's access asks for; and its body is within the route's
-// limit. A route in the form is held to its declaration too: a query or a body it does not take is
-// refused with 400 before its handler runs, which is given only what was declared, read and typed. A
-// page from an allowed origin gets the CORS answers it needs to call RPE directly, the Lumiverse page
-// among them.
+// may call RPE; it carries what its route's access asks for; and its body, whatever its method, is
+// within the route's limit. A route in the form is held to its declaration too: a query or a body it
+// does not take is refused with 400 before its handler runs, which is given only what was declared,
+// read and typed, and the caller's credential only where its route declares it. A page from an allowed
+// origin gets the CORS answers it needs to call RPE directly, the Lumiverse page among them.
 
 import type { BunRequest, Server } from "bun";
+import { createHmac, randomBytes } from "node:crypto";
 import type { Log } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { Auth } from "./auth";
@@ -111,6 +112,12 @@ function sizeWords(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MiB`;
 }
 
+/** Why a body over its route's limit is refused: both sizes as a person reads them, or in bytes where those would read the same. */
+function tooLargeWords(size: number, limit: number, at: string): string {
+  const [said, most] = sizeWords(size) === sizeWords(limit) ? [`${size} bytes`, `${limit} bytes`] : [sizeWords(size), sizeWords(limit)];
+  return `This request's body is ${said}, and ${at} takes at most ${most}.`;
+}
+
 /** The request's body, counted as it arrives so that one sent without a length stops at the limit. */
 async function readBody(request: Request, limit: number): Promise<{ bytes: Uint8Array<ArrayBuffer> } | { tooLarge: number }> {
   const declared = Number(request.headers.get("content-length") ?? "NaN");
@@ -155,8 +162,34 @@ const ACCESS_WORDS: Readonly<Record<"page" | "provider" | "extension", string>> 
   extension: "This needs the extension's registration with this RPE.",
 };
 
-/** What a paged route takes in its query beside what it declares: the size of the page it asks for, and where it starts. */
+/** What a paged route takes in its query beside what it declares: the size of the page it asks for, and the cursor a page before gave. */
 const PAGE_QUERY: QueryFields = { limit: shape.optional(shape.whole({ least: 1 })), cursor: shape.optional(shape.text({ blank: false })) };
+
+/**
+ * A cursor's seal: the route, the list it was given for (the route's params) and the place, signed with a
+ * key this server made when it started, so that a cursor it did not give, another route's or another
+ * list's, one changed, or one from before it last started, fails.
+ */
+function sealOf(key: Uint8Array, route: string, params: Readonly<Record<string, string>>, place: string): string {
+  const list = JSON.stringify(Object.entries(params).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return createHmac("sha256", key).update(`${route}\n${list}\n${place}`).digest("base64url");
+}
+
+/** The cursor a page hands back: the place its last item has in the list's own order, sealed to the route and the list. */
+function cursorOf(key: Uint8Array, route: string, params: Readonly<Record<string, string>>, place: string): string {
+  return `${Buffer.from(place, "utf8").toString("base64url")}.${sealOf(key, route, params, place)}`;
+}
+
+/** The place a cursor names, when this route gave it for this list; null for any other, or one changed. */
+function placeOf(key: Uint8Array, route: string, params: Readonly<Record<string, string>>, cursor: string): string | null {
+  const dot = cursor.lastIndexOf(".");
+  if (dot < 0) return null;
+  const sent = cursor.slice(0, dot);
+  const place = Buffer.from(sent, "base64url").toString("utf8");
+  // Read back as it would be written, so a change base64 would read past is a change still.
+  if (Buffer.from(place, "utf8").toString("base64url") !== sent) return null;
+  return cursor.slice(dot + 1) === sealOf(key, route, params, place) ? place : null;
+}
 
 /** The rest of the path a pattern's last `*` stands for: each segment decoded, or as sent where one cannot be. */
 function restOf(pattern: string, pathname: string): { decoded: string | null; sent: string } {
@@ -180,18 +213,28 @@ interface Asked {
   signal: AbortSignal;
 }
 
-/** A route in the form, answered: its query and its body held to its declaration (refused with 400 in RPE's words), then its handler given what they hold. */
-async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>, asked: Asked): Promise<Response> {
+/**
+ * A route in the form, answered: its query and its body held to its declaration (refused with 400 in RPE's
+ * words), then its handler given what they hold; `cursorKey` seals and reads a paged route's cursors.
+ */
+async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any, any>, asked: Asked, cursorKey: Uint8Array): Promise<Response> {
   const at = `${route.method} ${route.path}`;
   const fields: QueryFields = route.paged === undefined ? (route.query ?? {}) : { ...route.query, ...PAGE_QUERY };
   const read = readQuery(fields, asked.search, at);
   if (!read.ok) return refusal(asked.path, 400, read.why);
-  const query = read.value;
-  const sizes: PageSizes | undefined = await route.paged?.sizes?.({ params: asked.params, user: asked.user });
-  if (sizes !== undefined) {
-    const limit = query.limit as number | undefined;
-    if (limit !== undefined && limit > sizes.most) return refusal(asked.path, 400, `${at} gives at most ${sizes.most} a page, and this asks for ${limit}.`);
-    query.limit = limit ?? sizes.default;
+  const { cursor, ...query } = read.value;
+  if (route.paged !== undefined) {
+    const sizes: PageSizes | undefined = await route.paged.sizes?.({ params: asked.params, user: asked.user });
+    if (sizes !== undefined) {
+      const limit = query.limit as number | undefined;
+      if (limit !== undefined && limit > sizes.most) return refusal(asked.path, 400, `${at} gives at most ${sizes.most} a page, and this asks for ${limit}.`);
+      query.limit = limit ?? sizes.default;
+    }
+    if (typeof cursor === "string") {
+      const after = placeOf(cursorKey, at, asked.params, cursor);
+      if (after === null) return refusal(asked.path, 400, `This cursor is not one ${at} gave for this list: read the list again from its start, with no cursor.`);
+      query.after = after;
+    }
   }
   let body: unknown;
   const sent = asked.bytes !== null && asked.bytes.length > 0;
@@ -208,14 +251,19 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
     const problems = problemsOf(declared, body, "body");
     if (problems.length > 0) return refusal(asked.path, 400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
   }
-  const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, credential: asked.credential, signal: asked.signal });
+  // The caller's credential reaches only the code of a route that declares it reads it.
+  const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, signal: asked.signal, ...(route.credential === true ? { credential: asked.credential } : {}) });
   if ((route.reply as AnyShape).kind === "nothing") return new Response(null, { status: 204 });
-  return Response.json(reply, { headers: { "cache-control": "no-store" } });
+  // A page's `next` is the place of its last item; the page is handed it sealed, as its cursor.
+  const answered = route.paged !== undefined && isRecord(reply) && typeof reply.next === "string" ? { ...reply, next: cursorOf(cursorKey, at, asked.params, reply.next) } : reply;
+  return Response.json(answered, { headers: { "cache-control": "no-store" } });
 }
 
 export function startServer(parts: ServerParts): RunningServer {
   const { config, auth, log } = parts;
   const table = parts.routes.fix();
+  // Made at each start and kept nowhere: a cursor is good for the server that gave it.
+  const cursorKey = randomBytes(32);
   let listening = config.port;
   const limits = [config.server.bodyBytes, config.server.providerBodyBytes, ...[...table.values()].flatMap((byMethod) => [...byMethod.values()].map((p) => p.route.maxBody ?? 0))];
 
@@ -253,11 +301,17 @@ export function startServer(parts: ServerParts): RunningServer {
     } else if (route.access !== "public" && !auth.holds(route.access, credentialOf(request))) {
       return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "provider" | "extension"]), origin);
     }
+    // Every request's body is held to its route's limit, whatever its method. Bun hands no route the body of a
+    // GET or a HEAD, and no route takes one, so what such a request's headers say of a body refuses it.
     let bytes: Uint8Array<ArrayBuffer> | null = null;
-    if (request.method === "POST" || request.method === "PUT" || request.method === "PATCH") {
-      const limit = route.maxBody ?? (route.access === "provider" ? config.server.providerBodyBytes : config.server.bodyBytes);
+    const limit = route.maxBody ?? (route.access === "provider" ? config.server.providerBodyBytes : config.server.bodyBytes);
+    if (request.method === "GET" || request.method === "HEAD") {
+      const declared = Number(request.headers.get("content-length") ?? "0");
+      if (declared > limit) return withCors(refusal(path, 413, tooLargeWords(declared, limit, `${request.method} ${route.path}`)), origin);
+      if (declared !== 0 || request.headers.has("transfer-encoding")) return withCors(refusal(path, 400, `${request.method} ${route.path} takes no body.`), origin);
+    } else {
       const read = await readBody(request, limit);
-      if ("tooLarge" in read) return withCors(refusal(path, 413, `This request's body is ${sizeWords(read.tooLarge)}, and ${request.method} ${route.path} takes at most ${sizeWords(limit)}.`), origin);
+      if ("tooLarge" in read) return withCors(refusal(path, 413, tooLargeWords(read.tooLarge, limit, `${request.method} ${route.path}`)), origin);
       bytes = read.bytes;
     }
     const credential = credentialOf(request);
@@ -265,16 +319,18 @@ export function startServer(parts: ServerParts): RunningServer {
     try {
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
-        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map(), credential, ends: undefined }, ...(headers === undefined ? {} : { headers }) });
+        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map(), credential, ends: undefined, catchUp: undefined }, ...(headers === undefined ? {} : { headers }) });
         const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket });
         return response === undefined ? undefined : withCors(response, origin);
       }
       if (isDeclared(route)) {
         if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
         const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal };
-        return withCors(await answerDeclared(route, asked), origin);
+        return withCors(await answerDeclared(route, asked, cursorKey), origin);
       }
       let body: unknown;
+      // A route not yet in the form takes a body only through a reader, which the table allows on no DELETE.
+      if (route.body === undefined && request.method === "DELETE" && bytes !== null && bytes.length > 0) return withCors(refusal(path, 400, `DELETE ${route.path} takes no body.`), origin);
       if (route.body !== undefined) {
         if (bytes === null || bytes.length === 0) return withCors(refusal(path, 400, `${request.method} ${route.path} takes a JSON body.`), origin);
         let value: unknown;

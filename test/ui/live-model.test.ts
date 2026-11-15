@@ -152,7 +152,8 @@ describe("however the page came to hear it", () => {
   });
 
   test("events of another kind, or of another chat's page, are not a run's", () => {
-    const model = fold([{ chat: CHAT, seq: 1, kind: "state", key: "scene", at: 0, data: { scene: "harbour" } }, { chat: CHAT, seq: 2, kind: "trace", at: 0, data: { not: "a record" } }]);
+    // Neither is what the live socket declares: a page is still not misled by them.
+    const model = fold([{ chat: CHAT, seq: 1, kind: "state", key: "scene", at: 0, data: { scene: "harbour" } }, { chat: CHAT, seq: 2, kind: "trace", at: 0, data: { not: "a record" } }] as unknown as typeof RECORDED);
     expect(model.runs).toEqual([]);
   });
 });

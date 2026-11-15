@@ -1,8 +1,8 @@
-// RPE's API as its route table declares it: every route's params, query, body and reply, and every kind
-// the live socket carries. Written by `bun run api` (scripts/api/) from the table the server runs, for
-// every road to RPE: both shells, the command line, the MCP server. Do not edit it: a route's
-// declaration is where a type changes, and `bun run api` writes this again. The reference for people
-// is docs/api.md, written beside it.
+// RPE's API as its route table declares it: every route's params, query, body and reply, every kind the
+// live socket carries, and the live socket's own messages and constants. Written by `bun run api`
+// (scripts/api/) from the table the server runs, for every road to RPE: both shells, the command line,
+// the MCP server. Do not edit it: a route's declaration is where a type changes, and `bun run api`
+// writes this again. The reference for people is docs/api.md, written beside it.
 
 /** Any JSON value. */
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -136,6 +136,31 @@ export interface LimitHit {
   value: number;
   agent?: AgentRef;
   connection?: string;
+}
+
+/** What a page sends on the live socket: to follow a chat's events from its next one, or to stop. */
+export interface LiveAsk {
+  op: "follow" | "unfollow";
+  chat: string;
+}
+
+/** A chat's events in order, and the numbers of those the hub dropped before them for a page that fell behind: an events message without its type, as the relay hands it on. */
+export interface LiveBatch {
+  chat: string;
+  events: LiveEvent[];
+  missed?: LiveMissed;
+}
+
+/** One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string } };
+
+/** What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
+export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
+
+/** The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than live.queueEvents holds for it. */
+export interface LiveMissed {
+  from: number;
+  to: number;
 }
 
 /** One limit of a model, in tokens, and where it came from. */
@@ -474,5 +499,12 @@ export interface LiveKinds {
   handler_failed: { op: string; error: string };
 }
 
-/** One event of a chat as the live socket sends it: numbered from 1 per chat, of one of the kinds above. */
-export type LiveEvent = { [K in keyof LiveKinds]: { chat: string; seq: number; kind: K; key?: string; at: number; data: LiveKinds[K] } }[keyof LiveKinds];
+// The live socket's own constants. What a page sends on it is a LiveAsk, and what it is sent a LiveMessage (above).
+/** Where a page opens the live socket, as a WebSocket. */
+export const LIVE_PATH = "/api/v1/live";
+/** The protocol a page offers to open the live socket. */
+export const LIVE_PROTOCOL = "rpe.live";
+/** A page that cannot set the Authorization header offers its token as a second protocol: this, then the token. */
+export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";
+/** The code RPE closes a page's live socket with once the token it opened with has run out or been replaced, with the reason "The page's token has run out or was replaced: open the live socket again with a new one." */
+export const LIVE_TOKEN_ENDED = 4401;

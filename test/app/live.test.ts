@@ -5,7 +5,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, LiveBatch, LiveData, LiveEvent, LivePublish, RunningServer } from "../../src/app";
-import { LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
+import { LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, problemsOf, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
+import { LIVE_SOCKET } from "../../src/app/live";
+import { isRecord } from "../../src/shared/json";
 import { type Bed, makeBed, makeKey, rawSocket } from "./helpers";
 
 /** A reader that takes what it is given until told it is full. */
@@ -157,6 +159,42 @@ describe("the live socket", () => {
     expect(got.map((e) => e.seq)).toEqual(Array.from({ length: 200 }, (_, i) => i + 2));
     expect(got.map((e) => e.data)).toEqual(Array.from({ length: 200 }, (_, i) => delta(i).data));
   });
+
+  test("every message the hub sends a page is one its declaration holds", async () => {
+    // A page on the socket: following begun, what it sent refused, and an event of every kind.
+    const p = await page(server, token);
+    const following = p.next("following");
+    p.socket.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
+    await following;
+    const refused = p.next("refused");
+    p.socket.send(JSON.stringify({ op: "wave", chat: "chat-a" }));
+    await refused;
+    const each: LivePublish[] = [
+      { kind: "trace", data: RECORD },
+      delta(1),
+      { kind: "reply", data: { run: "turn-harbor", from: 0, text: "The door opens on a wet night." } },
+      { kind: "reply", data: { run: "turn-harbor", line: 0, progress: "Weighing what the stranger wants." } },
+      { kind: "state", data: {} },
+      { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } },
+    ];
+    for (const event of each) app.live.publish("chat-a", event);
+    const eventsOf = (messages: readonly Record<string, unknown>[]): unknown[] => messages.flatMap((m) => (m.type === "events" && Array.isArray(m.events) ? m.events : []));
+    while (eventsOf(p.messages).length < each.length) await p.next("events");
+    p.socket.close();
+    // A reader that fell behind, given its catch-up with what was dropped named: the message the socket sends, as the reader takes it.
+    const hub = new LiveHub({ queueEvents: 2, now: () => 0 });
+    const taken: string[] = [];
+    let full = true;
+    const slow = hub.follow("chat-a", { take: (_batch, message) => (taken.push(message), !full) });
+    for (let i = 0; i < 6; i++) hub.publish("chat-a", delta(i));
+    full = false;
+    slow.ready();
+    const sent = [...p.messages, ...taken.map((message): Record<string, unknown> => JSON.parse(message))];
+    expect(sent.map((m) => ({ type: m.type, problems: problemsOf(LIVE_SOCKET.answers, m) }))).toEqual(sent.map((m) => ({ type: m.type, problems: [] })));
+    expect(new Set(sent.map((m) => m.type))).toEqual(new Set(["following", "refused", "events"]));
+    expect(sent.filter((m) => m.missed !== undefined).map((m) => m.missed)).toEqual([{ from: 2, to: 4 }]);
+    expect(new Set(eventsOf(sent).map((e) => (isRecord(e) ? e.kind : null)))).toEqual(new Set(Object.keys(LIVE_KINDS)));
+  });
 });
 
 /** A page's live socket: what it was sent, and how it closed. */
@@ -194,33 +232,44 @@ describe("the live socket's bounds", () => {
     await bed.remove();
   });
 
-  test("a page that falls behind gets fewer, newer updates when it reads again, and the publisher never waits for it", async () => {
-    // Held for the page: the newest 4 events, so what it is given when it reads again is one message of 32 KiB.
-    const app = await bed.open({ config: { live: { queueEvents: 4 } } });
+  test("at the default settings, a page that falls behind gets its catch-up, the missed notice and the newest event without sending anything", async () => {
+    const app = await bed.open();
     const server = await app.start();
+    const queued = app.config.live.queueEvents;
     const page = await rawSocket(server, LIVE_PATH, [LIVE_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${await makeKey(app, "web")}`]);
     expect(page.status).toBe(101);
     page.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
     await page.waitFor((messages) => messages.some((m) => m.includes('"type":"following"')));
     page.pause();
-    const published = 3000;
     const filler = "x".repeat(8 * 1024);
-    const started = performance.now();
-    for (let i = 1; i <= published; i++) app.live.publish("chat-a", delta(i, filler));
-    const publishing = performance.now() - started;
+    // Published as a turn publishes, from outside any of the socket's handlers, until the hub itself says the page is behind,
+    // however much this machine's socket buffers took first; then more than the hub holds for it, so the oldest are dropped.
+    let seq = 0;
+    while (app.live.behind("chat-a") === 0) {
+      seq = app.live.publish("chat-a", delta(seq + 1, filler)).seq;
+      if (seq > 20_000) throw new Error("The page never fell behind, though it read nothing.");
+    }
+    const sent = seq;
+    for (let i = 0; i < 600; i++) seq = app.live.publish("chat-a", delta(seq + 1, filler)).seq;
+    const newest = seq;
+    // The publisher never waited for the page: every event was published while it read nothing.
+    expect(app.live.behind("chat-a")).toBe(1);
     page.resume();
-    await page.waitFor((messages) => messages.some((m) => m.includes(`"seq":${published},`)));
-    page.close();
+    // Waited for by the messages themselves, never by a clock, and the page sends nothing.
+    await page.waitFor((messages) => messages.some((m) => m.includes(`"seq":${newest},`)));
     const batches = page.messages.map((m) => JSON.parse(m) as { type: string; events?: LiveEvent[]; missed?: { from: number; to: number } }).filter((m) => m.type === "events");
     const seqs = batches.flatMap((m) => (m.events ?? []).map((e) => e.seq));
-    expect(seqs.length).toBeLessThan(published / 2);
-    expect(seqs.at(-1)).toBe(published);
-    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
-    expect(new Set(seqs).size).toBe(seqs.length);
-    // What it was not given is named, so the page can read again what it needs.
-    expect(batches.some((m) => m.missed !== undefined)).toBe(true);
-    // Publishing took no longer than the work of publishing: nothing waited on the page that stopped reading.
-    expect(publishing).toBeLessThan(2000);
+    // Each event the socket took before the page was behind, then the newest the hub held, and the stretch between named as missed.
+    const caughtUp = Array.from({ length: queued }, (_, i) => newest - queued + 1 + i);
+    expect(seqs).toEqual([...Array.from({ length: sent }, (_, i) => i + 1), ...caughtUp]);
+    expect(batches.filter((m) => m.missed !== undefined).map((m) => m.missed)).toEqual([{ from: sent + 1, to: newest - queued }]);
+    // Then every later event, as it comes.
+    for (let i = 0; i < 3; i++) seq = app.live.publish("chat-a", delta(seq + 1)).seq;
+    await page.waitFor((messages) => messages.some((m) => m.includes(`"seq":${seq},`)));
+    expect(app.live.behind("chat-a")).toBe(0);
+    page.close();
+    const later = page.messages.flatMap((m) => (JSON.parse(m) as { events?: LiveEvent[] }).events ?? []).map((e) => e.seq);
+    expect(later.slice(-3)).toEqual([newest + 1, newest + 2, newest + 3]);
   });
 
   test("a page follows at most live.follows chats at once: one more is refused in words that name the setting, and after an unfollow it may follow another", async () => {

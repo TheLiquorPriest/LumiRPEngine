@@ -3,9 +3,8 @@
 // the level above shows through; the settings set per connection, once for each connection, under it.
 // With a chat open its own level is there too. What RPE refuses is shown in its words.
 
-import type { LayerLevel } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { SettingsReply, SettingTakes, SettingView } from "../../shared/api";
+import type { LayerLevel, SettingsReply, SettingTakes, SettingView } from "../../shared/api";
 import type { JsonValue } from "../../shared/json";
 import { useApp } from "../app";
 import { Banner, Button, Fold, PageHeader } from "../atoms";

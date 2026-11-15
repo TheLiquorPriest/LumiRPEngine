@@ -1,13 +1,12 @@
 // What the pages read from RPE (plan §4.4, §14) that the generated types (`src/shared/api`, written by
 // `bun run api` from the route table) do not hold yet: the shapes of the routes not yet declared in the
 // route form, with what each answers, kept here by hand until their areas declare them, each held to its
-// route by `test/ui/direct.test.ts`; and the live events a turn publishes on its chat. A route in the form
-// takes its types from the generated file and from nowhere else: the app's own, the settings' and the
-// connections' are there.
+// route by `test/ui/direct.test.ts`. A route in the form, the live socket and every type the generated
+// file holds are taken from there and from nowhere else: the app's own routes, the settings', the
+// connections', the live socket's messages and constants, and the types RPH's trace is made of.
 
-import type { AgentRef, FileKind, JobView, JsonObject, LayerLevel, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
-import type { ApiRoutes } from "../shared/api";
-import type { JsonValue } from "../shared/json";
+import type { FileKind, JsonObject, ReplyError, RunStatus, StackPart } from "rp-harness/contract";
+import type { AgentRef, ApiRoutes, JobView, LayerLevel, TraceRecord, TurnKind, Usage } from "../shared/api";
 import type { ChipRequest, DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 
@@ -29,31 +28,8 @@ export interface ExtensionStatus {
   missing: MissingPermission[] | null;
 }
 
-/** The live socket (`src/app/live.ts`): its path, its protocol, how a page gives its token as a protocol, and the code it closes with when that token runs out or is replaced. */
-export const LIVE_PATH = "/api/v1/live";
-export const LIVE_PROTOCOL = "rpe.live";
-export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";
-export const LIVE_TOKEN_ENDED = 4401;
 export const STATUS_PATH = "/api/v1/status";
 export const SESSION_PATH = "/api/v1/status/session";
-
-/** One event of a chat as the live hub sends it: numbered from 1 per chat, with what happened in the publishing area's words. */
-export interface LiveEvent {
-  chat: string;
-  seq: number;
-  kind: string;
-  /** Present on a state push, which a newer push with the same key may replace for a page that fell behind. */
-  key?: string;
-  at: number;
-  data: JsonValue;
-}
-
-/** A chat's events in order; `missed` names the hub's numbers it dropped for a page that fell behind. */
-export interface LiveBatch {
-  chat: string;
-  events: LiveEvent[];
-  missed?: { from: number; to: number };
-}
 
 // ---------------------------------------------------------------- chats and turns (the turn lane's)
 
@@ -828,24 +804,3 @@ export interface Routes {
 
 /** Every route the pages call: those in the form, as the generated types write them, and those above. */
 export type RouteKey = (keyof ApiRoutes | keyof Routes) & string;
-
-// ---------------------------------------------------------------- what a turn publishes on its chat
-
-/**
- * What went to the chat: a piece of the reply's text at its offset in the reply (UTF-16 code units), or
- * one progress line of the chat's thinking block, counted from 0.
- */
-export type ReplyPiece = { run: string; from: number; text: string } | { run: string; line: number; progress: string };
-
-/**
- * The live kinds published on a chat (`app.live.publish(chat, { kind, key?, data })`). A turn's come
- * without a key, so none replaces another: every event of a run as RPH traced it, the text of a model
- * call as it streams, and what went to the chat. The play area's `state` comes with the key `state` and
- * no data, once the chat's state changed (`src/play/live.ts`), so a page that fell behind is given one.
- */
-export interface LiveKinds {
-  trace: TraceRecord;
-  delta: TraceDelta;
-  reply: ReplyPiece;
-  state: Record<string, never>;
-}
