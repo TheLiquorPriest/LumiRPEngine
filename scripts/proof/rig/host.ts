@@ -24,18 +24,38 @@ import { isChatPage, LIVE_NAME_OF, LUMIVERSE_CHAT, openLivePage, type Shared } f
 import { ChatSteps } from "../live/steps";
 import type { GuidanceFacts, Host, HostOptions, PlayStart, RunFacts, Session } from "../route/host";
 import { type PinHow, pinSettingsFromEnv } from "../route/pin";
-import { openRigBed, RIG_CHAT, RIG_PASSWORD, RIG_PRESET, RIG_RPE_CONNECTION, RIG_USER, type RigBed } from "./bed";
+import { openRigBed, RIG_CHAT, RIG_PASSWORD, RIG_PLAIN_MODEL, RIG_PRESET, RIG_RPE_CONNECTION, RIG_USER, type RigBed } from "./bed";
 import { rigPages } from "./chat-page";
 import { openDoor, type Door } from "./door";
 import { Fixtures } from "./fixtures";
+import { FLOOR_FIXTURE_FORMS, type FloorMade, makeFloorFixture } from "./floor";
+import { Lumiverse } from "../../testbed/lib/lumiverse";
 import { definitionsOf, type Delays, RigModels, withDelays } from "./scripts";
 import { PROCESS_CLOCK } from "../../../test/standin/host";
 import { type PlainReply, ScriptedProvider } from "../../../test/standin/provider";
 import { builtUi } from "./ui";
 
-/** The Lumiverse connection that calls the plain scripted provider (`test/standin/provider.ts`, PlanAdapter-S5 item 6) at `PLAIN_ORIGIN`. */
+/** The Lumiverse connection that calls the plain scripted provider (`test/standin/provider.ts`, PlanAdapter-S5 item 6) at `PLAIN_ORIGIN`: its name; Lumiverse gives it an id of its own. */
 export const RIG_PLAIN_CONNECTION = "conn-plain";
 export const PLAIN_ORIGIN = "http://plain.rig.test";
+/** The provider both the plain connection and RPE's own are of (an id RPH's model layer offers): the floor compares the arms on one provider. */
+export const RIG_PROVIDER = "deepseek";
+
+/**
+ * RPE's own connection in the rig, made through its route as the Connections page makes it (`POST /api/v1/connections`, then `PUT .../default`): the
+ * connection the Author's calls name, so the floor can read its provider from RPE's own list. The calls themselves are answered by the scripts.
+ */
+export async function rigConnection(base: string, token: string): Promise<void> {
+  const call = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+    const answered = await fetch(`${base}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const text = await answered.text();
+    if (!answered.ok) throw new Error(`RPE's ${method} ${path} answered ${answered.status}: ${text.slice(0, 300)}`);
+    return text === "" ? null : JSON.parse(text);
+  };
+  const made = await call("POST", "/api/v1/connections", { connection: { name: "Rig scripted", provider: RIG_PROVIDER, auth: "key", model: RIG_PLAIN_MODEL }, key: "rig-scripted-key" });
+  if (typeof made !== "object" || made === null || !("id" in made) || typeof made.id !== "string") throw new Error("RPE's route gave no id for the connection it made");
+  await call("PUT", `/api/v1/connections/${encodeURIComponent(made.id)}/default`);
+}
 /** The rig's persona, which the composer's menu offers. */
 export const RIG_PERSONA = { id: "pers-traveller", name: "The traveller" };
 
@@ -172,10 +192,21 @@ class RigReader extends RpeReader {
   }
 }
 
-/** The Author's replies when a run gives none: each an intent record then a reply, the delays set in. */
+/** What every scripted reply says, a word to a chunk: the plain connection's, and the Author's `<reply>` (so both arms of a pair show the same text, and the floor's time per token compares like with like). */
+export const REPLY_WORDS: readonly string[] = ["The", " lamp", " turns", " above", " you", " and", " the", " sea", " answers", "."];
+
+/** The delays a play has where its caller gives none: a first word after 30 ms and one every 20 ms, on both connections, so a reply streams as a model's does and the page can time it. */
+export const DEFAULT_DELAYS: Delays = { firstWord: 30, between: 20 };
+
+/** The Author's replies when a run gives none: each an intent record then a reply, a word to a piece, the delays set in. */
 export function authorReplies(count: number, delays: Delays | undefined): Answer[] {
   return Array.from({ length: count }, (_, i): Answer => {
-    const pieces = [...(delays?.firstThinking === undefined ? [] : [{ thinking: "The scene asks for one beat." }]), { text: `<intent>Turn ${i + 1}: the scene goes on, one beat.</intent>` }, { text: `<reply>The lamp turns above you, and the sea answers. (${i + 1})</reply>` }];
+    const pieces = [
+      ...(delays?.firstThinking === undefined ? [] : [{ thinking: "The scene asks for one beat." }]),
+      { text: `<intent>Turn ${i + 1}: the scene goes on, one beat.</intent>` },
+      // The tags ride on the first and last words, so the reply's words come at the pace of the plain connection's and no wait falls between the last word and the closing tag.
+      ...REPLY_WORDS.map((word, at) => ({ text: `${at === 0 ? "<reply>" : ""}${word}${at === REPLY_WORDS.length - 1 ? "</reply>" : ""}` })),
+    ];
     return delays === undefined ? { pieces } : withDelays({ pieces }, delays);
   });
 }
@@ -183,7 +214,7 @@ export function authorReplies(count: number, delays: Delays | undefined): Answer
 /** The plain connection's scripted reply with the delays set: one chunk for each word, thinking first where a first-thinking delay is given. */
 export function plainReplyOf(delays: Delays | undefined): PlainReply {
   return {
-    words: ["The", " lamp", " turns", " above", " you", " and", " the", " sea", " answers", "."],
+    words: [...REPLY_WORDS],
     ...(delays?.firstThinking === undefined ? {} : { thinking: ["The scene asks for one beat."], toThinking: delays.firstThinking }),
     ...(delays?.firstWord === undefined ? {} : { toWord: delays.firstWord }),
     ...(delays?.between === undefined ? {} : { between: delays.between }),
@@ -224,7 +255,7 @@ export async function openRig(options: HostOptions & RigOptions): Promise<Host<R
   const stamp = stampOf(repo, installedRphCommit(repo));
   const scriptsOf = (): Record<string, readonly Answer[]> => {
     const given = options.scripts ?? {};
-    const rpeDelays = options.delays?.rpe;
+    const rpeDelays = options.delays?.rpe ?? DEFAULT_DELAYS;
     const author = given.author ?? authorReplies(DEFAULT_AUTHOR_REPLIES, rpeDelays);
     const others = Object.fromEntries(Object.entries(given).filter(([name]) => name !== "author"));
     return { ...others, author: given.author === undefined || rpeDelays === undefined ? author : author.map((answer) => withDelays(answer, rpeDelays)) };
@@ -262,12 +293,18 @@ export async function openRig(options: HostOptions & RigOptions): Promise<Host<R
       const bed = await openRigBed({ models: models.source, ui, version: stamp, limitMs });
       let door: Door | null = null;
       let browser: BrowserDriver | null = null;
+      let floor: FloorMade | null = null;
       try {
         // The persona the composer offers, and the plain connection: a scripted OpenAI-compatible model the connection's `base` points at (PlanAdapter-S5 item 6), answering at the delays set.
         bed.host.library.addPersona({ id: RIG_PERSONA.id, user: RIG_USER, name: RIG_PERSONA.name, is_default: true });
-        const provider = new ScriptedProvider(PROCESS_CLOCK, plainReplyOf(options.delays?.plain));
+        const provider = new ScriptedProvider(PROCESS_CLOCK, plainReplyOf(options.delays?.plain ?? DEFAULT_DELAYS));
         bed.host.servers.set(PLAIN_ORIGIN, provider.server);
-        bed.host.connections.set(RIG_PLAIN_CONNECTION, { id: RIG_PLAIN_CONNECTION, base: `${PLAIN_ORIGIN}/v1`, key: "plain-key", model: "scripted-plain" });
+        // The plain connection is a connection profile of Lumiverse's, as one made on its Connections page is, of the provider RPE's own connection below is of: the floor's two arms are on one model of one provider.
+        const profiles = bed.server.profiles;
+        if (profiles === undefined) throw new Error("the rig's Lumiverse has no connection profiles to make the plain connection in");
+        const plain = profiles.create(RIG_USER, { name: RIG_PLAIN_CONNECTION, provider: RIG_PROVIDER, api_url: `${PLAIN_ORIGIN}/v1`, model: RIG_PLAIN_MODEL, api_key: "plain-key" });
+        // RPE's own connection, through its route as the Connections page makes it: what the Author's calls name, and the provider the floor reads it by.
+        await rigConnection(bed.listening.url, bed.pageToken);
 
         door = openDoor({ base: bed.server.base, fetch: bed.server.fetch, open: bed.server.open }, rigPages);
         const lumiverseToken = await (async (): Promise<string> => {
@@ -289,6 +326,11 @@ export async function openRig(options: HostOptions & RigOptions): Promise<Host<R
         const settled = new Set<string>();
         const fixtures = new Fixtures(bed.host);
         const floorChats = new Set<string>();
+        // The floor's fixture, made as `floor.ts setup` makes it, for the forms that play it; its record is the rig's own, which `findFixture` reads by the environment for the play's length.
+        if (FLOOR_FIXTURE_FORMS.includes(start.form.id)) {
+          floor = await makeFloorFixture({ fixtures, lumiverse: new Lumiverse(doorBase, lumiverseToken), definition: await reader.viewFile("", "@shipped/.agents/author.md"), plainConnection: plain.id });
+          await start.keep("floor-fixture", { lines: floor.lines, record: floor.store.read() }).catch(() => undefined);
+        }
 
         const generate = (chat: string, type?: "swipe" | "regenerate" | "continue" | "impersonate", message?: string): Promise<Outcome> => bed.host.generate({ chat, connection, preset: RIG_PRESET, persona: RIG_PERSONA.id, ...(type === undefined ? {} : { type }), ...(message === undefined ? {} : { message }) });
         const missing = (what: string, package_: string): never => {
@@ -342,7 +384,7 @@ export async function openRig(options: HostOptions & RigOptions): Promise<Host<R
         const acts: RigActs = {
           lumiverse: { base: doorBase, token: lumiverseToken },
           rpe: { base: bed.listening.url, token: bed.pageToken },
-          connections: { plain: RIG_PLAIN_CONNECTION, rpe: RIG_RPE_CONNECTION },
+          connections: { plain: plain.id, rpe: RIG_RPE_CONNECTION },
           bed,
           provider,
           models,
@@ -362,8 +404,10 @@ export async function openRig(options: HostOptions & RigOptions): Promise<Host<R
             const found = bed.host.library.charactersByIds(RIG_USER, [card]).get(card);
             if (found === undefined) throw new Error(`the rig's Lumiverse holds no card ${card}: a fixture adds it first`);
             const id = `chat-floor-${floorChats.size + 1}`;
-            bed.host.addChat({ id, user: RIG_USER, name: "Floor test", character: found, messages: [] });
+            const greeting = bed.db.rows("SELECT first_mes FROM characters WHERE id = ?", card)[0]?.first_mes;
+            bed.host.addChat({ id, user: RIG_USER, name: "Floor test", character: found, messages: typeof greeting === "string" && greeting !== "" ? [{ id: `${id}-greeting`, role: "assistant", content: greeting }] : [] });
             floorChats.add(id);
+            if (floor !== null) floor.store.write({ ...floor.store.read(), chats: [...floor.store.read().chats, id] });
             chatNow = id;
             return id;
           },
@@ -405,12 +449,14 @@ export async function openRig(options: HostOptions & RigOptions): Promise<Host<R
             await page.close();
             await door?.stop();
             await bed.close();
+            await floor?.close();
           },
         };
       } catch (error) {
         await browser?.close().catch(() => undefined);
         await door?.stop().catch(() => undefined);
         await bed.close();
+        await floor?.close();
         throw error;
       }
     },

@@ -21,10 +21,11 @@ const WEB_PAGES: Record<string, { fragment: (chat: string | null, turn: string |
   story: { fragment: (chat) => `#/chats/${encodeURIComponent(chat ?? "")}/story`, heading: "Story", needs: "chat" },
   play: { fragment: (chat) => `#/chats/${encodeURIComponent(chat ?? "")}/play`, heading: "Play", needs: "chat" },
   build: { fragment: () => "#/build", heading: "Build" },
-  files: { fragment: () => "#/files", heading: "Files" },
+  // Files, Settings and Storage are a chat's when a chat is current (its levels, its stack, its own settings), and the user's own otherwise.
+  files: { fragment: (chat) => (chat === null ? "#/files" : `#/chats/${encodeURIComponent(chat)}/files`), heading: "Files" },
   connections: { fragment: () => "#/connections", heading: "Connections" },
-  settings: { fragment: () => "#/settings", heading: "Settings" },
-  storage: { fragment: () => "#/storage", heading: "Storage" },
+  settings: { fragment: (chat) => (chat === null ? "#/settings" : `#/chats/${encodeURIComponent(chat)}/settings`), heading: "Settings" },
+  storage: { fragment: (chat) => (chat === null ? "#/storage" : `#/chats/${encodeURIComponent(chat)}/storage`), heading: "Storage" },
   migration: { fragment: () => "#/migration", heading: "Migration" },
 };
 

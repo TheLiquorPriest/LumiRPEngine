@@ -171,8 +171,21 @@ export class BrowserDriver implements Browser {
     await this.call("settle");
   }
 
+  /** A control is waited for as a person waits for a page to finish: until it is there, or the host's limit, and then with the page's own words for what is missing. */
+  private async withControl<T>(run: () => Promise<T>): Promise<T> {
+    const start = Date.now();
+    for (;;) {
+      try {
+        return await run();
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith("no control") || Date.now() - start > this.limitMs) throw error;
+        await Bun.sleep(25);
+      }
+    }
+  }
+
   async find(control: Control): Promise<void> {
-    await this.call<Found>("find", control);
+    await this.withControl(() => this.call<Found>("find", control));
   }
 
   private async clickAt(x: number, y: number): Promise<void> {
@@ -182,7 +195,7 @@ export class BrowserDriver implements Browser {
   }
 
   async press(control: Control): Promise<void> {
-    const at = await this.call<Found>("find", control);
+    const at = await this.withControl(() => this.call<Found>("find", control));
     await this.clickAt(at.x, at.y);
   }
 
@@ -198,8 +211,10 @@ export class BrowserDriver implements Browser {
     await this.clickAt(at.x, at.y);
   }
 
+  /** Types into the field named; into a menu (a select) the words are the option a person picks by them. */
   async type(control: Control, text: string): Promise<void> {
-    await this.call("focus", control);
+    const focused = await this.withControl(() => this.call<string>("focus", control));
+    if (focused === "select") return await this.call("choose", control, text);
     await this.cdp.send("Input.insertText", { text }, this.session);
   }
 
@@ -218,7 +233,7 @@ export class BrowserDriver implements Browser {
    */
   async choose(control: Control, name: string): Promise<void> {
     try {
-      await this.call("choose", control, name);
+      await this.withControl(() => this.call("choose", control, name));
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes("is not a menu")) throw error;
       await this.type(control, name);

@@ -150,6 +150,12 @@ export function installProof(collect: (root: Element, area: TextArea) => string)
   const INTERACTIVE = 'a[href], button, input:not([type="hidden"]), select, textarea, summary, [role], [tabindex], [contenteditable=""], [contenteditable="true"]';
   const describe = (el: Element): string => `${roleOf(el) || el.tagName.toLowerCase()} "${nameOf(el).slice(0, 60)}"`;
 
+  /** The words a label says by themselves: the words of the controls inside it (a menu's options) left out. */
+  const ownWords = (label: Element): string => {
+    const clone = label.cloneNode(true) as Element;
+    for (const inner of Array.from(clone.querySelectorAll("select, input, textarea, button, option"))) inner.remove();
+    return one(clone.textContent ?? "");
+  };
   /** The one element a control names among the elements `selector` picks, or why none. */
   const search = (control: WantedControl, selector: string): Answer<Element> => {
     const wantRole = control.role?.toLowerCase();
@@ -159,6 +165,9 @@ export function installProof(collect: (root: Element, area: TextArea) => string)
     if (wantLabel === undefined) return every.length === 1 ? { ok: true, value: every[0] as Element } : every.length === 0 ? fail(`no control ${what}`) : fail(`${every.length} controls ${what}: say which`);
     const named = every.map((el) => ({ el, name: one(nameOf(el)) }));
     const exact = named.filter((n) => n.name === wantLabel);
+    // A control inside its label, or named by one, is found by the label's own words: its label says "Agent", and the words of the menu inside it are not part of what the label says.
+    const labelled = exact.length > 0 ? [] : every.filter((el) => "labels" in el && Array.from((el as HTMLInputElement).labels ?? []).some((l) => ownWords(l) === wantLabel));
+    if (labelled.length === 1) return { ok: true, value: labelled[0] as Element };
     const pool = exact.length > 0 ? exact : named.filter((n) => n.name !== "" && n.name.includes(wantLabel));
     if (pool.length === 1) return { ok: true, value: (pool[0] as { el: Element }).el };
     if (pool.length === 0) return fail(`no control ${what}`);
@@ -226,7 +235,8 @@ export function installProof(collect: (root: Element, area: TextArea) => string)
       el.focus();
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") (el as HTMLInputElement).select();
       else if (el.isContentEditable) document.getSelection()?.selectAllChildren(el);
-      else return fail(`${describe(el)} takes no typing`);
+      // A menu takes no typed letters here: a person picks its option by its words, and `type` does the same.
+      else if (el.tagName !== "SELECT") return fail(`${describe(el)} takes no typing`);
       return { ok: true, value: el.tagName.toLowerCase() };
     },
     choose(control, option) {

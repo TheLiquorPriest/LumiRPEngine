@@ -19,11 +19,13 @@ import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE } from "../..
 import { LumiverseSession } from "../../../src/adapter/lumiverse/session";
 import { startExtension } from "../../../src/ext/start";
 import type { Turns } from "../../../src/turn";
-import { ALL, REAL_CLOCK } from "../../../test/ext/rig";
+import { REAL_CLOCK } from "../../../test/ext/rig";
+import { ADMIN, installRpe } from "../../../test/standin/install";
 import { StandInDb } from "../../../test/standin/db";
 import { LumiverseServer } from "../../../test/standin/http";
 import { type ChatMessage, StandIn } from "../../../test/standin/lumiverse";
 import type { ModelSource } from "rp-harness/testing/rig";
+import { SCRIPTED_MODEL } from "./scripts";
 
 /** The invented names of the rig's one player and the chat the rig starts with. */
 export const RIG_USER = "user-marlow";
@@ -32,6 +34,9 @@ export const RIG_CHAT = "chat-gannet";
 export const RIG_CHARACTER = { id: "char-wren", name: "Wren Hale" };
 /** The Lumiverse connection that points at RPE. */
 export const RIG_RPE_CONNECTION = "conn-rpe";
+/** The models of the two connections: Lumiverse counts the tokens of a reply and of the shown text for each (the stand-in has a tokenizer only for models it is told of). The plain connection is on the model the agents' scripts stand in for, as the floor's pairs are. */
+export const RIG_RPE_MODEL = "rpe";
+export const RIG_PLAIN_MODEL = SCRIPTED_MODEL;
 export const RIG_PRESET = "preset-lamp";
 export const RIG_GREETING = "The lamp turns above you; the sea is loud tonight.";
 export const RIG_CHAT_NAME = "The lighthouse";
@@ -87,10 +92,12 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
     db.write({ user: [{ id: RIG_USER, name: "Marlow", email: "marlow@example.invalid", username: "marlow" }], characters: [], chats: [], messages: [], world_books: [], world_book_entries: [], personas: [], presets: [], settings: [], message_breakdowns: [] });
     const host = new StandIn();
     host.db = db;
-    const server = new LumiverseServer({ clock: REAL_CLOCK, db, host, accounts: [{ id: RIG_USER, username: "marlow", password: RIG_PASSWORD }] });
+    // Lumiverse counts the tokens of a reply (the completion's count, else its own tokenizer's) only for a model it has a tokenizer for.
+    for (const model of [RIG_PLAIN_MODEL, RIG_RPE_MODEL]) host.tokenizedModels.add(model);
+    const server = new LumiverseServer({ clock: REAL_CLOCK, db, host, accounts: [{ id: RIG_USER, username: "marlow", password: RIG_PASSWORD }], tokenizedModels: [RIG_PLAIN_MODEL, RIG_RPE_MODEL] });
     cleanups.push(() => server.stop());
-    const running = await startExtension(server.install(EXTENSION_IDENTIFIER, ALL));
-    cleanups.push(() => running.stop());
+    const { id: extensionId } = await installRpe(host, { code: (api) => startExtension(api) });
+    cleanups.push(() => host.spindle.disable(ADMIN, extensionId));
 
     // RPE signed in as `rpe lumiverse` leaves it: the session's token in RPE's secrets.
     const data = join(root, "rpe");
@@ -130,7 +137,7 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
       return registered !== null && origins.has(new URL(registered.base).origin) ? registered : null;
     });
     await until("RPE's event socket to open", () => composition.door.lumiverse()?.events.open);
-    host.connections.set(RIG_RPE_CONNECTION, { id: RIG_RPE_CONNECTION, base: `${listening.url}/v1`, key: providerKey, model: "rpe" });
+    host.connections.set(RIG_RPE_CONNECTION, { id: RIG_RPE_CONNECTION, base: `${listening.url}/v1`, key: providerKey, model: RIG_RPE_MODEL });
 
     // Lumiverse's side: a preset, and the chat as the character's greeting leaves it.
     host.presets.set(RIG_PRESET, {

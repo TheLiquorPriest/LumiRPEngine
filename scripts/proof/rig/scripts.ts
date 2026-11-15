@@ -124,6 +124,9 @@ export interface RigModelsOptions {
   maxTokens?: number;
 }
 
+/** The one model every agent's script stands in for: the trace names it whichever agent called, so a plain connection on the same model id is on the same model as the Author. */
+export const SCRIPTED_MODEL = "scripted";
+
 /** Every agent's scripted model behind one `ModelSource`. */
 export class RigModels {
   private readonly models = new Map<string, ScriptedModel>();
@@ -140,7 +143,7 @@ export class RigModels {
   }
 
   private make(agent: string, answers: readonly Answer[]): ScriptedModel {
-    return scriptedModel(answers, { clock: this.clock, ...this.limits, id: `scripted-${agent}`, name: `Scripted ${agent}` });
+    return scriptedModel(answers, { clock: this.clock, ...this.limits, id: SCRIPTED_MODEL, name: `Scripted ${agent}` });
   }
 
   /** Adds answers to an agent's own list. */

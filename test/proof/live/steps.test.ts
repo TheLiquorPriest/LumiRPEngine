@@ -22,9 +22,9 @@ afterAll(async () => {
   await chrome?.close();
 });
 
-async function window(site: Site, shared: Shared): Promise<BrowserDriver> {
-  const options = { lumiverse: site.base, account: { username: "marlow", password: "brass and lamp oil" }, rpe: { base: "http://127.0.0.1:1", token: "none" }, chat: () => "chat-1", turn: () => null, shared, limitMs: 10_000 };
-  return await BrowserDriver.create({ chrome, pages: { open: (page, tab) => openLivePage(page, tab, options), nameOf: LIVE_NAME_OF }, limitMs: 10_000 });
+async function window(site: Site, shared: Shared, limitMs = 10_000): Promise<BrowserDriver> {
+  const options = { lumiverse: site.base, account: { username: "marlow", password: "brass and lamp oil" }, rpe: { base: "http://127.0.0.1:1", token: "none" }, chat: () => "chat-1", turn: () => null, shared, limitMs };
+  return await BrowserDriver.create({ chrome, pages: { open: (page, tab) => openLivePage(page, tab, options), nameOf: LIVE_NAME_OF }, limitMs });
 }
 
 function site(script = DEFAULT_SCRIPT): Site {
@@ -107,11 +107,12 @@ test("a reply with no reasoning has no first thinking, and a reply that never be
 
 test("a step that cannot find its control stops, naming it", async () => {
   const s = site();
-  const tab = await window(s, { cookies: null });
+  // A control a person cannot find is waited for as long as the host's limit, which this test keeps short.
+  const tab = await window(s, { cookies: null }, 2000);
   await tab.open(LUMIVERSE_CHAT, 1440);
   const steps = new ChatSteps(tab);
   await expect(steps.chooseConnection("No such connection")).rejects.toThrow("No such connection");
   await expect(steps.choosePersona("Nobody")).rejects.toThrow("Nobody");
   await expect(steps.choosePreset("No such preset")).rejects.toThrow("no menu with a preset named No such preset");
   await tab.close();
-});
+}, 30_000);

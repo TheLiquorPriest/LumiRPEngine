@@ -9,6 +9,7 @@ import type { Entry } from "../../../test/standin/lore";
 import type { Character } from "../../../test/standin/books";
 import type { ChatMessage, StandIn } from "../../../test/standin/lumiverse";
 import { RIG_CHARACTER, RIG_USER } from "./bed";
+import { CARD, MARK, markedCard, PRESET } from "../../testbed/floor-fixture";
 
 /** A line the player or the character said at the place `at` (from 0), which the fixture plants in the chat. */
 export interface Planted {
@@ -59,6 +60,20 @@ export function messagesOf(length: number, planted: readonly Planted[] = []): Ch
   });
 }
 
+/** The ids the rig gives the floor's card, persona and preset. */
+export const FLOOR_IDS = { preset: "preset-floor", persona: "pers-floor", card: "char-floor" } as const;
+
+/**
+ * The floor's persona as `scripts/testbed/floor-fixture.ts` designs it (a constant that file does not export: S4Floor's), with the same mark. `findFixture` asks
+ * for the mark and the id; the rest is what the page shows.
+ */
+const FLOOR_PERSONA = {
+  name: "Traveller",
+  title: "Floor test (invented)",
+  folder: "Floor test (invented)",
+  description: "A traveller whose small boat put in at Skerry Rock ahead of the storm: tired, polite, and curious about the keeper and her light.",
+};
+
 /** What the rig can load, on a stand-in. */
 export class Fixtures {
   constructor(private readonly host: StandIn) {}
@@ -91,5 +106,26 @@ export class Fixtures {
     if (first === undefined) throw new Error("a group chat has members");
     for (const member of spec.members) this.host.library.addCharacter(RIG_USER, member);
     return this.chat({ id: spec.id, name: spec.name, character: first, length: spec.length ?? 2, metadata: { group: true, character_ids: spec.members.map((m) => m.id), muted_character_ids: [] } });
+  }
+
+  /**
+   * The floor's own card, persona and preset (`scripts/testbed/floor-fixture.ts`: the same card, instructions and mark), made as Lumiverse's services write
+   * them: the rows the routes list, and for the preset the blocks a generation reads. The book is made by the caller through Lumiverse's own routes (the
+   * card holds it by id). Lumiverse has no create route for these in the stand-in (the fixture's `setup` makes them through one), so they go in directly.
+   */
+  floor(bookId: string): { preset: string; persona: string; card: string } {
+    const db = this.host.db;
+    if (db === null || db === undefined) throw new Error("the floor's fixture is written as rows: the stand-in has no database attached");
+    db.run("INSERT INTO presets (id, name, provider, parameters, prompt_order, metadata, prompts, engine, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", FLOOR_IDS.preset, PRESET.name, PRESET.provider, JSON.stringify(PRESET.parameters), JSON.stringify(PRESET.prompt_order), JSON.stringify(PRESET.metadata), JSON.stringify(PRESET.prompts), PRESET.engine, RIG_USER);
+    this.host.presets.set(FLOOR_IDS.preset, {
+      id: FLOOR_IDS.preset,
+      name: PRESET.name,
+      blocks: PRESET.prompt_order.map((b, i) => ({ id: `b-floor-${i + 1}`, name: b.name, role: "system" as const, content: b.content, ...(b.marker === null ? {} : { marker: b.marker as NonNullable<Block["marker"]> }) })),
+    });
+    this.host.library.addPersona({ id: FLOOR_IDS.persona, user: RIG_USER, name: FLOOR_PERSONA.name, description: FLOOR_PERSONA.description, is_default: false });
+    db.run("UPDATE personas SET title = ?, folder = ?, metadata = ? WHERE id = ?", FLOOR_PERSONA.title, FLOOR_PERSONA.folder, JSON.stringify({ [MARK]: true }), FLOOR_IDS.persona);
+    this.host.library.addCharacter(RIG_USER, { id: FLOOR_IDS.card, name: CARD.name, extensions: markedCard({}, bookId) ?? {} });
+    db.run("UPDATE characters SET description = ?, personality = ?, scenario = ?, first_mes = ? WHERE id = ?", CARD.description, CARD.personality, CARD.scenario, CARD.first_mes, FLOOR_IDS.card);
+    return { ...FLOOR_IDS };
   }
 }
