@@ -447,7 +447,7 @@ export function intentCrossCheck(run: FloorRun): CrossCheck[] {
     const own = intentOwn(t);
     if (!("ms" in own) || !own.began) return [];
     if (run.form === "tag" && t.rpe.deltasMissed) return [{ turn: label(t), route: own.ms, trace: "trace incomplete", resolution: t.page.resolution }];
-    const trace = traceIntentMs(run.form, t.rpe.trace, t.rpe.deltas, t.rpe.turn);
+    const trace = traceIntentMs(run.form, t.rpe.trace, t.rpe.deltas);
     return trace === null || Math.abs(trace - own.ms) > t.page.resolution ? [{ turn: label(t), route: own.ms, trace, resolution: t.page.resolution }] : [];
   });
 }
@@ -484,7 +484,7 @@ function replySpan(t: FloorTurn): { span: number } | { none: string } {
   if (t.rpe === null) return { none: "no RPE turn was matched to it" };
   const call = replyCall(callsOf(t.rpe.trace), releaseOf(t.rpe.trace));
   if (call === null) return { none: "the reply call's streamed pieces were not heard" };
-  const pieces = t.rpe.deltas.filter((d) => d.run === t.rpe?.turn && d.agent === call.agent && d.call === call.call && (d.text ?? "") !== "");
+  const pieces = t.rpe.deltas.filter((d) => d.run === call.run && d.agent === call.agent && d.call === call.call && (d.text ?? "") !== "");
   const first = pieces[0];
   const last = pieces.at(-1);
   if (first === undefined || last === undefined) return { none: "the reply call's streamed pieces were not heard" };

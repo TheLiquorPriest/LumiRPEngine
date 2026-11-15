@@ -81,11 +81,13 @@ function plainTurn(pair: number, shape: Shape): FloorTurn {
 function rpeTurn(pair: number, shape: Shape): FloorTurn {
   const two = shape.form === "two-step";
   const turn = `t-${pair}`;
+  // The run's own id, which is never the turn's (RPH `ff1c9839`): the turn is in each record's scope, the run in its `run`.
+  const run = `run-${pair}-1`;
   const sent = PAGE0 + pair * 100_000 + 50_000;
   const r = RPE0 + pair * 100_000;
   const records: TraceRecord[] = [];
   const deltas: TraceDelta[] = [];
-  const push = (at: number, event: TraceEvent) => records.push({ seq: records.length + 1, run: turn, scope: { ...SCOPE, turn }, at, agent: { ...LEAD }, event });
+  const push = (at: number, event: TraceEvent) => records.push({ seq: records.length + 1, run, scope: { ...SCOPE, turn }, at, agent: { ...LEAD }, event });
   const usage = (output: number) => ({ calls: 1, input: 9000, cacheRead: 8000, cacheWrite: 0, output });
   const tokens = { toolTokens: shape.toolTokens === undefined ? 6400 : shape.toolTokens, openingTokens: shape.openingTokens === undefined ? 5800 : shape.openingTokens };
   const callStarted = (at: number, call: number) =>
@@ -98,7 +100,7 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
   push(r + 50, { kind: "run_started", run: "turn", turn: "new", lead: "author" });
   push(r + 55, { kind: "agent_started", definition: "author", connection: shape.connection ?? "rpe-floor", model: MODEL, ...(shape.effort === null ? {} : { effort: shape.effort ?? "low" }), session: "s-floor", given: [] });
   callStarted(r + 60, 1);
-  for (const at of [300, 600, 900]) deltas.push({ run: turn, agent: LEAD.id, call: 1, thinking: "…", at: r + at });
+  for (const at of [300, 600, 900]) deltas.push({ run, agent: LEAD.id, call: 1, thinking: "…", at: r + at });
   const recordTo = span === null || span === "not served" ? 1600 : (span.to ?? 1600);
   // The trace's own sight of the record: its first piece of text (tag) or its tool call's start (two-step), to the intent event.
   const traceFrom = (span === null || span === "not served" ? 1000 : span.from) + skew;
@@ -106,13 +108,13 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
   let released: number;
   let firstWord: number;
   if (!two) {
-    for (let at = traceFrom; at <= recordTo; at += 100) deltas.push({ run: turn, agent: LEAD.id, call: 1, text: at === traceFrom ? "<intent>wants:" : " …", at: r + at });
+    for (let at = traceFrom; at <= recordTo; at += 100) deltas.push({ run, agent: LEAD.id, call: 1, text: at === traceFrom ? "<intent>wants:" : " …", at: r + at });
     push(r + recordTo, { kind: "intent", text: "wants: shelter\nscope: the room\nstory: …\nengine: none\nneeds: nothing" });
     for (let n = 0; n < extra; n++) callStarted(r + recordTo + 10 + n, ++call);
     released = r + 1700 + slower;
     firstWord = released;
     push(released, { kind: "released", release: { by: { ...LEAD }, form: "tags", length: 400 } });
-    for (let at = 1700 + slower; at <= 4000 + slower; at += 100) deltas.push({ run: turn, agent: LEAD.id, call, text: " word", at: r + at });
+    for (let at = 1700 + slower; at <= 4000 + slower; at += 100) deltas.push({ run, agent: LEAD.id, call, text: " word", at: r + at });
     push(r + 4000 + slower, { kind: "call_ended", call, model: MODEL, text: "…", toolCalls: [], stop: "stop", usage: usage(300), ms: 3940 });
   } else {
     // `began` is C7's field (PlanHarnessCore-1), newer than the pinned contract's type: the route serves it as JSON either way.
@@ -121,8 +123,8 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
     push(r + recordTo, { kind: "intent", text: "wants: shelter\nscope: the room\nstory: …\nengine: none\nneeds: nothing" });
     for (let n = 0; n < extra; n++) callStarted(r + 1660 + n, ++call);
     callStarted(r + 1700, ++call);
-    for (const at of [1800, 2000, 2200]) deltas.push({ run: turn, agent: LEAD.id, call, thinking: "…", at: r + at });
-    for (let at = 2300; at <= 3500 + slower; at += 100) deltas.push({ run: turn, agent: LEAD.id, call, text: " word", at: r + at });
+    for (const at of [1800, 2000, 2200]) deltas.push({ run, agent: LEAD.id, call, thinking: "…", at: r + at });
+    for (let at = 2300; at <= 3500 + slower; at += 100) deltas.push({ run, agent: LEAD.id, call, text: " word", at: r + at });
     released = r + 3500 + slower;
     firstWord = streamed ? r + 2300 : released;
     push(released, { kind: "released", release: { by: { ...LEAD }, form: "message", length: 400 } });

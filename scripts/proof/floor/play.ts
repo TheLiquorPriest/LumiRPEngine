@@ -42,7 +42,7 @@ import type { ActivatedEntry, BookDesign } from "../lib/lore";
 import { noteOf, renderFrame } from "../lib/frame";
 import { LumiverseReader, RpeReader } from "../lib/read";
 import { buildFrom, floorTrials, installedRph, leadsOf, standingLines, type BuildReader, type Observed } from "../lib/record";
-import { callsOf, keptRequest, leadOf, leadStart, recordTimes } from "../lib/turn";
+import { callsOf, deltasOfTurn, keptRequest, leadOf, leadStart, recordTimes } from "../lib/turn";
 
 /** What the floor plays with, from the host's acts. */
 export interface FloorActs {
@@ -378,7 +378,7 @@ async function rpeSide(api: RpeApi, reader: RpeReader, lumiverse: LumiverseReade
   const map = Array.isArray(detail.lore?.map) ? detail.lore.map : null;
   if (map === null) missing.lore ??= "the turn route gives no lore map (an older turn shape)";
   return {
-    side: { turn: tied.id, status: detail.status, timings: detail.timings, record: recordTimes(detail.timings), trace: detail.trace, deltas: live.deltas.filter((d) => d.run === tied.id), deltasMissed: live.missed.length > missedBefore || live.closed, request, stored, rows, history, lore: { map: map ?? [], entries }, missing },
+    side: { turn: tied.id, status: detail.status, timings: detail.timings, record: recordTimes(detail.timings), trace: detail.trace, deltas: deltasOfTurn(detail.trace, live.deltas, tied.id), deltasMissed: live.missed.length > missedBefore || live.closed, request, stored, rows, history, lore: { map: map ?? [], entries }, missing },
     error: null,
   };
 }

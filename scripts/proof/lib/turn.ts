@@ -18,6 +18,11 @@
 // - The kept request file: RPH `src/harness/requests.ts` at the pin, `{"messages":[{"role","text"}]}`;
 //   a message's `block`, RPH's name for its own block (the session's carry, the briefing), is read where
 //   the file gives one (PlanGates-4-fix1 item 8). RPH at the pin names none.
+// - A run's id is its own, made by RPH when the run starts: a turn's first run, a continue and a "Settle
+//   now" each have one, and none is the turn's (RPH `ff1c9839`; PlanHarnessTools-20). A record carries
+//   its run's id in `run` and its turn in `scope.turn`; a streamed piece (`TraceDelta`) carries only
+//   `run`. So a turn's pieces are those of any run its records name (`deltasOfTurn`), and a call, a
+//   release or an intent is held to its own run, never found by the turn's id.
 
 import type { ReleaseForm, TraceDelta, TraceRecord, Usage } from "rp-harness/contract";
 import { isRecord } from "../../../src/shared/json";
@@ -53,6 +58,8 @@ export function recordTimes(timings: unknown): RecordTimes | "not served" {
 /** One model call of a turn, from its `call_started` and `call_ended`. Times on RPE's clock. */
 export interface Call {
   agent: string;
+  /** The run it belongs to, by the run's own id. */
+  run: string;
   definition: string;
   call: number;
   startedAt: number;
@@ -73,14 +80,15 @@ export interface Call {
 
 export function callsOf(trace: readonly TraceRecord[]): Call[] {
   const ends = new Map<string, TraceRecord>();
-  for (const r of trace) if (r.event.kind === "call_ended") ends.set(`${r.agent.id}\u0000${r.event.call}`, r);
+  for (const r of trace) if (r.event.kind === "call_ended") ends.set(`${r.run}\u0000${r.agent.id}\u0000${r.event.call}`, r);
   return trace.flatMap((r): Call[] => {
     if (r.event.kind !== "call_started") return [];
-    const end = ends.get(`${r.agent.id}\u0000${r.event.call}`);
+    const end = ends.get(`${r.run}\u0000${r.agent.id}\u0000${r.event.call}`);
     const ended = end?.event.kind === "call_ended" ? end.event : null;
     return [
       {
         agent: r.agent.id,
+        run: r.run,
         definition: r.agent.definition,
         call: r.event.call,
         startedAt: r.at,
@@ -118,21 +126,28 @@ export function leadStart(trace: readonly TraceRecord[]): LeadStart | null {
   return started?.event.kind === "agent_started" ? { effort: started.event.effort ?? null, model: started.event.model, connection: started.event.connection } : null;
 }
 
-/** The release: when, in which form, and by which agent. */
-export function releaseOf(trace: readonly TraceRecord[]): { at: number; form: ReleaseForm; by: string } | null {
+/** The release: when, in which form, by which agent, and in which run. */
+export function releaseOf(trace: readonly TraceRecord[]): { at: number; form: ReleaseForm; by: string; run: string } | null {
   const released = trace.find((r) => r.event.kind === "released");
-  return released?.event.kind === "released" ? { at: released.at, form: released.event.release.form, by: released.event.release.by.id } : null;
+  return released?.event.kind === "released" ? { at: released.at, form: released.event.release.form, by: released.event.release.by.id, run: released.run } : null;
 }
 
-/** When the intent record reached the trace, whole. */
-export function intentAt(trace: readonly TraceRecord[]): number | null {
-  return trace.find((r) => r.event.kind === "intent")?.at ?? null;
+/** When the intent record reached the trace, whole, and in which run. */
+export function intentOf(trace: readonly TraceRecord[]): { at: number; run: string } | null {
+  const intent = trace.find((r) => r.event.kind === "intent");
+  return intent === undefined ? null : { at: intent.at, run: intent.run };
 }
 
-/** The call that wrote the reply: the releasing agent's last call begun before the release. */
-export function replyCall(calls: readonly Call[], release: { at: number; by: string } | null): Call | null {
+/** The call that wrote the reply: the releasing agent's last call of the releasing run begun before the release. */
+export function replyCall(calls: readonly Call[], release: { at: number; by: string; run: string } | null): Call | null {
   if (release === null) return null;
-  return calls.filter((c) => c.agent === release.by && c.startedAt <= release.at).at(-1) ?? null;
+  return calls.filter((c) => c.agent === release.by && c.run === release.run && c.startedAt <= release.at).at(-1) ?? null;
+}
+
+/** The streamed pieces of a turn: those of every run its records name, whichever run of the turn it is, and none of another turn's. */
+export function deltasOfTurn(trace: readonly TraceRecord[], deltas: readonly TraceDelta[], turn: string): TraceDelta[] {
+  const runs = new Set(trace.filter((r) => r.scope.turn === turn).map((r) => r.run));
+  return deltas.filter((d) => runs.has(d.run));
 }
 
 /** Calls begun by any agent before a moment: the reply's first piece leaving RPE (tag form) or its release (two-step form). */
@@ -171,13 +186,15 @@ export function writesIntent(tool: { name: string; path: string | null }): boole
  * item 3, PlanGates-4-fix1 item 11): in the tag form from the first piece of the lead's text in the call
  * that wrote the record to the `intent` event; in the two-step form from when the model began writing
  * the `file_write` of `scratch/intent.md` (C7's `began`) to the `intent` event, never from another tool
- * call of that model call. Null where the trace cannot say.
+ * call of that model call. The call and its pieces are those of the run that wrote the record. Null
+ * where the trace cannot say.
  */
-export function traceIntentMs(form: "tag" | "two-step", trace: readonly TraceRecord[], deltas: readonly TraceDelta[], run: string): number | null {
-  const at = intentAt(trace);
+export function traceIntentMs(form: "tag" | "two-step", trace: readonly TraceRecord[], deltas: readonly TraceDelta[]): number | null {
+  const intent = intentOf(trace);
   const lead = leadOf(trace);
-  if (at === null || lead === null) return null;
-  const calls = callsOf(trace).filter((c) => c.agent === lead.id && c.startedAt <= at);
+  if (intent === null || lead === null) return null;
+  const { at, run } = intent;
+  const calls = callsOf(trace).filter((c) => c.agent === lead.id && c.run === run && c.startedAt <= at);
   if (form === "tag") {
     const call = calls.at(-1);
     if (call === undefined) return null;
