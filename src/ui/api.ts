@@ -96,7 +96,10 @@ export interface TurnList {
 
 /** One run of a turn: its first, or a continue of it, which runs the turn again under a run id of its own. */
 export interface TurnRun {
+  /** RPE's own id for it. */
   id: string;
+  /** RPH's own id for it, which its trace records carry as their `run`; null before its first record. */
+  run: string | null;
   /** Its place among the turn's runs, from 1. */
   nth: number;
   kind: RunKind;
@@ -106,13 +109,16 @@ export interface TurnRun {
   /** What this run sent to the chat: the reply's text, and the progress lines of its thinking block. */
   reply: { text: string; progress: string[] };
   error: ReplyError | null;
-  /** Its own trace records, numbered from 1 within the run, from the record numbered `from`. */
+  /** Its own trace records, numbered from 1 within the run, as far as the read reaches (`TurnDetail.trace`). */
   trace: TraceRecord[];
   /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call, each named by its path below the folder. */
   requests: { agent: string; definition: string; call: number; file: string }[];
 }
 
-/** `GET /api/v1/chats/:chat/turns/:turn?from=`: one turn, with its trace from the record numbered `from` (1 when absent). */
+/**
+ * `GET /api/v1/chats/:chat/turns/:turn?run=&from=`: one turn, read on from where a page has read to: the records of its run `run`
+ * (RPH's id for it; the turn's first when absent) numbered `from` on (1 when absent), and every record of each run that began after it.
+ */
 export interface TurnDetail extends TurnSummary {
   chat: string;
   /** The lead's intent record as it was written (plan §10.3); null when it wrote none. Shown behind the spoiler gate. */
@@ -121,7 +127,7 @@ export interface TurnDetail extends TurnSummary {
   reply: { text: string; progress: string[] };
   /** Why the reply failed, when it did. */
   error: ReplyError | null;
-  /** The events of all its runs, each run's numbered from `from`, in order. */
+  /** Its runs' events as far as the read reaches, in order. */
   trace: TraceRecord[];
   /** The lore of the turn's prompt, by id, as its intake kept it: the entries Lumiverse activated for it (Lumiverse's ids), and the entries its lore map showed the Author (RPE's ids, as the map writes them). */
   lore: { activated: string[]; map: string[] };
@@ -765,7 +771,7 @@ export interface Routes {
   "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
   "GET /api/v1/chats": RouteShape<ChatList>;
   "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
-  "GET /api/v1/chats/:chat/turns/:turn": RouteShape<TurnDetail, { from?: number }>;
+  "GET /api/v1/chats/:chat/turns/:turn": RouteShape<TurnDetail, { run?: string; from?: number }>;
   "POST /api/v1/chats/:chat/turns/:turn/stop": RouteShape<StopAnswer>;
   "GET /api/v1/chats/:chat/turns/:turn/files": RouteShape<TurnFiles>;
   "GET /api/v1/chats/:chat/turns/:turn/files/*": RouteShape<TurnFile>;

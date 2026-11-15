@@ -75,12 +75,15 @@ export interface ReplySoFar {
 }
 
 export interface RunNode {
+  /** RPH's own id for the run, which its records, its streaming text and what it sent to the chat carry; RPE's own id for it, read before its first record is in. */
   readonly run: string;
   /**
    * Which run of its id this is, from 1. RPH names a turn's run by the turn, so a continue runs its turn
    * again under the same name, its records numbered from 1 again (plan §10.10).
    */
   readonly nth: number;
+  /** The turn it is a run of, as its records' scope names it, or the read that named the run; null for a run of no turn (a job the user started), or one heard of by nothing else yet. */
+  readonly turn: string | null;
   readonly scope: Scope | null;
   /** The agent, run and tool call of another run that started this one (a job's). */
   readonly startedBy: { readonly agent: string; readonly run: string; readonly call: string } | null;
@@ -113,8 +116,8 @@ export const EMPTY_LIVE: LiveModel = { runs: [] };
 const NO_STREAM = { text: "", thinking: "" } as const;
 const NO_REPLY: ReplySoFar = { text: "", progress: [], held: [] };
 
-function emptyRun(run: string, nth: number): RunNode {
-  return { run, nth, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
+function emptyRun(run: string, nth: number, turn: string | null = null): RunNode {
+  return { run, nth, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
 }
 
 function withRun(model: LiveModel, next: RunNode): LiveModel {
@@ -265,8 +268,10 @@ function fold(run: RunNode, record: TraceRecord): RunNode {
 
 /** The model with one trace record in: folded when it follows its run's last, passed over when it is in already, held when it comes past a hole. */
 export function applyRecord(model: LiveModel, record: TraceRecord): LiveModel {
-  const run = runFor(model, record);
-  if (record.seq <= run.seq || run.waiting.some((w) => w.seq === record.seq)) return model;
+  const found = runFor(model, record);
+  if (record.seq <= found.seq || found.waiting.some((w) => w.seq === record.seq)) return model;
+  // Its turn is known from any record of it, one held past a hole included.
+  const run = found.turn === null && record.scope.turn !== undefined ? { ...found, turn: record.scope.turn } : found;
   if (record.seq !== run.seq + 1) {
     const waiting = [...run.waiting, record].sort((a, b) => a.seq - b.seq);
     return withRun(model, { ...run, waiting });
@@ -348,12 +353,18 @@ export function applyLive(model: LiveModel, event: LiveEvent): LiveModel {
  * The model with a read of one turn in: its records, and what went to the chat, which holds as far as it
  * goes. A read that says the turn has ended holds too, for a run whose records do not say so (a turn
  * read without its trace): its outcome is the read's. What a read says beside its records is of the
- * turn's latest run.
+ * turn's latest run, by RPH's id for it; a run read before its first record is in goes under RPE's own
+ * id for it, and gives way to RPH's once a read names that.
  */
 export function applyRead(model: LiveModel, detail: TurnDetail): LiveModel {
   let next = model;
   for (const record of detail.trace) next = applyRecord(next, record);
-  const run = lastRunOf(next, detail.id) ?? emptyRun(detail.id, 1);
+  const named = new Set(detail.runs.flatMap((view) => (view.run === null ? [] : [view.id])));
+  if (next.runs.some((r) => named.has(r.run))) next = { runs: next.runs.filter((r) => !named.has(r.run)) };
+  const latest = detail.runs.at(-1);
+  if (latest === undefined) return next;
+  const name = latest.run ?? latest.id;
+  const run = lastRunOf(next, name) ?? emptyRun(name, 1, detail.id);
   const known = run.reply;
   const text = known.text.length > detail.reply.text.length ? detail.reply.text + known.text.slice(detail.reply.text.length) : detail.reply.text;
   const progress = Array.from({ length: Math.max(known.progress.length, detail.reply.progress.length) }, (_, i) => detail.reply.progress[i] ?? known.progress[i] ?? "");

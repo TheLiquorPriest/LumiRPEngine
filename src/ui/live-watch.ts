@@ -1,17 +1,19 @@
 // Watching a chat as its pages show it. The Live page watches its latest turn, whichever that is; the
-// Turn page watches one turn, and every run of it (a continue runs it again). Either way: follow the
-// chat's live events, read at once (so the page shows something even while the live road is not up)
-// and again once following has begun, and read again wherever something was lost on the way (a hole in
-// a run's records, events the hub dropped for a page that fell behind, a relay frame lost). The Turn
-// page also reads its turn again when one of its runs begins or ends, since what a read says beside the
-// records (how the turn stands, its moments, what it spent) changes then. What the page is shown changes
-// at most once each `renderMs`, however fast the events come, but a read's result shows at once.
+// Turn page watches one turn, and every run of it (a continue runs it again), each under RPH's own id
+// for it: a run is the turn's when its records' scope names the turn, and its streaming text and what
+// it sent to the chat are known by that run. Either way: follow the chat's live events, read at once
+// (so the page shows something even while the live road is not up) and again once following has begun,
+// and read again wherever something was lost on the way (a hole in a run's records, read by that run,
+// events the hub dropped for a page that fell behind, a relay frame lost). The Turn page also reads its
+// turn again when one of its runs begins or ends, since what a read says beside the records (how the
+// turn stands, its moments, what it spent) changes then. What the page is shown changes at most once
+// each `renderMs`, however fast the events come, but a read's result shows at once.
 
 import type { LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
 import type { TurnDetail } from "./api";
 import type { RpeClient } from "./client";
-import { applyLive, applyRead, EMPTY_LIVE, holeIn, lastRunOf, type LiveModel } from "./live-model";
+import { applyLive, applyRead, EMPTY_LIVE, holeIn, lastRunOf, type LiveModel, type RunNode } from "./live-model";
 import type { Timers } from "./roads";
 import { errorWords } from "./words";
 
@@ -51,6 +53,19 @@ function runOfEvent(event: LiveEvent): string | null {
   // Read as whatever came, the declared kinds' data or not.
   const data: unknown = event.data;
   return isRecord(data) && typeof data.run === "string" ? data.run : null;
+}
+
+/** The turn a live event's record is of, as its scope names it; null for any other event. */
+function turnOfEvent(event: LiveEvent): string | null {
+  const data: unknown = event.data;
+  if (event.kind !== "trace" || !isRecord(data) || !isRecord(data.scope)) return null;
+  return typeof data.scope.turn === "string" ? data.scope.turn : null;
+}
+
+/** Where a read of a turn begins: a run of it, by RPH's id for it, and the record of that run (none named: the turn's first run, whole). */
+interface ReadFrom {
+  run?: string;
+  from: number;
 }
 
 /** Whether a live event is a run of its turn beginning or ending. */
@@ -95,6 +110,8 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
   const reading = new Set<string>();
   /** Turns to read again once the read of them now out is back. */
   const stale = new Set<string>();
+  /** On the Turn page: the runs of its turn heard of so far, by RPH's id for each. */
+  const ours = new Set<string>();
 
   const publish = (): void => {
     timers.clearTimeout(timer);
@@ -104,15 +121,31 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
   const soon = (): void => {
     if (timer === null) timer = timers.setTimeout(publish, renderMs);
   };
-  /** Where a read of a turn starts: past the records its latest run has. */
-  const nextOf = (turn: string): number => (lastRunOf(model, turn)?.seq ?? 0) + 1;
+  /** Where a read of a turn starts: past the records of the latest run of it the page holds records of. */
+  const nextOf = (turn: string): ReadFrom => {
+    const run = model.runs.findLast((r) => r.turn === turn && (r.seq > 0 || r.waiting.length > 0));
+    return run === undefined ? { from: 1 } : { run: run.run, from: run.seq + 1 };
+  };
+  /** Reads a turn's run on from `from`; for a run the page holds no record of yet (one read before its first), the turn on from where the page has it. */
+  const readOn = (run: RunNode, from: number): void => {
+    if (run.turn === null) return;
+    if (run.seq > 0 || run.waiting.length > 0) void read(run.turn, { run: run.run, from });
+    else refresh(run.turn);
+  };
+  /** Whether a live event is of a run of the turn the Turn page watches: its records' scope names the turn, and its other events name the run. */
+  const ofOurs = (event: LiveEvent): boolean => {
+    const run = runOfEvent(event);
+    if (run === null) return false;
+    if (turnOfEvent(event) === only) ours.add(run);
+    return ours.has(run);
+  };
 
-  async function read(turn: string, from: number): Promise<void> {
+  async function read(turn: string, at: ReadFrom): Promise<void> {
     if (reading.has(turn)) return;
     reading.add(turn);
     let got: TurnDetail | null = null;
     try {
-      got = await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn }, { query: { from } });
+      got = await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn }, { query: at });
     } catch (error) {
       problem = errorWords(error);
     } finally {
@@ -121,16 +154,19 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
     if (!alive) return;
     if (got !== null) {
       model = applyRead(model, got);
-      if (turn === only) detail = got;
+      if (turn === only) {
+        detail = got;
+        for (const record of got.trace) ours.add(record.run);
+      }
       problem = null;
     }
     if (turn === only) loading = false;
     publish();
-    // Events that came while the read was out may have left a hole the read did not reach: read on, while each read gets further.
-    const run = lastRunOf(model, turn);
+    // Events that came while the read was out may have left a hole in the run read that the read did not reach: read on, while each read gets further.
+    const run = at.run === undefined ? model.runs.findLast((r) => r.turn === turn) : lastRunOf(model, at.run);
     const hole = run === undefined ? null : holeIn(run);
     if (stale.delete(turn)) refresh(turn);
-    else if (got !== null && hole !== null && hole > from) void read(turn, hole);
+    else if (got !== null && run !== undefined && hole !== null && (at.run !== run.run || hole > at.from)) void read(turn, { run: run.run, from: hole });
   }
 
   /** Reads a turn again, or once the read of it now out is back. */
@@ -161,7 +197,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
     events(events, missed) {
       let begunOrEnded = false;
       for (const event of events) {
-        if (only !== null && runOfEvent(event) !== only) continue;
+        if (only !== null && !ofOurs(event)) continue;
         model = applyLive(model, event);
         begunOrEnded ||= turning(event);
       }
@@ -169,18 +205,18 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
       soon();
       for (const run of model.runs) {
         const hole = holeIn(run);
-        if (hole !== null) void read(run.run, hole);
+        if (hole !== null) readOn(run, hole);
       }
       if (only !== null && begunOrEnded) refresh(only);
       // The hub dropped events for this page: whatever they held is read again, the latest turn's included.
       if (missed !== null) {
         catchUp();
-        for (const run of model.runs) if (run.outcome === null) void read(run.run, run.seq + 1);
+        for (const run of model.runs) if (run.outcome === null) readOn(run, run.seq + 1);
       }
     },
     reset() {
       catchUp();
-      for (const run of model.runs) if (run.outcome === null) void read(run.run, run.seq + 1);
+      for (const run of model.runs) if (run.outcome === null) readOn(run, run.seq + 1);
     },
     refused(words) {
       problem = words;
@@ -189,7 +225,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
     },
   });
   if (only === null) void readLatest();
-  else void read(only, 1);
+  else void read(only, { from: 1 });
 
   return () => {
     alive = false;

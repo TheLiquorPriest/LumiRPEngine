@@ -204,6 +204,20 @@ function continued(): LiveEvent[] {
 export const CONTINUED: readonly LiveEvent[] = continued();
 export const CONTINUED_RECORDS: readonly TraceRecord[] = CONTINUED.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
 
+/**
+ * Events of the recording as RPH gives them since each run has an id of its own: `run` wherever the recording names its run by the
+ * turn's id (a record's run and a sub-agent's parent run, a piece of streaming text, a piece of the reply), the turn kept in each
+ * record's scope.
+ */
+export function underRun(events: readonly LiveEvent[], run: string): LiveEvent[] {
+  return events.map((e): LiveEvent => {
+    if (e.kind === "trace") return { ...e, data: { ...e.data, run, ...(e.data.parent === undefined ? {} : { parent: { ...e.data.parent, run } }) } };
+    if (e.kind === "delta") return { ...e, data: { ...e.data, run } };
+    if (e.kind === "reply") return { ...e, data: { ...e.data, run } };
+    return e;
+  });
+}
+
 /** The recorded turn once continued, as a read of it answers: what its latest run (the continue) says, the records of both its runs in time order, and each run. */
 export function continuedTurn(): TurnDetail {
   const latest = turnOf(CONTINUED, { run: RUN, chat: CHAT, received: (CONTINUED_RECORDS[0]?.at ?? T0) - INTAKE_MS });
@@ -235,6 +249,7 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
   const trace = records.filter((r) => r.seq >= (options.from ?? 1));
   const run: TurnRun = {
     id: `${options.run}.1`,
+    run: records[0]?.run ?? options.run,
     nth: 1,
     kind: "new",
     status,
@@ -293,7 +308,8 @@ export function earlierTurn(id: string, chat = CHAT): TurnDetail | null {
   if (summary === undefined || words === undefined) return null;
   const error = summary.status === "stopped" ? { code: "stopped" as const } : null;
   const reply = { text: words.reply, progress: [] };
-  const run: TurnRun = { id: `${id}.1`, nth: 1, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
+  // The recording names a run by its turn, as RPH did before each run had an id of its own.
+  const run: TurnRun = { id: `${id}.1`, run: id, nth: 1, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
   return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run] };
 }
 

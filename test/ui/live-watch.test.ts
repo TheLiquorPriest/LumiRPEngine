@@ -5,13 +5,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { createStore } from "../../src/frontend/store";
-import type { LiveEvent } from "../../src/shared/api";
+import type { LiveEvent, TraceRecord } from "../../src/shared/api";
 import type { MissingPermission, RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
 import type { ClientState, LiveListener, RpeClient } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE, type RunNode } from "../../src/ui/live-model";
 import { watchChat, watchTurn, type Watched } from "../../src/ui/live-watch";
 import type { Timers } from "../../src/ui/roads";
-import { CHAT, CONTINUED, continuedTurn, RECORDED, RECORDS, RUN, turnAt, turnListAt } from "./recorded";
+import { CHAT, CONTINUED, CONTINUED_REPLY, continuedTurn, RECORDED, RECORDS, REPLY, RUN, T0, turnAt, turnListAt, turnOf, underRun } from "./recorded";
 
 /** A clock the test moves by hand. */
 function manualTimers(): Timers & { advance(ms: number): void } {
@@ -121,7 +121,7 @@ describe("watching a chat", () => {
     // The read following asked for: the list again, then only the records after those the page has.
     (await client.call_(2)).answer(turnListAt(55));
     const after = await client.call_(3);
-    expect(after.query).toEqual({ from: recordsIn(55) + 1 });
+    expect(after.query).toEqual({ run: RUN, from: recordsIn(55) + 1 });
     after.answer(turnAt(55, recordsIn(55) + 1));
     await flush();
     client.listener().events(RECORDED.slice(55), null);
@@ -144,7 +144,7 @@ describe("watching a chat", () => {
     client.listener().events(RECORDED.slice(40, 50), { from: 31, to: 40 });
     const asked = await Promise.all([client.call_(1), client.call_(2)]);
     const turnRead = asked.find((a) => a.key === "GET /api/v1/chats/:chat/turns/:turn");
-    expect(turnRead?.query).toEqual({ from: recordsIn(30) + 1 });
+    expect(turnRead?.query).toEqual({ run: RUN, from: recordsIn(30) + 1 });
     turnRead?.answer(turnAt(50, recordsIn(30) + 1));
     for (const a of asked) if (a.key === "GET /api/v1/chats/:chat/turns") a.answer(turnListAt(50));
     await flush();
@@ -190,11 +190,12 @@ describe("watching one turn, for its page", () => {
     // Following begins: the turn is read on from what the page has.
     client.listener().reset();
     const caught = await client.call_(1);
-    expect(caught.query).toEqual({ from: recordsIn(30) + 1 });
+    expect(caught.query).toEqual({ run: RUN, from: recordsIn(30) + 1 });
     caught.answer(turnAt(30, recordsIn(30) + 1));
     await flush();
     // Its events, and one of another turn of the chat.
-    const elsewhere = { ...(RECORDED[0] as LiveEvent), seq: 9_999, data: { ...(RECORDED[0]?.data as object), run: "turn-99" } } as LiveEvent;
+    const other = RECORDS[0] as TraceRecord;
+    const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "turn-99", scope: { ...other.scope, turn: "turn-99" } } };
     client.listener().events([...RECORDED.slice(30, 60), elsewhere], null);
     timers.advance(50);
     expect(seen.at(-1)?.model.runs.map((r) => r.run)).toEqual([RUN]);
@@ -202,7 +203,7 @@ describe("watching one turn, for its page", () => {
     // Its run ends live: the turn is read again, for how it ended.
     client.listener().events(RECORDED.slice(60), null);
     const after = await client.call_(2);
-    expect(after.query).toEqual({ from: RECORDS.length + 1 });
+    expect(after.query).toEqual({ run: RUN, from: RECORDS.length + 1 });
     after.answer(turnAt(RECORDED.length, RECORDS.length + 1));
     await flush();
     expect(seen.at(-1)?.detail?.status).toBe("released");
@@ -220,7 +221,7 @@ describe("watching one turn, for its page", () => {
     await flush();
     client.listener().events(CONTINUED.slice(0, 3), null);
     const again = await client.call_(1);
-    expect(again.query).toEqual({ from: 4 });
+    expect(again.query).toEqual({ run: RUN, from: 4 });
     again.answer({ ...continuedTurn(), status: "running", trace: [] });
     timers.advance(50);
     await flush();
@@ -229,6 +230,53 @@ describe("watching one turn, for its page", () => {
       [RUN, 2, 3],
     ]);
     expect(seen.at(-1)?.detail?.kind).toBe("continue");
+    stop();
+  });
+
+  test("each run of the turn, under RPH's own id for it, is heard by the turn in its records' scope; what a run sent to the chat goes on that run, and a hole in a run is read by that run", async () => {
+    const client = heldClient();
+    const timers = manualTimers();
+    const seen: Watched[] = [];
+    const first = underRun(RECORDED, "run-31a");
+    const again = underRun(CONTINUED, "run-31b");
+    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), 50);
+    const opened = await client.call_(0);
+    expect([opened.params, opened.query]).toEqual([{ chat: CHAT, turn: RUN }, { from: 1 }]);
+    opened.answer(turnOf(first.slice(0, 30), { run: RUN, chat: CHAT, received: T0 }));
+    await flush();
+    // The first run's events go on, beside a record of another turn's run.
+    const other = RECORDS[0] as TraceRecord;
+    const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "run-99", scope: { ...other.scope, turn: "turn-99" } } };
+    client.listener().events([...first.slice(30), elsewhere], null);
+    timers.advance(50);
+    expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.turn, r.seq])).toEqual([["run-31a", RUN, RECORDS.length]]);
+    // Its end reads the turn again, on from that run's last record.
+    const ended = await client.call_(1);
+    expect([ended.params, ended.query]).toEqual([{ chat: CHAT, turn: RUN }, { run: "run-31a", from: RECORDS.length + 1 }]);
+    ended.answer({ ...turnOf(first, { run: RUN, chat: CHAT, received: T0 }), trace: [] });
+    await flush();
+
+    // A continue: a run of its own, heard by its turn; what it sent to the chat goes on it.
+    client.listener().events(again.slice(0, 4), null);
+    const begun = await client.call_(2);
+    expect(begun.query).toEqual({ run: "run-31b", from: 4 });
+    begun.answer({ ...turnOf(again.slice(0, 4), { run: RUN, chat: CHAT, received: T0 }), trace: [] });
+    await flush();
+    timers.advance(50);
+    expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.turn, r.seq, r.reply.text])).toEqual([
+      ["run-31a", RUN, RECORDS.length, REPLY],
+      ["run-31b", RUN, 3, CONTINUED_REPLY],
+    ]);
+    // A record of it past a hole: the hole is read by that run.
+    client.listener().events(again.slice(5, 6), null);
+    const hole = await client.call_(3);
+    expect(hole.query).toEqual({ run: "run-31b", from: 4 });
+    hole.answer(turnOf(again.slice(0, 6), { run: RUN, chat: CHAT, received: T0, from: 4 }));
+    await flush();
+    expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.seq, r.waiting.length])).toEqual([
+      ["run-31a", RECORDS.length, 0],
+      ["run-31b", 5, 0],
+    ]);
     stop();
   });
 });

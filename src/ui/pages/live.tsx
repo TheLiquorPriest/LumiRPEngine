@@ -14,9 +14,8 @@ import { AgentTree, ReplyBox, RunHead } from "../trace-view";
 import { errorWords } from "../words";
 
 /**
- * A Stop pressed on the Live page: the chat and the run it was pressed for, that run by its place among
- * its turn's runs too (a continue runs a turn again under the same id), and why it did not go through,
- * in RPE's words, once that is known.
+ * A Stop pressed on the Live page: the chat and the run it was pressed for (by RPH's own id for it), and
+ * why it did not go through, in RPE's words, once that is known. What is stopped is the run's turn.
  */
 export interface StopPress {
   chat: string;
@@ -120,12 +119,12 @@ export function LivePage(props: { chat: string }) {
   const now = useNow(run !== null && run.outcome === null);
 
   const pressStop = (): void => {
-    if (run === null) return;
+    if (run === null || run.turn === null) return;
     const press: StopPress = { chat, run: run.run, nth: run.nth, problem: null };
     setStop(press);
     // RPE's answer counts only while this press is the page's own: not once it has left the chat, or Stop was pressed again.
     const answered = (next: StopPress | null): void => setStop((held) => (held === press ? next : held));
-    app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn: run.run }).then(
+    app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn: run.turn }).then(
       (answer) => {
         if (!answer.stopped) answered(null);
       },
@@ -146,7 +145,7 @@ export function LivePage(props: { chat: string }) {
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onOpenTurn={() => {
-        if (run !== null) app.go({ page: "turn", chat, turn: run.run });
+        if (run?.turn != null) app.go({ page: "turn", chat, turn: run.turn });
       }}
     />
   );
