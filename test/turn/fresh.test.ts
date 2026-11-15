@@ -27,6 +27,6 @@ test("a fresh RPE starts its harness with no error in its log", async () => {
   const turns = composition.turns();
   expect(turns).not.toBeNull();
   // The harness's jobs settle what they found at the start before they answer anything.
-  expect(await turns!.harness.jobs?.list({ user: "user-nobody" })).toEqual([]);
+  expect((await turns!.harness.jobs.list({ user: "user-nobody" })).jobs).toEqual([]);
   expect(lines.filter((line) => /error/i.test(line))).toEqual([]);
 });

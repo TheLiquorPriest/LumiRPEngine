@@ -113,11 +113,11 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
 
   // Two jobs run at once by default, so the third to begin waits for a place. The player cancels one, wherever it stands; the other two
   // go on after the reply.
-  const views = (await b.turns.harness.jobs?.list({ user: USER, chat: CHAT })) ?? [];
+  const views = (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs;
   const id = (brief: string): string => views.find((v) => v.brief === brief)?.id ?? "";
   expect(views.map((v) => [v.brief, v.scope.turn, v.ended]).sort()).toEqual(Object.values(briefs).map((brief) => [brief, first, undefined]).sort());
   expect(views.map((v) => v.state).sort()).toEqual(["queued", "running", "running"]);
-  expect((await b.turns.harness.jobs?.cancel(USER, id(briefs.cancelled)))?.state).toBe("cancelled");
+  expect((await b.turns.harness.jobs.cancel(USER, id(briefs.cancelled)))?.state).toBe("cancelled");
   held.done.open();
   held.failed.open();
   const states: JobState[] = ["done", "failed", "cancelled"];
@@ -139,8 +139,9 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
 
 /** A job the user starts for the bed's chat, its agent's first call held by the script; given once it runs. */
 async function heldJob(b: TurnBed, brief: string): Promise<JobView> {
-  const started = await b.turns.harness.jobs!.start({ user: USER, chat: CHAT, session: NO_SESSION }, { agent: "historian", brief });
-  return await b.until("the job to run", async () => ((await b.turns.harness.jobs!.get(USER, started.id))?.state === "running" ? started : null));
+  const started = await b.turns.harness.jobs.start({ user: USER, chat: CHAT, session: NO_SESSION }, { agent: "historian", brief });
+  if ("refused" in started) throw new Error(`The job was refused: ${JSON.stringify(started)}`);
+  return await b.until("the job to run", async () => ((await b.turns.harness.jobs.get(USER, started.id))?.state === "running" ? started : null));
 }
 
 test("another user's job is not found, and is not cancelled", async () => {

@@ -4,6 +4,7 @@
 // says the same. Written once here, read by the routes (`routes.ts`) and by every page through the
 // generated types.
 
+import type { FindStopped } from "rp-harness/contract";
 import { type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, replyError, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { PanelRequest } from "./player";
@@ -129,7 +130,22 @@ export const stopReply = shape.named("StopReply", "True when the turn was runnin
 
 const folderEntry = shape.named("FolderEntry", "One entry of a turn's folder: its path below the folder, its size (a folder's is what its files hold), and whether it is a folder.", shape.object({ name: T, bytes: N, folder: shape.yesNo() }));
 export type TurnFileEntry = Infer<typeof folderEntry>;
-export const folderReply = shape.named("FolderReply", "The whole of a turn's folder, every level down; none for a turn that has no folder.", shape.object({ files: shape.list(folderEntry) }));
+const findStopped = shape.named(
+  "FindStopped",
+  "Why the file host stopped before it had looked everywhere, each way it did with its counts: at the cap on hits with more there, past files too large to search, at lines cut to a length, or out of time.",
+  shape.object({
+    limit: opt(shape.object({ max: N }), "The hits reached `max`, the host's own cap, and more were there."),
+    large: opt(shape.object({ files: N, bytes: N }), "A search passed over `files` files larger than `bytes` bytes."),
+    cut: opt(shape.object({ lines: N, chars: N }), "A search cut `lines` of the lines it gave to `chars` characters each."),
+    time: opt(shape.object({ ms: N }), "It ran out of the `ms` milliseconds it was given."),
+  }),
+);
+type FindStoppedMirrored = Holds<Exactly<Infer<typeof findStopped>, FindStopped>>;
+export const folderReply = shape.named(
+  "FolderReply",
+  "The whole of a turn's folder, every level down; none for a turn that has no folder. Where the file host stopped short of the whole folder, what it found, and how it stopped.",
+  shape.object({ files: shape.list(folderEntry), stopped: opt(findStopped, "How the file host stopped short of the whole folder; absent when it listed it all.") }),
+);
 export const fileReply = shape.named("FileReply", "One file of a turn's folder, by its path below the folder, as text.", shape.object({ name: T, text: T }));
 
 export const settleReply = shape.named("SettleReply", "The newest turn, and the Settle now run begun on it.", shape.object({ turn: shape.turnId(), run: T }));

@@ -50,7 +50,7 @@ test("every chat the migration carried is started one after another within the j
 
   // One at a time, as the setting says: the heron's job runs once the lighthouse's has ended.
   held.first.open();
-  await b.until("the heron's job to run", async () => (await b.turns.harness.jobs?.get(USER, heron ?? ""))?.state === "running");
+  await b.until("the heron's job to run", async () => (await b.turns.harness.jobs.get(USER, heron ?? ""))?.state === "running");
   held.second.open();
   const ended = await b.until("both jobs to end", async () => {
     const pages = await Promise.all([CHAT, HERON].map((chat) => call<BootstrapChat>("GET", BOOTSTRAP_CHAT_PATH, { chat })));

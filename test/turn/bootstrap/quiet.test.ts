@@ -24,7 +24,7 @@ test("ten turns of a chat that has no bootstrap job start none, nor any other jo
     await settledTurn(b, out.generationId!);
   }
   expect(b.model.requests).toHaveLength(10);
-  expect(await b.turns.harness.jobs?.list({ user: USER })).toEqual([]);
+  expect((await b.turns.harness.jobs.list({ user: USER })).jobs).toEqual([]);
   const page = await call<BootstrapChat>("GET", BOOTSTRAP_CHAT_PATH, { chat: CHAT });
   expect(page.body.jobs).toEqual([]);
   // The past the window leaves out is there, uncovered: what a bootstrap would be for, had the player started one.

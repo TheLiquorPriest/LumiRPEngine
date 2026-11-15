@@ -1560,6 +1560,23 @@ export interface FileWrittenReply {
 }
 ```
 
+### `FindStopped`
+
+Why the file host stopped before it had looked everywhere, each way it did with its counts: at the cap on hits with more there, past files too large to search, at lines cut to a length, or out of time.
+
+```ts
+export interface FindStopped {
+  /** The hits reached `max`, the host's own cap, and more were there. */
+  limit?: { max: number };
+  /** A search passed over `files` files larger than `bytes` bytes. */
+  large?: { files: number; bytes: number };
+  /** A search cut `lines` of the lines it gave to `chars` characters each. */
+  cut?: { lines: number; chars: number };
+  /** It ran out of the `ms` milliseconds it was given. */
+  time?: { ms: number };
+}
+```
+
 ### `FoldDifference`
 
 Where RPE's fold of a chat differs from today's: at a swipe (its message and number) or at the chat's head; the values that differ, by path; and whether today's state there is kept as the turn's start.
@@ -1587,11 +1604,13 @@ export interface FolderEntry {
 
 ### `FolderReply`
 
-The whole of a turn's folder, every level down; none for a turn that has no folder.
+The whole of a turn's folder, every level down; none for a turn that has no folder. Where the file host stopped short of the whole folder, what it found, and how it stopped.
 
 ```ts
 export interface FolderReply {
   files: FolderEntry[];
+  /** How the file host stopped short of the whole folder; absent when it listed it all. */
+  stopped?: FindStopped;
 }
 ```
 

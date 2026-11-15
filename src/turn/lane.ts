@@ -321,7 +321,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // listed once now that the harness and the lane its end is told to are made, so his are shown as interrupted at once, before he calls.
   // A list that fails is logged, and the start goes on.
   for (const user of storeUsers(app.db)) {
-    harness.jobs?.list({ user }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
+    harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
   return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore, loreIndex, notes, suggestions };
 }

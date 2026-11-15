@@ -5,7 +5,7 @@
 // that activated for it, the history window's cut), the prompt map of each preset, and where RPH found
 // each slice in a turn's prompt.
 //
-// Area `harness` (Appendix B, "Harness"): RPH's small durable state (`kv`), each turn's run as the Turn
+// Area `harness` (Appendix B, "Harness"): RPH's small durable state (`kv`, and its job records, `job`), each turn's run as the Turn
 // page shows it (`turn_run`: where it stands, its timings and usage, what went to the chat), what RPH
 // told RPE about the run (`turn_told`: rules that fired, consents, gap checks, suggestions, attachments
 // asked for), the player's messages as RPE read them (`player_text`), what the player asked for
@@ -275,6 +275,31 @@ ALTER TABLE turn_run ADD COLUMN last_text INTEGER NOT NULL DEFAULT 0;
     // `runs.ts` `finished`. A run kept before has none, and reads as one whose reply did not go out whole.
     sql: `
 ALTER TABLE turn_run ADD COLUMN finished INTEGER;
+`,
+  },
+  {
+    version: 13,
+    name: "RPH's job records in a table of their own",
+    // `kv.ts` `jobRecords`: each record whole as JSON in `value`, with the columns a page is chosen and ordered by. The records RPH kept
+    // before as plain keys (`jobs/all/<id>`) are moved here, so the jobs listed before are listed still.
+    sql: `
+CREATE TABLE job (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  started INTEGER NOT NULL,
+  chat TEXT NOT NULL,
+  state TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX job_by_start ON job (user, started DESC, id DESC);
+INSERT OR REPLACE INTO job (user, id, started, chat, state, value)
+  SELECT user, json_extract(value, '$.id'), json_extract(value, '$.started'), json_extract(value, '$.scope.chat'), json_extract(value, '$.state'), value
+  FROM kv
+  WHERE substr(key, 1, 9) = 'jobs/all/' AND json_valid(value)
+    AND json_type(value, '$.id') = 'text' AND json_type(value, '$.started') IN ('integer', 'real')
+    AND json_type(value, '$.scope.chat') = 'text' AND json_type(value, '$.state') = 'text';
+DELETE FROM kv WHERE substr(key, 1, 9) = 'jobs/all/' AND EXISTS (SELECT 1 FROM job WHERE job.user = kv.user AND job.id = substr(kv.key, 10));
 `,
   },
 ];

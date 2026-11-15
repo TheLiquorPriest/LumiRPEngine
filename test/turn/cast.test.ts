@@ -162,9 +162,10 @@ test("a continue that saves nothing new takes back what it wrote to the cast and
   const out = await continuing;
   expect(out.error).not.toBeNull();
   // The continue was sent as Lumiverse sends it: the reply it goes on with last, out of the history, with no postfix, as the preset sets
-  // none, and the nudge after it (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`).
+  // none, and the nudge after it (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`). The reply carries back, as its
+  // thinking, the progress lines RPE streamed for it (`keepInHistory` by default, `prompt-assembly.service.ts:3370-3394`).
   expect((out.body!.messages as unknown[]).slice(-2)).toEqual([
-    { role: "assistant", content: "The lamp turns." },
+    { role: "assistant", content: "The lamp turns.", reasoning_content: expect.any(String) },
     { role: "system", content: CONTINUE_NUDGE },
   ]);
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, out.generationId!)?.settled ?? null) !== null);

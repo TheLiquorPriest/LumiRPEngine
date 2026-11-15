@@ -75,3 +75,17 @@ test("a run stopped at its call limit ends with what it has: no reply written, t
   expect(run).toMatchObject({ status: "limit", stoppedBy: { limit: { limit: "calls", per: "turn", max: 1 } }, reply: "" });
   expect(b.model.requests.length).toBe(1);
 });
+
+test("a run stopped at its call limit with no reply, the last plain text set: the Author's text outside its tags goes out as the reply", async () => {
+  const answers = [{ pieces: [{ text: "<intent>Look first.</intent>\nThe keeper turns to the stairs." }, { call: "world_query", args: { at: "world" } }] }];
+  const b = await openTurnBed({ answers, global: "limits:\n  turn:\n    calls: 1\nreply:\n  lastText: true\n" });
+  beds.push(b);
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+
+  expect(out.error).toBeNull();
+  expect(out.reply?.content).toBe("The keeper turns to the stairs.");
+  await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+  const run = b.turns.runs.byGeneration(USER, out.generationId!);
+  expect(run).toMatchObject({ status: "limit", stoppedBy: { limit: { limit: "calls", per: "turn", max: 1 } }, lastText: true, reply: "The keeper turns to the stairs." });
+});

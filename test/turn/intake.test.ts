@@ -98,7 +98,8 @@ describe(`intake on a chat of ${MESSAGES} messages`, () => {
     const files = b.turns.files;
     const write = files.write;
     files.write = async (scope, path, op, by) => {
-      if (rpeFolderFile(path) && scope.turn !== undefined && !folderFirst.has(scope.turn)) folderFirst.set(scope.turn, b.model.requests.length);
+      const turn = "turn" in scope ? scope.turn : undefined;
+      if (rpeFolderFile(path) && turn !== undefined && !folderFirst.has(turn)) folderFirst.set(turn, b.model.requests.length);
       return await write(scope, path, op, by);
     };
   }, LIMIT_MS);

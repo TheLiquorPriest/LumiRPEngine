@@ -61,7 +61,7 @@ test("the Author is given the skill's text, the player's choice and the setting'
 
   const again = await call<{ error: string }>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
   expect(again).toEqual({ status: 409, body: { error: `A bootstrap job of chat ${CHAT} is running (job ${first.body.id}). Another can be started once it has ended.` } });
-  expect((await b.turns.harness.jobs?.list({ user: USER, chat: CHAT }))?.length).toBe(1);
+  expect((await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.length).toBe(1);
 
   held.open();
   const ended = await b.until("the job to end", async () => {
@@ -95,7 +95,7 @@ test("a start is refused in words for a chat Lumiverse does not hold, and where 
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: "chat-nowhere" }, {})).toEqual({ status: 404, body: { error: "No bootstrap job was started: There is no chat chat-nowhere for this RPE's Lumiverse user." } });
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {})).toEqual({ status: 409, body: { error: `No bootstrap job was started: the skill bootstrap is switched off or missing in the files of chat ${CHAT}.` } });
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, { relive: 3 })).toEqual({ status: 400, body: { error: expect.stringContaining("does not take this body") } });
-  expect(await boot.b.turns.harness.jobs?.list({ user: USER })).toEqual([]);
+  expect((await boot.b.turns.harness.jobs.list({ user: USER })).jobs).toEqual([]);
 });
 
 test("the bootstrap reads its jobs as its user's", async () => {

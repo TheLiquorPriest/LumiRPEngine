@@ -12,7 +12,7 @@
 // route is a page's: it answers only for the user this RPE belongs to. A route that is handed a turn's
 // id answers a turn joined to another (a continue's held turn) as a fact: the turn it joined (`joined`).
 
-import type { JobsApi, JobView, Scope, TraceRecord, Usage } from "rp-harness/contract";
+import type { JobView, Scope, TraceRecord, Usage } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
 import { isRecord } from "../shared/json";
 import { JoinedTurnError, type NodeView, type ValuesShown } from "../store";
@@ -112,17 +112,10 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     return { scope, folder: (await turns.files.places(scope)).turn ?? null };
   };
 
-  /** RPH's jobs; a 503 where this RPE runs none. */
-  const jobsApi = (): JobsApi => {
-    if (turns.harness.jobs === undefined) throw new RouteError(503, "This RPE runs no jobs.");
-    return turns.harness.jobs;
-  };
-
   /** The user's jobs as RPH last kept each, of one chat or of every chat, the newest started first. */
-  const jobsOf = async (user: string, chat?: string): Promise<{ jobs: JobView[] }> => {
-    const jobs = await jobsApi().list({ user, ...(chat !== undefined ? { chat } : {}) });
-    return { jobs: jobs.sort((a, b) => b.started - a.started || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)) };
-  };
+  const jobsOf = async (user: string, chat?: string): Promise<{ jobs: JobView[] }> => ({
+    jobs: (await turns.harness.jobs.list({ user, ...(chat !== undefined ? { chat } : {}) })).jobs,
+  });
 
   /**
    * The lore of a turn's prompt as its intake kept it in the turn's folder (`turn.json`): the ids of the entries Lumiverse activated
@@ -311,13 +304,14 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       handle: async ({ user, params }) => {
         const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
         if (folder === null) return { files: [] as TurnFileEntry[] };
-        // The whole folder, every level down: it holds what one turn wrote.
+        // The whole folder, every level down: it holds what one turn wrote. Where the file host stopped short of it, what it found is
+        // listed and how it stopped is said.
         const found = await turns.files.find(scope, { by: "list", path: folder, depth: Number.POSITIVE_INFINITY, limit: Number.POSITIVE_INFINITY });
-        const listed = (Array.isArray(found) ? found : [])
+        const listed = (found.status === "found" ? found.hits : [])
           .filter((hit) => hit.path.startsWith(folder) && hit.path.length > folder.length)
           .map((hit) => ({ name: hit.path.slice(folder.length).replace(/\/$/, ""), bytes: hit.bytes ?? 0, folder: hit.type === "folder" }));
         const files: TurnFileEntry[] = listed.map((e) => (e.folder ? { ...e, bytes: listed.filter((f) => !f.folder && f.name.startsWith(`${e.name}/`)).reduce((n, f) => n + f.bytes, 0) } : e));
-        return { files };
+        return { files, ...(found.status === "found" && found.stopped !== undefined ? { stopped: found.stopped } : {}) };
       },
     }),
     route({
@@ -401,7 +395,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       reply: jobCancelReply,
       // A job that has ended already is given as it ended: nothing of it is cancelled. Another user's job is no job of his.
       handle: async ({ user, params }) => {
-        const jobs = jobsApi();
+        const jobs = turns.harness.jobs;
         const job = await jobs.get(user, params.job);
         if (job === undefined) throw new RouteError(404, `There is no job ${params.job}.`);
         return { job: (await jobs.cancel(user, job.id)) ?? job };

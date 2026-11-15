@@ -13,7 +13,7 @@
 // RPH's own record of its jobs.
 
 import { loadGuidance } from "rp-harness";
-import type { AgentRef, JobState, JobView, JsonValue, Scope } from "rp-harness/contract";
+import type { AgentRef, JobRefusal, JobState, JobView, JsonValue, Scope } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { Turns } from "../lane";
 import { turnSettings } from "../settings";
@@ -31,7 +31,7 @@ export const BOOTSTRAP_FACTS = "bootstrap:facts";
 /** Where a chat's bootstrap jobs are kept in RPH's store, by the chat's id. */
 const KEPT = "rpe/bootstrap/";
 /** The states a job is under way in: one of the chat's bootstrap jobs in one of them keeps another from starting. */
-const UNDER_WAY: Readonly<Partial<Record<JobState, true>>> = { queued: true, running: true };
+const UNDER_WAY: Readonly<Partial<Record<JobState, true>>> = { queued: true, held: true, running: true, asking: true };
 
 /** What a bootstrap job is given beside its brief: the player's choice of what to relive (null: none was made), and the token limit the setting gives. */
 export interface BootstrapAsk {
@@ -87,6 +87,26 @@ function refused(status: number, why: string): BootstrapStart {
   return { refused: { status, why } };
 }
 
+/** Why RPH started no job, or why a control of one did nothing, in RPE's words for the page: RPH gives the fact and its numbers. */
+export function refusalWords(refusal: JobRefusal): string {
+  switch (refusal.refused) {
+    case "off":
+      return "jobs are switched off on the Jobs page.";
+    case "day-count":
+      return `${refusal.value} jobs${refusal.connection !== undefined ? ` on connection ${refusal.connection}` : ""} were started in the last 24 hours, and the setting allows ${refusal.max}.`;
+    case "day-tokens":
+      return `jobs spent ${refusal.value} tokens in the last 24 hours, and the setting allows ${refusal.max}.`;
+    case "limit":
+      return `the job's ${refusal.limit} limit is ${refusal.value}, and a limit is a whole number above 0.`;
+    case "agent":
+      return `there is no agent definition ${refusal.agent} in force, or no model for it to run on.`;
+    case "no-job":
+      return `there is no job ${refusal.id}.`;
+    case "state":
+      return `job ${refusal.id} is ${refusal.state}; that is done only to a job that is ${refusal.applies.join(" or ")}.`;
+  }
+}
+
 export class BootstrapJobs {
   readonly #deps: BootstrapJobsDeps;
   /** Each chat's latest start, by user and chat, so that one chat's starts run one at a time. */
@@ -131,7 +151,7 @@ export class BootstrapJobs {
   async chat(user: string, chat: string): Promise<BootstrapChat> {
     const turns = this.#deps.turns();
     const kept = keptOf(await turns.env.store.get({ user }, keyOf(chat)));
-    const [facts, views] = await Promise.all([this.facts(user, chat), Promise.all(kept.map((k) => turns.harness.jobs?.get(user, k.job)))]);
+    const [facts, views] = await Promise.all([this.facts(user, chat), Promise.all(kept.map((k) => turns.harness.jobs.get(user, k.job)))]);
     return { chat, facts, jobs: kept.map((k, i) => ({ id: k.job, relive: k.relive, tokenLimit: k.tokenLimit, view: views[i] ?? null })) };
   }
 
@@ -151,7 +171,6 @@ export class BootstrapJobs {
   async #start(place: string, user: string, chat: string, relive: string | null): Promise<BootstrapStart> {
     const turns = this.#deps.turns();
     const jobs = turns.harness.jobs;
-    if (jobs === undefined) return refused(503, "This RPE runs no jobs, so no bootstrap job can be started.");
     const scope: Scope = { user, chat, session: NO_SESSION };
     for (const kept of keptOf(await turns.env.store.get(scope, keyOf(chat)))) {
       const view = await jobs.get(user, kept.job);
@@ -168,12 +187,13 @@ export class BootstrapJobs {
     const ask: BootstrapAsk = { relive, tokenLimit };
     this.#asking.set(place, ask);
     try {
-      let view: JobView;
+      let view: JobView | JobRefusal;
       try {
         view = await jobs.start(scope, { agent: lead, brief: skill.body, attach: [BOOTSTRAP_JOB, BOOTSTRAP_FACTS], limits: { tokens: tokenLimit } });
       } catch (error) {
         return refused(409, error instanceof Error ? error.message : String(error));
       }
+      if ("refused" in view) return refused(409, `No bootstrap job was started: ${refusalWords(view)}`);
       const job: KeptJob = { job: view.id, ...ask };
       await turns.env.store.update(scope, keyOf(chat), (current) => ({ jobs: [...keptOf(current), job] }) as unknown as JsonValue);
       return { started: view };

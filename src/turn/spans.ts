@@ -43,7 +43,9 @@ export class RunTimes {
     }
     if (record.agent.id !== followed.lead) return;
     const { run, calls } = followed;
-    if (event.kind === "intent") run.intent = { from: run.intent?.from ?? record.at, to: record.at };
+    // The record's first token (`intent_began`) opens its span, which stays open (`to` null) until the record ends (`intent`).
+    if (event.kind === "intent_began") run.intent = { from: run.intent?.from ?? record.at, to: null };
+    else if (event.kind === "intent") run.intent = { from: run.intent?.from ?? record.at, to: record.at };
     else if (event.kind === "call_started" && run.released === null) calls.set(event.call, { thinking: null, lastThought: record.at, output: false });
     else if (event.kind === "call_ended") {
       // A call whose only output was a tool call (the record written to its file) ended its thinking where its last thought came.

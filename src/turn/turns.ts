@@ -22,7 +22,7 @@
 import type { Database } from "bun:sqlite";
 import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
 import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
-import { forkOf, reconcile, type ChatChange, type ChatChanges } from "../adapter/lumiverse/events";
+import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
 import type { LvMessage } from "../adapter/lumiverse/rows";
@@ -293,6 +293,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   readonly #recording = new Set<Promise<unknown>>();
   /** By chat: the turns whose deleted message was heard of, cancelled and told to RPH then, until the chat's next comparison. */
   readonly #deletedTold = new Map<string, Set<string>>();
+  /** By user and chat: the generations Lumiverse told as begun and not yet as ended (`#generatingIn`). */
+  readonly #generating = new Map<string, Set<string>>();
 
   constructor(deps: TurnLaneDeps) {
     this.#d = deps;
@@ -583,17 +585,69 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const user = this.#d.owner();
     if (user === null) return;
     let work: Promise<unknown> | null = null;
-    if (change.kind === "generation-ended") work = this.#ended(user, change);
-    else if (change.kind === "message-deleted") work = this.#deleted(user, change.chat, change.message);
-    // An edit, a swipe flipped and a fork are found by the next turn's comparison of the path.
+    if (change.kind === "generation-started") this.#generatingIn(user, change.chat).add(change.generation);
+    else if (change.kind === "generation-ended") {
+      this.#generatingIn(user, change.chat).delete(change.generation);
+      work = this.#ended(user, change);
+    } else if (change.kind === "message-deleted") work = this.#deleted(user, change.chat, change.message);
+    else if (change.kind === "message-edited") work = this.#edited(user, change.chat, change.message, change.hidden, change.shown);
+    // A swipe flipped, added or deleted changes only which swipe shows, which the question's path carries; his edit of the swipe that
+    // shows, through the swipe route and outside a generation, is his edit.
+    else if (change.kind === "message-swiped" && change.updated === true) work = this.#edited(user, change.chat, change.message, null, change.shown);
+    else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
     if (work === null) return;
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
     void done.finally(() => this.#recording.delete(done));
   }
 
-  /** What was missed while the event socket was closed is found again at each chat's next intake, by the comparison and by `#catchUp`. */
-  reopened(): void {}
+  /**
+   * What was missed while the event socket was closed is found again at each chat's next intake, by the comparison and by `#catchUp`. A
+   * generation whose end was missed is no longer known to run: what is heard next is taken as heard outside one.
+   */
+  reopened(): void {
+    this.#generating.clear();
+  }
+
+  /** The generations Lumiverse told as begun in the user's chat and not yet as ended: while one runs, its writes to the chat are its own. */
+  #generatingIn(user: string, chat: string): Set<string> {
+    const key = `${user}\u0000${chat}`;
+    let going = this.#generating.get(key);
+    if (going === undefined) {
+      going = new Set();
+      this.#generating.set(key, going);
+    }
+    return going;
+  }
+
+  /**
+   * A message's text, hidden mark or `extra` changed (plan §4.2, R-21): the hidden mark is kept for the next question; outside a
+   * generation in the chat, the text of the swipe it shows is kept as an edit of the turn played on it (`heardEdit`), which a change
+   * that left the text as it was does not change. Lumiverse's own writes while a generation runs (its save, a continue's appended
+   * text, its macro re-save) are no edit of his: the generation's end ties them. Both set facts mirrored from Lumiverse, and no world
+   * state; a chat the store does not know keeps nothing. Whether it is his edit is told by what was heard before it; both go to the
+   * write queue at once, in the order heard.
+   */
+  #edited(user: string, chat: string, message: string, hidden: boolean | null, shown: ShownSwipe): Promise<void> {
+    const store = this.#d.store.user(user);
+    const his = this.#generatingIn(user, chat).size === 0;
+    return this.#d.writes.run(() => {
+      if (hidden !== null) store.markHidden(chat, message, hidden);
+      if (his) store.heardEdit(chat, message, shown.date, shown.hash);
+    }, "keeping a mark or an edit Lumiverse told of");
+  }
+
+  /**
+   * A chat forked from another, heard when it is made (plan §6.3, §10.10 "Branch"): where the store holds the source and not yet the
+   * branch, the branch is made sharing the source's tree up to the last message of the source's path the id map names, so its first
+   * question is answered as the source stood there. A source the store never saw is left to the branch's first turn (`#chat`).
+   */
+  async #forked(user: string, chat: string, from: string, ids: Record<string, string>): Promise<void> {
+    const store = this.#d.store.user(user);
+    await this.#d.writes.run(() => {
+      if (store.chat(chat) === null && store.chat(from) !== null) store.branchChat({ id: chat, from, map: ids });
+    }, "making a chat forked from another");
+  }
 
   /** Resolves once every change heard so far is recorded. */
   async settled(): Promise<void> {
@@ -658,7 +712,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const inForce = this.#goingOn(user, chat, turn.id);
       const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: turn.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: turn.id };
-      if (inForce.session === null) await this.#d.harness().sessions?.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
+      if (inForce.session === null) await this.#d.harness().sessions.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
       await this.#d.notes.follow(user, chat, { turns: onPath, branchOf: store.chat(chat)?.sourceChat ?? null }).catch((error: unknown) =>
         this.#d.log.error("The chat's notes could not be put as they stand at this turn's start.", { turn: turn.id, error: words(error) }),
       );
@@ -766,10 +820,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (now.session?.id === played) return;
     const sessions = this.#d.harness().sessions;
     await this.#d.writes.run(() => store.closeSession(played, turn), "closing the session of a scene that ended");
-    await sessions?.close({ user, chat, session: played, turn });
+    await sessions.close({ user, chat, session: played, turn });
     if (now.session !== null || now.scene === "") return;
     const opened = await this.#d.writes.run(() => store.openSession({ chat, scene: now.scene, turn }), "opening the session of a scene that began");
-    await sessions?.open({ user, chat, session: opened.id, turn }, now.summary === null ? {} : { summary: now.summary });
+    await sessions.open({ user, chat, session: opened.id, turn }, now.summary === null ? {} : { summary: now.summary });
   }
 
   /**
@@ -811,7 +865,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   async #begin(scope: Scope & { turn: string }, turn: TurnRow, inForce: SceneSession): Promise<void> {
     const sessions = this.#d.harness().sessions;
     const from = this.#forkFrom(scope.user, scope.chat, turn, inForce.scene);
-    if (from !== null && sessions !== undefined) {
+    if (from !== null) {
       try {
         await sessions.fork(from, { user: scope.user, chat: scope.chat, session: scope.session });
         return;
@@ -819,7 +873,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         this.#d.log.error("A branch's session could not be begun as it stood at the branch point; it is begun from the scene's summary.", { turn: scope.turn, error: words(error) });
       }
     }
-    await sessions?.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
+    await sessions.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
   }
 
   /**
@@ -1520,7 +1574,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    */
   async #deleted(user: string, chat: string, message: string): Promise<void> {
     const store = this.#d.store.user(user);
-    store.heardDeleted(chat, message);
+    // What was heard of it goes, through the write queue as every change to the store does.
+    const forgotten = this.#d.writes.run(() => store.heardDeleted(chat, message), "forgetting what was heard of a deleted message");
     const tied = store.chat(chat) === null ? [] : store.swipes(chat, message);
     const running = this.#d.runs.ofChat(user, chat).filter((r) => r.target === message);
     const turns = new Set([...tied.map((t) => t.id), ...running.map((r) => r.turn)]);
@@ -1528,6 +1583,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const told = this.#deletedTold.get(chatKey) ?? new Set<string>();
     for (const turn of turns) told.add(turn);
     this.#deletedTold.set(chatKey, told);
-    await Promise.all([...turns].map((turn) => this.#cancel(user, chat, turn)));
+    await Promise.all([forgotten, ...[...turns].map((turn) => this.#cancel(user, chat, turn))]);
   }
 }

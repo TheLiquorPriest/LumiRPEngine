@@ -146,6 +146,7 @@ describe("the record's own time and the thinking", () => {
     record(10, started(1));
     delta(400, 1, { thinking: "The keeper " });
     delta(450, 1, { thinking: "is lying." });
+    record(470, { kind: "intent_began" });
     delta(470, 1, { text: "<intent>She lies" });
     delta(520, 1, { text: ".</intent>" });
     record(520, { kind: "intent", text: "She lies." });
@@ -155,7 +156,7 @@ describe("the record's own time and the thinking", () => {
     delta(610, 2, { thinking: "rolling" }, OTHER);
     ended(650, 1, "<intent>She lies.</intent><reply>No.</reply>");
     expect(run.thinking).toEqual([{ from: 400, to: 450 }]);
-    expect(run.intent?.to).toBe(520);
+    expect(run.intent).toEqual({ from: 470, to: 520 });
   });
 
   test("two-step: the record's call and the reply's message each think first; two spans in call order, neither holding the record or the tool round", () => {
@@ -187,6 +188,15 @@ describe("the record's own time and the thinking", () => {
     record(250, { kind: "run_ended", outcome: { status: "stopped", released: false, usage: { calls: 1, input: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } });
     expect(run.thinking).toEqual([{ from: 200, to: null }]);
     expect(run.intent).toBeNull();
+  });
+
+  test("a record begun and stopped before it ended keeps its first token's time and no end", () => {
+    const { run, record, delta } = timed();
+    record(10, started(1));
+    record(300, { kind: "intent_began" });
+    delta(300, 1, { text: "<intent>She" });
+    record(350, { kind: "run_ended", outcome: { status: "stopped", released: false, usage: { calls: 1, input: 1, cacheRead: 0, cacheWrite: 0, output: 1 } } });
+    expect(run.intent).toEqual({ from: 300, to: null });
   });
 
   test("no record and no thinking: the record's time is none and the thinking is empty", () => {

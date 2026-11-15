@@ -69,12 +69,12 @@ test("a turn stopped before its reply's first word is dropped, RPH is told it le
   beds.push(b);
   b.host.send(CHAT, "I open the keeper's log.");
   const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
-  const running = await b.until("the job to run", async () => ((await b.turns.harness.jobs?.list({ user: USER, chat: CHAT })) ?? []).find((j) => j.state === "running"));
+  const running = await b.until("the job to run", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.state === "running"));
   const turn = running.scope.turn!;
   expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
   expect((await generating).stopped).toBe(true);
 
   await b.until("the turn to be dropped", () => b.turns.store.user(USER).turn(turn)?.status === "dropped");
   await b.until("RPH to be told the turn left the path", () => b.left.some((s) => s.turn === turn));
-  expect(await b.until("the job to be cut off", async () => (await b.turns.harness.jobs?.get(USER, running.id))?.state === "off-path")).toBe(true);
+  expect(await b.until("the job to be cut off", async () => (await b.turns.harness.jobs.get(USER, running.id))?.state === "off-path")).toBe(true);
 });
