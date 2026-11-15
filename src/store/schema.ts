@@ -162,6 +162,13 @@ CREATE INDEX change_job ON change (user, job) WHERE job IS NOT NULL;
     // so a job the continue started, still holding that turn, is told where to write. A turn made before this joined none.
     sql: `ALTER TABLE turn ADD COLUMN joined TEXT;`,
   },
+  {
+    version: 5,
+    // How many marks and edits of a chat's messages RPE has heard (plan §4.2): each one heard is numbered by it, so a comparison
+    // keeps what was heard after its path was read. A chat made before this has heard nothing numbered; what it heard reads as heard
+    // before any path its next comparison reads.
+    sql: `ALTER TABLE chat ADD COLUMN heard_count INTEGER NOT NULL DEFAULT 0;`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

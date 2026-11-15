@@ -167,6 +167,8 @@ interface ChatDb {
   path: string;
   /** What was heard of the chat's messages since its last comparison (`Heard`), as JSON. */
   heard: string;
+  /** How many marks and edits of the chat's messages RPE has heard, ever: what each entry of `heard` is numbered by. */
+  heard_count: number;
   created: number;
   deleted: number | null;
 }
@@ -251,12 +253,23 @@ function pathOf(json: string): PathEntry[] {
 }
 
 /**
- * What RPE heard of a chat's messages since its last comparison (plan §4.2, §6.3), by message id, kept in the chat's row until the
- * next comparison takes what the chat shows: a hidden mark set or taken off, whether the message is on the path yet or not; and an
- * edit of a reply, as the hash the text of the swipe a turn was played on now has, by turn. An edit heard is not the turn's own edit
- * mark (`edited`), which only a comparison sets, so the comparison still finds the edit, records it and tells it.
+ * What RPE heard of a chat's messages since its last comparison (plan §4.2, §6.3), by message id, kept in the chat's row until a
+ * comparison takes it: a hidden mark set or taken off, where it differs from the mark the last comparison took (none taken: not
+ * hidden), whether the message is on the path yet or not; and an edit of a reply, as the hash the text of the swipe a turn was
+ * played on now has, by turn. Each entry carries the chat's heard count when it was last heard (`at`; one kept before the store
+ * counted reads 0), so a comparison takes only what the path it compares could have shown. An edit heard is not the turn's own
+ * edit mark (`edited`), which only a comparison sets, so the comparison still finds the edit, records it and tells it.
  */
-type Heard = Record<string, { hidden?: boolean; edits?: Record<string, string> }>;
+type Heard = Record<string, { hidden?: boolean; edits?: Record<string, string>; at?: number }>;
+
+/** Puts `message`'s entry into `heard`, numbered `at`: its mark and its edits; one that holds neither goes. */
+function hear(heard: Heard, message: string, hidden: boolean | undefined, edits: Record<string, string> | undefined, at: number): void {
+  const entry: Heard[string] = { at };
+  if (hidden !== undefined) entry.hidden = hidden;
+  if (edits !== undefined && Object.keys(edits).length > 0) entry.edits = edits;
+  if (entry.hidden === undefined && entry.edits === undefined) delete heard[message];
+  else heard[message] = entry;
+}
 
 /** Opens a store over a database: a path it opens and brings up itself, or a database whose owner made its tables. */
 export function openStore(options: StoreOptions): Store {
@@ -482,7 +495,7 @@ export class UserStore {
   /** The user's chats, oldest first; a chat deleted while a branch still shares its turns is left out. Each chat's path is not read. */
   chats(): ChatRow[] {
     return this.db
-      .query<ChatDb, [string]>("SELECT id, world, revision, source_chat, source_message, head, '' AS path, '{}' AS heard, created, deleted FROM chat WHERE user = ? AND deleted IS NULL ORDER BY created, rowid")
+      .query<ChatDb, [string]>("SELECT id, world, revision, source_chat, source_message, head, '' AS path, '{}' AS heard, 0 AS heard_count, created, deleted FROM chat WHERE user = ? AND deleted IS NULL ORDER BY created, rowid")
       .all(this.id)
       .map(chatOf);
   }
@@ -833,8 +846,15 @@ export class UserStore {
    * turn there, each message's hidden mark is the one shown, and turns after an earlier reply's
    * flipped swipe stand rebased, their changes applied again on the swipe now showing. The report
    * says what it found, with what no longer applies on the new path.
+   *
+   * What was heard of the chat since the last comparison goes only where this one takes it: a hidden
+   * mark where the path shown gives Lumiverse's own mark for that message, an edit where the path
+   * shows that text at that turn (the comparison records the edit, or finds it recorded), and both
+   * where the path no longer shows the message. `heardUpTo` is the chat's heard count (`heardCount`)
+   * read before the path shown was read: what was heard after it, which that path could not show, is
+   * kept whole. Absent, the path was read now, after everything heard.
    */
-  sync(chat: string, shown: readonly ShownMessage[]): PathReport {
+  sync(chat: string, shown: readonly ShownMessage[], heardUpTo?: number): PathReport {
     const row = this.chatOrThrow(chat);
     const before = pathOf(row.path);
     const was = new Map(before.map((e) => [e.message, e]));
@@ -910,26 +930,58 @@ export class UserStore {
       for (const [turn, hash] of flags) flag.run(hash, this.id, turn);
       const put = this.db.query("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)");
       for (const [key, p, turn, d] of nodes) put.run(this.id, key, p, turn, d);
-      // The chat as shown replaces what was heard of it since the last comparison.
-      this.db.run("UPDATE chat SET path = ?, head = ?, heard = '{}' WHERE user = ? AND id = ?", [JSON.stringify(after), head, this.id, chat]);
+      this.db.run("UPDATE chat SET path = ?, head = ?, heard = ? WHERE user = ? AND id = ?", [JSON.stringify(after), head, JSON.stringify(this.untaken(row, shown, after, heardUpTo ?? row.heard_count)), this.id, chat]);
       return found.rebased ? this.headState(chat).notApplied : [];
     });
     return { ...found, edited, branched, notApplied };
   }
 
+  /** What was heard of a chat (`row`) that a comparison of `shown` (taken as `after`), read once `upto` was heard, does not take. */
+  private untaken(row: ChatDb, shown: readonly ShownMessage[], after: readonly PathEntry[], upto: number): Heard {
+    const heard = JSON.parse(row.heard) as Heard;
+    const marks = new Map(shown.map((m) => [m.id, m.hidden]));
+    const showing = new Map(after.map((e) => [e.message, e]));
+    const out: Heard = {};
+    for (const [message, entry] of Object.entries(heard)) {
+      const at = entry.at ?? 0;
+      const now = showing.get(message);
+      // Heard after the path was read: that path could not show it.
+      if (at > upto) out[message] = entry;
+      else if (now !== undefined) {
+        // A mark the path gives no mark for stays where it differs from the one the comparison takes: none, not hidden.
+        const hidden = entry.hidden === true && marks.get(message) === undefined ? true : undefined;
+        hear(out, message, hidden, Object.fromEntries(Object.entries(entry.edits ?? {}).filter(([turn, hash]) => !(now.turn === turn && now.hash === hash))), at);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * How many marks and edits of the chat's messages RPE has heard (`markHidden`, `heardEdit`), ever; 0 for a chat the store does not
+   * know. A caller reads it before it reads the chat's path, and hands it to the comparison of that path (`sync`), which then keeps
+   * what was heard after it.
+   */
+  heardCount(chat: string): number {
+    return this.chatDb(chat)?.heard_count ?? 0;
+  }
+
   /**
    * A message hidden from the prompt, or shown again, as heard between comparisons (plan §4.2, R-21): kept with the chat by message
-   * id, whether the message is on RPE's path yet or not, and laid on by the question's answer (`turnStart`), until the next
-   * comparison takes the marks the chat shows, which it does whether this was heard or not. A chat the store does not know keeps
-   * nothing: its first comparison takes the marks. Whether the mark was kept. It changes no state.
+   * id, whether the message is on RPE's path yet or not, and laid on by the question's answer (`turnStart`), until a comparison takes
+   * the marks the chat shows, which it does whether this was heard or not. A mark the last comparison took is no news: it leaves no
+   * mark heard for the message. A chat the store does not know keeps nothing: its first comparison takes the marks. Whether the
+   * chat is known. It changes no state.
    */
   markHidden(chat: string, message: string, hidden: boolean): boolean {
     return this.write(false, () => {
       const row = this.chatDb(chat);
       if (row === null) return false;
       const heard = JSON.parse(row.heard) as Heard;
-      heard[message] = { ...heard[message], hidden };
-      this.db.run("UPDATE chat SET heard = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), this.id, chat]);
+      const count = row.heard_count + 1;
+      // A mark the last comparison took (none taken: not hidden) is no news.
+      const compared = this.store.comparedPath(this.id, chat, row.path).byMessage.get(message)?.hidden ?? false;
+      hear(heard, message, hidden === compared ? undefined : hidden, heard[message]?.edits, count);
+      this.db.run("UPDATE chat SET heard = ?, heard_count = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), count, this.id, chat]);
       return true;
     });
   }
@@ -938,7 +990,7 @@ export class UserStore {
    * A reply edited between comparisons (plan §6.3): its showing swipe, found by the message and that swipe's `date` as a comparison
    * finds it (`matchTurn`), now has text whose hash is `hash`. Kept with the chat, apart from the turn's own edit mark, so the next
    * question knows the turn by its new text (`turnStart`), while the next comparison still records the edit on the turn and tells it,
-   * and replaces what was heard. A swipe no turn was played on, and a chat the store does not know, are left to the comparison; a
+   * and then lets it go (`sync`). A swipe no turn was played on, and a chat the store does not know, are left to the comparison; a
    * swipe that shows its saved text again takes back an edit heard for it. The turn the edit was kept for, or null. It changes no
    * state.
    */
@@ -946,7 +998,7 @@ export class UserStore {
     return this.write(false, () => {
       const row = this.chatDb(chat);
       if (row === null) return null;
-      const last = pathOf(row.path).find((e) => e.message === message)?.turn ?? null;
+      const last = this.store.comparedPath(this.id, chat, row.path).byMessage.get(message)?.turn ?? null;
       const match = matchTurn(this.tiedTo(chat, [message]).get(message) ?? [], { hash, date }, last);
       if (match.turn === null) return null;
       const heard = JSON.parse(row.heard) as Heard;
@@ -954,9 +1006,22 @@ export class UserStore {
       if (match.edited) edits[match.turn.id] = hash;
       else if (edits[match.turn.id] !== undefined) delete edits[match.turn.id];
       else return null;
-      heard[message] = { ...heard[message], edits };
-      this.db.run("UPDATE chat SET heard = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), this.id, chat]);
+      const count = row.heard_count + 1;
+      hear(heard, message, heard[message]?.hidden, edits, count);
+      this.db.run("UPDATE chat SET heard = ?, heard_count = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), count, this.id, chat]);
       return match.edited ? match.turn.id : null;
+    });
+  }
+
+  /** A message deleted, as heard (plan §4.2): what was heard of it goes with it. A chat the store does not know holds nothing. */
+  heardDeleted(chat: string, message: string): void {
+    this.write(false, () => {
+      const row = this.chatDb(chat);
+      if (row === null) return;
+      const heard = JSON.parse(row.heard) as Heard;
+      if (heard[message] === undefined) return;
+      delete heard[message];
+      this.db.run("UPDATE chat SET heard = ? WHERE user = ? AND id = ?", [JSON.stringify(heard), this.id, chat]);
     });
   }
 

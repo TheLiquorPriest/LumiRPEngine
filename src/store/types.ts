@@ -302,8 +302,9 @@ export type TurnPoint = { follows: string | null; replaces?: never } | { replace
  * What the extension's question is answered from (plan §4.2, §9.6, R-5): the state where a turn not yet begun will start on the path
  * the question carries, folded along the chain of turns that path shows (`node` is the key of the path node the turn will stand
  * after, which a comparison of that path stores, null at the chat's start), and that path up to the point, oldest first, each
- * message with the hidden mark the store holds for it (R-21; none for one no comparison has seen) and the turn the tree ties its
- * showing text to (null: none).
+ * message with the hidden mark the store holds for it (R-21): the mark heard for it since the last comparison, else the one that
+ * comparison took; a message no comparison has seen carries the mark heard for it, if one was, and is not hidden otherwise. With
+ * each, the turn the tree ties its showing text to (null: none).
  */
 export interface TurnStart extends Folded {
   messages: (SeenMessage & { hidden: boolean; turn: string | null })[];

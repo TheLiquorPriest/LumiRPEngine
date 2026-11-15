@@ -700,7 +700,7 @@ describe("heard between turns", () => {
       // The store's tables as the build before this one left them, with a chat in them.
       expect(migrateStore(db, STORE_MIGRATIONS.filter((m) => m.version <= 2))).toBe(2);
       db.run("INSERT INTO chat (user, id, created) VALUES (?, 'old', 1)", [USER]);
-      expect(migrateStore(db)).toBe(4);
+      expect(migrateStore(db)).toBe(STORE_MIGRATIONS.length);
       expect(db.query<{ heard: string }, []>("SELECT heard FROM chat").get()?.heard).toBe("{}");
       const s = openStore({ db, registry: registry(), worlds: () => undefined }).user(USER);
       const path = seen(["u1", "(an aside)"], ["u2", "go on"]);
@@ -750,6 +750,154 @@ describe("heard between turns", () => {
     // A swipe no turn was played on, and one that shows its text as saved, are left to the comparison.
     expect(s.heardEdit("c", "m3", 3, hashOf("A reply written elsewhere."))).toBeNull();
     expect(s.heardEdit("c", "m1", 1, hashOf("Wren comes in from the rain."))).toBeNull();
+  });
+
+  /** Two played replies, the second making Bram's lantern Wren's, compared as Lumiverse shows them, the aside between them shown. */
+  function played() {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const t2 = play(s, "c", "m2", SAVED, 2, engine(make("lantern", "Lantern", POV)));
+    s.sync("c", shownWith(SAVED));
+    return { ...ts, t1, t2 };
+  }
+  const SAVED = "Bram lends her a lantern.";
+  const EDITED = "Bram lends her a lantern with a cracked pane.";
+  const LINES: Line[] = [
+    ["u1", "in"],
+    ["m1", "Wren comes in from the rain.", 0],
+    ["u2", "(Marlow mutters about the weather.)"],
+  ];
+  /** The chat as Lumiverse shows it to a comparison: the second reply showing `text` at `date`, every message with its hidden mark. */
+  const shownWith = (text: string, date = 2, hidden: readonly string[] = []): ShownMessage[] => asShown(seen(...LINES, ["m2", text, 0]), { m1: 1, m2: date }).map((m) => ({ ...m, hidden: hidden.includes(m.id) }));
+  /** The question's path: the second reply showing `text`, then the player's new line. */
+  const asked = (text: string): SeenMessage[] => seen(...LINES, ["m2", text, 0], ["u3", "thank him"]);
+  /** What the chat's row keeps as heard, by message. */
+  const heardIn = (ts: TestStore): string[] => Object.keys(JSON.parse(ts.store.db.query<{ heard: string }, []>("SELECT heard FROM chat WHERE id = 'c'").get()?.heard ?? "{}") as object).sort();
+
+  test("an edit heard, then a swipe and a flip back to the edited swipe and a line sent: the question is answered with that turn's changes in", () => {
+    const ts = played();
+    const { s, t2 } = ts;
+    expect(s.heardEdit("c", "m2", 2, hashOf(EDITED))).toBe(t2.id);
+    // The player swipes the reply. At the swipe's start the turn lane shows the comparison the reply being replaced as it was last
+    // compared (`src/turn/turns.ts`), so that comparison records no edit; the swipe's own turn is played and tied.
+    s.sync("c", shownWith(SAVED));
+    play(s, "c", "m2", "Bram has no lantern to spare.", 5, engine(tick(1)), { target: "m2" });
+    // The player flips back to the edited swipe, which Lumiverse tells only as `MESSAGE_SWIPED`: nothing is heard. Then a line.
+    const answer = s.turnStart("c", asked(EDITED), { follows: "u3" });
+    expect(answer.at).toEqual({ message: "m2", turn: t2.id });
+    expect(carried(answer.state.world, POV)).toContain("lantern");
+  });
+
+  test("a hide and an edit heard between the path's read and its comparison are kept by that comparison", () => {
+    const ts = played();
+    const { s, t2 } = ts;
+    // The turn lane takes the chat's heard count, then reads the path from Lumiverse; before it compares, the player hides the aside
+    // and edits the reply, each heard.
+    const upto = s.heardCount("c");
+    const asRead = shownWith(SAVED);
+    s.markHidden("c", "u2", true);
+    expect(s.heardEdit("c", "m2", 2, hashOf(EDITED))).toBe(t2.id);
+    s.sync("c", asRead, upto);
+    const answer = s.turnStart("c", asked(EDITED), { follows: "u3" });
+    expect(answer.messages.find((m) => m.id === "u2")?.hidden).toBe(true);
+    expect(answer.at).toEqual({ message: "m2", turn: t2.id });
+    // The next comparison, of a path read after both, takes them both: the mark as shown, the edit recorded.
+    expect(s.sync("c", shownWith(EDITED, 2, ["u2"]), s.heardCount("c")).edited.map((e) => e.turn)).toEqual([t2.id]);
+    expect(heardIn(ts)).toEqual([]);
+  });
+
+  test("a mark heard back to the compared one leaves no entry, and a deleted message's entry goes with the delete", () => {
+    const ts = played();
+    const { s, t2 } = ts;
+    s.markHidden("c", "u2", true);
+    expect(heardIn(ts)).toEqual(["u2"]);
+    s.markHidden("c", "u2", false);
+    expect(heardIn(ts)).toEqual([]);
+    // A mark the last comparison took, and none for a message it never saw, are no news: every edit Lumiverse tells carries one.
+    s.markHidden("c", "u1", false);
+    s.markHidden("c", "u9", false);
+    expect(heardIn(ts)).toEqual([]);
+    // One the comparison took as hidden: shown again it is kept, hidden again it goes.
+    s.sync("c", shownWith(SAVED, 2, ["u1"]));
+    s.markHidden("c", "u1", false);
+    expect(heardIn(ts)).toEqual(["u1"]);
+    s.markHidden("c", "u1", true);
+    expect(heardIn(ts)).toEqual([]);
+    // A message deleted takes what was heard of it, its edits and its mark, with it.
+    expect(s.heardEdit("c", "m2", 2, hashOf(EDITED))).toBe(t2.id);
+    s.markHidden("c", "m2", true);
+    s.markHidden("c", "u2", true);
+    expect(heardIn(ts)).toEqual(["m2", "u2"]);
+    s.heardDeleted("c", "m2");
+    expect(heardIn(ts)).toEqual(["u2"]);
+  });
+
+  test("a 500-message hide on a 10,000-message chat, and its showing again, stay within their bound", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const lines = Array.from({ length: 10_000 }, (_, i): ShownMessage => ({ id: `u${i}`, user: true, hash: hashOf(`Line ${i}.`), hidden: false }));
+    s.sync("c", lines);
+    const marked = lines.filter((_, i) => i % 20 === 7).map((m) => m.id);
+    expect(marked.length).toBe(500);
+    // Each call reads the chat's row and writes it again: the least it does, and the bound is a fixed multiple of that, taken in turns
+    // with it so a busy machine slows both alike, and the least of a few runs of each, which noise only adds to: a guard (R-15).
+    const row = ts.store.db.query<unknown, [string]>("SELECT * FROM chat WHERE id = ?");
+    let reading = Number.POSITIVE_INFINITY;
+    let hiding = Number.POSITIVE_INFINITY;
+    let showing = Number.POSITIVE_INFINITY;
+    for (let run = 0; run < 3; run++) {
+      let from = performance.now();
+      for (const id of marked) s.markHidden("c", id, true);
+      hiding = Math.min(hiding, performance.now() - from);
+      expect(heardIn(ts).length).toBe(500);
+      from = performance.now();
+      for (const id of marked) s.markHidden("c", id, false);
+      showing = Math.min(showing, performance.now() - from);
+      expect(heardIn(ts)).toEqual([]);
+      for (let i = 0; i < 25; i++) {
+        from = performance.now();
+        row.get("c");
+        reading = Math.min(reading, performance.now() - from);
+      }
+    }
+    console.log(`500 hidden on a chat of 10,000 messages: ${hiding.toFixed(1)} ms; shown again: ${showing.toFixed(1)} ms; reading the chat's row once: ${reading.toFixed(3)} ms`);
+    // About five readings a call where it stands; parsing the chat's path at each call would be about forty.
+    expect(hiding).toBeLessThanOrEqual(500 * 20 * reading);
+    expect(showing).toBeLessThanOrEqual(500 * 20 * reading);
+  });
+
+  test("an edit heard for an unplayed swipe of a played message is left alone", () => {
+    const ts = played();
+    const { s, t1 } = ts;
+    // A second swipe of the played reply, made in Lumiverse with no turn and its own date, edited there.
+    const other = "Bram offers a candle instead, its wick trimmed.";
+    expect(s.heardEdit("c", "m2", 9, hashOf(other))).toBeNull();
+    expect(heardIn(ts)).toEqual([]);
+    expect(s.turnStart("c", asked(other), { follows: "u3" }).at).toEqual({ message: "m1", turn: t1.id });
+  });
+
+  test("a mark heard between turns is still there when the store is opened again while the message is hidden", () => {
+    const ts = played();
+    ts.s.markHidden("c", "u2", true);
+    const counted = reopened(ts)
+      .user(USER)
+      .turnStart("c", asked(SAVED), { follows: "u3" })
+      .messages.flatMap((m) => (m.hidden ? [] : [m.id]));
+    expect(counted).toEqual(["u1", "m1", "m2", "u3"]);
+  });
+
+  test("an edit heard back to the saved text takes back the heard edit", () => {
+    const ts = played();
+    const { s, t1, t2 } = ts;
+    expect(s.heardEdit("c", "m2", 2, hashOf(EDITED))).toBe(t2.id);
+    expect(s.turnStart("c", asked(EDITED), { follows: "u3" }).at).toEqual({ message: "m2", turn: t2.id });
+    expect(s.heardEdit("c", "m2", 2, hashOf(SAVED))).toBeNull();
+    expect(heardIn(ts)).toEqual([]);
+    // The edited text is a swipe no turn is known by again.
+    expect(s.turnStart("c", asked(EDITED), { follows: "u3" }).at).toEqual({ message: "m1", turn: t1.id });
   });
 });
 
@@ -855,7 +1003,7 @@ describe("a continue's held turn", () => {
       migrateStore(db, STORE_MIGRATIONS.filter((m) => m.version <= 3));
       db.run("INSERT INTO chat (user, id, created) VALUES (?, 'old', 1)", [USER]);
       db.run("INSERT INTO turn (user, id, chat, node, depth, kind, status, created) VALUES (?, 'old-turn', 'old', 'n', 0, 'normal', 'open', 1)", [USER]);
-      expect(migrateStore(db)).toBe(4);
+      expect(migrateStore(db)).toBe(STORE_MIGRATIONS.length);
       expect(openStore({ db, registry: registry(), worlds: () => undefined }).user(USER).joinedTo("old-turn")).toBeNull();
     } finally {
       db.close();

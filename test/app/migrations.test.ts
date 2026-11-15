@@ -125,7 +125,7 @@ describe("migrations", () => {
     try {
       const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
       for (const table of ["chat", "turn", "change", "snapshot", "session", "path_node", "message_link", "world_revision"]) expect(tables).toContain(table);
-      expect(recorded(db)).toEqual(["app 1", "store 1", "store 2", "store 3", "store 4"]);
+      expect(recorded(db)).toEqual(["app 1", ...STORE_MIGRATIONS.map((m) => `store ${m.version}`)]);
     } finally {
       db.close();
     }
