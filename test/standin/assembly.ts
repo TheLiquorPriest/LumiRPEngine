@@ -10,6 +10,7 @@ import type { WI_MARKERS } from "./db";
 import { buildHistoryPlan, clipToContextBudget, selectHistoryMessages, type ContextClipStats, type CortexConfig, type MemoryOfChat, type MessageLimit } from "./history";
 import type { Entry, Placement } from "./lore";
 import { indexInChat, type ChatMessage } from "./rows";
+import type { ReasoningDelimiters } from "./save";
 import { stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role } from "./steps";
 
 /**
@@ -66,6 +67,8 @@ export interface Preset {
   useSystemPrompt?: boolean;
   /** Names (`completionSettings.namesBehavior`): 0 none, 1 the speaker's name beside each user and assistant message, 2 written at the start of its text. */
   namesBehavior?: 0 | 1 | 2;
+  /** "Trim incomplete words" (`promptBehavior.trimIncompleteWords`, `services/generate.service.ts:3447`): a streamed reply that ends on a half word loses it, the prefill's part kept. */
+  trimIncompleteWords?: boolean;
   /** The preset's own metadata (`presets.metadata`): each extension is handed only its own namespace of it, `metadata[<its identifier>]` (`spindle/preset-metadata-context.ts`). */
   metadata?: Record<string, unknown>;
 }
@@ -105,6 +108,13 @@ export interface Ending {
   mention?: string;
   /** How many of the newest generated pictures reach the model (`resolveGeneratedImageContextPolicy`, `:1032-1059`): none where the user does not recycle them. */
   recycledImageLimit?: number;
+  /**
+   * The thinking Lumiverse kept with an earlier reply, by the message: its carrier's text (`extra.reasoningCarrier` of type `reasoning_content`, `services/prompt-assembly.service.ts:282-329`), put back on
+   * the assistant's history message as `reasoning_content` (`:3370-3394`); and the user's `reasoningSettings`, whose `keepInHistory` says how many of the newest replies keep theirs (-1, every one
+   * of them, `:6851-6900`, `:3466-3474`).
+   */
+  carriers?: ReadonlyMap<string, string>;
+  reasoning?: { keepInHistory: number; delimiters: ReasoningDelimiters };
 }
 
 /** One entry of the assembly's breakdown (`AssemblyBreakdownEntry`). */
@@ -611,9 +621,35 @@ function buildHistory(messages: readonly ChatMessage[], ending: Ending): LlmMess
     const pictures = (m.images ?? []).filter((p) => m.imageGen !== true || recycled.has(p));
     if (m.imageGen === true && m.content.trim() === "" && pictures.length === 0) continue;
     const parts: LlmPart[] = [...(m.content.trim() === "" ? [] : [{ type: "text" as const, text: m.content }]), ...pictures.map((p) => ({ type: "image" as const, ...p }))];
-    history.push(markHistory({ role: m.role, content: pictures.length > 0 ? parts : m.content }, { id: m.id, index: indexInChat(m), metadata: m.metadata }, anchor !== null && indexInChat(m) >= anchor));
+    const carrier = m.role === "assistant" ? ending.carriers?.get(m.id) : undefined;
+    history.push(markHistory({ role: m.role, content: pictures.length > 0 ? parts : m.content, ...(carrier !== undefined ? { reasoning_content: carrier } : {}) }, { id: m.id, index: indexInChat(m), metadata: m.metadata }, anchor !== null && indexInChat(m) >= anchor));
   }
+  if (ending.reasoning !== undefined) stripReasoningFromHistory(history, ending.reasoning);
   return history;
+}
+
+/**
+ * `stripReasoningFromChatHistory` (`services/prompt-assembly.service.ts:6851-6900`): from the newest reply back, each assistant message that holds a delimited block of thinking or a native carrier is
+ * counted, and the ones past the `keepInHistory` newest lose both. -1 keeps every one.
+ */
+function stripReasoningFromHistory(history: LlmMessage[], keep: { keepInHistory: number; delimiters: ReasoningDelimiters }): void {
+  if (keep.keepInHistory === -1) return;
+  const { prefix, suffix } = keep.delimiters;
+  const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = prefix && suffix ? new RegExp(`\\s*${escape(prefix)}\\s*[\\s\\S]*?${escape(suffix)}\\s*`, "g") : undefined;
+  let seen = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]!;
+    if (m.__cortexHistorySummary === true || m.role !== "assistant") continue;
+    const stripped = typeof m.content === "string" && pattern !== undefined ? m.content.replace(pattern, "").trim() : m.content;
+    const delimited = typeof m.content === "string" && stripped !== m.content.trim();
+    const native = typeof m.reasoning_content === "string" && m.reasoning_content !== "";
+    if (!delimited && !native) continue;
+    seen++;
+    if (seen <= keep.keepInHistory) continue;
+    const { reasoning_content: _carrier, ...rest } = m;
+    history[i] = { ...rest, ...(delimited ? { content: stripped as string } : {}) } as LlmMessage;
+  }
 }
 
 /** The prompt for these messages, each history message carrying the number Lumiverse stored for it (`:229-231`, `:3361`, `:3398`). */

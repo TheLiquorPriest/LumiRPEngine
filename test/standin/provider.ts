@@ -28,6 +28,12 @@ export interface PlainReply {
   keepAlive?: number;
   finishReason?: string;
   usage?: Record<string, unknown>;
+  /**
+   * How the reply ends: `finish` (the default) with its finish reason, the usage and `[DONE]`; `drop`, the connection closing with no finish reason, as when the model's server goes down
+   * (Lumiverse then fails the generation with "closed before a terminal response was received"); or `{ error }`, a chunk that carries an error (`llm/provider-sse.ts:11-21`), or for a reply
+   * asked for whole, a 500.
+   */
+  ending?: "finish" | "drop" | { error: string };
 }
 
 /** When each chunk of a reply comes, in milliseconds from the request, and when its end does. */
@@ -82,6 +88,7 @@ export class ScriptedProvider {
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
+    if (typeof reply.ending === "object") return Response.json({ error: { message: reply.ending.error } }, { status: 500 });
     return Response.json({
       id: "scripted",
       object: "chat.completion",
@@ -132,6 +139,18 @@ export class ScriptedProvider {
           tick(0);
         }
         at(endsAt, () => {
+          const ending = reply.ending ?? "finish";
+          if (ending === "drop") {
+            stop();
+            controller.close();
+            return;
+          }
+          if (typeof ending === "object") {
+            send(`data: ${JSON.stringify({ error: { message: ending.error, type: "server_error" } })}\n\n`);
+            stop();
+            controller.close();
+            return;
+          }
           send(chunk({}, reply.finishReason ?? "stop"));
           if (reply.usage !== undefined) send(`data: ${JSON.stringify({ id: "scripted", object: "chat.completion.chunk", created: 0, model: "scripted", choices: [], usage: reply.usage })}\n\n`);
           send("data: [DONE]\n\n");

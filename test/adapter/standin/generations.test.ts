@@ -161,9 +161,9 @@ describe("Lumiverse's limits (`spindle/worker-host.ts:771`, `:3159-3163`, `:4937
       expect(lv.log).toContain("World-info interceptor timed out after 10s; skipping");
       await until("the prompt interceptor to be asked", () => clock.pending >= 2);
       await clock.advance(9_999);
-      expect(lv.log.some((line) => line.includes("Interceptor from extension timed out"))).toBe(false);
+      expect(lv.log.some((line) => line.includes("timed out (10s)"))).toBe(false);
       await clock.advance(1);
-      expect(lv.log).toContain("[Spindle] Interceptor error: Interceptor from extension timed out (10s)");
+      expect(lv.log).toContain(`[Spindle] Interceptor error from ${ext.id}: Interceptor from ${ext.id} timed out (10s)`);
       const out = await runOn(clock, run);
       expect(out.error).toBeNull();
       expect(out.reply?.content).toBe("Fine.");
@@ -264,11 +264,12 @@ describe("the ten-minute cut (`services/generation/active-generation-registry.ts
     const { lv, provider } = scripted(clock, reply);
     const begun = clock.now();
     const run = await lv.start({ chat: CHAT, connection: "conn-model", preset: "preset-quay", ...(parameters !== undefined ? { parameters } : {}) });
-    let out: Outcome | null = null;
-    void run.done.then((o) => (out = o));
     await until("the request", () => provider.calls.length === 1);
-    for (let t = 0; t < 30 * MINUTE && out === null; t += 10_000) await clock.advance(10_000);
-    return { out: await run.done, minutes: (clock.now() - begun) / MINUTE, lv };
+    // The generation ends when its terminal event is told; its breakdown follows on a later task of the process's own.
+    const ended = (): boolean => lv.events.some((e) => e.event === "GENERATION_ENDED" || e.event === "GENERATION_STOPPED");
+    for (let t = 0; t < 30 * MINUTE && !ended(); t += 10_000) await clock.advance(10_000);
+    const minutes = (clock.now() - begun) / MINUTE;
+    return { out: await run.done, minutes, lv };
   }
 
   test("silence is cut between ten and eleven minutes; a progress line keeps it alive; a whole reply cannot be kept alive", async () => {

@@ -15,6 +15,10 @@ import { Databanks, Memory } from "./memory";
 import { ChatRows, indexInChat, type Chat, type ChatMessage, type Stored } from "./rows";
 import { GenerationRegistry, InferenceAdmission, TEARDOWN_WAIT_MS, type ActiveGeneration } from "./registry";
 import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, textOf, type LlmMessage, type StreamSeen, type StreamedReply } from "./steps";
+import { normalizeStoredExtra, SWIPE_SCOPED_EXTRA_KEYS } from "./extra";
+import { StreamFrames } from "./frames";
+import { extractDelimitedReasoning, finishedText, partialText, resolveMacros, resolveReasoningDelimiters, type ResponseScript, type TextSettings } from "./save";
+import { resolveGenerationTokenCounts, timingMetrics, type Timing } from "./metrics";
 
 export type { Chat, ChatMessage } from "./rows";
 export type { Installed } from "./host";
@@ -26,6 +30,8 @@ export interface Connection {
   base: string;
   key: string;
   model: string;
+  /** Its name, which a failed generation's end event carries (`connectionName`, `services/generate.service.ts:630-647`). */
+  name?: string;
   /** Its own record: a "Start Reply With" bound to it stands in place of the user's, an empty one too (`services/prompt-assembly.service.ts:4130-4137`). */
   metadata?: { reasoningBindings?: { promptBias?: string } };
 }
@@ -61,6 +67,8 @@ export interface GenerateInput {
 export interface Outcome {
   /** Null for a dry run, which announces none. */
   generationId: string | null;
+  /** The message the reply was saved in, or kept in when it failed or was stopped; absent where none was. */
+  messageId?: string;
   /** The generation's error, as Lumiverse ends it with one. */
   error: string | null;
   /** The user stopped it (`POST /api/v1/generate/stop`): what was streamed until then is saved, and is `reply`'s text. */
@@ -124,6 +132,12 @@ export class StandIn extends ChatRows {
   readonly registry = new GenerationRegistry(() => this.clock);
   /** The inference scheduler's admission of a provider call: off, as Lumiverse's default, unless a test sets its concurrency (`registry.ts`). */
   readonly inference = new InferenceAdmission();
+  /** The user's response scripts (`target: "response"`, `services/generate.service.ts:4106-4116`): the stand-in's own small kind, a regular expression and its replacement (`save.ts`). */
+  regexScripts: ResponseScript[] = [];
+  /** True where the tokenizer throws, as it can: a reply is saved and ended, and no breakdown is stored for it (`services/generate.service.ts:4432-4497`). */
+  tokenizerFails = false;
+  /** The models its tokenizer knows (`countForModel`, `services/tokenizer.service.ts`): a reply's token count is worked out only for these, else only the provider's own count is used. Counts are the stand-in's own, a quarter of the characters. */
+  readonly tokenizedModels = new Set<string>();
 
   /**
    * `POST /api/v1/generate/stop` (`routes/generate.routes.ts:45-65`): the generation named (a stale id falls back to the chat's when the chat is given), else the chat's, else
@@ -249,6 +263,8 @@ export class StandIn extends ChatRows {
         const m: ChatMessage = { id: staged, role: "assistant", content: "", characterId: speakerId };
         chat.messages.push(m);
         this.createRow(chat, m, speakerName);
+        // The staged reply is told as a message sent, before the generation is announced (`services/chats.service.ts:2675`; `services/generate.service.ts:1988-2002`).
+        this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(staged) ?? m }, chat.user);
         target = { message: staged, swipe: 0 };
         excluded = staged;
       } else if (type === "swipe" || type === "regenerate") {
@@ -361,7 +377,7 @@ export class StandIn extends ChatRows {
       context.presetId = preset.id;
       delete context.__spindlePresetMetadata;
       if (preset.metadata) context.__spindlePresetMetadata = preset.metadata;
-      const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context) : { messages: prompt, parameters: undefined };
+      const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context, chat.user, stop.signal) : { messages: prompt, parameters: undefined };
       checkAborted();
       // After the interceptors: post-processing, the blank filter, collapse, then the parameters (`:1249-1256`, `:1414-1441`).
       sent = intercepted.messages;
@@ -384,12 +400,26 @@ export class StandIn extends ChatRows {
       delete parameters._streaming;
       body = buildBody(connection.model, sent, parameters, streaming);
       const base = connection.base.replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
-      const seen: StreamSeen = { content: "", reasoning: "" };
+      // The authored start of the reply, which the model goes on from (`:3702-3722`): streamed to the page first and saved in front of the model's text.
+      const prefill = breakdown.find((e) => e.type === "utility" && e.name === "Assistant Prefill")?.content ?? "";
+      const thinkingSetting = this.library.setting(chat.user, "reasoningSettings") as { autoParse?: unknown; prefix?: unknown; suffix?: unknown } | undefined;
+      const text: TextSettings = { cot: { autoParse: thinkingSetting?.autoParse === true, delimiters: resolveReasoningDelimiters(thinkingSetting) }, trim: preset.trimIncompleteWords === true, scripts: this.regexScripts };
+      const seen: StreamSeen = { content: prefill, reasoning: "" };
       this.streams.set(live.id, seen);
-      let reply: StreamedReply;
+      const timing: Timing = { streamingStartedAt: this.clock.now(), wasStreaming: streaming };
+      const frames = new StreamFrames(() => this.clock, (frame) => this.emit("STREAM_TOKEN_RECEIVED", frame, chat.user, { topic: `stream:${chat.user}:${chat.id}` }), { generationId: live.id, chatId: chat.id });
+      if (prefill !== "") {
+        // A prefill that opens thinking is thinking from its first word (`:3706-3709`).
+        const part = text.cot.autoParse ? extractDelimitedReasoning(prefill, text.cot.delimiters) : { cleaned: prefill, reasoning: "" };
+        frames.push("reasoning", part.reasoning);
+        frames.push("content", part.cleaned);
+      }
+      const landing: Landing = { type, staged, swipeAt, original, postfix, target, speakerId, speakerName, names, draft: input.impersonateDraft === true, ...(input.persona !== undefined ? { persona: input.persona } : {}) };
+      let reply: StreamedReply | null = null;
+      let failure: unknown = null;
       try {
         // The provider call waits for the scheduler to admit it where the scheduler is on, and that wait is not silence (`:3771-3783`); every chunk with text touches the generation
-        // (`:3867-3873`), and the stop is raced against each read (`:3830-3850`).
+        // (`:3867-3873`) and is framed to the page, and the stop is raced against each read (`:3830-3850`).
         this.registry.waiting(live.id, true);
         let release: () => void;
         try {
@@ -399,56 +429,91 @@ export class StandIn extends ChatRows {
         }
         try {
           const res = await this.fetch(`${base}/chat/completions`, { method: "POST", headers: providerHeaders(connection.key), body: JSON.stringify(body), signal: stop.signal });
-          const hooks = { touch: () => this.registry.touch(live.id), signal: stop.signal };
-          reply = streaming ? await readStream(res, seen, hooks) : await readWhole(res, hooks);
+          const hooks = {
+            touch: () => this.registry.touch(live.id),
+            text: (chunk: { content: string; reasoning: string }) => {
+              const now = this.clock.now();
+              if (chunk.reasoning !== "" || chunk.content !== "") timing.firstTokenAt ??= now;
+              if (/\S/.test(chunk.content)) timing.firstContentTokenAt ??= now;
+              frames.push("reasoning", chunk.reasoning);
+              frames.push("content", chunk.content);
+            },
+            signal: stop.signal,
+          };
+          const read = streaming ? await readStream(res, seen, hooks) : await readWhole(res, hooks);
+          timing.responseStoppedAt = this.clock.now();
+          // The reply's own text is the model's; the prefill is in front of what the player sees and what is saved.
+          reply = streaming ? { ...read, content: read.content.slice(prefill.length) } : read;
+          if (!streaming) {
+            seen.content = prefill + read.content;
+            seen.reasoning = read.reasoning;
+          }
         } finally {
           release();
         }
       } catch (error) {
-        if (!stop.signal.aborted) throw error;
-        // Stopped by the user: what was streamed is saved, and the stop told (`:4502-4537`, `persistPartialContent` `:3565-3660`).
-        const savedText = this.saveStopped(chat, { staged, swipeAt, original, postfix, target: target.message, swipe: target.swipe }, seen);
-        this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: savedText }, chat.user);
-        return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo, contextClipStats };
+        if (!stop.signal.aborted) failure = error ?? new Error("Unknown error");
       }
-      let messageId: string | undefined;
-      let savedText = reply.content;
-      const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
-      if (swipeAt !== null && target.message !== null) {
-        // A swipe or a regenerate: the blank swipe made at the start filled in (`:4120-4128`), whichever swipe the player looks at now.
-        const m = shown(target.message);
-        if (m && (m.swipeId ?? 0) === swipeAt) m.content = reply.content;
-        this.saveSwipe(chat, target.message, swipeAt, reply.content);
-        messageId = target.message;
-      } else if (original !== null && target.message !== null) {
-        // A continue: the text the message held, the preset's postfix, then the new text (`:4129-4147`), into the swipe it continued,
-        // which the player may have flipped away from (`contentSwipeId`).
-        savedText = original + postfix + reply.content;
-        const m = shown(target.message);
-        if (m && (m.swipeId ?? 0) === target.swipe) m.content = savedText;
-        this.saveText(chat, target.message, savedText, target.swipe ?? undefined);
-        messageId = target.message;
-      } else if (staged !== null) {
-        // The staged message filled in (`:4148-4166`).
-        const m = shown(staged);
-        if (m) m.content = reply.content;
-        this.saveText(chat, staged, reply.content);
-        messageId = staged;
-      } else if (!(type === "impersonate" && input.impersonateDraft === true)) {
-        // Anything else saves a new message: an impersonation as the user's (`:4172-4194`). A draft saves none (`:4167-4171`).
-        const m: ChatMessage = { id: crypto.randomUUID(), role: type === "impersonate" ? "user" : "assistant", content: reply.content, ...(type === "impersonate" ? {} : { characterId: speakerId }) };
-        chat.messages.push(m);
-        this.createRow(chat, m, type === "impersonate" ? "User" : speakerName);
-        this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(m.id) ?? m }, chat.user);
-        messageId = m.id;
+      /** The provider's own thinking, which a later prompt may carry back (`storedReasoningCarrier`, `:3447-3470`). */
+      const carrierOf = (thinking: string): Record<string, unknown> | undefined => (thinking === "" ? undefined : { type: "reasoning_content", content: thinking });
+      if (reply === null) {
+        // Stopped by the user or failed while the provider was called or read (`:4502-4579`): whatever came is kept, a staged message that got nothing removed (`persistPartialContent`, `:3565-3680`).
+        const kept = this.land(chat, landing, false, partialText({ content: seen.content, reasoning: seen.reasoning, prefill, streamed: streaming }, text), carrierOf(seen.reasoning));
+        const how = seen.finishReason !== undefined ? { finish_reason: seen.finishReason } : null;
+        const swipe = target.swipe ?? undefined;
+        if (kept.messageId !== undefined && type !== "impersonate") this.setSwipeScopedExtra(chat, kept.messageId, swipe, { generationOutcome: how });
+        const heard = { content: seen.content.slice(prefill.length), reasoning: seen.reasoning, finishReason: seen.finishReason ?? "", usage: null };
+        if (failure === null) {
+          frames.flush();
+          this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: kept.content }, chat.user);
+          return { generationId, ...(kept.messageId !== undefined ? { messageId: kept.messageId } : {}), error: null, stopped: true, prompt: sent, body, reply: heard, parameters, stored: null, worldInfo, contextClipStats };
+        }
+        const failed = failureOf(failure, connection);
+        if (kept.messageId !== undefined) this.setSwipeScopedExtra(chat, kept.messageId, swipe, { generationOutcome: { ...(how ?? {}), error: failed.error } });
+        frames.flush();
+        this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId: kept.messageId, content: kept.content, ...failed, ...(how ?? {}), usage: undefined, generationType: type, frontendSessionId: undefined }, chat.user);
+        return { generationId, ...(kept.messageId !== undefined ? { messageId: kept.messageId } : {}), error: failed.error, stopped: false, prompt: sent, body, reply: null, parameters, stored: null, worldInfo, contextClipStats };
       }
-      this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: savedText, usage: reply.usage, generationType: type, ...(input.impersonateDraft === true && type === "impersonate" ? { impersonateDraft: true } : {}) }, chat.user);
-      if (messageId === undefined) return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo, contextClipStats };
-      // Stored after the generation ends, beside the reply (`:4432-4476`; `services/breakdown.service.ts:3-12`); token counts are the stand-in's own.
-      const tokens = (text: string): number => Math.ceil(text.length / 4);
+      // A reply that ended well (`:4065-4310`): its text finished, saved where it goes, its macros resolved, what belongs to its swipe written, then told.
+      const finished = finishedText({ content: prefill + reply.content, reasoning: reply.reasoning, prefill, streamed: streaming }, text);
+      const carrier = carrierOf(reply.reasoning);
+      const landed = this.land(chat, landing, true, finished, carrier);
+      const messageId = landed.messageId;
+      let savedText = landed.content;
+      if (messageId !== undefined) {
+        savedText = this.resolveSaved(chat, messageId, target.swipe ?? undefined, savedText, names);
+        this.setSwipeScopedExtra(chat, messageId, target.swipe ?? undefined, {
+          generationOutcome: { finish_reason: reply.finishReason },
+          ...(finished.reasoning !== "" ? { reasoning: finished.reasoning } : {}),
+          ...(type !== "impersonate" && carrier !== undefined ? { reasoningCarrier: carrier } : {}),
+          ...(reply.usage !== null ? { usage: reply.usage } : {}),
+        });
+      }
+      frames.flush();
+      timing.completedAt = this.clock.now();
+      this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: savedText, usage: reply.usage ?? undefined, finish_reason: reply.finishReason, generationType: type, frontendSessionId: undefined, impersonateDraft: landing.draft && type === "impersonate" ? true : undefined }, chat.user);
+      // What follows comes on a later task, after the terminal event (`:4305-4310`): the token count and the timings, then the breakdown stored where a message was saved and the tokenizer counted
+      // (`:4432-4497`); `stored` waits for it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (messageId !== undefined) {
+        const counted = (value: string): number | undefined => (this.tokenizedModels.has(connection.model) ? Math.ceil(value.length / 4) : undefined);
+        const options = { hasReasoning: finished.reasoning !== "" || carrier !== undefined, hasDelimitedReasoning: finished.delimited };
+        const provided = resolveGenerationTokenCounts(reply.usage?.completion_tokens, {}, options);
+        const calculatedMessage = provided.messageTokenCount === undefined && savedText.length > 0 ? counted(savedText) : undefined;
+        const calculatedResponse = streaming && provided.responseTokenCount === undefined && /\S/.test(reply.content) ? (provided.messageTokenCount === undefined && reply.content === savedText ? calculatedMessage : counted(reply.content)) : undefined;
+        const resolved = resolveGenerationTokenCounts(reply.usage?.completion_tokens, { messageTokenCount: calculatedMessage, responseTokenCount: calculatedResponse }, options);
+        const generationMetrics = { ...timingMetrics(timing, resolved.responseTokenCount, this.clock.now()), model: connection.model, provider: "custom", presetId: preset.id, presetName: preset.name };
+        const metrics = { ...(resolved.messageTokenCount ? { tokenCount: resolved.messageTokenCount } : {}), generationMetrics };
+        // The swipe the reply was made for, not the one on show (`:4400-4426`).
+        this.setSwipeScopedExtra(chat, messageId, target.swipe ?? undefined, metrics);
+        this.emit("GENERATION_METRICS_READY", { generationId, chatId: chat.id, messageId, swipeId: target.swipe ?? undefined, ...metrics }, chat.user);
+      }
+      if (messageId === undefined || this.tokenizerFails || breakdown.length === 0) return { generationId, ...(messageId !== undefined ? { messageId } : {}), error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo, contextClipStats };
+      // Token counts are the stand-in's own.
+      const tokens = (value: string): number => Math.ceil(value.length / 4);
       const historyTokens = history.reduce((n, m) => n + tokens(textOf(m)), 0);
       const entriesStored = breakdown.map((e) => ({ name: e.name, type: e.type, tokens: e.type === "chat_history" ? historyTokens : tokens(e.tokenCountContent ?? e.content ?? ""), ...(e.role ? { role: e.role } : {}), ...(e.blockId ? { blockId: e.blockId } : {}), content: e.content }));
-      const stored: Stored = {
+      const stored: Stored & { tokenizer_name: string } = {
         entries: entriesStored.filter((e) => e.type !== "chat_history"),
         chatHistoryTokens: historyTokens,
         messages: sent.map((m) => ({ role: m.role, content: textOf(m) })),
@@ -461,9 +526,13 @@ export class StandIn extends ChatRows {
         usage: reply.usage,
         presetName: preset.name,
         presetId: preset.id,
+        tokenizer_name: "approximate",
       };
       this.storeBreakdown(chat, messageId, stored);
-      return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo, contextClipStats };
+      // Pushed without its `messages`, the largest field (`:4487-4496`).
+      const { messages: _messages, ...forClient } = stored;
+      this.emit("GENERATION_BREAKDOWN_READY", { generationId, chatId: chat.id, messageId, breakdown: forClient }, chat.user);
+      return { generationId, messageId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo, contextClipStats };
     } catch (error) {
       if ((error instanceof CancelledByExtension || stop.signal.aborted) && generationId !== null) {
         // A context handler's cancel, and a stop that came while the setup was still going, end it as a stop does, its empty message removed and nothing saved (`:3003-3022`).
@@ -471,11 +540,11 @@ export class StandIn extends ChatRows {
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: "" }, chat.user);
         return { generationId, error: null, stopped: true, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
       }
-      // A failed setup or call ends the generation with its error, its empty message removed (`:2987-3048`).
-      const message = error instanceof Error ? error.message : String(error);
+      // A failed setup ends the generation with its error, its empty message removed (`:2987-3048`).
+      const failed = failureOf(error, connection);
       if (staged !== null) this.deleteMessage(chat.id, staged);
-      if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, error: message, generationType: type }, chat.user);
-      return { generationId, error: message, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
+      if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, ...failed, generationType: type, frontendSessionId: undefined }, chat.user);
+      return { generationId, error: failed.error, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
     }
   }
 
@@ -496,7 +565,7 @@ export class StandIn extends ChatRows {
    * its config and the chat allow them, the user's image settings, and each valid `#mention` in the player's lines taken out of them and the mentioned documents'
    * text put at the end of the last of them. The messages given back are copies; the chat's own are not touched.
    */
-  private shapeHistory(chat: Chat, metadata: Record<string, unknown>, speaker: Character, messages: readonly ChatMessage[]): { messages: ChatMessage[]; ending: Pick<Ending, "anchorIndex" | "messageLimit" | "memory" | "mention" | "recycledImageLimit"> } {
+  private shapeHistory(chat: Chat, metadata: Record<string, unknown>, speaker: Character, messages: readonly ChatMessage[]): { messages: ChatMessage[]; ending: Pick<Ending, "anchorIndex" | "messageLimit" | "memory" | "mention" | "recycledImageLimit" | "carriers" | "reasoning"> } {
     const user = chat.user;
     const anchorId = typeof metadata.context_history_anchor_message_id === "string" ? metadata.context_history_anchor_message_id : null;
     const anchor = anchorId === null ? undefined : chat.messages.find((m) => m.id === anchorId && m.hidden !== true);
@@ -506,6 +575,17 @@ export class StandIn extends ChatRows {
     const rawLimit = Number(images?.recycledImageLimit ?? 1);
     const copies = messages.map((m) => ({ ...m }));
     const mention = this.mentionsIn(chat, metadata, speaker, copies);
+    // The thinking Lumiverse kept with each assistant reply, as its row holds it for the swipe on show (`getStoredReasoningCarrier`, `:282-329`), and the user's `keepInHistory` (`:3466-3474`).
+    const carriers = new Map<string, string>();
+    for (const m of copies) {
+      if (m.role !== "assistant") continue;
+      const row = this.messageRow(m.id);
+      const stored = row === null ? undefined : (row.extra as Record<string, unknown>);
+      const list = stored?.reasoningCarrierBySwipe;
+      const carrier = Array.isArray(list) ? list[Number(row?.swipe_id ?? 0)] : stored?.reasoningCarrier;
+      if (typeof carrier === "object" && carrier !== null && "type" in carrier && carrier.type === "reasoning_content" && "content" in carrier && typeof carrier.content === "string" && carrier.content !== "") carriers.set(m.id, carrier.content);
+    }
+    const reasoningSetting = this.library.setting(user, "reasoningSettings") as { keepInHistory?: unknown; prefix?: unknown; suffix?: unknown } | undefined;
     return {
       messages: copies,
       ending: {
@@ -513,6 +593,8 @@ export class StandIn extends ChatRows {
         messageLimit: this.library.setting(user, "summarization") as MessageLimit | undefined,
         ...(replaces ? { memory: { config, of: { consolidations: this.memory.consolidations(chat.id), chunks: this.memory.chunks(chat.id) } } } : {}),
         mention,
+        carriers,
+        reasoning: { keepInHistory: typeof reasoningSetting?.keepInHistory === "number" ? reasoningSetting.keepInHistory : -1, delimiters: resolveReasoningDelimiters(reasoningSetting) },
         recycledImageLimit: images?.recycleGeneratedImages === true ? Math.max(1, Math.min(20, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 1)) : 0,
       },
     };
@@ -578,30 +660,94 @@ export class StandIn extends ChatRows {
     this.emit("CHAT_CHANGED", { chat: shown, changedFields }, chat.user);
   }
 
-  /** What a stopped generation saves (`persistPartialContent`, `services/generate.service.ts:3565-3660`), and the text it saved. */
-  private saveStopped(chat: Chat, at: { staged: string | null; swipeAt: number | null; original: string | null; postfix: string; target: string | null; swipe: number | null }, seen: StreamSeen): string {
+  /**
+   * Where a reply goes and what is written there, by the kind of generation: a swipe's blank swipe filled in, a continue's text joined to what the message held, a staged
+   * message filled in, any other reply made a message of its own (`services/generate.service.ts:4120-4195`). A reply that ended well always fills its place; one stopped or
+   * failed (`persistPartialContent`, `:3565-3680`) writes only what came, a staged message that got nothing removed, and a continue or a new message made only for something.
+   * The thinking goes into the message's `extra` with the text for a staged message and a new one, and by the swipe's own write for the others (`setSwipeScopedExtra`).
+   */
+  private land(chat: Chat, at: Landing, done: boolean, saved: { content: string; reasoning: string }, carrier: Record<string, unknown> | undefined): { messageId?: string; content: string } {
+    const impersonation = at.type === "impersonate";
+    const nothing = saved.content === "" && saved.reasoning === "" && carrier === undefined;
+    const thinking: Record<string, unknown> = { ...(saved.reasoning !== "" ? { reasoning: saved.reasoning } : {}), ...(carrier !== undefined && !impersonation ? { reasoningCarrier: carrier } : {}) };
     const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
-    if (at.swipeAt !== null && at.target !== null) {
-      const m = shown(at.target);
-      if (m && (m.swipeId ?? 0) === at.swipeAt) m.content = seen.content;
-      this.saveSwipe(chat, at.target, at.swipeAt, seen.content);
-    } else if (at.staged !== null) {
-      // A staged message with nothing in it is removed.
-      if (seen.content === "" && seen.reasoning === "") this.deleteMessage(chat.id, at.staged);
-      else {
-        const m = shown(at.staged);
-        if (m) m.content = seen.content;
-        this.saveText(chat, at.staged, seen.content);
-      }
-    } else if (at.original !== null && at.target !== null && (seen.content !== "" || seen.reasoning !== "")) {
-      // As at the end, joined by the preset's postfix (`:3638-3650`).
-      const joined = at.original + at.postfix + seen.content;
-      const m = shown(at.target);
-      if (m && (m.swipeId ?? 0) === at.swipe) m.content = joined;
-      this.saveText(chat, at.target, joined, at.swipe ?? undefined);
-      return joined;
+    if (at.swipeAt !== null && at.target.message !== null) {
+      const m = shown(at.target.message);
+      if (m && (m.swipeId ?? 0) === at.swipeAt) m.content = saved.content;
+      this.saveSwipe(chat, at.target.message, at.swipeAt, saved.content);
+      if (!done && Object.keys(thinking).length > 0) this.setSwipeScopedExtra(chat, at.target.message, at.swipeAt, thinking);
+      return { messageId: at.target.message, content: saved.content };
     }
-    return seen.content;
+    if (at.original !== null && at.target.message !== null) {
+      if (!done && nothing) return { content: saved.content };
+      // The text the message held, the preset's postfix, then the new text (`:4129-4147`), into the swipe it continued, which the player may have flipped away from (`contentSwipeId`).
+      const joined = at.original + at.postfix + saved.content;
+      const m = shown(at.target.message);
+      if (m && (m.swipeId ?? 0) === at.target.swipe) m.content = joined;
+      this.saveText(chat, at.target.message, joined, at.target.swipe ?? undefined);
+      if (!done && Object.keys(thinking).length > 0) this.setSwipeScopedExtra(chat, at.target.message, at.target.swipe ?? undefined, thinking);
+      return { messageId: at.target.message, content: joined };
+    }
+    if (at.staged !== null) {
+      if (!done && nothing) {
+        this.deleteMessage(chat.id, at.staged);
+        return { content: saved.content };
+      }
+      const m = shown(at.staged);
+      if (m) m.content = saved.content;
+      this.updateRow(chat, at.staged, { content: saved.content, extra: done ? (saved.reasoning !== "" ? { reasoning: saved.reasoning } : {}) : thinking });
+      return { messageId: at.staged, content: saved.content };
+    }
+    if (at.draft && impersonation) return { content: saved.content };
+    if (!done && nothing) return { content: saved.content };
+    // Anything else makes a message: an impersonation the user's, under the persona's name, anything else the speaker's (`:4172-4194`).
+    const m: ChatMessage = { id: crypto.randomUUID(), role: impersonation ? "user" : "assistant", content: saved.content, ...(impersonation ? {} : { characterId: at.speakerId }) };
+    chat.messages.push(m);
+    const extra = { ...(impersonation && at.persona !== undefined ? { persona_id: at.persona } : {}), ...(done ? (saved.reasoning !== "" ? { reasoning: saved.reasoning } : {}) : thinking) };
+    this.createRow(chat, m, impersonation ? "User" : at.speakerName, normalizeStoredExtra(extra, 1, 0));
+    this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(m.id) ?? m }, chat.user);
+    return { messageId: m.id, content: saved.content };
+  }
+
+  /** `updateMessage` with text and a patch of `extra` (`services/chats.service.ts:2922-3033`): the text into the swipe on show, the patch folded into the swipe-scoped fields, the revision raised, then told. */
+  private updateRow(chat: Chat, id: string, patch: { content: string; extra: Record<string, unknown> }): void {
+    const row = this.messageRow(id);
+    if (this.db === null || row === null) return;
+    const swipes = [...(row.swipes as string[])];
+    const shown = Number(row.swipe_id);
+    swipes[shown] = patch.content;
+    const extra = normalizeStoredExtra({ ...(row.extra as Record<string, unknown>), ...patch.extra }, swipes.length, shown);
+    this.db.run("UPDATE messages SET content = ?, swipes = ?, extra = ?, revision = revision + 1 WHERE id = ? AND chat_id = ?", patch.content, JSON.stringify(swipes), JSON.stringify(extra), id, chat.id);
+    this.emit("MESSAGE_EDITED", { chatId: chat.id, message: this.messageRow(id) }, chat.user);
+  }
+
+  /**
+   * `setSwipeScopedExtra` (`services/chats.service.ts:2888-2920`): the fields given written to one swipe's own entries, whichever swipe the message shows; the swipe shown when the one named
+   * is out of range. It tells nothing and raises no revision.
+   */
+  protected setSwipeScopedExtra(chat: Chat, id: string, swipe: number | undefined, fields: Record<string, unknown>): void {
+    const row = this.messageRow(id);
+    if (this.db === null || row === null) return;
+    const count = (row.swipes as string[]).length;
+    const at = typeof swipe === "number" && Number.isInteger(swipe) && swipe >= 0 && swipe < count ? swipe : Number(row.swipe_id);
+    const base: Record<string, unknown> = { ...(row.extra as Record<string, unknown>) };
+    for (const key of SWIPE_SCOPED_EXTRA_KEYS) delete base[key];
+    Object.assign(base, fields);
+    this.db.run("UPDATE messages SET extra = ? WHERE id = ? AND chat_id = ?", JSON.stringify(normalizeStoredExtra(base, count, at)), id, chat.id);
+  }
+
+  /** The macros of the saved reply resolved and the message written again where they changed it (`services/generate.service.ts:4207-4249`); the text it holds now. */
+  private resolveSaved(chat: Chat, id: string, swipe: number | undefined, held: string, names: { user: string; character: string }): string {
+    const row = this.messageRow(id);
+    const swipes = row === null ? null : (row.swipes as string[]);
+    const at = swipe !== undefined && swipes !== null && swipe >= 0 && swipe < swipes.length ? swipe : Number(row?.swipe_id ?? 0);
+    const base = swipes?.[at] ?? held;
+    const resolved = resolveMacros(base, { user: names.user, char: names.character });
+    if (resolved === base) return base;
+    const m = chat.messages.find((x) => x.id === id);
+    if (m && (m.swipeId ?? 0) === at) m.content = resolved;
+    this.saveText(chat, id, resolved, at);
+    return resolved;
   }
 }
 
@@ -609,6 +755,39 @@ export class StandIn extends ChatRows {
 function effectiveName(character: Character): string {
   const alternate = character.extensions?.alternate_character_name;
   return (typeof alternate === "string" ? alternate.trim() : "") || character.name;
+}
+
+/** What a generation's end event says of a failure (`generationFailurePayload`, `services/generate.service.ts:630-647`; `generationErrorCode`, `:612-627`): the message, a code, the connection's name. */
+function failureOf(error: unknown, connection: Connection): { error: string; errorCode: string; errorMessage: string; connectionName?: string } {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : String(error);
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+  const status = /^Provider error (\d+)/.exec(message)?.[1];
+  const name = connection.name?.trim();
+  return {
+    error: message,
+    errorCode: typeof code === "string" && code.trim() !== "" ? code.trim().slice(0, 120) : typeof code === "number" && Number.isFinite(code) ? String(code) : status !== undefined ? `http_${status}` : "generation_failed",
+    errorMessage: message,
+    ...(name ? { connectionName: name } : {}),
+  };
+}
+
+/** Where a generation's reply goes, and what the save needs of the generation (`land`). */
+interface Landing {
+  type: GenerationType;
+  /** The empty message made at the start for a new reply. */
+  staged: string | null;
+  /** A swipe's or a regenerate's blank swipe. */
+  swipeAt: number | null;
+  /** A continue: the text the message held and what joins the new text to it. */
+  original: string | null;
+  postfix: string;
+  target: { message: string | null; swipe: number | null };
+  speakerId: string;
+  speakerName: string;
+  names: { user: string; character: string };
+  /** An impersonation kept as a draft for the input box, saving no message. */
+  draft: boolean;
+  persona?: string;
 }
 
 /** `GenerationCancelledByExtensionError` (`services/generate.service.ts:525-530`). */

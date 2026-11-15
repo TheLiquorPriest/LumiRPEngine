@@ -73,12 +73,17 @@ export function collapse(result: LlmMessage[]): void {
 const ALLOWED = ["temperature", "max_tokens", "top_p", "top_k", "frequency_penalty", "presence_penalty", "stop", "min_p", "repetition_penalty"];
 const INTERNAL: Record<string, true> = { max_context_length: true, _include_usage: true, use_responses_api: true, _nanogpt: true };
 
-/** `flattenForChat` and `formatContent` for text and pictures (`llm/providers/openai-compatible.ts:337-435`). */
+/**
+ * `flattenForChat` and `formatContent` for text and pictures (`llm/providers/openai-compatible.ts:337-435`); an assistant message that holds native thinking sends it back in its own field, as the custom
+ * provider does for ordinary history turns (`assistantReasoningCarrier`, `:442-460`).
+ */
 function flatten(m: LlmMessage): Record<string, unknown> {
-  if (typeof m.content === "string") return { role: m.role, content: m.content };
+  const carrier = m.role === "assistant" && typeof m.reasoning_content === "string" && m.reasoning_content !== "" ? { reasoning_content: m.reasoning_content } : {};
+  if (typeof m.content === "string") return { role: m.role, content: m.content, ...carrier };
   return {
     role: m.role,
     content: m.content.map((part) => (part.type === "text" ? { type: "text", text: part.text } : { type: "image_url", image_url: { url: `data:${part.mime_type};base64,${part.data}` } })),
+    ...carrier,
   };
 }
 
@@ -107,15 +112,20 @@ export interface StreamedReply {
   usage: Record<string, unknown> | null;
 }
 
-/** What a stream has given so far, kept as it comes: what a stopped generation saves (`services/generate.service.ts:3565-3660`). */
+/** What a stream has given so far, kept as it comes: what a stopped generation saves (`services/generate.service.ts:3565-3660`), and the finish reason once it came (`stopMetadata`, `:3441-3445`). */
 export interface StreamSeen {
   content: string;
   reasoning: string;
+  finishReason?: string;
 }
 
-/** What a read of a provider's answer tells its generation: that text came (`touchActiveGeneration`, `services/generate.service.ts:3867-3873`), and the signal that ends the read. */
+/**
+ * What a read of a provider's answer tells its generation: that text came (`touchActiveGeneration`, `services/generate.service.ts:3867-3873`), the text of each chunk as
+ * Lumiverse's stream handling gets it, thinking first (`:3881-3896`), and the signal that ends the read.
+ */
 export interface StreamHooks {
   touch?: () => void;
+  text?: (chunk: { content: string; reasoning: string }) => void;
   signal?: AbortSignal;
 }
 
@@ -171,7 +181,7 @@ export async function readStream(res: Response, seen: StreamSeen = { content: ""
       }
       const choice = (data.choices as Record<string, unknown>[] | undefined)?.[0];
       const delta = choice?.delta as Record<string, unknown> | undefined;
-      if (typeof choice?.finish_reason === "string" && finishReason === undefined) finishReason = choice.finish_reason;
+      if (typeof choice?.finish_reason === "string" && finishReason === undefined) seen.finishReason = finishReason = choice.finish_reason;
       if (!reasoningKey) {
         if (delta?.reasoning !== undefined) reasoningKey = "reasoning";
         else if (delta?.reasoning_content !== undefined) reasoningKey = "reasoning_content";
@@ -179,11 +189,10 @@ export async function readStream(res: Response, seen: StreamSeen = { content: ""
       // `splitMirroredReasoning` (`openai-compatible.ts:80-106`): a delta whose content mirrors its reasoning is reasoning only.
       const c = typeof delta?.content === "string" ? delta.content : "";
       const r = reasoningKey && typeof delta?.[reasoningKey] === "string" && (delta[reasoningKey] as string).length > 0 ? (delta[reasoningKey] as string) : "";
-      if (r && c && (c === r || c.trim() === r.trim())) seen.reasoning += r;
-      else {
-        seen.content += c;
-        seen.reasoning += r;
-      }
+      const mirrored = Boolean(r && c && (c === r || c.trim() === r.trim()));
+      seen.reasoning += r;
+      if (!mirrored) seen.content += c;
+      hooks.text?.({ content: mirrored ? "" : c, reasoning: r });
       // Only a chunk with reply or thinking text touches the generation (`:3867-3873`); the stream's own comment and empty lines do not.
       if (c !== "" || r !== "") hooks.touch?.();
       if (data.usage && typeof data.usage === "object") usage = data.usage as Record<string, unknown>;
@@ -229,7 +238,10 @@ export async function readWhole(res: Response, hooks: StreamHooks = {}): Promise
     usage: typeof data.usage === "object" && data.usage !== null ? (data.usage as Record<string, unknown>) : null,
   };
   // The one chunk a whole reply makes (`:3793-3815`) touches the generation as it comes, never before.
-  if (reply.content !== "" || reply.reasoning !== "") hooks.touch?.();
+  if (reply.content !== "" || reply.reasoning !== "") {
+    hooks.text?.({ content: reply.content, reasoning: reply.reasoning });
+    hooks.touch?.();
+  }
   return reply;
 }
 

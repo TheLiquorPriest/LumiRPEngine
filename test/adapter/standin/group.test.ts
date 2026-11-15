@@ -103,7 +103,9 @@ describe("each generation of a group chat names its speaker (`services/generate.
     expect(Object.keys(contexts[0]!)).not.toContain("characterId");
     const reply = odo.chats.get(CHAT)!.messages.at(-1)!;
     expect(reply).toMatchObject({ role: "assistant", content: "NEW-TEXT she says.", characterId: "char-odo" });
-    expect(odo.db!.rows("SELECT name, extra FROM messages WHERE id = ?", reply.id)).toEqual([{ name: "Odo the Younger", extra: JSON.stringify({ character_id: "char-odo" }) }]);
+    const saved = odo.db!.rows("SELECT name, extra FROM messages WHERE id = ?", reply.id);
+    expect(saved.map((r) => r.name)).toEqual(["Odo the Younger"]);
+    expect(JSON.parse(String(saved[0]!.extra))).toMatchObject({ character_id: "char-odo", generationOutcomeBySwipe: [{ finish_reason: "stop" }] });
     // The speaker is named in the prompt where the preset writes names.
     const named = ridge({ preset: { namesBehavior: 1 } });
     const namedOut = await generate(named, "normal", { targetCharacter: "char-odo" });
