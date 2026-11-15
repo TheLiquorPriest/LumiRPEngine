@@ -5,8 +5,7 @@
 // when the page opens, when the live view says a run of the chat began or ended, and after a Cancel;
 // nothing polls.
 
-import type { JobState, JobView } from "rp-harness/contract";
-import type { JobsReply } from "../../shared/api";
+import type { JobsReply, JobState, JobView } from "../../shared/api";
 import { Badge, Banner, Button, Pre, Section, type Tone } from "../atoms";
 import type { RpeClient } from "../client";
 import { errorWords, num, tokenWords, when } from "../words";

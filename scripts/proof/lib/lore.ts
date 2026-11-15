@@ -20,7 +20,7 @@
 //   constant did not activate, and that turn is not judged ("the event was not heard"), never judged
 //   on an empty list. The floor's own entries stay "not played" where a heard event lacks one made to
 //   activate on its line.
-// - `TurnDetail.lore.map` (RPE `src/ui/api.ts`): the lore-map ids (`e-112`) the Author's map showed.
+// - `TurnReply.lore.map` (RPE `src/shared/api`): the lore-map ids (`e-112`) the Author's map showed.
 // - A turn's activated lore as RPE's lore route serves it: `LoreEntry` (`./read.ts`, the lead's ruling of
 //   PlanLore-13's route, 15 Nov), each entry with its lore-map id, Lumiverse's entry and book ids, its
 //   title, and how it came in where the tag says.

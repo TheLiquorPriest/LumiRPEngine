@@ -8,9 +8,9 @@
 // default under it. The agents' suggestions are listed with what each would change, and accepted as
 // proposed or edited, or dismissed. What RPE refuses is shown in its words.
 
-import type { FileKind, LayerLevel, StackLeft } from "rp-harness/contract";
+import type { FileKind, StackLeft } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { StackReply, DiffRow, FileSwitchAsk, FileWrittenReply, SuggestionAcceptedReply, SuggestionDismissedReply, SuggestionsReply, TreeDiffReply, TreeFileRow, TreeFileReply, TreeListingReply, SuggestionShown } from "../../shared/api";
+import type { LayerLevel, StackReply, DiffRow, FileSwitchAsk, FileWrittenReply, SuggestionAcceptedReply, SuggestionDismissedReply, SuggestionsReply, TreeDiffReply, TreeFileRow, TreeFileReply, TreeListingReply, SuggestionShown } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, Fold, PageHeader, Pre, Section, type Tone } from "../atoms";
 import type { RpeClient } from "../client";

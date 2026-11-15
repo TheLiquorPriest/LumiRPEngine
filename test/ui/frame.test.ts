@@ -19,11 +19,11 @@ function notice(word: Partial<ExtensionWord>): { text: string; tree: unknown; ch
   return out;
 }
 
-const held = (missing: MissingPermissionShown[] | null): ExtensionStatusReply => ({ registered: true, why: null, missing });
+const held = (missing: MissingPermissionShown[] | null): ExtensionStatusReply => ({ registered: true, why: null, missing, stopped: null });
 
 describe("the notice of RPE's extension in Lumiverse", () => {
   test("when the extension does not hold RPE's registration, the page says chats are not played, and why, in RPE's words", () => {
-    const shown = notice({ rpe: { registered: false, why: NOT_HEARD, missing: null } });
+    const shown = notice({ rpe: { registered: false, why: NOT_HEARD, missing: null, stopped: null } });
     expect(shown.text).toContain("Chats on RPE's connection are not being played");
     expect(shown.text).toContain(NOT_HEARD);
     press(shown.tree, "Check again");

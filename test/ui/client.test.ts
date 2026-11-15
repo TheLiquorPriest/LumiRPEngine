@@ -434,7 +434,7 @@ describe("a chat's live updates", () => {
 
 describe("how RPE's extension stands, as the page hears it", () => {
   test("RPE's word on its extension is read again each time the page is told to read afresh, so a registration lost while the page is open shows", async () => {
-    let said: ExtensionStatusReply = { registered: true, why: null, missing: [] };
+    let said: ExtensionStatusReply = { registered: true, why: null, missing: [], stopped: null };
     const channel = new Channel((sent) => (sent.path === "/api/v1/status/extension" ? { status: 200, body: said } : { status: 200, body: turnListAt() }));
     const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
     const heard: ExtensionHeard[] = [];
@@ -444,13 +444,13 @@ describe("how RPE's extension stands, as the page hears it", () => {
       await settled(client);
       await settle();
       expect(heard.at(-1)).toEqual({ rpe: said, problem: null });
-      said = { registered: false, why: "Another install of the extension took RPE's registration.", missing: null };
+      said = { registered: false, why: "Another install of the extension took RPE's registration.", missing: null, stopped: null };
       // Updates were lost on the way: the page reads afresh, this word among the rest.
       channel.send([], true);
       await settle();
       expect(heard.at(-1)).toEqual({ rpe: said, problem: null });
       // A page that begins to follow a chat reads it afresh too.
-      said = { registered: true, why: null, missing: [{ permission: "interceptor", why: "to tag each reply RPE plays" }] };
+      said = { registered: true, why: null, missing: [{ permission: "interceptor", why: "to tag each reply RPE plays" }], stopped: null };
       const mine = follower();
       client.follow(CHAT, mine);
       await mine.resets(1);

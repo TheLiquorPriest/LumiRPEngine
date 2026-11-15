@@ -6,8 +6,7 @@
 // every chat the migration carried, with which started and which were refused, and why. Nothing starts
 // by itself.
 
-import type { JobView } from "rp-harness/contract";
-import type { BootstrapBatchReply, BootstrapChatReply, DoneEnoughShown, FactNotKnown, MessageStretch } from "../../shared/api";
+import type { BootstrapBatchReply, BootstrapChatReply, DoneEnoughShown, FactNotKnown, JobView, MessageStretch } from "../../shared/api";
 import { Badge, Banner, Button, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { counted, errorWords, num, tokenWords, when } from "../words";

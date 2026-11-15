@@ -1,5 +1,5 @@
 // RPE's own account of its turns, as its Turn page reads it (`src/turn/routes.ts`, shapes in
-// `src/ui/api.ts`): a chat's turns, one turn with its timings, usage and trace, and the chat's live
+// `src/shared/api`): a chat's turns, one turn with its timings, usage and trace, and the chat's live
 // events (`/api/v1/live`), of which only the model calls' streaming text is kept here, because the
 // trace keeps no record of when a call's text began. Address and token come from the environment.
 

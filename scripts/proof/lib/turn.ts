@@ -4,7 +4,7 @@
 // the reader says it is not served rather than guessing a value.
 //
 // Shapes, and where each was taken from:
-// - `TurnDetail`, `TurnRun`, `TurnTimings`: RPE `src/ui/api.ts:124-191`.
+// - `TurnReply`, `RunShown`, `TurnMoments`: RPE `src/shared/api`.
 // - `timings.intent` and `timings.thinking` (PlanTurn-3 item 4), as the lead ruled their shape on 15 Nov:
 //   `intent: { from: number; to: number | null } | null` (the record's first token to its last, R-185)
 //   and `thinking: { from: number; to: number | null }[]` (one span per model call on the reply's path

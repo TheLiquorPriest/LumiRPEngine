@@ -5,14 +5,13 @@
 
 import { Glob } from "bun";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { generateApi, REFERENCE_FILE, TYPES_FILE } from "../../scripts/api/generate";
 import { type Area, route, shape } from "../../src/app";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const GENERATED = join(ROOT, "src/shared/api");
-const UI_API = join(ROOT, "src/ui/api");
 
 /** The names a module's file exports. */
 function exportsOf(file: string): string[] {
@@ -99,7 +98,7 @@ describe("the generated types and the API reference", () => {
     expect(reference).toContain("- [The live socket's messages](#the-live-sockets-messages)");
   });
 
-  test("a file under src/ui that takes types from the generated file takes none of the same names from rp-harness/contract or from src/ui/api.ts", () => {
+  test("a file under src/ui that takes types from the generated file takes none of the same names from rp-harness/contract", () => {
     const generated = new Set(exportsOf(TYPES_FILE));
     const files = [...new Glob("src/ui/**/*.{ts,tsx}").scanSync(ROOT)].map((file) => join(ROOT, file)).sort();
     const takers: string[] = [];
@@ -108,12 +107,12 @@ describe("the generated types and the API reference", () => {
       const imports = importsOf(file);
       if (!imports.some((i) => i.from === GENERATED)) continue;
       takers.push(relative(ROOT, file));
-      for (const i of imports) if (i.from === "rp-harness/contract" || i.from === UI_API) for (const name of i.names.filter((n) => generated.has(n))) doubled.push(`${relative(ROOT, file)} takes ${name} from ${i.from === UI_API ? "src/ui/api.ts" : i.from}`);
+      for (const i of imports) if (i.from === "rp-harness/contract") for (const name of i.names.filter((n) => generated.has(n))) doubled.push(`${relative(ROOT, file)} takes ${name} from ${i.from}`);
     }
     expect(doubled).toEqual([]);
     // Every file that reads the live socket is among them.
     expect(takers).toEqual(expect.arrayContaining(["src/ui/client.ts", "src/ui/roads.ts", "src/ui/live-model.ts", "src/ui/live-watch.ts", "src/ui/pages/connections.tsx", "src/ui/pages/settings.tsx"]));
-    // Nor does src/ui/api.ts keep a copy of one for a page to take.
-    expect(exportsOf(`${UI_API}.ts`).filter((name) => generated.has(name))).toEqual([]);
+    // No page keeps a hand copy of a route's shape beside it.
+    expect(existsSync(join(ROOT, "src/ui/api.ts"))).toBe(false);
   });
 });

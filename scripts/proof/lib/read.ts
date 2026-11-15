@@ -5,7 +5,7 @@
 //
 // Routes, and where each shape was taken from:
 // - RPE `GET /api/v1/chats/:chat/turns/:turn`, `GET /api/v1/files?chat=`, `GET /api/v1/files/*?chat=`, `GET /api/v1/settings?chat=`:
-//   RPE `src/ui/api.ts` (`TurnDetail`, `TreeListing`, `TreeFileText`, `SettingsReply`).
+//   RPE `src/shared/api` (`TurnReply`, `TreeListingReply`, `TreeFileReply`, `SettingsReply`).
 // - RPE `GET /api/v1/chats/:chat/turns/:turn/requests/*`: one model call's kept request, which RPH keeps as pointers into the turn's
 //   files, rebuilt exactly as it was sent (RPE `src/turn/shapes.ts` `requestReply`: `{ name, same, messages, tools }`).
 // - RPE `GET /api/v1/chats/:chat/turns/:turn/lore` (PlanLore-13): `{ entries: LoreEntry[] }`, the shape the lead ruled on 15 Nov.
