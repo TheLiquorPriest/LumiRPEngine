@@ -308,10 +308,10 @@ describe("the numbers Lumiverse stored (`services/prompt-assembly.service.ts:229
     lv.deleteMessage(CHAT, reply.id);
     const again = lv.send(CHAT, "USER-3 I let go of the rail.");
     expect(lv.rowsOf(CHAT)).toEqual([
-      { id: "m0", index: 0, hidden: false },
-      { id: "m2", index: 2, hidden: false },
-      { id: asked, index: 3, hidden: false },
-      { id: again, index: 4, hidden: false },
+      { id: "m0", index: 0, hidden: false, role: "assistant" },
+      { id: "m2", index: 2, hidden: false, role: "assistant" },
+      { id: asked, index: 3, hidden: false, role: "user" },
+      { id: again, index: 4, hidden: false, role: "user" },
     ]);
   });
 });

@@ -108,12 +108,12 @@ export class ChatRows extends ExtensionHost {
     for (const m of chat.messages) if (m.index === undefined) m.index = ++max;
   }
 
-  /** A chat's messages as its rows list them, in Lumiverse's order (`index_in_chat`), each with its stored number and its hidden mark (`extra.hidden`); null for no such chat. */
-  rowsOf(chatId: string): { id: string; index: number; hidden: boolean }[] | null {
+  /** A chat's messages as its rows list them, in Lumiverse's order (`index_in_chat`), each with its stored number, its role as RPE's read gives it (`user` when `is_user`, `system` when `extra.spindle_role` is `system`, else `assistant`) and its hidden mark (`extra.hidden`); null for no such chat. */
+  rowsOf(chatId: string): { id: string; index: number; hidden: boolean; role: "user" | "assistant" | "system" }[] | null {
     const chat = this.chats.get(chatId);
     if (chat === undefined) return null;
     this.numbered(chat);
-    return chat.messages.map((m) => ({ id: m.id, index: indexInChat(m), hidden: m.hidden === true })).sort((a, b) => a.index - b.index);
+    return chat.messages.map((m) => ({ id: m.id, index: indexInChat(m), hidden: m.hidden === true, role: m.role })).sort((a, b) => a.index - b.index);
   }
 
   /** `createMessage` (`services/chats.service.ts:2638-2683`): its stored number, its text its one swipe, dated now; a greeting marked as `createChat` marks it (`:1250-1259`). */
