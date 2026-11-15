@@ -87,22 +87,20 @@ test("a chat of 2,000 messages is loaded through the stand-in and RPE's web shel
   }
 }, 120_000);
 
-test("the chat page's Send says what the stand-in does not yet serve, naming the package, and is played where it serves it", async () => {
+test("the chat page's Send plays on the stand-in: the routes it calls are served, and the moments are the page's own, in order, from a streamed reply", async () => {
   const session = await host.begin(start);
   try {
     const acts = session.acts;
-    const gaps = await standInGaps(acts.lumiverse.base, acts.lumiverse.token, RIG_CHAT);
+    expect(await standInGaps(acts.lumiverse.base, acts.lumiverse.token, RIG_CHAT)).toEqual([]);
     expect(RIG_PASSWORD.length).toBeGreaterThan(0);
-    const sending = acts.send(RIG_CHAT, acts.connections.rpe, "I climb to the lamp room.", { preset: "preset-lamp", persona: "pers-traveller" });
-    if (gaps.length > 0) {
-      await expect(sending).rejects.toThrow("waits on");
-      return;
+    const plain = await acts.send(RIG_CHAT, acts.connections.plain, "I climb to the lamp room.", { preset: "preset-lamp", persona: "pers-traveller" });
+    const rpe = await acts.send(RIG_CHAT, acts.connections.rpe, "I look at the lamp.", { preset: "preset-lamp", persona: "pers-traveller" });
+    for (const moments of [plain, rpe]) {
+      const [sent, first, last, ended] = [moments.sent, moments.firstWord, moments.lastWord, moments.ended].map((n) => n ?? Number.NaN) as [number, number, number, number];
+      expect(sent).toBeLessThan(first);
+      expect(first).toBeLessThan(last);
+      expect(last).toBeLessThanOrEqual(ended);
     }
-    // Served: the moments come from the page, and the stand-in must have streamed them.
-    await sending.then(
-      (moments) => expect(moments.sent).toBeLessThan(moments.firstWord ?? Infinity),
-      (error: unknown) => expect(String(error)).toContain("STREAM_TOKEN_RECEIVED"),
-    );
   } finally {
     await session.close();
   }
