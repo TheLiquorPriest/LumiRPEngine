@@ -22,6 +22,7 @@ import { IFACE_SETTINGS } from "../../src/iface";
 import { LORE_SETTINGS } from "../../src/lore";
 import { STORE_SETTINGS } from "../../src/store";
 import { STORY_SETTINGS } from "../../src/story";
+import { MIGRATE_SETTINGS } from "../../src/migrate/setting-list";
 import { TREE_SETTINGS } from "../../src/tree";
 import { NO_SESSION, TURN_SETTINGS } from "../../src/turn";
 import { BOOTSTRAP_FACTS, BOOTSTRAP_SETTINGS } from "../../src/turn/bootstrap";
@@ -37,7 +38,7 @@ const OWN: Readonly<Record<string, { file: string; settings: readonly Setting[] 
   store: { file: "store/area.ts", settings: STORE_SETTINGS },
   lore: { file: "lore/area.ts", settings: LORE_SETTINGS },
   iface: { file: "iface/area.ts", settings: IFACE_SETTINGS },
-  migrate: { file: "migrate/area.ts", settings: [] },
+  migrate: { file: "migrate/area.ts", settings: MIGRATE_SETTINGS },
   tree: { file: "tree/area.ts", settings: TREE_SETTINGS },
   turn: { file: "turn/area.ts", settings: [...harnessSettings(), ...TURN_SETTINGS] },
   bootstrap: { file: "turn/bootstrap/area.ts", settings: BOOTSTRAP_SETTINGS },

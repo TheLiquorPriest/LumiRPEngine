@@ -69,7 +69,7 @@ describe("the generated types and the API reference", () => {
   test("a route a fixture area adds appears in the generated types and in the reference, with nothing else edited", async () => {
     const before = await generateApi();
     const { types, reference } = await generateApi([tides]);
-    expect(types).toContain(['  "GET /api/v1/chats/:chat/tides": {', "    params: { chat: string };", "    query: { day?: number };", "    body: undefined;", "    reply: TideTable;", "    paged: false;", "    joined: false;", "  };"].join("\n"));
+    expect(types).toContain(['  "GET /api/v1/chats/:chat/tides": {', "    params: { chat: string };", "    query: { day?: number };", "    body: undefined;", "    reply: TideTable;", "    paged: false;", "    long: false;", "    joined: false;", "  };"].join("\n"));
     expect(types).toContain("export interface TideTable {\n  chat: string;\n  turns: { at: string; high: boolean }[];\n}");
     expect(routeKeys(types)).toEqual(new Set([...routeKeys(before.types), "GET /api/v1/chats/:chat/tides"]));
     const places = reference.indexOf("## Places");
