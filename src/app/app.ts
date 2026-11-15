@@ -8,6 +8,7 @@ import type { JsonValue, Log, ModelsPort, SettingDef } from "rp-harness/contract
 import { Auth } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
+import { commandRoutes } from "./command-routes";
 import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
@@ -221,6 +222,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const builds = new Builds({ version, file: options.appFile ?? null, log });
   await builds.start();
   routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui, builds));
+  // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
+  routes.add("command", commandRoutes({ paths, secrets, db, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
   let running: RunningServer | null = null;
   let starting: Promise<RunningServer> | null = null;
   let closing: Promise<void> | null = null;
