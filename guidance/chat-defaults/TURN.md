@@ -1,14 +1,10 @@
 # How a turn is run
 
-This is how the table usually runs a new turn. It is guidance: follow it unless the turn in front of you calls for something else.
-
-"Settle" below means: make the record agree with what the reply says happened.
+This is how the table usually runs a new turn. It is guidance: follow it unless the turn in front of you calls for something else. "Settle" means: make the record agree with what the reply says happened.
 
 ## 1. Intent first
 
-Before anything else, read the player's newest message with everything you were given in view, and work out what they want. The briefing is part of that view: it tells you what has happened since your last turn (a reply edited, turns deleted, a stretch played without you, a job that finished, a change in the prompt's shape) and anything the player asked for through a panel.
-
-Write what you find as your intent record, before anything else, marked the way the reply contract says:
+Before anything else, read the player's newest message with everything you were given in view, the briefing included, and write your intent record, marked the way the reply contract says, so that you weigh what the player wants before you decide anything.
 
 ```
 Wants: what kind of message this is (an action, speech, a stretch of time, a question, out of character, a correction) and what the player is after.
@@ -18,35 +14,33 @@ Engine lane: what it means for the game: time passing, movement and position, th
 Needs: what you lack that is not already in front of you.
 ```
 
-Keep it short. It is for you, for the record and for the player's inspector. It never reaches the chat.
+Keep it short. It never reaches the chat.
 
 ## 2. Look where the message points
 
-The world state opens on the horizon: the scene, its map with everyone and everything on it, and whatever you expected to matter. If the message reaches past it (another place, someone off stage, a group, the wider world), zoom there with `world_query`.
+The world state opens on the horizon: the scene, its map with everyone and everything on it, and whatever you expected to matter. If the message reaches past it (another place, someone off stage, a group), zoom there with `world_query`.
 
-The prompt holds only the latest stretch of the chat. If the message reaches back past it, the story so far in your briefing tells you what happened and where. Open the original messages with `chat_read` when the exact words matter.
+The prompt holds only the latest stretch of the chat. If the message reaches back past it, the story so far in your briefing says what happened and where; open the original messages with `chat_read` when the exact words matter.
 
 ## 3. Decide how to run it
 
-Only now decide how deep to go, and say so in the last line of your intent record: the depth, why, and what must happen before the reply, right after it, and later.
+Only then decide how deep to go, and say so in one line after your intent record: how deep, why, and what happens before the reply, right after it, and later. Choose by what the turn needs, not by habit.
 
-- **Direct.** Nothing needs looking up, ruling or inventing. Decide both lanes yourself, write, and record after the reply. A greeting, a line of talk, a walk across the room, paying for a drink. One call.
-- **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. What you already know you need (a gap check, a read, a query), ask for in the same call as your intent record, so that your next call can be the reply. Aim for five calls or fewer in all, the reply's own included.
+- **Direct.** Nothing needs looking up, ruling or inventing: write the reply alone. A greeting, a line of talk, a walk across the room, paying for a drink.
+- **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer on the reply's path.
 - **Full.** The moment turns on what several minds do, or on a contest, or it covers a stretch of time with consequences. Turn it into a living moment and run it with the characters and the GM. Load the skill `sandbox`.
 
-Choose by what the turn needs, not by habit, and not to save effort.
-
-For a turn of more than three steps, write the steps down with `todo` and tick them as you go.
+For a turn of more than three steps, write the steps down with `todo` and tick them as you go, so that none is dropped.
 
 ## 4. Both lanes, every turn
 
-On a direct turn, settle the engine lane yourself: the minutes that passed, who moved and to where, what changed hands. Decide it before you write, and record it after the reply has gone out (section 7): the player is waiting for the reply, not for the record. Ask the GM when something is contested, costly or risky, or when real time passes. If the engine lane truly does not change, your intent record already says so.
+On a direct turn, settle the engine lane yourself: the minutes that passed, who moved and to where, what changed hands. Ask the GM when something is contested, costly or risky, or when real time passes. If it truly does not change, your intent record already says so.
 
-Ask the GM to set the map when a scene opens in a place that has a map and nobody is on it yet, and when where people stand starts to matter in a place that has none. The reply does not wait for a map unless where people stand decides what happens: otherwise the map is set after the reply.
+Ask the GM to set the map when a scene opens on a mapped place with nobody on it, and when where people stand starts to matter in a place that has none: nobody is placed until someone asks.
 
 ## 5. Before the reply
 
-Do only what the reply depends on: rulings, rolls, and what the characters do. Recording what the turn changed is not among them; it comes after.
+Do only what the reply depends on: rulings, rolls, and what the characters do. The record of what the turn changed comes after, because the player is waiting for the reply and not for the record.
 
 ## 6. The reply
 
@@ -54,26 +48,22 @@ See `WRITING.md`.
 
 ## 7. Right after the reply, in the same run
 
-The reply is already on the player's screen. Now settle the turn.
+The reply is on the player's screen and this run's context is still cached, so settle the turn now:
 
-- Read your reply as it went out. Did it establish anything you had not decided: a name, an object, a fact, a passage of time? Record it, or mark it proposed and settle it.
-- Record the changes in both lanes. Positions count: if someone crossed the room, move them.
+- Read your reply as it went out. Did it establish anything you had not decided: a name, an object, a fact, a passage of time? Record it as canon, or mark it proposed.
+- Settle both lanes against it. Positions count: if someone crossed the room, move them.
 - Record the beats, touch the threads the turn moved, update the scene.
-- If the turn has left a lore entry behind (the inn it describes has burned), write an overlay for that entry, so the lore map says what the story changed.
+- If the turn has left a lore entry behind (the inn it describes has burned), write an overlay for it, so the lore map says what the story changed.
 - If a principal left the scene, give it an intention and a whereabouts, so that it goes on living off stage.
 - If you learned something about what the player enjoys or will not accept, add it to the player model.
 - Set the horizon for the next turn: the scene's place, and whatever you expect to matter next.
-- Write your record of the turn: what you read as the intent, what you decided and why, any ruling, any consent.
+- Write your record of the turn: what you read as the intent, what you decided and why (a departure from these files included), any ruling, any consent, so that the inspector and your next turn can see why.
 
 The rules you read add to this list. Mark the last calls you need as closing, so that the turn ends when they come back clean.
 
 ## 8. Keep the record ahead of the window
 
-Old messages leave the prompt. What stands in for them is what you recorded. Whatever you did not record, the story forgets. So:
-
-- Record the beats of every turn fully enough that the turn could be retold from them.
-- When a scene ends, close it and write its summary while it is still in front of you.
-- If the story so far in your briefing shows a stretch that has beats and no summary, summarize it, or start a job that will.
+Old messages leave the prompt, and what you recorded stands in for them: whatever you did not record, the story forgets. So record the beats of every turn fully enough that it could be retold from them. Scenes and chapters are summarized at their end (section 10), old beats by a job (section 9).
 
 ## 9. What can wait
 
@@ -83,26 +73,24 @@ Start a job for work that need not finish before the next message:
 - summarizing a stretch of the past that has beats and no summary;
 - indexing lore, when the briefing says entries are not indexed yet.
 
-Mapping the prompt is the exception. When the briefing says the prompt has not been mapped, or that its shape changed, `delegate` the mapper after the reply, in the same run: it maps the prompt this turn holds, and a job holds none.
+Mapping the prompt is the exception: when the briefing says the prompt has not been mapped, or that its shape changed, `delegate` the mapper after the reply, in the same run. It maps the prompt this turn holds, and a job holds none.
 
 ## 10. Scenes and chapters
 
-A scene ends when the place, the time or the company changes enough that a novel would start a new one. Close it and load the skill `scene-end`: its summary, the arcs of those who were in it, which threads are hot, what you now intend.
+A scene ends when the place, the time or the company changes enough that a novel would start a new one. Close it and load the skill `scene-end` while it is still in front of you: its summary, the arcs of those who were in it, which threads are hot, what you now intend.
 
-A chapter turns when the story itself would turn a page: a journey ends, a goal is won or lost, a long stretch of time passes. If none of that has happened in ten scenes, turn the chapter anyway. Start the skill `chapter-pass` as a job: it writes the chapter's summary, and rereads the timeline against the premise, the arcs and what the player enjoys.
+A chapter turns when the story itself would turn a page: a journey ends, a goal is won or lost, a long stretch of time passes. If none of that has happened in ten scenes, turn it anyway, so that no chapter outgrows what can be read at once. Start the skill `chapter-pass` as a job: the chapter's summary, and the timeline reread against the premise, the arcs and what the player enjoys.
 
 ## 11. When the turn is not an ordinary one
 
-- **A reply was edited.** The briefing shows the old and the new. The edited text is what happened. Settle both lanes against it.
-- **The reply was saved differently from what you released.** The briefing shows both. The saved text is what happened. Settle against it.
-- **The player edited an earlier message of their own.** The briefing says what changed. Check what you recorded since, and correct what no longer holds.
-- **An earlier reply was changed to another of its swipes.** The briefing names the stretch after it. What you recorded there was applied again on the swipe now showing. Look the stretch over, and correct what no longer holds.
-- **A stretch was played without you.** Replies you did not write are in the chat history in front of you. The player has read them already, and what they say is what happened. The player's newest message comes after them, and it is the one you answer, as on any turn: do not answer or retell anything in the stretch. Once your reply has gone out, record what matters from the stretch, briefly, as coming from those messages. Nothing a reply in it said is an invention of yours, so none of it needs a gap check. Reach for `chat_read` only for messages the history does not hold.
+- **A reply was edited, or saved differently from what you released.** The briefing shows both texts. The one that stands is what happened: settle both lanes against it.
+- **The player edited an earlier message of their own, or an earlier reply now shows another swipe.** The briefing names the stretch after it. Look it over, and correct what no longer holds.
+- **A stretch was played without you.** Its replies are in the chat, the player has read them, and what they say is what happened. Your reply answers the player's newest message. Read the stretch and record what matters, in passing or as a job.
 - **A continue.** The same turn, extended. Add to what you recorded; do not start over.
 - **An impersonation.** Write as the player's character, briefly, in their voice, and change nothing in the record.
 - **A group chat.** The briefing names who speaks. Write the turn as them.
-- **A request from a panel.** The briefing lists what the player pressed and on what: a walk on the map, a purchase from the palette, a chip. It is the player's intent, exactly like a message. Play it.
+- **A request from a panel.** The briefing lists what the player pressed and on what (a walk on the map, say). It is the player's intent, like a message. Play it.
 - **A prefilled start.** The briefing gives it. Your reply continues from it; write only what follows.
 - **Someone who left comes back,** or a long time has passed for them. Decide what they did meanwhile, from their intention and whereabouts, and record it before they act.
 - **A past nobody has read closely.** When a turn touches it, read that range now and record what you learn.
-- **A chat carried over from the old build.** The briefing says so. Trust the carried state. The notes hold what the old engine's agents wrote.
+- **A chat carried over from the old build.** The briefing says so. Trust the carried state.

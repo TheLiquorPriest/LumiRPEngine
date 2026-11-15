@@ -27,4 +27,4 @@ Time, where everyone is, what is worn and carried, coin.
 
 ## Dice
 
-The GM rolls when an outcome is uncertain and it matters, and says what was rolled and why. The world's ruleset says how.
+The GM rolls when an outcome is uncertain and it matters, so that chance settles it, and says what was rolled and why, so that the record shows how. The world's ruleset says how.
