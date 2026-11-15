@@ -186,7 +186,7 @@ const viewFields = {
 } as const;
 const providers = { default: shape.nullable(T), providers: shape.list(shape.named("ProviderOffer", "A provider the Connections page offers, how its connections may sign their calls, the APIs it speaks, and whether a connection of it must give its address.", shape.object({ id: T, name: T, auth: shape.list(auth), apis: shape.list(T), needsBaseUrl: shape.yesNo() }))) } as const;
 const tested = { ok: { ok: shape.literal(true), ms: N, model: T }, failed: { ok: shape.literal(false), ms: N, error: T } } as const;
-const connectionView = shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo(), last4: shape.nullable(T) })) });
+const connectionView = shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo(), waiting: shape.yesNo() })) });
 const connectionInput = shape.named(
   "ConnectionInput",
   "A connection to save, whole: with the id of one that exists it replaces that one, and a field left out (or null) is cleared; headers left out keep the stored ones.",
@@ -219,7 +219,7 @@ const limitsProblem = opt(shape.nullable(T), "Why its model's limits could not b
 const connectionShown = shape.named(
   "ConnectionShown",
   "A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read, where they could not.",
-  shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo() })), limitsInForce: shape.nullable(limits), limitsProblem }),
+  shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo(), waiting: opt(shape.yesNo(), "The key is kept and waits until the owner allows the place it now goes to; its calls fail in words until then.") })), limitsInForce: shape.nullable(limits), limitsProblem }),
 );
 /** A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read. */
 export type ConnectionShown = Infer<typeof connectionShown>;
@@ -249,7 +249,7 @@ async function limitsOf(api: ConnectionsApi, log: Log, user: string, id: string,
 async function shown(api: ConnectionsApi, log: Log, user: string, view: ConnectionView): Promise<ConnectionShown> {
   const { key, ...rest } = view;
   const read = view.model === undefined ? { limits: null, problem: null } : await limitsOf(api, log, user, view.id);
-  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: read.limits, limitsProblem: read.problem };
+  return { ...rest, key: key === null ? null : { set: key.set, waiting: key.waiting }, limitsInForce: read.limits, limitsProblem: read.problem };
 }
 
 const saveConnection = shape.named(

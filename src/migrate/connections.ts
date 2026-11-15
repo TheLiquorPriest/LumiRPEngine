@@ -19,6 +19,7 @@
 // connection left as RPE has it keeps RPE's, and one taken from today's takes today's whole.
 
 import type { ConnectionsDoc, ModelsPort, SecretsDoc, SignInToken, StoredConnection } from "rp-harness/contract";
+import { placeOf as rphPlaceOf } from "rp-harness/helpers";
 import { hashJson } from "../shared/hash";
 import { isRecord } from "../shared/json";
 import { readText } from "./files";
@@ -97,21 +98,15 @@ function isSignIn(value: unknown): value is SignInToken {
 
 /**
  * Where a connection's key and headers' values go, in the form RPH's model layer keeps beside them
- * in the secrets (`SecretsDoc.places`, made by `placeOf` in RPH's `src/model/book.ts`): its provider
- * and its address's origin, null for the provider's own address. The layer compares it at every
- * read, the first after a start too, and sends them to no other place. Undefined for an entry that
- * names no provider or address as a connection does.
+ * in the secrets (`SecretsDoc.places`, RPH's own `placeOf`): its provider and its address's origin
+ * and path, null for the provider's own address. The layer compares it at every read, the first
+ * after a start too, and sends them to no other place. Undefined for an entry that names no
+ * provider or address as a connection does.
  */
 function placeOf(c: { provider?: unknown; baseUrl?: unknown }): string | undefined {
   const { provider, baseUrl } = c;
   if (typeof provider !== "string" || (baseUrl !== undefined && typeof baseUrl !== "string")) return undefined;
-  if (baseUrl === undefined || baseUrl.trim() === "") return JSON.stringify([provider, null]);
-  try {
-    return JSON.stringify([provider, new URL(baseUrl.trim()).origin]);
-  } catch {
-    // What isn't an address is a place of its own, as the layer has it.
-    return JSON.stringify([provider, baseUrl]);
-  }
+  return rphPlaceOf(provider, baseUrl);
 }
 
 async function readBook(connectionsFile: string, secretsFile: string | undefined, serial: ReadonlySet<string>): Promise<Book> {

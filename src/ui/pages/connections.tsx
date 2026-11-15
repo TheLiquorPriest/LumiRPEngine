@@ -29,7 +29,8 @@ const AUTH_WORDS: Readonly<Record<ConnectionAuth, string>> = { key: "With a key"
 function keyWords(view: ConnectionShown): string {
   if (view.auth === "none") return "Signs its calls with no key.";
   if (view.auth === "signin") return view.signedIn === true ? "Signed in to its provider." : "Not signed in to its provider.";
-  return view.key?.set === true ? "A key is set." : "No key is set.";
+  if (view.key?.set !== true) return "No key is set.";
+  return view.key.waiting === true ? "A key is set, and waits until you allow the address it now goes to: its calls fail until then." : "A key is set.";
 }
 
 /**
@@ -45,6 +46,7 @@ export function draftOf(form: Iterable<readonly [string, FormDataEntryValue]>, w
     return value === "" ? null : value;
   };
   const effort = text("effort");
+  const retries = text("retries");
   const connection = {
     name: field.get("name") ?? "",
     provider: field.get("provider") ?? "",
@@ -53,9 +55,10 @@ export function draftOf(form: Iterable<readonly [string, FormDataEntryValue]>, w
     api: text("api"),
     model: text("model"),
     effort: EFFORTS.find((e) => e === effort) ?? null,
-    serialTools: was?.serialTools ?? null,
-    messageThreads: was?.messageThreads ?? null,
-    retries: was?.retries ?? null,
+    // The connection's own values, as the form shows them: a box left empty or unticked clears it, and the setting or the default holds.
+    serialTools: field.get("serialTools") === "on" ? true : null,
+    messageThreads: field.get("messageThreads") === "on" ? true : null,
+    retries: retries === null ? null : Number(retries),
     limits: limitsOf(field, text("model"), was),
   };
   const key = field.get("key") ?? "";
@@ -179,6 +182,19 @@ function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimits
           <span class="label">API</span>
           <input name="api" class="lre-input" defaultValue={was?.api ?? ""} autoComplete="off" spellcheck={false} />
           <span class="lre-field-help">The API a compatible server speaks, where it speaks more than one.</span>
+        </label>
+        <label class="lre-field">
+          <span class="label">Tries again</span>
+          <input name="retries" class="lre-input" type="number" inputMode="numeric" min={0} defaultValue={was?.retries === undefined ? "" : String(was.retries)} autoComplete="off" />
+          <span class="lre-field-help">How many times a call that failed before any answer arrived is made again. Left empty, the setting calls.retries holds: 2, as Appendix D.1 has it.</span>
+        </label>
+        <label class="lre-inline">
+          <input name="messageThreads" type="checkbox" defaultChecked={was?.messageThreads === true} />
+          <span>Message threads: off unless ticked (Appendix D.1), so every request carries everything it is about.</span>
+        </label>
+        <label class="lre-inline">
+          <input name="serialTools" type="checkbox" defaultChecked={was?.serialTools === true} />
+          <span>One tool call per answer: off unless ticked, for a model that takes only one at a time.</span>
         </label>
         <label class="lre-field">
           <span class="label">Context window</span>

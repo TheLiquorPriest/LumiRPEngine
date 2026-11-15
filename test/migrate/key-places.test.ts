@@ -126,14 +126,14 @@ describe("the place each key was given for, through a real run and RPE's next st
       const next = await testCalls(data);
       expect(JSON.stringify(next.sent)).not.toContain(SECRETS.key);
       expect(JSON.stringify(next.sent)).not.toContain(SECRETS.header);
-      expect(next.key).toEqual({ set: false, last4: null });
+      expect(next.key).toEqual({ set: true, waiting: true });
 
-      // That start took the key away. A run after it fills today's key back in for the connection RPE keeps, with the place today's build gives it for, so the start after that sends it nowhere either.
+      // That start kept the key, waiting until the owner allows the new address. A run after it fills today's key back in for the connection RPE keeps, with the place today's build gives it for, so the start after that sends it nowhere either.
       await migrated(fixture, data, 11);
       const after = await testCalls(data);
       expect(JSON.stringify(after.sent)).not.toContain(SECRETS.key);
       expect(JSON.stringify(after.sent)).not.toContain(SECRETS.header);
-      expect(after.key).toEqual({ set: false, last4: null });
+      expect(after.key).toEqual({ set: true, waiting: true });
     });
   });
 
@@ -164,7 +164,7 @@ describe("the place each key was given for, through a real run and RPE's next st
       const next = await testCalls(data);
       expect(JSON.stringify(next.sent)).not.toContain(SECRETS.key);
       expect(next.sent.map((s) => s.headers.authorization)).toEqual([`Bearer ${OPENAI_KEY}`]);
-      expect(next.key).toEqual({ set: true, last4: OPENAI_KEY.slice(-4) });
+      expect(next.key).toEqual({ set: true, waiting: false });
     });
   });
 });

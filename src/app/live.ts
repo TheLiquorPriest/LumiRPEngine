@@ -105,6 +105,18 @@ const callPermission = shape.named(
   "The permission a write or external tool's call ran under: the lane its tier puts it under (external for a tool of the external tier), the user's setting for that lane, and under Confirm the user's word on the call.",
   shape.object({ lane: T, setting: shape.oneOf("auto", "confirm", "never"), answer: opt(approvalAnswer) }),
 );
+const callRefusal = shape.named(
+  "CallRefusal",
+  "Why a tool call never ran: a limit spent before it started, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, or a permission or rule that could not be asked.",
+  shape.union(
+    shape.object({ by: shape.literal("limit"), hit: limitHit }),
+    shape.object({ by: shape.literal("switch"), thing: shape.object({ kind: shape.oneOf("hook", "rule-command", "command-tool", "mcp-server", "http-tool", "connection"), name: T, target: T }), state: shape.oneOf("on", "waiting", "off") }),
+    shape.object({ by: shape.literal("never"), lane: T }),
+    shape.object({ by: shape.literal("declined"), lane: T, reason: opt(T) }),
+    shape.object({ by: shape.literal("hold"), rule: T }),
+    shape.object({ by: shape.literal("unasked"), error: T }),
+  ),
+);
 const jobLimits = shape.named(
   "JobLimits",
   "Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on.",
@@ -159,7 +171,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("connection_stand_in"), named: T, used: T }),
     shape.object({ kind: shape.literal("tool_started"), callId: T, tool: T, args: shape.json(), closing: shape.yesNo(), via: opt(shape.literal("tool_use")) }),
     shape.object({ kind: shape.literal("tool_update"), callId: T, tool: T, partial: toolResult }),
-    shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N, permission: opt(callPermission) }),
+    shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N, permission: opt(callPermission), refused: opt(callRefusal) }),
     shape.object({ kind: shape.literal("rule_fired"), firing: ruleFiring }),
     shape.object({
       kind: shape.literal("hook"),

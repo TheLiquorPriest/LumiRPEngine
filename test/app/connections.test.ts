@@ -103,21 +103,26 @@ describe("connections", () => {
 
   test("a connection saved for one user is not listed for another, and its key is not given for another", async () => {
     const dir = await mkdtemp(join(tmpdir(), "rpe-connections-"));
-    const host = await createFolderHost({ dir, user: OWNER });
+    // A host serves one user, so each user's layer stands on its own host; both are over RPE's one port.
+    const host = await createFolderHost({ dir: join(dir, "owner"), user: OWNER });
+    const otherHost = await createFolderHost({ dir: join(dir, "other"), user: OTHER });
     try {
       // RPH's own model layer over RPE's port; nothing here calls a provider.
-      const layer = createHarness({ ...host, models: app.models }, { fetch: (async () => Response.json({}, { status: 401 })) as unknown as typeof fetch }).models;
+      const fetch = (async () => Response.json({}, { status: 401 })) as unknown as typeof globalThis.fetch;
+      const layer = createHarness({ ...host, models: app.models }, { fetch }).models;
+      const otherLayer = createHarness({ ...otherHost, models: app.models }, { fetch }).models;
       const mine = await layer.save(OWNER, { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, KEY);
-      expect((await layer.list(OTHER)).connections).toEqual([]);
+      expect((await otherLayer.list(OTHER)).connections).toEqual([]);
       expect(await storedKey(app.models)(OTHER, mine.id)).toBeNull();
-      const theirs = await layer.save(OTHER, { name: "Local server", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:1234/v1" });
-      expect([(await layer.list(OWNER)).connections.map((c) => c.id), (await layer.list(OTHER)).connections.map((c) => c.id)]).toEqual([[mine.id], [theirs.id]]);
+      const theirs = await otherLayer.save(OTHER, { name: "Local server", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:1234/v1" });
+      expect([(await layer.list(OWNER)).connections.map((c) => c.id), (await otherLayer.list(OTHER)).connections.map((c) => c.id)]).toEqual([[mine.id], [theirs.id]]);
       expect([await storedKey(app.models)(OWNER, mine.id), await storedKey(app.models)(OTHER, mine.id)]).toEqual([KEY, null]);
       // Each one's document stands under his own name in the global config.
       const global = YAML.parse(await readFile(app.paths.globalConfig, "utf8")) as { models: Record<string, ConnectionsDoc> };
       expect(Object.fromEntries(Object.entries(global.models).map(([user, doc]) => [user, doc.connections.map((c) => c.id)]))).toEqual({ [OWNER]: [mine.id], [OTHER]: [theirs.id] });
     } finally {
       await host.close();
+      await otherHost.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -157,8 +162,8 @@ describe("connections", () => {
       expect(added.status).toBe(200);
       const addedText = await added.text();
       expect(addedText).not.toContain(KEY.slice(-4));
-      const view = JSON.parse(addedText) as { id: string; key: { set: boolean } };
-      expect(view.key).toEqual({ set: true });
+      const view = JSON.parse(addedText) as { id: string; key: { set: boolean; waiting: boolean } };
+      expect(view.key).toEqual({ set: true, waiting: false });
       const changed = await fetch(`${server.url}/api/v1/connections/${view.id}`, { method: "PUT", headers: page, body: JSON.stringify({ connection: { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-pro" } }) });
       expect(await changed.json()).toMatchObject({ model: "deepseek-v4-pro", key: { set: true } });
       expect((await fetch(`${server.url}/api/v1/connections/${view.id}/default`, { method: "PUT", headers: page })).status).toBe(204);

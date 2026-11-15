@@ -121,7 +121,7 @@ export function testModelLayer(port: ModelsPort): ConnectionsApi {
     return {
       ...rest,
       default: doc.default === c.id,
-      key: c.auth === "key" ? { set: key !== undefined, last4: key === undefined ? null : key.slice(-4) } : null,
+      key: c.auth === "key" ? { set: key !== undefined, waiting: false } : null,
       ...(headers === undefined ? {} : { headers: Object.entries(headers).map(([name, value]) => ({ name, set: value !== null })) }),
     };
   };

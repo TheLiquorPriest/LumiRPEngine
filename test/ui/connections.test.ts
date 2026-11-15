@@ -70,8 +70,8 @@ describe("the Connections page", () => {
     expect([chosen("provider"), chosen("auth"), chosen("effort")]).toEqual([["deepseek"], ["key"], ["high"]]);
     // The user's own limits for its model start as they are set.
     expect([inputs.find((e) => e.props.name === "contextWindow")?.props.defaultValue, inputs.find((e) => e.props.name === "maxTokens")?.props.defaultValue]).toEqual(["64000", ""]);
-    const typed = { name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "max", baseUrl: "", api: "", contextWindow: "64000", maxTokens: "" };
-    // What the form does not show goes as it was: a save replaces the connection whole.
+    const typed = { name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "max", baseUrl: "", api: "", retries: "4", contextWindow: "64000", maxTokens: "" };
+    // A save replaces the connection whole: what the form shows starts as it is, and goes as the form leaves it.
     const kept = draftOf(entries({ ...typed, key: "" }), KEYED);
     expect(kept).toEqual({ connection: { name: "Flash", provider: "deepseek", auth: "key", baseUrl: null, api: null, model: "deepseek-v4-flash", effort: "max", serialTools: null, messageThreads: null, retries: 4, limits: { "deepseek-v4-flash": { contextWindow: 64_000 } } } });
     // A limit typed sets the user's own for the model, both left empty take them away, and another model's stay as they were.
@@ -80,8 +80,8 @@ describe("the Connections page", () => {
     expect(draftOf(entries({ ...typed, key: "", contextWindow: "", model: "deepseek-v4-pro" }), KEYED).connection.limits).toEqual({ "deepseek-v4-flash": { contextWindow: 64_000 } });
     expect(draftOf(entries({ ...typed, key: " sk-not-a-real-key " }), KEYED).key).toBe("sk-not-a-real-key");
     expect(draftOf(entries({ ...typed, key: "", dropKey: "on" }), KEYED).key).toBeNull();
-    // A new one: no effort chosen is the model's own, and no limit typed sets none of the user's own.
-    expect(draftOf(entries({ ...typed, effort: "", contextWindow: "", key: "sk-not-a-real-key" }), null)).toMatchObject({ connection: { effort: null, retries: null, limits: null }, key: "sk-not-a-real-key" });
+    // A new one: no effort chosen is the model's own, and no retries or limit typed sets none of the connection's own.
+    expect(draftOf(entries({ ...typed, effort: "", retries: "", contextWindow: "", key: "sk-not-a-real-key" }), null)).toMatchObject({ connection: { effort: null, retries: null, limits: null }, key: "sk-not-a-real-key" });
   });
 
   test("removing asks first, and RPE's refusal is shown in its words, in the form when one is open", () => {
@@ -157,5 +157,18 @@ describe("the Connections page", () => {
     const unread = view({ list: { ...LIST, connections: [{ ...KEYED, limitsInForce: null, limitsProblem: "The model catalogue could not be read: its file is not JSON." }] } });
     expect(textOf(elements(unread.tree).find((e) => e.props["data-limits"] === "c-flash")?.props.children)).toBe("Its limits could not be read: The model catalogue could not be read: its file is not JSON.");
     expect(limitsWords(null)).toBe("Context window: not known · Longest reply: not known");
+  });
+
+  test("the form shows and saves retries, message threads and serial tools, and the model's figures he enters", () => {
+    const own: ConnectionShown = { ...KEYED, retries: 4, messageThreads: true };
+    const form = view({ list: { ...LIST, connections: [own, SIGNED] }, action: { kind: "form", id: "c-flash" } });
+    const input = (name: string) => elements(form.tree).find((e) => e.type === "input" && e.props.name === name)?.props;
+    expect([input("retries")?.defaultValue, input("messageThreads")?.defaultChecked, input("serialTools")?.defaultChecked, input("contextWindow")?.defaultValue]).toEqual(["4", true, false, "64000"]);
+    // Each says its default where it is left empty or unticked: Appendix D.1's two tries again, and message threads off.
+    expect(form.text).toContain("Left empty, the setting calls.retries holds: 2, as Appendix D.1 has it.");
+    expect(form.text).toContain("Message threads: off unless ticked (Appendix D.1)");
+    const saved = draftOf(entries({ name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", retries: "3", serialTools: "on", contextWindow: "48000", maxTokens: "6000", key: "" }), own);
+    expect(saved.connection).toMatchObject({ retries: 3, serialTools: true, messageThreads: null, limits: { "deepseek-v4-flash": { contextWindow: 48_000, maxTokens: 6000 } } });
+    expect(draftOf(entries({ name: "Flash", provider: "deepseek", auth: "key", retries: "", key: "" }), own).connection).toMatchObject({ retries: null, serialTools: null, messageThreads: null });
   });
 });
