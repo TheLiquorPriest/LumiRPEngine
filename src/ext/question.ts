@@ -14,7 +14,7 @@
 // that.
 
 import type { WorldInfoCandidate } from "../shared/host";
-import { textOf } from "../backend/lore-secrets";
+import { textOf } from "../secrecy/lore-secrets";
 import type { PathStep, Question, QuestionEntry } from "../adapter/lumiverse/wire";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";

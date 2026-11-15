@@ -112,7 +112,7 @@ describe("the fates of today's files", () => {
 
   test("what moves whole reads moved, to its home and by its package, and the Kept line has every item", () => {
     expect(fates.files.get("src/backend/worlds.ts")).toMatchObject({ fate: "moved", by: "PlanSwap-5", home: "src/worlds/worlds.ts" });
-    expect(fates.files.get("src/backend/lore-secrets.ts")).toMatchObject({ fate: "moved", by: "PlanSwap-6", home: "src/secrecy/" });
+    expect(fates.files.get("src/backend/lore-secrets.ts")).toMatchObject({ fate: "moved", by: "PlanSwap-6", home: "src/secrecy/lore-secrets.ts" });
     for (const path of ["src/backend/lore.ts", "src/backend/lore-pins.ts"]) expect(fates.files.get(path)).toMatchObject({ fate: "moved", by: "PlanChatUI-B3", home: "src/build/lore/" });
     expect(KEPT.secrecy).toBe("the secrecy half of the World Info gate (§9.6)");
   });

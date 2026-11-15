@@ -1,32 +1,21 @@
-// World Info as lore (DESIGN §4.2, §6.1, §6.11). A chat's World Info entries are read live by the
-// helpers and minds, and LRE writes none of them but on the user's press in Build. What is secret in
-// an entry is in its own text, as secret marks (`shared/secret-marks.ts`): the interceptor hands the
-// narrator's prompt each mark as the chat's narrator view has it, marked or left out; the host strips
-// every mark by itself, so a mark fails closed; helpers read an entry's public text, and a mark's own
-// text reaches only its holders' minds and the knowledge step, which reads what each person in the
-// scene holds. An earlier build's secrecy fields are read as they stand and never written. Each test
-// says what reached the prompt, a helper, a mind or the user, and that the user's books are as they
-// were.
+// World Info as lore, through today's runtime (DESIGN §4.2, §6.1, §6.11): what the helpers and minds
+// read of a chat's entries live, the Place section, Build's World Info lore editor, and what reaches
+// a mind or a trace. The checks of the secrecy rule itself, which entries are held back and how each
+// reader is handed a mark, are `test/secrecy/`'s, run on `src/secrecy/` alone; what stays here is the
+// part that goes with today's runtime. Each test says what reached a helper, a mind or the user, and
+// that the user's books are as they were.
 
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
-import type { HostBookEntryInput, QuietRequest, WorldInfoCandidate, WorldInfoVerdict } from "../../src/shared/host";
+import type { HostBookEntryInput, QuietRequest } from "../../src/shared/host";
 import { toChain } from "../../src/migrate/today/ledger-io";
-import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
-import { worldInfoVerdict, type WorldInfoGate } from "../../src/backend/wi-interceptor";
-import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
+import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { isRecord, type JsonObject } from "../../src/shared/json";
-import { factId, MINDS_EVENTS, type MindsRunView } from "../../src/shared/minds";
 import type { BackendToFrontend, LoreBookEntryView, LoreBookView, ResultBodies } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
-import { bookTextHash } from "../../src/shared/lore";
-import { publicText, SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
-import { blankWorld } from "../../src/engine/authoring";
-import { createRegistry, type Registry } from "../../src/engine/registry-impl";
-import { ALL_PACKS } from "../../src/packs/index";
+import { publicText, secretMarkText } from "../../src/shared/secret-marks";
 import { bookLabels } from "../../src/frontend/build/book-lore";
-import { startState } from "../packs/support";
 import { plainMinds, Rig } from "../support/rig";
 
 const SECRET = "The ferryman scuttled the old boat for the insurance money";
@@ -42,11 +31,6 @@ const KNOWLEDGE_STEP = "You keep track of who knows what in the roleplay world";
 const ENGINE_BOOK = "LumiRPEngine · ";
 
 const FERRY = "FERRY-MARK: the ferry runs twice a day.";
-const DEBT = "DEBT-MARK: Marcus owes the marina three months of slip fees.";
-const WRECK = "WRECK-MARK: the old boat went down with the marina's records aboard.";
-const DOCK = "DOCK-MARK: the dock is stone.";
-const SEEN = "SEEN-MARK: Jordan saw the boat go down from the breakwater.";
-const PLAIN = "PLAIN-MARK: the pier is older than the ferry.";
 
 function quiet(req: QuietRequest): string {
   const prompt = req.messages[0]?.content ?? "";
@@ -62,16 +46,6 @@ const lreFields = (lore: JsonObject): JsonObject => ({ [LEDGER_NAMESPACE]: { lor
 const oldSecret = (gate = GATE): HostBookEntryInput => entry("The wreck", `${SECRET}.`, { disabled: true, extensions: lreFields({ secret: true, gate }) });
 /** An entry about `place`, with LRE's `extra` fields beside its link. */
 const about = (place: string, content: string, extra: JsonObject = {}, over: Partial<HostBookEntryInput> = {}): HostBookEntryInput => entry("The harbor wall", content, { keys: [], ...over, extensions: lreFields({ links: [place], ...extra }) });
-
-/**
- * Port Alder entries with secret marks: Marcus's, kept from everyone else; a whole entry kept from
- * everyone; one Jordan, the player character, knows. Each author named a person by a word of their name.
- */
-const MARKED: HostBookEntryInput[] = [
-  entry("The ferry", `${FERRY}\n{{// Secret (known to Marcus): ${DEBT}}}`),
-  entry("The wreck", `{{// Secret: ${WRECK}}}`),
-  entry("The dock", `${DOCK}\n{{// Secret (known to Jordan): ${SEEN}}}`),
-];
 
 /** A narrator view a chat may choose for itself: whose knowledge, and whether secrets are marked or left out. */
 type NarratorView = { knowledge: "scene" | "pov"; secrets: "marked" | "omit" };
@@ -139,35 +113,11 @@ const carrying = (rig: Rig, text: string): string[] => rig.host.quietCalls.filte
 /** Who was handed `text`: each mind by its character's name, the knowledge step by its own, every other call as a helper. */
 const readers = (rig: Rig, text: string): string[] => [...new Set(rig.host.quietCalls.filter((c) => JSON.stringify(c.messages).includes(text)).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] ?? ((c.messages[0]?.content ?? "").startsWith(KNOWLEDGE_STEP) ? "the knowledge step" : "a helper")))];
 
-/** Every entry of the user's own books as the host stores it, by id: the engine's own book, which holds its sections, aside. */
-function userEntries(rig: Rig): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const book of rig.host.bookStore.values()) if (!book.name.startsWith(ENGINE_BOOK)) for (const id of book.entries.keys()) out[id] = rig.host.storedEntry(id);
-  return out;
-}
-
 /** Every section's text: as the last prompt held each, and as GM → This chat → Sections previews each now. */
 async function sectionTexts(rig: Rig, chatId: string): Promise<string[]> {
   const engine = new Set([...rig.host.bookStore.values()].filter((b) => b.name.startsWith(ENGINE_BOOK)).flatMap((b) => [...b.entries.keys()]));
   const preview = rig.body(await rig.send({ type: "lre.sections", chatId })) as unknown as ResultBodies["lre.sections"];
   return [...rig.host.assembled.filter((e) => engine.has(e.id)).map((e) => e.content), ...preview.sections.flatMap((s) => (s.content === null ? [] : [s.content]))];
-}
-
-/** An entry as the host gives the interceptor one. */
-const candidate = (id: string, bookId: string, disabled: boolean, extensions: JsonObject, content = `${SECRET}.`): WorldInfoCandidate => ({ id, bookId, disabled, extensions, comment: "", content });
-/** The interceptor's gate as the runtime's, the chat's world and state read by `head`. */
-const gateOn = (registry: Registry, head: WorldInfoGate["head"]): WorldInfoGate => ({ registry, playsWorld: () => true, head, narrator: async () => ({ view: { ...defaultSettings().narrator }, wording: SECRET_MARK_WORDING }), log: () => undefined });
-
-/**
- * The texts a prompt gets of `entries` with `verdict` applied as the host applies it, before its own
- * macro pass strips any mark: an off vote wins, an on vote switches on an entry stored off, and a text
- * of the prompt's own stands in for the entry's.
- */
-function prompted(entries: readonly WorldInfoCandidate[], verdict: WorldInfoVerdict): string[] {
-  const off = new Set(verdict.disabled);
-  const on = new Set(verdict.enabled);
-  const text = new Map((verdict.mutated ?? []).map((m) => [m.id, m.content]));
-  return entries.filter((e) => !off.has(e.id) && (!e.disabled || on.has(e.id))).map((e) => text.get(e.id) ?? e.content);
 }
 
 describe("World Info read live as lore", () => {
@@ -183,180 +133,7 @@ describe("World Info read live as lore", () => {
   });
 });
 
-describe("an earlier build's secrecy fields, read as they stand", () => {
-  test("keep an entry out of the prompt until its gate holds, then it is in; nothing LRE does writes it: turns, a draft save, a commit and Upgrade, the Sections preview, GM → Minds → Run, a Re-read", async () => {
-    const { rig, chatId, bookId, ids, pov } = await bookChat([entry("The ferry", FERRY), oldSecret(HARBOR_MASTER)], { shipped: true, minds: true });
-    const secretId = ids[1] ?? "";
-    const stood = userEntries(rig);
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    expect(inPrompt(rig, FERRY)).toBe(true);
-    expect(inPrompt(rig, SECRET)).toBe(false);
-    expect(userEntries(rig)).toEqual(stood);
-    // A world entry indexed from it, secret by the same gate: its draft save, the commit, the chat's Upgrade to it.
-    const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
-    await rig.oldCopy(worldId, { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: ["ferry"], links: [], secret: true, gate: HARBOR_MASTER, source: { kind: "book", bookId, entryId: secretId, hash: bookTextHash(`${SECRET}.`) } });
-    expect(userEntries(rig)).toEqual(stood);
-    const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to: committed.revision }));
-    expect(userEntries(rig)).toEqual(stood);
-    await rig.turn(chatId, "I walk back to the ferry.", "The ferry horn sounds again.");
-    expect(inPrompt(rig, SECRET)).toBe(false);
-    rig.body(await rig.send({ type: "lre.sections", chatId }));
-    expect(userEntries(rig)).toEqual(stood);
-    // GM → Minds → Run on Danny, who holds no part of it while its gate is shut.
-    const before = rig.host.quietCalls.length;
-    const run = rig.body(await rig.send({ type: "lre.minds", op: "run", chatId, who: ["danny_okafor"] })).run as MindsRunView;
-    const ended = await rig.host.sentWhere((m) => m.type === "lre.minds.update" && m.run.runId === run.runId && m.run.status !== "running");
-    expect(ended.type === "lre.minds.update" && ended.run.status).toBe("done");
-    const ran = rig.host.quietCalls.slice(before);
-    expect(ran.map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1])).toContain("Danny Okafor");
-    expect(JSON.stringify(ran.map((c) => c.messages))).not.toContain(SECRET);
-    expect(userEntries(rig)).toEqual(stood);
-    // The gate holds: the entry is switched on for the prompt, and stays stored as it was.
-    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: pov, field: "occupation", value: "harbor_master" }] }));
-    await rig.turn(chatId, "I wait by the ferry.", "The ferry docks.");
-    expect(promptOf(rig, secretId)).toContain(SECRET);
-    expect(userEntries(rig)).toEqual(stood);
-    const reply = rig.host.chat(chatId).messages.at(-1);
-    if (!reply) throw new Error("no reply");
-    rig.host.editMessage(chatId, reply.id, "The ferry docks by the ferry office.");
-    await rig.host.settle();
-    rig.body(await rig.send({ type: "lre.chip", chatId, chip: `reread:${reply.id}:${reply.swipeId}`, choice: "reread" }));
-    expect(userEntries(rig)).toEqual(stood);
-    // Three turns, a minds run and a Re-read on Port Alder with minds take a while.
-  }, 60_000);
-
-  test("an entry kept secret on both sides, by its own fields and by the world entry indexed from it, opens only once both gates hold", async () => {
-    const registry = createRegistry(ALL_PACKS);
-    const world = blankWorld("w_both", "Both");
-    const entries = [candidate("e", "b", true, lreFields({ secret: true, gate: "true" }))];
-    for (const [gate, opens] of [["false", false], ["true", true]] as const) {
-      world.lore.wreck = { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate, source: { kind: "book", bookId: "b", entryId: "e", hash: bookTextHash(`${SECRET}.`) } };
-      const verdict = await worldInfoVerdict(gateOn(registry, async () => ({ world, state: startState(world, registry) })), { chatId: "c", userId: "u", chatMetadata: {}, entries });
-      expect(prompted(entries, verdict).some((t) => t.includes(SECRET))).toBe(opens);
-    }
-  });
-
-  test("a twin an earlier build switched off as the copy of a secret world entry's source opens only once the world entry's gate holds too", async () => {
-    const registry = createRegistry(ALL_PACKS);
-    const world = blankWorld("w_twin", "Twin");
-    // Its text as the book has it since the world entry was indexed: the note alone ties it to the world entry.
-    const entries = [candidate("t", "b2", true, { [LEDGER_NAMESPACE]: { lore: { secret: true, gate: "true" }, secretCopyOf: { entry: "b/e", off: false, fields: null } } }, "WRECK-NOW: the boat went down.")];
-    for (const [gate, opens] of [["false", false], ["true", true]] as const) {
-      world.lore.wreck = { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate, source: { kind: "book", bookId: "b", entryId: "e", hash: bookTextHash(`${SECRET}.`) } };
-      const verdict = await worldInfoVerdict(gateOn(registry, async () => ({ world, state: startState(world, registry) })), { chatId: "c", userId: "u", chatMetadata: {}, entries });
-      expect(prompted(entries, verdict).includes("WRECK-NOW: the boat went down.")).toBe(opens);
-    }
-  });
-});
-
-describe("secret marks in the narrator's prompt", () => {
-  test("under the default view, everyone in the scene with secrets marked, each mark is told marked with whom it is known to, beside the entry's public text", async () => {
-    const { rig, chatId, ids } = await bookChat(MARKED, { shipped: true });
-    const [ferry = "", wreck = "", dock = ""] = ids;
-    const stood = userEntries(rig);
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    // The author wrote "Marcus" and "Jordan": the narrator is told whose secret each is by their names.
-    for (const told of [FERRY, DEBT, "Marcus Delgado"]) expect(promptOf(rig, ferry)).toContain(told);
-    for (const told of [DOCK, SEEN, "Jordan Ellis"]) expect(promptOf(rig, dock)).toContain(told);
-    // A whole-entry secret is that one secret, marked.
-    expect(promptOf(rig, wreck)).toBe(secretMarkText(WRECK, [], "everyone"));
-    expect(userEntries(rig)).toEqual(stood);
-  });
-
-  const VIEWS: [string, NarratorView][] = [
-    ["everyone in the scene with secrets left out", { knowledge: "scene", secrets: "omit" }],
-    ["the player character's, secrets marked", { knowledge: "pov", secrets: "marked" }],
-  ];
-  for (const [label, narrator] of VIEWS) {
-    test(`under a chat's own view, ${label}, a mark kept from the player character is left out, a whole-entry one switched off, and one Jordan knows stays, marked`, async () => {
-      const { rig, chatId, ids } = await bookChat(MARKED, { shipped: true, narrator });
-      const [ferry = "", wreck = "", dock = ""] = ids;
-      const stood = userEntries(rig);
-      await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-      expect(promptOf(rig, ferry)).toContain(FERRY);
-      expect(inPrompt(rig, DEBT)).toBe(false);
-      expect(promptOf(rig, wreck)).toBe("");
-      expect(inPrompt(rig, WRECK)).toBe(false);
-      for (const told of [DOCK, SEEN, "Jordan Ellis"]) expect(promptOf(rig, dock)).toContain(told);
-      expect(userEntries(rig)).toEqual(stood);
-    });
-  }
-
-  // What the player character's narrator may be told: the chat's view is the player character's.
-  test("a mark the player character holds by now goes in under their view, they among the people who know it; one they don't hold stays out", async () => {
-    const { rig, chatId, bookId, ids, pov } = await bookChat(MARKED, { shipped: true, narrator: PLAYER_VIEW });
-    const [ferry = "", wreck = ""] = ids;
-    // Marcus told Jordan about the slip fees in play, as the knowledge step records a telling (DESIGN §24.11).
-    const debt = factId({ kind: "wi", book: bookId, entry: ferry, mark: 0 });
-    const told: LedgerEvent[] = [
-      { type: MINDS_EVENTS.fact, data: { fact: { id: debt, kind: "wi", claim: DEBT, about: [], truth: "true" } } },
-      { type: MINDS_EVENTS.learn, data: { who: [pov], fact: debt, how: "told", by: "marcus_delgado", evidence: [], belief: "true", confidence: 1, msg: null, at: 0 } },
-    ];
-    await rig.rt.ledger.write(chatId, rig.host.userId, { kind: "post", id: "told", target: "head", entry: { kind: "fix", events: told } });
-    await rig.host.settle();
-    const stood = userEntries(rig);
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    for (const shown of [FERRY, DEBT, "Marcus Delgado", "Jordan Ellis"]) expect(promptOf(rig, ferry)).toContain(shown);
-    expect(promptOf(rig, wreck)).toBe("");
-    expect(inPrompt(rig, WRECK)).toBe(false);
-    expect(userEntries(rig)).toEqual(stood);
-  });
-
-  /** Marks kept from the player character as an author may write them: in words, and with a name misspelled. */
-  const YOU = "YOU-MARK: the harbor master keeps a second set of keys.";
-  const PC = "PC-MARK: a page is torn out of the ferry's logbook.";
-  const TYPO = "TYPO-MARK: Danny sold the old outboard for cash.";
-  const OTHERS = "OTHERS-MARK: Jordan paid the slip fees twice.";
-  const NAMED = [entry("The harbor", `${DOCK}\n{{// Secret (kept from you): ${YOU}}}\n{{// Secret (kept from the player character): ${PC}}}\n{{// Secret (kept from Jordan Elis): ${TYPO}}}\n{{// Secret (kept from Marcus): ${OTHERS}}}`)];
-  for (const [label, narrator] of VIEWS) {
-    test(`under a chat's own view, ${label}, a mark kept from "you", from "the player character", or from a name that names no one is left out; one kept from Marcus alone stays`, async () => {
-      const { rig, chatId, ids } = await bookChat(NAMED, { shipped: true, narrator });
-      await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-      for (const shown of [DOCK, OTHERS]) expect(promptOf(rig, ids[0] ?? "")).toContain(shown);
-      for (const kept of [YOU, PC, TYPO]) expect(inPrompt(rig, kept)).toBe(false);
-    });
-  }
-
-  test("under the default view, the marks kept from \"you\" and \"the player character\" are told kept from Jordan; one kept from a misspelled name is told kept from Jordan too, and one kept from Marcus alone from him", async () => {
-    const { rig, chatId, ids } = await bookChat(NAMED, { shipped: true });
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    const told = promptOf(rig, ids[0] ?? "");
-    expect(told).toContain(DOCK);
-    for (const kept of [YOU, PC]) expect(told).toContain(secretMarkText(kept, [], ["Jordan Ellis"]));
-    // The narrator can't tell whom "Jordan Elis" means, so it is told the player character may be one of them.
-    expect(told).toContain(secretMarkText(TYPO, [], ["Jordan Ellis", "Jordan Elis"]));
-    expect(told).toContain(secretMarkText(OTHERS, [], ["Marcus Delgado"]));
-  });
-
-  test("when the interceptor fails, the host strips every mark itself and no secret reaches the prompt, an earlier build's with its gate holding included", async () => {
-    const { rig, chatId, ids } = await bookChat([...MARKED, oldSecret("true"), entry("The pier", PLAIN)]);
-    const stood = userEntries(rig);
-    rig.host.worldInfoInterceptor = async () => {
-      throw new Error("the interceptor broke");
-    };
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    for (const shown of [FERRY, DOCK, PLAIN]) expect(inPrompt(rig, shown)).toBe(true);
-    for (const kept of [DEBT, WRECK, SEEN, SECRET]) expect(inPrompt(rig, kept)).toBe(false);
-    expect(promptOf(rig, ids[1] ?? "")).toBe("");
-    expect(userEntries(rig)).toEqual(stood);
-  });
-
-  test("when the chat's state can't be read, no secret reaches the prompt: every mark is left out, and a whole-entry secret, a mark's twin and an earlier build's secret stored on are all off", async () => {
-    const entries = [
-      candidate("ferry", "b", false, {}, `${FERRY}\n{{// Secret (known to Marcus): ${DEBT}}}`),
-      candidate("wreck", "b", false, {}, `{{// Secret: ${WRECK}}}`),
-      candidate("dock", "b", false, {}, `${DOCK}\n{{// Secret (known to Jordan): ${SEEN}}}`),
-      candidate("copy", "b2", false, {}, DEBT),
-      candidate("old", "b", false, lreFields({ secret: true, gate: "true" })),
-      candidate("plain", "b", false, {}, PLAIN),
-    ];
-    const verdict = await worldInfoVerdict(gateOn(createRegistry(ALL_PACKS), async () => Promise.reject(new Error("no state"))), { chatId: "c", userId: "u", chatMetadata: {}, entries });
-    const told = prompted(entries, verdict).join("\n");
-    for (const shown of [FERRY, DOCK, PLAIN]) expect(told).toContain(shown);
-    for (const kept of [DEBT, WRECK, SEEN, SECRET]) expect(told).not.toContain(kept);
-  });
-
+describe("a mark that can't be read", () => {
   test("a mark that can't be read reaches no prompt and no helper, while the entry's other text does, and Build shows it as one that can't be read", async () => {
     const BROKEN = "{{// Secret: BROKEN-A {{user}} BROKEN-B}}";
     const { rig, chatId, bookId, ids } = await bookChat([entry("The ferry", `${FERRY}\n${BROKEN}`)]);
@@ -370,35 +147,6 @@ describe("secret marks in the narrator's prompt", () => {
     const shown = (rig.body(await rig.send({ type: "lre.lore", op: "entries", bookId })).entries as LoreBookEntryView[]).find((e) => e.id === ids[0]);
     expect(shown?.unreadable?.map((u) => u.raw)).toEqual([BROKEN]);
     expect(shown?.marks).toBeUndefined();
-  });
-
-  /** A Port Alder chat whose book holds Marcus's mark, and a book a character's card brought holding a copy of the mark's words, both read by the chat. */
-  async function twinChat(narrator?: NarratorView): Promise<{ rig: Rig; chatId: string; original: string; twin: string }> {
-    const { rig, chatId, ids } = await bookChat([entry("The ferry", `${FERRY}\n{{// Secret (known to Marcus): ${DEBT}}}`)], { shipped: true, narrator });
-    const card = rig.host.userBook("Harbor notes", { character: true });
-    const twin = await rig.host.books.createEntry(card, entry("Marina gossip", `  ${DEBT}\n`), rig.host.userId);
-    await attachBook(rig, chatId, card);
-    return { rig, chatId, original: ids[0] ?? "", twin };
-  }
-
-  test("a twin, an entry whose whole text is a mark's text, reads as the mark: told as the mark is told, and read by no helper", async () => {
-    const { rig, chatId, original, twin } = await twinChat();
-    const stood = userEntries(rig);
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    const told = promptOf(rig, twin);
-    expect(told).toContain(DEBT);
-    expect(told).toContain("Marcus Delgado");
-    expect(promptOf(rig, original)).toContain(told);
-    expect(carrying(rig, DEBT)).toEqual([]);
-    expect(userEntries(rig)).toEqual(stood);
-  });
-
-  test("a twin is left out with its mark where the view leaves the mark out", async () => {
-    const { rig, chatId, twin } = await twinChat(PLAYER_VIEW);
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    expect(promptOf(rig, twin)).toBe("");
-    expect(inPrompt(rig, DEBT)).toBe(false);
-    expect(carrying(rig, DEBT)).toEqual([]);
   });
 });
 
@@ -573,156 +321,6 @@ describe("World Info secrecy wherever the entry is read", () => {
     await attachBook(rig, chatId, bookId);
     return { bookId, entryId };
   }
-
-  /** A world chat on the test world, the player character at `here`: `setup` writes the draft's lore (and any books it reads) before the commit. */
-  async function loreChat(setup: (rig: Rig, worldId: string, here: string) => Promise<void>): Promise<{ rig: Rig; chatId: string }> {
-    const rig = new Rig();
-    for (const patch of [{ modelUse: { preset: "full" } }, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
-    const worldId = await rig.newWorld("Harbor");
-    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
-    await setup(rig, worldId, draft.start.place);
-    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    const chatId = rig.host.createChat("Morning, Sam.");
-    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    rig.host.quietReply = quiet;
-    return { rig, chatId };
-  }
-  const DEBT_NOTE = "DEBT-MARK: the ferryman owes the harbor master money.";
-  /** A book holding `DEBT_NOTE`, Known by whoever knows `links`; attached to `chatId` when given. */
-  async function debtBook(rig: Rig, links: string[], chatId?: string): Promise<{ bookId: string; entryId: string }> {
-    const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
-    const entryId = await rig.host.books.createEntry(bookId, entry("The debt", DEBT_NOTE, { extensions: lreFields({ visibility: "known_by", links }) }), rig.host.userId);
-    if (chatId) await attachBook(rig, chatId, bookId);
-    return { bookId, entryId };
-  }
-
-  test("a world entry with a visibility no reader knows stays unread by every call, whatever its links", async () => {
-    const RUMOR = "RUMOR-MARK: the harbor master takes bribes.";
-    const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "rumor", value: { id: "rumor", title: "Harbor rumor", content: RUMOR, keys: ["ferry"], links: [here], visibility: "secret" } }));
-    });
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, "RUMOR-MARK")).toEqual([]);
-    expect(inPrompt(rig, "RUMOR-MARK")).toBe(false);
-  });
-
-  test("a Known-by world entry that links nothing stays unread when a book entry of its text links what the player character knows", async () => {
-    let place = "";
-    const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
-      place = here;
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "debt", value: { id: "debt", title: "The debt", content: DEBT_NOTE, keys: ["ferry"], links: [], visibility: "known_by" } }));
-    });
-    await debtBook(rig, [place], chatId);
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, "DEBT-MARK")).toEqual([]);
-  });
-
-  test("a Known-by world entry that links nothing stays unread though the book entry it was indexed from links what the player character knows", async () => {
-    const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
-      const { bookId, entryId } = await debtBook(rig, [here]);
-      await rig.oldCopy(worldId, { id: "debt", title: "The debt", content: DEBT_NOTE, keys: ["ferry"], links: [], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT_NOTE) } });
-    });
-    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, "DEBT-MARK")).toEqual([]);
-  });
-
-  /**
-   * A world chat whose starting place has one book entry pinned, `over` its own, its book attached to
-   * no chat: `setup` gives the draft its lore, and the entry any change made in Build, before the commit.
-   */
-  async function pinnedChat(content: string, over: Partial<HostBookEntryInput>, setup: (rig: Rig, worldId: string, bookId: string, entryId: string) => Promise<void>): Promise<{ rig: Rig; chatId: string }> {
-    const rig = new Rig();
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
-    const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
-    const entryId = await rig.host.books.createEntry(bookId, entry("The wreck", content, { keys: ["zzqq"], constant: false, ...over }), rig.host.userId);
-    const worldId = await rig.newWorld("Harbor");
-    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
-    await setup(rig, worldId, bookId, entryId);
-    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: { [draft.start.place]: [{ book: bookId, entry: entryId }] }, steps: {} } }));
-    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    const chatId = rig.host.createChat("Morning, Sam.");
-    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    rig.host.quietReply = quiet;
-    return { rig, chatId };
-  }
-
-  test("a book entry pinned where the player character is reads as Known by when the world entry indexed from it is", async () => {
-    const { rig, chatId } = await pinnedChat(DEBT_NOTE, {}, async (rig, worldId, bookId, entryId) => {
-      await rig.oldCopy(worldId, { id: "debt", title: "The debt", content: DEBT_NOTE, keys: [], links: ["dev"], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT_NOTE) } });
-    });
-    await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, "DEBT-MARK")).toEqual([]);
-    expect(inPrompt(rig, "DEBT-MARK")).toBe(false);
-  });
-
-  test("a book entry an earlier build kept secret, indexed into a secret world entry and pinned where the player character is, opens only once the world entry's gate holds too", async () => {
-    const { rig, chatId } = await pinnedChat(`${SECRET}.`, { disabled: true, extensions: lreFields({ secret: true, gate: "true" }) }, async (rig, worldId, bookId, entryId) => {
-      await rig.oldCopy(worldId, { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate: "false", source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } });
-    });
-    await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, SECRET)).toEqual([]);
-    const traced = (rig.rt.inspectorRecords(chatId) ?? []).flatMap((r) => r.lore ?? []).flatMap((t) => t.entries.map((e) => e.title));
-    expect(traced).not.toContain("The wreck");
-  });
-
-  test("a World Info entry made secret in Build, pinned to the starting place, reaches no call and no trace", async () => {
-    const { rig, chatId } = await pinnedChat(`${SECRET}.`, {}, async (rig, _worldId, bookId, entryId) => {
-      rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));
-    });
-    await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, SECRET)).toEqual([]);
-    const traced = (rig.rt.inspectorRecords(chatId) ?? []).flatMap((r) => r.lore ?? []).flatMap((t) => t.entries.map((e) => e.title));
-    expect(traced).not.toContain("The wreck");
-  });
-
-  /** A copy note as an earlier build left it on a twin it switched off: the original it names, the twin on before, no fields of its own. */
-  const copyNote = (original: string): JsonObject => ({ [LEDGER_NAMESPACE]: { secretCopyOf: { entry: original, off: false, fields: null } } });
-
-  test("a card's copy of a secret, pinned alone, is as secret as its original in a book nothing else reads: it reaches no call and no trace", async () => {
-    const { rig, chatId } = await pinnedChat(`${SECRET}.`, { disabled: true }, async (rig, _worldId, _bookId, entryId) => {
-      const saga = await rig.host.books.create("Saga - Core", "", rig.host.userId);
-      const original = await rig.host.books.createEntry(saga, entry("The wreck", `${SECRET}.`, { disabled: true, extensions: lreFields({ secret: true, gate: "false" }) }), rig.host.userId);
-      // What an earlier build left on the copy a character's card brought: the pinned entry is that copy.
-      await rig.host.books.update(entryId, { extensions: copyNote(`${saga}/${original}`) }, rig.host.userId);
-    });
-    const stood = userEntries(rig);
-    await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, SECRET)).toEqual([]);
-    const traced = (rig.rt.inspectorRecords(chatId) ?? []).flatMap((r) => r.lore ?? []).flatMap((t) => t.entries.map((e) => e.title));
-    expect(traced).not.toContain("The wreck");
-    expect(userEntries(rig)).toEqual(stood);
-  });
-
-  test("a card's copy of a secret whose original is gone, pinned, stays secret: it reaches no call", async () => {
-    const { rig, chatId } = await pinnedChat(`${SECRET}.`, { disabled: true, extensions: copyNote("gone-book/gone-entry") }, async () => undefined);
-    await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
-    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
-    expect(carrying(rig, SECRET)).toEqual([]);
-  });
-
-  // What the player character's narrator may be told: the chat's view is the player character's.
-  test("a public world entry over a book entry made secret in Build reads as secret: not in the Place section, nor any call", async () => {
-    const { rig, chatId } = await bookChat([], { shipped: true, narrator: PLAYER_VIEW });
-    const { bookId, entryId } = await oneEntry(rig, chatId, {});
-    const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
-    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
-    await rig.oldCopy(worldId, { id: "wall", title: "The harbor wall", content: `${SECRET}.`, keys: [], links: [draft.start.place], source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } });
-    const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to: committed.revision }));
-    rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));
-    rig.host.quietCalls.length = 0;
-    await rig.turn(chatId, "I look at the harbor wall.", "Gulls call.");
-    expect(rig.host.section(DEFAULT_SECTIONS.place?.label ?? "Place")).not.toContain(SECRET);
-    expect(carrying(rig, SECRET)).toEqual([]);
-  });
 
   test("the outline gate's chip holds a World Info secret an outline beat repeats as a spoiler, never in its editable lines", async () => {
     const OUTLINE = "You outline a roleplay narrator's next reply";

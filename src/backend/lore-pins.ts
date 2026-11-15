@@ -17,8 +17,8 @@ import type { LorePin, WorldDoc } from "../shared/world";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../shared/secret-marks";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";
 import type { HostBookEntry, HostPort } from "../shared/host";
-import { bookEntryLore, bookEntryTitle } from "./book-lore";
-import { copiedOriginals, secrecyParts, secretTexts, type SecretTexts } from "./lore-secrets";
+import { bookEntryLore, bookEntryTitle } from "../secrecy/book-lore";
+import { copiedOriginals, secrecyParts, secretTexts, type SecretTexts } from "../secrecy/lore-secrets";
 
 /** An entry the engine wrote (`engineWroteEntry`: its own books' sections, the Minds section among them, which holds other minds): never read through a pin, whatever names it. */
 function engineWrote(e: HostBookEntry): boolean {
@@ -90,7 +90,7 @@ export async function pinReader(host: Pick<HostPort, "books" | "log">, world: Wo
   const read = await bookReads(host, refs.map((r) => r.pin), userId);
   const given = [...[...read.entries.values()].flatMap((e) => (e ? [e] : [])), ...[...read.books.values()].flatMap((list) => list ?? [])];
   // A pinned copy is as secret as its original, which is read for it when its pin doesn't name it.
-  const texts = secretTexts({ world, entries: [...given, ...(await copiedOriginals(host, given, userId))] });
+  const texts = secretTexts({ world, entries: [...given, ...(await copiedOriginals((id) => host.books.entry(id, userId), given, (message) => host.log("warn", message, userId)))] });
   return (some) => {
     const out: PinnedText[] = [];
     const seen = new Set<string>();

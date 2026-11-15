@@ -31,7 +31,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { bookLoreFieldsOf, engineWroteEntry, loreIsSecret, type BookLoreFields } from "../shared/lore";
 import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView, SecrecyState } from "../shared/protocol";
 import { hasSecretMarks, secretMarkProblem, writeSecretMark } from "../shared/secret-marks";
-import { bookEntryTitle } from "./book-lore";
+import { bookEntryTitle } from "../secrecy/book-lore";
 import type { HostBookEntry, HostEntryPatch, HostPort } from "../shared/host";
 import { pinBooks } from "./lore-pins";
 import { secretCopyOf } from "../shared/lore";

@@ -3,10 +3,16 @@
 // what RPE last kept out of the chat added.
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { WorldInfoCandidate } from "../../src/shared/host";
-import { worldInfoVerdict, type WorldInfoGate } from "../../src/backend/wi-interceptor";
+import { worldInfoVerdict, type WorldInfoGate } from "../../src/secrecy/verdict";
 import { failClosed, KeptOut } from "../../src/ext/fail-closed";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
+import { ROOT } from "../removal/fates";
+import { readTree } from "../removal/imports";
+import recorded from "../secrecy/before-the-move.json";
+import { books, candidateOf } from "../secrecy/fixture";
 import type { Entry } from "../standin/lore";
 import { StandIn } from "../standin/lumiverse";
 
@@ -65,6 +71,15 @@ describe("the fail-closed answer", () => {
     // The verdict did something: a whole-entry secret is off, a marked passage is cut.
     expect(extension.find((e) => e.id === "tunnel")!.disabled).toBe(true);
     expect(extension.find((e) => e.id === "lighthouse")!.content).not.toContain("KEEPER-SECRET");
+  });
+
+  test("is the answer recorded from today's interceptor before its rule moved, entry for entry on invented books, with no copy of the rule left in the extension", () => {
+    expect(failClosed(books().map(candidateOf), new Set())).toEqual(recorded.blind as never);
+    const source = readFileSync(resolve(import.meta.dir, "../../src/ext/fail-closed.ts"), "utf8");
+    for (const copy of ["function blind", "function usersOwn"]) expect(source).not.toContain(copy);
+    const edges = readTree(ROOT).edges.filter((edge) => edge.from === "src/ext/fail-closed.ts" && edge.to !== null).map((edge) => edge.to);
+    expect(edges).toContain("src/secrecy/blind.ts");
+    expect(edges.filter((to) => to?.startsWith("src/backend/"))).toEqual([]);
   });
 
   test("keeps every marked passage and every copy of a whole-entry secret out, and leaves the rest of each entry in", async () => {

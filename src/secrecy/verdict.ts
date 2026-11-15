@@ -21,9 +21,9 @@
 
 import type { ChatId, EntityId, UserId } from "../shared/ids";
 import { hasOwn, type JsonObject } from "../shared/json";
-import { engineWroteEntry, loreIsSecret } from "../shared/lore";
+import { loreIsSecret } from "../shared/lore";
 import { heldSecrets } from "../shared/minds";
-import { hasSecretMarks, publicText, renderMark, renderSecretMarks, resolveMarkNames, unreadableMarks, wholeEntrySecret, type ResolvedMarkNames, type SecretMarkWording } from "../shared/secret-marks";
+import { hasSecretMarks, renderMark, renderSecretMarks, resolveMarkNames, unreadableMarks, wholeEntrySecret, type ResolvedMarkNames, type SecretMarkWording } from "../shared/secret-marks";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
@@ -32,6 +32,7 @@ import { bookLoreId, bookMarkLoreId } from "./book-lore";
 import type { NarratorView } from "../shared/settings";
 import { bookSecrecy, secretTexts, switchedOffForSecrecy, textOf, type MarkAt } from "./lore-secrets";
 import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "../shared/host";
+import { blind, usersOwn } from "./blind";
 
 /** What the interceptor reads of the engine. */
 export interface WorldInfoGate {
@@ -47,28 +48,6 @@ export interface WorldInfoGate {
    */
   narrator(chatId: ChatId, userId: UserId, meta: JsonObject, world: WorldDoc): Promise<{ view: NarratorView; wording: SecretMarkWording }>;
   log(message: string, userId: UserId): void;
-}
-
-/** The entries of the user's books among a prompt's: the engine's own sections are no secret's. */
-function usersOwn(entries: readonly WorldInfoCandidate[]): WorldInfoCandidate[] {
-  return entries.filter((e) => !engineWroteEntry(e.extensions));
-}
-
-/**
- * What is known without the chat's state (it can't be read, or the interceptor threw): every
- * earlier-build secret and whole-entry secret off, every other entry's marks out, read or not, and a
- * mark's twin off, for this prompt.
- */
-function blind(entries: readonly WorldInfoCandidate[]): WorldInfoVerdict {
-  const texts = secretTexts({ entries });
-  const out: Required<WorldInfoVerdict> = { disabled: [], enabled: [], mutated: [] };
-  for (const e of entries) {
-    if (hasSecretMarks(e.content) || unreadableMarks(e.content).length > 0) {
-      if (wholeEntrySecret(e.content)) out.disabled.push(e.id);
-      else out.mutated.push({ id: e.id, content: publicText(e.content) });
-    } else if (texts.marks.has(textOf(e.content)) || loreIsSecret(bookSecrecy(e, texts) ?? {})) out.disabled.push(e.id);
-  }
-  return out;
 }
 
 /** The entries to switch off, on and change for a world chat's prompt (see the header); nothing for any other chat. */

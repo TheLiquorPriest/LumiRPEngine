@@ -1,0 +1,298 @@
+{
+  "booksLore": {
+    "lore": {
+      "book:b1/e-dock": {
+        "id": "book:b1/e-dock",
+        "title": "e-dock",
+        "content": "DOCK-MARK: the dock is stone.\n",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-dock",
+          "hash": "da8975d3ea6135d9a661ffb998e00d68"
+        }
+      },
+      "book:b1/e-dock#1": {
+        "id": "book:b1/e-dock#1",
+        "title": "SEEN-MARK: Jordan saw the boat go down from…",
+        "content": "SEEN-MARK: Jordan saw the boat go down from the breakwater.",
+        "keys": [],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-dock",
+          "hash": "da8975d3ea6135d9a661ffb998e00d68"
+        },
+        "secret": true,
+        "gate": ""
+      },
+      "book:b1/e-ferry": {
+        "id": "book:b1/e-ferry",
+        "title": "e-ferry",
+        "content": "FERRY-MARK: the ferry runs twice a day.\n",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-ferry",
+          "hash": "8cde849a630c421ca0fe0d8f0dcf10fe"
+        }
+      },
+      "book:b1/e-ferry#1": {
+        "id": "book:b1/e-ferry#1",
+        "title": "DEBT-MARK: Marcus owes the marina three months of…",
+        "content": "DEBT-MARK: Marcus owes the marina three months of slip fees.",
+        "keys": [],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-ferry",
+          "hash": "8cde849a630c421ca0fe0d8f0dcf10fe"
+        },
+        "secret": true,
+        "gate": ""
+      },
+      "book:b1/e-old": {
+        "id": "book:b1/e-old",
+        "title": "e-old",
+        "content": "OLD-SECRET: the ferryman scuttled the old boat for the insurance money.",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-old",
+          "hash": "c4dabddf5e7decc3d7a9bf8d790a26eb"
+        },
+        "secret": true,
+        "gate": "self.cash > 100000"
+      },
+      "book:b1/e-plain": {
+        "id": "book:b1/e-plain",
+        "title": "e-plain",
+        "content": "PLAIN-MARK: the pier is older than the ferry.",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-plain",
+          "hash": "36cddef5cd55db837e944fe4f57e05b0"
+        }
+      },
+      "book:b1/e-wreck": {
+        "id": "book:b1/e-wreck",
+        "title": "e-wreck",
+        "content": "WRECK-MARK: the old boat went down with the marina's records aboard.",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b1",
+          "entryId": "e-wreck",
+          "hash": "9a18d35a219bcb5cca0a946800e30a08"
+        },
+        "secret": true,
+        "gate": ""
+      },
+      "book:b2/e-copy": {
+        "id": "book:b2/e-copy",
+        "title": "e-copy",
+        "content": "ORIGINAL-SECRET: the lamp-keeper keeps a second ledger.",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b2",
+          "entryId": "e-copy",
+          "hash": "840d64aaca82b3a4216936fcb46d4cf1"
+        },
+        "secret": true,
+        "gate": "self.cash > 5"
+      },
+      "book:b2/e-lost": {
+        "id": "book:b2/e-lost",
+        "title": "e-lost",
+        "content": "LOST-COPY: a copy whose original is gone.",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b2",
+          "entryId": "e-lost",
+          "hash": "460f33618563b74089fd3d82ee4d5c7d"
+        },
+        "secret": true,
+        "gate": ""
+      },
+      "book:b2/e-unread": {
+        "id": "book:b2/e-unread",
+        "title": "e-unread",
+        "content": "UNREAD-COPY: a copy whose original can't be read.",
+        "keys": [
+          "ferry"
+        ],
+        "links": [],
+        "source": {
+          "kind": "book",
+          "bookId": "b2",
+          "entryId": "e-unread",
+          "hash": "e19baac2cfdea9844a40e990d0213a1b"
+        },
+        "secret": true,
+        "gate": ""
+      },
+      "own": {
+        "id": "own",
+        "title": "The lighthouse",
+        "content": "The lighthouse is white.",
+        "keys": [
+          "lighthouse"
+        ],
+        "links": []
+      },
+      "vault": {
+        "id": "vault",
+        "title": "The vault",
+        "content": "VAULT-SECRET: the vault holds the marina's silver.",
+        "keys": [],
+        "links": [],
+        "secret": true,
+        "gate": "false"
+      }
+    },
+    "lorePins": {
+      "characters": {
+        "you": [
+          {
+            "book": "b1",
+            "entry": "e-plain"
+          },
+          {
+            "lore": "own"
+          }
+        ]
+      },
+      "places": {
+        "home": [
+          {
+            "lore": "vault"
+          }
+        ]
+      },
+      "steps": {}
+    },
+    "entries": [
+      "b1/e-ferry",
+      "b1/e-wreck",
+      "b1/e-dock",
+      "b1/e-old",
+      "b1/e-twin",
+      "b1/e-plain",
+      "b2/e-copy",
+      "b2/e-lost",
+      "b2/e-unread"
+    ],
+    "logs": [
+      "[LumiRPEngine] lore book b-gone the world lists is gone: no call reads it (Build → Lore → Lore books)",
+      "[LumiRPEngine] the World Info entry a copy was kept secret as a twin of (b3/e-unreadable) wasn't read, so the copy stays secret: the host would not say",
+      "[LumiRPEngine] the World Info entry a copy was kept secret as a twin of (b3/e-unreadable) wasn't read, so the copy stays secret: the host would not say"
+    ]
+  },
+  "copiedOriginals": [
+    "b3/e-original"
+  ],
+  "blind": {
+    "disabled": [
+      "e-wreck",
+      "e-old",
+      "e-twin",
+      "e-copy",
+      "e-lost",
+      "e-unread"
+    ],
+    "enabled": [],
+    "mutated": [
+      {
+        "id": "e-ferry",
+        "content": "FERRY-MARK: the ferry runs twice a day.\n"
+      },
+      {
+        "id": "e-dock",
+        "content": "DOCK-MARK: the dock is stone.\n"
+      }
+    ]
+  },
+  "open": {
+    "disabled": [
+      "e-old",
+      "e-copy",
+      "e-lost",
+      "e-unread"
+    ],
+    "enabled": [],
+    "mutated": [
+      {
+        "id": "e-ferry",
+        "content": "FERRY-MARK: the ferry runs twice a day.\nDEBT-MARK: Marcus owes the marina three months of slip fees. [secret; known to Marcus]"
+      },
+      {
+        "id": "e-wreck",
+        "content": "WRECK-MARK: the old boat went down with the marina's records aboard. [secret; kept from everyone]"
+      },
+      {
+        "id": "e-dock",
+        "content": "DOCK-MARK: the dock is stone.\nSEEN-MARK: Jordan saw the boat go down from the breakwater. [secret; known to Jordan]"
+      },
+      {
+        "id": "e-twin",
+        "content": "DEBT-MARK: Marcus owes the marina three months of slip fees. [secret; known to Marcus]"
+      }
+    ]
+  },
+  "knowledgeSwitch": {
+    "noSlice": null,
+    "trackedStays": null,
+    "turnedOff": {
+      "type": "minds.knowledge",
+      "data": {
+        "on": false
+      }
+    },
+    "turnedOn": {
+      "type": "minds.knowledge",
+      "data": {
+        "on": true
+      }
+    },
+    "stillOff": null,
+    "thresholdChanged": {
+      "type": "minds.knowledge",
+      "data": {
+        "on": true,
+        "threshold": 0.7
+      }
+    },
+    "thresholdSame": null,
+    "thresholdWhileOff": null
+  }
+}

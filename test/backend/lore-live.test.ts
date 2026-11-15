@@ -10,7 +10,7 @@ import { classicRoles } from "../../src/backend/agents/roles/classic";
 import type { ToolOutcome } from "../../src/backend/agents/runtime";
 import { LORE_TOOLS } from "../../src/backend/agents/tools/lore";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
-import { bookLoreId } from "../../src/backend/book-lore";
+import { bookLoreId } from "../../src/secrecy/book-lore";
 import type { HostBookEntryInput } from "../../src/shared/host";
 import { toChain } from "../../src/migrate/today/ledger-io";
 import { ROLE_IDS } from "../../src/shared/agent-roles";

@@ -35,7 +35,7 @@ import { nounFor } from "../../../shared/words";
 import type { LoreEntryDef } from "../../../shared/world";
 import { loreSearch } from "../../../engine/lore";
 import { slug } from "../../../engine/places-in-play";
-import { bookLoreId } from "../../book-lore";
+import { bookLoreId } from "../../../secrecy/book-lore";
 import { tokensOf } from "../../book";
 import { renderIndex } from "../../lore-routing";
 import type { ToolOutcome } from "../runtime";

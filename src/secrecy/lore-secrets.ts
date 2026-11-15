@@ -13,11 +13,10 @@
 // in the world that made it.
 
 import { hashParts } from "../shared/hash";
-import type { UserId } from "../shared/ids";
 import { bookLoreFieldsOf, engineWroteEntry, LORE_AUDIENCE, loreIsSecret, loreSourceOf, secretCopyOf, withoutOldSecrecy, type BookLoreFields, type SecretCopy } from "../shared/lore";
 import { hasSecretMarks, parseSecretMarks, resolveMarkNames, wholeEntrySecret, type MarkNamesSource, type SecretMark } from "../shared/secret-marks";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
-import type { HostBookEntry, HostPort } from "../shared/host";
+import type { HostBookEntry } from "../shared/host";
 
 /** The key a text is known by: each run of whitespace one space, the ends trimmed, hashed; "" for none. */
 export function textOf(content: string): string {
@@ -177,13 +176,16 @@ export function secretTexts(also: { world?: WorldDoc | null; entries?: readonly 
   return out;
 }
 
+/** A reader of one World Info entry by its id: null when it is gone. */
+export type EntryReader = (entryId: string) => Promise<HostBookEntry | null>;
+
 /**
  * The originals that the copy notes among `entries` name and `entries` doesn't hold, each read once
- * from its book: a copy reads as its original holds it wherever the original is (DESIGN §4.2), as the
- * earlier build that kept it read every book. One that is gone, or can't be read, is left out, and its
- * copy then reads as `secrecyParts` gives it, a secret all the same.
+ * by `read`: a copy reads as its original holds it wherever the original is (DESIGN §4.2), as the
+ * earlier build that kept it read every book. One that is gone, or can't be read, is left out (a read
+ * that fails is told to `warn`), and its copy then reads as `secrecyParts` gives it, a secret all the same.
  */
-export async function copiedOriginals(host: Pick<HostPort, "books" | "log">, entries: readonly HostBookEntry[], userId: UserId): Promise<HostBookEntry[]> {
+export async function copiedOriginals(read: EntryReader, entries: readonly HostBookEntry[], warn: (message: string) => void = () => undefined): Promise<HostBookEntry[]> {
   const have = new Set(entries.map((e) => e.id));
   const named = new Map<string, string>();
   for (const e of entries) {
@@ -191,18 +193,18 @@ export async function copiedOriginals(host: Pick<HostPort, "books" | "log">, ent
     const original = copy ? copyOriginal(copy) : null;
     if (original && original.entryId !== "" && !have.has(original.entryId)) named.set(original.entryId, original.bookId);
   }
-  const read = await Promise.all(
+  const found = await Promise.all(
     [...named].map(([entryId, bookId]) =>
-      host.books.entry(entryId, userId).then(
+      read(entryId).then(
         (e) => (e && e.bookId === bookId && !engineWroteEntry(e.extensions) ? [e] : []),
         (error: unknown) => {
-          host.log("warn", `[LumiRPEngine] the World Info entry a copy was kept secret as a twin of (${bookId}/${entryId}) wasn't read, so the copy stays secret: ${error instanceof Error ? error.message : String(error)}`, userId);
+          warn(`[LumiRPEngine] the World Info entry a copy was kept secret as a twin of (${bookId}/${entryId}) wasn't read, so the copy stays secret: ${error instanceof Error ? error.message : String(error)}`);
           return [];
         },
       ),
     ),
   );
-  return read.flat();
+  return found.flat();
 }
 
 /**

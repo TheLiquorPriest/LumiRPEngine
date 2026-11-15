@@ -27,7 +27,7 @@ import { beatProblem, type StoryProblemCode } from "../../../../engine/story/che
 import { storyName } from "../../../../engine/story/feed";
 import type { StoryPath } from "../../../../engine/story/record";
 import { readSlice } from "../../../../packs/minds/core/state";
-import { bookEntryTitle } from "../../../book-lore";
+import { bookEntryTitle } from "../../../../secrecy/book-lore";
 import { type ChatRead, chatRead } from "../../../chat-read";
 import type { HostBookEntry, HostMessage } from "../../../../shared/host";
 import { renderPrompt } from "../../../prompts";

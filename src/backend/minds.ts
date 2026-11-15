@@ -23,7 +23,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindCuts, MindEventData, MindLengths, MindMoment, MindNote, MindPlan, MindPurpose, MindsMemoryConfig, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
-import { answerLengths, COMMITMENT_KINDS, cutsNote, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, MINDS_SLOT, parseFactId, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
+import { answerLengths, COMMITMENT_KINDS, cutsNote, effectiveMemory, knowledgeAnswerFormat, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, MINDS_SLOT, parseFactId, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
 import { helperCallOf, stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
@@ -45,6 +45,7 @@ import { Working } from "../engine/working";
 import { capCounted, capText, firstCounted } from "../packs/minds/core/edit";
 import { fidelityOf, type MindPick, pickMinds, quietMind } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
+import { knowledgeSwitch } from "../secrecy/knowledge-switch";
 import { sectionsOf } from "./book";
 import type { HostMessage, HostPort } from "../shared/host";
 import { seedKnowledge } from "./knowledge-seed";
@@ -513,19 +514,6 @@ function keptMind(state: Readonly<WorldState>, pick: MindPick): MindEventData | 
   const m = readCharacter(state, pick.entity).mind;
   if (!m) return null;
   return { entity: pick.entity, at: state.clock, place: placeOfEntity(state, pick.entity), level: pick.level, moment: "turn", reason: KEPT_MIND_REASON, monologue: m.monologue, depiction: m.depiction, intent: m.intent, reactions: [...m.reactions], mood: m.mood, interrupt: null, withheld: m.withheld };
-}
-
-/**
- * Whether the chat tracks knowledge, recorded when it changes (`minds.knowledge`, DESIGN §24.11):
- * only in a chat that holds some, so a chat that never tracked any folds as it did. Null when the
- * state already says so.
- */
-export function knowledgeSwitch(state: Readonly<WorldState>, on: boolean, threshold: number): LedgerEvent | null {
-  const slice = readSlice(state);
-  if (slice.knowledge === undefined) return null;
-  // The user's threshold, when it changed: the player screens read it from the chat's state, as they read everything.
-  const sure = on && knowledgeThreshold(slice) !== threshold;
-  return knowledgeTracked(slice) !== on || sure ? { type: MINDS_EVENTS.knowledge, data: { on, ...(sure ? { threshold } : {}) } } : null;
 }
 
 /**

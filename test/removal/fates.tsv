@@ -164,7 +164,7 @@ src/backend/lore-index.ts	removed	PlanSwap-8	halves
 src/backend/lore-index.ts	piece	PlanChatUI-B5	src/build/jobs/	all of it
 src/backend/lore-pins.ts	moved	PlanChatUI-B3	src/build/lore/	Build's lore pins (the Kept line's builder), moved whole
 src/backend/lore-routing.ts	removed	PlanSwap-8	agents
-src/backend/lore-secrets.ts	moved	PlanSwap-6	src/secrecy/	the Kept line's secrecy half of the World Info gate (§9.6): textOf, secretTexts, bookSecrecy, secrecyParts, textParts, heldTo, markFields, stricter, switchedOffForSecrecy and copiedOriginals' rule, moved whole
+src/backend/lore-secrets.ts	moved	PlanSwap-6	src/secrecy/lore-secrets.ts	the Kept line's secrecy half of the World Info gate (§9.6): textOf, secretTexts, bookSecrecy, secrecyParts, textParts, heldTo, markFields, stricter, switchedOffForSecrecy and copiedOriginals' rule, moved whole
 src/backend/lore-steps.ts	removed	PlanSwap-8	classic
 src/backend/lore.ts	moved	PlanChatUI-B3	src/build/lore/	Build's lore (the Kept line's builder), moved whole
 src/backend/lumiverse-mcp.ts	removed	PlanSwap-8	halves

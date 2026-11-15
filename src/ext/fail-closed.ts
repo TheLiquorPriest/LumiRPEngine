@@ -8,35 +8,8 @@
 // lost when its worker restarts.
 
 import type { WorldInfoCandidate, WorldInfoVerdict } from "../shared/host";
-import { bookSecrecy, secretTexts, textOf } from "../backend/lore-secrets";
 import type { Answer, KeepPoint } from "../adapter/lumiverse/wire";
-import { engineWroteEntry, loreIsSecret } from "../shared/lore";
-import { hasSecretMarks, publicText, unreadableMarks, wholeEntrySecret } from "../shared/secret-marks";
-
-// Carried over unchanged from `backend/wi-interceptor.ts:52-72`, where it is private: the same rules,
-// so the verdict with no answer is today's.
-
-/** The entries of the user's books among a prompt's: the engine's own sections are no secret's. */
-function usersOwn(entries: readonly WorldInfoCandidate[]): WorldInfoCandidate[] {
-  return entries.filter((e) => !engineWroteEntry(e.extensions));
-}
-
-/**
- * What is known without the chat's state (it can't be read, or the interceptor threw): every
- * earlier-build secret and whole-entry secret off, every other entry's marks out, read or not, and a
- * mark's twin off, for this prompt.
- */
-function blind(entries: readonly WorldInfoCandidate[]): WorldInfoVerdict {
-  const texts = secretTexts({ entries });
-  const out: Required<WorldInfoVerdict> = { disabled: [], enabled: [], mutated: [] };
-  for (const e of entries) {
-    if (hasSecretMarks(e.content) || unreadableMarks(e.content).length > 0) {
-      if (wholeEntrySecret(e.content)) out.disabled.push(e.id);
-      else out.mutated.push({ id: e.id, content: publicText(e.content) });
-    } else if (texts.marks.has(textOf(e.content)) || loreIsSecret(bookSecrecy(e, texts) ?? {})) out.disabled.push(e.id);
-  }
-  return out;
-}
+import { blind, usersOwn } from "../secrecy/blind";
 
 /** What RPE last said of each chat's prompt: the entries it switched off, and the first history message to keep (null: all). */
 export class KeptOut {

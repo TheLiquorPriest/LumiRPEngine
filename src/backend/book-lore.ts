@@ -13,40 +13,15 @@
 // they stand.
 
 import type { ChatId, UserId } from "../shared/ids";
-import { deepFreeze, hasOwn, isRecord } from "../shared/json";
-import { bookLoreFieldsOf, bookTextHash, editedBookFields, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf, secretCopyOf, withBookLoreFields, type BookFieldsEdit, type BookLoreFields } from "../shared/lore";
+import { deepFreeze, isRecord } from "../shared/json";
+import { bookLoreFieldsOf, editedBookFields, loreBooksOf, loreIsSecret, loreSourceOf, secretCopyOf, withBookLoreFields, type BookFieldsEdit, type BookLoreFields } from "../shared/lore";
 import type { LoreMarkChange } from "../shared/protocol";
-import { parseSecretMarks, publicText, SecretMarkError, unreadableMarks, wholeEntrySecret, writeSecretMark, type MarkNamesSource, type SecretMark, type SecretMarkInput } from "../shared/secret-marks";
-import type { LoreEntryDef, LorePin, WorldDoc } from "../shared/world";
+import { parseSecretMarks, SecretMarkError, unreadableMarks, writeSecretMark, type SecretMark, type SecretMarkInput } from "../shared/secret-marks";
+import type { WorldDoc } from "../shared/world";
 import type { LoreBooks } from "../shared/settings";
 import type { HostBookEntry, HostPort } from "../shared/host";
-import { copiedOriginals, heldTextOf, heldTo, markFields, secrecyParts, secretTexts, textOf, textParts } from "./lore-secrets";
-
-/** The words a book entry with no comment is titled by. */
-const TITLE_WORDS = 8;
-
-/** A text's first words as a title, or null when it has none. */
-function wordsTitle(text: string): string | null {
-  const words = text.replace(/\s+/g, " ").trim().split(" ").filter((w) => w !== "");
-  return words.length === 0 ? null : words.length > TITLE_WORDS ? `${words.slice(0, TITLE_WORDS).join(" ")}…` : words.join(" ");
-}
-
-/** A book entry's title: its comment, else the first words of what anyone may read of its text, else of its whole-entry secret's. */
-export function bookEntryTitle(e: Pick<HostBookEntry, "comment" | "content">): string {
-  const comment = e.comment.replace(/\s+/g, " ").trim();
-  if (comment !== "") return comment;
-  return wordsTitle(publicText(e.content)) ?? wordsTitle(wholeEntrySecret(e.content)?.text ?? "") ?? "Untitled entry";
-}
-
-/** A book entry's id as a lore entry, the same as its pin's key, so it reads once however it comes. */
-export function bookLoreId(bookId: string, entryId: string): string {
-  return `book:${bookId}/${entryId}`;
-}
-
-/** The lore id of the `n`th mark (from 1) in a longer book entry's text: a secret entry of its own beside the entry. */
-export function bookMarkLoreId(bookId: string, entryId: string, n: number): string {
-  return `${bookLoreId(bookId, entryId)}#${n}`;
-}
+import { bookLoreId, booksAsLore, copiedEntry, entriesRead } from "../secrecy/book-lore";
+import { copiedOriginals } from "../secrecy/lore-secrets";
 
 /** Why Build can't change a book entry's marks as asked (`markedContent`), in words for the user. */
 export class MarkChangeError extends Error {}
@@ -125,65 +100,6 @@ export async function writeBookFields(host: Pick<HostPort, "books">, e: HostBook
 }
 
 /**
- * A book entry as lore, on or off (a pin reads either), found by its own fields alone: its title (its
- * comment, else its first words), its World Info keys, its secondary keys and LRE aliases as other
- * names, and its text; its links are its own LRE fields'. Held back by `parts` (`secrecyParts`). Its
- * text is what anyone may read of it; a whole-entry secret is the secret, read by its holders and no
- * one else (a mark has no gate).
- */
-export function bookEntryLore(e: HostBookEntry, parts: readonly BookLoreFields[], world: MarkNamesSource): LoreEntryDef {
-  const fields = bookLoreFieldsOf(e.extensions);
-  const aliases = [...new Set([...(fields?.aliases ?? []), ...(e.secondaryKeys ?? [])].map((a) => a.trim()).filter((a) => a !== ""))];
-  const whole = wholeEntrySecret(e.content);
-  return heldTo(
-    {
-      id: bookLoreId(e.bookId, e.id),
-      title: bookEntryTitle(e),
-      content: whole ? whole.text : publicText(e.content),
-      // The entry's own World Info keys are what its author wrote it to answer to.
-      keys: e.keys.filter((k) => k.trim() !== ""),
-      links: fields?.links ?? [],
-      ...(aliases.length > 0 ? { aliases } : {}),
-      source: { kind: "book", bookId: e.bookId, entryId: e.id, hash: bookTextHash(e.content) },
-    },
-    whole ? [...parts, markFields(world, whole)] : parts,
-  );
-}
-
-/**
- * The marks of a longer book entry as secret lore entries (DESIGN §4.2): each its own text, read by
- * its holders and no one else, and about what the entry links. It answers to no key and goes by no
- * name of the entry's, which anyone may say: a screen on what the player reads takes its words alone
- * as the secret's. None for a whole-entry secret, which is the entry itself (`bookEntryLore`).
- */
-export function bookMarkLores(e: HostBookEntry, world: MarkNamesSource): LoreEntryDef[] {
-  if (engineWroteEntry(e.extensions) || wholeEntrySecret(e.content)) return [];
-  const links = bookLoreFieldsOf(e.extensions)?.links ?? [];
-  return parseSecretMarks(e.content).map((mark, i): LoreEntryDef => ({
-    id: bookMarkLoreId(e.bookId, e.id, i + 1),
-    title: wordsTitle(mark.text) ?? "A secret",
-    content: mark.text,
-    keys: [],
-    links,
-    source: { kind: "book", bookId: e.bookId, entryId: e.id, hash: bookTextHash(e.content) },
-    ...markFields(world, mark),
-  }));
-}
-
-/**
- * A World Info entry as lore: none when it isn't any, because the engine wrote it, it holds no text,
- * or its author switched it off and gave it no LRE fields (an earlier build stored its secrets off, so
- * one with fields reads whether on or off); else the entry, unless all of its text is marks, and each
- * of its marks. `parts` hold it back (`secrecyParts`).
- */
-export function bookLoreEntries(e: HostBookEntry, parts: readonly BookLoreFields[], world: MarkNamesSource): LoreEntryDef[] {
-  if (engineWroteEntry(e.extensions) || e.content.trim() === "") return [];
-  if (e.disabled && bookLoreFieldsOf(e.extensions) === null) return [];
-  const entry = bookEntryLore(e, parts, world);
-  return [...(entry.content.trim() === "" ? [] : [entry]), ...bookMarkLores(e, world)];
-}
-
-/**
  * The books a world chat reads lore from (DESIGN §4.2), each once, in order: the world's list, the
  * chat's books, the global ones, then the books an earlier build copied the world's lore from (so a
  * world that has such copies reads the books themselves now); never the engine's own, nor one that is
@@ -244,43 +160,6 @@ export class BookReads {
   }
 }
 
-/** The lore last made of each kept (frozen) book entry, with what it was made with: the world it names holders by and the parts holding it back. */
-const MADE = new WeakMap<HostBookEntry, { world: MarkNamesSource; parts: string; lore: LoreEntryDef[] }>();
-
-/** `bookLoreEntries`, made once per kept entry for the same world and parts; an entry of a read not kept (not frozen) is made each time. */
-function entryLore(e: HostBookEntry, parts: readonly BookLoreFields[], world: MarkNamesSource): LoreEntryDef[] {
-  if (!Object.isFrozen(e)) return bookLoreEntries(e, parts, world);
-  const key = JSON.stringify(parts);
-  const made = MADE.get(e);
-  if (made && made.world === world && made.parts === key) return made.lore;
-  const lore = deepFreeze(bookLoreEntries(e, parts, world));
-  MADE.set(e, { world, parts: key, lore });
-  return lore;
-}
-
-/** The World Info entry an earlier build's copy of one (a world entry with a `book` source) stands for, by the copy's lore id in `world`; null for any other id. */
-function copiedEntry(world: WorldDoc, loreId: string): { bookId: string; entryId: string } | null {
-  const source = hasOwn(world.lore, loreId) ? loreSourceOf(world.lore[loreId]?.source) : null;
-  return source?.kind === "book" ? { bookId: source.bookId, entryId: source.entryId } : null;
-}
-
-/**
- * The world's lore pins with each pin of a copy an earlier build made of a World Info entry (a world
- * entry with a `book` source) pinned to that entry instead, which is what reads now (DESIGN §24.5).
- */
-function pinsToBooks(world: WorldDoc): WorldDoc["lorePins"] {
-  const pins = world.lorePins;
-  if (!pins) return pins;
-  const moved = (list: readonly LorePin[] | undefined): LorePin[] =>
-    (list ?? []).map((pin) => {
-      if (!("lore" in pin)) return pin;
-      const copied = copiedEntry(world, pin.lore);
-      return copied ? { book: copied.bookId, entry: copied.entryId, ...(pin.keep ? { keep: pin.keep } : {}) } : pin;
-    });
-  const part = (record: Readonly<Record<string, readonly LorePin[] | undefined>> | undefined): Record<string, LorePin[]> => Object.fromEntries(Object.entries(record ?? {}).map(([id, list]) => [id, moved(list)]));
-  return { ...pins, characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
-}
-
 /**
  * The lore id a turn recorded reads by now (DESIGN §4.2): the id of an earlier build's copy of a
  * World Info entry reads as that entry, as a pin of the copy does (`pinsToBooks`), so an old turn's
@@ -330,24 +209,8 @@ export async function booksLore(host: Pick<HostPort, "books" | "log">, world: Wo
       }),
     ),
   );
-  const live = new Map(read.flat().map((e) => [bookLoreId(e.bookId, e.id), e]));
+  const live = entriesRead(read.flat());
   // A copy in these books is as secret as its original, which is read for it wherever it is.
-  const texts = secretTexts({ world, entries: [...live.values(), ...(await copiedOriginals(host, [...live.values()], userId))] });
-  const lore: Record<string, LoreEntryDef> = {};
-  for (const [id, entry] of Object.entries(world.lore)) {
-    if (loreSourceOf(entry.source).kind === "book") continue;
-    // A world entry's own text may hold marks copied from a book: what anyone may read of it, as its book's would be.
-    lore[id] = heldTo(typeof entry.content === "string" && publicText(entry.content) !== entry.content ? { ...entry, content: publicText(entry.content) } : entry, textParts(texts, entry.content));
-  }
-  const seen = new Set(Object.values(lore).map((entry) => textOf(entry.content)));
-  // A book's entry or mark whose text is read already is left out: its twin reads where it first came.
-  const keep = (entry: LoreEntryDef): void => {
-    const text = heldTextOf(entry, entry.content);
-    if (hasOwn(lore, entry.id) || (text !== "" && seen.has(text))) return;
-    lore[entry.id] = entry;
-    seen.add(text);
-  };
-  for (const e of live.values()) for (const entry of entryLore(e, secrecyParts(e, texts), world)) keep(entry);
-  const lorePins = pinsToBooks(world);
-  return { world: { ...world, lore, ...(lorePins ? { lorePins } : {}) }, entries: [...live.values()].filter((e) => !engineWroteEntry(e.extensions)) };
+  const originals = await copiedOriginals((id) => host.books.entry(id, userId), live, (message) => host.log("warn", message, userId));
+  return booksAsLore(world, live, originals);
 }

@@ -112,7 +112,7 @@ import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./
 import { pinReader } from "./lore-pins";
 import { BookReads, liveLore, recordedLoreId } from "./book-lore";
 import { LoreRouting } from "./lore-routing";
-import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
+import { worldInfoVerdict, type WorldInfoGate } from "../secrecy/verdict";
 import { type CatalogEntry, interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { playerReason } from "../play/state/requirement-words";
