@@ -4,13 +4,14 @@
 // reaches the app through `App` and nothing else.
 
 import type { Database } from "bun:sqlite";
-import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
+import type { JsonValue, Log, ModelsPort, SettingDef } from "rp-harness/contract";
 import { Auth } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
 import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
+import { type Fills, gatherHooks, gatherSettings, type Hooks } from "./hooks";
 import { LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
 import { migrate, Migrations } from "./migrations";
@@ -33,8 +34,12 @@ export const SESSION_PATH = "/api/v1/status/session";
 export const UPDATE_PATH = "/api/v1/update";
 
 /**
- * An area of RPE as the app mounts it: its tables, and what it adds once they are up to date (its
- * routes, its live events, its writers). Areas are mounted in the order given.
+ * An area of RPE as the app mounts it: its tables, its settings, what it adds to the other areas'
+ * hooks, and what it adds once its tables are up to date (its routes, its live events, its writers).
+ * Each area names all of these in a file of its own (`area.ts` in its folder), and the composition
+ * (`compose.ts`) names each area once. Areas are mounted in the order given, then each is told that
+ * all are mounted (`mounted`): a route made from the parts of an area mounted after this one is added
+ * there, and the rest in `mount`.
  *
  * Two moments besides: `started`, once the server listens (its address is then `app.listening()`),
  * areas in order; and `stopping`, first thing when the app closes, areas in reverse order, while the
@@ -186,12 +191,15 @@ export function appRoutes(version: string, started: number, auth: Auth, ui: stri
 export async function openApp(options: OpenAppOptions): Promise<App> {
   const { paths, config, version } = options;
   const areas = options.areas ?? [];
+  // Gathered first: a lane two areas fill, or a setting two areas list, stops the app before it has touched the data folder.
+  const settings = gatherSettings(areas);
+  const hooks = gatherHooks(areas);
   const now = options.now ?? Date.now;
   const log = options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now);
   await prepareDataFolder(paths);
   const migrations = new Migrations();
   migrations.add("app", APP_MIGRATIONS);
-  for (const area of areas) if (area.tables !== undefined) migrations.add(area.tables.area, area.tables.migrations);
+  for (const area of areas) for (const tables of area.tables ?? []) migrations.add(tables.area, tables.migrations);
   const db = openDatabase(paths.database, config.database.busyMs);
   let migrated: MigrationOutcome;
   try {
@@ -238,6 +246,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     secrets,
     models: modelsPort(paths, secrets, () => config.lumiverse.user),
     log,
+    settings,
+    hooks,
     now,
     builds,
     migrated,
@@ -279,6 +289,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
       await area.mount?.(app);
       mounted.push(area);
     }
+    for (const area of areas) await area.mounted?.(app);
   } catch (error) {
     await app.close();
     throw error;

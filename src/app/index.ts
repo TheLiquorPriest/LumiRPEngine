@@ -3,7 +3,9 @@
 // switch's setter is not here: switching on anything that runs a command or calls out is the
 // command line's alone (cli.ts, switches.ts).
 
-export { appRoutes, BUILDS_PATH, lineLog, openApp, SESSION_PATH, STATUS_PATH, UPDATE_PATH, type App, type Area, type OpenAppOptions } from "./app";
+export { appRoutes, BUILDS_PATH, lineLog, openApp, SESSION_PATH, STATUS_PATH, UPDATE_PATH, type App, type Area, type AreaTables, type OpenAppOptions } from "./app";
+export { appArea } from "./area";
+export { gatherHooks, gatherSettings, type DoorFills, type Fills, type Hooks, type ViewHook } from "./hooks";
 export { type AppFile, type BuildsStatus, type RestartState } from "./update";
 export { Auth, AuthRefused, bearerOf, KEY_PREFIXES, NO_OWNER, type KeyKind, type MadeKey, type PageToken, type TokenMaker } from "./auth";
 export {
