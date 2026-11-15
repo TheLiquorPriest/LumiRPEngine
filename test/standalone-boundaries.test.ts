@@ -55,8 +55,8 @@ const RULES: Record<Zone, Rule> = {
   iface: { zones: ["app", "store", "worlds"], carried: PURE, harness: true },
   cast: { zones: ["app", "store", "iface"], carried: PURE, harness: true },
   story: { zones: ["app", "store", "iface", "cast"], carried: PURE, harness: true },
-  // The migration's database is whole: the story's writes count the lore's overlays, so it lays the lore's tables too.
-  migrate: { zones: ["app", "store", "cast", "story", "build", "lore", "worlds"], carried: [...PURE, "backend"], helpers: true },
+  // The migration's database is whole: the story's writes count the lore's overlays, so it lays the lore's tables too. It reads Lumiverse through the adapter's door alone (R-2).
+  migrate: { zones: ["app", "adapter", "store", "cast", "story", "build", "lore", "worlds"], carried: [...PURE, "backend"], helpers: true },
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter", "secrecy"], carried: ["shared", "backend"], sandboxed: true },
