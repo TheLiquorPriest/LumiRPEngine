@@ -69,7 +69,7 @@ Commands that change something are written by the running RPE when it runs, and 
 
 Everything RPE keeps is in one folder: its database (`rpe.db`), the files the agents read and write (`files/`), its secrets file (`secrets.json`), its config file (`config.json`) and its backups (`backups/`). The folder is `$RPE_DATA` when that is set, else `~/.local/share/rpe`. Every command takes `--data <folder>` to use another one.
 
-`config.json` says where RPE listens, which Lumiverse it serves, and RPE's own limits. Each value and its default is in [Settings](settings.md#the-application-configjson). Four values can also come from the environment, which wins over the file: `RPE_ADDRESS`, `RPE_PORT`, `RPE_LUMIVERSE_URL` and `RPE_LUMIVERSE_USER`.
+`config.json` holds the install's facts: which Lumiverse RPE serves and as which user, its database file, the port RPE's connection in Lumiverse points at, and that connection with its models. The command line writes it (`rpe up`, `rpe lumiverse`); the Settings page lists it and never writes it. Each fact is in [Settings](settings.md#the-install-configjson). Three can also come from the environment, which wins over the file: `RPE_PORT`, `RPE_LUMIVERSE_URL` and `RPE_LUMIVERSE_USER`. RPE's own limits (where it listens, the origins and names allowed, its body limits, the lives of tokens, the live socket's bounds, the database's and the command line's waits) are settings in `files/RPE-global.yml`, in force from RPE's next start; a `config.json` from an earlier build that still holds limits has them moved there at RPE's first start, each value kept.
 
 By default RPE listens on `127.0.0.1`, port `7871`.
 
@@ -108,12 +108,9 @@ reply:
   forms:
     deepseek: two-step
   streamAnyway: [deepseek]
-effort:
-  connections:
-    deepseek: off
 ```
 
-`reply.forms.<connection>` and `effort.connections.<connection>` are set per connection, by its name or its id. See [Settings](settings.md).
+`reply.forms.<connection>` is set per connection, by its name or its id. See [Settings](settings.md).
 
 ## The pages
 
@@ -150,7 +147,7 @@ rpe key web
 
 It is shown once. The browser keeps it until you sign out, or until RPE stops taking it. A new one makes the one before it stop working. As shipped a web key has no end; with `auth.webKeyDays` set, it runs out that many days after it is made, and `rpe key web` prints when.
 
-RPE listens only on this machine unless you change that. To open the web app from another device, publish RPE's address over HTTPS (with a reverse proxy, for example), then list that address in `config.json`: its origin in `origins`, and its host name in `hosts`. Setting `address` makes RPE listen on another address as well; it always listens on `127.0.0.1` too, which the extension uses.
+RPE listens only on this machine unless you change that. To open the web app from another device, publish RPE's address over HTTPS (with a reverse proxy, for example), then list that address in `files/RPE-global.yml`: its origin in `server.origins`, and its host name in `server.hosts`. Setting `server.address` makes RPE listen on another address as well, from its next start; it always listens on `127.0.0.1` too, which the extension uses.
 
 ## Updating
 
