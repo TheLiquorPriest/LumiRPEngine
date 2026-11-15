@@ -636,7 +636,7 @@ export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; 
 /** What the live socket sends a page: that following a chat began, with the number of the chat's last event then; a chat's events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
 
-/** The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than live.queueEvents holds for it. */
+/** The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than liveSocket.queueEvents holds for it. */
 export interface LiveMissed {
   from: number;
   to: number;

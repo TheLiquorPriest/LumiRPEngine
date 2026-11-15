@@ -91,6 +91,8 @@ const HARNESS_ROWS: Readonly<Record<string, string>> = Object.freeze({
   "compaction.reserve": "Compaction starts",
   "compaction.keepTurns": "Compaction starts",
   "compaction.records": "Carried records before folding (records mode)",
+  "calls.retries": "A model call that failed before any answer arrived",
+  "calls.silentAfter": "A model's answer that goes silent",
 });
 
 /** The keys of RPH's own list that a row above names. */

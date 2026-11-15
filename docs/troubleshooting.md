@@ -42,7 +42,7 @@ RPE played the turn, and it ended with no reply. The chat shows one plain line, 
 | The line starts | What it means | What to do |
 |---|---|---|
 | "The Author ended this turn without writing a reply." | The lead agent ended its run with no reply. | Look at the turn's page. Swipe or send again. If it keeps happening, the model may not keep to the reply's form: set `reply.forms.<connection>` to `two-step` (see [Install](install.md#a-model-that-does-not-keep-to-the-replys-tags)). |
-| "The turn reached its limit of …" | A limit you set stopped the turn first, such as `limits.turn.calls`. | Raise the limit in [Settings](settings.md#limits-of-a-turn), or swipe. |
+| "The turn reached its limit of …" | A limit you set stopped the turn first, such as `limits.turn.calls`. | Raise the limit in [Settings](settings.md#limits), or swipe. |
 | "The model's provider failed before a reply was written: …" | The provider refused or broke off. The rest of the line is its own words. | Check the connection's key and model (`rpe connection list`), the provider's status, and your account's credit. |
 | "The turn was stopped before a reply was written." | You, or Lumiverse, stopped the generation. | Send again. |
 | "The turn could not be played: …" | Anything else, in words after the colon. A missing model connection is one: an agent's `model:` names a connection RPE does not have, or there is none at all. | Add a connection with `rpe connection add`, or set the agent's `model:` to one you have. |
@@ -69,7 +69,7 @@ Its words come from `guidance/.prompts/play-answers.md`.
 
 **It asks for a key.** Make one with `rpe key web` on the machine RPE runs on. The browser lets go of a key RPE no longer takes, and says so: a key stops when a new one is made, or when its days run out, where `auth.webKeyDays` gives it an end.
 
-**"Not connected to RPE".** The page cannot reach RPE. From another device, RPE must be published at an address that device reaches, and that address listed in `origins` and `hosts` in `config.json` (see [Install](install.md#the-web-app-and-its-key)).
+**"Not connected to RPE".** The page cannot reach RPE. From another device, RPE must be published at an address that device reaches, and that address listed in `server.origins` and `server.hosts` in `files/RPE-global.yml` (see [Install](install.md#the-web-app-and-its-key)).
 
 ## After an update
 

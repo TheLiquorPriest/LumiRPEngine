@@ -1907,7 +1907,7 @@ export type LiveMessage = { type: "following"; chat: string; seq: number } | { t
 
 ### `LiveMissed`
 
-The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than live.queueEvents holds for it.
+The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than liveSocket.queueEvents holds for it.
 
 ```ts
 export interface LiveMissed {

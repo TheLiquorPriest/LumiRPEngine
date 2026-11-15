@@ -3,30 +3,23 @@
 // in a YAML example is one a reader of the code takes; every shipped file they name is in `guidance/`
 // or, under `files/defaults/`, among the harness's own shipped files;
 // every link between them reaches a page and a heading that exist. A name renamed or removed in the
-// code fails here, where a reader would otherwise copy a line that no longer works.
+// code fails here, where a reader would otherwise copy a line that no longer works. The settings page
+// is the generator's own writing of the registry, and each default Appendix D.1 gives is held here.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { SHIPPED_GUIDANCE } from "rp-harness";
+import type { JsonValue } from "rp-harness/contract";
+import { configFacts, renderSettingsDoc, settingsRegistry } from "../../scripts/settings/generate";
 import { runCli } from "../../src/app/cli";
-import { CONFIG_DEFAULTS } from "../../src/app/config";
-import { CONNECTION_PART, type Declared } from "../../src/app/setting-list";
-import { UPDATE_SETTINGS } from "../../src/app/update";
-import { CAST_SETTINGS } from "../../src/cast";
-import { IFACE_SETTINGS } from "../../src/iface";
-import { LORE_SETTINGS } from "../../src/lore";
-import { STORE_SETTINGS } from "../../src/store";
-import { STORY_SETTINGS } from "../../src/story";
+import { CONNECTION_PART } from "../../src/app/setting-list";
 import { CHAT_DEFAULTS } from "../../src/tree/shipped";
-import { TREE_SETTINGS } from "../../src/tree/settings";
-import { BOOTSTRAP_SETTINGS } from "../../src/turn/bootstrap/settings";
-import { TURN_SETTINGS } from "../../src/turn/settings";
 
 const ROOT = join(import.meta.dir, "../..");
 const DOCS = ["README.md", "docs/install.md", "docs/migration.md", "docs/behaviour.md", "docs/settings.md", "docs/security.md", "docs/troubleshooting.md"];
-const SETTINGS: readonly Declared[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...BOOTSTRAP_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS];
+/** Every setting RPE and RPH read, as the app composes its areas' lists. */
+const SETTINGS = settingsRegistry();
 /** The shipped config file: settings, the files layer's keys (`off`, `layered`, `added`) among them. */
 const SHIPPED_CONFIG = Bun.YAML.parse(readFileSync(join(ROOT, "guidance/RPE-global.yml"), "utf8")) as Record<string, unknown>;
 
@@ -122,12 +115,8 @@ function settingMatches(key: string): boolean {
   });
 }
 
-/** The config file's keys, dotted, from its defaults. */
-function configKeys(value: unknown, prefix = ""): string[] {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return [prefix];
-  return Object.entries(value).flatMap(([k, v]) => configKeys(v, prefix === "" ? k : `${prefix}.${k}`));
-}
-const CONFIG_KEYS = new Set(configKeys(CONFIG_DEFAULTS));
+/** config.json's keys: the install's facts. */
+const CONFIG_KEYS = new Set(configFacts().map((fact) => fact.key));
 
 /** Every leaf of a YAML mapping, as a dotted key. */
 function leaves(value: unknown, prefix = ""): string[] {
@@ -236,36 +225,48 @@ describe("the standalone docs", () => {
     expect(wrong).toEqual([]);
   });
 
-  test("the settings page lists every setting, every key of the config file and of the files in force, each with the default the code holds", () => {
-    // Its tables, by the section they are in: a row's first cell is a key in code, its second the default.
-    const page = parts(readFileSync(join(ROOT, "docs/settings.md"), "utf8")).prose;
-    const rows = page.split(/^## /m).flatMap((section) => {
-      const title = section.split("\n")[0] ?? "";
-      return [...section.matchAll(/^\| `([^`]+)` \| ([^|]+) \|/gm)].map(([, key, cell]) => ({ title, key: key ?? "", cell: (cell ?? "").trim() }));
-    });
-    // A default as the page writes it: in code, a text as it is, anything else as JSON.
-    const shown = (v: unknown): string => `\`${typeof v === "string" ? v : JSON.stringify(v)}\``;
-    // A dotted key's value in a nested mapping.
-    const valueIn = (root: unknown, key: string): unknown => key.split(".").reduce<unknown>((at, k) => (at as Record<string, unknown>)[k], root);
-    const config = rows.filter((r) => r.title.includes("config.json"));
-    const tree = rows.filter((r) => r.title === "Which files are in force");
-    const settings = rows.filter((r) => !config.includes(r) && !tree.includes(r));
+  test("docs/settings.md is what the generator writes now, and every key the shipped config file sets is a listed setting", () => {
+    expect(readFileSync(join(ROOT, "docs/settings.md"), "utf8")).toBe(renderSettingsDoc(SETTINGS, configFacts()));
+    expect(leaves(SHIPPED_CONFIG).filter((key) => !settingMatches(key))).toEqual([]);
+  });
 
-    expect(settings.map((r) => r.key).sort()).toEqual(SETTINGS.map((d) => d.key).sort());
-    for (const r of settings) {
-      const def = SETTINGS.find((d) => d.key === r.key);
-      const wanted = def === undefined ? "" : def.default === null ? `none (${def.none ?? ""})` : shown(def.default);
-      expect({ key: r.key, default: r.cell }).toEqual({ key: r.key, default: wanted });
-    }
-
-    expect(config.map((r) => r.key).sort()).toEqual([...CONFIG_KEYS].sort());
-    for (const r of config) {
-      const at = valueIn(CONFIG_DEFAULTS, r.key);
-      expect({ key: r.key, default: r.cell }).toEqual({ key: r.key, default: at === null ? "none" : shown(at) });
-    }
-
-    // The shipped config file's keys that are no setting, each entry of a mapping on its own row.
-    expect(tree.map((r) => r.key).sort()).toEqual(leaves(SHIPPED_CONFIG).filter((key) => !settingMatches(key)).sort());
-    for (const r of tree) expect({ key: r.key, default: r.cell }).toEqual({ key: r.key, default: shown(valueIn(SHIPPED_CONFIG, r.key)) });
+  test("each setting marked with a D.1 row has the default D.1 gives", () => {
+    // Appendix D.1's defaults (plan l.2390-2433), each as the value its setting holds it.
+    const D1: Readonly<Record<string, readonly [string, JsonValue]>> = {
+      "history.window": ["History window", 40],
+      "history.step": ["The window's step", null],
+      "history.hold.on": ["Hold a message in the prompt until the record covers it", false],
+      "history.hold.cap": ["Hold a message in the prompt until the record covers it", 40],
+      "story.soFar.share": ["The story so far, in the briefing", 0.05],
+      "story.soFar.floor": ["The story so far, in the briefing", 6000],
+      "worldState.budget": ["World state: everything else", 4000],
+      "lore.index.bound": ["Lore map, bound entries not in the prompt", 12],
+      "lore.index.batch": ["Lore indexing, entries per call", 20],
+      "limits.turn.calls": ["Calls in a turn across all agents", 40],
+      "limits.previousRun": ["Wait for the previous turn's run", 20],
+      "reply.heldSentences": ["Reply held back when a rule that interrupts covers it", 1],
+      "rules.judge": ["The model that answers a `question:` rule", null],
+      "reply.form": ["How a connection marks its reply", "tags"],
+      "reply.lastText": ["When the Author ends with no reply", false],
+      "progress.silence": ["Thinking block in the chat", 60],
+      "reply.tailSentences": ["Sentences shown again to an agent that goes on after a rule stopped it", 3],
+      "calls.retries": ["A model call that failed before any answer arrived", 2],
+      "calls.silentAfter": ["A model's answer that goes silent", 300],
+      "reply.leadSampling": ["The Author's sampling", "own"],
+      "carry": ["How context is carried in a session", "continuing"],
+      "compaction.reserve": ["Compaction starts", 16_384],
+      "compaction.keepTurns": ["Compaction starts", 3],
+      "compaction.records": ["Carried records before folding (records mode)", 6000],
+      "cast.comesToMindTokens": ["What comes to mind", 2000],
+      "cast.topOfMind": ["Top of mind", 9],
+      "cast.shortTermDays": ["Short-term memory", 3],
+      "store.snapshotEvery": ["Snapshot", 25],
+      "retention.turnFolders": ["Turn folders kept whole", 50],
+      "bootstrap.tokenLimit": ["Bootstrap asks before", 200_000],
+      "chat.hiddenReadable": ["Hidden messages readable by agents", false],
+      "server.address": ["RPE listens on", "127.0.0.1"],
+    };
+    const marked = SETTINGS.filter((def) => def.row !== undefined).map((def) => [def.key, def.row, def.default]);
+    expect(marked.sort()).toEqual(Object.entries(D1).map(([key, [row, value]]) => [key, row, value]).sort());
   });
 });

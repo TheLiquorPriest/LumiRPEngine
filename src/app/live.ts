@@ -15,7 +15,7 @@
 // sends (follow or unfollow a chat), what it is sent (that following began, a chat's events with what was
 // missed, or a refusal), and the code and reason RPE closes it with once the token it opened with has run
 // out or been replaced. The server reads what a page sends by that declaration, and the generated types
-// and the reference are written from it. A socket follows at most `live.follows` chats.
+// and the reference are written from it. A socket follows at most `liveSocket.follows` chats.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
@@ -229,7 +229,7 @@ export type LiveData<K extends LiveKind> = Infer<(typeof LIVE_KINDS)[K]["data"]>
 
 const missedRange = shape.named(
   "LiveMissed",
-  "The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than live.queueEvents holds for it.",
+  "The first and the last number of the events the hub dropped before a batch, for a page that fell behind further than liveSocket.queueEvents holds for it.",
   shape.object({ from: N, to: N }),
 );
 /** One event of each kind as the socket sends it: the kind's data, and the key only where its kind is declared with one. */
@@ -475,9 +475,9 @@ export interface LiveSocketData {
 const LONGEST_TIMER_MS = 2_147_483_647;
 
 export interface LiveSocketOptions {
-  /** The largest message a page may send, in bytes (`live.messageBytes`). */
+  /** The largest message a page may send, in bytes (`liveSocket.messageBytes`). */
   messageBytes: number;
-  /** The most chats one socket may follow at once (`live.follows`). */
+  /** The most chats one socket may follow at once (`liveSocket.follows`). */
   follows: number;
   /** When a credential runs out (null: no end), or false when it holds no longer: retired, run out, or never one. */
   holds(credential: string | null): number | null | false;
@@ -545,7 +545,7 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
       }
       if (follows.has(chat)) return;
       if (follows.size >= options.follows) {
-        refuse(ws, `This socket follows ${follows.size} chats, the most one socket may (live.follows in RPE's config): unfollow one first.`);
+        refuse(ws, `This socket follows ${follows.size} chats, the most one socket may (the setting liveSocket.follows): unfollow one first.`);
         return;
       }
       sendTo(ws, { type: "following", chat, seq: hub.seq(chat) });
