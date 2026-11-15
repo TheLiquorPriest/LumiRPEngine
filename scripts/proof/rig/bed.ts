@@ -131,7 +131,15 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
     host.connections.set(RIG_RPE_CONNECTION, { id: RIG_RPE_CONNECTION, base: `${listening.url}/v1`, key: providerKey, model: "rpe" });
 
     // Lumiverse's side: a preset, and the chat as the character's greeting leaves it.
-    host.presets.set(RIG_PRESET, { id: RIG_PRESET, name: "Lamp", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a lighthouse on Gannet Rock, one scene at a time." }] });
+    host.presets.set(RIG_PRESET, {
+      id: RIG_PRESET,
+      name: "Lamp",
+      blocks: [
+        { id: "b-main", name: "Main", role: "system", content: "You narrate a lighthouse on Gannet Rock, one scene at a time." },
+        // The stand-in sends the chat's history only where a block carries this marker, as Lumiverse does.
+        { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" },
+      ],
+    });
     if (options.messages !== null) host.addChat({ id: RIG_CHAT, user: RIG_USER, name: RIG_CHAT_NAME, character: RIG_CHARACTER, messages: options.messages ?? [{ id: "m-greeting", role: "assistant", content: RIG_GREETING }] });
 
     return { app, listening, composition, turns, host, server, db, data, pageToken, webToken, until, close };
