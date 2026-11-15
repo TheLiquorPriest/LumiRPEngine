@@ -17,8 +17,14 @@ export interface ShellMount {
   road: PageRoad;
 }
 
-/** The UI's extension shell (`src/ui/`): mounts the pages, returns its cleanup. */
-export type MountShell = (mount: ShellMount) => () => void;
+/** What the mounted shell gives back: its cleanup, and a way to show one of its pages in the drawer tab (whoever calls it opens the tab). */
+export interface Mounted {
+  unmount(): void;
+  open(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
+}
+
+/** The UI's extension shell (`src/ui/`): mounts the pages. */
+export type MountShell = (mount: ShellMount) => Mounted;
 
 /** The drawer tab RPE's pages live in. */
 export const TAB = { id: "rpe", title: "RPE", shortName: "RPE", description: "RPE: the live view, turns, world, cast, story and settings" };
@@ -28,9 +34,9 @@ export function loader(mount: MountShell): (ctx: SpindleFrontendContext) => () =
   return (ctx) => {
     const road = pageRoad(ctx);
     const tab = ctx.ui.registerDrawerTab(TAB);
-    const unmount = mount({ root: tab.root, ctx, road });
+    const mounted = mount({ root: tab.root, ctx, road });
     return () => {
-      unmount();
+      mounted.unmount();
       road.stop();
       tab.destroy();
     };
