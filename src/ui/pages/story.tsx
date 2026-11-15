@@ -17,6 +17,7 @@ import { onChatChange } from "../live-watch";
 import { EntryCard, type StrikeAsk } from "../records";
 import { counted, errorWords } from "../words";
 import { type BootstrapReader, type BootstrapShown, BootstrapView, type BootstrapViewProps, NO_BOOTSTRAP, readBootstrap } from "./bootstrap";
+import type { PageEntry } from "../page-entry";
 
 export type StoryLists = Record<StoryListPart, StoryList>;
 
@@ -337,3 +338,5 @@ export function StoryPage(props: { chat: string }) {
     />
   );
 }
+
+export const entry: PageEntry = { id: "story", title: "Story", icon: "book", shells: ["web", "drawer"], needsChat: true, often: false, order: 60, render: (route) => <StoryPage chat={route.chat} /> };

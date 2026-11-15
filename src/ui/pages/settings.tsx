@@ -9,6 +9,8 @@ import { isRecord, type JsonValue } from "../../shared/json";
 import { useApp } from "../app";
 import { Banner, Button, Fold, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
+import type { PageEntry } from "../page-entry";
+import { useUiSettings } from "../ui-settings";
 import { errorWords, LEVEL_WORDS, num } from "../words";
 import { type BuildsReader, type BuildsShown, BuildsView, NO_BUILDS, readBuilds, readSession, SessionLine } from "./builds";
 
@@ -126,8 +128,8 @@ export interface SettingsControl {
   stop(): void;
 }
 
-/** The page's state over its calls: the settings at once, and as RPE answers each write; nothing once `stop()` is called. */
-export function settingsControl(calls: SettingsCalls, onChange: (shown: SettingsShown) => void): SettingsControl {
+/** The page's state over its calls: the settings at once, and as RPE answers each write; nothing once `stop()` is called. `written` is told of each write RPE took. */
+export function settingsControl(calls: SettingsCalls, onChange: (shown: SettingsShown) => void, written: () => void = () => undefined): SettingsControl {
   let shown = NO_SETTINGS;
   let alive = true;
   const show = (next: SettingsShown): void => {
@@ -142,7 +144,10 @@ export function settingsControl(calls: SettingsCalls, onChange: (shown: Settings
   const write = (key: string, level: LayerLevel, value: JsonValue, none: boolean): void => {
     show({ ...shown, busy: true, refusal: null });
     calls.write(level, key, value, none).then(
-      (reply) => show({ ...shown, reply, busy: false, editing: null }),
+      (reply) => {
+        show({ ...shown, reply, busy: false, editing: null });
+        written();
+      },
       (error: unknown) => show({ ...shown, busy: false, refusal: { key, words: errorWords(error) } }),
     );
   };
@@ -405,6 +410,8 @@ export function SettingsView(props: SettingsViewProps) {
 
 export function SettingsPage(props: { chat: string | null }) {
   const app = useApp();
+  // The page's own settings (pages.*) are read again after each save.
+  const ui = useUiSettings();
   const { chat } = props;
   const [shown, setShown] = useState<SettingsShown>(NO_SETTINGS);
   const [control, setControl] = useState<SettingsControl | null>(null);
@@ -413,7 +420,7 @@ export function SettingsPage(props: { chat: string | null }) {
   const [sessionEnds, setSessionEnds] = useState<number | null>(null);
   useEffect(() => {
     setShown(NO_SETTINGS);
-    const made = settingsControl(settingsCalls(app.client, chat), setShown);
+    const made = settingsControl(settingsCalls(app.client, chat), setShown, () => ui.reread());
     setControl(made);
     return () => made.stop();
   }, [chat]);
@@ -440,3 +447,5 @@ export function SettingsPage(props: { chat: string | null }) {
     />
   );
 }
+
+export const entry: PageEntry = { id: "settings", title: "Settings", icon: "sliders", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 110, render: (route) => <SettingsPage chat={route.chat ?? null} /> };

@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { StoryStruck } from "../../src/ui/api";
-import { NAV } from "../../src/ui/frame";
+import { PAGES } from "../../src/ui/page-list";
 import { NO_STORY, listsOf, readStory, type StoryShown, StoryView } from "../../src/ui/pages/story";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";
@@ -137,7 +137,7 @@ describe("the Story page", () => {
   });
 
   test("Story is a chat's page in both shells, behind More on a narrow bar, with its own address", () => {
-    expect(NAV.find((n) => n.id === "story")).toMatchObject({ shells: ["web", "drawer"], needsChat: true, often: false });
+    expect(PAGES.find((n) => n.id === "story")).toMatchObject({ shells: ["web", "drawer"], needsChat: true, often: false });
     expect(routeOfHash(hashOf({ page: "story", chat: CHAT }))).toEqual({ page: "story", chat: CHAT });
   });
 });

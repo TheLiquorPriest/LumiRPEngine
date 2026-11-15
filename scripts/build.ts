@@ -35,6 +35,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpat
 import { dirname, join, relative, resolve, sep } from "node:path";
 import pkg from "../package.json";
 import { installScan } from "./install-scan";
+import { writePageList } from "./ui/pages";
 
 export const ROOT = resolve(import.meta.dir, "..");
 export const DIST = join(ROOT, "dist");
@@ -205,6 +206,8 @@ async function main(argv: readonly string[]): Promise<number> {
 
     // Bun's metafile names each input by its path from here.
     process.chdir(ROOT);
+    // The shells offer the pages the folders hold, so the list of them is made from the folders first.
+    if (pages) writePageList();
     const seconds = Math.floor(Date.now() / 1000);
     const sha = git(ROOT, ["rev-parse", "--short=8", "HEAD"])?.trim() ?? null;
     const sources = ["src", "guidance", "docs", "schemas", "package.json", "bun.lock", "tsconfig.json", "bunfig.toml", "scripts/build.ts"];

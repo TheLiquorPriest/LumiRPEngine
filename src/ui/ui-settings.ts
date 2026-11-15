@@ -19,6 +19,8 @@ export const START_WAIT_KEY = "rpe:page-start-ms";
 /** The page's settings, as the shell holds them. */
 export interface UiSettings {
   readonly values: Readable<PageSettings>;
+  /** Lumiverse's address as RPE holds it (an install fact the settings route lists), once read; null before, and where RPE holds none. */
+  readonly lumiverse: Readable<string | null>;
   /** Takes the group as RPE gave it (a mapping from each setting's key to its value); nothing changes when there is none. */
   take(group: unknown): void;
   /** Reads the group from RPE's settings route through `client` now, and again each time the client reaches RPE and each time `reread` is asked; the returned function stops. */
@@ -52,6 +54,7 @@ function keptStart(storage: Keeping): number {
 /** The page's settings over `storage`, which keeps the start wait between visits (null: kept for this page alone). */
 export function createUiSettings(storage: Keeping): UiSettings {
   const store = createStore<PageSettings>({ ...PAGE_DEFAULTS, startMs: keptStart(storage) });
+  const lumiverse = createStore<string | null>(null);
   let reader: (() => void) | null = null;
   const take = (group: unknown): void => {
     if (group === undefined || group === null) return;
@@ -69,6 +72,7 @@ export function createUiSettings(storage: Keeping): UiSettings {
   };
   return {
     values: store,
+    lumiverse,
     take,
     follow(client) {
       let asked = 0;
@@ -78,7 +82,10 @@ export function createUiSettings(storage: Keeping): UiSettings {
         const mine = ++asked;
         client.call("GET /api/v1/settings", {}).then(
           (reply) => {
-            if (mine === asked) take(Object.fromEntries(reply.settings.filter((s) => s.key.startsWith(PAGE_KEY_PREFIX)).map((s) => [s.key, s.value])));
+            if (mine !== asked) return;
+            take(Object.fromEntries(reply.settings.filter((s) => s.key.startsWith(PAGE_KEY_PREFIX)).map((s) => [s.key, s.value])));
+            const address = reply.facts.find((fact) => fact.key === "lumiverse.url")?.value;
+            lumiverse.set(typeof address === "string" ? address : null);
           },
           // The settings stay as they were: the next time the page reaches RPE reads them again.
           () => undefined,

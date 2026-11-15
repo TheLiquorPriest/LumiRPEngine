@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { CastStruck } from "../../src/ui/api";
-import { NAV } from "../../src/ui/frame";
+import { PAGES } from "../../src/ui/page-list";
 import { type CastShown, CastView, NO_CAST, readCast } from "../../src/ui/pages/cast";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";
@@ -173,7 +173,7 @@ describe("the Cast page", () => {
   });
 
   test("Cast is a chat's page in both shells, behind More on a narrow bar, with its own address", () => {
-    const cast = NAV.find((n) => n.id === "cast");
+    const cast = PAGES.find((n) => n.id === "cast");
     expect(cast).toMatchObject({ shells: ["web", "drawer"], needsChat: true, often: false });
     expect(routeOfHash(hashOf({ page: "cast", chat: CHAT }))).toEqual({ page: "cast", chat: CHAT });
   });

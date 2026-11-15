@@ -97,8 +97,13 @@ const OWN_CSS = `
 }
 
 .rpe-drawer{display:flex;flex-direction:column;gap:var(--lre-s3);padding-bottom:var(--lre-s4);min-width:0}
-.rpe-drawer-bar{display:flex;flex-direction:column;gap:var(--lre-s1);padding:var(--lre-s1) 0 0}
+.rpe-drawer-bar{position:sticky;top:var(--lre-stick-top,0px);z-index:20;display:flex;flex-direction:column;gap:var(--lre-s1);padding:var(--lre-s1) 0;background:var(--lre-bar-bg)}
 .rpe-drawer-nav{position:relative;z-index:20;min-width:0}
+
+.rpe-frame{display:grid;min-width:0}
+.rpe-frame>.rpe-frame-page,.rpe-frame>.rpe-frame-block{grid-area:1/1;min-width:0}
+.rpe-frame[data-blocked=yes]>.rpe-frame-page{visibility:hidden}
+.rpe-frame-block{align-self:start;display:flex;flex-direction:column;gap:var(--lre-s3);background:var(--lre-surface)}
 .rpe-drawer-nav .lre-tabs>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);border-color:color-mix(in srgb,var(--lre-accent) 35%,transparent);font-weight:600}
 
 .rpe-more-away{position:fixed;inset:0;z-index:-1}

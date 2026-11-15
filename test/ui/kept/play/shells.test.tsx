@@ -6,7 +6,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { render } from "preact";
 import { act } from "preact/test-utils";
 import type { ChatSummary } from "../../../../src/ui/api";
-import { NAV, navOf, routeFor } from "../../../../src/ui/frame";
+import { routeFor } from "../../../../src/ui/frame";
+import { PAGES } from "../../../../src/ui/page-list";
 import { ChatsView } from "../../../../src/ui/pages/chats";
 import { hashOf, routeOfHash } from "../../../../src/ui/web";
 import { openPage, type Page, type PageElement } from "../dom";
@@ -21,9 +22,8 @@ const words = (el: PageElement): string => el.textContent.replace(/\s+/g, " ").t
 
 describe("the Play page in the shells", () => {
   test("is in both shells' navigation, for the chat in view, under an address of its own in the web shell", () => {
-    expect(NAV.find((item) => item.id === "play")).toMatchObject({ title: "Play", shells: ["web", "drawer"], needsChat: true });
+    expect(PAGES.find((item) => item.id === "play")).toMatchObject({ title: "Play", shells: ["web", "drawer"], needsChat: true });
     expect(routeFor("play", "chat-fernwick")).toEqual({ page: "play", chat: "chat-fernwick" });
-    expect(navOf({ page: "play", chat: "chat-fernwick" })).toBe("play");
     expect(hashOf({ page: "play", chat: "chat fernwick" })).toBe("#/chats/chat%20fernwick/play");
     expect(routeOfHash(hashOf({ page: "play", chat: "chat fernwick" }))).toEqual({ page: "play", chat: "chat fernwick" });
   });

@@ -15,6 +15,7 @@ import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, Fold, PageHeader, Pre, Section, type Tone } from "../atoms";
 import type { RpeClient } from "../client";
 import { bytesWords, errorWords, LEVEL_WORDS, when } from "../words";
+import type { PageEntry } from "../page-entry";
 
 /** The levels of the tree, farthest first, as the listing gives them. */
 const LEVELS: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
@@ -777,3 +778,5 @@ export function FilesPage(props: { chat: string | null }) {
     />
   );
 }
+
+export const entry: PageEntry = { id: "files", title: "Files", icon: "folder", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 90, render: (route) => <FilesPage chat={route.chat ?? null} /> };

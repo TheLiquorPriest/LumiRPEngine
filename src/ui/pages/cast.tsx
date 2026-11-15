@@ -18,6 +18,7 @@ import { replyOf, type RpeClient } from "../client";
 import { onChatChange } from "../live-watch";
 import { EntryCard, type EntryCardProps, type StrikeAsk, writeWords } from "../records";
 import { counted, errorWords, when } from "../words";
+import type { PageEntry } from "../page-entry";
 
 /** What the page shows: the cast, the character open with its record, what is being read, and the last strike with what came of it. */
 export interface CastShown {
@@ -422,3 +423,5 @@ export function CastPage(props: { chat: string }) {
     />
   );
 }
+
+export const entry: PageEntry = { id: "cast", title: "Cast", icon: "users", shells: ["web", "drawer"], needsChat: true, often: false, order: 50, render: (route) => <CastPage chat={route.chat} /> };

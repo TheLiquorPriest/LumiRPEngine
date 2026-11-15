@@ -9,6 +9,7 @@ import { useApp } from "../app";
 import { Banner, Button, PageHeader, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { bytesWords, counted, errorWords } from "../words";
+import type { PageEntry } from "../page-entry";
 
 export interface StorageCalls {
   storage(): Promise<TreeStorage>;
@@ -223,3 +224,5 @@ export function StoragePage(props: { chat: string | null }) {
   }, [chat]);
   return <StorageView chat={chat} shown={shown} onChat={(next) => app.go({ page: "storage", chat: next })} onAsk={(asking) => control?.ask(asking)} onPrune={() => control?.prune()} />;
 }
+
+export const entry: PageEntry = { id: "storage", title: "Storage", icon: "box", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 120, render: (route) => <StoragePage chat={route.chat ?? null} /> };

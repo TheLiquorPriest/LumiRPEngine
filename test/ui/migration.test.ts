@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import { NAV } from "../../src/ui/frame";
+import { PAGES } from "../../src/ui/page-list";
 import { type MigrationRead, MigrationView, readMigration } from "../../src/ui/pages/migration";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";
@@ -94,7 +94,7 @@ describe("the Migration page", () => {
     asked[2]?.answer(MIGRATED);
     await settle();
     expect(reads.length).toBe(2);
-    expect(NAV.find((n) => n.id === "migration")?.shells).toEqual(["web", "drawer"]);
+    expect(PAGES.find((n) => n.id === "migration")?.shells).toEqual(["web", "drawer"]);
     expect(routeOfHash(hashOf({ page: "migration" }))).toEqual({ page: "migration" });
   });
 });

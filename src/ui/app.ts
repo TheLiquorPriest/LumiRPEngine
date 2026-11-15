@@ -4,21 +4,27 @@
 
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
-import type { Readable } from "./store";
+import { type Readable, useSelect } from "./store";
 import type { RpeClient } from "./client";
 import type { Gate } from "./gate";
 import type { KeptHost } from "./kept/host";
 import type { Timers } from "./roads";
+import { useUiSetting, useUiSettings } from "./ui-settings";
 
 /** The web shell, served by RPE at `/ui/`, or the drawer in Lumiverse. */
 export type Shell = "web" | "drawer";
 
 /**
- * Where a page stands. A chat's pages have no chat in the drawer while Lumiverse shows none; Files and
- * Settings show the shipped and your own levels with no chat, and the chat's own with one; Storage shows
- * every chat, and the notes of the chat it is given. The rest are about no chat.
+ * Where a page stands: the page by its id (`PageEntry.id`), the chat it is about, and its own inner
+ * place, which is part of its address (a turn on the Turns page, a folder on Files): the names that
+ * lead to it, in order. A page that needs a chat has one; one that can show a chat's own levels has the
+ * chat the shell is on or null; the rest have none. A page with no inner place has an empty `at`.
  */
-export type Route = { page: "chats" } | { page: "build" } | { page: "connections" } | { page: "migration" } | { page: "live" | "turns" | "world" | "cast" | "story" | "play" | "files" | "settings" | "storage"; chat: string | null } | { page: "turn"; chat: string; turn: string };
+export interface Route {
+  readonly page: string;
+  readonly chat?: string | null;
+  readonly at?: readonly string[];
+}
 
 export interface UiApp {
   readonly shell: Shell;
@@ -41,12 +47,13 @@ export function useApp(): UiApp {
 
 /** The chat a route is about, if any. */
 export function chatOf(route: Route): string | null {
-  return "chat" in route ? route.chat : null;
+  return route.chat ?? null;
 }
 
-/** Now, ticking each second while `ticking`, for the times of what still runs. */
+/** Now, ticking at the page's tick (its setting) while `ticking`, for the times of what still runs. */
 export function useNow(ticking: boolean): number {
   const app = useApp();
+  const tickMs = useUiSetting("tickMs");
   const [now, setNow] = useState(() => app.timers.now());
   useEffect(() => {
     setNow(app.timers.now());
@@ -54,10 +61,17 @@ export function useNow(ticking: boolean): number {
     let handle: unknown = null;
     const tick = (): void => {
       setNow(app.timers.now());
-      handle = app.timers.setTimeout(tick, 1000);
+      handle = app.timers.setTimeout(tick, tickMs);
     };
-    handle = app.timers.setTimeout(tick, 1000);
+    handle = app.timers.setTimeout(tick, tickMs);
     return () => app.timers.clearTimeout(handle);
-  }, [ticking]);
+  }, [ticking, tickMs]);
   return now;
+}
+
+/** Lumiverse's address as RPE holds it, for the pages that link into Lumiverse (Build's books): in the web shell, where the page is outside Lumiverse; none in the drawer, where the page is inside it already. */
+export function useLumiverseAddress(): string | null {
+  const app = useApp();
+  const address = useSelect(useUiSettings().lumiverse, (value) => value);
+  return app.shell === "web" ? address : null;
 }

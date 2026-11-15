@@ -9,6 +9,7 @@ import type { ConnectionAuth, ConnectionShown, ConnectionsShown, ConnectionTeste
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
+import type { PageEntry } from "../page-entry";
 import { duration, errorWords, num } from "../words";
 
 const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
@@ -475,3 +476,5 @@ export function ConnectionsPage() {
     />
   );
 }
+
+export const entry: PageEntry = { id: "connections", title: "Connections", icon: "link", shells: ["web", "drawer"], needsChat: false, often: false, order: 100, render: () => <ConnectionsPage /> };

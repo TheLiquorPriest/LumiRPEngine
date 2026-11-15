@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { render } from "preact";
 import { act } from "preact/test-utils";
 import type { Shell } from "../../src/ui/app";
-import { type BarPlace, NAV, type NavId, type NavItem, PagesBar, type PagesBarProps } from "../../src/ui/frame";
+import { type BarPlace, PagesBar, type PagesBarProps } from "../../src/ui/frame";
+import type { PageEntry } from "../../src/ui/page-entry";
+import { PAGES } from "../../src/ui/page-list";
 import { openPage, type Page, PageEvent, type PageElement } from "./kept/dom";
 
 let page: Page;
@@ -20,10 +22,10 @@ afterAll(() => page.close());
 const words = (el: PageElement): string => el.textContent.replace(/\s+/g, " ").trim();
 
 /** The bar drawn at `place`, on `current`: its entries, the list More opens, and where each tap went. */
-async function drawn(place: BarPlace, current: NavId, disabled: PagesBarProps["disabled"] = () => false) {
+async function drawn(place: BarPlace, current: string, disabled: PagesBarProps["disabled"] = () => false) {
   const root = page.document.createElement("div");
-  const gone: NavId[] = [];
-  const draw = (on: NavId) => render(<PagesBar place={place} current={on} disabled={disabled} go={(id) => gone.push(id)} />, root as unknown as HTMLElement);
+  const gone: string[] = [];
+  const draw = (on: string) => render(<PagesBar place={place} current={on} disabled={disabled} go={(id) => gone.push(id)} />, root as unknown as HTMLElement);
   await act(() => draw(current));
   const nav = (): PageElement => root.querySelector("nav") as PageElement;
   /** The bar's own entries, More last: the web shell's are the nav's buttons, the drawer's are in its row of tabs. */
@@ -38,7 +40,7 @@ async function drawn(place: BarPlace, current: NavId, disabled: PagesBarProps["d
     list,
     /** The words of the entries the bar shows. */
     bar: () => entries().map(words),
-    redraw: (on: NavId) => act(() => draw(on)),
+    redraw: (on: string) => act(() => draw(on)),
     /** Taps a page by its title: in the bar when it is there, else behind More. */
     async tap(title: string): Promise<void> {
       const inBar = entries().find((el) => words(el) === title);
@@ -54,7 +56,7 @@ async function drawn(place: BarPlace, current: NavId, disabled: PagesBarProps["d
   };
 }
 
-const pagesOf = (shell: Shell): NavItem[] => NAV.filter((item) => item.shells.includes(shell));
+const pagesOf = (shell: Shell): PageEntry[] => PAGES.filter((item) => item.shells.includes(shell));
 
 describe("the bars of pages", () => {
   test("at the foot of the web shell at phone width, the chats and each chat's own pages stay in the bar, and every page is reached with a tap or two", async () => {

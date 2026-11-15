@@ -8,6 +8,7 @@ import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import { errorWords, when } from "../words";
 import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "./jobs";
+import type { PageEntry } from "../page-entry";
 
 export interface ChatsViewProps {
   chats: readonly ChatSummary[] | null;
@@ -102,3 +103,5 @@ export function ChatsPage() {
     />
   );
 }
+
+export const entry: PageEntry = { id: "chats", title: "Chats", icon: "message", shells: ["web"], needsChat: false, often: true, order: 10, render: () => <ChatsPage /> };

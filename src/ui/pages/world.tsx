@@ -9,6 +9,8 @@ import type { TurnSummary, ValueLine, ValueMark, ValuesShown, ValueSource, World
 import { useApp } from "../app";
 import { Badge, Banner, Button, PageHeader, Row, Section } from "../atoms";
 import { replyOf, type RpeClient } from "../client";
+import type { PageEntry } from "../page-entry";
+import { useUiSetting } from "../ui-settings";
 import { TURN_KIND_WORDS } from "../trace-view";
 import { counted, errorWords, when } from "../words";
 import { readTurns } from "./turns";
@@ -286,6 +288,7 @@ export function WorldView(props: WorldViewProps) {
 export function WorldPage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
+  const turnsAtATime = useUiSetting("turnsAtATime");
   const [query, setQuery] = useState<WorldQuery>(WORLD_START);
   const [shown, setShown] = useState<{ answer: WorldAnswer | null; loading: boolean; problem: string | null }>({ answer: null, loading: true, problem: null });
   const [turns, setTurns] = useState<readonly TurnSummary[] | null>(null);
@@ -297,17 +300,19 @@ export function WorldPage(props: { chat: string }) {
     setTurns(null);
     setMore(false);
     // A read that failed leaves them unknown: the page then says nothing of whether any turn was played.
-    const reading = readTurns(app.client, chat, (read) => {
+    const reading = readTurns(app.client, chat, turnsAtATime, (read) => {
       if (read.loading || read.problem !== null) return;
       setTurns(read.turns);
       setMore(read.more);
     });
     reader.current = reading;
     return reading.stop;
-  }, [chat]);
+  }, [chat, turnsAtATime]);
   useEffect(() => {
     setShown((held) => ({ ...held, loading: true }));
     return readWorld(app.client, chat, query, (result) => setShown((held) => ({ answer: result.answer ?? held.answer, loading: false, problem: result.problem })));
   }, [chat, query]);
   return <WorldView query={query} {...shown} turns={turns} moreTurns={{ more, onMore: () => reader.current?.more() }} onQuery={setQuery} />;
 }
+
+export const entry: PageEntry = { id: "world", title: "World", icon: "globe", shells: ["web", "drawer"], needsChat: true, often: true, order: 40, render: (route) => <WorldPage chat={route.chat} /> };

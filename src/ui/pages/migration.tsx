@@ -12,6 +12,7 @@ import { Badge, Banner, Fold, PageHeader, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { bytesWords, counted, errorWords } from "../words";
 import { BatchOffer, type BatchShown, NO_BATCH, type Relive, startCarried } from "./bootstrap";
+import type { PageEntry } from "../page-entry";
 
 /** The page's one read: RPE's answer, or its refusal in its own words. */
 export interface MigrationRead {
@@ -203,3 +204,5 @@ export function MigrationPage() {
   useEffect(() => readMigration(app.client, setRead), []);
   return <MigrationView read={read} batch={{ shown: batch, onStart: (relive) => startCarried(app.client, relive, setBatch) }} />;
 }
+
+export const entry: PageEntry = { id: "migration", title: "Migration", icon: "download", shells: ["web", "drawer"], needsChat: false, often: false, order: 130, render: () => <MigrationPage /> };
