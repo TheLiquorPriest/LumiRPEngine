@@ -11,6 +11,7 @@ import { migrationPage } from "../../src/migrate/page";
 import { MIGRATION_PATH, migrateRoutes } from "../../src/migrate/routes";
 import { buildFixture, IDENT, STRAY, USER, type Fixture } from "./fixture";
 import { TREE as tree } from "./tree";
+import { callRoute } from "../app/call";
 
 describe("the Migration page's route", () => {
   let fixture: Fixture;
@@ -31,8 +32,7 @@ describe("the Migration page's route", () => {
   const ask = async (db: Database, user: string): Promise<unknown> => {
     const [page] = migrateRoutes({ db, identifier: IDENT });
     if (page === undefined) throw new Error("no route");
-    const request = new Request(`http://rpe.test${MIGRATION_PATH}`);
-    return await page.handle({ params: {}, query: new URLSearchParams(), body: undefined, user, request, signal: request.signal });
+    return await callRoute(page, { user });
   };
 
   test("is one read for a page, and answers what the page's data function gives for that user", async () => {

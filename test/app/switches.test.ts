@@ -5,9 +5,8 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes, METHODS, route, RouteError, storedKey } from "../../src/app";
+import { connectionRoutes, METHODS, route, shape, storedKey } from "../../src/app";
 import { runCli } from "../../src/app/cli";
-import { isRecord } from "../../src/shared/json";
 import { bearer, type Bed, cliIo, makeBed, makeKey, OWNER, testModelLayer } from "./helpers";
 
 describe("the switches", () => {
@@ -34,10 +33,10 @@ describe("the switches", () => {
               method: "POST",
               path: "/api/v1/probe/sql",
               access: "page",
-              body: (value: unknown) => {
-                if (!isRecord(value) || typeof value.sql !== "string") throw new RouteError(400, "Send {sql}.");
-                return { sql: value.sql };
-              },
+              group: "service",
+              does: "Runs whatever SQL a page sends, through the write queue.",
+              body: shape.object({ sql: shape.text() }),
+              reply: shape.object({ changed: shape.number() }),
               handle: async ({ body }) => ({ changed: await a.writes.run((db) => db.run(body.sql).changes) }),
             });
             a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);

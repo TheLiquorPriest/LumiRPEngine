@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { act } from "preact/test-utils";
 import type { StateView } from "../../../../src/shared/state-view";
+import { replyOf } from "../../../../src/ui/client";
 import { attachedWords, NOT_HERE } from "../../../../src/ui/kept/play/app";
 import { handTimers } from "../bed";
 import { openPage, type Page, PageElement } from "../dom";
@@ -28,7 +29,7 @@ const PLAYED = "chat-larkspur";
 
 /** The chat's state as RPE's state route answers it now. */
 async function stateOf(rpe: ServedRpe, chat: string): Promise<StateView> {
-  return await rpe.client.call("GET /api/v1/chats/:chat/state", { chat });
+  return replyOf(await rpe.client.call("GET /api/v1/chats/:chat/state", { chat }));
 }
 
 /** The HUD's time as the state holds it. */

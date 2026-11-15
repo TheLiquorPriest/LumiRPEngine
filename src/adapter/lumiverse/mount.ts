@@ -28,6 +28,7 @@ import { preferDatabase, type LumiverseReads } from "./reads";
 import { Relay, type RelaySettings } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket, type SocketSettings } from "./socket";
+import { extensionStatusReply } from "./shapes";
 import { QUESTION_PATH } from "./wire";
 
 /** What other lanes answer for the adapter. */
@@ -249,14 +250,34 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
         };
       } else status.why = NOT_SET_UP;
       at.routes.add("lumiverse", [
-        rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: (request) => (handlers === null ? notSetUp() : handlers.provider(request)) }),
-        rawRoute({ method: "GET", path: "/v1/models", access: "provider", raw: modelsEndpoint({ allowed: providerKey, modelNames }) }),
-        route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", handle: extension }),
-        rawRoute({ method: "POST", path: QUESTION_PATH, access: "extension", maxBody: QUESTION_BODY_BYTES, raw: (request) => (handlers === null ? notSetUp() : handlers.question(request)) }),
+        rawRoute({
+          method: "POST",
+          path: "/v1/chat/completions",
+          access: "provider",
+          group: "provider",
+          does: "The provider endpoint: Lumiverse's chat completions, answered as the Lumiverse provider API's own (OpenAI's chat completions, streamed or whole); a reply tagged for a turn of RPE is played through the turn lane, any other is passed on.",
+          answers: "an OpenAI chat completion, streamed or whole, as OpenAI answers",
+          raw: (request) => (handlers === null ? notSetUp() : handlers.provider(request)),
+        }),
+        rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames }) }),
+        route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", group: "service", does: "How RPE's extension in Lumiverse last said it stands with RPE.", reply: extensionStatusReply, handle: extension }),
+        rawRoute({
+          method: "POST",
+          path: QUESTION_PATH,
+          access: "extension",
+          group: "service",
+          does: "The extension's question for a prompt it is about to send: which of its lore entries and messages RPE keeps, by its window and its secrecy rules.",
+          answers: "JSON, the extension's own message (`src/adapter/lumiverse/wire.ts`)",
+          maxBody: QUESTION_BODY_BYTES,
+          raw: (request) => (handlers === null ? notSetUp() : handlers.question(request)),
+        }),
         rawRoute({
           method: "POST",
           path: CONFIRM_PATH,
           access: "extension",
+          group: "service",
+          does: "The extension asks whether the registration it holds is the one this RPE made.",
+          answers: "JSON: `{ rpe: \"confirmed\", user, relay }`, or 409 for a registration this RPE did not make",
           // The server has held the ask to the key in force and this to RPE's own user: what is left is that it names RPE's own relay socket and connection.
           raw: forOwner(async (body, owner) => {
             const asked = readConfirmAsk(body);
@@ -270,6 +291,9 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           method: "POST",
           path: START_PATH,
           access: "extension",
+          group: "service",
+          does: "A page's start-up facts, asked for by the extension: a page token for the user this RPE belongs to, its end, RPE's addresses a browser may try, and its build.",
+          answers: "JSON: the page's start-up facts (`StartFacts`, `src/adapter/lumiverse/pipe-wire.ts`)",
           raw: forOwner(async (_body, owner) => {
             try {
               const minted = await at.auth.mintPageToken(owner, "extension");
@@ -285,6 +309,9 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           method: "POST",
           path: LIVE_PATH,
           access: "extension",
+          group: "service",
+          does: "A page's follow of a chat's live events, carried by the extension to RPE's relay.",
+          answers: "JSON: an empty object, or 400 for a follow RPE does not read",
           raw: forOwner(async (body, _owner, p) => {
             const ask = readLiveAsk(body);
             if (ask === null) return json(400, { error: "That is not a follow RPE reads." });

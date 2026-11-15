@@ -1,5 +1,6 @@
-// The routes the Turn and World pages read (plan §14), in the shapes the pages' client is typed by
-// (`src/ui/api.ts`): the chats RPE played, then those its store holds that it has not (a migration's);
+// The routes the Turn and World pages read (plan §14), declared in the route form (`src/app/routes.ts`)
+// with the shapes of `./shapes.ts`, so that the pages' types and the API reference are written from them:
+// the chats RPE played, then those its store holds that it has not (a migration's);
 // a chat's turns newest first, each with what its runs spent
 // together; one turn with its intent record, what went to the chat, the lore of its prompt, its trace,
 // and each of its runs (the first, each continue, each Settle now) with its own trace and the request
@@ -8,15 +9,17 @@
 // the world's tree for a chat, at its head or at a turn, from the store's own view; a panel's request,
 // held as part of the player's next message; and the jobs (plan §13.5), of the user or of one chat, each
 // as RPH last kept it (how it stands, what started it, what it spent), and the cancel of one. Every
-// route is a page's: it answers only for the user this RPE belongs to.
+// route is a page's: it answers only for the user this RPE belongs to. A route that is handed a turn's
+// id answers a turn joined to another (a continue's held turn) as a fact: the turn it joined (`joined`).
 
-import type { JobsApi, JobView, ReplyError, Scope, TraceRecord, Usage } from "rp-harness/contract";
-import { rawRoute, route, RouteError } from "../app";
+import type { JobsApi, JobView, Scope, TraceRecord, Usage } from "rp-harness/contract";
+import { route, RouteError, shape } from "../app";
 import { isRecord } from "../shared/json";
-import type { NodeView, ValuesShown } from "../store";
+import { JoinedTurnError, type NodeView, type ValuesShown } from "../store";
 import { TURN_FILES } from "./folder";
 import type { Turns } from "./lane";
-import type { RunKind, RunRecord, RunState } from "./runs";
+import type { RunRecord } from "./runs";
+import { chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, panelRequestBody, panelRequestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 
 /** Fixed: turns a chat's list gives when the page names no limit, and the most it gives. */
 export const TURN_LIST = { limit: 50, most: 500 } as const;
@@ -24,49 +27,12 @@ export const TURN_LIST = { limit: 50, most: 500 } as const;
 /** What the world's tree shows when the page names nothing: the world, one level in, each level with its own values. */
 export const WORLD_VIEW = { at: "world", depth: 1, values: "own" } as const satisfies { at: string; depth: number; values: ValuesShown };
 
-const VALUES: readonly ValuesShown[] = ["none", "own", "all"];
-
 const NO_USAGE: Usage = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
-
-/** The route that reads one file of a turn's folder: the path below the folder follows `files/`. */
-const FILE_PATH = "/api/v1/chats/:chat/turns/:turn/files/*";
-/** How many of a request path's segments come before the file's own. */
-const BEFORE_FILE = FILE_PATH.split("/").length - 1;
 
 export interface TurnRoutesDeps {
   turns: Turns;
   /** A chat's name in Lumiverse; null when it cannot be read. */
   chatName(chat: string): Promise<string | null>;
-}
-
-/** A turn's run as the Turn page shows it: its first, a continue of it, or a Settle now run on it. */
-export interface RunView {
-  id: string;
-  /** Its place among the turn's runs, from 1. */
-  nth: number;
-  kind: RunKind;
-  status: RunState;
-  timings: { received: number; started: number | null; firstWord: number | null; released: number | null; ended: number | null };
-  usage: Usage;
-  reply: { text: string; progress: string[] };
-  error: ReplyError | null;
-  /** Its own trace records, numbered from 1 within the run; from the record numbered `from` when the page names one. */
-  trace: TraceRecord[];
-  /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call. */
-  requests: { agent: string; definition: string; call: number; file: string }[];
-}
-
-/** One entry of a turn's folder: its path below the folder, its size (a folder's, what its files hold), and whether it is a folder. */
-export interface TurnFileEntry {
-  name: string;
-  bytes: number;
-  folder: boolean;
-}
-
-function count(value: string | null, name: string, fallback: number, most: number): number {
-  if (value === null) return fallback;
-  if (!/^\d+$/.test(value) || Number(value) < 1) throw new RouteError(400, `${name} is a whole number from 1.`);
-  return Math.min(Number(value), most);
 }
 
 /** Strings among a value's items; none when it is no list. */
@@ -88,48 +54,53 @@ function spent(runs: readonly RunRecord[]): Usage {
   return sum;
 }
 
-/**
- * A turn's trace records split by the run that made them, in order: each run numbers its records from 1 with no gap, and a turn's
- * runs go one after another, so a record joins the newest run whose last record is the one numbered just before it.
- */
-function byRun(records: readonly TraceRecord[]): TraceRecord[][] {
-  const groups: TraceRecord[][] = [];
+/** A turn's trace records by the run that made them, by RPH's own id for each (`record.run`): the runs in the order each began, each run's records in order. */
+function byRun(records: readonly TraceRecord[]): Map<string, TraceRecord[]> {
+  const runs = new Map<string, TraceRecord[]>();
   for (const record of records) {
-    const into = record.seq === 1 ? undefined : groups.findLast((group) => group.at(-1)?.seq === record.seq - 1);
-    if (into !== undefined) into.push(record);
-    else groups.push([record]);
+    const of = runs.get(record.run);
+    if (of === undefined) runs.set(record.run, [record]);
+    else of.push(record);
   }
-  return groups;
+  return runs;
 }
 
-/** The path below a turn's folder a file route names, its segments decoded: none may be empty, `.` or `..`, or hold a slash. */
-function fileName(pathname: string): string {
-  const names = pathname
-    .split("/")
-    .slice(BEFORE_FILE)
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment);
-      } catch {
-        throw new RouteError(400, "A file's path is not written as a path.");
-      }
-    });
-  if (names.length === 0 || names.some((n) => n === "" || n === "." || n === ".." || n.includes("/") || n.includes("\\"))) throw new RouteError(400, "A file is named by its path inside the turn's folder, and no path leaves it.");
+/**
+ * Which of a turn's records a read gives, going on from where a page has read to: of the run `run` names (the turn's first when
+ * none), those numbered `from` on; and every record of each run that began after it. A run the turn's records do not hold is a 404.
+ */
+function readFrom(turn: string, runs: ReadonlyMap<string, readonly TraceRecord[]>, run: string | undefined, from: number): (record: TraceRecord) => boolean {
+  const order = [...runs.keys()];
+  const at = run === undefined ? 0 : order.indexOf(run);
+  if (at < 0) throw new RouteError(404, `Turn ${turn} has no run ${run}.`);
+  const asked = order[at];
+  const later = new Set(order.slice(at + 1));
+  return (record) => later.has(record.run) || (record.run === asked && record.seq >= from);
+}
+
+/** The path below a turn's folder a file route names, its segments as the server decoded them: none may be empty, `.` or `..`, or hold a backslash. */
+function fileName(rest: string): string {
+  const names = rest.split("/");
+  if (names.length === 0 || names.some((n) => n === "" || n === "." || n === ".." || n.includes("\\"))) throw new RouteError(400, "A file is named by its path inside the turn's folder, and no path leaves it.");
   return names.join("/");
-}
-
-/** A panel's request as the page sends it: what was pressed, and what it was pressed on, where it was pressed on something. */
-function panelAsk(value: unknown): { what: string; on: string | null } {
-  if (!isRecord(value) || typeof value.what !== "string" || value.what.trim() === "") throw new RouteError(400, "A request from a panel names what was pressed, as `what`.");
-  if (value.on !== undefined && value.on !== null && typeof value.on !== "string") throw new RouteError(400, "`on`, where given, is what was pressed on, as text.");
-  return { what: value.what, on: typeof value.on === "string" && value.on.trim() !== "" ? value.on : null };
 }
 
 export function turnRoutes(deps: TurnRoutesDeps) {
   const { turns } = deps;
 
+  /**
+   * A turn of the chat asked for by id that was joined to another (a continue's held turn) is answered as a fact, naming the turn
+   * it joined: thrown as the store throws it, for the server to answer in its one place. A turn the chat does not hold is for
+   * the route's own 404.
+   */
+  const notJoined = (user: string, chat: string, turn: string): void => {
+    const row = turns.store.user(user).turn(turn);
+    if (row !== null && row.chat === chat && row.joined !== null) throw new JoinedTurnError(turn, row.joined);
+  };
+
   /** The turn of the chat as kept (its latest run); a 404 for a turn the chat does not have. */
   const turnOf = (user: string, chat: string, turn: string): RunRecord => {
+    notJoined(user, chat, turn);
     const r = turns.runs.record(user, turn);
     if (r === null || r.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     return r;
@@ -169,21 +140,11 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     return isRecord(data) ? { activated: idsOf(data.lore), map: idsOf(data.loreMap) } : { activated: [], map: [] };
   };
 
-  /** Each of a turn's runs, oldest first, with its own trace from `from` on and the request files named in it. */
-  const runsOf = async (r: RunRecord, from: number): Promise<RunView[]> => {
-    const all = turns.runs.ofTurn(r.user, r.turn);
+  /** Each of a turn's runs, oldest first, with its own records as far as the read reaches and the request files named in all of them. */
+  const runsOf = async (r: RunRecord, runs: ReadonlyMap<string, readonly TraceRecord[]>, within: (record: TraceRecord) => boolean): Promise<RunView[]> => {
     const { folder } = await folderOf(r);
-    const records = await turns.trace.records({ user: r.user, chat: r.chat, session: r.session, turn: r.turn });
-    // A run's records begin once it has started: each group of them is the newest run's that had started by its first record.
-    const started = all.filter((run) => run.started !== null);
-    const traceOf = new Map<string, TraceRecord[]>();
-    for (const group of byRun(records)) {
-      const at = group[0]?.at ?? 0;
-      const run = started.findLast((s) => (s.started ?? 0) <= at) ?? started[0];
-      if (run !== undefined) traceOf.set(run.id, [...(traceOf.get(run.id) ?? []), ...group]);
-    }
-    return all.map((run, i) => {
-      const trace = traceOf.get(run.id) ?? [];
+    return turns.runs.ofTurn(r.user, r.turn).map((run, i) => {
+      const trace = run.traceRun === null ? [] : (runs.get(run.traceRun) ?? []);
       const requests = trace.flatMap((t) =>
         t.event.kind === "call_started" && t.event.request !== undefined
           ? [{ agent: t.agent.id, definition: t.agent.definition, call: t.event.call, file: folder !== null && t.event.request.startsWith(folder) ? t.event.request.slice(folder.length) : t.event.request }]
@@ -191,14 +152,15 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       );
       return {
         id: run.id,
+        run: run.traceRun,
         nth: i + 1,
         kind: run.kind,
         status: run.status,
-        timings: { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended },
+        timings: { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended, intent: run.intent, thinking: run.thinking },
         usage: run.usage ?? NO_USAGE,
         reply: { text: run.reply, progress: [...run.progress] },
         error: run.error,
-        trace: trace.filter((t) => t.seq >= from),
+        trace: trace.filter(within),
         requests,
       };
     });
@@ -214,7 +176,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       onPath,
       message: row?.message ?? null,
       status: r.status,
-      timings: { received: r.received, started: r.started, firstWord: r.firstWord, released: r.released, ended: r.ended },
+      timings: { received: r.received, started: r.started, firstWord: r.firstWord, released: r.released, ended: r.ended, intent: r.intent, thinking: r.thinking },
       usage: spent(turns.runs.ofTurn(user, r.turn)),
     };
   };
@@ -224,6 +186,9 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "GET",
       path: "/api/v1/chats",
       access: "page",
+      group: "chats",
+      does: "The chats RPE played, the most recently played first, then the chats its store holds that it has not played (a migration's), by name.",
+      reply: chatsReply,
       handle: async ({ user }) => {
         // The chats played on RPE, newest first; then each chat the store holds with no run yet (one a migration imported), by name.
         // Each says whether it was played, and whether the store has a world for it, so a page offers a world's panels only there.
@@ -247,10 +212,18 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "GET",
       path: "/api/v1/chats/:chat/turns",
       access: "page",
+      group: "turns",
+      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it.",
+      query: {
+        limit: shape.optional(shape.whole({ least: 1 }), `How many turns to give: ${TURN_LIST.limit} when left out, and at most ${TURN_LIST.most}.`),
+        before: shape.optional(shape.turnId(), "A turn's id: the turns older than it are given."),
+      },
+      reply: turnsReply,
+      joined: true,
       handle: ({ user, params, query }) => {
-        const limit = count(query.get("limit"), "limit", TURN_LIST.limit, TURN_LIST.most);
-        const before = query.get("before") ?? undefined;
-        const kept = turns.runs.ofChatKept(user, params.chat, limit + 1, before);
+        const limit = Math.min(query.limit ?? TURN_LIST.limit, TURN_LIST.most);
+        if (query.before !== undefined) notJoined(user, params.chat, query.before);
+        const kept = turns.runs.ofChatKept(user, params.chat, limit + 1, query.before);
         return { turns: kept.slice(0, limit).map((r) => summary(user, params.chat, r)), more: kept.length > limit };
       },
     }),
@@ -258,19 +231,28 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "GET",
       path: "/api/v1/chats/:chat/turns/:turn",
       access: "page",
+      group: "turns",
+      does: "One turn, read on from where a page has read to: its intent record, what went to the chat, the lore of its prompt, its runs' records from the record numbered `from` of the run named, and each of its runs.",
+      query: {
+        run: shape.optional(shape.text(), "One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole."),
+        from: shape.optional(shape.whole({ least: 1 }), "The named run's records are given from the one with this number; 1 when left out."),
+      },
+      reply: turnReply,
+      joined: true,
       handle: async ({ user, params, query }) => {
         const r = turnOf(user, params.chat, params.turn);
-        const from = count(query.get("from"), "from", 1, Number.MAX_SAFE_INTEGER);
-        const trace = (await turns.trace.records({ user, chat: r.chat, session: r.session, turn: r.turn })).filter((t) => t.seq >= from);
+        const records = await turns.trace.records({ user, chat: r.chat, session: r.session, turn: r.turn });
+        const runs = byRun(records);
+        const within = readFrom(r.turn, runs, query.run, query.from ?? 1);
         return {
           ...summary(user, params.chat, r),
           chat: r.chat,
           intent: turns.store.user(user).turn(r.turn)?.intent ?? null,
           reply: { text: r.reply, progress: [...r.progress] },
           error: r.error,
-          trace,
+          trace: records.filter(within),
           lore: await keptLore(r),
-          runs: await runsOf(r, from),
+          runs: await runsOf(r, runs, within),
         };
       },
     }),
@@ -278,6 +260,10 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "POST",
       path: "/api/v1/chats/:chat/turns/:turn/stop",
       access: "page",
+      group: "turns",
+      does: "Stops a turn going on now; says whether it was running.",
+      reply: stopReply,
+      joined: true,
       handle: async ({ user, params }) => {
         turnOf(user, params.chat, params.turn);
         return { stopped: await turns.lane.stop(user, params.turn) };
@@ -287,17 +273,24 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "POST",
       path: "/api/v1/chats/:chat/requests",
       access: "page",
-      body: panelAsk,
+      group: "chats",
+      does: "Holds a panel's request as part of the player's next message, for the turn that answers it.",
+      body: panelRequestBody,
+      reply: panelRequestReply,
       handle: async ({ user, params, body }) => {
         // A panel acts on a chat RPE plays: a request for one RPE does not hold is refused, and nothing of it is kept.
         if (turns.store.user(user).chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat}.`);
-        return { request: await turns.player.hold(user, params.chat, body, Date.now()) };
+        const ask = { what: body.what, on: typeof body.on === "string" && body.on.trim() !== "" ? body.on : null };
+        return { request: await turns.player.hold(user, params.chat, ask, Date.now()) };
       },
     }),
     route({
       method: "POST",
       path: "/api/v1/chats/:chat/settle",
       access: "page",
+      group: "turns",
+      does: "Settle now: a run on the chat's newest turn that writes nothing into the chat; answers the turn and the run begun, or a refusal in the turn-errors part's words.",
+      reply: settleReply,
       // The run begins and goes on after the answer, which names it; a refusal is told in the turn-errors part's words.
       handle: async ({ user, params }) => {
         const settling = await turns.lane.settle(user, params.chat);
@@ -309,6 +302,10 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "GET",
       path: "/api/v1/chats/:chat/turns/:turn/files",
       access: "page",
+      group: "turns",
+      does: "The whole of a turn's folder, every level down, each entry with its size; none for a turn that has no folder.",
+      reply: folderReply,
+      joined: true,
       handle: async ({ user, params }) => {
         const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
         if (folder === null) return { files: [] as TurnFileEntry[] };
@@ -321,34 +318,46 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         return { files };
       },
     }),
-    rawRoute({
+    route({
       method: "GET",
-      path: FILE_PATH,
+      path: "/api/v1/chats/:chat/turns/:turn/files/*",
       access: "page",
-      raw: async (request, { user, params }) => {
+      group: "turns",
+      does: "One file of a turn's folder, by its path below the folder, as text; no path leaves the folder.",
+      reply: fileReply,
+      joined: true,
+      handle: async ({ user, params }) => {
         const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
-        const name = fileName(new URL(request.url).pathname);
+        const name = fileName(params["*"]);
         const read = folder === null ? null : await turns.files.read(scope, `${folder}${name}`);
         if (folder === null || read?.status !== "read" || !read.path.startsWith(folder)) throw new RouteError(404, `Turn ${params.turn}'s folder has no file ${name}.`);
-        return Response.json({ name, text: read.text }, { headers: { "cache-control": "no-store" } });
+        return { name, text: read.text };
       },
     }),
     route({
       method: "GET",
       path: "/api/v1/chats/:chat/world",
       access: "page",
+      group: "state",
+      does: "The world's tree for a chat: the level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn.",
+      query: {
+        at: shape.optional(shape.text(), `The level to start at, by its ref; \`${WORLD_VIEW.at}\` when left out.`),
+        depth: shape.optional(shape.whole({ least: 0 }), `How many levels below it to give; ${WORLD_VIEW.depth} when left out.`),
+        values: shape.optional(valuesShown, `Which values each level carries: none, its own, or all; \`${WORLD_VIEW.values}\` when left out.`),
+        turn: shape.optional(shape.turnId(), "A turn's id: the world as it stood at that turn; left out, at the chat's head."),
+      },
+      reply: worldReply,
+      joined: true,
       handle: ({ user, params, query }) => {
         const store = turns.store.user(user);
         if (store.chat(params.chat) === null) throw new RouteError(404, `RPE has played no chat ${params.chat}.`);
-        const turn = query.get("turn");
+        const turn = query.turn ?? null;
         if (turn !== null && store.turn(turn)?.chat !== params.chat) throw new RouteError(404, `Chat ${params.chat} has no turn ${turn}.`);
-        const values = (query.get("values") ?? WORLD_VIEW.values) as ValuesShown;
-        if (!VALUES.includes(values)) throw new RouteError(400, `values is one of ${VALUES.join(", ")}.`);
-        const asked = query.get("depth");
-        if (asked !== null && !/^\d+$/.test(asked)) throw new RouteError(400, "depth is a whole number from 0.");
-        const depth = asked === null ? WORLD_VIEW.depth : Number(asked);
+        if (turn !== null) notJoined(user, params.chat, turn);
+        const values: ValuesShown = query.values ?? WORLD_VIEW.values;
+        const depth = query.depth ?? WORLD_VIEW.depth;
         const view = turn === null ? store.view(params.chat) : store.viewAt(turn);
-        const at = query.get("at") ?? WORLD_VIEW.at;
+        const at = query.at ?? WORLD_VIEW.at;
         const ref = view.resolve(at);
         if (ref === null) throw new RouteError(404, `Nothing in the world of chat ${params.chat} is called ${at}.`);
         // The level asked for, then each level below it to the depth asked for, each with the values asked for.
@@ -367,18 +376,27 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "GET",
       path: "/api/v1/jobs",
       access: "page",
+      group: "jobs",
+      does: "The user's jobs, of every chat, as RPH last kept each, the newest started first.",
+      reply: jobsReply,
       handle: ({ user }) => jobsOf(user),
     }),
     route({
       method: "GET",
       path: "/api/v1/chats/:chat/jobs",
       access: "page",
+      group: "jobs",
+      does: "The user's jobs of one chat, as RPH last kept each, the newest started first.",
+      reply: jobsReply,
       handle: ({ user, params }) => jobsOf(user, params.chat),
     }),
     route({
       method: "POST",
       path: "/api/v1/jobs/:job/cancel",
       access: "page",
+      group: "jobs",
+      does: "Cancels a job; one that has ended already is given as it ended.",
+      reply: jobCancelReply,
       // A job that has ended already is given as it ended: nothing of it is cancelled. Another user's job is no job of his.
       handle: async ({ user, params }) => {
         const jobs = jobsApi();

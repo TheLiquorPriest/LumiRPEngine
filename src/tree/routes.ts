@@ -14,23 +14,24 @@
 //
 // The page's shape asked for switching off at `/api/v1/files/*/off`; the route table takes a `*` only as
 // a path's last part, so it is `/api/v1/files-off/*`, and the difference is `/api/v1/files-diff/*`.
+// Each route is declared in the route form with the shapes of `./shapes.ts`.
 
 import type { Database } from "bun:sqlite";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Layer, LayerLevel, StackPart } from "rp-harness/contract";
-import { rawRoute, route, RouteError } from "../app";
+import { route, RouteError, shape } from "../app";
 import { readText, writeWhole } from "../app/disk";
 import { withTopLevelKey, yamlMapping } from "../app/yaml";
-import { isRecord } from "../shared/json";
 import { kindAt, nameList, OFF_KEY, type TreeFileEntry, treeListing, userMayWrite, writtenItem } from "./catalog";
 import type { TreeChats } from "./chats";
-import { defaultChanges, type DiffLine, lineDiff } from "./defaults";
+import { defaultChanges, lineDiff } from "./defaults";
 import { oneFileAtATime } from "./files";
 import { pruneChat } from "./retention";
 import { treeSettingsOf } from "./settings";
 import { noteFiles, treeStorage } from "./storage";
-import { SUGGESTION_STATES, type TreeSuggestion, type TreeSuggestions } from "./suggestions";
+import { chatQuery, fileRemovedReply, fileSwitchBody, fileWriteBody, fileWrittenReply, notesReply, pruneBody, pruneReply, stackReply, storageReply, suggestionAcceptBody, suggestionAcceptedReply, suggestionDismissedReply, suggestionState, suggestionsReply, treeDiffReply, treeFileReply, treeListingReply, type TreeFileDiff, type TreeFileText, type TreeSuggestionView } from "./shapes";
+import type { TreeSuggestion, TreeSuggestions } from "./suggestions";
 import { type ChatLocation, type Located, locate, treeLayers, viewPath } from "./view";
 
 export interface TreeRoutesDeps {
@@ -55,58 +56,11 @@ const DIFF_PATH = "/api/v1/files-diff/*";
 const OFF_LEVELS: readonly LayerLevel[] = ["global", "chat"];
 const LEVELS: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
 
-/** A file the Files page reads. */
-export interface TreeFileText {
-  path: string;
-  level: LayerLevel;
-  kind: TreeFileEntry["kind"];
-  bytes: number;
-  editable: boolean;
-  text: string;
-}
-
-/** A file's differences (plan §5.4 "Defaults"). */
-export interface TreeFileDiff {
-  path: string;
-  /** The shipped file of the same name; null when there is none, or the file is the shipped one. */
-  shipped: string | null;
-  /** From the shipped file to this one, line by line; none without a shipped file. */
-  lines: DiffLine[];
-  /** The update that changed the shipped file since this one was last written: when, and from the shipped file before it to the shipped file now. */
-  update: { at: number; lines: DiffLine[] } | null;
-}
-
-/** An agent's suggestion as the Files page shows it: with the difference from its file as it is now to the text proposed. */
-export interface TreeSuggestionView extends TreeSuggestion {
-  lines: DiffLine[];
-}
-
-/** The path in the chat's view that a file route names, its segments decoded: none may be empty, `.` or `..`, or hold a slash. */
-function viewPathOf(request: Request, route: string): string {
-  const before = route.split("/").length - 1;
-  const names = new URL(request.url).pathname
-    .split("/")
-    .slice(before)
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment);
-      } catch {
-        throw new RouteError(400, "A file's path is not written as a path.");
-      }
-    });
-  if (names.length === 0 || names.some((n) => n === "" || n === "." || n === ".." || n.includes("/") || n.includes("\\"))) throw new RouteError(400, "A file is named by its path in the tree, and no path leaves it.");
+/** The path in the chat's view that a file route names, its segments as the server decoded them: none may be empty, `.` or `..`, or hold a backslash. */
+function viewPathOf(rest: string): string {
+  const names = rest.split("/");
+  if (names.length === 0 || names.some((n) => n === "" || n === "." || n === ".." || n.includes("\\"))) throw new RouteError(400, "A file is named by its path in the tree, and no path leaves it.");
   return names.join("/");
-}
-
-async function bodyOf(request: Request): Promise<Record<string, unknown>> {
-  let body: unknown;
-  try {
-    body = JSON.parse(await request.text());
-  } catch {
-    throw new RouteError(400, "The body is not JSON.");
-  }
-  if (!isRecord(body)) throw new RouteError(400, "The body is one JSON object.");
-  return body;
 }
 
 function chatOf(value: unknown): string | null {
@@ -205,42 +159,43 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       method: "GET",
       path: "/api/v1/storage",
       access: "page",
+      group: "files",
+      does: "What the tree takes: each chat's folder by area, the user's own level, the shipped level, and RPE's database file.",
+      reply: storageReply,
       handle: ({ user }) => treeStorage(deps, user),
     }),
     route({
       method: "GET",
       path: "/api/v1/storage/notes",
       access: "page",
+      group: "files",
+      does: "A chat's largest notes, and those agents rewrote most.",
+      query: { chat: shape.field(shape.text({ blank: false }), "The chat whose notes are listed."), limit: shape.optional(shape.whole({ least: 0 }), "How many of each; the Storage page's setting when left out, and at most its largest.") },
+      reply: notesReply,
       handle: async ({ user, query }) => {
-        const chat = chatOf(query.get("chat"));
-        if (chat === null) throw new RouteError(400, "Name the chat whose notes are listed, as `chat`.");
-        const asked = query.get("limit");
-        if (asked !== null && !/^\d+$/.test(asked)) throw new RouteError(400, "limit is a whole number.");
-        const loc = locationOf(user, chat);
+        const loc = locationOf(user, query.chat);
         const { notesListed, notesMost } = await treeSettingsOf(loc);
-        return await noteFiles(deps, loc, user, chat, Math.min(asked === null ? notesListed : Number(asked), notesMost));
+        return await noteFiles(deps, loc, user, query.chat, Math.min(query.limit ?? notesListed, notesMost));
       },
     }),
     route({
       method: "GET",
       path: "/api/v1/files-stack",
       access: "page",
-      handle: async ({ user, query }) => {
-        const chat = chatOf(query.get("chat"));
-        const agent = query.get("agent");
-        if (chat === null || agent === null || agent === "") throw new RouteError(400, "Name the chat as `chat` and the agent's definition as `agent`.");
-        return { agent, parts: await deps.stack(user, chat, agent) };
-      },
+      group: "files",
+      does: "The exact stack an agent gets in a chat, part by part, with the file each comes from.",
+      query: { chat: shape.field(shape.text({ blank: false }), "The chat the agent runs in."), agent: shape.field(shape.text({ blank: false }), "The agent's definition.") },
+      reply: stackReply,
+      handle: async ({ user, query }) => ({ agent: query.agent, parts: await deps.stack(user, query.chat, query.agent) }),
     }),
     route({
       method: "POST",
       path: "/api/v1/files-prune",
       access: "page",
-      body: (value: unknown): { chat: string } => {
-        const chat = isRecord(value) ? chatOf(value.chat) : null;
-        if (chat === null) throw new RouteError(400, "Name the chat whose turn folders are pruned, as `chat`.");
-        return { chat };
-      },
+      group: "files",
+      does: "Prunes a chat's old turn folders as the chat's retention setting says, never while a turn of it is going on; says what it took away.",
+      body: pruneBody,
+      reply: pruneReply,
       handle: async ({ user, body }) => {
         if (deps.turning(user, body.chat)) throw new RouteError(409, "A turn of this chat is going on: prune once it is over.");
         return { pruned: await pruneChat(deps, user, body.chat) };
@@ -250,10 +205,12 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       method: "GET",
       path: "/api/v1/suggestions",
       access: "page",
+      group: "files",
+      does: "A chat's suggestions from the agents (every chat's when none is named), newest first, each with what it would change.",
+      query: { chat: chatQuery, state: shape.optional(suggestionState, "Only the suggestions in this state.") },
+      reply: suggestionsReply,
       handle: async ({ user, query }) => {
-        const state = query.get("state");
-        if (state !== null && !SUGGESTION_STATES.some((s) => s === state)) throw new RouteError(400, `state is one of ${SUGGESTION_STATES.join(", ")}.`);
-        const listed = deps.suggestions.list(user, chatOf(query.get("chat")), SUGGESTION_STATES.find((s) => s === state));
+        const listed = deps.suggestions.list(user, chatOf(query.chat), query.state);
         return { suggestions: await Promise.all(listed.map((s) => shownSuggestion(user, s))) };
       },
     }),
@@ -261,11 +218,10 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       method: "POST",
       path: "/api/v1/suggestions/:id/accept",
       access: "page",
-      body: (value: unknown): { text: string | null; level: unknown } => {
-        if (!isRecord(value)) throw new RouteError(400, "The body is one JSON object: `{}` to accept the text as proposed.");
-        if (value.text !== undefined && value.text !== null && typeof value.text !== "string") throw new RouteError(400, "`text`, where given, is the file's whole text as you accept it.");
-        return { text: typeof value.text === "string" ? value.text : null, level: value.level };
-      },
+      group: "files",
+      does: "Accepts a suggestion as it is or edited, writing it as the user at a level; says the suggestion as it now stands and the file.",
+      body: suggestionAcceptBody,
+      reply: suggestionAcceptedReply,
       handle: async ({ user, params, body }) => {
         const s = openSuggestion(user, params.id);
         const loc = locationOf(user, s.chat);
@@ -287,6 +243,9 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       method: "POST",
       path: "/api/v1/suggestions/:id/dismiss",
       access: "page",
+      group: "files",
+      does: "Dismisses a suggestion; says the suggestion as it now stands.",
+      reply: suggestionDismissedReply,
       handle: async ({ user, params }) => {
         const s = openSuggestion(user, params.id);
         if (!(await deps.suggestions.decide(user, s.id, "dismissed"))) throw new RouteError(409, `Suggestion ${s.id} was decided already.`);
@@ -297,15 +256,23 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       method: "GET",
       path: "/api/v1/files",
       access: "page",
-      handle: async ({ user, query }) => ({ files: await listingOf(locationOf(user, chatOf(query.get("chat")))) }),
+      group: "files",
+      does: "Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own.",
+      query: { chat: chatQuery },
+      reply: treeListingReply,
+      handle: async ({ user, query }) => ({ files: await listingOf(locationOf(user, chatOf(query.chat))) }),
     }),
-    rawRoute({
+    route({
       method: "GET",
       path: DIFF_PATH,
       access: "page",
-      raw: async (request, { user }) => {
-        const loc = locationOf(user, chatOf(new URL(request.url).searchParams.get("chat")));
-        const at = await found(loc, viewPathOf(request, DIFF_PATH));
+      group: "files",
+      does: "A file's difference from the shipped file of its name, and what the update that changed the shipped file since it was written changed of it.",
+      query: { chat: chatQuery },
+      reply: treeDiffReply,
+      handle: async ({ user, params, query }) => {
+        const loc = locationOf(user, chatOf(query.chat));
+        const at = await found(loc, viewPathOf(params["*"]));
         const entry = await entryOf(loc, at.path);
         const text = entry === null ? null : await readText(at.disk);
         if (entry === null || text === null) throw new RouteError(404, `The tree has no file ${at.path}.`);
@@ -318,60 +285,72 @@ export function treeRoutes(deps: TreeRoutesDeps) {
           lines: shipped === null ? [] : lineDiff(shipped, text, diffCells),
           update: change === undefined || shipped === null ? null : { at: change.at, lines: lineDiff(change.before, shipped, diffCells) },
         };
-        return Response.json(diff, { headers: { "cache-control": "no-store" } });
+        return diff;
       },
     }),
-    rawRoute({
+    route({
       method: "GET",
       path: FILE_PATH,
       access: "page",
-      raw: async (request, { user }) => {
-        const loc = locationOf(user, chatOf(new URL(request.url).searchParams.get("chat")));
-        const at = await found(loc, viewPathOf(request, FILE_PATH));
+      group: "files",
+      does: "One file of the tree, as text.",
+      query: { chat: chatQuery },
+      reply: treeFileReply,
+      handle: async ({ user, params, query }) => {
+        const loc = locationOf(user, chatOf(query.chat));
+        const at = await found(loc, viewPathOf(params["*"]));
         const text = at.is === "file" ? await readText(at.disk) : null;
         if (text === null) throw new RouteError(404, `The tree has no file ${at.path}.`);
         const file: TreeFileText = { path: at.path, level: at.level, kind: at.kind, bytes: Buffer.byteLength(text, "utf8"), editable: userMayWrite(at.level, at.rest, at.kind), text };
-        return Response.json(file, { headers: { "cache-control": "no-store" } });
+        return file;
       },
     }),
-    rawRoute({
+    route({
       method: "PUT",
       path: FILE_PATH,
       access: "page",
-      raw: async (request, { user }) => {
-        const body = await bodyOf(request);
-        if (typeof body.text !== "string") throw new RouteError(400, "`text` is the file's whole text.");
+      group: "files",
+      does: "Writes a file's whole text as the user at a level (for a file of another level, the user's own file of its name there); says the file as the listing now shows it.",
+      body: fileWriteBody,
+      reply: fileWrittenReply,
+      handle: async ({ user, params, body }) => {
         const chat = chatOf(body.chat);
         const loc = locationOf(user, chat);
-        const written = await writeAsUser(loc, viewPathOf(request, FILE_PATH), levelOf(body.level, LEVELS, chat), body.text);
-        return Response.json({ file: await entryOf(loc, written) });
+        const written = await writeAsUser(loc, viewPathOf(params["*"]), levelOf(body.level, LEVELS, chat), body.text);
+        return { file: await entryOf(loc, written) };
       },
     }),
-    rawRoute({
+    route({
       method: "DELETE",
       path: FILE_PATH,
       access: "page",
-      raw: async (request, { user }) => {
-        const loc = locationOf(user, chatOf(new URL(request.url).searchParams.get("chat")));
-        const at = await found(loc, viewPathOf(request, FILE_PATH));
+      group: "files",
+      does: "Removes a file of the user's; for one in place of a default, that is resetting to the default.",
+      query: { chat: chatQuery },
+      reply: fileRemovedReply,
+      handle: async ({ user, params, query }) => {
+        const loc = locationOf(user, chatOf(query.chat));
+        const at = await found(loc, viewPathOf(params["*"]));
         if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
         if (!userMayWrite(at.level, at.rest, at.kind)) throw new RouteError(403, at.level === "shipped" ? "A shipped file is not removed: switch it off instead." : `${at.path} is not a file you remove: RPE makes it again.`);
         await oneFileAtATime(at.disk, () => rm(at.disk, { force: true }));
-        return Response.json({ removed: at.path });
+        return { removed: at.path };
       },
     }),
-    rawRoute({
+    route({
       method: "PUT",
       path: OFF_PATH,
       access: "page",
-      raw: async (request, { user }) => {
-        const body = await bodyOf(request);
-        if (typeof body.off !== "boolean") throw new RouteError(400, "`off` is true to switch the file off, false to switch it on again.");
+      group: "files",
+      does: "Switches a file's name off or on again in the `off:` list of a level's config, which is what \"Delete\" on a shipped file does; says the file as the listing now shows it.",
+      body: fileSwitchBody,
+      reply: fileWrittenReply,
+      handle: async ({ user, params, body }) => {
         const off = body.off;
         const chat = chatOf(body.chat);
         const level = levelOf(body.level, OFF_LEVELS, chat);
         const loc = locationOf(user, chat);
-        const path = viewPathOf(request, OFF_PATH);
+        const path = viewPathOf(params["*"]);
         const listed = await entryOf(loc, (await found(loc, path)).path);
         if (listed === null) throw new RouteError(404, `The tree has no file ${path}.`);
         if (listed.item === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
@@ -395,7 +374,7 @@ export function treeRoutes(deps: TreeRoutesDeps) {
           await mkdir(dirname(config.disk), { recursive: true });
           await writeWhole(config.disk, withTopLevelKey(text, OFF_KEY, next, config.path));
         });
-        return Response.json({ file: await entryOf(loc, listed.path) });
+        return { file: await entryOf(loc, listed.path) };
       },
     }),
   ] as const;

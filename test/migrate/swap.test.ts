@@ -573,7 +573,7 @@ describe("the swap, and going back", () => {
       const body: unknown = await request.json();
       return Response.json({ asked: isRecord(body) ? (body.model ?? null) : null });
     };
-    const echo = { name: "echo", mount: (app: App) => app.routes.add("echo", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: asked })]) };
+    const echo = { name: "echo", mount: (app: App) => app.routes.add("echo", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", group: "provider", does: "A test's provider endpoint.", answers: "JSON", raw: asked })]) };
     const app = await openApp({ paths, config: await loadConfig(paths, {}), version: "test", areas: [echo], ui: null, log: lineLog(() => {}) });
     try {
       const running = await app.start();

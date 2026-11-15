@@ -37,7 +37,7 @@ function passing(minutes: number, intent?: string): Answer {
 
 /** The Turn page's Settle now: its status, and its answer. */
 async function settle(b: TurnBed): Promise<{ status: number; body: { turn?: string; run?: string; error?: string } }> {
-  return await b.page("POST", `/api/v1/chats/${CHAT}/settle`, {});
+  return await b.page("POST", `/api/v1/chats/${CHAT}/settle`);
 }
 
 /** What the Author was sent in the model's `n`th request, as one text. */

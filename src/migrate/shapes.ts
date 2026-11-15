@@ -1,0 +1,133 @@
+// What the Migration page's route answers (plan §14, §15.5, §15.6), declared field by field. The page reads
+// each chat's check, the backup, what waits on the user, the steps of going back, the report as it was
+// printed and, of the report, what became of each world in Build. The rest of the report, what was carried
+// of each chat and what today's build put in Lumiverse are documents the migration stored as JSON and
+// carries as they are: their fields are named here, each as JSON, and the page shows them as the report's
+// printed text. The parts the page reads are held to the migration's own types.
+
+import { type Exactly, type Holds, type Infer, shape } from "../app";
+import type { WorldsSeeded } from "../build/seed";
+import type { MigrationPage, PageChat, Waiting } from "./page";
+import type { MigrationReport } from "./report";
+
+const T = shape.text();
+const N = shape.number();
+const field = shape.field;
+const opt = shape.optional;
+const nullable = shape.nullable;
+const json = shape.json();
+
+const outcome = shape.named(
+  "ChatImportOutcome",
+  "What came of a chat the last run looked at, in the run's own words.",
+  shape.oneOf(
+    "imported",
+    "replaced",
+    "played on RPE: left alone",
+    "a chat made from it was played on RPE: left alone",
+    "gone from Lumiverse: removed",
+    "gone from Lumiverse, played on RPE: left alone",
+    "gone from Lumiverse, a chat made from it was played on RPE: left alone",
+    "not imported",
+  ),
+);
+
+const difference = shape.named(
+  "FoldDifference",
+  "Where RPE's fold of a chat differs from today's: at a swipe (its message and number) or at the chat's head; the values that differ, by path; and whether today's state there is kept as the turn's start.",
+  shape.object({ at: shape.union(shape.object({ message: T, swipe: N }), shape.literal("head")), turn: shape.turnId(), values: shape.list(T), kept: shape.yesNo() }),
+);
+
+const chatRow = shape.named(
+  "MigrationChatRow",
+  "One chat as the last run left it: what came of it and why it was not imported; the turns imported of its own; the messages it shares with the chat it was made from; its check against today's fold (matched at the head and at how many swipes, where it differed, and where its swipes were placed); and what the run carried of it.",
+  shape.object({
+    chat: T,
+    outcome,
+    why: nullable(T),
+    turns: N,
+    shares: nullable(shape.object({ chat: T, messages: N })),
+    check: shape.object({
+      matched: shape.object({ head: shape.yesNo(), swipes: N, of: N }),
+      differences: shape.list(difference),
+      placed: shape.object({ own: N, shown: N, lost: N, head: N }),
+    }),
+    carried: field(nullable(json), "What the run that imported it carried of it, over its whole path (a document the migration kept as JSON); null for a chat no run of this build imported."),
+  }),
+);
+
+const waiting = shape.named(
+  "WaitingOnUser",
+  "One thing the last run left waiting on the user, by what it is.",
+  shape.union(
+    shape.object({ kind: shape.literal("guidance"), path: T }),
+    shape.object({ kind: shape.literal("connection"), setting: T, connection: T }),
+    shape.object({ kind: shape.literal("chat"), chat: T, questions: N, staged: N, chips: N, reviewCards: N, rollback: shape.yesNo() }),
+    shape.object({ kind: shape.literal("own"), agents: N, skills: N, texts: N }),
+    shape.object({ kind: shape.literal("filing"), chat: T, characters: N, notes: shape.yesNo() }),
+    shape.object({ kind: shape.literal("world"), world: T, name: nullable(T) }),
+  ),
+);
+
+const worldsInBuild = shape.named(
+  "WorldsInBuildShown",
+  "What a run did with each world it carried into Build's own copy, by the world's id: copied in, replaced (Build's copy was still a run's), unchanged, or kept as RPE has it (changed or made there); of those kept, which are newer on today's side too; and each world's name as today's index gives it. The last two are absent from a report kept before runs told them.",
+  shape.object({ copied: shape.list(T), replaced: shape.list(T), unchanged: shape.list(T), kept: shape.list(T), newer: opt(shape.list(T)), names: opt(shape.record(T)) }),
+);
+
+const report = shape.named(
+  "MigrationReportShown",
+  "The last real run's report as the run printed it, whole (counts and checksums, never content): the page reads of it what became of each world in Build; every other field is the migration's own document, carried as JSON.",
+  shape.object({
+    format: json,
+    at: json,
+    mode: json,
+    layout: json,
+    database: json,
+    rows: json,
+    items: json,
+    notClassified: json,
+    chats: json,
+    unreadable: json,
+    unsent: json,
+    runtime: opt(json),
+    standIn: json,
+    lumiverse: json,
+    disk: json,
+    underWay: json,
+    imports: json,
+    backup: json,
+    landed: json,
+    carried: json,
+    worldsInStore: json,
+    worldsInBuild: opt(worldsInBuild),
+    changes: json,
+    refusals: json,
+  }),
+);
+
+export const migrationReply = shape.named(
+  "MigrationReply",
+  "The Migration page's data, in one read: the last real run's report and its text as the run printed it; each chat's check, what came of it and what was carried of it; the backup with its checksum, and whether it is still there; what is waiting on the user; the steps of going back with the permissions the previous build asks for; and what today's build put in Lumiverse.",
+  shape.object({
+    report: field(nullable(report), "Null before any run."),
+    text: nullable(T),
+    chats: shape.list(chatRow),
+    backup: field(nullable(shape.object({ path: T, bytes: N, sha256: T, present: field(shape.yesNo(), "Whether a file of that size is still there.") })), "The backup the last run took before it wrote anything."),
+    waiting: field(shape.list(waiting), "In the order the plan lists it: GUIDANCE.md first."),
+    goingBack: shape.object({ steps: shape.list(T), permissions: shape.list(T) }),
+    lumiverse: field(nullable(json), "What today's build put in Lumiverse, left as it is until the user says they will not go back."),
+  }),
+);
+export type MigrationShown = Infer<typeof migrationReply>;
+
+// The parts the page reads, held to the migration's own types.
+type WorldsMirrored = Holds<Exactly<Infer<typeof worldsInBuild>, WorldsSeeded>>;
+type OutcomeMirrored = Holds<Exactly<Infer<typeof outcome>, PageChat["outcome"]>>;
+type WaitingMirrored = Holds<Exactly<Infer<typeof waiting>, Waiting>>;
+type BackupMirrored = Holds<Exactly<NonNullable<MigrationShown["backup"]>, NonNullable<MigrationPage["backup"]>>>;
+type GoingMirrored = Holds<Exactly<MigrationShown["goingBack"], MigrationPage["goingBack"]>>;
+type DifferenceMirrored = Holds<Exactly<Infer<typeof difference>, PageChat["check"]["differences"][number]>>;
+type ReportFieldsMirrored = Holds<Exactly<keyof NonNullable<MigrationShown["report"]>, keyof MigrationReport>>;
+/** The checks above hold, and are read by no one. */
+export type Mirrors = [WorldsMirrored, OutcomeMirrored, WaitingMirrored, BackupMirrored, GoingMirrored, DifferenceMirrored, ReportFieldsMirrored];

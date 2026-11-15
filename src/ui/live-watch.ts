@@ -12,7 +12,7 @@
 import type { LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
 import type { TurnDetail } from "./api";
-import type { RpeClient } from "./client";
+import { replyOf, type RpeClient } from "./client";
 import { applyLive, applyRead, EMPTY_LIVE, holeIn, lastRunOf, type LiveModel, type RunNode } from "./live-model";
 import type { Timers } from "./roads";
 import { errorWords } from "./words";
@@ -145,7 +145,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
     reading.add(turn);
     let got: TurnDetail | null = null;
     try {
-      got = await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn }, { query: at });
+      got = replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn }, { query: at }));
     } catch (error) {
       problem = errorWords(error);
     } finally {
@@ -177,7 +177,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
 
   async function readLatest(): Promise<void> {
     try {
-      const list = await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: 1 } });
+      const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: 1 } }));
       const latest = list.turns[0];
       if (latest !== undefined && alive) await read(latest.id, nextOf(latest.id));
     } catch (error) {

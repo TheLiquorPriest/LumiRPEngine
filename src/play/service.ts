@@ -52,7 +52,7 @@ import { type ErrorCode, type ErrorMessage, FIX_THINGS_MAX, type FrontendToBacke
 import type { StateView } from "../shared/state-view";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import type { ParamDef, WorldDoc } from "../shared/world";
-import { type ChangeInput, type ChangeRow, readPart, type Report, type Store } from "../store";
+import { type ChangeInput, type ChangeRow, JoinedTurnError, readPart, type Report, type Store } from "../store";
 import { RunEnds, stateChanged } from "./live";
 import { chatView, headTurn } from "./view";
 
@@ -195,7 +195,10 @@ export class PlayService {
 
   /** The chat's state view at its head, or at `turn`, one of its turns. */
   state(user: string, chat: string, turn: string | null): StateView {
-    if (turn !== null && this.deps.store.user(user).turn(turn)?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
+    const row = turn === null ? null : this.deps.store.user(user).turn(turn);
+    if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
+    // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
+    if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
     return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat) });
@@ -382,6 +385,9 @@ export class PlayService {
     const s = this.deps.store.user(user);
     return this.deps.writes.run(() => {
       const [, turn = "", tap = ""] = UNDO_ID.exec(chip) ?? [];
+      // A tap of a turn joined to another is answered as a fact, naming the turn it joined.
+      const held = s.turn(turn);
+      if (held?.chat === chat && held.joined !== null) throw new JoinedTurnError(turn, held.joined);
       const all = s.turn(turn)?.chat === chat ? s.changes(turn).filter((c) => isRecord(c.cite) && c.cite.tap === tap) : [];
       const mine = all.filter((c) => c.source === PLAYER);
       if (mine.length === 0) throw new Refused("not_found", { line: "no_undo" });
@@ -414,6 +420,8 @@ export class PlayService {
   }
 
   private async failed(r: FrontendToBackend, error: unknown): Promise<ErrorMessage> {
+    // A turn joined to another is a fact the server answers in its one place, not a failure of this page's request.
+    if (error instanceof JoinedTurnError) throw error;
     const fail = (code: ErrorCode, message: string): ErrorMessage => ({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: r.reqId, code, message });
     if (error instanceof Refused) return fail(error.code, "words" in error.why ? error.why.words : await this.words(error.why.line, error.why.fields, error.why.codes));
     const message = error instanceof Error ? error.message : String(error);

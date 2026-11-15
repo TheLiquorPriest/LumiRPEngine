@@ -4,24 +4,13 @@
 // `unavailable`, in the client's own words. Once closed, the transport hands nothing on.
 
 import { describe, expect, test } from "bun:test";
-import type { RouteBody, RouteReply } from "../../../src/app";
-import type { buildRoutes } from "../../../src/build";
 import { ProtocolClient } from "../../../src/frontend/protocol-client";
-import type { Routes } from "../../../src/ui/api";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
 import { buildTransport } from "../../../src/ui/kept/transport";
 import { routeClient } from "./bed";
 
-/** True when each of A and B is assignable to the other. */
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type BuildRoute = ReturnType<typeof buildRoutes>[number];
-
-// What the pages' route map expects of Build's route, against the route itself: each line stops compiling when the two part.
-const shapes: [Same<Routes["POST /api/v1/build"]["reply"], RouteReply<BuildRoute>>, Same<Routes["POST /api/v1/build"]["body"], RouteBody<BuildRoute>>] = [true, true];
-
 describe("Build's messages, through the page's client to RPE's Build route", () => {
   test("a message reaches the route's path as it was sent, and its answer and then its pushes come back in that order", async () => {
-    expect(shapes).toEqual([true, true]);
     const { client, asked, route } = routeClient();
     const transport = buildTransport(client);
     const heard: unknown[] = [];

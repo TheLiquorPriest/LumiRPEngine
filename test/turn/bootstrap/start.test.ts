@@ -94,7 +94,7 @@ test("a start is refused in words for a chat Lumiverse does not hold, and where 
   beds.push(boot);
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: "chat-nowhere" }, {})).toEqual({ status: 404, body: { error: "No bootstrap job was started: There is no chat chat-nowhere for this RPE's Lumiverse user." } });
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {})).toEqual({ status: 409, body: { error: `No bootstrap job was started: the skill bootstrap is switched off or missing in the files of chat ${CHAT}.` } });
-  expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, { relive: 3 })).toEqual({ status: 400, body: { error: "relive, when given, is one of the words the bootstrap skill offers for reliving the past, as text." } });
+  expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, { relive: 3 })).toEqual({ status: 400, body: { error: expect.stringContaining("does not take this body") } });
   expect(await boot.b.turns.harness.jobs?.list({ user: USER })).toEqual([]);
 });
 

@@ -4,8 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, Area, RunningServer } from "../../src/app";
-import { route, RouteError, WriteWaited } from "../../src/app";
-import { isRecord } from "../../src/shared/json";
+import { route, shape, WriteWaited } from "../../src/app";
 import { bearer, type Bed, makeBed, makeKey } from "./helpers";
 
 /** A table to write to, and a page route that writes one row through the queue. */
@@ -18,10 +17,10 @@ const probe: Area = {
         method: "POST",
         path: "/api/v1/probe/rows",
         access: "page",
-        body: (value: unknown) => {
-          if (!isRecord(value) || typeof value.n !== "number") throw new RouteError(400, "Send {n}.");
-          return { n: value.n };
-        },
+        group: "service",
+        does: "Writes one row through the queue.",
+        body: shape.object({ n: shape.number() }),
+        reply: shape.object({ id: shape.number() }),
         handle: async ({ body }) => ({ id: await app.writes.run((db) => Number(db.run("INSERT INTO probe (n, by) VALUES (?, 'page')", [body.n]).lastInsertRowid)) }),
       }),
     ]);

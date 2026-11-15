@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { TurnSummary, ValueLine, ValueMark, ValuesShown, ValueSource, WorldAnswer, WorldFact, WorldNode, WorldNodeKind } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, PageHeader, Row, Section } from "../atoms";
-import type { RpeClient } from "../client";
+import { replyOf, type RpeClient } from "../client";
 import { TURN_KIND_WORDS } from "../trace-view";
 import { counted, errorWords, when } from "../words";
 import { readTurns } from "./turns";
@@ -31,7 +31,7 @@ export type WorldResult = { answer: WorldAnswer; problem: null } | { answer: nul
 export function readWorld(client: Pick<RpeClient, "call">, chat: string, query: WorldQuery, onResult: (result: WorldResult) => void): () => void {
   let alive = true;
   const asked = { at: query.at, depth: query.depth, values: query.values, ...(query.turn === null ? {} : { turn: query.turn }) };
-  client.call("GET /api/v1/chats/:chat/world", { chat }, { query: asked }).then(
+  client.call("GET /api/v1/chats/:chat/world", { chat }, { query: asked }).then(replyOf).then(
     (answer) => {
       if (alive) onResult({ answer, problem: null });
     },

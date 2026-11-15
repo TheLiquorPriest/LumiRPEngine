@@ -16,8 +16,8 @@ import { AuthRefused, bearerOf, NO_OWNER } from "./auth";
 import type { AppConfig } from "./config";
 import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
-import type { AnyShape, DeclaredRoute, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
-import { isDeclared, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
+import type { AnyShape, DeclaredRoute, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
+import { JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
 
 export interface ServerParts {
   config: AppConfig;
@@ -164,6 +164,16 @@ const ACCESS_WORDS: Readonly<Record<"page" | "provider" | "extension", string>> 
 
 /** What a paged route takes in its query beside what it declares: the size of the page it asks for, and the cursor a page before gave. */
 const PAGE_QUERY: QueryFields = { limit: shape.optional(shape.whole({ least: 1 })), cursor: shape.optional(shape.text({ blank: false })) };
+
+/**
+ * The two turns a refusal for a joined turn names: the turn asked for and the turn it joined. The store throws it as a
+ * `JoinedTurnError` (`src/store/types.ts`), which this server, importing no area, knows by its name and its two fields.
+ */
+function joinedOf(error: unknown): JoinedAnswer["joined"] | null {
+  if (!(error instanceof Error) || error.name !== "JoinedTurnError") return null;
+  const { turn, joined } = error as Error & { turn?: unknown; joined?: unknown };
+  return typeof turn === "string" && typeof joined === "string" ? { turn, joined } : null;
+}
 
 /**
  * A cursor's seal: the route, the list it was given for (the route's params) and the place, signed with a
@@ -323,30 +333,14 @@ export function startServer(parts: ServerParts): RunningServer {
         const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket });
         return response === undefined ? undefined : withCors(response, origin);
       }
-      if (isDeclared(route)) {
-        if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
-        const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal };
-        return withCors(await answerDeclared(route, asked, cursorKey), origin);
-      }
-      let body: unknown;
-      // A route not yet in the form takes a body only through a reader, which the table allows on no DELETE.
-      if (route.body === undefined && request.method === "DELETE" && bytes !== null && bytes.length > 0) return withCors(refusal(path, 400, `DELETE ${route.path} takes no body.`), origin);
-      if (route.body !== undefined) {
-        if (bytes === null || bytes.length === 0) return withCors(refusal(path, 400, `${request.method} ${route.path} takes a JSON body.`), origin);
-        let value: unknown;
-        try {
-          value = JSON.parse(new TextDecoder().decode(bytes));
-        } catch {
-          return withCors(refusal(path, 400, "The request's body is not JSON."), origin);
-        }
-        body = route.body(value);
-      }
-      const reply: unknown = await route.handle({ params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, query: url.searchParams, body, user, request, signal: request.signal });
-      if (reply instanceof Response) return withCors(reply, origin);
-      const response = reply === undefined ? new Response(null, { status: 204 }) : Response.json(reply, { headers: { "cache-control": "no-store" } });
-      return withCors(response, origin);
+      if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
+      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal };
+      return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
       if (error instanceof RouteError || error instanceof AuthRefused) return withCors(refusal(path, error.status, error.message), origin);
+      // A turn joined to another is a fact about the turn: the one answer for it, whichever route and whichever area's code threw it, logging no failure.
+      const joined = joinedOf(error);
+      if (joined !== null) return withCors(Response.json({ joined } satisfies JoinedAnswer, { status: JOINED_STATUS, headers: { "cache-control": "no-store" } }), origin);
       log.error(`${request.method} ${route.path} failed`, { area: placed.area, error: error instanceof Error ? error.message : String(error) });
       return withCors(refusal(path, 500, "RPE could not answer this request; its log says why."), origin);
     }

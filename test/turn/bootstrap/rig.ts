@@ -4,9 +4,10 @@
 // the turn lane's attachments answering the bootstrap's names through it, the hook its report asks of the
 // turn lane. Every name is invented.
 
-import { RouteError, type JsonRoute } from "../../../src/app";
+import { RouteError } from "../../../src/app";
 import { BootstrapJobs, bootstrapRoutes } from "../../../src/turn/bootstrap";
 import type { RecordedRequest } from "rp-harness/testing/rig";
+import { callRoute } from "../../app/call";
 import { openTurnBed, type TurnBed, type TurnBedOptions, USER } from "../bed";
 
 export interface BootBed {
@@ -19,7 +20,7 @@ export interface BootBed {
 export async function openBootBed(options: TurnBedOptions & { carried?: readonly string[] }): Promise<BootBed> {
   const b = await openTurnBed(options);
   const jobs = new BootstrapJobs({ turns: () => b.turns });
-  const routes = bootstrapRoutes({ jobs, carried: async () => options.carried ?? [] }) as unknown as JsonRoute<string, "page", unknown, unknown>[];
+  const routes = bootstrapRoutes({ jobs, carried: async () => options.carried ?? [] });
   // The turn lane's hook: a name an agent is given that is none of RPH's own is the bootstrap's to give, as well as the lane's.
   const events = b.turns.env.events;
   const given = events.attachments.bind(events);
@@ -36,8 +37,7 @@ export async function openBootBed(options: TurnBedOptions & { carried?: readonly
     const r = routes.find((x) => x.method === method && x.path === path);
     if (r === undefined) throw new Error(`the bootstrap has no route ${method} ${path}`);
     try {
-      const read = r.body === undefined ? undefined : r.body(body);
-      const reply = await r.handle({ params, query: new URLSearchParams(), body: read, user: USER, request: new Request("http://rpe.invalid/"), signal: new AbortController().signal });
+      const reply = await callRoute(r, { params, body, user: USER });
       return { status: 200, body: reply as T };
     } catch (error) {
       if (error instanceof RouteError) return { status: error.status, body: { error: error.message } as T };

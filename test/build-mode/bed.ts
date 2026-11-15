@@ -17,6 +17,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { migrateStore, openStore, readPart, type Store, storedWorlds } from "../../src/store";
+import { callRoute } from "../app/call";
 
 export const USER = "user-ash";
 export const OTHER = "user-birch";
@@ -104,9 +105,7 @@ export function makePage(bed: Bed, service = new BuildService({ db: bed.db, writ
   return {
     service,
     async send(message, user = USER) {
-      if (post.body === undefined) throw new Error("Build's route reads no body");
-      const body = post.body({ lre: 1, reqId: `req-${++asked}`, ...message });
-      return post.handle({ params: {}, query: new URLSearchParams(), body, user, request: new Request("http://rpe.test/api/v1/build", { method: "POST" }), signal: new AbortController().signal });
+      return await callRoute(post, { body: { lre: 1, reqId: `req-${++asked}`, ...message }, user });
     },
   };
 }

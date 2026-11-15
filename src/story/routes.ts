@@ -17,14 +17,14 @@
 // too. The words of every refusal are lines of `.prompts/story-answers.md`, as the chat has it.
 
 import type { JsonObject } from "rp-harness/contract";
-import { route, RouteError } from "../app";
+import { route, RouteError, shape } from "../app";
 import type { Writes } from "../iface/kit";
-import { type Fields, type GuidanceFiles, textOf } from "../iface/texts";
-import { isRecord } from "../shared/json";
-import type { Store, UserStore } from "../store";
+import { type Fields, type GuidanceFiles } from "../iface/texts";
+import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { STORY_DEFAULTS, type StoryClock, storyClock, storyLines, type StorySettings, valueView } from "./kit";
 import { storyAt } from "./path";
-import { type Span, type SpanPart, type StoryItem, type StoryPart, StoryRecord, STORY_PARTS, writeStory } from "./record";
+import { type Span, type SpanPart, type StoryItem, StoryRecord, writeStory } from "./record";
+import { type StoryAnswer, type StoryItemShown, type StoryList, type StoryListPart, type StoryStrike, type StoryStruck, type StoryWriteShown, storyListPart, storyReply, storyStrikeBody, storyStrikeReply } from "./shapes";
 
 export const STORY_PATH = "/api/v1/chats/:chat/story";
 export const STORY_STRIKE_PATH = "/api/v1/chats/:chat/story/strike";
@@ -45,94 +45,6 @@ export interface StoryRoutesDeps {
   settings(user: string, chat: string): Promise<Partial<StorySettings>>;
   /** Milliseconds since 1970, for the time of a strike's row; `Date.now` when absent. */
   now?: () => number;
-}
-
-/** The parts the answer gives as lists, each bounded: every part but the one premise. */
-export type StoryListPart = Exclude<StoryPart, "premise">;
-const LISTS = STORY_PARTS.filter((p): p is StoryListPart => p !== "premise");
-
-/** One write of an item, as the record keeps it. */
-export interface StoryWriteShown {
-  /** The turn it was written on. */
-  turn: string;
-  /** The number of that turn's reply on the chat's path, from 0; null while the turn is on no path (open, or left behind). */
-  message: number | null;
-  /** That turn was written by a migration's import, not played on RPE. */
-  imported: boolean;
-  /** Who wrote it: an agent's definition (`author`), `player`, or the migration. */
-  by: string | null;
-  /** What it said, as the item's fields are shown: `close` and `drop` among them. */
-  wrote: JsonObject;
-}
-
-/** An item of the story record as it stands on the path read. */
-export interface StoryItemShown {
-  id: string;
-  part: StoryPart;
-  /** Every field its writes set, the latest of each: messages by their number on the chat's path (`first` and `last` as `from` and `to`), a due time as the engine shows a time. */
-  fields: JsonObject;
-  /** Where it lies in the chat, by message number: a beat's messages, a scene's or a chapter's span. Null for a part that lies nowhere, or an end the record cannot place. */
-  from: number | null;
-  to: number | null;
-  /** Its first write: the turn, that turn's reply, whether a migration's import wrote that turn, and who wrote it. */
-  turn: string;
-  message: number | null;
-  imported: boolean;
-  by: string | null;
-  closed: boolean;
-  struck: boolean;
-  /** Every write of it on the path, oldest first. */
-  writes: StoryWriteShown[];
-}
-
-/** A list of the record, bounded: what it gives, how many it holds in all, and how many it left out before and after what it gives. */
-export interface StoryList {
-  items: StoryItemShown[];
-  total: number;
-  before: number;
-  after: number;
-}
-
-/** An entry of the Author's horizon, as the store keeps it: as the Author wrote it, with the level of the world it names now (none: words that name nothing). */
-export interface StoryHorizonEntry {
-  at: string;
-  ref: string | null;
-  name: string | null;
-}
-
-/** `GET /api/v1/chats/:chat/story?turn=&part=&skip=`: the story record of a chat. */
-export interface StoryAnswer {
-  chat: string;
-  /** The turn read at; null: the chat's newest. */
-  turn: string | null;
-  /** Story time at the reading, as the engine shows a time; null where the chat keeps none. */
-  now: string | null;
-  /** The most items one list gives at once: the setting `story.queryItems` for the chat. */
-  listed: number;
-  /** Chapters and scenes by where they start, beats by where they lie; what the record cannot place last. */
-  timeline: Record<Extract<StoryListPart, SpanPart | "beat">, StoryList>;
-  /** The chapter and the scene the chat is in now; null when it is in none (none yet, or the last one is closed). */
-  current: Record<SpanPart, string | null>;
-  /** The story model's parts as recorded, in the order first written: the premise, then each list. */
-  model: { premise: StoryItemShown | null } & Record<Exclude<StoryListPart, SpanPart | "beat" | "future">, StoryList>;
-  horizon: StoryHorizonEntry[];
-  /** The futures, today's drafts among them, in the order first written. */
-  futures: StoryList;
-}
-
-/** `POST /api/v1/chats/:chat/story/strike`: an item of the record, by id, struck (true) or its strike taken back (false); with a strike, why, where the player says. */
-export interface StoryStrike {
-  id: string;
-  struck: boolean;
-  why?: string;
-}
-
-/** What a strike, or taking one back, did. */
-export interface StoryStruck {
-  /** Whether anything was recorded: false when the item already stood so. */
-  changed: boolean;
-  /** The item as it stands now, at the chat's newest turn. */
-  item: StoryItemShown;
 }
 
 /** Why a page's request is not done: its status, and the line of the story's answers that says so. */
@@ -188,12 +100,16 @@ function chatHeld(store: Store, user: string, chat: string): UserStore {
   return s;
 }
 
-/** The turn the query names, one of the chat's (none named, or empty: the chat's newest), of a chat the user's store holds. */
-function asked(store: Store, user: string, chat: string, query: URLSearchParams): string | null {
+/**
+ * The turn the query names, one of the chat's (none named: the chat's newest), of a chat the user's store holds. A turn that was
+ * joined to another (a continue's held turn) is answered as a fact naming the turn it joined, for the server to answer in its one place.
+ */
+function asked(store: Store, user: string, chat: string, turn: string | undefined): string | null {
   const s = chatHeld(store, user, chat);
-  const turn = query.get("turn");
-  if (turn === null || turn === "") return null;
-  if (s.turn(turn)?.chat !== chat) throw new Refused(404, "no_turn", { id: turn });
+  if (turn === undefined) return null;
+  const row = s.turn(turn);
+  if (row?.chat !== chat) throw new Refused(404, "no_turn", { id: turn });
+  if (row.joined !== null) throw new JoinedTurnError(turn, row.joined);
   return turn;
 }
 
@@ -204,13 +120,8 @@ interface StrikeAsked {
   why: string | null;
 }
 
-/** A strike as the page sends it, read; what cannot be read is refused, saying which. */
-function strikeOf(value: unknown): StrikeAsked {
-  const body = isRecord(value) ? value : {};
-  const said = (v: unknown): string => (v === undefined ? "" : JSON.stringify(v));
-  if (typeof body.id !== "string" || body.id.trim() === "") throw new Refused(400, "unreadable", { field: "id", value: said(body.id) });
-  if (typeof body.struck !== "boolean") throw new Refused(400, "unreadable", { field: "struck", value: said(body.struck), choices: textOf([true, false]) });
-  if (body.why !== undefined && body.why !== null && typeof body.why !== "string") throw new Refused(400, "unreadable", { field: "why", value: said(body.why) });
+/** A strike as the page sends it, in the form the story takes it in: the item without the space around it, and why only where there is some. */
+function strikeOf(body: StoryStrike): StrikeAsked {
   return { id: body.id.trim(), struck: body.struck, why: typeof body.why === "string" && body.why.trim() !== "" ? body.why.trim() : null };
 }
 
@@ -279,16 +190,6 @@ function bounded(r: Reading, list: readonly { item: StoryItem; at: Span | null }
   return { items: list.slice(start, end).map(({ item, at }) => itemShown(r, item, at)), total: list.length, before: start, after: list.length - end };
 }
 
-/** The page's `part` and `skip`: the list read further back, and how many of its newest to pass over (with no part named, every list). */
-function paging(query: URLSearchParams): { part: StoryListPart | null; skip: number } {
-  const said = query.get("part");
-  const part = said === null || said === "" ? null : (LISTS.find((p) => p === said) ?? null);
-  if (said !== null && said !== "" && part === null) throw new Refused(400, "unreadable", { field: "part", value: JSON.stringify(said), choices: textOf(LISTS) });
-  const skip = query.get("skip");
-  if (skip !== null && skip !== "" && !/^\d+$/.test(skip)) throw new Refused(400, "unreadable", { field: "skip", value: JSON.stringify(skip) });
-  return { part, skip: skip === null || skip === "" ? 0 : Number(skip) };
-}
-
 /** The scene or chapter the chat is in now: the current one while it is open. */
 function openNow(record: StoryRecord, part: SpanPart): string | null {
   const current = record.current(part);
@@ -301,10 +202,20 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       method: "GET",
       path: STORY_PATH,
       access: "page",
+      group: "story",
+      does: "A chat's story record, at its newest turn or as it stood at one of its turns: the timeline, the story model's parts, the Author's horizon and the futures; each list bounded by the story's own setting, read further back with `part` and `skip`.",
+      query: {
+        turn: shape.optional(shape.turnId(), "A turn's id: the record as it stood at that turn; left out, at the chat's newest."),
+        part: shape.optional(storyListPart, "Read this list further back: with no part named, every list."),
+        skip: shape.optional(shape.whole({ least: 0 }), "How many of a list's newest items to pass over; 0 when left out."),
+      },
+      reply: storyReply,
+      joined: true,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryAnswer> => {
-          const turn = asked(deps.store, user, params.chat, query);
-          const { part, skip } = paging(query);
+          const turn = asked(deps.store, user, params.chat, query.turn);
+          const part = query.part ?? null;
+          const skip = query.skip ?? 0;
           const size = { ...STORY_DEFAULTS, ...(await deps.settings(user, params.chat)) }.queryItems;
           const r = readingAt(deps.store, user, params.chat, turn);
           const list = (p: StoryListPart): StoryList => bounded(r, listOf(r, p), size, part === null || part === p ? skip : 0);
@@ -327,8 +238,10 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       method: "POST",
       path: STORY_STRIKE_PATH,
       access: "page",
-      // Read in the handler, so that what cannot be read is refused in the story's words.
-      body: (value: unknown): unknown => value,
+      group: "story",
+      does: "Strikes an item of the story record, or takes its strike back, as the player's own change on the chat's newest turn; says whether anything was recorded and the item as it stands.",
+      body: storyStrikeBody,
+      reply: storyStrikeReply,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryStruck> => {
           chatHeld(deps.store, user, params.chat);

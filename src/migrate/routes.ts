@@ -5,6 +5,7 @@
 import type { Database } from "bun:sqlite";
 import { route } from "../app";
 import { migrationPage } from "./page";
+import { type MigrationShown, migrationReply } from "./shapes";
 
 export interface MigrateRoutesDeps {
   /** RPE's database. */
@@ -22,7 +23,11 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       method: "GET",
       path: MIGRATION_PATH,
       access: "page",
-      handle: ({ user }) => migrationPage({ db: deps.db, user, identifier: deps.identifier }),
+      group: "migration",
+      does: "The Migration page's data: the last run's report and its printed text, each chat's check, the backup, what waits on the user, and the steps of going back.",
+      reply: migrationReply,
+      // The report, what was carried of each chat and what was put in Lumiverse are documents the migration kept as JSON; they are carried as they are.
+      handle: ({ user }) => migrationPage({ db: deps.db, user, identifier: deps.identifier }) as unknown as MigrationShown,
     }),
-  ];
+  ] as const;
 }

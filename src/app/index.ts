@@ -21,13 +21,14 @@ export {
 } from "./config";
 export { connectionRoutes, MODELS_KEY, modelsPort, storedKey, type ConnectionShown, type ConnectionsApi, type ConnectionsShown, type ConnectionTested, type SaveConnection } from "./connections";
 export { openDatabase, WriteQueue, WritesClosed, WriteWaited } from "./database";
-export { Following, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, TOKEN_PROTOCOL_PREFIX, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader } from "./live";
+export { agentRef, effort, Following, jobView, layerLevel, limitHit, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, replyError, scope, TOKEN_PROTOCOL_PREFIX, traceRecord, usage, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader } from "./live";
 export { migrate, MIGRATION_AREAS, MigrationError, Migrations, type Migration, type MigrationArea, type MigrationOutcome } from "./migrations";
 export {
-  isDeclared,
   METHODS,
   paramsOf,
   problemsOf,
+  JOINED_STATUS,
+  joinedAnswer,
   rawRoute,
   readQuery,
   route,
@@ -36,6 +37,7 @@ export {
   RouteTable,
   shape,
   shapeWords,
+  TURN_PARAM,
   type Access,
   type AnyShape,
   type Declared,
@@ -47,7 +49,8 @@ export {
   type FieldShape,
   type Holds,
   type Infer,
-  type JsonRoute,
+  type JoinedAnswer,
+  type Mutually,
   type Method,
   type PageSizes,
   type Paging,
@@ -56,10 +59,8 @@ export {
   type QueryFields,
   type QueryShape,
   type RawCall,
-  type RawRoute,
   type Route,
   type RouteBody,
-  type RouteCall,
   type RouteDeclaration,
   type RouteGroup,
   type RouteInfo,
@@ -67,5 +68,6 @@ export {
   type UserFor,
 } from "./routes";
 export { SecretsFile } from "./secrets";
+export { draftChanged, errorMessage, requestMessage, resultMessage, stateView } from "./tunnel";
 export type { RunningServer } from "./server";
 export { switchDigest, Switches, type SwitchEntry, type SwitchState } from "./switches";

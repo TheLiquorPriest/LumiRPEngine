@@ -6,6 +6,7 @@ import type { BuildTransport } from "../../../src/ui/kept/transport";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
 import type { Timers } from "../../../src/ui/roads";
 import { GUIDANCE, makeBed, USER, words } from "../../build-mode/bed";
+import { callRoute } from "../../app/call";
 
 export { USER, words };
 
@@ -21,15 +22,12 @@ export interface RouteClient {
 export function routeClient(): RouteClient {
   const bed = makeBed();
   const [post] = buildRoutes(new BuildService({ db: bed.db, writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE }));
-  const read = post.body;
-  if (read === undefined) throw new Error("Build's route reads no body");
   const route = `${post.method} ${post.path}`;
   const asked: RouteClient["asked"] = [];
   const call = async (key: string, _params: unknown, options?: { body?: unknown }): Promise<unknown> => {
     asked.push({ key, body: options?.body });
     if (key !== route) throw new RpeError(404, `No route ${key}.`);
-    const body = read(JSON.parse(JSON.stringify(options?.body)));
-    const reply = await post.handle({ params: {}, query: new URLSearchParams(), body, user: USER, request: new Request(`http://rpe.test${post.path}`, { method: "POST" }), signal: new AbortController().signal });
+    const reply = await callRoute(post, { body: options?.body, user: USER });
     return JSON.parse(JSON.stringify(reply));
   };
   return { client: { call: call as RpeClient["call"] }, asked, route };

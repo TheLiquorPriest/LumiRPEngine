@@ -12,7 +12,7 @@ import { useSelect } from "../../frontend/store";
 import type { StoryAnswer, StoryItemShown, StoryList, StoryListPart, StoryStruck } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Gated, PageHeader, Row, Section } from "../atoms";
-import type { RpeClient } from "../client";
+import { replyOf, type RpeClient } from "../client";
 import { onChatChange } from "../live-watch";
 import { EntryCard, type StrikeAsk } from "../records";
 import { counted, errorWords } from "../words";
@@ -72,7 +72,7 @@ export function readStory(client: Pick<RpeClient, "call">, chat: string, onChang
     onChange(shown);
   };
   const read = (): void => {
-    client.call("GET /api/v1/chats/:chat/story", { chat }).then(
+    client.call("GET /api/v1/chats/:chat/story", { chat }).then(replyOf).then(
       (answer) => {
         const fresh = listsOf(answer);
         const held = shown.lists;
@@ -89,7 +89,7 @@ export function readStory(client: Pick<RpeClient, "call">, chat: string, onChang
       if (held === undefined || held.before === 0 || shown.further !== null) return;
       show({ further: part });
       // `skip` counts back from the newest end: past what the page holds, and past what was left out after it.
-      client.call("GET /api/v1/chats/:chat/story", { chat }, { query: { part, skip: held.items.length + held.after } }).then(
+      client.call("GET /api/v1/chats/:chat/story", { chat }, { query: { part, skip: held.items.length + held.after } }).then(replyOf).then(
         (answer) => {
           const older = listsOf(answer)[part];
           const now = shown.lists;

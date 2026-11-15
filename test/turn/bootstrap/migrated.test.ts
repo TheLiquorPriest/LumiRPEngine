@@ -67,6 +67,6 @@ test("every chat the migration carried is started one after another within the j
 test("the batch's body is a list of chat ids or the word for every chat the migration carried", async () => {
   const boot = await openBootBed({ answers: [] });
   beds.push(boot);
-  expect(await boot.call("POST", BOOTSTRAP_PATH, {}, { chats: "all" })).toEqual({ status: 400, body: { error: 'The body is a JSON object whose chats are a list of chat ids, or "migrated" for every chat the migration carried.' } });
+  expect(await boot.call("POST", BOOTSTRAP_PATH, {}, { chats: "all" })).toEqual({ status: 400, body: { error: expect.stringContaining("does not take this body") } });
   expect(await boot.call("POST", BOOTSTRAP_PATH, {}, { chats: "migrated" })).toEqual({ status: 200, body: { started: [], refused: [] } });
 });

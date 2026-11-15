@@ -7,6 +7,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useSelect } from "../../frontend/store";
 import { useApp, useNow } from "../app";
+import { replyOf } from "../client";
 import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../atoms";
 import { latestRun, type RunNode } from "../live-model";
 import { NOTHING_WATCHED, watchChat, type Watched } from "../live-watch";
@@ -124,7 +125,7 @@ export function LivePage(props: { chat: string }) {
     setStop(press);
     // RPE's answer counts only while this press is the page's own: not once it has left the chat, or Stop was pressed again.
     const answered = (next: StopPress | null): void => setStop((held) => (held === press ? next : held));
-    app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn: run.turn }).then(
+    app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn: run.turn }).then(replyOf).then(
       (answer) => {
         if (!answer.stopped) answered(null);
       },

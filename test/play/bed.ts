@@ -20,6 +20,7 @@ import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { migrateStore, openStore, readPart, type Store, storedWorlds, type TurnRow } from "../../src/store";
 import { asHarnessPasses } from "../story/rig";
+import { callRoute } from "../app/call";
 
 export const USER = "user-quill";
 export const OTHER = "user-sedge";
@@ -134,17 +135,13 @@ export function makeBed(): Bed {
       return await writes.run(() => s.tieTurn(begun.id, { message, hash: `hash-${message}` }), "tying the turn");
     },
     async state(query = {}, user = USER, chat = CHAT) {
-      return await stateRoute.handle({ ...call, query: new URLSearchParams(query), params: { chat }, body: undefined, user });
+      return await callRoute(stateRoute, { query, params: { chat }, user });
     },
     async send(message, user = USER, chat = CHAT) {
-      if (actionsRoute.body === undefined) throw new Error("the actions route reads no body");
-      const body = actionsRoute.body({ lre: 1, reqId: `req-${++asked}`, chatId: chat, ...message });
-      return await actionsRoute.handle({ ...call, params: { chat }, body, user });
+      return await callRoute(actionsRoute, { params: { chat }, body: { lre: 1, reqId: `req-${++asked}`, chatId: chat, ...message }, user });
     },
     async undo(chip, user = USER, chat = CHAT) {
-      if (undoRoute.body === undefined) throw new Error("the undo route reads no body");
-      const body = undoRoute.body({ lre: 1, reqId: `req-${++asked}`, type: "lre.chip", chatId: chat, chip, choice: "undo" });
-      return await undoRoute.handle({ ...call, params: { chat }, body, user });
+      return await callRoute(undoRoute, { params: { chat }, body: { lre: 1, reqId: `req-${++asked}`, type: "lre.chip", chatId: chat, chip, choice: "undo" }, user });
     },
   };
 }

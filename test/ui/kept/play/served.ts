@@ -18,6 +18,7 @@ import type { WriteQueue } from "../../../../src/app";
 import { type LiveListener, type RpeClient, RpeError } from "../../../../src/ui/client";
 import { GUIDANCE, makeBed, USER } from "../../../build-mode/bed";
 import { asHarnessPasses } from "../../../story/rig";
+import { callRoute } from "../../../app/call";
 
 export { USER };
 
@@ -50,22 +51,17 @@ export function servedRpe(): ServedRpe {
   const running = new Set<string>();
   const [post] = buildRoutes(new BuildService({ db: bed.db, writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE }));
   const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), log: bed.log }));
-  const ctx = () => ({ user: USER, request: new Request("http://rpe.test/"), signal: new AbortController().signal });
-  const read = <B>(route: { body?: (value: unknown) => B }, body: unknown): B => {
-    if (route.body === undefined) throw new Error("the route reads no body");
-    return route.body(JSON.parse(JSON.stringify(body)));
-  };
 
   const serve = async (key: string, chat: string, body: unknown, query: Record<string, string>): Promise<unknown> => {
     switch (key) {
       case "POST /api/v1/build":
-        return await post.handle({ ...ctx(), params: {}, query: new URLSearchParams(), body: read(post, body) });
+        return await callRoute(post, { body, user: USER });
       case "GET /api/v1/chats/:chat/state":
-        return await stateRoute.handle({ ...ctx(), params: { chat }, query: new URLSearchParams(query), body: undefined });
+        return await callRoute(stateRoute, { params: { chat }, query, user: USER });
       case "POST /api/v1/chats/:chat/actions":
-        return await actionsRoute.handle({ ...ctx(), params: { chat }, query: new URLSearchParams(), body: read(actionsRoute, body) });
+        return await callRoute(actionsRoute, { params: { chat }, body, user: USER });
       case "POST /api/v1/chats/:chat/actions/undo":
-        return await undoRoute.handle({ ...ctx(), params: { chat }, query: new URLSearchParams(), body: read(undoRoute, body) });
+        return await callRoute(undoRoute, { params: { chat }, body, user: USER });
       default:
         throw new RpeError(404, `No route ${key}.`);
     }
@@ -107,7 +103,7 @@ export function servedRpe(): ServedRpe {
     running,
     asked: [],
     async build(message) {
-      const answer = await post.handle({ ...ctx(), params: {}, query: new URLSearchParams(), body: read(post, { lre: 1, reqId: `setup-${++asked}`, type: "lre.world", ...message }) });
+      const answer = await callRoute(post, { body: { lre: 1, reqId: `setup-${++asked}`, type: "lre.world", ...message }, user: USER });
       if (answer.result.type !== "lre.result" || answer.result.request !== "lre.world") throw new Error(`Build refused: ${JSON.stringify(answer.result)}`);
       return answer.result.body;
     },

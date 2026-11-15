@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, QueryFields, Route, RunningServer } from "../../src/app";
-import { appRoutes, connectionRoutes, isDeclared, lineLog, RouteTable, rawRoute, route, shape } from "../../src/app";
+import { appRoutes, connectionRoutes, lineLog, RouteTable, rawRoute, route, shape } from "../../src/app";
 import { startServer } from "../../src/app/server";
 import { Builds } from "../../src/app/update";
 import { bearer, type Bed, LUMIVERSE, makeBed, makeKey, testModelLayer } from "./helpers";
@@ -236,15 +236,17 @@ describe("the server", () => {
 
   test("takes routes only where their access allows, never twice, and none once it has started", () => {
     const table = new RouteTable();
-    const ok = route({ method: "GET", path: "/api/v1/chats/:chat", access: "page", handle: ({ params }) => ({ chat: params.chat }) });
+    const reply = shape.object({ chat: shape.nullable(shape.text()) });
+    /** A route at `path` that answers nothing in particular: only where the table takes it is in question. */
+    const at = (method: "GET" | "POST", path: string, access: "page" | "public") => route({ method, path, access, group: "chats", does: "A route of a test's.", reply, handle: () => ({ chat: null }) });
+    const ok = route({ method: "GET", path: "/api/v1/chats/:chat", access: "page", group: "chats", does: "A chat's id.", reply, handle: ({ params }) => ({ chat: params.chat }) });
     table.add("chats", [ok]);
-    expect(() => table.add("other", [route({ method: "GET", path: "/api/v1/chats/:id", access: "page", handle: () => null })])).toThrow("already answers");
-    expect(() => table.add("other", [route({ method: "POST", path: "/api/v1/chats/:id", access: "page", handle: () => null })])).toThrow("name its params as /api/v1/chats/:chat");
-    expect(() => table.add("other", [route({ method: "POST", path: "/v1/chat/completions", access: "page", handle: () => null })])).toThrow("for provider");
-    expect(() => table.add("other", [route({ method: "POST", path: "/api/v1/ext/ask", access: "page", handle: () => null })])).toThrow("for extension");
-    expect(() => table.add("other", [route({ method: "GET", path: "/elsewhere", access: "public", handle: () => null })])).toThrow("routes live under");
-    expect(() => table.add("other", [route({ method: "GET", path: "/api/v1/files/*", access: "page", handle: () => null })])).toThrow("only a raw route");
-    expect(() => app.routes.add("late", [rawRoute({ method: "GET", path: "/ui/*", access: "public", raw: () => new Response("ui") })])).toThrow("after the server started");
+    expect(() => table.add("other", [at("GET", "/api/v1/chats/:id", "page")])).toThrow("already answers");
+    expect(() => table.add("other", [at("POST", "/api/v1/chats/:id", "page")])).toThrow("name its params as /api/v1/chats/:chat");
+    expect(() => table.add("other", [at("POST", "/v1/chat/completions", "page")])).toThrow("for provider");
+    expect(() => table.add("other", [at("POST", "/api/v1/ext/ask", "page")])).toThrow("for extension");
+    expect(() => table.add("other", [at("GET", "/elsewhere", "public")])).toThrow("routes live under");
+    expect(() => app.routes.add("late", [rawRoute({ method: "GET", path: "/ui/*", access: "public", group: "ui", does: "A late page.", answers: "a page", raw: () => new Response("ui") })])).toThrow("after the server started");
   });
 
   test("a route that reads a query or a body it does not declare is refused when it is added to the table", () => {
@@ -429,7 +431,7 @@ describe("the server", () => {
     // The app's own routes, each handler watched for what it is handed, on a server of their own over this app's auth and hub.
     const handed = new Map<string, unknown>();
     const watched = appRoutes("1.0.0", 0, app.auth, null, new Builds({ version: "1.0.0", file: null, log: lineLog(() => undefined) })).map((r: Route): Route => {
-      if (!isDeclared(r) || "raw" in r) return r;
+      if ("raw" in r) return r;
       const handle = r.handle as (call: Record<string, unknown>) => unknown;
       return { ...r, handle: (call: Record<string, unknown>) => (handed.set(`${r.method} ${r.path}`, "credential" in call ? call.credential : "handed none"), handle(call)) } as Route;
     });

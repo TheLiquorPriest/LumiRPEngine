@@ -13,7 +13,7 @@ import { useSelect } from "../../frontend/store";
 import { isRecord } from "../../shared/json";
 import type { SettleAnswer, TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../api";
 import { useApp, useNow } from "../app";
-import type { RpeClient } from "../client";
+import { replyOf, type RpeClient } from "../client";
 import { Badge, Banner, Button, Empty, Gated, PageHeader, Pre, Row, Section } from "../atoms";
 import { agentUsage, type RunNode, runsOf } from "../live-model";
 import { NOTHING_WATCHED, onChatChange, watchTurn, type Watched } from "../live-watch";
@@ -77,7 +77,7 @@ export function settleNow(client: Pick<RpeClient, "call">, chat: string, onChang
 export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string): Promise<TurnSummary | null> {
   let before: string | undefined;
   for (;;) {
-    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } });
+    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }));
     const found = list.turns.find((t) => t.onPath);
     if (found !== undefined) return found;
     before = list.turns.at(-1)?.id;
@@ -206,7 +206,7 @@ export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChang
     read = { ...read, ...next };
     onChange(read);
   };
-  const page = (before: string | undefined) => client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } });
+  const page = async (before: string | undefined) => replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }));
   /** `first`: the first read, the one `loading` waits for before any turn is held. */
   const newest = (first: boolean): void => {
     page(undefined).then(
@@ -323,7 +323,7 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
     shown = next;
     onChange(next);
   };
-  client.call("GET /api/v1/chats/:chat/turns/:turn/files", { chat, turn }).then(
+  client.call("GET /api/v1/chats/:chat/turns/:turn/files", { chat, turn }).then(replyOf).then(
     (list) => show({ ...shown, files: list.files, problem: null }),
     (error: unknown) => show({ ...shown, problem: errorWords(error) }),
   );
@@ -334,7 +334,7 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
       const answered = (open: FolderShown["open"]): void => {
         if (shown.open === opening) show({ ...shown, open });
       };
-      client.call("GET /api/v1/chats/:chat/turns/:turn/files/*", { chat, turn, "*": name }).then(
+      client.call("GET /api/v1/chats/:chat/turns/:turn/files/*", { chat, turn, "*": name }).then(replyOf).then(
         (file) => answered({ name, text: file.text, problem: null }),
         (error: unknown) => answered({ name, text: null, problem: errorWords(error) }),
       );

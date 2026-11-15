@@ -757,56 +757,5 @@ export interface BootstrapBatch {
   refused: { chat: string; why: string }[];
 }
 
-// ---------------------------------------------------------------- the route map the client is typed by, for the routes not yet in the form
-
-/** A route's reply, its query and its body. */
-export interface RouteShape<Reply, Query extends Record<string, string | number | undefined> = Record<string, never>, Body = undefined> {
-  reply: Reply;
-  query: Query;
-  body: Body;
-}
-
-/** Every route the pages call that is not yet declared in the route form, by method and path pattern, as the route table writes them; `*` stands for the rest of the path. */
-export interface Routes {
-  "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
-  "GET /api/v1/chats": RouteShape<ChatList>;
-  "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
-  "GET /api/v1/chats/:chat/turns/:turn": RouteShape<TurnDetail, { run?: string; from?: number }>;
-  "POST /api/v1/chats/:chat/turns/:turn/stop": RouteShape<StopAnswer>;
-  "GET /api/v1/chats/:chat/turns/:turn/files": RouteShape<TurnFiles>;
-  "GET /api/v1/chats/:chat/turns/:turn/files/*": RouteShape<TurnFile>;
-  "GET /api/v1/chats/:chat/world": RouteShape<WorldAnswer, { at?: string; depth?: number; values?: ValuesShown; turn?: string }>;
-  "POST /api/v1/build": RouteShape<{ result: ResultMessage | ErrorMessage; pushes: DraftChanged[] }, Record<string, never>, FrontendToBackend>;
-  "GET /api/v1/chats/:chat/state": RouteShape<StateView, { turn?: string }>;
-  "POST /api/v1/chats/:chat/actions": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, FrontendToBackend>;
-  "POST /api/v1/chats/:chat/actions/undo": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, ChipRequest>;
-  "GET /api/v1/files": RouteShape<TreeListing, { chat?: string }>;
-  "GET /api/v1/files/*": RouteShape<TreeFileText, { chat?: string }>;
-  "PUT /api/v1/files/*": RouteShape<FileWritten, Record<string, never>, FileWrite>;
-  "DELETE /api/v1/files/*": RouteShape<{ removed: string }, { chat?: string }>;
-  "PUT /api/v1/files-off/*": RouteShape<FileWritten, Record<string, never>, FileSwitch>;
-  "GET /api/v1/files-diff/*": RouteShape<TreeFileDiff, { chat?: string }>;
-  "GET /api/v1/suggestions": RouteShape<SuggestionList, { chat?: string; state?: SuggestionState }>;
-  "POST /api/v1/suggestions/:id/accept": RouteShape<SuggestionAccepted, Record<string, never>, SuggestionAccept>;
-  "POST /api/v1/suggestions/:id/dismiss": RouteShape<SuggestionDismissed>;
-  "GET /api/v1/migration": RouteShape<MigrationShown>;
-  "GET /api/v1/storage": RouteShape<TreeStorage>;
-  "GET /api/v1/storage/notes": RouteShape<NoteFiles, { chat: string; limit?: number }>;
-  "POST /api/v1/files-prune": RouteShape<{ pruned: Pruned }, Record<string, never>, { chat: string }>;
-  "GET /api/v1/files-stack": RouteShape<AgentStack, { chat: string; agent: string }>;
-  "GET /api/v1/chats/:chat/cast": RouteShape<CastList, { turn?: string }>;
-  "GET /api/v1/chats/:chat/cast/:character": RouteShape<CastCharacter, { turn?: string }>;
-  "POST /api/v1/chats/:chat/cast/:character/strike": RouteShape<CastStruck, Record<string, never>, CastStrike>;
-  "GET /api/v1/chats/:chat/story": RouteShape<StoryAnswer, { turn?: string; part?: StoryListPart; skip?: number }>;
-  "POST /api/v1/chats/:chat/story/strike": RouteShape<StoryStruck, Record<string, never>, StoryStrike>;
-  "POST /api/v1/chats/:chat/settle": RouteShape<SettleAnswer>;
-  "GET /api/v1/chats/:chat/bootstrap": RouteShape<BootstrapChat>;
-  "POST /api/v1/chats/:chat/bootstrap": RouteShape<JobView, Record<string, never>, { relive?: string }>;
-  "POST /api/v1/bootstrap": RouteShape<BootstrapBatch, Record<string, never>, { chats: string[] | "migrated"; relive?: string }>;
-  "GET /api/v1/jobs": RouteShape<JobList>;
-  "GET /api/v1/chats/:chat/jobs": RouteShape<JobList>;
-  "POST /api/v1/jobs/:job/cancel": RouteShape<JobCancelled>;
-}
-
-/** Every route the pages call: those in the form, as the generated types write them, and those above. */
-export type RouteKey = (keyof ApiRoutes | keyof Routes) & string;
+/** Every route the pages call, by method and path pattern, as the route table writes them (the generated types); `*` stands for the rest of the path. */
+export type RouteKey = keyof ApiRoutes & string;

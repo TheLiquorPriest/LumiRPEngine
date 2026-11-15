@@ -10,7 +10,7 @@
 
 import type { SyncState } from "../../../frontend/protocol-client";
 import { createStore, type Readable } from "../../../frontend/store";
-import type { RpeClient } from "../../client";
+import { replyOf, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
 
 /** The live kind RPE publishes on a chat once its state changed (`src/play/live.ts`), with no data of its own. */
@@ -38,7 +38,7 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
     }
     reading = true;
     if (state.get().view !== null) state.update((held) => ({ ...held, status: "resyncing" }));
-    client.call("GET /api/v1/chats/:chat/state", { chat }).then(
+    client.call("GET /api/v1/chats/:chat/state", { chat }).then(replyOf).then(
       (view) => {
         reading = false;
         if (!alive) return;

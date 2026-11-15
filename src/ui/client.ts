@@ -1,7 +1,7 @@
 // One typed client over RPE's API (plan §4.4), the same for both shells and every page. A call names its
 // route as the route table writes it ("GET /api/v1/chats/:chat/turns") and gets back what that route
 // answers: a route in the form is typed by the generated types (`src/shared/api`, written from the route
-// table by `bun run api`), the rest by the map `api.ts` still keeps. A route that pages is read a page at
+// table by `bun run api`): the client keeps no route's shape by hand. A route that pages is read a page at
 // a time with `call`, or walked to its end with `walk`. Whoever follows a chat gets its live events.
 // Behind it is one of the two roads (roads.ts). The web shell, served by RPE itself, is always direct. In
 // Lumiverse's drawer the client asks the extension for its start-up facts, tries RPE's addresses from the
@@ -9,9 +9,9 @@
 // why.
 
 import { createStore, type Readable } from "../frontend/store";
-import type { ApiRoutes, LiveEvent } from "../shared/api";
+import { type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
-import { type MissingPermission, type RouteKey, type Routes, SESSION_PATH } from "./api";
+import { type MissingPermission, type RouteKey, SESSION_PATH } from "./api";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
 import { errorWords } from "./words";
 
@@ -46,8 +46,29 @@ type ParamNames<P extends string> = P extends `${infer Head}/${infer Tail}` ? Pa
 /** A route's path params, by the names its pattern gives them. */
 export type ParamsOf<K extends RouteKey> = { readonly [N in ParamNames<PathOf<K>>]: string };
 
-/** What a route takes and answers: a route in the form's from the generated types, any other's from the map `api.ts` keeps. */
-export type RouteShapes<K extends RouteKey> = K extends keyof ApiRoutes ? ApiRoutes[K] : K extends keyof Routes ? Routes[K] : never;
+/** What a route takes and answers, as the route table declares it (the generated types). */
+export type RouteShapes<K extends RouteKey> = ApiRoutes[K];
+
+/**
+ * What a call to a route answers: its reply and, for a route that takes a turn's id (it declares `joined`), the answer of a turn
+ * that was joined to another, which names the turn it joined: a fact of its own kind beside the reply, never taken for a reply and
+ * never thrown as an error. A page follows it by asking again for the turn joined.
+ */
+export type Answer<K extends RouteKey> = ApiRoutes[K]["joined"] extends true ? ApiRoutes[K]["reply"] | JoinedAnswer : ApiRoutes[K]["reply"];
+
+/**
+ * A page that does not follow a joined turn yet reads the reply of a route that takes a turn's id as it reads any other, and a joined
+ * turn's answer as a refusal in words: the turn asked for, and the turn it joined.
+ */
+export function replyOf<T>(answer: T | JoinedAnswer): T {
+  if (isJoined(answer)) throw new RpeError(JOINED_STATUS, `Turn ${answer.joined.turn} was joined to turn ${answer.joined.joined}: ask for that turn.`);
+  return answer;
+}
+
+/** Whether an answer is a joined turn's, not the route's reply. */
+export function isJoined(answer: unknown): answer is JoinedAnswer {
+  return isRecord(answer) && isRecord(answer.joined) && typeof answer.joined.turn === "string" && typeof answer.joined.joined === "string" && Object.keys(answer).length === 1;
+}
 
 export interface CallOptions<K extends RouteKey> {
   query?: RouteShapes<K>["query"];
@@ -73,7 +94,7 @@ export interface RpeClient {
   readonly state: Readable<ClientState>;
   /** What the extension says it lacks, in its own word (the drawer); null where the page has none (the web shell: RPE's status route says it). */
   readonly missing: Readable<readonly MissingPermission[] | null>;
-  call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<RouteShapes<K>["reply"]>;
+  call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<Answer<K>>;
   /** Follows a chat's live events; the returned function stops. */
   follow(chat: string, listener: LiveListener): () => void;
   /**
@@ -140,8 +161,16 @@ function refusalOf(answer: RoadAnswer): RpeError {
   return new RpeError(answer.status, isRecord(body) && typeof body.error === "string" ? body.error : `RPE answered ${answer.status}.`);
 }
 
-/** A success's parsed JSON (undefined when it has none); a refusal is thrown. */
+/** A success's parsed JSON (undefined when it has none), or a joined turn's answer (status 409, naming the turn it joined); any other refusal is thrown. */
 function readAnswer(answer: RoadAnswer): unknown {
+  if (answer.status === JOINED_STATUS) {
+    try {
+      const body: unknown = JSON.parse(answer.text);
+      if (isJoined(body)) return body;
+    } catch {
+      // Not a joined turn's answer: a refusal like any other.
+    }
+  }
   if (answer.status < 200 || answer.status >= 300) throw refusalOf(answer);
   if (answer.text === "") return undefined;
   try {
@@ -290,7 +319,7 @@ export function createClient(connector: Connector): RpeClient {
         signOut(refused);
         throw refused;
       }
-      return readAnswer(answer) as RouteShapes<typeof key>["reply"];
+      return readAnswer(answer) as Answer<typeof key>;
     },
     follow(chat, listener) {
       let set = listeners.get(chat);

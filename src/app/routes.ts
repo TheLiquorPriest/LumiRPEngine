@@ -13,11 +13,7 @@
 // credential only where the route declares that its code reads it. The client's types
 // and the API reference (`docs/api.md`) are written from the same declarations (`bun run api`,
 // `scripts/api/`), and a test holds every reply to its declaration, so no route's shape is kept by hand
-// anywhere else.
-//
-// Routes written before the form (a handler that reads the query as it came and its body through a
-// reader of its own) are taken as they are until their area declares them: the server holds them to
-// their access, Origin, Host and body limit, and the reference lists them as not declared.
+// anywhere else. Every route is in this form: the table holds no other.
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -66,10 +62,15 @@ interface ShapeOf<T> {
   readonly doc?: string;
 }
 
-/** Text; not blank, where `blank` is false (the space at its ends is not counted). */
+/**
+ * Text; not blank, where `blank` is false (the space at its ends is not counted). `turn` marks text that
+ * holds a turn's id, alone (`inside` null) or inside another id (`inside` is that id's form, `tap:<turn>:<tap>`
+ * say): a route that takes one declares `joined` (below), and the table lists it as one that does.
+ */
 export interface TextShape extends ShapeOf<string> {
   readonly kind: "text";
   readonly blank: boolean;
+  readonly turn?: { readonly inside: string | null };
 }
 
 /** A number, or a whole number; at least `least` and at most `most` where each is given. */
@@ -134,7 +135,17 @@ export interface NothingShape extends ShapeOf<void> {
   readonly kind: "nothing";
 }
 
-export type AnyShape = TextShape | NumberShape | YesNoShape | LiteralShape | OneOfShape | ListShape | ObjectShape | RecordShape | UnionShape | JsonShape | NothingShape;
+/** A value of the previous build's wire, carried as that build wrote it (see `shape.carried`). */
+export interface CarriedShape<T = unknown> extends ShapeOf<T> {
+  readonly kind: "carried";
+  readonly name: string;
+  /** The module the generated types import its type from, relative to `src/shared/api/`. */
+  readonly from: string;
+  readonly words: string;
+  readonly holds: (value: unknown) => boolean;
+}
+
+export type AnyShape = TextShape | NumberShape | YesNoShape | LiteralShape | OneOfShape | ListShape | ObjectShape | RecordShape | UnionShape | JsonShape | NothingShape | CarriedShape;
 
 /** A field of an object: its shape, whether it may be left out, and what it is, in a line. */
 export interface FieldShape<S extends AnyShape = AnyShape, O extends boolean = boolean> {
@@ -151,6 +162,8 @@ export type Infer<S> = S extends ShapeOf<infer T> ? T : never;
 
 /** True when two types are the same, each field's optional mark included: a declaration that mirrors another's type stops compiling where they part. */
 export type Exactly<A, B> = (<X>() => X extends A ? 1 : 2) extends (<X>() => X extends B ? 1 : 2) ? true : false;
+/** True when each of two types is assignable to the other: for a type made of intersections, which `Exactly` tells from the flat object a declaration makes. */
+export type Mutually<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /** Compiles only for `true`. */
 export type Holds<T extends true> = T;
 
@@ -189,6 +202,12 @@ export const shape = {
   nullable,
   json: (): JsonShape => ({ kind: "json" }),
   nothing: (): NothingShape => ({ kind: "nothing" }),
+  /**
+   * A value of the previous build's wire (its messages and its state view), which the form does not describe field by field: carried
+   * as that build wrote it, under the name of its type, which the generated types take from `from` (a module of `src/shared`, as
+   * `src/shared/api/index.ts` reaches it). `words` says in the refusal what a value must be; `holds` is what the server checks of it.
+   */
+  carried: <T>(name: string, from: string, doc: string, words: string, holds: (value: unknown) => value is T): CarriedShape<T> => ({ kind: "carried", name, from, doc, words, holds }),
   /** A field that may be left out. */
   optional: <S extends AnyShape>(of: S, doc?: string): FieldShape<S, true> => ({ kind: "field", of, optional: true, ...(doc === undefined ? {} : { doc }) }),
   /** A field with a line saying what it is. */
@@ -197,14 +216,19 @@ export const shape = {
   named: <S extends AnyShape>(name: string, doc: string, of: S): S => ({ ...of, name, doc }) as S,
   /** A page of a list, as a route that pages answers: its items, and where the next page starts (null at the end). */
   page: <S extends AnyShape>(item: S): ObjectShape<{ items: Infer<S>[]; next: string | null }> => ({ kind: "object", fields: { items: list(item), next: nullable(TEXT) }, page: true }),
+  /**
+   * A turn's id, as a field of a query or a body, or a reply's field that names one: written once as `TurnId`. Where the
+   * id is held inside another (a tap's, `tap:<turn>:<tap>`), `inside` is that id's form and the shape is not named.
+   */
+  turnId: (inside?: string): TextShape => (inside === undefined ? { kind: "text", blank: false, turn: { inside: null }, name: "TurnId", doc: "A turn's id: the id RPE gives a turn when it begins it." } : { kind: "text", blank: false, turn: { inside } }),
 };
 
 /** What a value of `s` is, in words, for a refusal. */
 export function shapeWords(s: AnyShape): string {
-  if (s.name !== undefined) return `a ${s.name}`;
+  if (s.name !== undefined && s.kind !== "carried") return `a ${s.name}`;
   switch (s.kind) {
     case "text":
-      return s.blank ? "text" : "text that is not blank";
+      return s.turn !== undefined ? (s.turn.inside === null ? "a turn's id" : `an id of the form ${s.turn.inside}`) : s.blank ? "text" : "text that is not blank";
     case "number": {
       const what = s.whole ? "a whole number" : "a number";
       if (s.least !== null && s.most !== null) return `${what} from ${s.least} to ${s.most}`;
@@ -228,6 +252,8 @@ export function shapeWords(s: AnyShape): string {
       return s.of.map(shapeWords).join(", or ");
     case "json":
       return "any JSON value";
+    case "carried":
+      return s.words;
     case "nothing":
       return "nothing";
   }
@@ -298,6 +324,8 @@ export function problemsOf(s: AnyShape, value: unknown, at = "value"): string[] 
     }
     case "json":
       return isJson(value) ? [] : not();
+    case "carried":
+      return s.holds(value) ? [] : not();
     case "nothing":
       return value === undefined ? [] : not();
   }
@@ -435,6 +463,11 @@ export interface DeclaredRoute<
   readonly paged?: G;
   /** Its code reads the caller's credential (to say whose it is); absent, it is handed none. */
   readonly credential?: C;
+  /**
+   * It takes a turn's id (in its path, its query or its body), and a turn that was joined to another is answered as a fact:
+   * `JoinedAnswer`, status 409, in the one place the server turns a throw into an answer.
+   */
+  readonly joined?: true;
   readonly handle: (call: DeclaredCall<P, A, Q, B, G, C>) => Infer<R> | Promise<Infer<R>>;
 }
 
@@ -465,67 +498,29 @@ export interface DeclaredRawRoute<P extends string = string, A extends Access = 
   readonly answers: string;
   readonly maxBody?: number;
   readonly raw: (request: Request, call: RawCall<P, A>) => Response | undefined | Promise<Response | undefined>;
-}
-
-/** What a route written before the form is given. */
-export interface RouteCall<P extends string, A extends Access, B> {
-  readonly params: PathParams<P>;
-  readonly query: URLSearchParams;
-  /** The body as the route's reader gave it back; undefined for a route with no reader. */
-  readonly body: B;
-  readonly user: UserFor<A>;
-  readonly request: Request;
-  /** Aborts when the caller goes away. */
-  readonly signal: AbortSignal;
-}
-
-/** A route that answers in JSON, written before the form: taken as it is until its area declares it. */
-export interface JsonRoute<P extends string = string, A extends Access = Access, B = unknown, R = unknown> {
-  readonly method: Method;
-  readonly path: P;
-  readonly access: A;
-  readonly maxBody?: number;
-  readonly body?: (value: unknown) => B;
-  readonly handle: (call: RouteCall<P, A, B>) => R | Promise<R>;
-}
-
-/** A raw route written before the form: taken as it is until its area declares it. */
-export interface RawRoute<P extends string = string, A extends Access = Access> {
-  readonly method: Method;
-  readonly path: P;
-  readonly access: A;
-  readonly maxBody?: number;
-  readonly raw: (request: Request, call: RawCall<P, A>) => Response | undefined | Promise<Response | undefined>;
+  /** A turn that was joined to another is answered as a fact (`JoinedAnswer`, status 409), whatever this route reads. */
+  readonly joined?: true;
 }
 
 /** A route in the form, of any types. */
 export type Declared = DeclaredRoute<any, any, any, any, any, any, any> | DeclaredRawRoute<any, any>;
 // A table holds routes of every shape; each keeps its own types where it is written.
-export type Route = Declared | JsonRoute<any, any, any, any> | RawRoute<any, any>;
+export type Route = Declared;
 
-/** Writes a JSON route in the form, keeping its types; a route written before the form is taken as it was. */
-export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined, C extends true | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G, C>): DeclaredRoute<P, A, Q, B, R, G, C>;
-export function route<const P extends string, const A extends Access, B = undefined, R = unknown>(def: JsonRoute<P, A, B, R>): JsonRoute<P, A, B, R>;
-export function route(def: Route): Route {
+/** Writes a JSON route in the form, keeping its types. */
+export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined, C extends true | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G, C>): DeclaredRoute<P, A, Q, B, R, G, C> {
   return def;
 }
 
-/** Writes a raw route in the form, keeping its types; a route written before the form is taken as it was. */
-export function rawRoute<const P extends string, const A extends Access>(def: DeclaredRawRoute<P, A>): DeclaredRawRoute<P, A>;
-export function rawRoute<const P extends string, const A extends Access>(def: RawRoute<P, A>): RawRoute<P, A>;
-export function rawRoute(def: Route): Route {
+/** Writes a raw route in the form, keeping its types. */
+export function rawRoute<const P extends string, const A extends Access>(def: DeclaredRawRoute<P, A>): DeclaredRawRoute<P, A> {
   return def;
-}
-
-/** Whether a route is in the form. */
-export function isDeclared(r: Route): r is Declared {
-  return "group" in r && typeof r.group === "string";
 }
 
 /** The reply a JSON route gives, for a client. */
-export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any, any> ? Infer<R> : T extends JsonRoute<any, any, any, infer R> ? Exclude<Awaited<R>, Response> : never;
+export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any, any> ? Infer<R> : never;
 /** The body a JSON route takes, for a client. */
-export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : T extends JsonRoute<any, any, infer B, any> ? B : never;
+export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : never;
 
 /** A refusal a route's handler throws: its status and the words the caller is shown. */
 export class RouteError extends Error {
@@ -539,10 +534,24 @@ export class RouteError extends Error {
   }
 }
 
+/**
+ * What the server answers a turn that was joined to another with, status 409: a continue's held turn is joined to the turn
+ * it extended, and any reading of it is refused naming the turn it joined (`JoinedTurnError`, `src/store/types.ts`). The page
+ * follows it to the turn joined; it is a fact about the turn, never a failure of the server. Every route that takes a turn's id
+ * declares `joined`, and the server gives this answer wherever such a refusal is thrown under a route.
+ */
+export const JOINED_STATUS = 409;
+export const joinedAnswer = shape.named(
+  "JoinedAnswer",
+  "What a route that takes a turn's id answers, with status 409, for a turn that was joined to another: the turn asked for and the turn it joined, which is the one to ask for.",
+  shape.object({ joined: shape.object({ turn: shape.turnId(), joined: shape.turnId() }) }),
+);
+export type JoinedAnswer = Infer<typeof joinedAnswer>;
+
 /** A route's declaration as the table lists it: what a JSON route takes and answers, or what a raw route answers. */
 export type RouteDeclaration =
-  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean; readonly credential: boolean }
-  | { readonly group: RouteGroup; readonly does: string; readonly answers: string };
+  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean; readonly credential: boolean; readonly joined: boolean; readonly turn: boolean }
+  | { readonly group: RouteGroup; readonly does: string; readonly answers: string; readonly joined: boolean; readonly turn: boolean };
 
 /** A route as the table lists it. */
 export interface RouteInfo {
@@ -554,8 +563,8 @@ export interface RouteInfo {
   raw: boolean;
   /** Its params, by the names its pattern gives them (`*` for the rest of the path). */
   params: string[];
-  /** Its declaration; null for a route written before the form. */
-  declared: RouteDeclaration | null;
+  /** Its declaration. */
+  declared: RouteDeclaration;
 }
 
 export interface Placed {
@@ -565,7 +574,7 @@ export interface Placed {
 
 const LITERAL = /^[A-Za-z0-9._~-]+$/;
 const PARAM = /^:[A-Za-z_][A-Za-z0-9_]*$/;
-const SHAPE_KINDS: Readonly<Record<AnyShape["kind"], true>> = { text: true, number: true, yesNo: true, literal: true, oneOf: true, list: true, object: true, record: true, union: true, json: true, nothing: true };
+const SHAPE_KINDS: Readonly<Record<AnyShape["kind"], true>> = { text: true, number: true, yesNo: true, literal: true, oneOf: true, list: true, object: true, record: true, union: true, json: true, nothing: true, carried: true };
 
 /** The access a path's place allows. */
 function accessFor(path: string): readonly Access[] | null {
@@ -605,6 +614,7 @@ function declarationProblem(r: Declared): string | null {
   if (!(ROUTE_GROUPS as readonly string[]).includes(r.group)) return `its group is one of §4.4's: ${ROUTE_GROUPS.join(", ")}.`;
   if (!groupsFor(r.path)(r.group)) return `a route at ${r.path} is not in the ${r.group} group.`;
   if (typeof r.does !== "string" || r.does.trim() === "" || r.does.includes("\n")) return "it says what it does in one line.";
+  if (r.joined !== undefined && r.joined !== true) return "joined is true where the route takes a turn's id, and left out where it does not.";
   if ("raw" in r) return typeof r.answers !== "string" || r.answers.trim() === "" || r.answers.includes("\n") ? "a raw route says what it answers in one line." : null;
   const params = new Set(paramsOf(r.path));
   for (const [name, f] of Object.entries(r.query ?? {})) {
@@ -627,11 +637,40 @@ function declarationProblem(r: Declared): string | null {
   return null;
 }
 
-/** A route's declaration as the table lists it; null for a route written before the form. */
-function declarationOf(r: Route): RouteDeclaration | null {
-  if (!isDeclared(r)) return null;
-  if ("answers" in r) return { group: r.group, does: r.does, answers: r.answers };
-  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined, credential: r.credential === true };
+/** Whether a shape holds a turn's id somewhere in it (`shape.turnId`). */
+function holdsTurnId(s: AnyShape): boolean {
+  switch (s.kind) {
+    case "text":
+      return s.turn !== undefined;
+    case "list":
+    case "record":
+      return holdsTurnId(s.of);
+    case "object":
+      return Object.values(s.fields).some((f) => holdsTurnId(fieldOf(f).of));
+    case "union":
+      return s.of.some(holdsTurnId);
+    default:
+      return false;
+  }
+}
+
+/** A path param named this holds a turn's id. */
+export const TURN_PARAM = "turn";
+
+/** Whether a route takes a turn's id: in its path (a param named `turn`), in its query, or in its body. */
+function takesTurn(r: Declared): boolean {
+  if (paramsOf(r.path).includes(TURN_PARAM)) return true;
+  if ("raw" in r) return false;
+  const query: Fields = r.query ?? {};
+  return Object.values(query).some((f) => holdsTurnId(fieldOf(f).of)) || (r.body !== undefined && holdsTurnId(r.body));
+}
+
+/** A route's declaration as the table lists it. */
+function declarationOf(r: Route): RouteDeclaration {
+  const turn = takesTurn(r);
+  const joined = r.joined === true;
+  if ("answers" in r) return { group: r.group, does: r.does, answers: r.answers, joined, turn };
+  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined, credential: r.credential === true, joined, turn };
 }
 
 export class RouteTable {
@@ -649,18 +688,13 @@ export class RouteTable {
       if (!METHODS.includes(r.method)) throw new Error(`${at}: a route's method is one of ${METHODS.join(", ")}.`);
       const path: string = r.path;
       const segments = path.split("/");
-      const wildcard = segments.at(-1) === "*";
-      const declared = isDeclared(r);
       if (segments[0] !== "" || segments.length < 2 || !segments.slice(1).every((s, i) => LITERAL.test(s) || PARAM.test(s) || (s === "*" && i === segments.length - 2))) throw new Error(`${at}: a path is made of words and :params between slashes, with * last.`);
-      if (wildcard && !declared && !("raw" in r)) throw new Error(`${at}: only a raw route, or a route in the form, may end in *.`);
       const allowed = accessFor(r.path);
       if (allowed === null) throw new Error(`${at}: routes live under /v1/, /api/v1/ or /ui/.`);
       if (!allowed.includes(r.access)) throw new Error(`${at}: a route there is for ${allowed.join(" or ")}, not ${r.access}.`);
       if (r.maxBody !== undefined && (!Number.isInteger(r.maxBody) || r.maxBody < 0)) throw new Error(`${at}: maxBody is a whole number of bytes.`);
-      if (declared) {
-        const problem = declarationProblem(r);
-        if (problem !== null) throw new Error(`${at}: ${problem}`);
-      } else if ("body" in r && r.body !== undefined && (r.method === "GET" || r.method === "DELETE")) throw new Error(`${at}: a ${r.method} takes no body.`);
+      const problem = declarationProblem(r);
+      if (problem !== null) throw new Error(`${at}: ${problem}`);
       const shape = shapeOf(r.path);
       const key = `${r.method} ${shape}`;
       if (taken.has(key)) throw new Error(`${at}: another route already answers ${r.method} on that path.`);

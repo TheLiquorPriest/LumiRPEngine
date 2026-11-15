@@ -19,12 +19,11 @@
 // too. The words of every refusal are lines of `.prompts/cast-answers.md`, as the chat has it.
 
 import type { JsonObject } from "rp-harness/contract";
-import { route, RouteError } from "../app";
+import { route, RouteError, shape } from "../app";
 import type { Writes } from "../iface/kit";
-import { type Fields, type GuidanceFiles, textOf } from "../iface/texts";
-import { isRecord } from "../shared/json";
+import { type Fields, type GuidanceFiles } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
-import type { Store, UserStore } from "../store";
+import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { fileName, IMPORTED_KIND, isFiled } from "./imported";
 import { CAST_DEFAULTS, type CastClock, castClock, castLines, type CastSettings } from "./kit";
 import { memoriesNow, type Tier } from "./memory";
@@ -50,6 +49,7 @@ import {
   writeCast,
 } from "./record";
 import { forgetsOf, holdingChanges, secretsHeldAgain, secretsLetGo, worldAt } from "./secrets";
+import { type CastCharacter, type CastCounts, type CastEntryShown, type CastHeld, type CastKind, type CastList, type CastMemberShown, type CastStrike, type CastStruck, type CastWriteShown, castReply, castStrikeBody, castStrikeReply, characterReply } from "./shapes";
 import { CAST_LANE, type Unread } from "./update";
 
 export const CAST_PATH = "/api/v1/chats/:chat/cast";
@@ -72,171 +72,6 @@ export interface CastRoutesDeps {
   settings(user: string, chat: string): Promise<Partial<CastSettings>>;
   /** Milliseconds since 1970, for the time of a strike's rows; `Date.now` when absent. */
   now?: () => number;
-}
-
-/** The parts of a character's record that hold entries, as the page names them (`cast_query`'s names, with memories and the carried mind files). */
-export type CastKind = "growth" | "mind" | "memories" | "relationships" | "knowledge" | "history" | "perceptions" | "files";
-
-/** How many entries of a kind a character holds on the reading's path: standing, and struck. */
-export interface CastHeld {
-  held: number;
-  struck: number;
-}
-
-export type CastCounts = Record<Exclude<CastKind, "files">, CastHeld> & {
-  /** The mind files a migration carried: those standing, those struck (a file a turn of today's build removed is struck), and how many of those standing are marked filed. */
-  files: CastHeld & { filed: number };
-};
-
-/** A casting in force: the player's pin, else the Author's on the path. */
-export interface CastingShown {
-  as: Casting;
-  /** The player pinned it; it stands over the Author's. */
-  pinned: boolean;
-  /** The Author's line for the character, where it wrote one. */
-  line: string | null;
-}
-
-/** A character as the cast lists it. */
-export interface CastMemberShown {
-  id: string;
-  name: string;
-  /** The chat it was first cast in: this chat, or one this chat was branched from. */
-  chat: string;
-  /** Its casting at the reading; null when it has none there (in the cast, not yet cast). */
-  casting: CastingShown | null;
-  /** Where its record on the path came from: writes on turns a migration's import wrote (carried), and writes on turns RPE played. */
-  from: { carried: boolean; played: boolean };
-  counts: CastCounts;
-}
-
-/** `GET /api/v1/chats/:chat/cast?turn=`: every character the chat knows, with what each holds on the path read. */
-export interface CastList {
-  chat: string;
-  /** The turn read at; null: the chat's newest. */
-  turn: string | null;
-  /** In the order they were made: this chat's, and those of the chats it was branched from. */
-  characters: CastMemberShown[];
-}
-
-/** One write of an entry, as the record keeps it. */
-export interface CastWriteShown {
-  /** The turn it was written on. */
-  turn: string;
-  /** The number of that turn's reply on the chat's path, from 0; null while the turn is on no path (open, or left behind). */
-  message: number | null;
-  /** That turn was written by a migration's import, not played on RPE. */
-  imported: boolean;
-  /** Who wrote it: an agent's definition (`author`, a character's own), `player`, or the migration. */
-  by: string | null;
-  /** What it said: the fields it set, `drop` among them. */
-  wrote: JsonObject;
-}
-
-/** An entry of a character's record as it stands on the path read. */
-export interface CastEntryShown {
-  id: string;
-  part: Exclude<RowPart, "casting">;
-  /** Every field its writes set, the latest of each: its words among them, as they were written. */
-  fields: JsonObject;
-  /** Story time of its first write, as the engine shows a time; null where the chat keeps none. */
-  date: string | null;
-  /** Its first write: the turn, that turn's reply, whether a migration's import wrote that turn, and who wrote it. */
-  turn: string;
-  message: number | null;
-  imported: boolean;
-  by: string | null;
-  struck: boolean;
-  /** Every write of it on the path, oldest first. */
-  writes: CastWriteShown[];
-}
-
-/** A memory: with its tier, its strength from 0 to 1 and whether it has faded to its gist, at story time at the reading (none while struck). */
-export interface CastMemoryShown extends CastEntryShown {
-  tier: Tier | null;
-  strength: number | null;
-  faint: boolean;
-}
-
-/** A perception: with the turn it is of, and that turn's reply. */
-export interface CastPerceptionShown extends CastEntryShown {
-  of: { turn: string; message: number | null };
-}
-
-/** A mind file a migration carried, word for word, with its filed mark. */
-export interface CastFileShown extends CastEntryShown {
-  file: string;
-  /** The file's text as carried, every byte; null where its row holds none. */
-  text: string | null;
-  filed: boolean;
-}
-
-/** A version of a part of the base (it stands outside turns: a swipe changes none of it). */
-export interface CastBaseShown {
-  part: BasePart;
-  version: number;
-  text: string;
-  /** The newest version of its part: the one in force. */
-  standing: boolean;
-  /** The turn it was written in; null when written outside one. */
-  turn: string | null;
-  by: string | null;
-  created: number;
-}
-
-/** A source bound to the character, as recorded (the text stays in Lumiverse). */
-export interface CastSourceShown {
-  kind: SourceKind;
-  ref: string;
-  /** Which side of the character it defines, in the binder's words. */
-  defines: string | null;
-  created: number;
-}
-
-/** `GET /api/v1/chats/:chat/cast/:character?turn=`: everything on one character's record, by kind. */
-export interface CastCharacter {
-  chat: string;
-  turn: string | null;
-  character: CastMemberShown;
-  sources: CastSourceShown[];
-  /** Every version of every part of the base, oldest first. */
-  base: CastBaseShown[];
-  /** The Author's castings of it on the path, oldest first. */
-  castings: CastWriteShown[];
-  growth: CastEntryShown[];
-  /** What is on its mind; the carried mind files are under `files`. */
-  mind: CastEntryShown[];
-  memories: CastMemoryShown[];
-  relationships: CastEntryShown[];
-  knowledge: CastEntryShown[];
-  history: CastEntryShown[];
-  perceptions: CastPerceptionShown[];
-  files: CastFileShown[];
-}
-
-/** `POST /api/v1/chats/:chat/cast/:character/strike`: an entry of the character's record, by id, struck (true) or its strike taken back (false); with a strike, why, where the player says. */
-export interface CastStrike {
-  id: string;
-  struck: boolean;
-  why?: string;
-}
-
-/** What a strike, or taking one back, did. */
-export interface CastStruck {
-  /** Whether anything was recorded: false when the entry already stood so. */
-  changed: boolean;
-  /** The entry as it stands now, at the chat's newest turn. */
-  entry: CastEntryShown;
-  /** The knowledge a struck perception gave, struck with it, by id. */
-  alsoStruck: string[];
-  /** The secrets whose holding the strike took back, by their fact's id. */
-  letGo: string[];
-  /** A perception's strike taken back: the knowledge its strike struck with it, standing again with it, by id. */
-  alsoStood: string[];
-  /** A strike taken back: the secrets the knowledge standing again gives, held again, by their fact's id. */
-  heldAgain: string[];
-  /** What it could not do, and what it left as it was (knowledge struck apart, and the secret it gave), in the cast's words. */
-  notes: string[];
 }
 
 /** Why a page's request is not done: its status, and the line of the cast's answers that says so. */
@@ -298,12 +133,16 @@ function chatHeld(store: Store, user: string, chat: string): UserStore {
   return s;
 }
 
-/** The turn the query names, one of the chat's (none named, or empty: the chat's newest), of a chat the user's store holds. */
-function asked(store: Store, user: string, chat: string, query: URLSearchParams): string | null {
+/**
+ * The turn the query names, one of the chat's (none named: the chat's newest), of a chat the user's store holds. A turn that was
+ * joined to another (a continue's held turn) is answered as a fact naming the turn it joined, for the server to answer in its one place.
+ */
+function asked(store: Store, user: string, chat: string, turn: string | undefined): string | null {
   const s = chatHeld(store, user, chat);
-  const turn = query.get("turn");
-  if (turn === null || turn === "") return null;
-  if (s.turn(turn)?.chat !== chat) throw new Refused(404, "no_turn", { id: turn });
+  if (turn === undefined) return null;
+  const row = s.turn(turn);
+  if (row?.chat !== chat) throw new Refused(404, "no_turn", { id: turn });
+  if (row.joined !== null) throw new JoinedTurnError(turn, row.joined);
   return turn;
 }
 
@@ -336,13 +175,8 @@ interface StrikeDone {
   unread: Unread[];
 }
 
-/** A strike as the page sends it, read; what cannot be read is refused, saying which. */
-function strikeOf(value: unknown): StrikeAsked {
-  const body = isRecord(value) ? value : {};
-  const said = (v: unknown): string => (v === undefined ? "" : JSON.stringify(v));
-  if (typeof body.id !== "string" || body.id.trim() === "") throw new Refused(400, "unreadable", { field: "id", value: said(body.id) });
-  if (typeof body.struck !== "boolean") throw new Refused(400, "unreadable", { field: "struck", value: said(body.struck), choices: textOf([true, false]) });
-  if (body.why !== undefined && body.why !== null && typeof body.why !== "string") throw new Refused(400, "unreadable", { field: "why", value: said(body.why) });
+/** A strike as the page sends it, in the form the cast takes it in: the entry without the space around it, and why only where there is some. */
+function strikeOf(body: CastStrike): StrikeAsked {
   return { id: body.id.trim(), struck: body.struck, why: typeof body.why === "string" && body.why.trim() !== "" ? body.why.trim() : null };
 }
 
@@ -534,14 +368,20 @@ function characterShown(r: Reading, character: Character, settings: CastSettings
 }
 
 export function castRoutes(deps: CastRoutesDeps) {
+  const turnQuery = shape.optional(shape.turnId(), "A turn's id: the cast as it stood at that turn; left out, at the chat's newest.");
   return [
     route({
       method: "GET",
       path: CAST_PATH,
       access: "page",
+      group: "cast",
+      does: "Every character a chat knows, with what each holds on the path read: at the chat's newest turn, or as it stood at one of its turns.",
+      query: { turn: turnQuery },
+      reply: castReply,
+      joined: true,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, (): CastList => {
-          const turn = asked(deps.store, user, params.chat, query);
+          const turn = asked(deps.store, user, params.chat, query.turn);
           const r = readingAt(deps.store, user, params.chat, turn);
           return { chat: params.chat, turn, characters: membersOf(r, charactersOf(deps.store.db, user, r.chats)) };
         }),
@@ -550,9 +390,14 @@ export function castRoutes(deps: CastRoutesDeps) {
       method: "GET",
       path: CHARACTER_PATH,
       access: "page",
+      group: "cast",
+      does: "Everything on one character's record, by kind: at the chat's newest turn, or as it stood at one of its turns.",
+      query: { turn: turnQuery },
+      reply: characterReply,
+      joined: true,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, async (): Promise<CastCharacter> => {
-          const turn = asked(deps.store, user, params.chat, query);
+          const turn = asked(deps.store, user, params.chat, query.turn);
           const r = readingAt(deps.store, user, params.chat, turn);
           const character = findCharacter(deps.store.db, user, r.chats, params.character);
           if (character === null) throw new Refused(404, "no_character", { who: params.character });
@@ -564,8 +409,10 @@ export function castRoutes(deps: CastRoutesDeps) {
       method: "POST",
       path: CHARACTER_STRIKE_PATH,
       access: "page",
-      // Read in the handler, so that what cannot be read is refused in the cast's words.
-      body: (value: unknown): unknown => value,
+      group: "cast",
+      does: "Strikes an entry of a character's record, or takes its strike back, as the player's own change on the chat's newest turn; says what it did, in the cast's words.",
+      body: castStrikeBody,
+      reply: castStrikeReply,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async (): Promise<CastStruck> => {
           chatHeld(deps.store, user, params.chat);

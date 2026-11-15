@@ -6,12 +6,12 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { RouteReply } from "../../src/app";
 import { insertPageToken } from "../../src/app/auth";
 import type { NodeView } from "../../src/store";
-import { type RunView, type TurnFileEntry, turnRoutes } from "../../src/turn";
+import type { ApiRoutes } from "../../src/shared/api";
+import type { TurnFileEntry } from "../../src/turn";
 import { hashJson } from "../../src/shared/hash";
-import type { ChatList, ChatSummary, Routes, StopAnswer, TurnDetail, TurnList, TurnSummary } from "../../src/ui/api";
+import { replyProblems } from "../app/call";
 import { world } from "../iface/rig";
 import { CHARACTER, CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
@@ -20,28 +20,22 @@ afterEach(async () => {
   for (const b of beds.splice(0)) await b.close();
 });
 
+type ChatList = ApiRoutes["GET /api/v1/chats"]["reply"];
+type TurnList = ApiRoutes["GET /api/v1/chats/:chat/turns"]["reply"];
+type TurnDetail = ApiRoutes["GET /api/v1/chats/:chat/turns/:turn"]["reply"];
+type StopAnswer = ApiRoutes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"];
+
 /** Every field of a page's type, once: a field added to the type or left out of here does not compile. */
-const CHAT_FIELDS: Record<keyof ChatSummary, true> = { id: true, name: true, lastTurnAt: true, running: true, played: true, world: true };
-const SUMMARY_FIELDS: Record<keyof TurnSummary, true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
-const DETAIL_FIELDS: Record<keyof TurnDetail | "runs", true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true, runs: true };
-const RUN_FIELDS: Record<keyof RunView, true> = { id: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, trace: true, requests: true };
+const CHAT_FIELDS: Record<keyof ChatList["chats"][number], true> = { id: true, name: true, lastTurnAt: true, running: true, played: true, world: true };
+const SUMMARY_FIELDS: Record<keyof TurnList["turns"][number], true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
+const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true, runs: true };
+const RUN_FIELDS: Record<keyof TurnDetail["runs"][number], true> = { id: true, run: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, trace: true, requests: true };
 const fields = (shape: object): string[] => Object.keys(shape).sort();
 
 describe("the Turn page's routes", () => {
-  test("each route's reply is the type the pages' client is written against, and each answer holds exactly its fields", async () => {
+  test("each route's reply is what its declaration takes, checked at run time, and each answer holds exactly its fields", async () => {
     const b = await openTurnBed({ answers: [replying("The lamp turns."), replying("Wren nods."), replying("Wren points at the sea.")] });
     beds.push(b);
-    const [chats, list, one, stop] = turnRoutes({ turns: b.turns, chatName: async () => null });
-    // The client's shape of each route's reply is what the route gives: these lines do not compile when they part.
-    const replies: [Routes["GET /api/v1/chats"]["reply"], Routes["GET /api/v1/chats/:chat/turns"]["reply"], Routes["GET /api/v1/chats/:chat/turns/:turn"]["reply"], Routes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"]] = [
-      null as unknown as RouteReply<typeof chats>,
-      null as unknown as RouteReply<typeof list>,
-      null as unknown as RouteReply<typeof one>,
-      null as unknown as RouteReply<typeof stop>,
-    ];
-    expect(replies).toHaveLength(4);
-    expect([chats, list, one, stop].map((r) => `${r.method} ${r.path}`)).toEqual(["GET /api/v1/chats", "GET /api/v1/chats/:chat/turns", "GET /api/v1/chats/:chat/turns/:turn", "POST /api/v1/chats/:chat/turns/:turn/stop"]);
-
     const played: string[] = [];
     for (const said of ["I climb the stairs.", "I ask about the boat.", "I look at the sea."]) {
       b.host.send(CHAT, said);
@@ -50,11 +44,13 @@ describe("the Turn page's routes", () => {
     }
 
     const chatList = await b.page<ChatList>("GET", "/api/v1/chats");
+    expect(replyProblems(b.app, "GET /api/v1/chats", chatList.body)).toEqual([]);
     expect(fields(chatList.body)).toEqual(["chats"]);
     expect(chatList.body.chats.map(fields)).toEqual([fields(CHAT_FIELDS)]);
 
     // A chat's turns, newest first, a page at a time.
     const first = await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns?limit=2`);
+    expect(replyProblems(b.app, "GET /api/v1/chats/:chat/turns", first.body)).toEqual([]);
     expect(fields(first.body)).toEqual(["more", "turns"]);
     expect(first.body.turns.map(fields)).toEqual([fields(SUMMARY_FIELDS), fields(SUMMARY_FIELDS)]);
     expect(first.body).toMatchObject({ more: true, turns: [{ id: played[0] }, { id: played[1] }] });
@@ -64,6 +60,7 @@ describe("the Turn page's routes", () => {
 
     // One turn, its trace whole and from a record on.
     const detail = await b.page<TurnDetail>("GET", `/api/v1/chats/${CHAT}/turns/${played[0]}`);
+    expect(replyProblems(b.app, "GET /api/v1/chats/:chat/turns/:turn", detail.body)).toEqual([]);
     expect(fields(detail.body)).toEqual(fields(DETAIL_FIELDS));
     expect(fields(detail.body.timings)).toEqual(["ended", "firstWord", "received", "released", "started"]);
     expect(fields(detail.body.reply)).toEqual(["progress", "text"]);
@@ -74,6 +71,7 @@ describe("the Turn page's routes", () => {
     expect(later.body.trace.map((r) => r.seq)).toEqual(seqs.filter((s) => s >= from));
 
     const stopped = await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${played[0]}/stop`);
+    expect(replyProblems(b.app, "POST /api/v1/chats/:chat/turns/:turn/stop", stopped.body)).toEqual([]);
     expect(stopped.body).toEqual({ stopped: false });
   });
 
@@ -137,7 +135,7 @@ describe("the Turn page's routes", () => {
 });
 
 /** A turn's detail as the routes give it now: the page's type, and each of its runs. */
-type Detail = TurnDetail & { runs: RunView[] };
+type Detail = TurnDetail;
 
 /** A path below a turn's folder, as the file route takes it. */
 const filePath = (turn: string, name: string): string => `/api/v1/chats/${CHAT}/turns/${turn}/files/${name.split("/").map(encodeURIComponent).join("/")}`;
@@ -193,6 +191,7 @@ describe("a turn's runs, its folder, and the world", () => {
 
     const listing = await b.page<{ files: TurnFileEntry[] }>("GET", `/api/v1/chats/${CHAT}/turns/${turn}/files`);
     expect(listing.status).toBe(200);
+    expect(replyProblems(b.app, "GET /api/v1/chats/:chat/turns/:turn/files", listing.body)).toEqual([]);
     const byName = new Map(listing.body.files.map((f) => [f.name, f]));
     expect(byName.get("briefing.md")).toMatchObject({ folder: false });
     expect(byName.get("turn.json")).toMatchObject({ folder: false });
@@ -205,6 +204,7 @@ describe("a turn's runs, its folder, and the world", () => {
     const disk = (await b.turns.files.turnDisk({ user: USER, chat: CHAT, session: run.session, turn }))!;
     for (const name of ["briefing.md", inTranscripts[0]!.name]) {
       const file = await b.page<{ name: string; text: string }>("GET", filePath(turn, name));
+      expect(replyProblems(b.app, "GET /api/v1/chats/:chat/turns/:turn/files/*", file.body)).toEqual([]);
       expect(file.body).toEqual({ name, text: await Bun.file(join(disk, name)).text() });
       expect(Buffer.byteLength(file.body.text)).toBe(byName.get(name)!.bytes);
     }
@@ -257,6 +257,7 @@ describe("a turn's runs, its folder, and the world", () => {
     // At the head, the world with its own values: the time the second turn set the clock to, kept by the calendar.
     const head = await world("");
     expect(head.status).toBe(200);
+    expect(replyProblems(b.app, "GET /api/v1/chats/:chat/world", head.body)).toEqual([]);
     expect(head.body.at).toBe("world");
     expect(head.body.nodes[0]).toMatchObject({ ref: "world", kind: "world" });
     expect(head.body.nodes[0]!.values.find((v) => v.key === "time")).toMatchObject({ from: { system: "calendar" } });

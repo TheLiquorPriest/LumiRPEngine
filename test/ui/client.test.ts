@@ -8,7 +8,7 @@ import { h } from "preact";
 import { pageRoad } from "../../src/ext/page";
 import type { LiveEvent } from "../../src/shared/api";
 import type { ExtensionStatus } from "../../src/ui/api";
-import { type ClientState, createClient, extensionConnector, KEY_LET_GO, type LiveListener, pathOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
+import { type ClientState, createClient, extensionConnector, KEY_LET_GO, type LiveListener, pathOf, replyOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
 import { CHAT, RECORDED, turnListAt } from "./recorded";
@@ -250,7 +250,7 @@ describe("which road the drawer's client takes", () => {
     const channel = new Channel(() => ({ status: 200, body: turnListAt() }));
     const { deps, fetched } = browser(refused);
     const client = track(createClient(extensionConnector(channel, deps)));
-    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } });
+    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } }));
     expect(list).toEqual(turnListAt());
     expect(fetched.map((f) => f.url)).toEqual([`${ADDRESS}/api/v1/status`]);
     expect(channel.requests).toEqual([{ method: "GET", path: `/api/v1/chats/${CHAT}/turns?limit=1`, headers: { authorization: "Bearer rpp_page1", accept: "application/json" } }]);
@@ -269,7 +269,7 @@ describe("which road the drawer's client takes", () => {
     const channel = new Channel(() => ({ status: 500, body: { error: "not this way" } }));
     const { deps, fetched, opened } = browser(async (url) => (url.endsWith("/api/v1/status") ? rpeStatus() : json(200, turnListAt())()));
     const client = track(createClient(extensionConnector(channel, deps)));
-    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } });
+    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } }));
     expect(list.turns.length).toBe(4);
     expect(client.state.get()).toEqual({ phase: "direct", address: ADDRESS });
     expect(channel.requests).toEqual([]);
@@ -302,7 +302,7 @@ describe("which road the drawer's client takes", () => {
   test("a page token RPE refuses is renewed, and the call made once more with the new one", async () => {
     const channel = new Channel((sent) => (sent.headers.authorization === "Bearer rpp_page2" ? { status: 200, body: turnListAt() } : { status: 401, body: { error: "This needs a page token or the web UI's token." } }));
     const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
-    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });
+    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }));
     expect(list.turns[0]?.id).toBe("turn-31");
     expect(channel.starts).toBe(2);
     expect(channel.requests.map((r) => r.headers.authorization)).toEqual(["Bearer rpp_page1", "Bearer rpp_page2"]);

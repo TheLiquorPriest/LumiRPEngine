@@ -18,6 +18,7 @@ import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import type { ShownMessage, TurnRow } from "../../src/store";
 import { hashOf } from "../store/fixtures";
 import { type Bench, CHAT, dataOf, openBench, openTable, type Table, USER } from "./rig";
+import { callRoute } from "../app/call";
 
 const BRANCH = "chat-b";
 
@@ -41,16 +42,12 @@ function pageOn(t: Table): Page {
   const running = new Set<string>();
   const deps: CastRoutesDeps = { store: t.store, writes: t.writes, turning: (_user, chat) => running.has(chat), files: () => shippedTexts(), settings: async () => ({}), now: () => 7 };
   const [listRoute, oneRoute, strikeRoute] = castRoutes(deps);
-  const call = { body: undefined, request: new Request("http://rpe.test/"), signal: new AbortController().signal };
   return {
     t,
     running,
-    list: async (query = {}, user = USER, chat = CHAT) => await listRoute.handle({ ...call, params: { chat }, query: new URLSearchParams(query), user }),
-    one: async (character, query = {}, user = USER, chat = CHAT) => await oneRoute.handle({ ...call, params: { chat, character }, query: new URLSearchParams(query), user }),
-    strike: async (character, body, user = USER, chat = CHAT) => {
-      if (strikeRoute.body === undefined) throw new Error("the strike route reads no body");
-      return await strikeRoute.handle({ ...call, params: { chat, character }, query: new URLSearchParams(), body: strikeRoute.body(body), user });
-    },
+    list: async (query = {}, user = USER, chat = CHAT) => await callRoute(listRoute, { params: { chat }, query, user }),
+    one: async (character, query = {}, user = USER, chat = CHAT) => await callRoute(oneRoute, { params: { chat, character }, query, user }),
+    strike: async (character, body, user = USER, chat = CHAT) => await callRoute(strikeRoute, { params: { chat, character }, body, user }),
   };
 }
 
@@ -350,8 +347,8 @@ describe("striking from the page", () => {
     await expect(page.strike("Wren", { id: `casting:${wren}`, struck: true })).rejects.toMatchObject({ status: 404, message: words("page_no_entry", { who: "Wren", id: `casting:${wren}` }) });
     await expect(page.strike("Wren", { id: "k-nowhere", struck: true })).rejects.toMatchObject({ status: 404, message: words("page_no_entry", { who: "Wren", id: "k-nowhere" }) });
     await expect(page.strike("Tam", { id: ids.seal, struck: true })).rejects.toMatchObject({ status: 404, message: words("no_character", { who: "Tam" }) });
-    await expect(page.strike("Wren", { id: ids.seal })).rejects.toMatchObject({ status: 400, message: words("unreadable", { field: "struck", value: "", choices: "true, false" }) });
-    await expect(page.strike("Wren", { struck: true })).rejects.toMatchObject({ status: 400, message: words("unreadable", { field: "id", value: "" }) });
+    await expect(page.strike("Wren", { id: ids.seal })).rejects.toMatchObject({ status: 400 });
+    await expect(page.strike("Wren", { struck: true })).rejects.toMatchObject({ status: 400 });
     // One user's chat is not another's to strike.
     await expect(page.strike("Wren", { id: ids.seal, struck: true }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
     expect(rows()).toBe(before);

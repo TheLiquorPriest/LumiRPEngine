@@ -1,0 +1,169 @@
+// What the Files and Storage pages' routes take and answer (plan §5, §14), declared field by field and
+// held to the tree's own types, so that the pages' types and the API reference say what a page sends and
+// is sent, and a change to one stops this compiling until the declaration says the same.
+
+import type { FileKind, StackPart } from "rp-harness/contract";
+import { agentRef, type Exactly, type Holds, type Infer, layerLevel, shape } from "../app";
+import type { TreeFileEntry } from "./catalog";
+import type { DiffLine } from "./defaults";
+import type { Pruned } from "./retention";
+import type { ChatStorage, NoteFile, NoteFiles, TreeStorage } from "./storage";
+import type { SuggestionState, TreeSuggestion } from "./suggestions";
+
+const T = shape.text();
+const N = shape.number();
+const field = shape.field;
+const opt = shape.optional;
+const nullable = shape.nullable;
+
+const fileKind = shape.named("TreeFileKind", "What a file of the tree is: one the user writes, a note an agent keeps, or one RPE makes again.", shape.oneOf("yours", "notes", "generated"));
+type KindMirrored = Holds<Exactly<Infer<typeof fileKind>, FileKind>>;
+
+/** The chat a route names, where it names one: a chat's id; left out, none (the shipped level and the user's own). */
+export const chatQuery = opt(T, "The chat whose view of the tree is read; left out, the shipped level and the user's own.");
+
+// ---------------------------------------------------------------- files
+
+const treeFileRow = shape.named(
+  "TreeFileRow",
+  "One file of the agents' tree as the Files page lists it: its path in the chat's view, its level and kind, its size, whether RPH takes it, and what stands beside it at other levels.",
+  shape.object({
+    path: field(T, "Its path in the chat's view, as the file routes take it: `@shipped/…`, `@global/…`, `@character/…`, or below the chat's folder."),
+    level: layerLevel,
+    kind: fileKind,
+    bytes: N,
+    item: field(nullable(T), "The name RPH loads it by, and an `off:` list names it by; null for a file RPH does not load by its name."),
+    applies: field(shape.yesNo(), "Whether RPH takes it: a named file when it is the nearest of its name, not switched off and not an example; any other file as it is."),
+    replacedBy: field(nullable(T), "The nearer file of the same name taken in its place; null when none is."),
+    off: field(shape.yesNo(), "Its name is in a config's `off:` list, which switches it off at every level."),
+    offIn: field(shape.list(layerLevel), "The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing."),
+    editable: field(shape.yesNo(), "Whether the user may write it where it is: never a shipped file or a generated one."),
+    shipped: field(nullable(T), "The shipped file of the same name, for a file of another level that has one; null otherwise."),
+    defaultChanged: field(nullable(N), "For a file of the user's in place of a shipped one: when an update changed that shipped file, if it did since this file was last written; null otherwise."),
+  }),
+);
+type EntryMirrored = Holds<Exactly<Infer<typeof treeFileRow>, TreeFileEntry>>;
+
+export const treeListingReply = shape.named("TreeListingReply", "Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own.", shape.object({ files: shape.list(treeFileRow) }));
+
+export const treeFileReply = shape.named(
+  "TreeFileReply",
+  "One file of the tree, as text.",
+  shape.object({ path: T, level: layerLevel, kind: fileKind, bytes: N, editable: shape.yesNo(), text: T }),
+);
+/** A file the Files page reads. */
+export type TreeFileText = Infer<typeof treeFileReply>;
+
+const diffRow = shape.named("DiffRow", "One line of a difference between two texts: in both, only in the second, or only in the first.", shape.object({ op: shape.oneOf("same", "added", "removed"), text: T }));
+type DiffMirrored = Holds<Exactly<Infer<typeof diffRow>, DiffLine>>;
+
+export const treeDiffReply = shape.named(
+  "TreeDiffReply",
+  "A file's differences: from the shipped file of its name to this one; and what the update that changed the shipped file since this one was written changed of it.",
+  shape.object({
+    path: T,
+    shipped: field(nullable(T), "The shipped file of the same name; null when there is none, or the file is the shipped one."),
+    lines: field(shape.list(diffRow), "From the shipped file to this one, line by line; none without a shipped file."),
+    update: field(nullable(shape.object({ at: N, lines: shape.list(diffRow) })), "The update that changed the shipped file since this one was last written: when, and from the shipped file before it to the shipped file now."),
+  }),
+);
+
+/** A file's differences (plan §5.4 "Defaults"). */
+export type TreeFileDiff = Infer<typeof treeDiffReply>;
+
+export const fileWriteBody = shape.named(
+  "FileWriteAsk",
+  "The whole text of a file, written as the user at a level (for a file of another level, the user's own file of its name there); a chat's level names the chat.",
+  shape.object({ level: layerLevel, chat: opt(nullable(T)), text: T }),
+);
+export const fileSwitchBody = shape.named(
+  "FileSwitchAsk",
+  "A file's name switched off or on again in the `off:` list of a level's config: the global level's, or a chat's, which names the chat.",
+  shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), off: shape.yesNo() }),
+);
+export const fileWrittenReply = shape.named("FileWrittenReply", "What writing a file or switching its name answers: the file as the listing now shows it.", shape.object({ file: nullable(treeFileRow) }));
+export const fileRemovedReply = shape.object({ removed: field(T, "The path of the file removed.") });
+
+// ---------------------------------------------------------------- suggestions
+
+export const suggestionState = shape.named("SuggestionStatus", "Where an agent's suggestion stands: waiting on the user, accepted, or dismissed.", shape.oneOf("open", "accepted", "dismissed"));
+type StateMirrored = Holds<Exactly<Infer<typeof suggestionState>, SuggestionState>>;
+
+const suggestionFields = {
+  id: N,
+  chat: T,
+  turn: field(nullable(shape.turnId()), "The turn it was filed in; null for one filed outside a turn."),
+  agent: agentRef,
+  path: field(T, "The file it would change, as the agent named it in the chat's view."),
+  text: field(T, "The proposed text, whole."),
+  reason: T,
+  at: N,
+  state: suggestionState,
+  decided: field(nullable(N), "When the user accepted or dismissed it; null while open."),
+} as const;
+const suggestionRow = shape.named("SuggestionRow", "An agent's suggestion for a file: the file as the agent named it in the chat's view, the text proposed whole, and why.", shape.object(suggestionFields));
+type SuggestionMirrored = Holds<Exactly<Infer<typeof suggestionRow>, TreeSuggestion>>;
+
+const suggestionShown = shape.named(
+  "SuggestionShown",
+  "A suggestion with what it would change: from the file as it is now to the text proposed.",
+  shape.object({ ...suggestionFields, lines: shape.list(diffRow) }),
+);
+/** An agent's suggestion as the Files page shows it: with the difference from its file as it is now to the text proposed. */
+export type TreeSuggestionView = Infer<typeof suggestionShown>;
+export const suggestionsReply = shape.named("SuggestionsReply", "A chat's suggestions (every chat's when none is named), newest first.", shape.object({ suggestions: shape.list(suggestionShown) }));
+export const suggestionAcceptBody = shape.named(
+  "SuggestionAcceptAsk",
+  "The text as accepted, when it was edited, and the level it is written at (absent: the file's own).",
+  shape.object({ text: opt(nullable(T)), level: opt(layerLevel) }),
+);
+export const suggestionAcceptedReply = shape.named("SuggestionAcceptedReply", "A suggestion accepted: it as it now stands, and the file as the listing now shows it.", shape.object({ suggestion: nullable(suggestionRow), file: nullable(treeFileRow) }));
+export const suggestionDismissedReply = shape.named("SuggestionDismissedReply", "A suggestion dismissed: it as it now stands.", shape.object({ suggestion: nullable(suggestionRow) }));
+
+// ---------------------------------------------------------------- storage
+
+const chatStorageRow = shape.named(
+  "ChatStorageRow",
+  "What a chat's folder takes in all, and by area: its notes, its turn folders, its sessions' own files, and the rest of its files.",
+  shape.object({ chat: T, folder: field(T, "Its folder below the tree's `chats/`."), bytes: N, areas: shape.object({ notes: N, turns: N, sessions: N, files: N }) }),
+);
+type ChatStorageMirrored = Holds<Exactly<Infer<typeof chatStorageRow>, ChatStorage>>;
+
+export const storageReply = shape.named(
+  "StorageReply",
+  "Each chat's folder; the user's own level and the shipped level; and RPE's database file, with its write-ahead log.",
+  shape.object({ chats: shape.list(chatStorageRow), global: field(N, "The user's own level, the chats' folders and the shipped level apart."), shipped: N, database: field(N, "RPE's database file, with its write-ahead log.") }),
+);
+type StorageMirrored = Holds<Exactly<Infer<typeof storageReply>, TreeStorage>>;
+
+const noteRow = shape.named(
+  "NoteRow",
+  "A note file of a chat: its path in the chat's view, its size now (0 for one no longer there), and how many times agents wrote it in turns.",
+  shape.object({ path: T, bytes: N, writes: N }),
+);
+type NoteMirrored = Holds<Exactly<Infer<typeof noteRow>, NoteFile>>;
+export const notesReply = shape.named("NotesReply", "A chat's largest notes, and those agents rewrote most.", shape.object({ largest: shape.list(noteRow), rewritten: shape.list(noteRow) }));
+type NotesMirrored = Holds<Exactly<Infer<typeof notesReply>, NoteFiles>>;
+
+const prunedShown = shape.named("PrunedShown", "What pruning a chat's old turn folders took away: of how many folders, how many files, how many bytes.", shape.object({ folders: N, files: N, bytes: N }));
+type PrunedMirrored = Holds<Exactly<Infer<typeof prunedShown>, Pruned>>;
+export const pruneBody = shape.named("PruneAsk", "The chat whose old turn folders are pruned.", shape.object({ chat: shape.text({ blank: false }) }));
+export const pruneReply = shape.object({ pruned: prunedShown });
+
+const stackPartRow = shape.named(
+  "StackPartRow",
+  "One part of an agent's stack: which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing; a part left out is listed with why.",
+  shape.object({
+    part: T,
+    path: field(T, "The file it came from; for a part left out as `missing`, where it would be."),
+    level: layerLevel,
+    hash: opt(T, "SHA-256 of the file, lower-case hex; absent for a part left out as `missing`."),
+    where: field(shape.oneOf("opening", "briefing"), "Where it sits, or for a part left out, where it would."),
+    left: opt(shape.oneOf("missing", "off", "empty", "broken", "needs"), "Why it is left out; absent for a part in the stack."),
+  }),
+);
+export const stackReply = shape.named("StackReply", "The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why.", shape.object({ agent: T, parts: shape.list(stackPartRow) }));
+type StackMirrored = Holds<Exactly<Infer<typeof stackPartRow>, StackPart>>;
+
+/** The checks above hold, and are read by no one. */
+export type Mirrors = [KindMirrored, EntryMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];

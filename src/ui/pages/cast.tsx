@@ -14,7 +14,7 @@ import { useSelect } from "../../frontend/store";
 import type { CastCharacter, CastEntryShown, CastKind, CastList, CastMemberShown, CastStruck, Casting, MemoryTier } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Empty, Fold, Gated, PageHeader, Pre, Row, Section } from "../atoms";
-import type { RpeClient } from "../client";
+import { replyOf, type RpeClient } from "../client";
 import { onChatChange } from "../live-watch";
 import { EntryCard, type EntryCardProps, type StrikeAsk, writeWords } from "../records";
 import { counted, errorWords, when } from "../words";
@@ -55,13 +55,13 @@ export function readCast(client: Pick<RpeClient, "call">, chat: string, onChange
     onChange(shown);
   };
   const readList = (): void => {
-    client.call("GET /api/v1/chats/:chat/cast", { chat }).then(
+    client.call("GET /api/v1/chats/:chat/cast", { chat }).then(replyOf).then(
       (list) => show({ list, loading: false, problem: null }),
       (error: unknown) => show({ loading: false, problem: errorWords(error) }),
     );
   };
   const readOne = (character: string): void => {
-    client.call("GET /api/v1/chats/:chat/cast/:character", { chat, character }).then(
+    client.call("GET /api/v1/chats/:chat/cast/:character", { chat, character }).then(replyOf).then(
       (read) => {
         if (shown.open === character) show({ character: read, problem: null });
       },

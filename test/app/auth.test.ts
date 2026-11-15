@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, RunningServer } from "../../src/app";
-import { AuthRefused, rawRoute, route } from "../../src/app";
+import { AuthRefused, rawRoute, route, shape } from "../../src/app";
 import { isRecord } from "../../src/shared/json";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "./helpers";
 
@@ -18,13 +18,16 @@ const probe = {
         method: "POST",
         path: "/v1/chat/completions",
         access: "provider",
+        group: "provider",
+        does: "A test's provider endpoint: answers whoever the server lets through.",
+        answers: "a chat completion",
         raw: async (request) => {
           const body: unknown = await request.json();
           return Response.json({ object: "chat.completion", asked: isRecord(body) ? (body.model ?? null) : null });
         },
       }),
-      rawRoute({ method: "GET", path: "/v1/models", access: "provider", raw: () => Response.json({ object: "list", data: [] }) }),
-      route({ method: "GET", path: "/api/v1/probe/me", access: "page", handle: ({ user }) => ({ user }) }),
+      rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "A test's model list.", answers: "a model list", raw: () => Response.json({ object: "list", data: [] }) }),
+      route({ method: "GET", path: "/api/v1/probe/me", access: "page", group: "service", does: "Says whose the caller is.", reply: shape.object({ user: shape.text() }), handle: ({ user }) => ({ user }) }),
     ]);
   },
 };
