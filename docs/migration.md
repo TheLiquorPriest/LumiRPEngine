@@ -6,7 +6,7 @@ This page is for you if you play chats on the previous build of this extension: 
 
 1. **The rehearsal.** It reads everything and writes nothing. You read its report.
 2. **The real run.** It copies everything into RPE's own data folder. The previous build goes on playing your chats the whole time.
-3. **The switch.** You switch the installed extension to the new build, and run `rpe up` with `--lumiverse`. It carries what changed since the real run, and RPE takes the previous runtime's place.
+3. **The switch.** You switch the installed extension to the new build, and run `rpe up`. It carries what changed since the real run, and RPE takes the previous runtime's place.
 4. **Going back**, should you want to: `rpe down` and the steps it prints.
 
 Steps 1 and 2 change nothing in Lumiverse and nothing of the previous build's. If you do not like what you see after them, delete RPE's data folder, and that is all.
@@ -57,7 +57,7 @@ A real run is refused while RPE answers at the address its data folder's config 
 
 ### The backups
 
-Every real run takes a backup of its own, and so does every switch (`rpe up --lumiverse`), which runs the migration again. Each is one archive in `backups/` in RPE's data folder, named `rpe-migration-backup-<the time it was made>.tar`, readable only by your account. Each is about the size of your data in the previous build: on the test server it was 367 MB. Nothing removes them, so they add up. An older one may be deleted once a newer one exists; keep the newest.
+Every real run takes a backup of its own, and so does every switch (`rpe up`), which runs the migration again. Each is one archive in `backups/` in RPE's data folder, named `rpe-migration-backup-<the time it was made>.tar`, readable only by your account. Each is about the size of your data in the previous build: on the test server it was 367 MB. Nothing removes them, so they add up. An older one may be deleted once a newer one exists; keep the newest.
 
 The same folder also holds `rpe-before-<build>-<time>.db`: a copy of RPE's database, taken when a new build of RPE first changes its tables. These stay until you delete them too.
 
@@ -103,16 +103,18 @@ Do this only when you are happy with the report.
 3. **Run the switch,** with the copy the extension now holds:
 
    ```sh
-   bun <Lumiverse's data folder>/extensions/lumi_rp_engine/repo/dist/rpe.js up --url <Lumiverse's address> --user <your username> --lumiverse <Lumiverse's data folder>
+   bun <Lumiverse's data folder>/extensions/lumi_rp_engine/repo/dist/rpe.js up --url <Lumiverse's address> --user <your username>
    ```
 
-`rpe up --lumiverse` does this, in this order:
+Run from the extension's own folder, `rpe up` knows Lumiverse's data folder, and looks there for the previous build's runtime of yours. Where it finds one, it is the switch. Where it finds none, it is the install, whatever the extension runs. Run from a copy elsewhere, it asks where Lumiverse's data folder is (`--lumiverse <folder>` says it and asks for the switch). `--runtime`, `--no-runtime`, `--runtime-config`, `--runtime-data` and `--identifier` say where the previous build's runtime is, where it is not where that build puts it.
 
-- It refuses, before it stops anything, while Lumiverse still has the previous build of the extension installed, or while the extension's `dist/backend.js` is another build than the `rpe.js` you ran. Switch the branch first, and run the `rpe.js` in the extension's own folder. A copy run from its sources is refused too: it has no build of its own to compare.
+`rpe up` does this for the switch, in this order:
+
+- It refuses, before it stops anything, while Lumiverse still has the previous build of the extension installed (it says so, and prints the steps above again), or while the extension's `dist/backend.js` is another build than the `rpe.js` you ran. Switch the branch first, and run the `rpe.js` in the extension's own folder. A copy run from its sources is refused too: it has no build of its own to compare.
 - It refuses another Lumiverse user than the one whose data was carried, and an RPE running outside its service (stop `rpe serve` first).
 - It checks that the migration would run, then waits until the previous runtime is idle, and stops its service.
 - It takes a fresh backup and migrates again from the start, for every chat not yet played on RPE. So everything that changed since the real run is carried too: a turn you played, a world you edited, a correction.
-- It starts RPE as a service (`rpe-<name>.service`), at the previous runtime's address, under its model name (`lumiah-lumi_rp_engine`) where Lumiverse still holds the previous build's connection, and with its key, and waits until RPE answers. Where Lumiverse holds no such connection, it makes RPE a connection of its own there instead, and asks you to choose it for your chats.
+- It starts RPE as a service (`rpe-<name>.service`), at the previous runtime's address, under its model name (`lumiah-lumi_rp_engine`) where Lumiverse still holds the previous build's connection, and with its key, and waits until RPE answers. Every connection in Lumiverse that reached the previous runtime is kept as it is and becomes RPE's own: RPE answers on each, under the model name it names, and says so. Where Lumiverse holds none, it makes RPE a connection of its own there instead, and asks you to choose it for your chats.
 - Only then does it switch the previous runtime's service off. It does not remove its unit, which going back uses.
 - If anything fails along the way, it puts everything back as it was, and the previous runtime runs again. So does Ctrl-C, a closed terminal or a kill: it says so, ends the step under way, and puts back what it did.
 
@@ -120,17 +122,17 @@ It prints which connection in Lumiverse RPE answers on, the report (with a line 
 
 A chat that played on the classic pipeline or the agents engine is played by the Author from then on. Its next turn is told it is a migrated chat, and what was carried.
 
-### Running `rpe up --lumiverse` again
+### Running `rpe up` again
 
-While the switch stands (RPE's service runs and answers in the previous runtime's place, and the previous runtime's service is off), a second `rpe up --lumiverse` stops nothing, changes nothing and does not run the migration again. It says what stands, and prints the line that carries what changed on the previous build's side since the last run: stop RPE's service, run `rpe migrate` with the same folders, and start the service again.
+While the switch stands (RPE's service runs and answers in the previous runtime's place, and the previous runtime's service is off), a second `rpe up` stops nothing, changes nothing and does not run the migration again. It says what stands, and prints the line that carries what changed on the previous build's side since the last run: stop RPE's service, run `rpe migrate` with the same folders, and start the service again.
 
-Where the switch does not stand, because RPE's service is stopped or the previous runtime's service is on again after going back, `rpe up --lumiverse` makes the whole switch again, as above. A chat already played on RPE is left as it is, every other chat is carried again. On the test server, cutting over a second time after going back carried eight chats again and left the one played on RPE alone.
+Where the switch does not stand, because RPE's service is stopped or the previous runtime's service is on again after going back, `rpe up` makes the whole switch again, as above. A chat already played on RPE is left as it is, every other chat is carried again. On the test server, cutting over a second time after going back carried eight chats again and left the one played on RPE alone.
 
 ### A carried connection has no limits of its own
 
 The model connections of the previous runtime are carried into RPE, and the migration gives them no limits of their own. Where pi's list of models, or the provider's own server, gives a carried connection's model its limits, RPE uses those. Where neither does, the **Connections** page shows "Context window: not known · Longest reply: not known". Then RPE sends the model no cap on a reply, and cannot tell when a session nears the model's window: it summarizes a session's earlier turns only once the provider refuses a call as too long.
 
-So after the switch, open the Connections page and look at each carried connection. For one with a limit "not known", choose **Test it**: it shows the model that answered and the limits the provider's list gives for it. Where the provider answered as another model than the connection names, **Take these limits** fills them into the connection's form. Or type them into the form's **Context window** and **Longest reply** yourself. Nothing is written until you save.
+After the switch, `rpe up` names each carried connection that has no limits among what is left for you to do. Open the Connections page and look at each carried connection. For one with a limit "not known", choose **Test it**: it shows the model that answered and the limits the provider's list gives for it. Where the provider answered as another model than the connection names, **Take these limits** fills them into the connection's form. Or type them into the form's **Context window** and **Longest reply** yourself. Nothing is written until you save.
 
 ### After the switch
 

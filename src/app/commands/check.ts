@@ -58,7 +58,7 @@ async function startsForReal(work: string, paths: DataPaths, config: AppConfig, 
   await mkdir(join(scratch, BACKUPS_FOLDER), { recursive: true });
   await copyDatabase(paths, join(scratch, DATABASE_FILE));
   const port = freeLoopbackPort();
-  await writeFile(join(scratch, "config.json"), JSON.stringify({ v: 1, port, lumiverse: { url: null, user, database: null, connection: null, models: config.lumiverse.models } }));
+  await writeFile(join(scratch, "config.json"), JSON.stringify({ v: 1, port, lumiverse: { url: null, user, database: null, connections: [], models: config.lumiverse.models } }));
   const child = Bun.spawn([process.execPath, appFile, "serve", "--data", scratch], { env: scratchEnv(io.env, port, user), stdout: "ignore", stderr: "pipe", stdin: "ignore" });
   const said = new Response(child.stderr).text();
   const exited = child.exited.then((code) => ({ code }));

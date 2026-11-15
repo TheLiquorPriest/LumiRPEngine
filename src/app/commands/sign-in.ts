@@ -53,7 +53,7 @@ export function oneUser(paths: DataPaths, config: AppConfig): (user: string) => 
  * nothing. The user written is the id Lumiverse answers for the username, which is what pages and
  * Lumiverse's rows name.
  */
-export async function signInTo(url: string, username: string, more: Record<string, string>, ctx: WriterContext, guard: (user: string) => void): Promise<LumiverseSession> {
+export async function signInTo(url: string, username: string, more: Record<string, string | string[]>, ctx: WriterContext, guard: (user: string) => void): Promise<LumiverseSession> {
   const { config, io } = ctx;
   const password = await io.secret(`The Lumiverse password of ${username} (it is not shown, and not kept): `);
   if (password === null) throw new Error("Signing in needs the password.");

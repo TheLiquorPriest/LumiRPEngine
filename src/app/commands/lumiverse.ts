@@ -15,12 +15,12 @@ import { oneUser, signInTo } from "./sign-in";
 
 /** Which Lumiverse this RPE belongs to, and its sign-in: never the token. */
 export async function showLumiverse(paths: DataPaths, config: AppConfig, io: CliIO): Promise<void> {
-  const { url, user, database, connection } = config.lumiverse;
+  const { url, user, database, connections } = config.lumiverse;
   const fromEnv = (name: string): string => (io.env[name]?.trim() ? ` (from ${name}, which wins over the config file)` : "");
   io.out(`Lumiverse: ${url ?? "not set"}${fromEnv(CONFIG_ENV.lumiverseUrl)}`);
   io.out(`User: ${user ?? "not set"}${fromEnv(CONFIG_ENV.lumiverseUser)}`);
   io.out(`Database: ${database ?? "not set, so Lumiverse is read over HTTP"}`);
-  io.out(`RPE's connection in Lumiverse: ${connection ?? "not set"}`);
+  io.out(`RPE's connections in Lumiverse: ${connections.length === 0 ? "not set" : connections.join(", ")}`);
   const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);
   if (!isRecord(kept) || typeof kept.username !== "string" || typeof kept.user !== "string") {
     io.out("Signed in: no");
@@ -42,7 +42,7 @@ export async function lumiverseCommand(flags: Flags, paths: DataPaths, config: A
   const connection = flags.connection === undefined ? undefined : plainText(flags.connection, "--connection");
   const database = flags.database === undefined ? undefined : resolve(flags.database);
   if (database !== undefined && !(existsSync(database) && statSync(database).isFile())) throw new Error(`There is no file at ${database}: give --database the path of Lumiverse's database file, or leave it out to read Lumiverse over HTTP.`);
-  await signInTo(url, username, { ...(database === undefined ? {} : { database }), ...(connection === undefined ? {} : { connection }) }, { paths, config, io, version, what: "rpe lumiverse" }, oneUser(paths, config));
+  await signInTo(url, username, { ...(database === undefined ? {} : { database }), ...(connection === undefined ? {} : { connections: [connection] }) }, { paths, config, io, version, what: "rpe lumiverse" }, oneUser(paths, config));
   await showLumiverse(paths, await loadConfig(paths, io.env), io);
   const answer = await serverAnswer(config, io);
   if (answer !== null && "rpe" in answer) io.out(`RPE is running at ${serverUrl(config)}: restart it (stop \`${runLine(io, paths, "serve")}\` and start it again) for it to take this.`);

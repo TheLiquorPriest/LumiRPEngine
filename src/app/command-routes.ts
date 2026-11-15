@@ -77,7 +77,7 @@ export const lumiverseSave = shape.named(
   "What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block.",
   shape.object({
     signIn: shape.optional(shape.nullable(signIn), "The sign-in to keep; null forgets the one kept; left out, it is not touched."),
-    set: shape.optional(shape.record(shape.nullable(shape.union(T, shape.list(T)))), "Values of the config's `lumiverse` block (url, user, database, connection, models); null takes one out."),
+    set: shape.optional(shape.record(shape.nullable(shape.union(T, shape.list(T)))), "Values of the config's `lumiverse` block (url, user, database, connections, models); null takes one out."),
     listens: shape.optional(shape.object({ address: T, port: shape.whole({ least: 0, most: 65535 }) }), "Where RPE listens, as the swap takes it from today's runtime."),
   }),
 );
@@ -179,6 +179,8 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
               if (value === null) delete block[name];
               else block[name] = value;
             }
+            // The list takes the place of the one id a config.json held before it.
+            if (set.connections !== undefined) delete block.connection;
             raw.lumiverse = block;
           }
           if (listens !== undefined) Object.assign(raw, { address: listens.address, port: listens.port });

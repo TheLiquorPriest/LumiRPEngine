@@ -30,7 +30,7 @@ export async function downCommand(argv: readonly string[], io: CliIO): Promise<n
   const user = config.lumiverse.user;
   const taken = user === null ? null : (earlierRuns(paths.database, user).previous?.runtime?.taken ?? null);
   // RPE answers to today's model name once the swap took today's connection over; else the connection its config names is its own.
-  const own = config.lumiverse.models.some((m) => TODAYS_MODEL.test(m)) ? null : config.lumiverse.connection;
+  const own = config.lumiverse.models.some((m) => TODAYS_MODEL.test(m)) ? null : (config.lumiverse.connections[0] ?? null);
   io.out("");
   for (const line of goingBack({ identifier: EXTENSION_IDENTIFIER, runtime: taken === null ? null : { name: taken.name, source: taken.source }, own })) io.out(line);
   return 0;

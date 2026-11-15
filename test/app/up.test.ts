@@ -164,7 +164,7 @@ describe("rpe up", () => {
     const made = only();
     expect(made).toMatchObject({ name: "RPE", provider: "custom", api_url: `http://127.0.0.1:${port}/v1`, model: "rpe", has_api_key: true });
     expect(inForce()).toEqual([secretHash(made.key ?? "")]);
-    expect((await config()).lumiverse).toEqual({ url: lumiverse.url, user: ACCOUNT.id, connection: made.id });
+    expect((await config()).lumiverse).toEqual({ url: lumiverse.url, user: ACCOUNT.id, connections: [made.id] });
     expect(first.out).toContain(`Made RPE's connection in Lumiverse, "RPE" (${made.id})`);
     expect(first.out).toContain("What is left for you to do:");
     expect(first.out).toContain("Install RPE's extension in Lumiverse");
@@ -268,7 +268,7 @@ describe("rpe up", () => {
     expect((await up(null)).code).toBe(0);
     const remade = only();
     expect(remade.id).not.toBe(gone);
-    expect(((await config()).lumiverse as Record<string, unknown>).connection).toBe(remade.id);
+    expect(((await config()).lumiverse as Record<string, unknown>).connections).toEqual([remade.id]);
     expect(inForce()).toEqual([secretHash(remade.key ?? "")]);
   });
 

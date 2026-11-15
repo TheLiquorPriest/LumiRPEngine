@@ -2254,7 +2254,7 @@ What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file 
 export interface LumiverseSave {
   /** The sign-in to keep; null forgets the one kept; left out, it is not touched. */
   signIn?: { username: string; user: string; token: string; savedAt: number } | null;
-  /** Values of the config's `lumiverse` block (url, user, database, connection, models); null takes one out. */
+  /** Values of the config's `lumiverse` block (url, user, database, connections, models); null takes one out. */
   set?: { [key: string]: string | string[] | null };
   /** Where RPE listens, as the swap takes it from today's runtime. */
   listens?: { address: string; port: number };

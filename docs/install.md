@@ -59,7 +59,7 @@ One RPE serves one Lumiverse user. A sign-in as another user is refused before a
 
 Every command `rpe` has:
 
-- `rpe up`: the above. With `--lumiverse`, the switch from the previous build: see [Moving from the previous build](migration.md#3-the-switch).
+- `rpe up`: the above. Where the previous build's runtime of yours is in Lumiverse's data folder and the extension runs the new build, `rpe up` is the switch from the previous build instead, with no flag: see [Moving from the previous build](migration.md#3-the-switch). Where the previous build is still installed, it says so and changes nothing.
 - `rpe serve`: runs RPE in the foreground.
 - `rpe status`: the build, the data folder, where RPE listens and whether it answers, the builds that run, the Lumiverse it belongs to, its keys, and anything waiting to be switched on.
 - `rpe down`: stops and removes RPE's service. Its data stays where it is.
@@ -78,7 +78,7 @@ Commands that change something are written by the running RPE when it runs, and 
 
 Everything RPE keeps is in one folder: its database (`rpe.db`), the files the agents read and write (`files/`), its secrets file (`secrets.json`), its config file (`config.json`) and its backups (`backups/`). The folder is `$RPE_DATA` when that is set, else `~/.local/share/rpe`. Every command takes `--data <folder>` to use another one.
 
-`config.json` holds the install's facts: which Lumiverse RPE serves and as which user, its database file, the port RPE's connection in Lumiverse points at, and that connection with its models. The command line writes it (`rpe up`, `rpe lumiverse`); the Settings page lists it and never writes it. Each fact is in [Settings](settings.md#the-install-configjson). Three can also come from the environment, which wins over the file: `RPE_PORT`, `RPE_LUMIVERSE_URL` and `RPE_LUMIVERSE_USER`. RPE's own limits (where it listens, the origins and names allowed, its body limits, the lives of tokens, the live socket's bounds, the database's and the command line's waits) are settings in `files/RPE-global.yml`, in force from RPE's next start; a `config.json` from an earlier build that still holds limits has them moved there at RPE's first start, each value kept.
+`config.json` holds the install's facts: which Lumiverse RPE serves and as which user, its database file, the port RPE's connections in Lumiverse point at, and those connections (`lumiverse.connections`: its own, and every one the switch took over from the previous build) with their models. A `config.json` from before the list holds the one connection as `lumiverse.connection`, which reads as a list of one. The command line writes it (`rpe up`, `rpe lumiverse`); the Settings page lists it and never writes it. Each fact is in [Settings](settings.md#the-install-configjson). Three can also come from the environment, which wins over the file: `RPE_PORT`, `RPE_LUMIVERSE_URL` and `RPE_LUMIVERSE_USER`. RPE's own limits (where it listens, the origins and names allowed, its body limits, the lives of tokens, the live socket's bounds, the database's and the command line's waits) are settings in `files/RPE-global.yml`, in force from RPE's next start; a `config.json` from an earlier build that still holds limits has them moved there at RPE's first start, each value kept.
 
 By default RPE listens on `127.0.0.1`, port `7871`.
 

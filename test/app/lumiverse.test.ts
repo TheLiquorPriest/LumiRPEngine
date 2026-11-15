@@ -91,13 +91,13 @@ describe("rpe lumiverse", () => {
     expect(made).toMatchObject({ code: 0 });
     expect(lumiverse.signIns).toEqual([{ body: { username: "reader", password: ACCOUNT.password }, origin: null, cookie: null }]);
     const token = lumiverse.tokens.at(-1) ?? "";
-    expect(JSON.parse(await readFile(bed.paths.config, "utf8")).lumiverse).toEqual({ url: lumiverse.url, user: ACCOUNT.id, database: lumiverseDb, connection: "connection-7" });
+    expect(JSON.parse(await readFile(bed.paths.config, "utf8")).lumiverse).toEqual({ url: lumiverse.url, user: ACCOUNT.id, database: lumiverseDb, connections: ["connection-7"] });
     expect(JSON.parse(await readFile(bed.paths.secrets, "utf8")).parts.lumiverse).toEqual({ username: "reader", token, user: ACCOUNT.id, savedAt: expect.any(Number) });
     for (const text of (await everything()).values()) expect(text).not.toContain(ACCOUNT.password);
     expect(made.out).toContain(`Signed in to Lumiverse at ${lumiverse.url} as reader. This RPE belongs to that Lumiverse user (${ACCOUNT.id}).`);
     const shown = await rpe(["lumiverse"]);
     expect(shown.code).toBe(0);
-    for (const line of [`Lumiverse: ${lumiverse.url}`, `User: ${ACCOUNT.id}`, `Database: ${lumiverseDb}`, "RPE's connection in Lumiverse: connection-7", `Signed in: as reader (user ${ACCOUNT.id}) since`]) expect(shown.out).toContain(line);
+    for (const line of [`Lumiverse: ${lumiverse.url}`, `User: ${ACCOUNT.id}`, `Database: ${lumiverseDb}`, "RPE's connections in Lumiverse: connection-7", `Signed in: as reader (user ${ACCOUNT.id}) since`]) expect(shown.out).toContain(line);
     expect(made.out + made.err + shown.out + shown.err).not.toContain(token);
   });
 

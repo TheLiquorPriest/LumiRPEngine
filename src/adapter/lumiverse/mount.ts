@@ -191,8 +191,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     const listening = app?.listening() ?? null;
     if (app === null || listening === null || key === null) return null;
     const { questionMs, logChars } = settings().extension;
-    const { connection } = app.config.lumiverse;
-    return { v: 1, base: listening.loopback, key, connections: connection === null ? [] : [connection], relay: relaySession, build: app.version, values: { questionMs, logChars } };
+    return { v: 1, base: listening.loopback, key, connections: [...app.config.lumiverse.connections], relay: relaySession, build: app.version, values: { questionMs, logChars } };
   };
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {

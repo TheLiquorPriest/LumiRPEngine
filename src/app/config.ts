@@ -100,8 +100,8 @@ export interface AppConfig {
     user: string | null;
     /** Lumiverse's database file, which the adapter reads read-only; null where it cannot be reached and Lumiverse is read over HTTP. */
     database: string | null;
-    /** The id of RPE's connection in Lumiverse; null before one is made. */
-    connection: string | null;
+    /** The ids of RPE's connections in Lumiverse: its own, made by `rpe up`, and every one the swap took over from today's runtime (R-109); none before one is made. A config.json from before the list holds the one id as `connection`, which reads as a list of one. */
+    connections: string[];
     /** The model names RPE's connection is offered (`/v1/models`). */
     models: string[];
   };
@@ -204,7 +204,7 @@ export const LOOPBACK = "127.0.0.1";
 export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   address: LOOPBACK,
   port: 7871,
-  lumiverse: { url: null, user: null, database: null, connection: null, models: ["rpe"] },
+  lumiverse: { url: null, user: null, database: null, connections: [], models: ["rpe"] },
   fromEnvironment: [],
   origins: [],
   hosts: [],
@@ -431,14 +431,19 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
     address: [hostName, l.address],
     port: [wholeIn(0, 65535), D.port],
     lumiverse: [
-      (value, at) =>
-        readGroup(value, at, {
+      (value, at) => {
+        const block = readGroup<Omit<AppConfig["lumiverse"], "connections"> & { connection: string | null; connections: string[] }>(value, at, {
           url: [(url, where) => (url === null ? null : webAddress(url, where)), D.lumiverse.url],
           user: [(user, where) => (user === null ? null : plainText(user, where)), D.lumiverse.user],
           database: [(file, where) => (file === null ? null : plainText(file, where)), D.lumiverse.database],
-          connection: [(id, where) => (id === null ? null : plainText(id, where)), D.lumiverse.connection],
+          // The one id of a config.json from before the list: a list of one.
+          connection: [(id, where) => (id === null ? null : plainText(id, where)), null],
+          connections: [listOf(plainText), D.lumiverse.connections],
           models: [listOf(plainText), D.lumiverse.models],
-        }),
+        });
+        const { connection, connections, ...facts } = block;
+        return { ...facts, connections: connections.length > 0 || connection === null ? connections : [connection] };
+      },
       D.lumiverse,
     ],
     origins: [listOf(origin), l.origins],
@@ -643,7 +648,7 @@ export function installFacts(config: AppConfig, paths: DataPaths): InstallFact[]
     { key: "lumiverse.user", name: "Your Lumiverse user", value: config.lumiverse.user, from: from("lumiverse.user") },
     { key: "lumiverse.database", name: "Lumiverse's database file", value: config.lumiverse.database, from: from("lumiverse.database") },
     { key: "port", name: "RPE's port, on loopback, that its connection in Lumiverse points at", value: config.port, from: from("port") },
-    { key: "lumiverse.connection", name: "RPE's connection in Lumiverse", value: config.lumiverse.connection, from: from("lumiverse.connection") },
+    { key: "lumiverse.connections", name: "RPE's connections in Lumiverse", value: config.lumiverse.connections, from: from("lumiverse.connections") },
     { key: "lumiverse.models", name: "The models that connection offers", value: config.lumiverse.models, from: from("lumiverse.models") },
     { key: "data", name: "RPE's data folder", value: paths.root, from: "install" },
     { key: "database", name: "RPE's database file", value: paths.database, from: "install" },

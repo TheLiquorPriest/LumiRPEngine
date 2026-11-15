@@ -1,14 +1,18 @@
-// The swap by `rpe up --lumiverse`, once the extension runs the new build.
+// The swap by `rpe up`, once the extension runs the new build: with today's build there for this user,
+// plain `rpe up` is the swap (§15.3 step 10; R-83).
 
-import { resolve } from "node:path";
 import { rm } from "node:fs/promises";
+import { connectionsWhere, installedExtension, type LumiverseCall, markConnection } from "../../adapter/lumiverse/install-calls";
 import { EXTENSION_IDENTIFIER } from "../../adapter/lumiverse/pipe-wire";
-import { type Loopback, otherBuildInstalled, swapCheck, swapRun, swapStands } from "../../migrate/swap";
+import { grantedPermissions } from "../../adapter/lumiverse/swap-reads";
+import { stopAfterSwitch, swapSteps } from "../../migrate/going-back";
 import { runtimeFoldersOf } from "../../migrate/runtime-folders";
+import { type Loopback, otherBuildInstalled, swapCheck, swapRun, swapStands, type TakenConnection, todaysBuildInstalled } from "../../migrate/swap";
+import { isRecord } from "../../shared/json";
+import { BUILDS_PATH } from "../app";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { readText, writeWhole } from "../disk";
-import { connectionsWhere, installedExtension, type LumiverseCall } from "../../adapter/lumiverse/install-calls";
 import { accountSystemctl, localUrl, type RpeService } from "../up";
 import type { Flags } from "./args";
 import { extensionLeft, sayLeft } from "./left";
@@ -16,23 +20,26 @@ import { ownConnection } from "./own-connection";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { treeLayout } from "./tree-layout";
-import { takeLock, withWriter, type WriterContext } from "./writer";
+import { webToken } from "./web-token";
+import { runningServer, takeLock, withWriter, type WriterContext } from "./writer";
 
 /**
- * What RPE takes of today's at the swap (plan §15.2), written into its own config and keys: where
- * today's runtime listened, the model name today's connection in Lumiverse names and the hash of the
- * key it holds, and `connection` as RPE's connection there. The model name is taken only with today's
- * connection (`todays`): it is then what tells that RPE answers on today's connection rather than
- * on one of its own (`rpe down`). Resolves to what puts RPE's config back as it was; a key hash taken
- * stays, since only today's connection holds that key, and it reaches RPE only where today's runtime
- * answered.
+ * What RPE takes of today's at the swap (plan §15.2; R-109), written into its own config and keys:
+ * where today's runtime listened, every connection in Lumiverse that reached it (`connections`, which
+ * are all RPE's now, each answered under the model name it names, so each is added to
+ * `lumiverse.models`), the model name today's loopback names where there is one, and the hash of the
+ * key those connections hold. The model names are what tell that RPE answers on today's connections
+ * rather than on one of its own (`rpe down`). Resolves to what puts RPE's config back as it was; a key
+ * hash taken stays, since only today's connections hold that key, and it reaches RPE only where today's
+ * runtime answered.
  */
-export async function takeOver(ctx: WriterContext, current: AppConfig, loopback: Loopback | null, connection: string, todays: boolean): Promise<() => Promise<void>> {
+export async function takeOver(ctx: WriterContext, current: AppConfig, loopback: Loopback | null, ids: readonly string[], taken: readonly TakenConnection[]): Promise<() => Promise<void>> {
   const before = await readText(ctx.paths.config);
-  const models: Record<string, string[]> = loopback === null || !todays || current.lumiverse.models.includes(loopback.model) ? {} : { models: [...current.lumiverse.models, loopback.model] };
+  const named = [...taken.map((c) => c.model), ...(loopback !== null && taken.length > 0 ? [loopback.model] : [])];
+  const models = [...new Set([...current.lumiverse.models, ...named])];
   const hash = loopback?.keyHash ?? null;
   await withWriter(ctx, async (ops) => {
-    await ops.saveLumiverse({ set: { connection, ...models }, ...(loopback === null ? {} : { listens: { address: loopback.at.address, port: loopback.at.port } }) });
+    await ops.saveLumiverse({ set: { connections: [...ids], ...(models.length === current.lumiverse.models.length ? {} : { models }) }, ...(loopback === null ? {} : { listens: { address: loopback.at.address, port: loopback.at.port } }) });
     if (hash !== null) await ops.takeKey(hash);
   });
   return async () => {
@@ -47,7 +54,7 @@ export async function takeOver(ctx: WriterContext, current: AppConfig, loopback:
   };
 }
 
-/** Where `rpe up --lumiverse` finds today's build, and RPE's service, as `upCommand` read them. */
+/** Where `rpe up` finds today's build, and RPE's service, as `upCommand` read them. */
 export interface SwapLine {
   flags: Flags;
   switches: ReadonlySet<string>;
@@ -57,6 +64,8 @@ export interface SwapLine {
   service: RpeService;
   existing: RpeService | null;
   unitText: string;
+  /** Lumiverse's data folder: the one the extension sits in, or the one `--lumiverse` names. */
+  lumiverse: string;
   /** Makes RPE's own copy, which the unit runs: called once the swap's checks have passed, before anything of today's is stopped. */
   prepare(): Promise<void>;
 }
@@ -83,33 +92,63 @@ function stopSignals(stop: (signal: string) => void): () => void {
   };
 }
 
+/** The build the light extension said at its last registration with the RPE that runs now, from that RPE's builds route; null where RPE does not answer or the extension has not registered. */
+async function registeredBuild(paths: DataPaths, config: AppConfig, io: CliIO): Promise<string | null> {
+  const server = await runningServer(paths, config, io);
+  if (server === null) return null;
+  try {
+    const body: unknown = await (await server.api("GET", BUILDS_PATH)).json();
+    return isRecord(body) && isRecord(body.builds) && typeof body.builds.extension === "string" ? body.builds.extension : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The model connections RPE holds that have no limits (neither a context window nor a longest reply known), asked of the running RPE, each as a line saying where to set them. */
+async function connectionsWithoutLimits(paths: DataPaths, config: AppConfig, io: CliIO): Promise<string[]> {
+  const server = await runningServer(paths, config, io);
+  if (server === null) return [];
+  try {
+    const body: unknown = await (await server.api("GET", "/api/v1/connections")).json();
+    if (!isRecord(body) || !Array.isArray(body.connections)) return [];
+    return body.connections.flatMap((c: unknown) => {
+      if (!isRecord(c) || typeof c.name !== "string") return [];
+      const limits = isRecord(c.limitsInForce) ? c.limitsInForce : null;
+      const none = limits === null || (limits.contextWindow === null && limits.maxTokens === null);
+      return none ? [`The model connection "${c.name}", carried from the previous build, has no limits: RPE does not know its model's context window or longest reply. Set them on the Connections page (${serverUrl(config)}/ui/#/connections), or with the connection's limits there.`] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 /**
- * The swap (src/migrate/swap.ts), from the command line: it checks before stopping anything, settles
- * RPE's connection in Lumiverse (today's loopback, kept as it is, where Lumiverse holds one; else
- * RPE's own, where RPE answers once swapped), then swaps, RPE taking today's runtime's place.
+ * The swap (src/migrate/swap.ts), from the command line: it checks before stopping anything, takes every
+ * connection in Lumiverse that reached today's runtime as RPE's own (R-109), kept as it is, or makes RPE's
+ * own where Lumiverse holds none, then swaps, RPE taking today's runtime's place.
  */
 export async function swapUp(line: SwapLine, io: CliIO, version: string): Promise<number> {
-  const { flags, switches, paths, current, call, service, existing } = line;
+  const { flags, switches, paths, current, call, service, existing, lumiverse } = line;
   const user = current.lumiverse.user;
   if (user === null) throw new Error("RPE's config names no Lumiverse user after the sign-in.");
-  if (existing !== null && existing.unit !== service.unit) {
-    io.err(`RPE's service for this data folder is ${existing.unit}, and --name asks for ${service.unit}: the swap starts RPE's own service again, so run it without --name. Nothing was stopped or changed.`);
+  const identifier = flags.identifier ?? EXTENSION_IDENTIFIER;
+  // The extension is switched to the new build first (§15.3 step 10): today's, left running in Lumiverse, would go on writing today's storage after the run had read it.
+  const installed = await installedExtension(call, identifier);
+  const other = await otherBuildInstalled({ lumiverse, identifier, version, installed, granted: await grantedPermissions(call, identifier) });
+  if (other !== null) {
+    io.err(other);
+    // Not yet switched: the steps, in one place (R-83).
+    if (todaysBuildInstalled(installed?.permissions ?? null)) for (const step of swapSteps({ identifier, up: runLine(io, paths, "up") })) io.err(step);
     return 1;
   }
+  const stop = (why: string): number => {
+    io.err(stopAfterSwitch({ identifier }, why).join("\n"));
+    return 1;
+  };
+  if (existing !== null && existing.unit !== service.unit) return stop(`RPE's service for this data folder is ${existing.unit}, and --name asks for ${service.unit}: the swap starts RPE's own service again, so run it without --name. Nothing was stopped or changed.`);
   // The migration is the data folder's one writer: a running RPE outside a service is stopped by the user, one in its service by the swap.
   const answer = await serverAnswer(current, io);
-  if (answer !== null && "rpe" in answer && existing === null) {
-    io.err(`RPE is running at ${serverUrl(current)}, outside a service: stop it (${runLine(io, paths, "serve")}), then run ${runLine(io, paths, "up", "--lumiverse", resolve(flags.lumiverse ?? ""))} again. Nothing was stopped or changed.`);
-    return 1;
-  }
-  // The extension is switched to the new build first (§15.3 step 10): today's, left running in Lumiverse, would go on writing today's storage after the run had read it.
-  const identifier = flags.identifier ?? EXTENSION_IDENTIFIER;
-  const lumiverse = resolve(flags.lumiverse ?? "");
-  const other = await otherBuildInstalled({ lumiverse, identifier, version, installed: await installedExtension(call, identifier) });
-  if (other !== null) {
-    io.err(`${other} Nothing was stopped or changed.`);
-    return 1;
-  }
+  if (answer !== null && "rpe" in answer && existing === null) return stop(`RPE is running at ${serverUrl(current)}, outside a service: stop it (${runLine(io, paths, "serve")}), then run ${runLine(io, paths, "up")} again. Nothing was stopped or changed.`);
   const found = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? found.configDir, dataDir: flags["runtime-data"] ?? found.dataDir };
   const swapIo = { out: io.out, fetch: io.fetch, now: io.now, sleep: (ms: number) => Bun.sleep(ms), systemctl: accountSystemctl(io.env, process.getuid?.() ?? null), onStop: stopSignals };
@@ -120,31 +159,48 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
     const runtimeFlags = [...(switches.has("no-runtime") ? ["--no-runtime"] : []), ...(["runtime", "runtime-config", "runtime-data", "identifier"] as const).flatMap((flag) => (flags[flag] === undefined ? [] : [`--${flag}`, flags[flag]]))];
     const migrateLine = runLine(io, paths, "migrate", "--lumiverse", lumiverse, "--user", user, ...runtimeFlags);
     io.out(`The swap stands: RPE's service ${standing.unit} runs, and RPE answers at ${standing.at}, where today's runtime ${standing.runtime} answered${standing.todays === null ? "" : `; today's service ${standing.todays} is switched off`}; the extension Lumiverse has installed is this build (${version}). Nothing was stopped or changed, and the migration was not made again.`);
-    io.out(`rpe migrate carries what changed on today's side since the last run (read at ${standing.since}): stop RPE's service (systemctl --user stop ${standing.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing.unit}).`);
+    io.out(`${runLine(io, paths, "migrate")} carries what changed on today's side since the last run (read at ${standing.since}): stop RPE's service (systemctl --user stop ${standing.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing.unit}).`);
     const left = await extensionLeft(call);
     if (left.length > 0) sayLeft(left, io);
     return 0;
   }
-  const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout() }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs }, swapIo);
+  const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout() }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs, reach: (is) => connectionsWhere(call, is) }, swapIo);
   if (plan === null) return 1;
 
-  // Today's connection in Lumiverse becomes RPE's, as it is; RPE makes its own only where Lumiverse holds no loopback of today's.
-  const loopbacks = plan.took === null ? [] : await connectionsWhere(call, plan.took.loopback.is);
-  const [todays, ...others] = loopbacks;
-  const connection = todays ?? (await ownConnection(call, `${localUrl(plan.at.address, plan.at.port)}/v1`, { paths, config: current, io, version, what: "rpe up" }, current));
-  if (todays !== undefined) io.out(`RPE's connection in Lumiverse is to be "${todays.name}" (${todays.id}), the one today's build made for its runtime: it is left as it is, and the chats that use it go on working once RPE answers in today's runtime's place.`);
-  if (todays !== undefined && others.length > 0) io.out(`These connections in Lumiverse reach today's runtime too: ${others.map((c) => `"${c.name}" (${c.id})`).join(", ")}. RPE plays only the chats on "${todays.name}": choose it for the chats on those.`);
-  // A connection of RPE's own that its config named (an earlier plain `rpe up` made it) is RPE's no longer once today's is.
-  const before = current.lumiverse.connection;
-  const ownBefore = todays !== undefined && before !== null && before !== todays.id && !others.some((c) => c.id === before) ? before : null;
-  if (todays !== undefined && ownBefore !== null) io.out(`The connection ${ownBefore} in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on "${todays.name}" (${todays.id}).`);
+  // Every connection in Lumiverse that reaches today's runtime is kept as it is and becomes RPE's own (R-109); RPE makes its own only where Lumiverse holds none.
+  const taken = plan.connections;
+  const own = taken.length > 0 ? null : await ownConnection(call, `${localUrl(plan.at.address, plan.at.port)}/v1`, { paths, config: current, io, version, what: "rpe up" }, current);
+  const ids = taken.length > 0 ? taken.map((c) => c.id) : [own?.id ?? ""];
+  for (const c of taken) io.out(`RPE answers on "${c.name}" (${c.id}), a connection in Lumiverse that reached today's runtime, under its model name (${c.model}): it is left as it is, and the chats that use it go on working once RPE answers in today's runtime's place.`);
+  // The connection of RPE's own that an earlier plain `rpe up` made is RPE's no longer once today's are: its key stops with RPE's own earlier key.
+  const earlier = current.lumiverse.connections.filter((id) => taken.length > 0 && !ids.includes(id));
+  for (const id of earlier) io.out(`The connection ${id} in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on ${taken.length === 1 ? `"${taken[0]?.name}"` : "one of the connections above"}.`);
 
+  const ctx = { paths, config: current, io, version, what: "rpe up" };
   await line.prepare();
-  if (!(await swapRun(plan, { service, text: line.unitText, installed: existing !== null, startMs: current.commandLine.startMs, waitMs: current.commandLine.waitMs, takeOver: () => takeOver({ paths, config: current, io, version, what: "rpe up" }, current, plan.took?.loopback ?? null, connection.id, todays !== undefined), todays: todays !== undefined }, swapIo))) return 1;
+  const ran = await swapRun(
+    plan,
+    {
+      service,
+      text: line.unitText,
+      installed: existing !== null,
+      startMs: current.commandLine.startMs,
+      waitMs: current.commandLine.waitMs,
+      askEveryMs: current.commandLine.askEveryMs,
+      takeOver: () => takeOver(ctx, current, plan.took?.loopback ?? null, ids, taken),
+      todays: taken.length > 0,
+      mark: (id, on) => markConnection(call, id, on),
+      extension: { build: version, registered: () => registeredBuild(paths, current, io) },
+    },
+    swapIo,
+  );
+  if (!ran) return 1;
+  const after = { ...current, lumiverse: { ...current.lumiverse, connections: ids } };
+  await webToken(ctx, after);
   const left = await extensionLeft(call);
+  left.push(...(await connectionsWithoutLimits(paths, after, io)));
   left.push(`RPE's service's own log, should you need it: journalctl --user -u ${service.unit}.`);
-  if (todays === undefined) left.push(`In Lumiverse, choose the connection "${connection.name}" for the chats RPE should play.`);
-  else if (ownBefore !== null) left.push(`In Lumiverse, move the chats on the connection ${ownBefore} to "${todays.name}": RPE plays only the chats on it now.`);
+  if (taken.length === 0 && own !== null) left.push(`In Lumiverse, choose the connection "${own.name}" for the chats RPE should play.`);
   sayLeft(left, io);
   return 0;
 }

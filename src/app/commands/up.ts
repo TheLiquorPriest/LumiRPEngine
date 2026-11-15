@@ -1,7 +1,7 @@
 // `rpe up`: the one command a new install runs, and the swap.
 
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { memoryRefusal } from "../service-memory";
 import { type AppConfig, type DataPaths, dataPaths, defaultDataFolder, loadConfig, LOOPBACK, plainText, webAddress } from "../config";
 import { lineLog } from "../app";
@@ -12,12 +12,16 @@ import { parseArgs, UsageError } from "./args";
 import { writeGlobalSetting } from "./global-setting";
 import { extensionLeft, sayLeft } from "./left";
 import { installCopy } from "../app-copy";
-import { lumiverseFolderOf } from "./lumiverse-folder";
+import { LUMIVERSE_DATABASE, lumiverseFolderOf } from "./lumiverse-folder";
 import { ownConnection } from "./own-connection";
 import { firstFreePort, portFree } from "./ports";
 import { runLine } from "./run-line";
 import { answerAt, loopbackUrl } from "./running";
 import { keptSession, keptUsername, oneUser, signInTo } from "./sign-in";
+import { runtimeFoldersOf } from "../../migrate/runtime-folders";
+import { installedExtension } from "../../adapter/lumiverse/install-calls";
+import { EXTENSION_IDENTIFIER } from "../../adapter/lumiverse/pipe-wire";
+import { todaysRuntimeFound } from "./swap-find";
 import { swapUp } from "./swap-up";
 import { installService, managerOf, unitFor, withoutSystemd, type Manager } from "./up-service";
 import { updateSettingsOf } from "./update-settings";
@@ -50,7 +54,7 @@ function portOf(given: string | undefined): number | undefined {
  * which it does not keep, and signs in to Lumiverse (a kept sign-in to the same Lumiverse and user that
  * still holds is used as it is, and nothing is asked). A new install makes RPE's connection there or
  * brings it into line (up.ts; today's build's own connection is never changed), keeps its id in
- * `lumiverse.connection`, prints the web app's token the first time, and runs RPE as a service of the
+ * `lumiverse.connections`, prints the web app's token the first time, and runs RPE as a service of the
  * account where asked (`--systemd`), else serves in the foreground until it is told to stop. Given
  * Lumiverse's data folder (`--lumiverse`), it swaps instead (`swapUp`): RPE takes today's runtime's
  * place, its address, its model name and its key, so today's connection in Lumiverse goes on working as
@@ -71,8 +75,6 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   );
   if (words.length > 0) throw new UsageError("rpe up takes no words.");
   if (flags.user !== undefined && flags.username !== undefined && flags.user !== flags.username) throw new UsageError("--user and --username are the same flag: give one of them.");
-  const swapping = flags.lumiverse !== undefined;
-  if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined || flags.identifier !== undefined)) throw new UsageError("--runtime, --no-runtime, --runtime-config, --runtime-data and --identifier say where today's build is: they go with --lumiverse.");
   if (switches.has("no-runtime") && flags.runtime !== undefined) throw new UsageError("--runtime names a runtime to take and --no-runtime says there is none: give one of them.");
   const nameWhy = flags.name === undefined ? null : unitNameRefusal(flags.name);
   if (nameWhy !== null) throw new UsageError(`--name is "${flags.name}": ${nameWhy}.`);
@@ -106,32 +108,32 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   const username = (flags.user ?? flags.username ?? io.env.LUMIVERSE_USERNAME?.trim() ?? (await keptUsername(url, paths, config)) ?? (await io.ask("Lumiverse username: ")))?.trim();
   if (username === undefined || username === "") throw new UsageError("rpe up needs your Lumiverse username: --user <name>, --username <name> or LUMIVERSE_USERNAME.");
 
-  // Where RPE serves, picked before anything is written: the port asked for, else the one its config holds, where taken the first free one after it.
-  const installed = config.lumiverse.connection !== null;
+  // Where RPE serves, worked out before anything is written and told only once it is the install that goes on: the port asked for, else the one its config holds, where taken the first free one after it.
+  const installed = config.lumiverse.connections.length > 0;
   const first = givenPort ?? config.port;
   const there = await answerAt(loopbackUrl(first), config, io);
   const taken = there !== null && !("rpe" in there) ? true : there === null && !portFree(LOOPBACK, first);
   let port = first;
   let blocked: string | null = null;
+  let portNote: string | null = null;
   if (taken) {
     if (installed && givenPort === undefined) blocked = `Something other than RPE answers at ${loopbackUrl(first)}, RPE's port: give RPE a free one with ${runLine(io, paths, "up", "--port", "<port>")} (the port is "port" in its config, and RPE_PORT), or stop what holds it.`;
     else {
       const next = firstFreePort(first + 1, config.service.portLast);
       if (next === null) throw new Error(`Port ${first} is taken and no port from ${first + 1} to ${config.service.portLast} is free on loopback: give a port with --port, or raise service.portLast. Nothing was changed.`);
-      io.out(`Port ${first} is taken, so RPE uses ${next}, the first free one after it (up to service.portLast, ${config.service.portLast}).`);
+      portNote = `Port ${first} is taken, so RPE uses ${next}, the first free one after it (up to service.portLast, ${config.service.portLast}).`;
       port = next;
     }
-  }
-  if (blocked !== null && manager?.systemd === true) {
-    io.err(`${blocked} Nothing was changed.`);
-    return 1;
   }
 
   const data = resolve(paths.root);
   const existing = await rpeServiceOf(data, io.env, io.home);
   const service = rpeService(flags.name ?? existing?.name ?? serviceNameOf(username), io.env, io.home);
-  if (service.unit !== existing?.unit && existsSync(service.file) && (manager?.systemd === true || swapping)) {
-    io.err(`${service.file} is a unit for something other than this RPE (another data folder's): give this RPE's service a name of its own with --name. Nothing was stopped or changed.`);
+  /** A unit of that name that is another RPE's: this RPE's service takes a name of its own. */
+  const nameTaken = service.unit !== existing?.unit && existsSync(service.file);
+  const nameWords = `${service.file} is a unit for something other than this RPE (another data folder's): give this RPE's service a name of its own with --name. Nothing was stopped or changed.`;
+  if (nameTaken && (manager?.systemd === true || flags.lumiverse !== undefined)) {
+    io.err(nameWords);
     return 1;
   }
   const database = flags.database === undefined ? undefined : resolve(flags.database);
@@ -146,10 +148,34 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   let current = await loadConfig(paths, io.env);
   const call: LumiverseCall = (method, path, body) => session.request(method, path, body);
 
+  // Where Lumiverse's data folder is: the one `--lumiverse` names, else the one the extension sits in (where this runs from its own folder), else the database file's, else asked.
+  const identifier = flags.identifier ?? EXTENSION_IDENTIFIER;
+  const here = options.appFile === undefined ? null : lumiverseFolderOf(options.appFile);
+  let lumiverse = flags.lumiverse !== undefined ? resolve(flags.lumiverse) : (here?.data ?? (database !== undefined && basename(database) === LUMIVERSE_DATABASE ? dirname(database) : null));
+  if (lumiverse === null && !installed && (await installedExtension(call, identifier)) !== null) {
+    const said = await io.ask("Lumiverse's data folder, if Lumiverse runs on this machine (it is where RPE finds the previous build's runtime to take over); leave it empty if it does not: ");
+    if (said !== null && said.trim() !== "") lumiverse = resolve(said.trim());
+  }
+  // With today's build there for this user, plain `rpe up` is the swap (R-83); without it, the install.
+  const userId = current.lumiverse.user;
+  const folders = runtimeFoldersOf(io.env, io.home);
+  const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? folders.configDir, dataDir: flags["runtime-data"] ?? folders.dataDir };
+  const swapping = flags.lumiverse !== undefined || (lumiverse !== null && userId !== null && (await todaysRuntimeFound({ lumiverse, identifier, userId, runtime, ...(flags.runtime === undefined ? {} : { runtimeName: flags.runtime }) })));
+  if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined)) io.err("--runtime, --no-runtime, --runtime-config and --runtime-data say where today's build is, and rpe up found none of today's runtime of yours here: it is the install.");
+
   // Where Lumiverse's database file is, where this runs from the extension's own folder (or `--database` says): RPE then reads Lumiverse through it.
-  const found = database ?? (options.appFile === undefined ? null : (lumiverseFolderOf(options.appFile)?.database ?? null));
-  const listens = port !== current.port || (listen !== undefined && listen !== current.address) ? { address: listen ?? current.address, port } : undefined;
+  const found = database ?? here?.database ?? null;
+  // The swap listens where today's runtime did; only the install picks a port.
+  const listens = swapping ? undefined : port !== current.port || (listen !== undefined && listen !== current.address) ? { address: listen ?? current.address, port } : undefined;
   const saved = { ...(found !== null && found !== current.lumiverse.database ? { set: { database: found } } : {}), ...(listens === undefined ? {} : { listens }) };
+  if (swapping && nameTaken) {
+    io.err(nameWords);
+    return 1;
+  }
+  if (!swapping && blocked !== null && manager?.systemd === true) {
+    io.err(`${blocked} Nothing else was changed.`);
+    return 1;
+  }
   if (Object.keys(saved).length > 0) {
     await withWriter({ ...ctx, config: current }, (ops) => ops.saveLumiverse(saved));
     if (saved.set !== undefined) io.out(`RPE reads Lumiverse's database at ${found}.`);
@@ -167,7 +193,11 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
     if (options.appFile === undefined) throw new Error("This process runs from no single app file, so RPE's own copy cannot be made.");
     await installCopy(data, options.appFile, io.now());
   };
-  if (swapping) return await swapUp({ flags, switches, paths, current, call, service, existing, unitText, prepare }, io, version);
+  if (swapping) {
+    if (lumiverse === null) throw new UsageError("rpe up needs Lumiverse's data folder to swap: --lumiverse <folder>.");
+    return await swapUp({ flags, switches, paths, current, call, service, existing, unitText, lumiverse, prepare }, io, version);
+  }
+  if (portNote !== null) io.out(portNote);
 
   const settled = await ownConnection(call, `${loopbackUrl(current.port)}/v1`, ctx, current);
   await webToken(ctx, current);

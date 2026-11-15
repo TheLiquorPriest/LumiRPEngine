@@ -276,13 +276,13 @@ test("config.json's facts are listed, and no route writes config.json", async ()
     ["lumiverse.user", "config.json"],
     ["lumiverse.database", "config.json"],
     ["port", "config.json"],
-    ["lumiverse.connection", "config.json"],
+    ["lumiverse.connections", "config.json"],
     ["lumiverse.models", "config.json"],
     ["data", "install"],
     ["database", "install"],
   ]);
   expect(facts.find((f) => f.key === "lumiverse.user")?.value).toBe(USER);
-  expect(facts.find((f) => f.key === "lumiverse.connection")?.value).toBe(CONNECTION);
+  expect(facts.find((f) => f.key === "lumiverse.connections")?.value).toEqual([CONNECTION]);
   // A fact, or a limit by the key config.json gave it in earlier builds, is no setting a route writes.
   for (const key of ["port", "lumiverse.url", "lumiverse.user", "address", "live.follows"]) {
     const answer = await settings<{ error: string }>(b, "PUT", "", { level: "global", key, value: 1 });

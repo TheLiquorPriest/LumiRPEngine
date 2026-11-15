@@ -368,5 +368,5 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lumiverse.user` | none | Your Lumiverse user |
 | `lumiverse.database` | none | Lumiverse's database file |
 | `port` | `7871` | RPE's port, on loopback, that its connection in Lumiverse points at |
-| `lumiverse.connection` | none | RPE's connection in Lumiverse |
+| `lumiverse.connections` | `[]` | RPE's connections in Lumiverse |
 | `lumiverse.models` | `["rpe"]` | The models that connection offers |

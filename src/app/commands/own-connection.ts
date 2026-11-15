@@ -6,8 +6,8 @@ import { type LumiverseCall, settleConnection, type SettledConnection } from "..
 import { withWriter, type WriterContext } from "./writer";
 
 /**
- * RPE's own connection in Lumiverse, made or brought into line at `apiUrl` (up.ts), its id kept in
- * `lumiverse.connection`, what was done said. Its key is in force only once Lumiverse holds it, so a
+ * RPE's own connection in Lumiverse, made or brought into line at `apiUrl` (up.ts), its id kept first in
+ * `lumiverse.connections`, what was done said. Its key is in force only once Lumiverse holds it, so a
  * refusal leaves the key before it working.
  */
 export async function ownConnection(call: LumiverseCall, apiUrl: string, line: WriterContext, current: AppConfig): Promise<SettledConnection & { moved: boolean }> {
@@ -16,13 +16,14 @@ export async function ownConnection(call: LumiverseCall, apiUrl: string, line: W
   const { io } = ctx;
   const hadKey = (await withWriter(ctx, (ops) => ops.status())).keys.some((k) => k.kind === "provider");
   const fresh: { key: string | null } = { key: null };
-  const settled = await settleConnection(call, current.lumiverse.connection, { apiUrl, models: current.lumiverse.models, hasKey: hadKey, makeKey: () => (fresh.key = newKeyText("provider")) });
+  const known = current.lumiverse.connections[0] ?? null;
+  const settled = await settleConnection(call, known, { apiUrl, models: current.lumiverse.models, hasKey: hadKey, makeKey: () => (fresh.key = newKeyText("provider")) });
   const key = fresh.key;
-  const moved = settled.id !== current.lumiverse.connection;
+  const moved = settled.id !== known;
   if (key !== null || moved) {
     await withWriter(ctx, async (ops) => {
       if (key !== null) await ops.makeKey({ kind: "provider", key });
-      if (moved) await ops.saveLumiverse({ set: { connection: settled.id } });
+      if (moved) await ops.saveLumiverse({ set: { connections: [settled.id, ...current.lumiverse.connections.slice(1)] } });
     });
   }
   const named = `"${settled.name}" (${settled.id})`;
