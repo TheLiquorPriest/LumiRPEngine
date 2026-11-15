@@ -73,7 +73,8 @@ describe("the other kinds of turn", () => {
       const row = run === null ? null : store.turn(run.turn);
       return row?.status === "done" && b.turns.runs.running(USER, row.id) !== undefined ? row : null;
     });
-
+    // Deleted while its work after the reply waits on its call, so the answer held for that call is its own.
+    await b.until("the work after the reply to call its model", () => b.model.requests.length >= 2);
     b.host.deleteMessage(CHAT, turn.message!);
     await b.until("the deleted turn's run to stop", () => b.turns.runs.running(USER, turn.id) === undefined);
     expect(after.isOpen).toBe(false);

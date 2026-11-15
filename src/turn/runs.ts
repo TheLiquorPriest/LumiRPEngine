@@ -66,15 +66,21 @@ export interface RunRecord {
   /** RPH's own id for the run, which its trace records and streaming text carry as their `run`; null until its first record. */
   traceRun: string | null;
   user: string;
+  /** The turn the run is one of: for a continue, its held turn until Lumiverse's end decides its turn, then that turn (`held`). */
   turn: string;
   chat: string;
   session: string;
   generation: string | null;
-  /** The message the reply is saved to; null for one that saves to none (an impersonation), or to one Lumiverse makes when it saves. */
+  /**
+   * The message the reply is saved to; null for one that saves to none (an impersonation), or to one Lumiverse makes when it saves.
+   * For a continue, the message its tag named for it to go on, a first word only: none where the tag could not tell, and the turn is
+   * tied where Lumiverse's end names it, whichever message that is (R-192).
+   */
   target: string | null;
   /**
    * The swipe of `target` the generation writes: a swipe's or a regenerate's own new one, the one a continue goes on, a new reply's
-   * first. Lumiverse writes it there whichever swipe the player looks at by then (`chats.service.ts:3346-3362`). Null with no target.
+   * first. Lumiverse writes it there whichever swipe the player looks at by then (`chats.service.ts:3346-3362`). Null with no target,
+   * but for a continue, whose generation names the swipe it goes on even where its tag names no message.
    */
   swipe: number | null;
   kind: RunKind;
@@ -134,8 +140,14 @@ export interface RunRecord {
    */
   settled: number | null;
   /**
-   * A continue of a turn already tied: the order (`ord`) of the turn's last change when the continue began, -1 for none. What the
-   * turn records after it is the continue's, taken back if it saves nothing new (plan §6.3). Null for any other run.
+   * A continue's own turn (R-192 (e)): what its run changes is held there until Lumiverse's end decides the continue's turn, and its
+   * folder holds the run's files. Where the end names a message another turn is tied to, the held turn joins that turn, and `turn`
+   * names that one from then on. Null for any other run.
+   */
+  held: string | null;
+  /**
+   * Where what the run records begins on its turn: the order (`ord`) of the turn's last change before the run's own, -1 for none. A
+   * continue's, set when its held turn joins the turn it extended, so that turn's counts are of this run's changes. Null for any other run.
    */
   mark: number | null;
   /** The same for the cast's rows (`castMark`) and the story's (`storyMark`) on the turn; null for any other run, or a run kept before they were. */
@@ -183,6 +195,7 @@ interface RunRow {
   base: string;
   saved: string | null;
   settled: number | null;
+  held: string | null;
   mark: number | null;
   cast_mark: number | null;
   story_mark: number | null;
@@ -223,6 +236,7 @@ function recordOf(user: string, r: RunRow): RunRecord {
     base: r.base,
     saved: r.saved,
     settled: r.settled,
+    held: r.held,
     mark: r.mark,
     castMark: r.cast_mark,
     storyMark: r.story_mark,
@@ -243,8 +257,8 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
          intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
@@ -284,11 +298,34 @@ export class Runs {
         r.base,
         r.saved,
         r.settled,
+        r.held,
         r.mark,
         r.castMark,
         r.storyMark,
       ],
     );
+  }
+
+  /**
+   * A continue's run names the turn its held turn joined from now on (R-192 (e)), inside the caller's queued write: as kept, and as held
+   * in memory while it goes on, so its end, its tokens and the Turn page find it under that turn.
+   */
+  join(into: Database, r: RunRecord, to: string): void {
+    into.run("UPDATE turn_run SET turn = ? WHERE user = ? AND id = ?", [to, r.user, r.id]);
+    const live = this.#running.get(key(r.user, r.turn));
+    if (live?.id === r.id) {
+      this.#running.delete(key(r.user, r.turn));
+      live.turn = to;
+      this.#running.set(key(r.user, to), live);
+    }
+    r.turn = to;
+  }
+
+  /** The continue's run that held its changes on `turn` (`RunRecord.held`), as it stands; null where none did. */
+  byHeld(user: string, turn: string): RunRecord | null {
+    for (const r of this.#running.values()) if (r.user === user && r.held === turn) return r;
+    const row = this.db.query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND held = ? ORDER BY received DESC LIMIT 1").get(user, turn);
+    return row === null ? null : recordOf(user, row);
   }
 
   /** Writes a run's record as it stands now. */

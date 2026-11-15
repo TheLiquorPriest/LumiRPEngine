@@ -30,14 +30,14 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
-import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, type SourceReader, takeBackCast } from "../cast";
+import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, joinCast, type SourceReader, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapLines, mapView } from "../iface";
 import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
 import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
-import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyMark, storyRecordParts, takeBackStory } from "../story";
+import { joinStory, type SceneSession, sceneSession, storyBrief, storyCoverage, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
 import { storySoFar } from "../story/sofar";
 import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
@@ -252,11 +252,13 @@ function madeAfter(store: UserStore, turn: TurnRow, before: string): boolean {
 
 /**
  * The swipe a generation wrote, as Lumiverse saved it (plan §6.3): the one it was given at its start, which need not be the one shown
- * now; for a message Lumiverse made only when it saved, its one swipe. Null when which swipe it wrote cannot be told.
+ * now; for a message Lumiverse made only when it saved, its one swipe; for a continue its tag could not place, the swipe its generation
+ * named on the message its end names. Null when which swipe it wrote cannot be told.
  */
 function writtenOf(run: RunRecord, saved: LvMessage): LvMessage["saves"][number] | null {
   if (run.target === saved.id && run.swipe !== null) return saved.saves[run.swipe] ?? null;
-  return run.target === null && saved.saves.length === 1 ? (saved.saves[0] ?? null) : null;
+  if (saved.saves.length === 1 && (run.target === null || run.kind === "continue")) return saved.saves[0] ?? null;
+  return run.kind === "continue" && run.target === null && run.swipe !== null ? (saved.saves[run.swipe] ?? null) : null;
 }
 
 /** The text a message shows: its showing swipe's, where its hash is the one the message shows by, else its content. */
@@ -462,25 +464,26 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       lap("previous");
 
       // The turn: a new attempt, begun at the point the generation starts from (`generationStart`): the point the extension's question
-      // is answered at, on the path just read, with the same answer. Or, for a continue, the turn its message is tied to (plan §10.10
-      // "Continue": the same turn, extended). Lumiverse names no message when it announces a continue, only the swipe it goes on: it
-      // continues the message the player's page names, the chat's last reply, else its last reply (`generate.service.ts:1809-1812`,
-      // `:1962-1966`): on the path just read, either way. A reply a branch shares with the chat it was made from is that chat's turn
-      // (plan §6.3, §10.10 "Branch": the tree is shared up to the branch point): a continue of it in the branch goes on in a turn of the
-      // branch's own, begun after it at that point, which takes its place at the message, and the chat it came from keeps it as it was.
+      // is answered at, on the path just read, with the same answer. A continue too plays on a turn of its own, held open until
+      // Lumiverse's end names the message it was saved to, which decides its turn (plan §10.10 "Continue", R-192 (e)): what it changes is
+      // held there, and no other turn is written to before then. The message its tag names is a first word only: the held turn is begun
+      // after that message's turn and plays in that turn's session (`#goingOn`); where the tag could not tell, after the path's last
+      // turn. A reply a branch shares with the chat it was made from is that chat's turn (plan §6.3, §10.10 "Branch"): a continue of it
+      // plays on in a turn of the branch's own, begun after it at that point, and the chat it came from keeps it as it was.
       const start = generationStart(store, chat, seenOf(steps), { kind: tag.kind, target: tag.target });
       const { goesOn } = start;
-      const target = tag.kind === "impersonate" ? null : tag.kind === "continue" ? goesOn : tag.target.message;
+      const target = tag.kind === "impersonate" ? null : tag.target.message;
       const tied = goesOn === null ? null : this.#tiedTo(user, chat, goesOn);
-      const continued = tied !== null && tied.turn.chat === chat ? tied.turn : null;
-      const begun = continued ?? (await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, on: start.node }), "beginning a turn"));
+      // The turn the tag's message is tied to, of this chat: a continue's held turn is told as a continue of it, and plays in its session.
+      const named = tied !== null && tied.turn.chat === chat ? tied.turn : null;
+      const begun = await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, on: start.node }), "beginning a turn");
       // The session the turn plays in (plan §11): the one in force at it (`#sessionAt`), or one opened now for the scene the story record
       // holds open there (or for none), starting from the summary of the scene before it. A swipe or a regenerate may play on in the
-      // session an earlier attempt at its message played in, any turn in the turn it follows; a continue plays in its own turn's
-      // (`#goingOn`). A branch's first turn begins its session as the one it follows stood there (`#forkFrom`): a continue of a reply the
-      // branch shares, as that reply's turn left it.
+      // session an earlier attempt at its message played in, any turn in the turn it follows; a continue plays in the session of the turn
+      // its tag names (`#goingOn`). A branch's first turn begins its session as the one it follows stood there (`#forkFrom`): a continue of
+      // a reply the branch shares, as that reply's turn left it.
       const earlierAttempts = replaced === null ? [] : store.swipes(chat, replaced).flatMap((t) => (t.id === begun.id ? [] : [t.id]));
-      const inForce = continued !== null ? this.#goingOn(user, chat, continued.id) : this.#sessionAt(user, chat, begun.id, [begun.id, begun.parent, ...earlierAttempts]);
+      const inForce = named !== null ? this.#goingOn(user, chat, named.id) : this.#sessionAt(user, chat, begun.id, [begun.id, begun.parent, ...earlierAttempts]);
       const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: begun.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: begun.id };
       if (inForce.session === null) await this.#begin(scope, begun, inForce);
@@ -499,7 +502,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const pictured = tagged.prompt.some((m) => typeof m.content !== "string" && m.content.some((part) => isRecord(part) && part.type === "image_url"));
       const { messages, left } = promptOf(tagged.prompt, pictured && (await limits())?.pictures?.takes === true);
       const prefill = prefillOf(tagged, messages);
-      // What Lumiverse puts in front of the reply when it saves it: for a continue, the text the swipe it goes on held, else the prefill.
+      // What Lumiverse puts in front of the reply when it saves it: for a continue, the text the swipe of the message its tag names held
+      // (none where the tag named none: what it was is read at the end, from the turn the end names), else the prefill.
       const goneOn = goesOn === null ? undefined : (await reads.messagesById(chat, [goesOn]))[0];
       const front = tag.kind === "continue" ? ((tag.target.swipe === null ? undefined : goneOn?.saves[tag.target.swipe]?.text) ?? goneOn?.text ?? "") : (prefill ?? "");
 
@@ -513,7 +517,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         session: session.id,
         generation: tag.generation,
         target,
-        swipe: target === null ? null : tag.target.swipe,
+        swipe: target === null && tag.kind !== "continue" ? null : tag.target.swipe,
         kind: tag.kind,
         status: "running",
         received,
@@ -538,17 +542,16 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         base: front,
         saved: null,
         settled: null,
+        held: tag.kind === "continue" ? begun.id : null,
         mark: null,
         castMark: null,
         storyMark: null,
         stop: new AbortController(),
         over: over.promise,
       };
-      // A continue's marks are taken, and the run held, in the one write that keeps it: a panel's tap, refused while a run of the chat is
-      // held, lands before the marks, and stays, or is refused; it is never taken back with what the continue recorded.
+      // The run is held in the one write that keeps it: a panel's tap, refused while a run of the chat is held, lands before it or not at all.
       await this.#d.writes
         .run((db) => {
-          if (continued !== null) Object.assign(run, marksOf(store, db, user, continued.id));
           // The lore Lumiverse said activated for the generation: heard before the request, and since; heard from now on, it joins the kept record.
           const late = this.#lateLore.get(chatKey);
           if (late?.generation === tag.generation) this.#lateLore.delete(chatKey);
@@ -567,10 +570,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let ask: FolderAsk;
       try {
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { steps, notices: lines(notices), guidance, last, stopped, again: continued !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
+        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
-        const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, begun, found)]);
+        // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
+        const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, named ?? begun, found)]);
         run.notGiven = notGiven;
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
@@ -594,12 +598,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           ...(sampling !== undefined ? { presetSampling: sampling } : {}),
           ...(maxTokens !== undefined ? { replyMaxTokens: maxTokens } : {}),
         };
-        // Kept before the run: what the turn was told, so no later turn is told it again; and on a new turn's row, the story time its
-        // briefing gave (plan Appendix B `turn`), as the migration keeps a carried turn's. A continue goes on with a turn that has its own.
-        const timed = continued === null && storyTime !== null;
+        // Kept before the run: what the turn was told, so no later turn is told it again (for a continue of a named turn, what that turn
+        // was told); and on the turn's row, the story time its briefing gave (plan Appendix B `turn`), as the migration keeps a carried
+        // turn's. A continue's held turn is a row of its own: joined to the turn it extended, that turn keeps its own.
+        const timed = storyTime !== null;
         if (told.length > 0 || timed) {
           await this.#d.writes.run((db) => {
-            if (told.length > 0) this.#d.since.told(db, user, begun.id, told);
+            if (told.length > 0) this.#d.since.told(db, user, (named ?? begun).id, told);
             if (timed) store.updateTurn(begun.id, { storyTime });
           }, "keeping what a turn was told and its story time");
         }
@@ -851,6 +856,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         base: "",
         saved: null,
         settled: null,
+        held: null,
         // What it records is the turn's, counted from marks taken as a continue's are, in the write that keeps it and holds it.
         mark: null,
         castMark: null,
@@ -910,13 +916,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /**
    * After a turn's writes, or a job's for the turn that started it (plan §11): the scene the story record now holds open at the turn
    * decides its session. When another session is in force there than the one the turn played in, that one is closed as the turn's
-   * work; and a scene that has no session yet has one opened as the turn's work, starting from the summary of the scene before it.
+   * work; and a scene that has no session yet has one opened as the turn's work, starting from the summary of the scene before it. A
+   * dropped turn has none; nor has a continue's held turn that joined the turn it extended, whose sessions are that turn's.
    */
   async sessionsAfter(user: string, chat: string, turn: string): Promise<void> {
     const store = this.#d.store.user(user);
     const played = this.#d.runs.record(user, turn)?.session;
     const row = store.turn(turn);
-    if (played === undefined || row === null || row.status === "dropped") return;
+    if (played === undefined || row === null || row.status === "dropped" || row.status === "joined") return;
     const now = this.#sessionAt(user, chat, turn, [turn]);
     if (now.session?.id === played) return;
     const sessions = this.#d.harness().sessions;
@@ -1314,10 +1321,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (line !== undefined && line.trim() !== "") items.push({ kind, text: line, ...extra });
     };
     // What a migration carried (plan §12, §15), told to the first run RPE plays on the turn's own line: a swipe of that first turn is
-    // told it too, and the turn after a continue of an imported reply, which RPE played as a run of the imported turn, is not.
+    // told it too, and the turn after a continue of an imported reply, whose run joined the imported turn, is not; nor a second continue.
     const { migrated } = this.#d;
     const before = storyAt(store, chat, turn.id).turns.filter((t) => t !== turn.id);
-    const played = this.#d.runs.countOf(user, before) > 0 || (again && this.#d.runs.countOf(user, [turn.id]) > 1);
+    const played = this.#d.runs.countOf(user, before) > 0 || (again && this.#d.runs.countOf(user, [turn.id]) > 0);
     const carried = played ? null : migrated.fields(user, chat);
     const carriedPart = carried === null ? undefined : await guidance.part(migrated.part);
     if (carried !== null && carriedPart?.format === "template") add("migrated", notices?.line(migrated.notice, { carried: carriedPart.render(carried).text.trim() }));
@@ -1564,11 +1571,15 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         replied.resolve();
         try {
           await this.#d.runs.save(run, "keeping a turn's run");
-          // The turn's tokens are what all its runs spent: a continue adds to the runs before it (plan §10.10 "Continue").
-          const spent = this.#d.runs.ofTurn(run.user, run.turn).flatMap((r) => (r.usage === null ? [] : [r.usage]));
-          const tokens = spent.length === 0 ? {} : { tokensIn: spent.reduce((n, u) => n + u.input, 0), tokensOut: spent.reduce((n, u) => n + u.output, 0) };
+          // The turn's tokens are what all its runs spent: a continue adds to the runs before it (plan §10.10 "Continue"). Its timings
+          // go on its own turn's row; a continue's run that joined the turn it extended keeps its own on the run, never over that turn's.
+          // Read in the write, so a join made before it or after it counts this run once.
           const timings = { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended };
-          await this.#d.writes.run(() => this.#d.store.user(run.user).updateTurn(run.turn, { timings, ...tokens }), "keeping a turn's timings");
+          await this.#d.writes.run(() => {
+            const spent = this.#d.runs.ofTurn(run.user, run.turn).flatMap((r) => (r.usage === null ? [] : [r.usage]));
+            const tokens = spent.length === 0 ? {} : { tokensIn: spent.reduce((n, u) => n + u.input, 0), tokensOut: spent.reduce((n, u) => n + u.output, 0) };
+            this.#d.store.user(run.user).updateTurn(run.turn, { ...(run.held === null || run.held === run.turn ? { timings } : {}), ...tokens });
+          }, "keeping a turn's timings");
           await this.#keepRecord(run);
         } catch (error) {
           this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(error) });
@@ -1603,7 +1614,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /**
    * A generation ended (plan §10.8): its turn tied to what Lumiverse saved in the swipe the generation wrote, whichever one the player
    * looks at now, or, saving nothing, left an attempt with no state. A reply not released whole (stopped, failed, or RPE stopped during
-   * it) is tied as cut short. Where which swipe it wrote cannot be told, the turn is left open, and the next intake looks again.
+   * it) is tied as cut short. Where which swipe it wrote cannot be told, the turn is left open, and the next intake looks again. A
+   * continue's run that held its changes on a turn of its own is tied where its end names the message (`#continued`).
    */
   async #ended(user: string, change: Ended): Promise<void> {
     const run: RunRecord | null = this.#d.runs.byGeneration(user, change.generation);
@@ -1633,44 +1645,118 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const saved = message === null || reads === null ? undefined : (await reads.messagesById(change.chat, [message]))[0];
     const written = saved === undefined ? undefined : writtenOf(run, saved);
     if (written === null) return;
-    // A continue's text as Lumiverse saved it: what it went on, the preset's join, then the reply. A join is no difference, and a
-    // continue that saved only its join saved nothing new (plan §10.8 step 4).
-    const joined = run.kind === "continue" && written !== undefined ? joinOf(written.text, run.base, run.reply) : null;
-    const nothingNew = written !== undefined && (written.text === run.base || (run.kind === "continue" && joinOf(written.text, run.base, "") !== null));
-    if (saved === undefined || written === undefined || (cut && nothingNew)) {
-      // Saving nothing new, an attempt is dropped, and RPH told it left the path, so its jobs are cut off (plan §13.5); a continue of a
-      // tied turn leaves it as it was, what the continue recorded taken back once its run, which may still be winding down, is over.
-      if (run.mark !== null) await held?.over;
+    if (run.held !== null) {
+      await this.#continued(user, run, run.held, held, settle, cut, saved !== undefined && written !== undefined ? { message: saved, text: written.text, date: written.date } : null);
+      return;
+    }
+    if (saved === undefined || written === undefined || (cut && written.text === run.base)) {
+      // Saving nothing new, an attempt is dropped, and RPH told it left the path, so its jobs are cut off (plan §13.5).
       const record = settle();
       const dropped = await this.#d.writes.run((db) => {
-        const tied = store.turn(run.turn);
         this.#d.runs.put(db, record);
-        if (tied?.status === "open") {
-          store.dropTurn(run.turn);
-          return true;
-        }
-        if (run.mark !== null && (tied?.status === "done" || tied?.status === "cut")) {
-          store.takeBack(run.turn, run.mark);
-          if (run.castMark !== null) takeBackCast(db, user, run.turn, run.castMark);
-          if (run.storyMark !== null) takeBackStory(db, user, run.turn, run.storyMark);
-          // Lumiverse saved its join after the text the turn is tied to: the turn is tied to what it stored, which is that text still.
-          if (saved !== undefined && written !== undefined && written.text !== run.base && tied.hash === textHash(run.base)) {
-            store.tieTurn(run.turn, { message: saved.id, hash: textHash(written.text), date: written.date, status: tied.status });
-          }
-        }
-        return false;
-      }, "taking back an attempt that saved nothing");
+        if (store.turn(run.turn)?.status !== "open") return false;
+        store.dropTurn(run.turn);
+        return true;
+      }, "dropping an attempt that saved nothing");
       this.#stateChanged(run.chat);
       if (dropped) await this.#d.harness().turnLeft({ user, chat: run.chat, session: run.session, turn: run.turn });
       return;
     }
-    const record = settle(joined !== null ? { saved: null, base: run.base + joined } : { saved: written.text === run.base + run.reply ? null : written.text });
+    const record = settle({ saved: written.text === run.base + run.reply ? null : written.text });
     await this.#d.writes.run((db) => {
       store.tieTurn(run.turn, { message: saved.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
       this.#d.runs.put(db, record);
     }, "tying a turn to its saved message");
     this.#stateChanged(run.chat);
     await this.#keepRecord(record);
+  }
+
+  /**
+   * A continue's end (plan §10.8, §10.10 "Continue", R-192): the message Lumiverse names decides its turn, whatever its tag named. A
+   * message a turn of the chat is tied to means that turn extended: the held turn joins it (`#join`), and it is tied again to the text
+   * Lumiverse saved, cut short where the continue was stopped part-way. A message no turn of the chat is tied to (Lumiverse saved a new
+   * one, or a reply a branch shares) means the held turn was a turn of its own, tied there with what its run changed, and the turn the
+   * tag had named keeps its own message and changes as they were. Saving nothing new, the held turn's own rows go: where the end names
+   * a turn's message its jobs' rows still join that turn, and it stays tied to what Lumiverse stored; else the held turn is dropped as
+   * an attempt. Its text before the continue is what intake read where the end names the message the tag named, else that turn's as
+   * RPE last kept it. The take-backs, the joins and the tie are one write.
+   */
+  async #continued(
+    user: string,
+    run: RunRecord,
+    heldTurn: string,
+    live: Run | undefined,
+    settle: (also?: Partial<RunRecord>) => RunRecord,
+    cut: boolean,
+    written: { message: LvMessage; text: string; date: number | null } | null,
+  ): Promise<void> {
+    const store = this.#d.store.user(user);
+    const tied = written === null ? null : this.#tiedTo(user, run.chat, written.message.id);
+    const into = tied !== null && tied.turn.chat === run.chat && tied.turn.id !== heldTurn && (tied.turn.status === "done" || tied.turn.status === "cut") ? tied.turn : null;
+    const kept = tied === null ? undefined : this.#d.runs.ofTurn(user, tied.turn.id).findLast((r) => r.kind !== "settle" && r.id !== run.id);
+    const before = written === null || written.message.id === run.target ? run.base : kept === undefined ? "" : (kept.saved ?? kept.base + kept.reply);
+    // A continue's text as Lumiverse saved it: what it went on, the preset's join, then the reply. A join is no difference, and a
+    // continue that saved only its join saved nothing new (plan §10.8 step 4).
+    const nothingNew = written !== null && (written.text === before || joinOf(written.text, before, "") !== null || (tied !== null && tied.turn.hash === textHash(written.text)));
+    if (written === null || (cut && nothingNew)) {
+      // Its own rows are taken back once its run, which may still be winding down, is over.
+      if (into !== null) await live?.over;
+      const record = settle();
+      const dropped = await this.#d.writes.run((db) => {
+        this.#d.runs.put(db, record);
+        if (store.turn(heldTurn)?.status !== "open") return false;
+        if (into === null) {
+          store.dropTurn(heldTurn);
+          return true;
+        }
+        // The owners' take-backs of the held turn first, which leave a job's rows; then the joins, which move those.
+        takeBackCast(db, user, heldTurn, -1);
+        takeBackStory(db, user, heldTurn, -1);
+        store.takeBack(heldTurn, -1);
+        this.#join(db, user, record, heldTurn, into.id);
+        // Lumiverse saved its join after the text the turn is tied to: the turn is tied to what it stored, which is that text still.
+        if (written !== null && written.text !== before && into.hash === textHash(before)) store.tieTurn(into.id, { message: written.message.id, hash: textHash(written.text), date: written.date, status: into.status === "cut" ? "cut" : "done" });
+        this.#d.runs.put(db, record);
+        return false;
+      }, "taking back a continue that saved nothing");
+      this.#stateChanged(run.chat);
+      if (dropped) await this.#d.harness().turnLeft({ user, chat: run.chat, session: run.session, turn: heldTurn });
+      return;
+    }
+    const joined = joinOf(written.text, before, run.reply);
+    const record = settle(joined !== null ? { saved: null, base: before + joined } : { base: before, saved: written.text === before + run.reply ? null : written.text });
+    await this.#d.writes.run((db) => {
+      if (store.turn(heldTurn)?.status !== "open") return;
+      if (into !== null) this.#join(db, user, record, heldTurn, into.id);
+      store.tieTurn(record.turn, { message: written.message.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
+      this.#d.runs.put(db, record);
+    }, "tying a continue to its saved message");
+    this.#stateChanged(run.chat);
+    // The turn's record is kept once both the run has ended and its turn is decided: here, where the run is over already; else at its end.
+    if (this.#d.runs.running(user, record.turn)?.id !== record.id) await this.#keepRecord(record);
+  }
+
+  /**
+   * A continue's held turn joins the turn Lumiverse's end decided it extended (plan §10.10, R-192 (e), (f), R-203), inside the caller's
+   * write: the cast's rows and the story's, then the store's changes, each checked again there; what the held turn was told is that
+   * turn's told; the run names that turn from now on, its marks where its rows begin there, so the turn's counts are of the run's own
+   * changes; and the turn's tokens are what all its runs spent, this one's among them.
+   */
+  #join(db: Database, user: string, run: RunRecord, held: string, into: string): void {
+    const store = this.#d.store.user(user);
+    const castFrom = castMark(db, user, into);
+    const storyFrom = storyMark(db, user, into);
+    const ownLast = store.changes(into).at(-1)?.ord ?? -1;
+    joinCast(this.#d.store, user, held, into);
+    joinStory(this.#d.store, user, held, into);
+    const moved = store.joinTurn(held, into);
+    this.#d.since.told(db, user, into, [...this.#d.since.toldTo(user, held)]);
+    run.mark = (moved[0]?.ord ?? ownLast + 1) - 1;
+    run.castMark = castFrom;
+    run.storyMark = storyFrom;
+    this.#d.runs.join(db, run, into);
+    const spent = this.#d.runs.ofTurn(user, into).flatMap((r) => (r.usage === null ? [] : [r.usage]));
+    if (spent.length > 0) store.updateTurn(into, { tokensIn: spent.reduce((n, u) => n + u.input, 0), tokensOut: spent.reduce((n, u) => n + u.output, 0) });
   }
 
   /**

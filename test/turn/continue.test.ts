@@ -1,11 +1,11 @@
 // A continue as Lumiverse makes one (plan §10.8, §10.10 "Continue": the same turn, extended; its changes are added to). Lumiverse
 // announces a continue naming the swipe it goes on and no message, sends the prompt with that reply moved to its end, the preset's
-// continue postfix on it and the continue nudge after it, and saves the text that swipe held, the postfix, then the new text. RPE goes
-// on with the turn the message is tied to, ties it again to the joined text, and tells the next turn nothing of the join; a continue
-// that saved only the join saved nothing new. And a continue plays in the session its turn played in, even where that turn moved the
-// story on to a new scene. Played through the stand-in Lumiverse on the scripted model. The postfix is the preset's own: where a test
-// leans on a single space, the bed's preset says it, as Lumiverse's default preset does (`src/auth/default-preset.ts:316`). Every
-// name is invented.
+// continue postfix on it and the continue nudge after it, and saves the text that swipe held, the postfix, then the new text. RPE plays
+// it on a turn of its own that holds what it changes, and when Lumiverse's end names the message, joins it to the turn that message is
+// tied to, ties that turn again to the joined text, and tells the next turn nothing of the join; a continue that saved only the join
+// saved nothing new. And a continue plays in the session the turn it names played in, even where that turn moved the story on to a
+// new scene. Played through the stand-in Lumiverse on the scripted model. The postfix is the preset's own: where a test leans on a
+// single space, the bed's preset says it, as Lumiverse's default preset does (`src/auth/default-preset.ts:316`). Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import { type Answer, gate } from "rp-harness/testing/rig";
@@ -101,8 +101,15 @@ test("a continue stopped before its first word, which Lumiverse saved as the tex
   const store = b.turns.store.user(USER);
   const before = store.changes(turn.id);
   const continuing = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
-  await b.until("the continue to record its change on the turn", () => store.changes(turn.id).length > before.length);
-  expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
+  // What it records is held on its own turn while it runs, never on the turn it continues.
+  const held = await b.until("the continue to record its change on its own turn", () => {
+    const going = b.turns.runs.ofChat(USER, CHAT)[0]?.held ?? null;
+    return going !== null && store.changes(going).length > 0 ? going : null;
+  });
+  expect(store.changes(turn.id)).toEqual(before);
+  // Stopped while its second call waits, so the answer held for it is its own, and the next turn is answered by the next.
+  await b.until("the continue's second call", () => b.model.requests.length >= 3);
+  expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${held}/stop`)).body).toEqual({ stopped: true });
   const out = await continuing;
   expect(out.stopped).toBe(true);
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, out.generationId!)?.settled ?? null) !== null);
@@ -147,6 +154,8 @@ test("a continue of the turn that moved the story on to a new scene plays in the
   expect(b.turns.store.user(USER).sessions(CHAT).map((s) => [s.openedBy === moved.id, s.closedBy === moved.id])).toContainEqual([true, false]);
 
   await settledTurn(b, await play(b, "continue"));
-  expect(b.requests[2]).toMatchObject({ kind: "continue", scope: { turn: moved.id, session: played } });
+  expect(b.requests[2]).toMatchObject({ kind: "continue", parent: moved.id, scope: { session: played } });
+  // Its end named the reply it went on: its run is that turn's, extended.
+  expect(b.turns.runs.ofTurn(USER, moved.id).map((r) => r.kind)).toEqual(["new", "continue"]);
   expect(JSON.stringify(b.model.requests.at(-1)!.messages)).toContain("INTENT-MORNING");
 });

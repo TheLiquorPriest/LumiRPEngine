@@ -33,7 +33,9 @@ test("a continue's own streaming text and reply reach the chat's live view under
   await settledTurn(b, continuing.generationId!);
 
   const records = heard.flatMap((e) => (e.kind === "trace" ? [e.data] : []));
-  const started = records.filter((r) => r.event.kind === "run_started" && r.scope.turn === turn.id).map((r) => r.run);
+  // The continue ran on a turn of its own, which joined the turn at its end.
+  const held = b.turns.runs.byGeneration(USER, continuing.generationId!)?.held ?? null;
+  const started = records.filter((r) => r.event.kind === "run_started" && (r.scope.turn === turn.id || r.scope.turn === held)).map((r) => r.run);
   expect(started.length).toBe(2);
   expect(new Set(started).size).toBe(2);
   expect(started).not.toContain(turn.id);

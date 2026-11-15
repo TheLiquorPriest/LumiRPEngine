@@ -219,12 +219,13 @@ describe("where a generation's turn starts", () => {
       expect(again.message).toBe(second.message);
     }
 
-    // A continue goes on the turn its message is tied to: the attempt now showing there.
+    // A continue plays on a turn of its own, held until its end, begun after the turn of the message it goes on: the attempt now showing.
     expected = await ruled("continue");
     const shown = store.path(CHAT).findLast((e) => !e.user)?.turn ?? null;
     await settledTurn(b, await play(b, "continue"));
     expect(expected).toBe(shown);
-    expect<string | null>(intake().scope.turn).toBe(expected);
+    expect(intake().parent).toBe(expected);
+    expect(intake().scope.turn).not.toBe(expected);
 
     // An impersonation starts after the path's head.
     expected = await ruled("impersonate");

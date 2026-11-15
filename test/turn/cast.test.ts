@@ -157,8 +157,13 @@ test("a continue that saves nothing new takes back what it wrote to the cast and
   expect(before.story.length).toBeGreaterThan(0);
 
   const continuing = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
-  await b.until("the continue to write to the story", () => rowsOf(b, turn.id).story.length > before.story.length);
-  expect(rowsOf(b, turn.id).cast.length).toBeGreaterThan(before.cast.length);
+  // What it writes is held on its own turn while it runs: the turn it continues holds none of it at any point.
+  const held = await b.until("the continue to write to the story on its own turn", () => {
+    const going = b.turns.runs.ofChat(USER, CHAT)[0]?.held ?? null;
+    return going !== null && rowsOf(b, going).story.length > 0 ? going : null;
+  });
+  expect(rowsOf(b, held).cast.length).toBeGreaterThan(0);
+  expect(rowsOf(b, turn.id)).toEqual(before);
   const out = await continuing;
   expect(out.error).not.toBeNull();
   // The continue was sent as Lumiverse sends it: the reply it goes on with last, out of the history, with no postfix, as the preset sets

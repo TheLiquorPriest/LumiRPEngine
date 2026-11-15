@@ -310,4 +310,13 @@ DELETE FROM kv WHERE substr(key, 1, 9) = 'jobs/all/' AND EXISTS (SELECT 1 FROM j
 ALTER TABLE turn_run ADD COLUMN not_given TEXT;
 `,
   },
+  {
+    version: 15,
+    name: "the turn a continue's run held what it changed on",
+    // A continue's own turn, kept after the run joins the turn Lumiverse's end decided; null for any other run, and for one kept before.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN held TEXT;
+CREATE INDEX turn_run_by_held ON turn_run (user, held) WHERE held IS NOT NULL;
+`,
+  },
 ];

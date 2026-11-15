@@ -140,15 +140,22 @@ describe("a turn whose preset has a prefill", () => {
 const PASS_TIME: Answer = { pieces: [{ text: "<intent>Then the storm.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", minutes: 30, source: { from: "prose" } }] } }] };
 
 describe("what a continue recorded", () => {
-  /** A turn played and saved, then continued by the Author's `after`, its change recorded on the turn before that answer begins. */
-  async function continued(after: Answer): Promise<{ b: TurnBed; turn: TurnRow; before: ChangeRow[]; continuing: Promise<Outcome> }> {
+  /**
+   * A turn played and saved, then continued by the Author's `after`, its change recorded before that answer begins on the continue's
+   * own held turn, never on the turn it continues.
+   */
+  async function continued(after: Answer): Promise<{ b: TurnBed; turn: TurnRow; held: string; before: ChangeRow[]; continuing: Promise<Outcome> }> {
     const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, after] });
     const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     const store = b.turns.store.user(USER);
     const before = store.changes(turn.id);
     const continuing = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
-    await b.until("the continue to record its change on the turn", () => store.changes(turn.id).length > before.length);
-    return { b, turn, before, continuing };
+    const held = await b.until("the continue to record its change on its own turn", () => {
+      const going = b.turns.runs.ofChat(USER, CHAT)[0]?.held ?? null;
+      return going !== null && store.changes(going).length > 0 ? going : null;
+    });
+    expect(store.changes(turn.id)).toEqual(before);
+    return { b, turn, held, before, continuing };
   }
 
   /**
@@ -164,8 +171,8 @@ describe("what a continue recorded", () => {
   }
 
   test("a continue stopped before it wrote anything saves nothing new, and what it recorded on its turn is taken back", async () => {
-    const { b, turn, before, continuing } = await continued({ pieces: [{ hold: gate() }, { text: "<reply> Then it stops.</reply>" }] });
-    expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
+    const { b, turn, held, before, continuing } = await continued({ pieces: [{ hold: gate() }, { text: "<reply> Then it stops.</reply>" }] });
+    expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${held}/stop`)).body).toEqual({ stopped: true });
     const out = await continuing;
     expect(out.stopped).toBe(true);
     // Lumiverse keeps a stopped continue with a thinking block, here RPE's progress line: the text and the preset's postfix, here none,

@@ -69,6 +69,7 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
       return now().find(scope, query);
     },
     write: async (scope, path, op, by) => now().write(scope, path, op, by),
+    update: async (scope, path, change) => now().update(scope, path, change),
     turnDisk: async (scope) => now().turnDisk(scope),
     sessionDisk: async (scope) => now().sessionDisk(scope),
   };
@@ -270,6 +271,22 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     ]);
     return [...engine, ...cast, ...story, ...indexing];
   };
+  /**
+   * The one place a joined turn is resolved (R-192 (f)): a scope that names a continue's held turn, joined to the turn Lumiverse's end
+   * decided it extended, names that turn, for every port and host tool that reads or writes the state at a turn: the host's tools at
+   * each call, the facts, the lore's reads, the views given by name and what RPH tells of the turn's work. A job the continue started,
+   * still running, so writes on the turn it extended. The held turn's own folder, its prompt, its trace, the lore that activated for
+   * its prompt and its intent record stay its own: they are its run's.
+   */
+  const joined = <S extends Scope>(scope: S): S => {
+    if (scope.turn === undefined) return scope;
+    const turns = store.user(scope.user);
+    const into = turns.turn(scope.turn) === null ? null : turns.joinedTo(scope.turn);
+    return into === null ? scope : { ...scope, turn: into };
+  };
+  const lorePorts = lorePort(lore);
+  // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
+  const events = turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log });
   const env: Environment = {
     id: "rpe",
     version: app.version,
@@ -279,16 +296,26 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       read: async (scope, range) => (await chatNow(scope)).read(scope, range),
       search: async (scope, query) => (await chatNow(scope)).search(scope, query),
     },
-    lore: lorePort(lore),
+    lore: { ...lorePorts, read: (scope, ids, reader) => lorePorts.read(joined(scope), ids, reader), search: (scope, query, reader) => lorePorts.search(joined(scope), query, reader) },
     prompt: prompts,
-    tools: { all: hostTools },
+    tools: { all: async (scope) => (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) })) },
     searchers: [],
-    facts,
+    facts: { defs: () => facts.defs(), read: (scope, names) => facts.read(joined(scope), names) },
     models: app.models,
     store: kvStore(app.db, app.writes),
     trace,
-    // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
-    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log }),
+    events: {
+      intent: (scope, text) => events.intent(scope, text),
+      attachments: (scope, agent, refs) => events.attachments(joined(scope), agent, refs),
+      consent: (scope, grant) => events.consent(joined(scope), grant),
+      gapCheck: (scope, check) => events.gapCheck(joined(scope), check),
+      dropStaged: (scope, agent) => events.dropStaged(joined(scope), agent),
+      ruleFired: (scope, firing) => events.ruleFired(joined(scope), firing),
+      suggestion: (scope, agent, suggestion) => events.suggestion(joined(scope), agent, suggestion),
+      released: (scope, release) => events.released(joined(scope), release),
+      ended: (scope, outcome) => events.ended(joined(scope), outcome),
+      job: async (scope, job) => events.job?.(joined(scope), job),
+    },
     clock,
     log: app.log,
   };

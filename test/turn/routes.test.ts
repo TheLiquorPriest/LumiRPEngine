@@ -29,7 +29,7 @@ type StopAnswer = ApiRoutes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"
 const CHAT_FIELDS: Record<keyof ChatList["chats"][number], true> = { id: true, name: true, lastTurnAt: true, running: true, played: true, world: true };
 const SUMMARY_FIELDS: Record<keyof TurnList["turns"][number], true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
 const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true, runs: true };
-const RUN_FIELDS: Record<keyof TurnDetail["runs"][number], true> = { id: true, run: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, stoppedBy: true, lastText: true, notGiven: true, trace: true, requests: true };
+const RUN_FIELDS: Record<keyof TurnDetail["runs"][number], true> = { id: true, run: true, nth: true, kind: true, status: true, target: true, held: true, timings: true, usage: true, reply: true, error: true, stoppedBy: true, lastText: true, notGiven: true, trace: true, requests: true };
 const fields = (shape: object): string[] => Object.keys(shape).sort();
 
 describe("the Turn page's routes", () => {
@@ -163,7 +163,9 @@ describe("a turn's runs, its folder, and the world", () => {
       [2, "continue", "released", " Then it stops."],
     ]);
     expect(new Set(detail.runs.map((r) => r.id)).size).toBe(2);
-    expect(new Set(detail.runs.map((r) => r.requests[0]?.file)).size).toBe(2);
+    // The continue played on a turn of its own, which joined this one at its end: its files are in that turn's folder.
+    expect(detail.runs.map((r) => r.held === null)).toEqual([true, false]);
+    expect(new Set(detail.runs.map((r) => `${r.held ?? turn}/${r.requests[0]?.file}`)).size).toBe(2);
     // Each run's trace is its own, numbered from 1 with no gap, and ends with that run's end.
     for (const run of detail.runs) {
       expect(run.trace.map((t) => t.seq)).toEqual(run.trace.map((_, i) => i + 1));
@@ -174,10 +176,10 @@ describe("a turn's runs, its folder, and the world", () => {
     expect(detail.usage.calls).toBe(2);
     expect(detail.usage.output).toBe(detail.runs[0]!.usage.output + detail.runs[1]!.usage.output);
 
-    // Each run names the request its lead's first call sent, kept in the turn's folder, and the file route opens it.
+    // Each run names the request its lead's first call sent, kept in the folder it played in, and the file route opens it there.
     for (const run of detail.runs) {
       expect(run.requests).toEqual([expect.objectContaining({ definition: "author", call: 1, file: expect.stringMatching(/^transcripts\/.+\.call-1\.json$/) })]);
-      const kept = await b.page<{ name: string; text: string }>("GET", filePath(turn, run.requests[0]!.file));
+      const kept = await b.page<{ name: string; text: string }>("GET", filePath(run.held ?? turn, run.requests[0]!.file));
       expect(kept.status).toBe(200);
       const request: unknown = JSON.parse(kept.body.text);
       expect(request).toHaveProperty(["messages", 0, "role"], "system");

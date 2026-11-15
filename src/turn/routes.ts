@@ -107,9 +107,22 @@ export function turnRoutes(deps: TurnRoutesDeps) {
   };
 
   /** The scope a turn's folder is read in, and the folder in the agents' view; null for a turn that has none. */
-  const folderOf = async (r: RunRecord): Promise<{ scope: Scope & { turn: string }; folder: string | null }> => {
+  const folderOf = async (r: Pick<RunRecord, "user" | "chat" | "session" | "turn">): Promise<{ scope: Scope & { turn: string }; folder: string | null }> => {
     const scope = { user: r.user, chat: r.chat, session: r.session, turn: r.turn };
     return { scope, folder: (await turns.files.places(scope)).turn ?? null };
+  };
+
+  /** The folder a run played in: its turn's, or a continue's own held turn's, which holds the run's files after it joined another (R-192). */
+  const runFolder = (run: RunRecord) => folderOf({ ...run, turn: run.held ?? run.turn });
+
+  /**
+   * The folder a page reads a turn's files in, by the turn's id: the turn's own; for a continue's held turn that joined the turn it
+   * extended, the folder its run played in, which holds the run's files, as `RunView.held` names it.
+   */
+  const filesOf = async (user: string, chat: string, turn: string): Promise<{ scope: Scope & { turn: string }; folder: string | null }> => {
+    const row = turns.store.user(user).turn(turn);
+    const held = row !== null && row.chat === chat && row.joined !== null ? turns.runs.byHeld(user, turn) : null;
+    return held !== null ? runFolder(held) : folderOf(turnOf(user, chat, turn));
   };
 
   /** The user's jobs as RPH last kept each, of one chat or of every chat, the newest started first. */
@@ -133,33 +146,37 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     return isRecord(data) ? { activated: idsOf(data.lore), map: idsOf(data.loreMap) } : { activated: [], map: [] };
   };
 
-  /** Each of a turn's runs, oldest first, with its own records as far as the read reaches and the request files named in all of them. */
+  /** Each of a turn's runs, oldest first, with its own records as far as the read reaches and the request files named in all of them, below the folder it played in. */
   const runsOf = async (r: RunRecord, runs: ReadonlyMap<string, readonly TraceRecord[]>, within: (record: TraceRecord) => boolean): Promise<RunView[]> => {
-    const { folder } = await folderOf(r);
-    return turns.runs.ofTurn(r.user, r.turn).map((run, i) => {
-      const trace = run.traceRun === null ? [] : (runs.get(run.traceRun) ?? []);
-      const requests = trace.flatMap((t) =>
-        t.event.kind === "call_started" && t.event.request !== undefined
-          ? [{ agent: t.agent.id, definition: t.agent.definition, call: t.event.call, file: folder !== null && t.event.request.startsWith(folder) ? t.event.request.slice(folder.length) : t.event.request }]
-          : [],
-      );
-      return {
-        id: run.id,
-        run: run.traceRun,
-        nth: i + 1,
-        kind: run.kind,
-        status: run.status,
-        timings: { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended, intent: run.intent, thinking: run.thinking },
-        usage: run.usage ?? NO_USAGE,
-        reply: { text: run.reply, progress: [...run.progress] },
-        error: run.error,
-        stoppedBy: run.stoppedBy,
-        lastText: run.lastText,
-        notGiven: run.notGiven,
-        trace: trace.filter(within),
-        requests,
-      };
-    });
+    return Promise.all(
+      turns.runs.ofTurn(r.user, r.turn).map(async (run, i) => {
+        const { folder } = await runFolder(run);
+        const trace = run.traceRun === null ? [] : (runs.get(run.traceRun) ?? []);
+        const requests = trace.flatMap((t) =>
+          t.event.kind === "call_started" && t.event.request !== undefined
+            ? [{ agent: t.agent.id, definition: t.agent.definition, call: t.event.call, file: folder !== null && t.event.request.startsWith(folder) ? t.event.request.slice(folder.length) : t.event.request }]
+            : [],
+        );
+        return {
+          id: run.id,
+          run: run.traceRun,
+          nth: i + 1,
+          kind: run.kind,
+          status: run.status,
+          target: run.target,
+          held: run.held,
+          timings: { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended, intent: run.intent, thinking: run.thinking },
+          usage: run.usage ?? NO_USAGE,
+          reply: { text: run.reply, progress: [...run.progress] },
+          error: run.error,
+          stoppedBy: run.stoppedBy,
+          lastText: run.lastText,
+          notGiven: run.notGiven,
+          trace: trace.filter(within),
+          requests,
+        };
+      }),
+    );
   };
 
   const summary = (user: string, chat: string, r: RunRecord) => {
@@ -237,7 +254,9 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       joined: true,
       handle: async ({ user, params, query }) => {
         const r = turnOf(user, params.chat, params.turn);
-        const records = await turns.trace.records({ user, chat: r.chat, session: r.session, turn: r.turn });
+        // Its runs' records, each kept in the folder it played in: a continue that joined this turn played in its own held turn's.
+        const folders = new Set([r.turn, ...turns.runs.ofTurn(user, r.turn).flatMap((run) => (run.held !== null && run.held !== r.turn ? [run.held] : []))]);
+        const records = (await Promise.all([...folders].map((turn) => turns.trace.records({ user, chat: r.chat, session: r.session, turn })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
         const runs = byRun(records);
         const within = readFrom(r.turn, runs, query.run, query.from ?? 1);
         return {
@@ -303,7 +322,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       reply: folderReply,
       joined: true,
       handle: async ({ user, params }) => {
-        const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
+        const { scope, folder } = await filesOf(user, params.chat, params.turn);
         if (folder === null) return { files: [] as TurnFileEntry[] };
         // The whole folder, every level down: it holds what one turn wrote. Where the file host stopped short of it, what it found is
         // listed and how it stopped is said.
@@ -324,7 +343,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       reply: fileReply,
       joined: true,
       handle: async ({ user, params }) => {
-        const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
+        const { scope, folder } = await filesOf(user, params.chat, params.turn);
         const name = fileName(params["*"]);
         const read = folder === null ? null : await turns.files.read(scope, `${folder}${name}`);
         if (folder === null || read?.status !== "read" || !read.path.startsWith(folder)) throw new RouteError(404, `Turn ${params.turn}'s folder has no file ${name}.`);
@@ -340,7 +359,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       reply: requestReply,
       joined: true,
       handle: async ({ user, params }) => {
-        const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
+        const { scope, folder } = await filesOf(user, params.chat, params.turn);
         const name = fileName(params["*"]);
         const rebuilt = folder === null ? undefined : await turns.harness.rebuildRequest(scope, `${folder}${name}`);
         if (rebuilt === undefined) throw new RouteError(404, `Turn ${params.turn}'s folder has no request ${name}.`);
