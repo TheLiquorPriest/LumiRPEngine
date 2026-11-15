@@ -1243,8 +1243,8 @@ How RPE stands as its own command line is told: the keys in force, the switches 
 
 ```ts
 export interface CommandStatus {
-  /** Each key in force, by its last four characters; none is empty for a key taken from today's connection. */
-  keys: ({ kind: "provider" | "extension" | "web"; last4: string; made: number })[];
+  /** Each key in force: the provider key by its last four characters (null for one taken from today's connection, whose were never known), when it was made and, for the web token, when it ends; never a key's text. */
+  keys: ({ kind: "provider" | "extension" | "web"; last4: string | null; made: number; ends: number | null; taken: boolean })[];
   /** Every switch, each name's newest definition. */
   switches: SwitchEntry[];
   /** The builds that meet at RPE in a sentence or two; null where the server does not say. */
@@ -1676,6 +1676,8 @@ export interface KeyMade {
   key: string;
   /** When it was made, epoch milliseconds. */
   made: number;
+  /** When it runs out, epoch milliseconds; null: it has no end. */
+  ends: number | null;
   /** How many keys taken from today's connection it retired. */
   retired: number;
   /** A key of this kind taken from today's connection is still in force. */

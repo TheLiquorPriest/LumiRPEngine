@@ -249,7 +249,7 @@ describe("one writer, while RPE runs", () => {
     expect((await rpe(["connection", "list"])).out).toContain("* Floor");
     expect((await rpe(["connection", "remove", "Floor"])).code).toBe(0);
     // No page token was made for the command line's calls: the socket is the credential.
-    expect(app.db.query("SELECT count(*) AS n FROM page_token WHERE made_by = 'command line'").get()).toEqual({ n: 0 });
+    expect(app.db.query("SELECT count(*) AS n FROM page_token WHERE kind = 'page' AND made_by = 'command line'").get()).toEqual({ n: 0 });
 
     const status = await rpe(["status"]);
     expect(status.code).toBe(0);

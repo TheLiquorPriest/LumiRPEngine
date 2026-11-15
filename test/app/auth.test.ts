@@ -68,7 +68,7 @@ describe("auth", () => {
   test("a key is kept only as its hash", async () => {
     const key = await makeKey(app, "provider");
     await app.writes.settled();
-    const stored = app.db.query<{ hash: string }, []>("SELECT hash FROM app_key").all();
+    const stored = app.db.query<{ hash: string }, []>("SELECT hash FROM provider_key").all();
     expect(stored.map((r) => r.hash)).not.toContain(key);
     expect(new TextDecoder().decode(await Bun.file(bed.paths.database).bytes())).not.toContain(key.slice(4));
   });
@@ -135,7 +135,7 @@ describe("auth", () => {
     const other = new Auth({ db: app.db, writes: app.writes, owner: "user-other", now: app.now, pageTokenMs: 60_000, webKeyMs: null });
     expect(other.holds("provider", provider)).toBe(false);
     expect(other.pageUser(web)).toBeNull();
-    const rows = app.db.query<{ user: string }, []>("SELECT user FROM app_key").all();
+    const rows = app.db.query<{ user: string }, []>("SELECT user FROM provider_key UNION ALL SELECT user FROM page_token WHERE kind = 'web'").all();
     expect(rows.map((r) => r.user)).toEqual([OWNER, OWNER]);
   });
 });

@@ -18,6 +18,7 @@ import { NO_OWNER } from "../auth";
 import { SecretsFile } from "../secrets";
 import { type AnyShape, type Infer, problemsOf } from "../routes";
 import { commandLineDatabase } from "./database";
+import { webKeyMs } from "./words";
 
 /** What a writer needs of the command it serves. */
 export interface WriterContext {
@@ -133,6 +134,7 @@ function folderSink(ctx: WriterContext): { sink: CommandSink; close(): void } {
       paths: ctx.paths,
       secrets: new SecretsFile(ctx.paths.secrets),
       user: ctx.config.lumiverse.user,
+      webKeyMs: webKeyMs(ctx.config),
       get db() {
         return open();
       },

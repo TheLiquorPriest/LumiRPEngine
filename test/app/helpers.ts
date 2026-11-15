@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { ConnectionsDoc, ConnectionView, ModelsPort, SecretsDoc, StoredConnection } from "rp-harness/contract";
 import type { App, AppConfig, Area, ConnectionsApi, DataPaths, RunningServer } from "../../src/app";
 import { dataPaths, lineLog, openApp } from "../../src/app";
-import { insertKey, type KeyKind } from "../../src/app/auth";
+import type { KeyKind } from "../../src/app/auth";
 import type { CliIO } from "../../src/app/cli";
 import { configOf } from "../../src/app/config";
 
@@ -55,7 +55,7 @@ export async function makeBed(): Promise<Bed> {
 
 /** Makes a key of `kind` through the app's own write queue, as the command line would on its connection. */
 export async function makeKey(app: App, kind: KeyKind): Promise<string> {
-  return (await app.writes.run((db) => insertKey(db, app.auth.owner, kind, app.now()))).key;
+  return (await app.auth.makeKey(kind)).key;
 }
 
 export function bearer(token: string): Record<string, string> {

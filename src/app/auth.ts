@@ -1,10 +1,12 @@
-// Who may call RPE (plan §4.4, §16). Three keys are given out, each random, shown once and kept only
-// as its SHA-256: the provider key Lumiverse sends on RPE's connection, the light extension's
-// registration, and the web UI's token. A new key of a kind retires the one before it. Page tokens
-// are short-lived; they are minted through the extension for a page of the Lumiverse user this RPE
-// belongs to and for no other user. Every key and token is kept under the user it was made for, and
-// one opens RPE only while that user is still the one this RPE belongs to. Nothing here can switch on
-// anything that runs a command: only the command line can (switches.ts).
+// Who may call RPE (plan §4.4, §16; Appendix B's `provider_key` and `page_token`). Three keys are
+// given out, each random, shown once and kept only as its SHA-256: the provider key Lumiverse sends on
+// RPE's connection, kept in `provider_key`; and the light extension's registration and the web UI's
+// token, which are tokens like the page's, kept in `page_token` with who made them and when they end
+// (the web token has no end unless `auth.webKeyDays` gives one). A new key of a kind takes the one
+// before it away. Page tokens are short-lived; they are minted through the extension for a page of the
+// Lumiverse user this RPE belongs to and for no other user. Every key and token is kept under the user
+// it was made for, and one opens RPE only while that user is still the one this RPE belongs to.
+// Nothing here can switch on anything that runs a command: only the command line can (switches.ts).
 
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
@@ -22,13 +24,23 @@ export interface MadeKey {
   key: string;
   last4: string;
   made: number;
+  /** When it runs out; null: it has no end. */
+  ends: number | null;
 }
 
-/** A key in force, as it may be shown: never the key. */
+/**
+ * A key in force, as it may be shown: never the key. Only the provider key's last four characters are
+ * kept (null for the others, and for the provider key taken from today's connection, whose were never
+ * known: `taken`); the web token's end is when it was made and `auth.webKeyDays` said it would be.
+ */
 export interface KeyFacts {
   kind: KeyKind;
-  last4: string;
+  last4: string | null;
   made: number;
+  /** When the key runs out; null: it has no end. */
+  ends: number | null;
+  /** The provider key RPE took from today's connection at the swap. */
+  taken: boolean;
 }
 
 export interface PageToken {
@@ -37,8 +49,11 @@ export interface PageToken {
   expires: number;
 }
 
-/** Who asked for a page token: the extension for a page, or the command line for its own call to the running server. */
-export type TokenMaker = "extension" | "command line";
+/** Who made a token, as `page_token` keeps it: the extension for a page, the command line for the web token, RPE itself at its start for the extension's registration. */
+export type TokenMaker = "extension" | "command line" | "rpe start";
+
+/** The kinds of token `page_token` holds. */
+export type TokenKind = "page" | "web" | "extension";
 
 /** Why RPE does not open its database, or does anything that writes there, before the install has named its user (R-179). */
 export const NO_OWNER = "RPE belongs to no Lumiverse user yet, so nothing was written: `rpe up` names the user it belongs to.";
@@ -64,46 +79,61 @@ export function newKeyText(kind: KeyKind): string {
   return `${KEY_PREFIXES[kind]}${randomBytes(32).toString("hex")}`;
 }
 
+/** Who makes each key RPE gives out, as `page_token` says it. */
+const MAKER: Readonly<Record<"web" | "extension", TokenMaker>> = { web: "command line", extension: "rpe start" };
+
 /**
- * Puts a key of `kind` for `user` in force (a new one unless `key` is given, made by `newKeyText` for a key that had to be handed out first) and retires his one before it.
- * A key taken from today's connection (`takeKeyHash`, its last four unknown) stays: going back needs that connection as it is (plan §15.6).
- * Runs inside a transaction: the server's write queue's, or the command line's own.
+ * Puts a key of `kind` for `user` in force (a new one unless `key` is given, made by `newKeyText` for a key that had to be handed out first) and takes his one before it away: the provider key
+ * into `provider_key`, the extension's and the web token into `page_token`, the web token with an end `webKeyMs` after it is made where there is one. A provider key taken from today's
+ * connection (`takeKeyHash`) stays: going back needs that connection as it is (plan §15.6). Runs inside a transaction: the server's write queue's, or the command line's own.
  */
-export function insertKey(db: Database, user: string, kind: KeyKind, now: number, key: string = newKeyText(kind)): MadeKey {
-  db.run("UPDATE app_key SET retired = ? WHERE user = ? AND kind = ? AND retired IS NULL AND last4 <> ''", [now, user, kind]);
-  db.run("INSERT INTO app_key (user, hash, kind, last4, made) VALUES (?, ?, ?, ?, ?)", [user, secretHash(key), kind, key.slice(-4), now]);
-  return { kind, key, last4: key.slice(-4), made: now };
+export function insertKey(db: Database, user: string, kind: KeyKind, now: number, key: string = newKeyText(kind), webKeyMs: number | null = null): MadeKey {
+  const hash = secretHash(key);
+  if (kind === "provider") {
+    db.run("DELETE FROM provider_key WHERE user = ? AND taken = 0", [user]);
+    db.run("INSERT INTO provider_key (user, hash, last4, made, taken) VALUES (?, ?, ?, ?, 0)", [user, hash, key.slice(-4), now]);
+    return { kind, key, last4: key.slice(-4), made: now, ends: null };
+  }
+  const ends = keyEnds(kind, now, webKeyMs);
+  db.run("DELETE FROM page_token WHERE user = ? AND kind = ?", [user, kind]);
+  db.run("INSERT INTO page_token (hash, user, kind, made_by, made, expires) VALUES (?, ?, ?, ?, ?, ?)", [hash, user, kind, MAKER[kind], now, ends]);
+  return { kind, key, last4: key.slice(-4), made: now, ends };
 }
 
 /**
- * Puts in force for `user`, beside his key of `kind` in force, a key RPE holds only as its SHA-256:
+ * Puts in force for `user`, beside his provider key in force, a key RPE holds only as its SHA-256:
  * the key today's build gave its connection in Lumiverse, which RPE takes at the swap (plan §15.2) so
- * that connection goes on working as it is. Its last four characters were never known, which is how
- * it is told from RPE's own: a new key of the kind leaves it in force. Runs inside a transaction.
+ * that connection goes on working as it is. Its last four characters were never known: a new key
+ * leaves it in force. Runs inside a transaction.
  */
-export function takeKeyHash(db: Database, user: string, kind: KeyKind, hash: string, now: number): void {
-  db.run("INSERT OR IGNORE INTO app_key (user, hash, kind, last4, made) VALUES (?, ?, ?, ?, ?)", [user, hash, kind, "", now]);
+export function takeKeyHash(db: Database, user: string, hash: string, now: number): void {
+  db.run("INSERT OR IGNORE INTO provider_key (user, hash, last4, made, taken) VALUES (?, ?, '', ?, 1)", [user, hash, now]);
 }
 
 /**
- * Retires `user`'s key of `kind` taken from today's connection (`takeKeyHash`), which a new key leaves
- * in force: that connection in Lumiverse then needs a key of RPE's own. Says how many it retired. Runs
- * inside a transaction.
+ * Takes away `user`'s provider key taken from today's connection (`takeKeyHash`), which a new key
+ * leaves in force: that connection in Lumiverse then needs a key of RPE's own. Says how many it took
+ * away. Runs inside a transaction.
  */
-export function retireTakenKeys(db: Database, user: string, kind: KeyKind, now: number): number {
-  return db.run("UPDATE app_key SET retired = ? WHERE user = ? AND kind = ? AND retired IS NULL AND last4 = ''", [now, user, kind]).changes;
+export function retireTakenKeys(db: Database, user: string): number {
+  return db.run("DELETE FROM provider_key WHERE user = ? AND taken = 1", [user]).changes;
 }
 
-/** `user`'s key of each kind in force. */
+/** `user`'s key of each kind in force: never a key's text. */
 export function currentKeys(db: Database, user: string): KeyFacts[] {
-  return db.query<KeyFacts, [string]>("SELECT kind, last4, made FROM app_key WHERE user = ? AND retired IS NULL ORDER BY kind").all(user);
+  const provider = db.query<{ last4: string; made: number; taken: number }, [string]>("SELECT last4, made, taken FROM provider_key WHERE user = ? ORDER BY made, rowid").all(user);
+  const tokens = db.query<{ kind: "web" | "extension"; made: number; expires: number | null }, [string]>("SELECT kind, made, expires FROM page_token WHERE user = ? AND kind IN ('web', 'extension') ORDER BY kind").all(user);
+  return [
+    ...provider.map((k): KeyFacts => ({ kind: "provider", last4: k.taken === 1 ? null : k.last4, made: k.made, ends: null, taken: k.taken === 1 })),
+    ...tokens.map((k): KeyFacts => ({ kind: k.kind, last4: null, made: k.made, ends: k.expires, taken: false })),
+  ].sort((a, b) => a.kind.localeCompare(b.kind));
 }
 
 /** A page token for `user`, holding for `ttlMs`; tokens past their time are let go in the same write. Runs inside a transaction. */
 export function insertPageToken(db: Database, user: string, by: TokenMaker, ttlMs: number, now: number): PageToken {
   const token = `${PAGE_TOKEN_PREFIX}${randomBytes(32).toString("hex")}`;
-  db.run("DELETE FROM page_token WHERE expires <= ?", [now]);
-  db.run("INSERT INTO page_token (hash, user, made_by, made, expires) VALUES (?, ?, ?, ?, ?)", [secretHash(token), user, by, now, now + ttlMs]);
+  db.run("DELETE FROM page_token WHERE kind = 'page' AND expires <= ?", [now]);
+  db.run("INSERT INTO page_token (hash, user, kind, made_by, made, expires) VALUES (?, ?, 'page', ?, ?, ?)", [secretHash(token), user, by, now, now + ttlMs]);
   return { token, user, expires: now + ttlMs };
 }
 
@@ -142,11 +172,13 @@ export class Auth {
     return this.deps.owner;
   }
 
-  /** Whether `presented` is the key of `kind` in force, made for the user this RPE belongs to. */
+  /** Whether `presented` is the key of `kind` in force and in time, made for the user this RPE belongs to. */
   holds(kind: KeyKind, presented: string | null): boolean {
     if (presented === null || presented === "") return false;
-    const row = this.deps.db.query<{ n: number }, [string, string, string]>("SELECT count(*) AS n FROM app_key WHERE user = ? AND hash = ? AND kind = ? AND retired IS NULL").get(this.deps.owner, secretHash(presented), kind);
-    return (row?.n ?? 0) > 0;
+    const hash = secretHash(presented);
+    if (kind === "provider") return (this.deps.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM provider_key WHERE user = ? AND hash = ?").get(this.deps.owner, hash)?.n ?? 0) > 0;
+    const row = this.deps.db.query<{ expires: number | null }, [string, string, string]>("SELECT expires FROM page_token WHERE user = ? AND hash = ? AND kind = ?").get(this.deps.owner, hash, kind);
+    return row !== null && (row.expires === null || row.expires > this.deps.now());
   }
 
   /**
@@ -155,7 +187,7 @@ export class Auth {
    * sees one. The key is in the result alone; only its hash is kept.
    */
   makeKey(kind: KeyKind): Promise<MadeKey> {
-    return this.deps.writes.run((db) => insertKey(db, this.deps.owner, kind, this.deps.now()), `a new ${kind} key`);
+    return this.deps.writes.run((db) => insertKey(db, this.deps.owner, kind, this.deps.now(), undefined, this.deps.webKeyMs), `a new ${kind} key`);
   }
 
   /** A page token for `user`, refused unless `user` is the one this RPE belongs to. */
@@ -178,11 +210,9 @@ export class Auth {
     if (presented === null || presented === "") return null;
     const now = this.deps.now();
     const hash = secretHash(presented);
-    const token = this.deps.db.query<{ user: string; expires: number }, [string]>("SELECT user, expires FROM page_token WHERE hash = ?").get(hash);
-    if (token !== null) return token.user === owner && token.expires > now ? { user: owner, until: token.expires } : null;
-    const web = this.deps.db.query<{ made: number }, [string, string]>("SELECT made FROM app_key WHERE user = ? AND hash = ? AND kind = 'web' AND retired IS NULL").get(owner, hash);
-    if (web === null) return null;
-    const until = keyEnds("web", web.made, this.deps.webKeyMs);
-    return until === null || until > now ? { user: owner, until } : null;
+    // A page token holds for its short life, the web token until its end where it has one; the extension's key is no page's.
+    const token = this.deps.db.query<{ user: string; kind: TokenKind; expires: number | null }, [string]>("SELECT user, kind, expires FROM page_token WHERE hash = ?").get(hash);
+    if (token === null || token.kind === "extension" || token.user !== owner) return null;
+    return token.expires === null || token.expires > now ? { user: owner, until: token.expires } : null;
   }
 }

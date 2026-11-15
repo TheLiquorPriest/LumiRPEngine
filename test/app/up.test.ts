@@ -137,7 +137,7 @@ describe("rpe up", () => {
   function providerKeys(): { hash: string; retired: number | null }[] {
     const db = new Database(bed.paths.database, { readonly: true });
     try {
-      return db.query<{ hash: string; retired: number | null }, []>("SELECT hash, retired FROM app_key WHERE kind = 'provider' ORDER BY made, rowid").all();
+      return db.query<{ hash: string; retired: number | null }, []>("SELECT hash, NULL AS retired FROM provider_key ORDER BY made, rowid").all();
     } finally {
       db.close();
     }

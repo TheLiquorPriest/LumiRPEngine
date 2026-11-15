@@ -8,7 +8,7 @@ One route answers anyone who reaches RPE: its status, `/api/v1/status`, which sa
 
 ## Keys and tokens
 
-Each key is random, shown once when it is made, and kept only as a hash. A new key of a kind stops the one before it at once. `rpe status` shows the last four characters of each and when it was made. Each kind starts alike, so you can tell which you hold.
+Each key is random, shown once when it is made, and kept only as a hash. A new key of a kind stops the one before it at once. `rpe status` shows the last four characters of the provider key, and for each key when it was made and, for the web key, when it runs out; never a key itself. The provider key is kept in the database's `provider_key`; the web key and the extension's key, which are tokens like a page's, in `page_token`, each with who made it and when it ends. Each kind starts alike, so you can tell which you hold.
 
 | Key | Starts with | What it opens | How it is made |
 |---|---|---|---|

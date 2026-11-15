@@ -255,10 +255,10 @@ test("rpe check reads the config and applies this build's migrations to a copy o
     expect(readdirSync(into)).toEqual([]);
     expect(await kept()).toEqual(before);
 
-    const broken: Area = { name: "broken", tables: [{ area: "build", migrations: [{ version: 1, name: "a table the database has already", sql: "CREATE TABLE app_key (x)" }] }] };
+    const broken: Area = { name: "broken", tables: [{ area: "build", migrations: [{ version: 1, name: "a table the database has already", sql: "CREATE TABLE switch (x)" }] }] };
     const failed = await check([broken]);
     expect(failed.code).toBe(1);
-    expect(failed.err).toContain("app_key already exists");
+    expect(failed.err).toContain("switch already exists");
     expect(readdirSync(into)).toEqual([]);
 
     await writeConfig(bed.paths, { port: "not a port" });

@@ -4,10 +4,11 @@
 // the server in-process on a free loopback port.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdir } from "node:fs/promises";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes, METHODS, route, shape, storedKey } from "../../src/app";
 import { runCli } from "../../src/app/cli";
-import { bearer, type Bed, cliIo, makeBed, makeKey, OWNER, testModelLayer } from "./helpers";
+import { bearer, type Bed, cliIo, LUMIVERSE, makeBed, makeKey, OWNER, testModelLayer, writeConfig } from "./helpers";
 
 describe("the switches", () => {
   let bed: Bed;
@@ -23,6 +24,9 @@ describe("the switches", () => {
 
   beforeEach(async () => {
     bed = await makeBed();
+    // The command line reads whose RPE this is from the data folder's config.
+    await mkdir(bed.paths.root, { recursive: true });
+    await writeConfig(bed.paths, { lumiverse: { url: LUMIVERSE, user: OWNER } });
     app = await bed.open({
       areas: [
         {

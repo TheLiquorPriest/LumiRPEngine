@@ -2,13 +2,13 @@
 
 import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
-import { currentKeys, keyEnds } from "../auth";
+import { currentKeys } from "../auth";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { appliedMigrations } from "../migrations";
 import { listSwitches } from "../switches";
 import { serverAnswer, serverUrl } from "./running";
-import { atWords, webKeyMs } from "./words";
+import { atWords } from "./words";
 import { runningServer } from "./writer";
 
 export async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, version: string): Promise<number> {
@@ -39,9 +39,10 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
       if (ofKind.length === 0) return [`${kind} none`];
       return ofKind.map((key) => {
         const made = new Date(key.made).toISOString().slice(0, 10);
-        if (key.last4 === "") return `${kind} taken from today's connection (taken ${made})`;
-        const ends = keyEnds(kind, key.made, webKeyMs(config));
-        return `${kind} ends ${key.last4} (made ${made}${kind !== "web" ? "" : ends === null ? ", no end" : `, runs out ${atWords(ends)}`})`;
+        if (key.taken) return `${kind} taken from today's connection (taken ${made})`;
+        // RPE keeps only the provider key's last four characters; the others it keeps by when they were made and end.
+        if (kind === "provider") return `${kind} ends ${key.last4} (made ${made})`;
+        return `${kind} made ${made}${kind === "extension" ? ", which RPE remakes at every start" : key.ends === null ? ", no end" : `, runs out ${atWords(key.ends)}`}`;
       });
     });
     io.out(`Keys: ${keyLines.join("; ")}`);

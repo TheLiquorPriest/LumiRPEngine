@@ -49,6 +49,7 @@ export const keyMade = shape.named(
     kind: shape.field(MADE_KIND, "Which key."),
     key: shape.field(T, "The key itself."),
     made: shape.field(shape.number(), "When it was made, epoch milliseconds."),
+    ends: shape.field(shape.nullable(shape.number()), "When it runs out, epoch milliseconds; null: it has no end."),
     retired: shape.field(shape.whole({ least: 0 }), "How many keys taken from today's connection it retired."),
     takenStays: shape.field(shape.yesNo(), "A key of this kind taken from today's connection is still in force."),
   }),
@@ -86,7 +87,10 @@ export const commandStatus = shape.named(
   "CommandStatus",
   "How RPE stands as its own command line is told: the keys in force, the switches and the builds in words.",
   shape.object({
-    keys: shape.field(shape.list(shape.object({ kind: KIND, last4: T, made: shape.number() })), "Each key in force, by its last four characters; none is empty for a key taken from today's connection."),
+    keys: shape.field(
+      shape.list(shape.object({ kind: KIND, last4: shape.nullable(T), made: shape.number(), ends: shape.nullable(shape.number()), taken: shape.yesNo() })),
+      "Each key in force: the provider key by its last four characters (null for one taken from today's connection, whose were never known), when it was made and, for the web token, when it ends; never a key's text.",
+    ),
     switches: shape.field(shape.list(switchEntry), "Every switch, each name's newest definition."),
     builds: shape.field(shape.nullable(T), "The builds that meet at RPE in a sentence or two; null where the server does not say."),
   }),
@@ -106,6 +110,8 @@ export interface CommandSink {
   readonly secrets: SecretsFile;
   /** The Lumiverse user this RPE belongs to, as the install named him; null before it has, and nothing of his is then written (R-179). */
   readonly user: string | null;
+  /** How long the web token holds after it is made (`auth.webKeyDays`); null: it has no end. */
+  readonly webKeyMs: number | null;
   /** For reads. Writes go through `run` alone. */
   readonly db: Database;
   /** Runs one write in a transaction of its own, after those asked for before it; resolves with what it returned once committed. */
@@ -144,15 +150,15 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
       if (ask.all === true && ask.kind !== "provider") throw new CommandRefused("Only the provider key can be taken from today's connection: all goes with provider.");
       const user = ownerOf(sink);
       return await sink.run((db) => {
-        const made = insertKey(db, user, ask.kind, now, ask.key);
-        const retired = ask.all === true ? retireTakenKeys(db, user, ask.kind, now) : 0;
-        return { kind: ask.kind, key: made.key, made: made.made, retired, takenStays: currentKeys(db, user).some((k) => k.kind === ask.kind && k.last4 === "") };
+        const made = insertKey(db, user, ask.kind, now, ask.key, sink.webKeyMs);
+        const retired = ask.all === true ? retireTakenKeys(db, user) : 0;
+        return { kind: ask.kind, key: made.key, made: made.made, ends: made.ends, retired, takenStays: currentKeys(db, user).some((k) => k.kind === ask.kind && k.taken) };
       });
     },
     async takeKey(hash) {
       if (!/^[0-9a-f]{64}$/.test(hash)) throw new CommandRefused("A key's hash is 64 hexadecimal characters.");
       const user = ownerOf(sink);
-      await sink.run((db) => takeKeyHash(db, user, "provider", hash, sink.now()));
+      await sink.run((db) => takeKeyHash(db, user, hash, sink.now()));
     },
     async setSwitch(name, state) {
       const user = ownerOf(sink);

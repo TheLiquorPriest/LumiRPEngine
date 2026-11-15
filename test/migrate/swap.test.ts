@@ -160,7 +160,7 @@ describe("the swap, and going back", () => {
   const providerKeys = (): string[] => {
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
-      return db.query<{ hash: string }, []>("SELECT hash FROM app_key WHERE kind = 'provider' AND retired IS NULL").all().map((r) => r.hash);
+      return db.query<{ hash: string }, []>("SELECT hash FROM provider_key").all().map((r) => r.hash);
     } finally {
       db.close();
     }

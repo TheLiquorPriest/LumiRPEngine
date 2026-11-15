@@ -2,10 +2,9 @@
 
 import type { CliIO } from "../cli";
 import type { KeyKind } from "../auth";
-import { keyEnds } from "../auth";
 import type { AppConfig, DataPaths } from "../config";
 import { UsageError } from "./args";
-import { atWords, webKeyMs } from "./words";
+import { atWords } from "./words";
 import { withWriter } from "./writer";
 
 /** The keys a command makes, and what to do with each. The extension's is made by RPE at every start, and handed over. */
@@ -27,8 +26,7 @@ export async function keyCommand(words: readonly string[], paths: DataPaths, con
   io.out("");
   io.out(KEY_WORDS[kind as keyof typeof KEY_WORDS]);
   if (made.kind === "web") {
-    const ends = keyEnds("web", made.made, webKeyMs(config));
-    io.out(ends === null ? "It has no end: it works until a new web key replaces it." : `It works until ${atWords(ends)}.`);
+    io.out(made.ends === null ? "It has no end: it works until a new web key replaces it." : `It works until ${atWords(made.ends)}.`);
   }
   io.out(`The ${kind} key made before it, if there was one, no longer works.`);
   if (made.retired > 0) io.out("Nor does the key of today's connection in Lumiverse, which RPE took over at the swap: that connection now needs this new key as its API key. Going back to the previous build then needs that connection's earlier key put back in it.");

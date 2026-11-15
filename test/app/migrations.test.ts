@@ -180,7 +180,7 @@ describe("migrations", () => {
     const app = await bed.open({ version: "1.0.0", areas: [{ name: "tree", tables: [{ area: "files", migrations: TREE_MIGRATIONS }] }] });
     expect(app.migrated.applied.map((m) => `${m.area} ${m.version}`)).toEqual([...APP_STEPS.slice(1), ...TREE_MIGRATIONS.slice(5).map((m) => `files ${m.version}`)]);
     const users = (table: string): string[] => app.db.query<{ user: string }, []>(`SELECT DISTINCT user FROM ${table}`).all().map((r) => r.user);
-    for (const table of ["migration", "meta", "app_key", "switch", "tree_default"]) expect({ table, users: users(table) }).toEqual({ table, users: [OWNER] });
+    for (const table of ["migration", "meta", "provider_key", "switch", "tree_default"]) expect({ table, users: users(table) }).toEqual({ table, users: [OWNER] });
     // What they held before they hold still, as the install's user's: his key opens RPE, his switch is on.
     expect(app.auth.holds("provider", key)).toBe(true);
     expect(await app.switches.check("format", "hook", "fmt {file}")).toBe("waiting");

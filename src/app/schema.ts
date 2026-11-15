@@ -1,7 +1,8 @@
-// The app area's own tables (plan Appendix B, "App"): the keys RPE was given out (provider, extension
-// registration, web UI), page tokens, and the switches for anything that runs a command or calls
-// out. Every key and token is kept as its SHA-256 alone; the key itself is shown once and never
-// stored. Every row says whose it is, these the installation's own included (R-9): a key, a token and
+// The app area's own tables (plan Appendix B, "App"): `provider_key` (the key Lumiverse sends on RPE's
+// connection), `page_token` (the page tokens, the web UI's token and the extension's registration,
+// each with its kind, who made it and when it ends), and the switches for anything that runs a
+// command or calls out. Every key and token is kept as its SHA-256 alone; the key itself is shown
+// once and never stored. Every row says whose it is, these the installation's own included (R-9): a key, a token and
 // a switch hold for the user they were made or listed for.
 
 import type { Migration } from "./migrations";
@@ -73,6 +74,39 @@ ALTER TABLE app_key_user RENAME TO app_key;
 CREATE INDEX app_key_current ON app_key (user, kind, retired);
 DROP TABLE switch;
 ALTER TABLE switch_user RENAME TO switch;`);
+    },
+  },
+  {
+    version: 3,
+    name: "the provider key in provider_key, the web token and the extension's key in page_token",
+    // Every key in force still opens what it opened: its hash moves, and a key retired already is not kept. The web token has no end, as it had none unless `auth.webKeyDays` said so; a token made from now on carries the end its setting gives it.
+    up: (db) => {
+      db.run(`
+CREATE TABLE provider_key (
+  user TEXT NOT NULL,
+  hash TEXT PRIMARY KEY,
+  last4 TEXT NOT NULL,
+  made INTEGER NOT NULL,
+  taken INTEGER NOT NULL DEFAULT 0 CHECK (taken IN (0, 1))
+);
+CREATE INDEX provider_key_user ON provider_key (user);
+CREATE TABLE page_token_kinds (
+  hash TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('page', 'web', 'extension')),
+  made_by TEXT NOT NULL,
+  made INTEGER NOT NULL,
+  expires INTEGER
+);`);
+      db.run("INSERT INTO provider_key (user, hash, last4, made, taken) SELECT user, hash, last4, made, CASE WHEN last4 = '' THEN 1 ELSE 0 END FROM app_key WHERE kind = 'provider' AND retired IS NULL");
+      db.run("INSERT INTO page_token_kinds (hash, user, kind, made_by, made, expires) SELECT hash, user, 'page', made_by, made, expires FROM page_token");
+      db.run("INSERT INTO page_token_kinds (hash, user, kind, made_by, made, expires) SELECT hash, user, kind, CASE kind WHEN 'web' THEN 'command line' ELSE 'rpe start' END, made, NULL FROM app_key WHERE kind IN ('web', 'extension') AND retired IS NULL");
+      db.run(`
+DROP TABLE app_key;
+DROP TABLE page_token;
+ALTER TABLE page_token_kinds RENAME TO page_token;
+CREATE INDEX page_token_user_kind ON page_token (user, kind);
+CREATE INDEX page_token_expires ON page_token (expires);`);
     },
   },
 ];

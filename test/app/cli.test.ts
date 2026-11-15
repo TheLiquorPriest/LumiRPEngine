@@ -94,7 +94,7 @@ describe("rpe", () => {
   test("a new provider key leaves the key taken from today's connection working, and says that connection keeps its own key", async () => {
     const today = "lumiah-key-of-todays-connection";
     const { app, server } = await serving();
-    await app.writes.run((db) => takeKeyHash(db, OWNER, "provider", secretHash(today), app.now()));
+    await app.writes.run((db) => takeKeyHash(db, OWNER, secretHash(today), app.now()));
     const made = await rpe(["key"]);
     expect(made.out).toContain("keeps its own key");
     const fresh = /\b(rpe_[0-9a-f]{64})\b/.exec(made.out)?.[1] ?? "";
@@ -106,7 +106,7 @@ describe("rpe", () => {
   test("key provider all also retires the key taken from today's connection, and says that connection now needs the new key; status lists only the new one", async () => {
     const today = "lumiah-key-of-todays-connection";
     const { app, server } = await serving();
-    await app.writes.run((db) => takeKeyHash(db, OWNER, "provider", secretHash(today), app.now()));
+    await app.writes.run((db) => takeKeyHash(db, OWNER, secretHash(today), app.now()));
     const made = await rpe(["key", "provider", "all"]);
     expect(made.code).toBe(0);
     expect(made.out).toContain("now needs this new key");
@@ -122,15 +122,15 @@ describe("rpe", () => {
 
   test("key web says when the key it prints runs out, and status lists it: no end as shipped, auth.webKeyDays after it is made when set", async () => {
     expect((await rpe(["key", "web"])).out).toContain("It has no end: it works until a new web key replaces it.");
-    expect((await rpe(["status"])).out).toMatch(/web ends [0-9a-f]{4} \(made 2026-11-13, no end\)/);
+    expect((await rpe(["status"])).out).toMatch(/web made 2026-11-13, no end/);
     await writeConfig(bed.paths, { port, lumiverse: { url: LUMIVERSE, user: OWNER }, auth: { webKeyDays: 30 } });
     expect((await rpe(["key", "web"])).out).toContain("It works until 2026-12-13 12:00 UTC.");
-    expect((await rpe(["status"])).out).toMatch(/web ends [0-9a-f]{4} \(made 2026-11-13, runs out 2026-12-13 12:00 UTC\)/);
+    expect((await rpe(["status"])).out).toMatch(/web made 2026-11-13, runs out 2026-12-13 12:00 UTC/);
   });
 
   test("backup makes one private archive of the database and the file tree, and never writes over one", async () => {
     const { app } = await serving();
-    await app.writes.run((db) => db.run("INSERT INTO page_token (hash, user, made_by, made, expires) VALUES ('h', 'u', 'extension', 1, 2)"));
+    await app.writes.run((db) => db.run("INSERT INTO page_token (hash, user, kind, made_by, made, expires) VALUES ('h', 'u', 'page', 'extension', 1, 2)"));
     await mkdir(join(bed.paths.files, "chats", "a-chat"), { recursive: true });
     await writeFile(join(bed.paths.files, "chats", "a-chat", "WORLD.md"), "# A world\n");
     await writeFile(bed.paths.globalConfig, "history:\n  keep: 40\n");
@@ -184,7 +184,7 @@ describe("rpe", () => {
     expect((await rpe(["connection", "remove", "Floor"])).code).toBe(0);
     expect((await rpe(["connection", "list"])).out).toContain("No connections yet");
     // The command line's own token is let go once its call is done.
-    expect(app.db.query("SELECT count(*) AS n FROM page_token WHERE made_by = 'command line'").get()).toEqual({ n: 0 });
+    expect(app.db.query("SELECT count(*) AS n FROM page_token WHERE kind = 'page' AND made_by = 'command line'").get()).toEqual({ n: 0 });
   });
 
   test("a word or flag it does not take is refused with its usage", async () => {
