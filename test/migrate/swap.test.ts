@@ -25,6 +25,9 @@ import { buildFixture, IDENT, OTHER_USER, RUNTIME, STRAY, treeSums, USER, USERNA
 
 const PASSWORD = "invented swap password";
 const TODAYS_CONNECTION = "conn-today";
+/** The call that marks today's connection as RPE's, and (the same call) takes the mark off; what the put-back says of it. */
+const MARKED = `PUT /api/v1/connections/${TODAYS_CONNECTION}`;
+const MARK_OFF = `the mark on "LumiRPEngine" (${TODAYS_CONNECTION}) is taken off`;
 /** The loopback key whose hash the fixture's registry holds, and the model name today's connection names. */
 const LOOPBACK_KEY = "lah_key";
 const TODAYS_MODEL = `lumiah-${IDENT}`;
@@ -40,6 +43,8 @@ const TODAYS_UNIT = "[Service]\nExecStart=/opt/bun/bin/bun lumiah.js serve\nMemo
 const BUILD = "test";
 /** A backend file as the build stamps one, as far as its build goes: `scripts/build.ts` writes the id in where the code reads it. */
 const backendOf = (build: string): string => `// @bun\nfunction pipeOptions(options) {\n  return { build: options.build ?? ${JSON.stringify(build)} ?? "dev" };\n}\n`;
+/** Lumiverse's id for the installed extension, as its list gives it beside the identifier. */
+const EXTENSION_ID = "ext-installed-1";
 
 interface Profile {
   id: string;
@@ -48,13 +53,15 @@ interface Profile {
   api_url: string;
   model: string;
   has_api_key: boolean;
+  /** What a connection holds of its own; Lumiverse replaces it whole when it is updated. */
+  metadata?: Record<string, unknown>;
 }
 
 interface LumiverseStandIn {
   url: string;
   connections: Map<string, Profile>;
-  /** What Lumiverse says the installed extension's manifest asks for. */
-  extension: { permissions: string[] };
+  /** What Lumiverse says the installed extension's manifest asks for, and the permissions it has granted it. */
+  extension: { permissions: string[]; granted: string[] };
   /** Every call that changes something, as `METHOD path`. */
   changes: string[];
   stop(): Promise<void>;
@@ -63,12 +70,12 @@ interface LumiverseStandIn {
 /** Lumiverse as `rpe up` meets it: the username sign-in and `get-session`, the connections routes, and the extensions list. Today's build's own connection is there already, at `todaysUrl`. */
 function lumiverseStandIn(todaysUrl: string): LumiverseStandIn {
   const connections = new Map<string, Profile>([[TODAYS_CONNECTION, { id: TODAYS_CONNECTION, name: "LumiRPEngine", provider: "custom", api_url: todaysUrl, model: TODAYS_MODEL, has_api_key: true }]]);
-  const extension = { permissions: [...LIGHT] };
+  const extension = { permissions: [...LIGHT], granted: [...LIGHT] };
   const changes: string[] = [];
   /** Live session tokens, by the user each signs in as. */
   const live = new Map<string, string>();
   let made = 0;
-  const shown = (p: Profile) => ({ ...p, preset_id: null, is_default: false, metadata: {}, created_at: 1, updated_at: 1 });
+  const shown = (p: Profile) => ({ ...p, preset_id: null, is_default: false, metadata: p.metadata ?? {}, created_at: 1, updated_at: 1 });
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -85,7 +92,8 @@ function lumiverseStandIn(todaysUrl: string): LumiverseStandIn {
       const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
       if (pathname === "/api/auth/get-session") return Response.json(live.has(token) ? { session: { token }, user: { id: live.get(token) } } : null);
       if (!live.has(token)) return Response.json({ error: "Unauthorized" }, { status: 401 });
-      if (request.method === "GET" && pathname === "/api/v1/spindle") return Response.json({ extensions: [{ identifier: IDENT, enabled: true, permissions: extension.permissions }] });
+      if (request.method === "GET" && pathname === "/api/v1/spindle") return Response.json({ extensions: [{ id: EXTENSION_ID, identifier: IDENT, enabled: true, permissions: extension.permissions }] });
+      if (request.method === "GET" && pathname === `/api/v1/spindle/${EXTENSION_ID}/permissions`) return Response.json({ granted: extension.granted });
       if (request.method !== "GET") changes.push(`${request.method} ${pathname}`);
       if (request.method === "GET" && pathname === "/api/v1/connections") return Response.json({ data: [...connections.values()].map(shown), total: connections.size, limit: 50, offset: 0 });
       if (request.method === "POST" && pathname === "/api/v1/connections" && isRecord(body)) {
@@ -168,6 +176,19 @@ describe("the swap, and going back", () => {
     }
   };
 
+  /** The build the light extension said at its last registration, as RPE's builds route gives it; null before it registered. */
+  let registered: string | null = BUILD;
+  /** RPE's own command socket, while RPE's service runs: its status, its builds as `rpe up` waits on them, and the few things the swap's last lines ask. Nothing answers there while it does not run. */
+  function onSocket(url: string): Response {
+    if (!existsSync(flags.rpe) || existsSync(flags.today)) throw new TypeError(`Unable to connect to ${url}`);
+    const path = new URL(url).pathname;
+    if (path === "/api/v1/status") return Response.json({ name: "rpe", version: BUILD });
+    if (path === "/api/v1/status/builds") return Response.json({ name: "rpe", version: BUILD, started: 1, builds: { running: BUILD, disk: BUILD, broken: null, extension: registered, agree: true, restart: "none", words: "" } });
+    if (path === "/api/v1/command/status") return Response.json({ keys: [{ kind: "web", last4: null, made: 1, ends: null, taken: false }], switches: [], builds: null });
+    if (path === "/api/v1/connections") return Response.json({ connections: [] });
+    return Response.json({ error: `No ${path}.` }, { status: 404 });
+  }
+
   async function rpe(line: string[], more: Record<string, string> = {}): Promise<{ code: number; out: string }> {
     const lines: string[] = [];
     const io: CliIO = {
@@ -180,9 +201,26 @@ describe("the swap, and going back", () => {
       ask: async () => null,
       stopped: () => new Promise(() => {}),
       // Nothing listens at today's address while neither service runs there: a call to it can't connect.
-      fetch: (url, init) => (url.startsWith(`http://127.0.0.1:${place.port}/`) && !existsSync(flags.today) && !existsSync(flags.rpe) ? Promise.reject(new TypeError(`Unable to connect to ${url}`)) : fetch(url, init)),
+      fetch: (url, init) => {
+        if ((init as { unix?: string } | undefined)?.unix !== undefined) {
+          try {
+            return Promise.resolve(onSocket(url));
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }
+        return url.startsWith(`http://127.0.0.1:${place.port}/`) && !existsSync(flags.today) && !existsSync(flags.rpe) ? Promise.reject(new TypeError(`Unable to connect to ${url}`)) : fetch(url, init);
+      },
     };
-    const code = await runCli(line, io, { version: BUILD, appFile: join(fixture.root, "build", "rpe.js") });
+    // RPE's command socket is a file the command line looks for before it asks (`onSocket` answers on it only while RPE's service runs).
+    const socket = join(data, "command.sock");
+    await writeFile(socket, "");
+    let code: number;
+    try {
+      code = await runCli(line, io, { version: BUILD, appFile: join(fixture.root, "build", "rpe.js") });
+    } finally {
+      await rm(socket, { force: true });
+    }
     return { code, out: lines.join("\n") };
   }
   const up = (more: Record<string, string> = {}, line: string[] = []): Promise<{ code: number; out: string }> => rpe(["up", "--url", lumiverse.url, "--user", USERNAME, "--lumiverse", fixture.sources.lumiverse, "--data", data, ...line], more);
@@ -351,14 +389,17 @@ describe("the swap, and going back", () => {
     expect(code).toBe(1);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, `systemctl --user disable --now ${UNIT}`, "systemctl --user daemon-reload", "systemctl --user start lumiah-home.service"]);
     expect(out).toContain(`The swap did not go through: RPE did not answer at http://127.0.0.1:${place.port} within 1 seconds of its service starting`);
-    expect(out).toContain(`Put back as it was: ${UNIT} is removed; RPE's config is as it was; lumiah-home.service runs again.`);
+    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; lumiah-home.service runs again.`);
     // Today's build answers again; RPE's service is gone; nothing of today's changed.
     expect(existsSync(flags.today)).toBe(true);
     expect(existsSync(join(unitFolder, UNIT))).toBe(false);
     expect(existsSync(join(unitFolder, "lumiah-home.service"))).toBe(true);
     expect(await readFile(join(data, "config.json"), "utf8")).toBe(configBefore);
     expect(await todays()).toEqual(before);
-    expect(lumiverse.changes).toEqual([]);
+    // The connection was marked as RPE's before RPE's service started, and the mark is off again.
+    expect(lumiverse.changes).toEqual([MARKED, MARKED]);
+    expect(lumiverse.connections.get(TODAYS_CONNECTION)?.metadata ?? {}).toEqual({});
+    lumiverse.changes.length = 0;
   });
 
   test("told to stop as it stops today's service (a closed terminal), the swap ends there and starts today's service again, changing nothing", async () => {
@@ -386,7 +427,7 @@ describe("the swap, and going back", () => {
     const { code, out } = await up({ RPE_SWAP_HANGUP: `restart ${UNIT}` });
     expect(code).toBe(1);
     expect(out).toContain("The swap did not go through: it was told to stop (SIGHUP).");
-    expect(out).toContain(`Put back as it was: ${UNIT} is removed; RPE's config is as it was; lumiah-home.service runs again.`);
+    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; lumiah-home.service runs again.`);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, `systemctl --user disable --now ${UNIT}`, "systemctl --user daemon-reload", "systemctl --user start lumiah-home.service"]);
     // Never both on: today's unit runs, and is still started at boot; RPE's is gone.
     expect(existsSync(flags.today)).toBe(true);
@@ -394,7 +435,9 @@ describe("the swap, and going back", () => {
     expect(existsSync(join(unitFolder, UNIT))).toBe(false);
     expect(await readFile(join(data, "config.json"), "utf8")).toBe(configBefore);
     expect(await todays()).toEqual(before);
-    expect(lumiverse.changes).toEqual([]);
+    expect(lumiverse.changes).toEqual([MARKED, MARKED]);
+    expect(lumiverse.connections.get(TODAYS_CONNECTION)?.metadata ?? {}).toEqual({});
+    lumiverse.changes.length = 0;
   });
 
   test("once today's build is idle, `rpe up` stops today's service, migrates, has RPE take today's loopback and start in its place, and only then switches today's off", async () => {
@@ -415,7 +458,7 @@ describe("the swap, and going back", () => {
     expect(kept.length).toBe(1);
     expect(await kept[0]?.[1].text()).toBe(TODAYS_UNIT);
     expect(await readFile(join(unitFolder, "lumiah-home.service"), "utf8")).toBe(TODAYS_UNIT);
-    expect(out).toContain(`RPE's connection in Lumiverse is to be "LumiRPEngine" (${TODAYS_CONNECTION}), the one today's build made for its runtime: it is left as it is`);
+    expect(out).toContain(`RPE answers on "LumiRPEngine" (${TODAYS_CONNECTION}), a connection in Lumiverse that reached today's runtime, under its model name (${TODAYS_MODEL}): it is left as it is`);
     expect(out).toContain(`Started ${UNIT}, RPE's service: RPE answers at http://127.0.0.1:${place.port}, where today's runtime home did, under its model name (${TODAYS_MODEL}) and with its key.`);
     expect(out).toContain("Stopped and switched off lumiah-home.service, today's service.");
     // No new connection to choose chat by chat: the chats on today's connection are RPE's now.
@@ -424,11 +467,13 @@ describe("the swap, and going back", () => {
     expect(text).toContain(`# RPE's data folder: ${data}`);
     expect(text).toContain(`serve --data ${data}`);
     // RPE listens where today's runtime did, answers to its model name, and its connection in Lumiverse is today's.
-    expect(await rpeConfig()).toMatchObject({ address: "127.0.0.1", port: place.port, lumiverse: { connection: TODAYS_CONNECTION, models: ["rpe", TODAYS_MODEL] } });
+    expect(await rpeConfig()).toMatchObject({ address: "127.0.0.1", port: place.port, lumiverse: { connections: [TODAYS_CONNECTION], models: ["rpe", TODAYS_MODEL] } });
     expect(providerKeys()).toContain(sha256(LOOPBACK_KEY));
-    // Today's storage and today's runtime's folders as they were; nothing changed in Lumiverse.
+    // Today's storage and today's runtime's folders as they were; in Lumiverse only the one key of the connection's metadata, RPE's mark, was written, and nothing else of it.
     expect(await todays()).toEqual(before);
-    expect(lumiverse.changes).toEqual([]);
+    expect(lumiverse.changes).toEqual([MARKED]);
+    expect(lumiverse.connections.get(TODAYS_CONNECTION)?.metadata).toEqual({ rpe: { v: 1 } });
+    lumiverse.changes.length = 0;
     expect(lumiverse.connections.get(TODAYS_CONNECTION)).toMatchObject({ api_url: `http://127.0.0.1:${place.port}/v1`, model: TODAYS_MODEL, has_api_key: true });
   });
 
@@ -472,12 +517,12 @@ describe("the swap, and going back", () => {
 
   test("the unit `rpe up` writes stops starting RPE after the starts its update settings allow, within the time they give", async () => {
     // The defaults, from the first swap's unit; then the user's own RPE-global.yml, which a later `rpe up` writes into the unit.
-    expect((await readFile(join(unitFolder, UNIT), "utf8")).split("\n")).toEqual(expect.arrayContaining(["StartLimitIntervalSec=60", "StartLimitBurst=5", "Restart=always"]));
+    expect((await readFile(join(unitFolder, UNIT), "utf8")).split("\n")).toEqual(expect.arrayContaining(["StartLimitIntervalSec=60", "StartLimitBurst=6", "Restart=always"]));
     const global = dataPaths(data).globalConfig;
     await writeFile(global, `${(await readFile(global, "utf8").catch(() => "")).trimEnd()}\nupdate:\n  startTries: 3\n  startWindow: 30\n`);
     await rm(log, { force: true });
     expect((await rpe(["up", "--url", lumiverse.url, "--user", USERNAME, "--data", data])).code).toBe(0);
-    expect((await readFile(join(unitFolder, UNIT), "utf8")).split("\n")).toEqual(expect.arrayContaining(["StartLimitIntervalSec=30", "StartLimitBurst=3"]));
+    expect((await readFile(join(unitFolder, UNIT), "utf8")).split("\n")).toEqual(expect.arrayContaining(["StartLimitIntervalSec=30", "StartLimitBurst=4"]));
   });
 
   /** RPE's chats and the migration's runs for the user, and the backups taken, as RPE's data folder holds them. */
@@ -500,7 +545,7 @@ describe("the swap, and going back", () => {
     expect(performance.now() - started).toBeLessThan(1500);
     expect(await asked()).toEqual([`systemctl --user is-active --quiet ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user is-enabled --quiet lumiah-home.service"]);
     expect(out).toContain(`The swap stands: RPE's service ${UNIT} runs, and RPE answers at http://127.0.0.1:${place.port}, where today's runtime ${RUNTIME} answered; today's service lumiah-home.service is switched off; the extension Lumiverse has installed is this build (${BUILD}). Nothing was stopped or changed, and the migration was not made again.`);
-    expect(out).toContain(`rpe migrate carries what changed on today's side since the last run (read at `);
+    expect(out).toContain("carries what changed on today's side since the last run (read at ");
     expect(out).toContain(`): stop RPE's service (systemctl --user stop ${UNIT}), run rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --data ${data}, then start it again (systemctl --user start ${UNIT}).`);
     expect(await held()).toEqual(had);
     expect(existsSync(flags.rpe)).toBe(true);
@@ -527,7 +572,7 @@ describe("the swap, and going back", () => {
     // Today's unit is started at boot again, as going back's own install line leaves it; and RPE's config names a connection a plain `rpe up` made for it, which the user moved chats to.
     await writeFile(flags.todayOn, "");
     const config = await rpeConfig();
-    await writeFile(join(data, "config.json"), JSON.stringify({ ...config, lumiverse: { ...(config.lumiverse as object), connection: "connection-own" } }));
+    await writeFile(join(data, "config.json"), JSON.stringify({ ...config, lumiverse: { ...(config.lumiverse as object), connections: ["connection-own"] } }));
     await rm(log, { force: true });
     const [before, had] = [await todays(), await held()];
     const { code, out } = await up();
@@ -535,9 +580,8 @@ describe("the swap, and going back", () => {
     expect(out).not.toContain("The swap stands");
     expect(await asked()).toEqual([`systemctl --user is-active --quiet ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user is-enabled --quiet lumiah-home.service", `systemctl --user is-active --quiet ${UNIT}`, `systemctl --user stop ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, "systemctl --user disable lumiah-home.service"]);
     expect(existsSync(flags.todayOn)).toBe(false);
-    expect(out).toContain(`The connection connection-own in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on "LumiRPEngine" (${TODAYS_CONNECTION}).`);
-    expect(out).toContain(`In Lumiverse, move the chats on the connection connection-own to "LumiRPEngine": RPE plays only the chats on it now.`);
-    expect(await rpeConfig()).toMatchObject({ lumiverse: { connection: TODAYS_CONNECTION } });
+    expect(out).toContain(`The connection connection-own in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on "LumiRPEngine".`);
+    expect(await rpeConfig()).toMatchObject({ lumiverse: { connections: [TODAYS_CONNECTION] } });
     expect(await held()).toEqual({ chats: had.chats, runs: had.runs + 1, backups: had.backups + 1 });
     expect(await todays()).toEqual(before);
     expect(lumiverse.changes).toEqual([]);
