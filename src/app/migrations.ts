@@ -1,5 +1,7 @@
 // The database's migrations (plan §4.6, Appendix B): forward only, each in one transaction, and a
-// copy of the file taken before the first migration of a new version. Every area brings its own
+// copy of the file taken before the first migration of a new version; the copies are kept to the
+// setting `database.copiesKept`, the oldest removed once the new version has started (`pruneCopies`).
+// Every area brings its own
 // tables as migrations through one registry; they run area by area in the order of
 // `MIGRATION_AREAS`, and within an area by version. An area's tables may name an earlier area's,
 // never a later one's.
@@ -12,7 +14,9 @@
 
 import type { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import type { Log } from "rp-harness/contract";
 import { NO_OWNER } from "./auth";
 import { OWNER_ONLY_FILE, OWNER_ONLY_FOLDER } from "./disk";
 
@@ -134,10 +138,44 @@ function bookkeeping(db: Database, user: string): void {
   })();
 }
 
+/** The start of every copy's name, and its stamp: the time it was taken, in UTC. */
+export const COPY_PREFIX = "rpe-before-";
+export const STAMP = /(\d{8}T\d{6}Z)\.[a-z]+$/;
+
 /** A file name made of `version`'s safe characters and the time. */
 function copyName(version: string, at: number): string {
   const stamp = new Date(at).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `rpe-before-${version.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64)}-${stamp}.db`;
+  return `${COPY_PREFIX}${version.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64)}-${stamp}.db`;
+}
+
+/** When a backup's name says it was made (epoch milliseconds); null for a name with no stamp. */
+export function stampOf(name: string): number | null {
+  const stamp = STAMP.exec(name)?.[1];
+  if (stamp === undefined) return null;
+  const at = Date.parse(`${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}Z`);
+  return Number.isNaN(at) ? null : at;
+}
+
+/**
+ * Keeps the `kept` newest copies taken before migrations (newest by the time each name says it was taken) and removes the rest,
+ * each removal logged: called once a version has started, so a version that failed to start leaves every copy. `rpe backup`'s
+ * archives and the migration's backups are never removed here: going back needs them (§15.6).
+ */
+export async function pruneCopies(backups: string, kept: number, log: Log): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(backups);
+  } catch {
+    return [];
+  }
+  const copies = names.filter((name) => name.startsWith(COPY_PREFIX) && name.endsWith(".db")).sort((a, b) => (stampOf(b) ?? 0) - (stampOf(a) ?? 0));
+  const removed: string[] = [];
+  for (const name of copies.slice(kept)) {
+    await rm(join(backups, name), { force: true });
+    removed.push(name);
+    log.info("a copy of the database taken before an earlier version's migrations was removed, past the copies the setting keeps", { copy: name, kept });
+  }
+  return removed;
 }
 
 /** What has run for `user`, by area. */
