@@ -115,7 +115,7 @@ export const jobView = shape.named(
     limit: opt(limitHit),
   }),
 );
-export const replyError = shape.object({ code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed"), limit: opt(limitHit), detail: opt(T) });
+export const replyError = shape.object({ code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed"), limit: opt(limitHit), detail: opt(T), text: opt(T) });
 const runOutcome = shape.named(
   "RunOutcome",
   "How a run ended, whether a reply was released, the limit or the failure, and what every agent of it spent.",
@@ -147,6 +147,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("todo"), items: shape.list(shape.object({ text: T, done: shape.yesNo() })) }),
     shape.object({ kind: shape.literal("limit"), hit: limitHit }),
     shape.object({ kind: shape.literal("released"), release }),
+    shape.object({ kind: shape.literal("progress_missing"), time: N }),
     shape.object({ kind: shape.literal("compacted"), session: T, before: N, after: N, keptTurns: N }),
     shape.object({ kind: shape.literal("session"), session: T, change: shape.oneOf("opened", "closed", "forked", "reopened"), from: opt(T) }),
     shape.object({ kind: shape.literal("job"), job: jobView }),
