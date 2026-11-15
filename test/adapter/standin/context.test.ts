@@ -13,7 +13,7 @@ const CLOCK = { now: (): number => Date.now(), setTimeout: (run: () => void, ms:
 
 function ford(metadata?: Record<string, unknown>): StandIn {
   const lv = new StandIn();
-  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT the ford runs."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
+  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT the ford runs."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-ford", { id: "preset-ford", name: "Ford", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a ford." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }], ...(metadata !== undefined ? { metadata } : {}) });
   lv.addChat({ id: CHAT, user: USER, character: { id: "char-ford", name: "Ford" }, messages: [{ id: "m0", role: "assistant", content: "GREET The ford is shallow." }] });

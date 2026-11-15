@@ -23,7 +23,7 @@ const HISTORY: ChatMessage[] = [
 /** A stand-in Lumiverse with the weir's chat and the entries as the character's own book, on a model that answers every request with one line. */
 async function weir(blocks: Preset["blocks"], entries: Entry[]): Promise<Outcome> {
   const lv = new StandIn();
-  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT the keeper nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
+  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT the keeper nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-weir", { id: "preset-weir", name: "Weir", blocks });
   lv.library.addBook({ id: "book-weir", name: "Weir lore", user: USER, entries });
@@ -106,7 +106,7 @@ describe("lore at each of Lumiverse's positions (`services/prompt-assembly.servi
 
   test("an entry an interceptor placed in the history leaves its position, counted from the start or the end of the history, named by its keys, primary then secondary", async () => {
     const lv = new StandIn();
-    lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT the keeper nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
+    lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT the keeper nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false }));
     lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
     lv.presets.set("preset-weir", { id: "preset-weir", name: "Weir", blocks: [MAIN, HISTORY_MARKER] });
     lv.library.addBook({ id: "book-weir", name: "Weir lore", user: USER, entries: [lore("start", { position: 1, keys: [" gate "], keysecondary: ["lock"], comment: "" }), lore("end", { position: 0 })] });

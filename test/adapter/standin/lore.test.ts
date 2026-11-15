@@ -45,7 +45,7 @@ function fen(messages: ChatMessage[], books: Entry[]): { lv: StandIn; calls: () 
   let calls = 0;
   lv.servers.set(MODEL, async (request) => {
     calls++;
-    return streamedReply(async (out) => out.content("NEW-TEXT Wynn nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null });
+    return streamedReply(async (out) => out.content("NEW-TEXT Wynn nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false });
   });
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-fen", { id: "preset-fen", name: "Fen", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a fen at dusk." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });

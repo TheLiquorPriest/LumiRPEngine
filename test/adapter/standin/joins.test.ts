@@ -32,7 +32,7 @@ const HISTORY_BLOCK = { id: "b-history", name: "Chat History", role: "system" as
 /** A stand-in Lumiverse with the marsh's chat, its book's entries (the character's own book), on a model that answers every request with one line. */
 function marsh(messages: ChatMessage[], preset: Partial<Preset> = {}, books: Entry[] = []): StandIn {
   const lv = new StandIn();
-  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she poles on."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
+  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she poles on."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-marsh", { id: "preset-marsh", name: "Marsh", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a ferry crossing a marsh." }, HISTORY_BLOCK], ...preset });
   lv.library.addBook({ id: "book-marsh", name: "Marsh lore", user: USER, entries: books });

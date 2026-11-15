@@ -53,7 +53,7 @@ function quay(options: Quay = {}): StandIn {
     db.write({ user: [{ id: USER, name: "Oona", email: "oona@example.invalid", username: "oona" }], characters: [], chats: [], messages: [], world_books: [], world_book_entries: [], personas: [], presets: [], settings: [], message_breakdowns: [] });
     lv.db = db;
   }
-  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she says."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
+  lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she says."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-quay", { id: "preset-quay", name: "Quay", blocks: options.blocks ?? [MAIN, HISTORY], ...options.preset });
   lv.addChat({ id: CHAT, user: USER, character: { id: "char-oona", name: "Oona" }, messages: options.messages ?? eight(), ...(options.metadata !== undefined ? { metadata: options.metadata } : {}) });
