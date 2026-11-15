@@ -47,12 +47,13 @@ describe("the fence around today's engines", () => {
 
   test("every line still stands as written, so the list shrinks with the code, line by line and name by name", () => {
     expect(stale(tree, fates, entries)).toEqual([]);
-    const view = entries.find((entry) => entry.from === "src/play/view.ts" && entry.to === "src/backend/view.ts");
-    expect(view).toBeDefined();
-    const wider = { ...(view as NonNullable<typeof view>), names: new Set([...(view?.names ?? []), "noSuchName"]), line: 0 };
-    expect(stale(tree, fates, [wider])).toEqual(["not-yet-moved.tsv:0: src/play/view.ts → src/backend/view.ts no longer takes noSuchName; take it out"]);
-    const gone = { from: "src/play/view.ts", to: "src/backend/runtime.ts", names: new Set(["readRun"]), by: "PlanSwap-6", note: "", line: 0 };
-    expect(stale(tree, fates, [gone])).toEqual(["not-yet-moved.tsv:0: src/play/view.ts → src/backend/runtime.ts no longer stands; take the line out"]);
+    const standing = planted({ "src/play/planted.ts": 'import { buildView } from "../backend/view";' });
+    const view = readList("src/play/planted.ts\tsrc/backend/view.ts\tbuildView\tPlanSwap-6\n").entries;
+    expect(stale(standing, fates, view)).toEqual([]);
+    const wider = readList("src/play/planted.ts\tsrc/backend/view.ts\tbuildView, noSuchName\tPlanSwap-6\n").entries;
+    expect(stale(standing, fates, wider)).toEqual(["not-yet-moved.tsv:1: src/play/planted.ts → src/backend/view.ts no longer takes noSuchName; take it out"]);
+    const gone = readList("src/play/planted.ts\tsrc/backend/runtime.ts\treadRun\tPlanSwap-6\n").entries;
+    expect(stale(standing, fates, gone)).toEqual(["not-yet-moved.tsv:1: src/play/planted.ts → src/backend/runtime.ts no longer stands; take the line out"]);
   });
 
   test("no line, and no name of a line, is one the committed list does not hold, whatever the count", () => {
@@ -94,10 +95,12 @@ describe("the fence around today's engines", () => {
   });
 
   test("a listed import allows the names it takes today, not the file", () => {
-    const service = entries.find((entry) => entry.from === "src/play/service.ts" && entry.to === "src/backend/view.ts");
-    expect(service).toBeDefined();
-    expect(service?.names.has("readRun")).toBe(false);
-    expect(beyond({ "src/play/service.ts": 'import { readRun } from "../backend/view";' })).toEqual([expect.stringContaining("src/play/service.ts:1 imports readRun from src/backend/view.ts")]);
+    const listed = readList("src/play/planted.ts\tsrc/backend/view.ts\tbuildView\tPlanSwap-6\n").entries;
+    expect(listed[0]?.names.has("readRun")).toBe(false);
+    const import1 = planted({ "src/play/planted.ts": 'import { buildView } from "../backend/view";' });
+    expect(fence(import1, fates, [...entries, ...listed], known.entries).filter((line) => !today.has(line))).toEqual([]);
+    const import2 = planted({ "src/play/planted.ts": 'import { buildView, readRun } from "../backend/view";' });
+    expect(fence(import2, fates, [...entries, ...listed], known.entries).filter((line) => !today.has(line))).toEqual([expect.stringContaining("src/play/planted.ts:1 imports readRun from src/backend/view.ts")]);
   });
 
   test("a listed line takes only names its removed file declares itself, so a re-export cannot pass through it", () => {

@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/shared/host";
 import { toChain } from "../../src/migrate/today/ledger-io";
-import { palette } from "../../src/backend/view";
+import { palette } from "../../src/play/state/palette";
 import { materializeAll } from "../../src/engine/materialize";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { resolveAction } from "../../src/engine/resolve";

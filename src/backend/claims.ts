@@ -36,7 +36,8 @@ import { claimCap, FOOD_AND_DRINK, priceOf } from "../packs/economy/core/model";
 import { cashGift } from "../packs/gear/core/index";
 import { fitsOn, isInside } from "../packs/gear/core/model";
 import type { ThingSort } from "./steps";
-import { namesOf, paidOutside, takes, unfitRef, type UnfitRef } from "./turn-steps";
+import { paidOutside } from "./turn-steps";
+import { namesOf, takes, unfitRef, type UnfitRef } from "../play/state/unfit-ref";
 
 /**
  * An action that plays in the read's place, held to the needs of the one the player's words named

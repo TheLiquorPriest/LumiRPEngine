@@ -5,7 +5,8 @@
 // and a half on, as after a turn that passed the time; a chat with no world answers today's view of a
 // chat that is not a world chat.
 
-import { buildView, notWorldView, ViewMemo } from "../../../../src/backend/view";
+import { buildView, ViewMemo } from "../../../../src/backend/view";
+import { notWorldView } from "../../../../src/play/state/not-world";
 import { resolveFix } from "../../../../src/engine/edits";
 import type { ChainMessage } from "../../../../src/engine/ledger/chain";
 import { LedgerFold } from "../../../../src/engine/ledger/fold";

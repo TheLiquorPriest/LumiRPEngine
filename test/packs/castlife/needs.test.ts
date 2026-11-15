@@ -8,7 +8,7 @@ import { ACTIVITY_PLACE, ACTIVITY_SPAN_OF, ENGINE_FIELDS, type WorldDoc } from "
 import type { EditOp } from "../../../src/shared/protocol";
 import { resolveEdit } from "../../../src/engine/edits";
 import { applyMarker } from "../../../src/engine/events";
-import { palette } from "../../../src/backend/view";
+import { palette } from "../../../src/play/state/palette";
 import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, KNOWLEDGE_DEFAULTS } from "../../../src/shared/minds";
 import { mindContext } from "../../../src/backend/minds-context";
 import { buildCharacter } from "../../../src/engine/character";

@@ -3,7 +3,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { ActionDef } from "../../src/shared/world";
-import { failureWords, needsOf } from "../../src/backend/requirement-words";
+import { needsOf } from "../../src/backend/requirement-words";
+import { failureWords } from "../../src/play/state/requirement-words";
 
 const named = (param: string): string => `the ${param}`;
 

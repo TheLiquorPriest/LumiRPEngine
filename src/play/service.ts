@@ -22,9 +22,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Log } from "rp-harness/contract";
 import { type LiveHub, RouteError, type WriteQueue } from "../app";
-import { playerReason } from "../backend/requirement-words";
-import { unfitRef } from "../backend/turn-steps";
-import { TIMELAPSE_ACTION } from "../backend/view";
 import { calendarOf, clockOfStamp, placeOffset } from "../engine/calendar";
 import { resolveEdit } from "../engine/edits";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
@@ -54,6 +51,9 @@ import { type ItemFix, parseItemFix } from "../shared/things";
 import type { ParamDef, WorldDoc } from "../shared/world";
 import { type ChangeInput, type ChangeRow, JoinedTurnError, readPart, type Report, type Store } from "../store";
 import { RunEnds, stateChanged } from "./live";
+import { TIMELAPSE_ACTION } from "./state/palette";
+import { playerReason } from "./state/requirement-words";
+import { unfitRef } from "./state/unfit-ref";
 import { chatView, headTurn } from "./view";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */

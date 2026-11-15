@@ -1,14 +1,13 @@
 // The panels of a chat (plan §14, "What happens to today's UI": today's play panels kept, re-pointed to
 // RPE): today's `StateView`, built from RPE's store at the chat's head or at one of its turns. Every
 // pack's panel comes from the pack's own builder, and the HUD, the scene, the palette and the controls
-// from today's pure builders, as today's backend builds them (`backend/view.ts`, `buildView`). What
+// from today's pure builders, which live in `state/` as today's backend built them (`buildView`). What
 // only today's ledger held (the Journal, the Keep report, writes held back for a turn, chips, each
 // reply's clock) has no source in RPE's store, and is present and empty. Which of today's engines
 // plays the chat is left out: none of them does, RPE does, and today's pages draw the parts of
 // today's harness (its prepared turns, its connections) for a chat that names it, which RPE does not
 // serve. A chat RPE plays on no world is answered as today answers a chat that is not a world's.
 
-import { controls, hud, notWorldView, palette, scene } from "../backend/view";
 import { playedWorld } from "../engine/places-in-play";
 import { readPass } from "../engine/read-pass";
 import { definitionsLag } from "../engine/upgrade";
@@ -19,6 +18,11 @@ import { OFFSTAGE_DEFAULTS } from "../shared/offstage";
 import { NARRATOR_DEFAULTS } from "../shared/settings";
 import type { StateView } from "../shared/state-view";
 import type { Store, UserStore } from "../store";
+import { controls } from "./state/controls";
+import { hud } from "./state/hud";
+import { notWorldView } from "./state/not-world";
+import { palette } from "./state/palette";
+import { scene } from "./state/scene";
 
 /**
  * The knowledge choices the controls show. RPE keeps none of today's (a chat's own, Settings → Minds →

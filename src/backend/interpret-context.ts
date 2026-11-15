@@ -31,7 +31,7 @@ import { openPuzzles } from "../packs/story/core/index";
 import { tokensOf } from "./book";
 import { readableReply } from "./json-hiding";
 import { gatesOf, needsOf } from "./requirement-words";
-import { TIMELAPSE_ACTION } from "./view";
+import { TIMELAPSE_ACTION } from "../play/state/palette";
 import { spanText } from "../engine/action-words";
 
 /** One action of `interpret`'s catalog, as its prompt lists it. */

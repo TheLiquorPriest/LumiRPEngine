@@ -61,8 +61,8 @@ const RULES: Record<Zone, Rule> = {
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter", "secrecy"], carried: ["shared", "backend"], sandboxed: true },
   build: { zones: ["app", "store", "worlds"], carried: [...PURE, "backend"] },
-  // A panel's payment keeps the books the way an agent's does, so it uses the engine tools' own bookkeeping.
-  play: { zones: ["app", "store", "iface"], carried: [...PURE, "backend"] },
+  // The panels' state and taps stand on the pure engine, the packs and the store's own areas: nothing of today's build (PlanSwap-6).
+  play: { zones: ["app", "store", "iface"], carried: PURE },
   // His worlds behind one world service over the store: today's world store moves here (PlanSwap-5), the service beside it (PlanChatUI-B1).
   worlds: { zones: ["app", "store"], carried: PURE },
   // The secrecy half of the World Info gate (§9.6), one rule that RPE's answer and the extension's fail-closed answer both run (PlanSwap-6).

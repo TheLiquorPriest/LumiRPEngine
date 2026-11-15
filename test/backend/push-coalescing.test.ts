@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { StatePush } from "../../src/backend/push";
-import { notWorldView } from "../../src/backend/view";
+import { notWorldView } from "../../src/play/state/not-world";
 import { deepFreeze } from "../../src/shared/json";
 import type { StateView } from "../../src/shared/state-view";
 import { FakeHost } from "../support/fake-host";

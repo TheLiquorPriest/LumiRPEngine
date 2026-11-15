@@ -12,7 +12,8 @@ import { CSS as LUMIAH_CSS, GROUPS, type KnownConnections as LumiahKnown, Shell 
 import { TRANSPORT_SCHEMA } from "lumi-ah/link";
 import type { VNode } from "preact";
 import type { ChatKnowledgePrefs } from "../../src/migrate/today/chat-knowledge-prefs";
-import { buildView, notWorldView, ViewMemo } from "../../src/backend/view";
+import { buildView, ViewMemo } from "../../src/backend/view";
+import { notWorldView } from "../../src/play/state/not-world";
 import { resolveFix } from "../../src/engine/edits";
 import { enginePack } from "../../src/engine/engine-pack";
 import type { ChainMessage } from "../../src/engine/ledger/chain";

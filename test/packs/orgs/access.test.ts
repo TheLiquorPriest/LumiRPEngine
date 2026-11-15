@@ -12,7 +12,7 @@ import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { OrgView, PremisesView } from "../../../src/shared/org-view";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { applyProposals } from "../../../src/backend/turn-model";
-import { palette } from "../../../src/backend/view";
+import { palette } from "../../../src/play/state/palette";
 import { entryFor, entryRefusal, withoutLeave } from "../../../src/engine/entry";
 import { createRng } from "../../../src/engine/rng";
 import { placeEntry } from "../../../src/engine/org";

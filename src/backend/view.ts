@@ -4,49 +4,32 @@
 // those derived from records (Re-read edit, Retry, Keep report) and the card for a turn kept from a
 // reply that failed.
 
-import type { ChatId, EntityId, MessageId, PackId, PanelId, RevisionId } from "../shared/ids";
-import type { JsonObject, JsonValue } from "../shared/json";
-import { deepFreeze, hasOwn, isRecord } from "../shared/json";
-import { formatMoney, requirementExpr } from "../shared/world";
-import { bandTiers } from "../shared/tiers";
+import type { ChatId, EntityId, MessageId, PackId, PanelId } from "../shared/ids";
+import type { JsonValue } from "../shared/json";
+import { deepFreeze } from "../shared/json";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, PostEntry, Rec } from "../shared/ledger";
-import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
+import type { CallMeterView, Chip, ControlsView, HudView, PaletteView, PendingMark, SceneView, StateView } from "../shared/state-view";
 import type { GenerateAs } from "../shared/protocol";
-import { narratorViewOf, type NarratorView } from "../shared/settings";
-import { chatFeed, sourceOf, worldFeed } from "../engine/feed";
-import { compactSpan, paramLabel, spanText } from "../engine/action-words";
-import { sectionsOf } from "./book";
-import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
-import { tableChoices } from "../shared/tables";
-import { routineSettingsOf } from "../shared/routines";
-import { checkView, policyOf } from "../engine/adjudication";
-import { calendarMonths, calendarOf, dayPartAt, formatClock, formatStamp, placeOffset } from "../engine/calendar";
+import type { NarratorView } from "../shared/settings";
+import { compactSpan, spanText } from "../engine/action-words";
+import type { MapDisplay, WorldDoc } from "../shared/world";
+import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
-import { clockPaused, DEFAULT_SCENE_TYPE, ENGINE_SCENE_TYPES, placeSceneType, sceneType } from "../engine/time";
-import { identifiers } from "../engine/expr";
+import { sceneType } from "../engine/time";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
-import { actsFor } from "../engine/org";
 import { optionalQuery, own } from "../engine/pack-kit";
-import { knownSubjects, playerDrop, playerLines, povMayKnow, UNSEEN_DROP } from "../engine/player-events";
+import { knownSubjects, playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import { PLACE_EVENT, playedWorld } from "../engine/places-in-play";
 import { recStoryOf } from "../engine/story/record";
 import { isDraftEvent } from "../engine/world-draft";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
-import { claimsOf, presetOf } from "../engine/realism";
-import { inferredOf, worldSkills } from "../engine/inferred";
-import { levelFloors, type Registry } from "../engine/registry-impl";
-import { actionOdds, companionCandidates, paramCandidates } from "../engine/resolve";
-import { isGone, kindIs, placeOfEntity, scopeEnv } from "../engine/scope";
-import { povLife } from "../engine/life";
+import type { Registry } from "../engine/registry-impl";
+import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, storyLocked, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
-import { knownPlaceRefs } from "../engine/character";
-import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
-import { thingsConfigOf } from "../shared/things";
 import type { ChatKnowledgePrefs } from "../migrate/today/chat-knowledge-prefs";
 import type { StoredChip } from "../migrate/today/chips";
 import { TURN_FOOTER, WORLD_MADE } from "./harness/card";
@@ -55,309 +38,20 @@ import type { ReplyFailure } from "../migrate/today/ledger-io";
 import { OFFSTAGE_TEXT_ID, type PromptTexts } from "../shared/prompts";
 import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
 import { renderPrompt } from "./prompts";
-import { chatCashRule, toggles } from "../packs/economy/core/pay";
-import { FEATURE_DEFS } from "../shared/finance";
 import { turnFrame } from "../migrate/today/turn-frame";
 import { gmKeyOf } from "./gm-memo";
 import type { DiagStep } from "../shared/diagnostics";
-
-/** The palette's timelapse action; its params are `{target, overrides}`. */
-export const TIMELAPSE_ACTION = "timelapse";
-
-export function notWorldView(chatId: ChatId): StateView {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], replyClocks: {}, journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
-}
-
-const GROUPS: Record<string, PaletteEntry["group"]> = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
-
-function groupOf(action: ActionDef): PaletteEntry["group"] {
-  const last = action.id.split(".").at(-1) ?? action.id;
-  for (const [key, group] of Object.entries(GROUPS)) if (last.startsWith(key)) return group;
-  return "action";
-}
+import { controls } from "../play/state/controls";
+import { hud } from "../play/state/hud";
+import { notWorldView } from "../play/state/not-world";
+import { palette } from "../play/state/palette";
+import { scene } from "../play/state/scene";
 
 /** A record's clock advance in minutes (its elapsed time, timelapse included). */
 export function clockMinutes(events: readonly LedgerEvent[]): number {
   let m = 0;
   for (const e of events) if (e.type === "clock") m += e.minutes;
   return m;
-}
-
-/**
- * The scene types the POV may know of (DESIGN §7): the engine's own and those of the places the POV
- * can see. A world's tick says nothing of who may know a type, so one only a hidden place has, or
- * only an action sets, is never named, whatever tick the world gives it.
- */
-function knownSceneTypes(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): Set<string> {
-  return new Set([...ENGINE_SCENE_TYPES, ...Object.values(world.places).flatMap((p) => (p.sceneType && canSeePlace(registry, world, state, world.pov, p.id) ? [p.sceneType] : []))]);
-}
-
-export function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonValue>, ctx: ReadContext): HudView {
-  const cal = calendarOf(world);
-  const pov = world.pov;
-  const placeId = placeOfEntity(state, pov);
-  // The pill and the ✎ name the POV's place as every player surface does: one it can't see is
-  // "Somewhere", with no id.
-  const shown = povPlace(ctx.registry, world, state);
-  const offset = placeOffset(world, state.clock, placeId);
-  const money = ctx.levelOf(pov, "money");
-  const economy = panels["economy.money"];
-  const band = isRecord(economy) && typeof economy.band === "string" ? economy.band : null;
-  // The economy pack's panel knows the POV's cash accounts; without it, the POV's account or cash field.
-  const panelCash = isRecord(economy) && isRecord(economy.cash) ? economy.cash : null;
-  const cents = panelCash && typeof panelCash.cents === "number" ? panelCash.cents : (state.accounts[pov] ?? (typeof state.entities[pov]?.fields.cash === "number" ? Number(state.entities[pov]?.fields.cash) : null));
-  const weatherPanel = panels["weather.weather"] ?? panels["weather.now"];
-  const weather = isRecord(weatherPanel) && typeof weatherPanel.label === "string" ? weatherPanel.label : null;
-  const fixes: HudView["fixes"] = {};
-  // The clock's ✎ (DESIGN §12) sets a date and a time of day in the world's calendar, starting from
-  // now as the pill reads it, local to the POV's place; it needs the calendar, as a Timelapse does.
-  if (ctx.levelOf(pov, "calendar") >= 1) fixes.time = { type: "time", value: formatStamp(cal, state.clock, offset), ...calendarMonths(cal) };
-  if (placeId) {
-    // The ✎ offers the places the POV may see; a hidden one, even where it stands, is never offered,
-    // nor named in another's path or as its parent (`knownPlaceRefs`), for the place sheet.
-    const seen = (id: string): boolean => canSeePlace(ctx.registry, world, state, pov, id);
-    const options = Object.values(world.places).filter((p) => seen(p.id));
-    fixes.place = { entity: pov, field: "place", type: "ref", value: shown?.id ?? null, options: options.map((p) => ({ value: p.id, label: p.name })), places: knownPlaceRefs(world, seen) };
-  }
-  // Cash from the economy panel is the POV's cash accounts: its ✎ posts a correction to them
-  // (`lre.fix`), so it needs one. Without the panel's cash, the ✎ sets the cash field the pill shows.
-  const cashAccount = isRecord(economy) && Array.isArray(economy.accounts) && economy.accounts.some((a) => isRecord(a) && a.kind === "cash");
-  if (money >= 2 && cents !== null && (typeof panelCash?.cents !== "number" || cashAccount)) fixes.cash = { entity: pov, field: "cash", type: "money", value: cents, min: 0 };
-  // Weather lives on the region over the player; the weather pack knows its climate's states.
-  const weatherFix = optionalQuery(ctx, "weather.fix")?.(ctx) ?? null;
-  if (weatherFix) fixes.weather = weatherFix;
-  // The scene type lives in the POV's `scene` field, which wins over its place's default until an
-  // action, a rule or another fix sets it; "" goes back to following the place. The ✎ offers the
-  // scene types the POV may know of (`knownSceneTypes`), and only those: it doesn't name the place
-  // default's type, or count a pinned one as current, when that is another type.
-  const pinned = state.entities[pov]?.fields.scene;
-  if (state.entities[pov]) {
-    const types = knownSceneTypes(ctx.registry, world, state);
-    const label = (type: string) => `${type.charAt(0).toUpperCase()}${type.slice(1).replace(/_/g, " ")}`;
-    const placeDefault = placeSceneType(world, state);
-    const value = typeof pinned !== "string" || pinned === "" ? "" : types.has(pinned) ? pinned : null;
-    fixes.scene = { entity: pov, field: "scene", type: "text", value, options: [{ value: "", label: types.has(placeDefault) ? `Place default (${label(placeDefault)})` : "Place default" }, ...[...types].map((type) => ({ value: type, label: label(type) }))] };
-  }
-  return {
-    // Paused as the engine reads it: for the scene it was paused in, so a scene change shows the clock running.
-    clock: { minutes: state.clock, label: formatClock(cal, state.clock, offset), dayPart: dayPartAt(cal, state.clock + offset).label, paused: clockPaused(world, state), scale: state.time.scale },
-    place: shown,
-    weather,
-    cash: money === 0 ? null : money === 1 ? (band ? { band } : panelCash && typeof panelCash.band === "string" ? { band: panelCash.band } : null) : cents === null ? null : { cents },
-    fixes,
-  };
-}
-
-export function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry: Registry): SceneView {
-  const placeId = placeOfEntity(state, world.pov);
-  const present: SceneView["present"] = [];
-  for (const [id, e] of Object.entries(state.entities)) {
-    if (id === world.pov || placeOfEntity(state, id) !== placeId || placeId === null || isGone(state, id)) continue;
-    // Authored kinds extend `person` (the starters' `character`). Someone the POV can't see (secret,
-    // or `known_by` and not known) isn't listed, even standing right there. A body stays listed where
-    // it lies, with its life state as the POV knows it.
-    if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(registry, world, state, world.pov, id)) continue;
-    const life = povLife(world, state, id);
-    present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind, ...(life ? { life: life.label } : {}) });
-  }
-  // The scene in force as the player reads it: a type the POV may not know of (one only a hidden
-  // place has or only an action sets, whether the POV stands in that place or is pinned to it)
-  // reads as the engine's default scene. Display only: the clock still paces by the type in force.
-  const type = sceneType(world, state);
-  return { placeId: povPlace(registry, world, state)?.id ?? null, sceneType: knownSceneTypes(registry, world, state).has(type) ? type : DEFAULT_SCENE_TYPE, present, elapsed: headElapsed };
-}
-
-/** Why a palette option is off, for the player: an unmet requirement isn't spelled as its expression, only in its own words when it has some (`why`). */
-function unavailable(failed: { code: string; reason: string; words?: string } | null | undefined): string {
-  if (!failed) return "Not available";
-  return failed.code === "requirement" ? (failed.words ?? "Not possible here and now") : failed.reason;
-}
-
-
-export function palette(world: WorldDoc, state: WorldState, registry: Registry): PaletteView {
-  const actions = new Map<string, ActionDef>();
-  for (const [id, a] of registry.actions) actions.set(id, a);
-  for (const [id, a] of Object.entries(world.actions)) actions.set(id, a);
-  const entries: PaletteEntry[] = [];
-  const ctx = registry.context(world, state);
-  const env = scopeEnv({ reg: registry, ctx, bindings: { self: world.pov, actor: world.pov } });
-  const retry = policyOf(world, state).retry;
-  // Paying as (ORG-SPEC §3.6): the organizations the POV may spend for, worked out once, for Pay and Buy.
-  let spendsFor: { id: EntityId; name: string }[] | undefined;
-  const payingFor = (): { id: EntityId; name: string }[] => (spendsFor ??= actsFor(ctx, world.pov, "money.spend").map((id) => ({ id, name: state.entities[id]?.name ?? id })));
-  for (const action of actions.values()) {
-    // Combat actions are the combat pack's Combat tab (below), and only where the world's ruleset has combat.
-    if (action.id === TIMELAPSE_ACTION || action.combat) continue;
-    // A step the story hasn't come to isn't an option yet (DESIGN §11): listed, even locked, it would tell what lies ahead.
-    if (storyLocked(env, action)) continue;
-    const refParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && !p.optional)?.[0];
-    const amountParam = Object.entries(action.params).find(([, p]) => p.type === "money")?.[0];
-    const options: PaletteEntry["options"] = [];
-    // Buy (DESIGN §12 "Buy (catalog)"): one option per offer where the POV is, priced.
-    const offers = groupOf(action) === "buy" && action.params.item?.type === "text" ? (optionalQuery(ctx, "economy.offers")?.(ctx, world.pov) ?? []) : [];
-    for (const offer of offers) {
-      const params: JsonObject = { item: offer.item };
-      const odds = actionOdds(registry, world, state, { action, params });
-      options.push({
-        label: offer.name,
-        params,
-        cents: offer.cents,
-        detail: offer.category,
-        ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
-        ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
-      });
-    }
-    // Attempt (sheets): one option per stat, with its odds.
-    const stats = action.id === "attempt" && action.params.stat?.type === "text" ? (optionalQuery(ctx, "sheets.stats")?.(ctx) ?? []) : [];
-    for (const stat of stats) {
-      const params: JsonObject = { stat: stat.id };
-      const odds = actionOdds(registry, world, state, { action, params });
-      options.push({
-        label: stat.label,
-        params,
-        ...checkView(odds, retry),
-        ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
-        ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
-      });
-    }
-    // A text param naming a table row (Use a skill, Make a save): one option per row, with its odds.
-    const rowParam = refParam === undefined ? Object.entries(action.params).find(([, p]) => p.type === "text" && !p.optional && p.table !== undefined) : undefined;
-    const rows = rowParam ? tableChoices(own(world.tables, rowParam[1].table ?? "")).slice(0, 24) : [];
-    for (const row of rows) {
-      const params: JsonObject = { [rowParam?.[0] ?? ""]: row.key };
-      const odds = actionOdds(registry, world, state, { action, params });
-      options.push({
-        label: row.label,
-        params,
-        ...checkView(odds, retry),
-        ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
-        ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
-      });
-    }
-    const targets = offers.length > 0 || stats.length > 0 || rows.length > 0 ? [] : refParam ? paramCandidates(registry, world, state, action, refParam) : [null];
-    // A second required ref (Drive's destination, Lend's borrower) is a nested pick.
-    const secondParam = refParam ? Object.entries(action.params).find(([name, p]) => name !== refParam && p.type === "ref" && !p.optional)?.[0] : undefined;
-    // Its candidates are the same for every first pick, so they are found once.
-    let secondCandidates: string[] | undefined;
-    // Take from a kit (gear): the pieces still in a kit are its second pick, with how many are left.
-    const kitStatus = action.id === "take_piece" && action.params.piece?.type === "text" ? optionalQuery(ctx, "gear.kit_status") : undefined;
-    const nameOf = (id: string): string => state.entities[id]?.name ?? world.places[id]?.name ?? id;
-    // A number the action needs (Lend's days: optional only because a said end can stand in for it,
-    // so a requirement reads it) gets an input pre-filled with 1, and a free amount (Pay, Invest) one
-    // currency unit: options are judged with them, so a target isn't "needs amount".
-    const numberParam = Object.entries(action.params).find(([name, p]) => p.type === "number" && (!p.optional || action.requires.some((req) => identifiers(requirementExpr(req)).includes(name))))?.[0];
-    const nominal: JsonObject = { ...(numberParam ? { [numberParam]: 1 } : {}), ...(amountParam && offers.length === 0 ? { [amountParam]: 10 ** world.currency.decimals } : {}) };
-    const pick = (params: JsonObject, label: string): PaletteOption => {
-      const odds = actionOdds(registry, world, state, { action, params: { ...nominal, ...params } });
-      return {
-        label,
-        params,
-        ...checkView(odds, retry),
-        ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
-        ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
-      };
-    };
-    for (const target of targets.slice(0, 24)) {
-      const params: JsonObject = refParam && target ? { [refParam]: target } : {};
-      if (secondParam && target) {
-        const seconds = (secondCandidates ??= paramCandidates(registry, world, state, action, secondParam)).filter((id) => id !== target).slice(0, 12);
-        const next = seconds.map((id) => {
-          const final = pick({ ...params, [secondParam]: id }, nameOf(id));
-          return { ...final, params: { [secondParam]: id } };
-        });
-        if (next.length > 0) options.push({ label: nameOf(target), params, next: { param: secondParam, label: paramLabel(action, secondParam, world, registry), options: next } });
-        continue;
-      }
-      if (kitStatus && target) {
-        const pieces = (kitStatus(ctx, target)?.pieces ?? []).filter((p) => p.present > 0).slice(0, 12);
-        const next = pieces.map((p) => {
-          const final = pick({ ...params, piece: p.name }, `${p.name} (${p.present} left)`);
-          return { ...final, params: { piece: p.name } };
-        });
-        if (next.length > 0) options.push({ label: nameOf(target), params, next: { param: "piece", label: paramLabel(action, "piece", world, registry), options: next } });
-        continue;
-      }
-      // A person is marked as one, for a picker that takes only people (the Money panel's tenant, buyer and hire).
-      const person = target !== null && kindIs(registry, world, state.entities[target]?.kind ?? "", "person");
-      options.push({ ...pick(params, target ? nameOf(target) : action.label), ...(person ? { person: true as const } : {}) });
-    }
-    if (options.length === 0) continue;
-    // Who comes along (Go's With): the scene's people the POV can see, ticked in the sheet.
-    const peopleParam = Object.entries(action.params).find(([, p]) => p.type === "list" && p.ref !== undefined)?.[0];
-    const company = peopleParam ? companionCandidates(registry, world, state, action, peopleParam).map((id) => ({ id, name: nameOf(id) })) : [];
-    // Paying as (Pay's and Buy's `as`): You, or an organization the POV may spend for, when there is one.
-    const actingParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && p.acting === "money.spend")?.[0];
-    const acting = actingParam ? payingFor() : [];
-    // Offers carry their price; a free amount would double it.
-    entries.push({
-      action: action.id,
-      label: action.label,
-      group: groupOf(action),
-      options,
-      ...(amountParam && offers.length === 0 ? { amount: { param: amountParam, min: 0, max: null } } : {}),
-      ...(numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {}),
-      ...(peopleParam && company.length > 0 ? { people: { param: peopleParam, label: paramLabel(action, peopleParam, world, registry), options: company } } : {}),
-      ...(actingParam && acting.length > 0 ? { acting: { param: actingParam, label: "Paying as", options: acting } } : {}),
-    });
-  }
-  entries.push(...combatEntries(ctx));
-  entries.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  const calendar = ctx.levelOf(world.pov, "calendar");
-  const timelapse: TimelapseView = {
-    action: TIMELAPSE_ACTION,
-    // A fight's rounds take no clock time, so neither does skipping ahead in one (DESIGN §11).
-    blocked: calendar < 1 ? "Calendar is off" : clockPaused(world, state) ? "Resume the clock first" : optionalQuery(ctx, "combat.engaged")?.(ctx, world.pov) === true ? "Not during a fight" : null,
-    durations: [30, 60, 180, 480, 1440, 10080],
-    until: [
-      ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part" as const, dayPart: d.id } })),
-      { label: "Next shift", target: { type: "shift" as const } },
-      { label: "Next commitment", target: { type: "commitment" as const } },
-      { label: "Next interruption", target: { type: "interrupt" as const } },
-    ],
-    interrupts: { ...state.time.interrupts },
-    dayParts: calendar === 1,
-    followRoutine: routineSettingsOf(world).paletteFollowsRoutine,
-  };
-  const encounter = paletteEncounter(ctx);
-  return { entries, timelapse, ...(encounter ? { encounter } : {}) };
-}
-
-export function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry, knowledge: ViewInput["knowledge"], offstage: OffstageSettings): ControlsView {
-  return {
-    // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
-    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
-    adjudication: policyOf(world, state),
-    inferred: inferredOf(world, state),
-    skills: worldSkills(registry, world, state),
-    sections: sectionsOf(world).map((s) => ({ id: s.id, label: s.label, world: worldFeed(s), chat: chatFeed(state)[s.id] ?? null })),
-    // One row per source, as `include` names them; a source with no words of its own reads as its name.
-    sources: [...new Map(registry.renderers.map((r) => [sourceOf(r), { id: sourceOf(r), slot: r.slot, label: r.label ?? sourceOf(r).replace(/_/g, " ") }])).values()],
-    time: {
-      sceneType,
-      sceneTicks: { ...state.time.sceneTicks },
-      scale: state.time.scale,
-      paused: clockPaused(world, state),
-      interrupts: { ...state.time.interrupts },
-      speedThrough: structuredClone(state.time.speedThrough),
-      montage: state.time.montage,
-      unitCap: { ...state.time.unitCap },
-    },
-    knowledge: {
-      tracking: { chat: knowledge.chat.knowledge ?? null, user: knowledge.tracking },
-      narrator: { chat: knowledge.chat.narrator ?? null, world: narratorViewOf(world.narrator), user: knowledge.narrator },
-    },
-    things: { tidy: { chat: knowledge.chat.tidy ?? null, world: thingsConfigOf(world).tidy.auto } },
-    cash: cashControls(registry, world, state),
-    offstage,
-  };
-}
-
-/** Where cash needs a machine (GM → This chat → Money): the chat's own rule beside the world's switch, at the player character's Money level; null where money is off. */
-function cashControls(registry: Registry, world: WorldDoc, state: WorldState): ControlsView["cash"] {
-  const level = registry.context(world, state).levelOf(world.pov, "money");
-  if (!(level > 0)) return null;
-  const set = toggles(world).atm;
-  return { chat: chatCashRule(state), world: typeof set === "boolean" ? set : null, level, usual: FEATURE_DEFS.atm.on };
 }
 
 /** Turns in the Journal (D8: player-known results), oldest first; the latest 100. */
