@@ -157,13 +157,13 @@ describe("the Author starts at once; the turn's folder follows it", () => {
     const before = b.model.requests.length;
     const turn = await settledTurn(b, await play(b, "normal", "I ask where the oil is kept.", PERSONA));
 
-    // The folder still reads the preset's markers and the persona's name of Lumiverse (intake reads neither): its persona file shows them.
+    // The folder still reads the preset's markers and the persona's name of Lumiverse: its persona file shows them. It reads each
+    // only once this turn's first request to the Author has gone out (the door may read the preset before, on receipt, for itself).
     expect(b.turns.runs.record(USER, turn.id)?.folder).toMatchObject({ error: null });
     expect(await folderText(b, turn, TURN_FILES.persona)).toBe(`# The player's persona: Marlow Venn\n\n## Who you are\n\n${PERSONA_TEXT}\n`);
-    const forFolder = reads.filter((r) => r.what === "preset" || (r.what === "persona" && r.named === PERSONA));
+    const forFolder = reads.filter((r) => r.requests > before && (r.what === "preset" || (r.what === "persona" && r.named === PERSONA)));
     expect(forFolder.map((r) => r.what).sort()).toEqual(["persona", "preset"]);
-    // Each of those reads came only once this turn's first request to the Author had gone out.
-    for (const r of forFolder) expect(r.requests).toBeGreaterThan(before);
+    expect(reads.filter((r) => r.requests === before && r.what === "persona")).toEqual([]);
   });
 
   test("the lore file is written from what intake read: no entry's text is read a second time", async () => {
