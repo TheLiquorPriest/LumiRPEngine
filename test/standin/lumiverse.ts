@@ -13,6 +13,7 @@ import { cortexConfigOf, cortexEnabledForChat, type ContextClipStats, type Messa
 import { activateLore, DEFAULT_EMBEDDING_SETTINGS, normalizeWorldInfoSettings, worldInfoChain, worldInfoContext, type ActivatedWorldInfoEntry, type Activation, type EmbeddingSettings, type Entry, type VectorSearch, type WiState, type WorldInfoSettings } from "./lore";
 import { Databanks, Memory } from "./memory";
 import { ChatRows, indexInChat, type Chat, type ChatMessage, type Stored } from "./rows";
+import { GenerationRegistry, InferenceAdmission, TEARDOWN_WAIT_MS, type ActiveGeneration } from "./registry";
 import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, textOf, type LlmMessage, type StreamSeen, type StreamedReply } from "./steps";
 
 export type { Chat, ChatMessage } from "./rows";
@@ -49,6 +50,12 @@ export interface GenerateInput {
    * character one of its members. A regenerate, a swipe or a continue is for the one who spoke its message before this.
    */
   targetCharacter?: string;
+  /**
+   * A background swipe (`background_swipe`, `services/generate.service.ts:1587-1600`): a swipe or a regenerate that leaves the swipe the reader has selected. It is
+   * refused for any other kind ("background_swipe requires an assistant swipe target"), for a target that is not an assistant's of the chat ("Invalid background swipe
+   * target") and while the chat has a generation running ("A generation is already running for this chat", `:1608`).
+   */
+  backgroundSwipe?: boolean;
 }
 
 export interface Outcome {
@@ -113,30 +120,28 @@ export class StandIn extends ChatRows {
   embeddingSettings: EmbeddingSettings = DEFAULT_EMBEDDING_SETTINGS;
   /** The draws of a probability or a group (`Math.random` in Lumiverse); a test may give its own. */
   random: () => number = Math.random;
-  /** The generations going on, by id, with what stops each (`services/generation/active-generation-registry.ts`). */
-  private readonly going = new Map<string, { user: string; chat: string; stop: AbortController }>();
+  /** The generations going on, with what stops each, and the idle sweep that ends a silent one (`services/generation/active-generation-registry.ts`; `registry.ts`). */
+  readonly registry = new GenerationRegistry(() => this.clock);
+  /** The inference scheduler's admission of a provider call: off, as Lumiverse's default, unless a test sets its concurrency (`registry.ts`). */
+  readonly inference = new InferenceAdmission();
 
-  /** `POST /api/v1/generate/stop` (`routes/generate.routes.ts:45-65`): the generation named, else every one of the chat, else every one of the user's; whether any was. */
+  /**
+   * `POST /api/v1/generate/stop` (`routes/generate.routes.ts:45-65`): the generation named (a stale id falls back to the chat's when the chat is given), else the chat's, else
+   * every one of the user's; whether any was.
+   */
   stop(user: string, ask: { generation?: string; chat?: string }): boolean {
-    const named = ask.generation === undefined ? undefined : this.going.get(ask.generation);
-    if (named !== undefined && named.user === user) {
-      named.stop.abort();
-      return true;
+    if (ask.generation !== undefined) {
+      const stopped = this.registry.stopGeneration(user, ask.generation);
+      return !stopped && ask.chat !== undefined ? this.registry.stopChat(user, ask.chat) : stopped;
     }
-    if (ask.generation !== undefined && ask.chat === undefined) return false;
-    let stopped = false;
-    for (const g of this.going.values()) {
-      if (g.user !== user || (ask.chat !== undefined && g.chat !== ask.chat)) continue;
-      g.stop.abort();
-      stopped = true;
-    }
-    return ask.chat === undefined ? true : stopped;
+    if (ask.chat !== undefined) return this.registry.stopChat(user, ask.chat);
+    this.registry.stopUser(user);
+    return true;
   }
 
   /**
-   * One generation, or a dry run: as `startGeneration` (`services/generate.service.ts:1546-3073`) and
-   * `dryRunGeneration` (`:3080-3274`) order it. The prompt itself is assembled the stand-in's own way
-   * (`assembly.ts`).
+   * One generation, or a dry run: as `startGeneration` (`services/generate.service.ts:1546-3073`) and `dryRunGeneration` (`:3080-3274`) order it. The prompt itself is
+   * assembled the stand-in's own way (`assembly.ts`). A generation takes its chat before anything is staged (`takeChat`); a dry run takes none.
    */
   async generate(input: GenerateInput, started?: (generationId: string | null) => void): Promise<Outcome> {
     const chat = this.chats.get(input.chat);
@@ -145,9 +150,58 @@ export class StandIn extends ChatRows {
     if (!chat || !connection || !preset) throw new Error("the stand-in has no such chat, connection or preset");
     // Every message the stand-in holds has its stored number from here on (`ChatRows.numbered`).
     this.numbered(chat);
+    if (input.dryRun === true) return await this.run(input, chat, connection, preset, null, started);
+    const taken = await this.takeChat(input, chat);
+    try {
+      return await this.run(input, chat, connection, preset, taken.live, started);
+    } finally {
+      // Out of the registry after its last event, the chat's lock given up where it is still its own, and a newer generation of the chat let go
+      // (`services/generate.service.ts:3050`, `:3067-3069`, `:4579-4586`).
+      this.registry.remove(taken.live.id);
+      this.registry.clearChat(chat.user, chat.id, taken.live.id);
+      taken.done();
+    }
+  }
+
+  /**
+   * One generation of a chat at a time (`services/generate.service.ts:1585-1660`): a background swipe needs an assistant swipe target (`:1592-1600`) and is refused while
+   * the chat has a generation (`:1608`); any other stops the one running and waits for its teardown, up to two seconds on the host's clock, before it takes the chat
+   * (`:1609-1630`). The generation is then registered, its last text time its start (`:1632-1651`).
+   */
+  private async takeChat(input: GenerateInput, chat: Chat): Promise<{ live: ActiveGeneration; done: () => void }> {
     const type = input.type ?? "normal";
-    const dryRun = input.dryRun === true;
-    const generationId = dryRun ? null : crypto.randomUUID();
+    const backgroundSwipe = input.backgroundSwipe === true;
+    if (backgroundSwipe && type !== "swipe" && type !== "regenerate") throw new Error("background_swipe requires an assistant swipe target");
+    if (backgroundSwipe) {
+      const target = input.message === undefined ? chat.messages.findLast((m) => m.role === "assistant") : chat.messages.find((m) => m.id === input.message);
+      if (target === undefined || target.role === "user") throw new Error("Invalid background swipe target");
+    }
+    const running = this.registry.chatGeneration(chat.user, chat.id);
+    if (backgroundSwipe && running !== undefined) throw new Error("A generation is already running for this chat");
+    if (running !== undefined) {
+      const existing = this.registry.get(running);
+      if (existing !== undefined) {
+        existing.stop.abort();
+        const patience = Promise.withResolvers<void>();
+        const timer = this.clock.setTimeout(patience.resolve, TEARDOWN_WAIT_MS);
+        await Promise.race([existing.completion, patience.promise]);
+        this.clock.clearTimeout(timer);
+      }
+      this.registry.remove(running);
+      this.registry.clearChat(chat.user, chat.id, running);
+    }
+    const finished = Promise.withResolvers<void>();
+    const now = this.clock.now();
+    const live: ActiveGeneration = { id: crypto.randomUUID(), user: chat.user, chat: chat.id, stop: new AbortController(), startedAt: now, lastTokenAt: now, waitingForInference: false, completion: finished.promise };
+    this.registry.register(live);
+    return { live, done: finished.resolve };
+  }
+
+  private async run(input: GenerateInput, chat: Chat, connection: Connection, preset: Preset, live: ActiveGeneration | null, started?: (generationId: string | null) => void): Promise<Outcome> {
+    const type = input.type ?? "normal";
+    const dryRun = live === null;
+    const generationId = live === null ? null : live.id;
+    const backgroundSwipe = !dryRun && input.backgroundSwipe === true;
     let target: { message: string | null; swipe: number | null } = { message: null, swipe: null };
     let excluded: string | null = null;
     let staged: string | null = null;
@@ -157,7 +211,7 @@ export class StandIn extends ChatRows {
     let goesOn: ChatMessage | null = null;
     let original: string | null = null;
     let postfix = "";
-    const stop = new AbortController();
+    const stop = live?.stop ?? new AbortController();
     if (type === "continue") {
       // The message named, else the chat's last non-user message by its place, hidden ones included (`services/generate.service.ts:1809-1813`,
       // `services/chats.service.ts:2066-2072`); a generation never goes on a user's (`:1814`), where a dry run does not ask (`:3150-3155`). A
@@ -180,8 +234,10 @@ export class StandIn extends ChatRows {
     const groupMetadata = this.metadataOf(chat);
     const members = groupMetadata.group === true && Array.isArray(groupMetadata.character_ids) ? (groupMetadata.character_ids as string[]) : [];
     const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
+    // The message a swipe or a regenerate is for: the one named, else the chat's last assistant message (`:1597-1599`, `:1700-1702`); never a user's.
+    const swipeTarget = input.message === undefined ? lastAssistant : chat.messages.find((m) => m.id === input.message && m.role !== "user");
     const requested = input.targetCharacter !== undefined && members.includes(input.targetCharacter) ? input.targetCharacter : undefined;
-    const spoke = dryRun ? undefined : type === "continue" ? goesOn?.characterId : type === "swipe" || type === "regenerate" ? lastAssistant?.characterId : undefined;
+    const spoke = dryRun ? undefined : type === "continue" ? goesOn?.characterId : type === "swipe" || type === "regenerate" ? swipeTarget?.characterId : undefined;
     const inferred = spoke !== undefined && members.includes(spoke) ? spoke : undefined;
     const speakerId = (type === "swipe" || type === "regenerate" || type === "continue" ? inferred || requested : requested || inferred) || chat.character.id;
     const speakerCard = this.library.charactersByIds(chat.user, [speakerId]).get(speakerId);
@@ -197,23 +253,29 @@ export class StandIn extends ChatRows {
         excluded = staged;
       } else if (type === "swipe" || type === "regenerate") {
         // The reply being replaced gets a new empty swipe, shown, and is left out of the prompt (`:1699-1720`, `prompt-assembly.service.ts:1900-1904`).
-        const last = lastAssistant;
+        const last = swipeTarget;
         if (last) {
-          swipeAt = this.addSwipeRow(chat, last.id, "") ?? (last.swipeId ?? 0) + 1;
-          last.swipeId = swipeAt;
+          // A background swipe leaves the swipe the reader has selected (`:1716`, `:1936`; `chats.service.ts:3301-3344`).
+          swipeAt = this.addSwipeRow(chat, last.id, "", !backgroundSwipe) ?? (last.swipeId ?? 0) + 1;
+          if (!backgroundSwipe) last.swipeId = swipeAt;
           target = { message: last.id, swipe: swipeAt };
           excluded = last.id;
         }
       } else if (type === "continue" && goesOn !== null) {
         target = { message: goesOn.id, swipe: goesOn.swipeId ?? 0 };
       }
-      this.going.set(generationId!, { user: chat.user, chat: chat.id, stop });
+      // Registered by `takeChat`, before anything was staged.
       // Announced before the prompt is assembled (`:2036-2055`), and the assembly starts on a later task (`:2068-2073`, `:1059`). A continue
       // names the swipe it goes on, the one its message shows, and no message (`:1962-1968`): only a swipe, a regenerate and a new reply's
       // staged message set `targetMessageId` (`:1928-1938`, `:1988-2006`). What none set, an impersonation's both, is left unset.
-      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe: false, characterId: speakerId, characterName: speakerName, generationType: type, frontendSessionId: undefined }, chat.user);
+      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe, characterId: speakerId, characterName: speakerName, generationType: type, frontendSessionId: undefined }, chat.user);
     }
     started?.(generationId);
+    // Setup stops where Lumiverse's own checks are (`checkAborted`, `services/generate.service.ts:1721-1731`, `:2309`, `:2960`): a stop that comes while it waits
+    // ends the generation there, as a stop, before the provider is called.
+    const checkAborted = (): void => {
+      if (stop.signal.aborted) throw stop.signal.reason ?? new DOMException("Aborted", "AbortError");
+    };
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const messages = chat.messages.filter((m) => m.id !== excluded);
@@ -225,6 +287,7 @@ export class StandIn extends ChatRows {
     let worldInfo: Outcome["worldInfo"] = { ms: 0, entries: [], activated: [], stats: {} };
     let contextClipStats: ContextClipStats | undefined;
     try {
+      checkAborted();
       // ---- the extensions' context handlers, first in the pipeline (`generate.service.ts:1063-1083`): what they give back is the
       // context, the frontend session put back; one that asks to cancel stops the generation.
       let context: Record<string, unknown> = { frontendSessionId: undefined, chatId: chat.id, connectionId: connection.id, personaId: input.persona, generationType: type, dryRun, userId: chat.user };
@@ -233,6 +296,7 @@ export class StandIn extends ChatRows {
         if (handled) context = { ...(handled as Record<string, unknown>), frontendSessionId: undefined };
         if (context.cancelGeneration === true) throw new CancelledByExtension();
       }
+      checkAborted();
       // The speaker's card is read when the assembly starts (`:1922-1932`), once the context handlers are through.
       if (speakerCard === undefined) throw new Error("Character not found");
 
@@ -240,7 +304,7 @@ export class StandIn extends ChatRows {
       // (`:2243-2271`); the chain before activation, over entries of every one (`:2282-2326`); then activation over the chat's own counts
       // (`:2272`), which change in place and are saved after the interceptors, and, for an extension that asked for it, over the
       // entries as they stood before the chain (`:2327-2561`).
-      const wiStarted = performance.now();
+      const wiStarted = this.clock.now();
       const metadata = this.metadataOf(chat);
       const speaker = speakerCard;
       // A temporary chat has no persona (`:1923-1937`).
@@ -260,7 +324,8 @@ export class StandIn extends ChatRows {
       const normalized = normalizeWorldInfoSettings(configured);
       const chain = await worldInfoChain(this.worldInfo, wiEntries, worldInfoContext(chat, messages, { userId: chat.user, metadata, characterId: speaker.id, activationSettings: { globalScanDepth: normalized.globalScanDepth, maxRecursionPasses: normalized.maxRecursionPasses } }), chat.user, sources.bookSourceMap, { clock: this.clock, log: this.log });
       for (const [book, source] of chain.additionalBookSources) sources.bookSourceMap.set(book, source);
-      const wiMs = performance.now() - wiStarted;
+      const wiMs = this.clock.now() - wiStarted;
+      checkAborted();
       const activation = { ...normalized, maxRecursionPasses: chain.activationOverrides.disableRecursion === true ? 0 : normalized.maxRecursionPasses };
       const wiState = structuredClone((metadata.wi_state ?? {}) as WiState);
       // The raw view is activated over a copy of the counts as they were before the real one changes them (`:2331-2332`).
@@ -297,13 +362,14 @@ export class StandIn extends ChatRows {
       delete context.__spindlePresetMetadata;
       if (preset.metadata) context.__spindlePresetMetadata = preset.metadata;
       const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context) : { messages: prompt, parameters: undefined };
+      checkAborted();
       // After the interceptors: post-processing, the blank filter, collapse, then the parameters (`:1249-1256`, `:1414-1441`).
       sent = intercepted.messages;
       if (this.postProcessing) applyPostProcessing(sent, this.postProcessing);
       sent = dropBlank(sent);
       if (preset.collapse === true) collapse(sent);
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
-      if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, contextClipStats, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
+      if (live === null) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, contextClipStats, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
       // A context anchor's tail that cannot fit ends the generation before the provider is called (`:2814-2826`); a dry run only reports it.
       if (contextClipStats.anchorOverflow === true) throw new Error(`Protected context anchor needs ${(contextClipStats.protectedHistoryTokens ?? 0).toLocaleString()} tokens, but only ${Math.max(0, contextClipStats.remainingHistoryBudget).toLocaleString()} fit after prompt overhead. Increase Context Size or lower Max Response.`);
       // The counts saved into the chat's metadata, then the lore told, before the provider is called (`:2827-2879`); a dry run saves none,
@@ -311,6 +377,7 @@ export class StandIn extends ChatRows {
       this.mergeChatMetadata(chat, { wi_state: wiState });
       if (lore.told.length > 0) this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: lore.told, stats: lore.stats }, chat.user);
       if (this.councilBlock !== null) sent.splice(Math.max(0, sent.length - 4), 0, { role: "system", content: this.councilBlock });
+      checkAborted();
       // The streaming switch decides the call and is never sent (`generate.service.ts:3725-3726`): a stream,
       // or one whole answer in one call (`:3793-3815`).
       const streaming = parameters._streaming !== false;
@@ -318,20 +385,32 @@ export class StandIn extends ChatRows {
       body = buildBody(connection.model, sent, parameters, streaming);
       const base = connection.base.replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
       const seen: StreamSeen = { content: "", reasoning: "" };
-      this.streams.set(generationId!, seen);
+      this.streams.set(live.id, seen);
       let reply: StreamedReply;
       try {
-        const res = await this.fetch(`${base}/chat/completions`, { method: "POST", headers: providerHeaders(connection.key), body: JSON.stringify(body), signal: stop.signal });
-        reply = streaming ? await readStream(res, seen) : await readWhole(res);
+        // The provider call waits for the scheduler to admit it where the scheduler is on, and that wait is not silence (`:3771-3783`); every chunk with text touches the generation
+        // (`:3867-3873`), and the stop is raced against each read (`:3830-3850`).
+        this.registry.waiting(live.id, true);
+        let release: () => void;
+        try {
+          release = await this.inference.acquire(base, stop.signal);
+        } finally {
+          this.registry.waiting(live.id, false);
+        }
+        try {
+          const res = await this.fetch(`${base}/chat/completions`, { method: "POST", headers: providerHeaders(connection.key), body: JSON.stringify(body), signal: stop.signal });
+          const hooks = { touch: () => this.registry.touch(live.id), signal: stop.signal };
+          reply = streaming ? await readStream(res, seen, hooks) : await readWhole(res, hooks);
+        } finally {
+          release();
+        }
       } catch (error) {
         if (!stop.signal.aborted) throw error;
         // Stopped by the user: what was streamed is saved, and the stop told (`:4502-4537`, `persistPartialContent` `:3565-3660`).
         const savedText = this.saveStopped(chat, { staged, swipeAt, original, postfix, target: target.message, swipe: target.swipe }, seen);
-        this.going.delete(generationId!);
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: savedText }, chat.user);
         return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo, contextClipStats };
       }
-      this.going.delete(generationId!);
       let messageId: string | undefined;
       let savedText = reply.content;
       const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
@@ -386,16 +465,14 @@ export class StandIn extends ChatRows {
       this.storeBreakdown(chat, messageId, stored);
       return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo, contextClipStats };
     } catch (error) {
-      if (error instanceof CancelledByExtension && generationId !== null) {
-        // A context handler's cancel ends it as a stop does, its empty message removed and nothing saved (`:3003-3022`).
-        this.going.delete(generationId);
+      if ((error instanceof CancelledByExtension || stop.signal.aborted) && generationId !== null) {
+        // A context handler's cancel, and a stop that came while the setup was still going, end it as a stop does, its empty message removed and nothing saved (`:3003-3022`).
         if (staged !== null) this.deleteMessage(chat.id, staged);
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: "" }, chat.user);
         return { generationId, error: null, stopped: true, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
       }
       // A failed setup or call ends the generation with its error, its empty message removed (`:2987-3048`).
       const message = error instanceof Error ? error.message : String(error);
-      if (generationId !== null) this.going.delete(generationId);
       if (staged !== null) this.deleteMessage(chat.id, staged);
       if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, error: message, generationType: type }, chat.user);
       return { generationId, error: message, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };

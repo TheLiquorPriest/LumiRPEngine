@@ -1,14 +1,16 @@
 // The provider endpoint's answers that the end-to-end tests do not reach: a reply asked for whole, a
 // request with no tag passed through RPH's model layer, the model list, a tag RPE cannot read, another
 // user's chat, a turn that fails while it streams, and a long silent turn kept alive inside Lumiverse's
-// ten minutes. Each response is read the way Lumiverse reads it (`test/standin/steps.ts`).
+// ten minutes, which the stand-in Lumiverse watches as it watches any generation (`test/standin/registry.ts`). Each response is read the way
+// Lumiverse reads it (`test/standin/steps.ts`).
 
 import { describe, expect, test } from "bun:test";
 import type { PassRequest, PassSink } from "rp-harness/contract";
 import { modelsEndpoint, providerEndpoint, type ProviderDeps, type TurnPlayer } from "../../src/adapter/lumiverse/provider";
 import { TAG_FIELD, textHash, type Tag } from "../../src/adapter/lumiverse/wire";
 import { FakeClock } from "../standin/clock";
-import { readStream, watchGeneration } from "../standin/steps";
+import { StandIn, type Outcome } from "../standin/lumiverse";
+import { readStream } from "../standin/steps";
 
 const tag: Tag = {
   v: 1,
@@ -141,10 +143,11 @@ describe("the provider endpoint", () => {
 
 describe("a long silent turn", () => {
   /**
-   * A turn that works twelve minutes and then replies, read as Lumiverse reads and watches it; with `progressEvery`, it writes a
-   * progress line after each such stretch of silence, as RPH does after `progress.silence` seconds.
+   * A turn that works twelve minutes and then replies, played as Lumiverse plays any generation: through the stand-in's `generate()` on a clock the test moves,
+   * RPE's endpoint the connection's server, the tag the extension would add given as a parameter; with `progressEvery`, it writes a progress line after each such
+   * stretch of silence, as RPH does after `progress.silence` seconds. Each moment the stand-in counted text as it came (`touchActiveGeneration`) is kept.
    */
-  async function silentTurn(progressEvery?: number): Promise<Awaited<ReturnType<typeof watchGeneration>>> {
+  async function silentTurn(progressEvery?: number): Promise<{ out: Outcome; touches: number[]; started: number; ended: number }> {
     const clock = new FakeClock();
     const play: TurnPlayer["play"] = async (_turn, out) => {
       const said = progressEvery === undefined ? [] : [1, 2].map((n) => clock.setTimeout(() => out.progress("Working on the scene."), n * progressEvery));
@@ -154,26 +157,53 @@ describe("a long silent turn", () => {
       for (const handle of said) clock.clearTimeout(handle);
       out.content("At last the ferry docks.");
     };
-    const res = await endpoint(play, { clock })(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
-    const watched = watchGeneration(res, clock);
-    for (let minute = 0; minute < 13; minute++) await clock.advance(60_000);
-    return await watched;
+    const lv = new StandIn();
+    lv.clock = clock;
+    lv.servers.set("http://rpe", endpoint(play, { clock }));
+    lv.connections.set("conn-rpe", { id: "conn-rpe", base: "http://rpe/v1", key: "rpe_key", model: "rpe" });
+    lv.presets.set("preset-a", { id: "preset-a", name: "A", blocks: [{ id: "b-rules", name: "Rules", role: "system", content: "Rules." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
+    lv.addChat({ id: "chat-a", user: "user-a", character: { id: "char-a", name: "Ilsa" }, messages: [{ id: "m1", role: "user", content: "Hello.", index: 1 }] });
+    const touches: number[] = [];
+    const touch = lv.registry.touch.bind(lv.registry);
+    lv.registry.touch = (id) => {
+      touches.push(clock.now());
+      touch(id);
+    };
+    const started = clock.now();
+    const run = await lv.start({ chat: "chat-a", connection: "conn-rpe", preset: "preset-a", parameters: { [TAG_FIELD]: tag } });
+    // The generation reaches the provider on its own later tasks, in real time; the clock moves only once the request is made.
+    for (let i = 0; i < 2_000 && !lv.streams.has(run.generationId!); i++) await Bun.sleep(1);
+    let out: Outcome | null = null;
+    let ended = started;
+    void run.done.then((o) => {
+      out = o;
+      ended = clock.now();
+    });
+    for (let minute = 0; minute < 13 && out === null; minute++) {
+      await clock.advance(60_000);
+      await Bun.sleep(1);
+    }
+    return { out: await run.done, touches, started, ended };
   }
 
   test("with progress lines at their least, one after 540 seconds of silence, a line reaches Lumiverse inside every ten minutes, and Lumiverse does not cut the turn", async () => {
     const run = await silentTurn(540_000);
-    expect(run.aborted).toBe(false);
-    expect(run.content).toBe("At last the ferry docks.");
-    const lines = run.texts.filter((t) => t.kind === "reasoning");
-    expect(lines.map((l) => l.text.trim())).toEqual(["Working on the scene."]);
+    expect(run.out.error).toBeNull();
+    expect(run.out.stopped).toBe(false);
+    expect(run.out.reply?.content).toBe("At last the ferry docks.");
+    expect(run.out.reply?.reasoning.trim()).toBe("Working on the scene.");
     // From the start to the reply, no stretch without text is ten minutes long.
-    const moments = [run.started, ...run.texts.map((t) => t.at)];
+    const moments = [run.started, ...run.touches, run.ended];
+    expect(run.touches).toHaveLength(2);
     for (let i = 1; i < moments.length; i++) expect(moments[i]! - moments[i - 1]!).toBeLessThan(10 * 60_000);
   });
 
   test("the stream adds no line of its own: a turn that gives none for ten minutes is ended by Lumiverse's watchdog", async () => {
     const run = await silentTurn();
-    expect(run.aborted).toBe(true);
-    expect(run.texts.filter((t) => t.kind === "reasoning")).toEqual([]);
+    expect(run.out.stopped).toBe(true);
+    expect(run.out.reply?.reasoning).toBe("");
+    expect(run.touches).toEqual([]);
+    expect((run.ended - run.started) / 60_000).toBeGreaterThan(10);
+    expect((run.ended - run.started) / 60_000).toBeLessThanOrEqual(11);
   });
 });

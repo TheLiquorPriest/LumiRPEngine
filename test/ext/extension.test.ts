@@ -9,9 +9,10 @@ import { KeptOut } from "../../src/ext/fail-closed";
 import { Generations } from "../../src/ext/generations";
 import { promptInterceptor } from "../../src/ext/prompt";
 import { worldInfoInterceptor } from "../../src/ext/question";
-import { PRIORITY } from "../../src/ext/start";
+import { DEADLINE_MS, PRIORITY } from "../../src/ext/start";
 import { ALL, FERRY_SECRET, FERRY_SHOWN, harborBooks, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
 import { FakeClock, settle } from "../standin/clock";
+import { WORLD_INFO_INTERCEPTOR_TIMEOUT_MS } from "../standin/lore";
 
 const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
 const WINDOW = [8, 9, 10, 11];
@@ -86,11 +87,27 @@ describe("the question before lore activates", () => {
     for (const kept of [FERRY_SECRET, VAULT_SECRET]) expect(text).not.toContain(kept);
   });
 
-  test("with RPE slow, its answer is given up at three seconds and every marked passage and copy stays out; RPE then cuts the window on receipt", async () => {
-    const rig = await new Rig({ questionDelayMs: 5_000 }).start();
-    const out = await rig.generate("conn-rpe");
-    expect(out.worldInfo.ms).toBeGreaterThanOrEqual(2_900);
-    expect(out.worldInfo.ms).toBeLessThan(3_500);
+  test("with RPE slow, its answer is given up at the shipped three seconds, well inside Lumiverse's ten; every marked passage and copy stays out; RPE then cuts the window on receipt", async () => {
+    // The extension's own three seconds pass in the process's time; Lumiverse's ten run on the clock the test holds, which moves only to run the worker's later tasks, so
+    // its limit is the same ten seconds as ships and cannot come before the extension's answer is given up.
+    const clock = new FakeClock();
+    const rig = await new Rig({ questionDelayMs: 5_000, clock }).start();
+    const began = performance.now();
+    const generating = rig.generate("conn-rpe");
+    let done = false;
+    void generating.then(() => (done = true));
+    while (!done) {
+      await clock.advance(0);
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    const out = await generating;
+    const waited = performance.now() - began;
+    expect(DEADLINE_MS).toBe(3_000);
+    expect(waited).toBeGreaterThanOrEqual(DEADLINE_MS - 100);
+    expect(waited).toBeLessThan(DEADLINE_MS + 500);
+    expect(DEADLINE_MS).toBeLessThan(WORLD_INFO_INTERCEPTOR_TIMEOUT_MS);
+    expect(rig.lv.log).not.toContain("World-info interceptor timed out after 10s; skipping");
+    expect(out.worldInfo.ms).toBeLessThan(WORLD_INFO_INTERCEPTOR_TIMEOUT_MS);
     expect(out.error).toBeNull();
     for (const kept of [FERRY_SECRET, VAULT_SECRET]) expect(bodyText(out.body)).not.toContain(kept);
 
@@ -109,8 +126,8 @@ describe("the question before lore activates", () => {
     const clock = new FakeClock();
     const rig = await new Rig({ questionDelayMs: 12_000, deadlineMs: 11_000, clock }).start();
     const generating = rig.generate("conn-other");
-    // Lumiverse's limit and RPE's delay are both set when the generation reaches the interceptor.
-    for (let i = 0; i < 1_000 && clock.pending < 2; i++) await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    // RPE's delay is set when the generation reaches the interceptor, which asks the question.
+    for (let i = 0; i < 1_000 && rig.questions.length === 0; i++) await new Promise<void>((resolve) => setTimeout(resolve, 1));
     await clock.advance(10_000);
     const out = await generating;
     expect(out.error).toBeNull();

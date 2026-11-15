@@ -2,8 +2,6 @@
 // a70f4ed2, the checkout the plan rests on). Each says the file and lines it copies. Paths are
 // Lumiverse's `src/`.
 
-import type { Clock } from "rp-harness/contract";
-
 export type Role = "system" | "user" | "assistant";
 
 export type LlmPart = { type: "text"; text: string } | { type: "image"; data: string; mime_type: string };
@@ -244,68 +242,4 @@ export async function readWhole(res: Response, hooks: StreamHooks = {}): Promise
  */
 export function stripClosingTags(text: string): string {
   return text.replace(/\{\{[ \t]*\/[\s\S]*?\}\}/g, "");
-}
-
-/** What Lumiverse saw of a watched generation. */
-export interface Watched {
-  started: number;
-  /** Each chunk with text, when it came (the clock's time). */
-  texts: { at: number; kind: "content" | "reasoning"; text: string }[];
-  content: string;
-  /** Lumiverse's watchdog ended it. */
-  aborted: boolean;
-}
-
-/**
- * Lumiverse watching a streamed generation as it comes, on a clock the test runs: it takes a chunk only
- * when it has text (`llm/providers/openai-compatible.ts:278`), touches the generation on reply or
- * thinking text (`services/generate.service.ts:3867-3873`), and every minute ends one untouched for
- * more than ten (`services/generation/active-generation-registry.ts:140-153`). Comment lines are
- * skipped (`llm/provider-sse.ts:52`). Kept until `StandIn.generate` runs this cut itself and the tests that watch a stream by hand move onto it.
- */
-export async function watchGeneration(res: Response, clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">): Promise<Watched> {
-  const out: Watched = { started: clock.now(), texts: [], content: "", aborted: false };
-  let lastTokenAt = clock.now();
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let sweep: unknown = null;
-  const check = (): void => {
-    if (clock.now() - lastTokenAt > 10 * 60 * 1000) {
-      out.aborted = true;
-      void reader.cancel();
-      return;
-    }
-    sweep = clock.setTimeout(check, 60_000);
-  };
-  // Lumiverse's sweep keeps its own minute, started with the server, not with the generation: half a
-  // minute off here, so a sweep never lands on the very moment a line arrives.
-  sweep = clock.setTimeout(check, 30_000);
-  let buffer = "";
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") continue;
-        const delta = (JSON.parse(payload) as { choices?: { delta?: { content?: string; reasoning_content?: string } }[] }).choices?.[0]?.delta;
-        for (const kind of ["content", "reasoning"] as const) {
-          const text = kind === "content" ? delta?.content : delta?.reasoning_content;
-          if (typeof text !== "string" || text === "") continue;
-          lastTokenAt = clock.now();
-          out.texts.push({ at: clock.now(), kind, text });
-          if (kind === "content") out.content += text;
-        }
-      }
-    }
-  } catch {
-    // Cancelled by the watchdog.
-  } finally {
-    clock.clearTimeout(sweep);
-  }
-  return out;
 }

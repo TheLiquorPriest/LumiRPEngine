@@ -1,7 +1,7 @@
-// Requests that meet at intake (plan §10.1, §10.10 "Stop"): two requests for one chat are taken in one
-// after the other, so the chat opens one session and one lead runs at a time; and a request Lumiverse
-// stops listening to while it waits for the previous turn's run ends there, having begun nothing, the
-// previous run going on. Played through the stand-in Lumiverse as the player would. Every name is invented.
+// Requests that meet at intake (plan §10.1, §10.10 "Stop"): Lumiverse runs one generation of a chat at a time, so a second request for a chat
+// stops the first, which RPE was holding until the previous turn's run was over: the first ends there, having begun nothing, and the second's turn
+// begins once that run is over; and a request the player stops while it waits ends there the same way, the previous run going on. Played through the
+// stand-in Lumiverse as the player would. Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { type Answer, type Gate, gate } from "rp-harness/testing/rig";
@@ -38,15 +38,6 @@ function waitingOne(b: TurnBed, others: readonly string[]): string | undefined {
   return [...b.host.streams.keys()].find((g) => !others.includes(g) && waits(b, g) > 0);
 }
 
-/** The message a generation's reply goes into, as Lumiverse announced it when the generation started. */
-function targetOf(b: TurnBed, generation: string): string {
-  for (const { event, payload: p } of b.host.events) {
-    if (event !== "GENERATION_STARTED" || typeof p !== "object" || p === null || !("generationId" in p) || p.generationId !== generation) continue;
-    if ("targetMessageId" in p && typeof p.targetMessageId === "string") return p.targetMessageId;
-  }
-  throw new Error(`generation ${generation} was not announced with a message`);
-}
-
 /** The first turn played and saved, its run still at work after its reply until `after` opens. */
 async function firstTurnAtWork(b: TurnBed): Promise<string> {
   b.host.send(CHAT, "I climb the stairs.");
@@ -59,36 +50,29 @@ async function firstTurnAtWork(b: TurnBed): Promise<string> {
 }
 
 describe("requests that meet at intake", () => {
-  test("a second request for the chat while the first is still being taken in waits for it: its turn begins once the first one's run is over", async () => {
+  test("a second request for the chat stops the first in Lumiverse while RPE holds it: the first ends there with no turn begun, and the second's turn begins once the turn before's run is over", async () => {
     const after = gate();
-    const held = gate();
-    /** The message the first request's reply goes into, once known: its run holds before its reply, any other replies at once. */
-    let first = "";
-    const routed: Answer = (request) =>
-      first !== "" && JSON.stringify(request.messages).includes(first)
-        ? { pieces: [{ text: "<intent>One exchange.</intent>" }, { hold: held }, { text: "<reply>Wren looks up.</reply>" }] }
-        : { pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>Wren looks away.</reply>" }] };
-    const b = await bed({ answers: [...replyThenWork(after), routed, routed], global: "limits:\n  previousRun: 5\n" });
-    await firstTurnAtWork(b);
+    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks away.")], global: "limits:\n  previousRun: 5\n" });
+    const before = await firstTurnAtWork(b);
 
-    // The first request waits for the turn before's run; while it does, a second request for the chat comes, and is shown the wait.
+    // The first request waits for the turn before's run, and the player is shown the wait. A second request for the chat comes, and Lumiverse stops the first before it takes the chat.
     b.host.send(CHAT, "I ask about the boat.");
     const one = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
     const oneId = await b.until("the first request to be shown the wait", () => waitingOne(b, []));
-    first = targetOf(b, oneId);
     const two = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    expect((await one).stopped).toBe(true);
     const twoId = await b.until("the second request to be shown the wait", () => waitingOne(b, [oneId]));
+    expect(b.turns.runs.byGeneration(USER, oneId)).toBeNull();
 
-    // The turn before's run ends: the first request's turn begins, its run holding before its reply. The second waits for that run.
+    // The turn before's run ends: the second request's turn begins, and no turn is ever begun for the first.
     after.open();
-    await b.until("the first request's run to be at work", () => b.turns.runs.byGeneration(USER, oneId));
-    const next = await Promise.race([two.then(() => "answered"), b.until("the second request to wait for the first one's run", () => waits(b, twoId) >= 2 && "waiting")]);
-    expect(next).toBe("waiting");
-    held.open();
-    expect((await Promise.all([one, two])).map((o) => o.error)).toEqual([null, null]);
-    const runs = [await settledTurn(b, oneId), await settledTurn(b, twoId)].map((t) => b.turns.runs.record(USER, t.id)!);
-    expect(runs[1]!.started!).toBeGreaterThanOrEqual(runs[0]!.ended!);
+    expect((await two).error).toBeNull();
+    const turn = await settledTurn(b, twoId);
+    expect(b.turns.runs.byGeneration(USER, oneId)).toBeNull();
+    expect(b.turns.runs.record(USER, turn.id)!.started!).toBeGreaterThanOrEqual(b.turns.runs.record(USER, before)!.ended!);
     expect(b.turns.store.user(USER).sessions(CHAT).filter((s) => s.closedBy === null)).toHaveLength(1);
+    // The turn before's two answers, and the second request's one: the first never reached the model.
+    expect(b.model.requests).toHaveLength(3);
   });
 
   test("a request Lumiverse stops while it waits for the previous turn's run ends there: no turn is begun, and the previous run goes on", async () => {

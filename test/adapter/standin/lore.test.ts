@@ -12,6 +12,7 @@ import { FakeClock } from "../../standin/clock";
 import { StandInDb } from "../../standin/db";
 import type { ActivatedWorldInfoEntry, Entry, VectorSearch } from "../../standin/lore";
 import { StandIn, type ChatMessage, type Outcome } from "../../standin/lumiverse";
+import { FIRST_SWEEP_MS, GENERATION_IDLE_SWEEP_INTERVAL_MS } from "../../standin/registry";
 import { textOf } from "../../standin/steps";
 
 const USER = "user-fen";
@@ -397,13 +398,13 @@ describe("what Lumiverse tells of it (`services/generate.service.ts:1217-1231`, 
 
     // Budgets: 10 seconds unless asked, else held between 1 and 120 seconds; one that runs out is passed over.
     const { lv: timed } = fen(fenLines(), book);
-    // The budgets run on the clock the test moves: each is the delay a timer is set for, and each runs out in its turn.
+    // The budgets run on the clock the test moves: each is the delay a timer is set for, and each runs out in its turn. The generation's own sweep of silent generations is no budget.
     const clock = new FakeClock();
     timed.clock = clock;
     const budgets: number[] = [];
     const setTimer = clock.setTimeout.bind(clock);
     clock.setTimeout = (run, ms) => {
-      if (ms > 0) budgets.push(ms);
+      if (ms > 0 && ms !== FIRST_SWEEP_MS && ms !== GENERATION_IDLE_SWEEP_INTERVAL_MS) budgets.push(ms);
       return setTimer(run, ms);
     };
     const hang = (): Promise<unknown> => Promise.withResolvers<unknown>().promise;

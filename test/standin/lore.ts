@@ -14,7 +14,7 @@ import { indexInChat, type Chat, type ChatMessage } from "./rows";
 import type { Role } from "./steps";
 
 /** A World Info interceptor's limit (`spindle/worker-host.ts:4937-4943`): fixed, as Lumiverse has it. */
-const WORLD_INFO_INTERCEPTOR_TIMEOUT_MS = 10_000;
+export const WORLD_INFO_INTERCEPTOR_TIMEOUT_MS = 10_000;
 
 export interface Entry {
   id: string;
