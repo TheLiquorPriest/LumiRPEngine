@@ -84,13 +84,12 @@ const MAKER: Readonly<Record<"web" | "extension", TokenMaker>> = { web: "command
 
 /**
  * Puts a key of `kind` for `user` in force (a new one unless `key` is given, made by `newKeyText` for a key that had to be handed out first) and takes his one before it away: the provider key
- * into `provider_key`, the extension's and the web token into `page_token`, the web token with an end `webKeyMs` after it is made where there is one. A provider key taken from today's
- * connection (`takeKeyHash`) stays: going back needs that connection as it is (plan §15.6). Runs inside a transaction: the server's write queue's, or the command line's own.
+ * into `provider_key`, the extension's and the web token into `page_token`, the web token with an end `webKeyMs` after it is made where there is one. Runs inside a transaction: the server's write queue's, or the command line's own.
  */
 export function insertKey(db: Database, user: string, kind: KeyKind, now: number, key: string = newKeyText(kind), webKeyMs: number | null = null): MadeKey {
   const hash = secretHash(key);
   if (kind === "provider") {
-    db.run("DELETE FROM provider_key WHERE user = ? AND taken = 0", [user]);
+    db.run("DELETE FROM provider_key WHERE user = ?", [user]);
     db.run("INSERT INTO provider_key (user, hash, last4, made, taken) VALUES (?, ?, ?, ?, 0)", [user, hash, key.slice(-4), now]);
     return { kind, key, last4: key.slice(-4), made: now, ends: null };
   }
@@ -101,22 +100,20 @@ export function insertKey(db: Database, user: string, kind: KeyKind, now: number
 }
 
 /**
- * Puts in force for `user`, beside his provider key in force, a key RPE holds only as its SHA-256:
- * the key today's build gave its connection in Lumiverse, which RPE takes at the swap (plan §15.2) so
- * that connection goes on working as it is. Its last four characters were never known: a new key
- * leaves it in force. Runs inside a transaction.
+ * Puts in force for `user` the key today's build gave its connection in Lumiverse, which RPE takes at
+ * the swap (plan §15.2) so that connection goes on working as it is, and which every connection that
+ * reaches today's runtime holds (R-109). RPE holds it only as its SHA-256; its last four characters
+ * were never known. It is the one key that opens the provider endpoint: RPE's own earlier key stops
+ * with it. Runs inside a transaction.
  */
 export function takeKeyHash(db: Database, user: string, hash: string, now: number): void {
+  db.run("DELETE FROM provider_key WHERE user = ? AND taken = 0 AND hash <> ?", [user, hash]);
   db.run("INSERT OR IGNORE INTO provider_key (user, hash, last4, made, taken) VALUES (?, ?, '', ?, 1)", [user, hash, now]);
 }
 
-/**
- * Takes away `user`'s provider key taken from today's connection (`takeKeyHash`), which a new key
- * leaves in force: that connection in Lumiverse then needs a key of RPE's own. Says how many it took
- * away. Runs inside a transaction.
- */
-export function retireTakenKeys(db: Database, user: string): number {
-  return db.run("DELETE FROM provider_key WHERE user = ? AND taken = 1", [user]).changes;
+/** Whether `user`'s provider key is the one taken from today's connection at the swap. */
+export function providerKeyTaken(db: Database, user: string): boolean {
+  return db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM provider_key WHERE user = ? AND taken = 1").get(user)?.n !== 0;
 }
 
 /** `user`'s key of each kind in force: never a key's text. */

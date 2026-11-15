@@ -475,12 +475,10 @@ export interface JoinedAnswer {
   joined: { turn: TurnId; joined: TurnId };
 }
 
-/** A new key of a kind, shown once: with `all`, the provider key taken from today's connection at the swap stops working too; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did. */
+/** A new key of a kind, shown once; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did. */
 export interface KeyAsk {
   /** Which key. */
   kind: "provider" | "web";
-  /** A new provider key also retires the key taken from today's connection. */
-  all?: boolean;
   /** The key's own text, in the form its kind's keys have. */
   key?: string;
 }
@@ -495,10 +493,6 @@ export interface KeyMade {
   made: number;
   /** When it runs out, epoch milliseconds; null: it has no end. */
   ends: number | null;
-  /** How many keys taken from today's connection it retired. */
-  retired: number;
-  /** A key of this kind taken from today's connection is still in force. */
-  takenStays: boolean;
 }
 
 /** A level of the agents' tree: what ships, the user's own, a character's, a chat's. */

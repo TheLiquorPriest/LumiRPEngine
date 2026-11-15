@@ -148,7 +148,7 @@ Going back takes four steps, which `rpe down` prints with your own names filled 
 
 If you moved chats to a connection of RPE's own, `rpe down` prints a fifth step: give those chats the connection they had before.
 
-If you stopped the key of the connection RPE took over, with `rpe key provider all`, and put RPE's new key in that connection, put its earlier key back in it too: the previous build accepts only its own. `rpe down` does not print this step.
+RPE makes no provider key after the switch, so the connection RPE took over keeps the key it had, and going back needs nothing changed in it.
 
 After going back, the previous build behaves as it did at the switch. What you played on RPE since stays in RPE's data and does not flow back. If you switch again later, RPE still has those chats as you left them.
 

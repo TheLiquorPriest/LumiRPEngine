@@ -9,7 +9,7 @@
 import type { Database } from "bun:sqlite";
 import { isRecord } from "../shared/json";
 import type { KeyFacts } from "./auth";
-import { currentKeys, insertKey, KEY_PREFIXES, NO_OWNER, retireTakenKeys, takeKeyHash } from "./auth";
+import { currentKeys, insertKey, KEY_PREFIXES, NO_OWNER, providerKeyTaken, takeKeyHash } from "./auth";
 import type { DataPaths } from "./config";
 import { updateConfigFile } from "./config";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
@@ -35,10 +35,9 @@ const MADE_KIND = shape.oneOf("provider", "web");
 
 export const keyAsk = shape.named(
   "KeyAsk",
-  "A new key of a kind, shown once: with `all`, the provider key taken from today's connection at the swap stops working too; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did.",
+  "A new key of a kind, shown once; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did.",
   shape.object({
     kind: shape.field(MADE_KIND, "Which key."),
-    all: shape.optional(shape.yesNo(), "A new provider key also retires the key taken from today's connection."),
     key: shape.optional(shape.text({ blank: false }), "The key's own text, in the form its kind's keys have."),
   }),
 );
@@ -50,8 +49,6 @@ export const keyMade = shape.named(
     key: shape.field(T, "The key itself."),
     made: shape.field(shape.number(), "When it was made, epoch milliseconds."),
     ends: shape.field(shape.nullable(shape.number()), "When it runs out, epoch milliseconds; null: it has no end."),
-    retired: shape.field(shape.whole({ least: 0 }), "How many keys taken from today's connection it retired."),
-    takenStays: shape.field(shape.yesNo(), "A key of this kind taken from today's connection is still in force."),
   }),
 );
 export const takenKeyAsk = shape.named("TakenKeyAsk", "The hash of the provider key today's connection holds, which RPE takes over at the swap.", shape.object({ hash: shape.field(shape.text({ blank: false }), "The key's SHA-256, in hex.") }));
@@ -133,6 +130,9 @@ export class CommandRefused extends Error {
   override name = "CommandRefused";
 }
 
+/** Why no provider key is made once RPE has taken today's connection's (plan §15.6, R-90). */
+export const ONE_KEY = "After the switch from the previous build, the one key that opens RPE's provider endpoint is the one your connection in Lumiverse already holds, so that connection never changes and going back stays as it is written. RPE makes no new provider key: a new one would have to be put in that connection, and that would make going back harder.";
+
 const HEX_KEY = /^[0-9a-f]{64}$/;
 
 /** The user a change of his rows is for: the install's, and a refusal where it has named none. */
@@ -147,12 +147,12 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
     async makeKey(ask) {
       const now = sink.now();
       if (ask.key !== undefined && !(ask.key.startsWith(KEY_PREFIXES[ask.kind]) && HEX_KEY.test(ask.key.slice(KEY_PREFIXES[ask.kind].length)))) throw new CommandRefused(`A ${ask.kind} key is ${KEY_PREFIXES[ask.kind]} and 64 hexadecimal characters.`);
-      if (ask.all === true && ask.kind !== "provider") throw new CommandRefused("Only the provider key can be taken from today's connection: all goes with provider.");
       const user = ownerOf(sink);
       return await sink.run((db) => {
+        // After the swap the one key is the one his connection in Lumiverse holds: a new one asked for would make going back harder. (The install hands over a key of its own for a connection of its own, which holds no key of today's.)
+        if (ask.kind === "provider" && ask.key === undefined && providerKeyTaken(db, user)) throw new CommandRefused(ONE_KEY);
         const made = insertKey(db, user, ask.kind, now, ask.key, sink.webKeyMs);
-        const retired = ask.all === true ? retireTakenKeys(db, user) : 0;
-        return { kind: ask.kind, key: made.key, made: made.made, ends: made.ends, retired, takenStays: currentKeys(db, user).some((k) => k.kind === ask.kind && k.taken) };
+        return { kind: ask.kind, key: made.key, made: made.made, ends: made.ends };
       });
     },
     async takeKey(hash) {

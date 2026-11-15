@@ -5,8 +5,9 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
-import { newKeyText, secretHash } from "../../src/app/auth";
+import { newKeyText, secretHash, takeKeyHash } from "../../src/app/auth";
 import { runCli } from "../../src/app/cli";
+import { rawRoute } from "../../src/app";
 import { openDatabase } from "../../src/app/database";
 import { migrate, Migrations } from "../../src/app/migrations";
 import { APP_MIGRATIONS } from "../../src/app/schema";
@@ -118,5 +119,46 @@ describe("keys", () => {
     }
     expect(shown.out).not.toContain(web.slice(-4));
     expect(shown.out + shown.err).not.toMatch(/rp[epwx]_[0-9a-f]{64}/);
+  });
+
+  test("after the swap one provider key opens the provider endpoint, the one today's connections hold", async () => {
+    const provider = (): Promise<string> => rpe(["key"]).then((r) => /\b(rpe_[0-9a-f]{64})\b/.exec(r.out)?.[1] ?? "");
+    const own = await provider();
+    const todays = "lumiah-key-of-todays-connection";
+    const app = await bed.open({ config: { port: 0 }, areas: [{ name: "probe", mount: (a) => a.routes.add("probe", [rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "A test's model list.", answers: "a model list", raw: () => Response.json({ object: "list", data: [] }) })]) }] });
+    const server = await app.start();
+    const models = (key: string): Promise<number> => fetch(`${server.url}/v1/models`, { headers: { authorization: `Bearer ${key}` } }).then((r) => r.status);
+    expect(await models(own)).toBe(200);
+    // The swap takes the key today's connections hold: RPE's own earlier key stops with it, and it is the one key.
+    await app.writes.run((db) => takeKeyHash(db, OWNER, secretHash(todays), app.now()));
+    expect(await models(todays)).toBe(200);
+    expect(await models(own)).toBe(401);
+    expect(app.db.query("SELECT taken FROM provider_key").all()).toEqual([{ taken: 1 }]);
+    expect((await rpe(["status"])).out).toContain("provider taken from today's connection (taken 2026-11-13)");
+  });
+
+  test("after the swap rpe key provider makes no key and says why; before any swap it makes the one key and the one before stops", async () => {
+    const first = await rpe(["key", "provider"]);
+    const second = await rpe(["key", "provider"]);
+    const [one, two] = [first, second].map((r) => /\b(rpe_[0-9a-f]{64})\b/.exec(r.out)?.[1] ?? "");
+    expect(one).not.toBe(two);
+    const db = new Database(bed.paths.database, { readonly: true });
+    try {
+      expect(db.query("SELECT hash, taken FROM provider_key").all()).toEqual([{ hash: secretHash(two ?? ""), taken: 0 }]);
+    } finally {
+      db.close();
+    }
+    const app = await bed.open();
+    await app.writes.run((db2) => takeKeyHash(db2, OWNER, secretHash("lumiah-key-of-todays-connection"), app.now()));
+    for (const argv of [["key", "provider"], ["key", "provider", "all"]]) {
+      const refused = await rpe(argv);
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("the one key that opens RPE's provider endpoint is the one your connection in Lumiverse already holds");
+      expect(refused.err).toContain("would make going back harder");
+      expect(refused.out).toBe("");
+    }
+    expect(app.db.query("SELECT count(*) AS n FROM provider_key").get()).toEqual({ n: 1 });
+    // The web key is no part of that.
+    expect((await rpe(["key", "web"])).code).toBe(0);
   });
 });

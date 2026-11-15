@@ -62,7 +62,7 @@ describe("the command line's routes", () => {
 
   test("a key is made through the server's queue, the one before it stops working, and a kind RPE makes itself is refused", async () => {
     const first = await (await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider" })).json();
-    expect(first).toMatchObject({ kind: "provider", retired: 0, takenStays: false });
+    expect(first).toMatchObject({ kind: "provider", ends: null });
     const key: string = first.key;
     expect(key).toMatch(/^rpe_[0-9a-f]{64}$/);
     const second = await (await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider" })).json();
@@ -74,11 +74,13 @@ describe("the command line's routes", () => {
     expect((await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider", key: "rpe_short" })).status).toBe(400);
     const own = `rpe_${"b".repeat(64)}`;
     expect(await (await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider", key: own })).json()).toMatchObject({ key: own });
-    // The provider key of today's connection, taken by its hash, stays until `all` retires it.
+    // The provider key of today's connection, taken by its hash, is the one key: no new one is asked for, though the install may hand over a key of its own for a connection of its own.
     expect((await onSocket("POST", COMMAND_PATHS.takenKeys, { hash: "c".repeat(64) })).status).toBe(204);
-    expect(await (await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider" })).json()).toMatchObject({ retired: 0, takenStays: true });
-    expect(await (await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider", all: true })).json()).toMatchObject({ retired: 1, takenStays: false });
-    expect((await onSocket("POST", COMMAND_PATHS.keys, { kind: "web", all: true })).status).toBe(400);
+    expect(await app.auth.holds("provider", own)).toBe(false);
+    const refused = await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider" });
+    expect(refused.status).toBe(400);
+    expect((await refused.json()).error).toContain("would make going back harder");
+    expect((await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider", key: `rpe_${"d".repeat(64)}` })).status).toBe(200);
   });
 
   test("a switch is switched on or off by the command line alone, and an unknown name says what is listed", async () => {
