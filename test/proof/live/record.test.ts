@@ -135,7 +135,7 @@ class Agents extends RpeReader {
   }
 }
 
-const view = (key: string, value: SettingView["value"], connection?: { id: string; name: string }): SettingView => ({ key, value, default: null, from: null, file: null, takes: { type: "text" }, takesWords: "", none: null, orNone: false, levels: [], passed: null, ...(connection ? { connection } : {}) });
+const view = (key: string, value: SettingView["value"], connection?: { id: string; name: string }): SettingView => ({ key, name: key, about: "", effect: "use", effectWords: "at its next use", row: null, value, default: null, from: null, file: null, set: [], joined: false, takes: { type: "text" }, takesWords: "", none: null, orNone: false, levels: [], passed: null, ...(connection ? { connection } : {}) });
 
 test("each agent's connection, model, reply form, effort and streaming come from RPE's routes", async () => {
   const shown: ConnectionsShown = {

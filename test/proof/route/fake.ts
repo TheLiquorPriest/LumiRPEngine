@@ -137,7 +137,7 @@ export function fakeFacts(guidance: GuidanceAsked = {}): RunFacts {
     lumiverse: { version: "0.0.0-stand-in" },
     browser: { name: "fake", version: "1" },
     agents: [{ agent: "author", connection: "Scripted", model: "scripted-author", replyForm: "tags", effort: "medium", streams: true }],
-    settings: { chat: null, files: [], settings: [{ key: "reply.streamAnyway", value: false, default: false, from: null, file: null, takes: { type: "yesNo" }, takesWords: "yes or no", none: null, orNone: false, levels: [], passed: null }] },
+    settings: { chat: null, files: [], settings: [{ key: "reply.streamAnyway", name: "Stream anyway", about: "Connections whose reply streams though they are in the two-step form.", effect: "use", effectWords: "at its next use", row: null, value: false, default: false, from: null, file: null, set: [], joined: false, takes: { type: "yesNo" }, takesWords: "yes or no", none: null, orNone: false, levels: [], passed: null }] },
     guidance: guidance.none ? null : fakeGuidance(guidance),
   };
 }

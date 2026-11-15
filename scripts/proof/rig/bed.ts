@@ -49,6 +49,8 @@ export interface RigBedOptions {
   messages?: ChatMessage[] | null;
   /** How long a wait on what the rig shows lasts, as the suite's runner sets it for a test (`RPE_TEST_LIMIT_MS`). */
   limitMs?: number;
+  /** The build id RPE says it runs (`/api/v1/status/builds`): the host stamps the checkout's commit on it, so a run's record can be held to the checkout; "rig-1" when not given. */
+  version?: string;
 }
 
 /** One play's footing. */
@@ -111,7 +113,7 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
     };
 
     const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: options.models } });
-    const app = await openApp({ paths, config, version: "rig-1", areas: composition.areas, ui: options.ui, log: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined } });
+    const app = await openApp({ paths, config, version: options.version ?? "rig-1", areas: composition.areas, ui: options.ui, log: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined } });
     cleanups.push(() => app.close());
     const turns = composition.turns();
     if (turns === null) throw new Error("the turn lane did not mount");
@@ -124,7 +126,7 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
     const origins = new Set([new URL(listening.url).origin, new URL(listening.loopback).origin]);
     for (const origin of origins) host.servers.set(origin, (request) => fetch(request));
     await until("the extension's answer to this RPE's registration", () => {
-      const registered = readRegistration(JSON.parse(host.storage.get(`${RIG_USER}\u0000${REGISTRATION_FILE}`) ?? "null"));
+      const registered = readRegistration(JSON.parse(host.readFile(`users/${RIG_USER}/extensions/${EXTENSION_IDENTIFIER}/${REGISTRATION_FILE}`) ?? "null"));
       return registered !== null && origins.has(new URL(registered.base).origin) ? registered : null;
     });
     await until("RPE's event socket to open", () => composition.door.lumiverse()?.events.open);
