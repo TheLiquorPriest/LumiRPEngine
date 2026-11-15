@@ -11,7 +11,7 @@ record: output/record.md
 
 {{#continuing}}
 {{^compacting}}
-What you did in this scene's earlier turns, oldest first. This is your own work, already done. It is not part of the chat.
+What you did in this scene's earlier turns, oldest first. This is your own work, already done, and what it read and found still stands. It is not part of the chat.
 {{/compacting}}
 {{#compacting}}
 What the Author did in these turns, oldest first: its intent records, its calls and what came back.

@@ -6,4 +6,4 @@ fact: turns.since.engine.change >= 6
 at: turn-start
 repeat: after 6 turns
 ---
-Nothing has been recorded in the engine lane for {{turns.since.engine.change}} turns. Time, position, belongings and condition rarely stand still that long. Check what the last turns changed and record it, or say that nothing did.
+Nothing has been recorded in the engine lane for {{turns.since.engine.change}} turns. Time, position, belongings and condition rarely stand still that long. Once this turn's reply has gone, check what the last turns changed and record it, or say that nothing did.

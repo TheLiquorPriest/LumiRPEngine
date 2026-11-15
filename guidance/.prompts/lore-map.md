@@ -2,7 +2,7 @@
 description: The layout of the lore map the Author is given at the start of every turn. One line per entry, with its id. Each part appears only when there is something in it. It lays out what the lore holds and what the story has changed; it asks for nothing.
 ---
 {{#in_prompt}}
-### In the prompt
+### In the prompt, each in full, as its text alone with no title or id
 
 {{#in_prompt.lines}}
 - {{.}}
@@ -37,5 +37,5 @@ description: The layout of the lore map the Author is given at the start of ever
 {{/bound}}
 {{#not_indexed}}
 
-{{not_indexed}} attached entries are not indexed yet. They show by title and keys only.
+{{not_indexed}} attached entries are not indexed yet. Where one is listed here, it shows by title and keys only.
 {{/not_indexed}}

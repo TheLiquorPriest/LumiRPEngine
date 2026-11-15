@@ -8,9 +8,9 @@ intent_file: scratch/intent.md
 # The reply contract
 
 {{#form.tags}}
-- **The reply:** whatever the player should see goes between `<{{tags.reply}}>` and `</{{tags.reply}}>`. Nothing else you write reaches the chat.
-- **An intent record,** when your instructions ask for one: between `<{{tags.intent}}>` and `</{{tags.intent}}>`.
-- Tool calls may come before the reply, after it, or both. One reply per turn.
+- **An intent record,** when your instructions ask for one: between `<{{tags.intent}}>` and `</{{tags.intent}}>`, at the very start of your first message, before the reply.
+- **The reply:** whatever the player should see goes between `<{{tags.reply}}>` and `</{{tags.reply}}>`. Nothing else you write reaches the chat. The replies among this conversation's assistant turns are shown unmarked, as the chat saved them; the reply you write is marked.
+- Tool calls may come before the reply, after it, or both. One reply per turn. Within one message the text comes first and its calls after it, so a message that opens with a call has no reply in it.
 {{/form.tags}}
 {{#form.two_step}}
 - **Working text goes in files, never in a message.** Whatever is written as the text of a message is the reply, and the player sees it: a plan, a note or a line about what comes next is working text. An intent record, when your instructions ask for one: written to `{{intent_file}}` in the turn's folder with `file_write`.
