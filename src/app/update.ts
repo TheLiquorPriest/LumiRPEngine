@@ -20,23 +20,24 @@ import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import type { JsonValue, Log } from "rp-harness/contract";
-import { isMapping, type Mapping, mergedConfig, type SettingDef, settingIn } from "./setting-list";
+import type { ConfigRead } from "./config-read";
+import type { Setting } from "./setting-list";
 
 /** What a file says its build is, or why it said none. */
 export type BuildOf = { build: string } | { failed: string };
 
 /** The update's settings, read from the global level alone: they are RPE's, not a chat's. */
 const DEFS = {
-  restart: { key: "update.restart", default: true, takes: { type: "yesNo" }, levels: ["shipped", "global"], perConnection: false },
-  versionWait: { key: "update.versionWait", default: 10, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  lookEvery: { key: "update.lookEvery", default: 2, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  startTries: { key: "update.startTries", default: 5, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  startWindow: { key: "update.startWindow", default: 60, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  checkWait: { key: "update.checkWait", default: 120, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-} as const satisfies Record<string, SettingDef>;
+  restart: { key: "update.restart", name: "Restart onto a new build", about: "RPE restarts by itself onto a new app file the extension brings, once no turn or job runs.", effect: "use", default: true, takes: { type: "yesNo" }, levels: ["shipped", "global"], perConnection: false },
+  versionWait: { key: "update.versionWait", name: "Wait for a new build to say its version", about: "Seconds a new app file is given to say its build.", effect: "use", default: 10, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  lookEvery: { key: "update.lookEvery", name: "Look again for running work", about: "Seconds a waiting restart waits before it looks again whether turns or jobs still run.", effect: "use", default: 2, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  startTries: { key: "update.startTries", name: "Starts allowed in the start window", about: "Starts of RPE's service its unit allows within the start window before the service manager stops starting it; rpe up writes it into the unit.", effect: "use", default: 5, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  startWindow: { key: "update.startWindow", name: "Start window", about: "Seconds within which the starts of RPE's service are counted.", effect: "use", default: 60, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  checkWait: { key: "update.checkWait", name: "Wait for a new build's check", about: "Seconds a new app file is given to check that it starts on this RPE's data.", effect: "use", default: 120, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+} as const satisfies Record<string, Setting>;
 
 /** Every setting the update reads, as the global config file writes it. */
-export const UPDATE_SETTINGS: readonly SettingDef[] = Object.values(DEFS);
+export const UPDATE_SETTINGS: readonly Setting[] = Object.values(DEFS);
 
 export interface UpdateSettings {
   /** RPE restarts on a new build by itself. */
@@ -52,24 +53,10 @@ export interface UpdateSettings {
   checkWaitMs: number;
 }
 
-/** The update's settings from the global level's config files (YAML texts, farthest first; null for a file that is not there). */
-export function updateSettings(texts: readonly (string | null)[], log: Log): UpdateSettings {
-  let config: Mapping = {};
-  for (const text of texts) {
-    if (text === null || text.trim() === "") continue;
-    try {
-      const parsed: unknown = Bun.YAML.parse(text);
-      if (isMapping(parsed)) config = mergedConfig(config, parsed);
-    } catch (error) {
-      log.warn("A config file does not parse; the update's settings in it are passed over.", { error: error instanceof Error ? error.message : String(error) });
-    }
-  }
-  const value = (def: SettingDef): JsonValue => {
-    const read = settingIn(config, def);
-    if (read.passed !== null) log.warn("A setting has a value it does not take; its default holds.", { setting: def.key, value: read.passed.value });
-    return read.value;
-  };
+/** The update's settings as the one reader of the config files gives them (the global level's, the shipped file's and the user's own over it). */
+export function updateSettings(read: ConfigRead): UpdateSettings {
   // Each value is one its setting takes, so of the type its `takes` says.
+  const value = (def: Setting): JsonValue => read.value(def);
   return { restart: value(DEFS.restart) as boolean, versionWaitMs: (value(DEFS.versionWait) as number) * 1000, lookEveryMs: (value(DEFS.lookEvery) as number) * 1000, startTries: value(DEFS.startTries) as number, startWindowMs: (value(DEFS.startWindow) as number) * 1000, checkWaitMs: (value(DEFS.checkWait) as number) * 1000 };
 }
 

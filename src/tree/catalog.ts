@@ -11,7 +11,7 @@ import { readText } from "../app/disk";
 import { yamlMapping } from "../app/yaml";
 import type { DefaultChange } from "./defaults";
 import { walk } from "./files";
-import { CHARACTER_FOLDERS } from "./layout";
+import { CHARACTER_FOLDERS, FILE_KEYS } from "./layout";
 import { type ChatLocation, kindOf, locate, treeLayers, viewPath } from "./view";
 
 /** One file of the tree as the Files page lists it. */
@@ -46,8 +46,8 @@ export interface NamesInForce {
 }
 
 /** The config keys read here, as RPH reads them. */
-export const OFF_KEY = "off";
-const LAYERED_KEY = "layered";
+export const OFF_KEY = FILE_KEYS.off;
+const LAYERED_KEY = FILE_KEYS.layered;
 
 const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "prompts", "tools"];
 

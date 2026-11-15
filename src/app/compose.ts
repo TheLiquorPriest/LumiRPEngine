@@ -31,13 +31,14 @@ import { playArea } from "../play/area";
 import { storeArea } from "../store/area";
 import { storyArea } from "../story/area";
 import { treeArea } from "../tree/area";
-import { RPE_GUIDANCE } from "../tree";
+import { RPE_GUIDANCE, treeReader } from "../tree";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { bootstrapArea } from "../turn/bootstrap/area";
 import { guidanceTexts } from "../turn/texts";
 import { appArea } from "./area";
-import type { Area } from "./app";
+import type { App, Area } from "./app";
+import type { SettingsReader } from "./config-read";
 
 export interface ComposeOptions {
   /** Lumiverse's network as the door reaches it: the machine's when absent. */
@@ -55,14 +56,24 @@ export interface Composition {
   readonly door: LumiverseDoor;
   /** The turn lane and the harness, once mounted; null before. */
   turns(): Turns | null;
+  /** The one reader of the config levels every area is handed, once the app is open. */
+  readonly settings: SettingsReader;
 }
 
 export function compose(options: ComposeOptions = {}): Composition {
+  let opened: App | null = null;
+  const app = (): App => {
+    if (opened === null) throw new Error("RPE is not open yet, so its settings are not read.");
+    return opened;
+  };
+  // The one reader of the config levels, every area's: over the tree's levels, a chat's placed by the turn lane's chats.
+  const reader = treeReader({ files: () => app().paths.files, folders: (user, chat) => made().chats.folders(user, chat), log: () => app().log, known: () => app().settings });
   const door = doorArea({
     fetch: options.fetch ?? ((url, init) => fetch(url, init)),
     open: options.open ?? bunSocket,
     clock: options.clock ?? MACHINE_CLOCK,
     sleep: options.sleep ?? ((ms) => Bun.sleep(ms)),
+    settings: reader,
   });
   const turn = turnArea({
     lumiverse: door.lumiverse,
@@ -82,7 +93,9 @@ export function compose(options: ComposeOptions = {}): Composition {
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
 
   const areas: Area[] = [
-    appArea(),
+    appArea((at) => {
+      opened = at;
+    }),
     storeArea(),
     loreArea(),
     ifaceArea(),
@@ -101,5 +114,5 @@ export function compose(options: ComposeOptions = {}): Composition {
     door.area,
   ];
 
-  return { areas, door, turns: turn.turns };
+  return { areas, door, turns: turn.turns, settings: reader };
 }

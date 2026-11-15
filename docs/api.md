@@ -630,7 +630,7 @@ Tests a connection with one small call: how long it took, and the model that ans
 
 ### `GET /api/v1/settings`
 
-Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, and the level and file it comes from.
+Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect and what it does.
 
 | | |
 |---|---|
@@ -1367,6 +1367,14 @@ export interface DoneEnoughShown {
   horizon: { known: true; entries: number; named: number; clock: boolean } | FactNotKnown;
   principals: { known: true; principals: { id: string; name: string; base: string[]; memories: number }[] } | FactNotKnown;
 }
+```
+
+### `Effect`
+
+When a change to a setting is in force: at its next use, from the next turn, or from RPE's next start.
+
+```ts
+export type Effect = "use" | "turn" | "start";
 ```
 
 ### `Effort`
@@ -2373,7 +2381,7 @@ export interface SettingsWrite {
 
 ### `SettingTakes`
 
-What a level may set a setting to: a whole number or a number, at least `least` and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.
+One of RPH's shapes of a value: a whole number or a number, at least `least` and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.
 
 ```ts
 export type SettingTakes = { type: "whole"; least: number; most?: number } | { type: "number"; least: number; most?: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
@@ -2387,14 +2395,28 @@ A setting as the Settings page shows it.
 export interface SettingView {
   /** As a config file writes it; a per-connection setting's names the connection. */
   key: string;
-  /** The value in force. */
+  /** What the page calls it. */
+  name: string;
+  /** One line on what it does. */
+  about: string;
+  /** When a change to it is in force. */
+  effect: Effect;
+  /** The same, in words: at its next use, from the next turn, from RPE's next start. */
+  effectWords: string;
+  /** Its row of Appendix D.1; null for a value beyond D.1, listed for the owner's approval. */
+  row: string | null;
+  /** The value in force; for a setting every level of which applies, all of theirs together. */
   value: JsonValue;
   default: JsonValue;
   /** The level whose file decides the value in force; null where no file does, and the default holds. */
   from: LayerLevel | null;
   /** That level's file, as the Files page names it. */
   file: string | null;
-  takes: SettingTakes;
+  /** What each level's file sets, farthest first; a level that sets nothing is left out. */
+  set: { level: LayerLevel; file: string; value: JsonValue }[];
+  /** Every level's value applies, not the nearest alone. */
+  joined: boolean;
+  takes: Takes;
   /** What it takes, in words. */
   takesWords: string;
   /** What no value means, where the default is none or `~` may be set. */
@@ -2803,6 +2825,14 @@ export interface TakenKeyAsk {
   /** The key's SHA-256, in hex. */
   hash: string;
 }
+```
+
+### `Takes`
+
+What a level may set a setting to: one of RPH's shapes; a table of names, each to a value of `of` (with `whole`, such a value alone for every name); or a list of records, each holding every field.
+
+```ts
+export type Takes = SettingTakes | { type: "table"; of: SettingTakes; whole?: true } | { type: "records"; fields: readonly { name: string; takes: SettingTakes; about: string }[] };
 ```
 
 ### `ToolCallView`

@@ -11,8 +11,9 @@ import { join } from "node:path";
 import { type AnyShape, type App, dataPaths, LIVE_TOKEN_ENDED as SENT_TOKEN_ENDED, lineLog, type LivePublish, openApp, problemsOf, route, SESSION_PATH as SENT_SESSION_PATH, shape } from "../../src/app";
 import { configOf } from "../../src/app/config";
 import { connectionRoutes } from "../../src/app/connections";
-import type { SettingDef } from "../../src/app/setting-list";
-import { type LevelFile, settingsRoutes } from "../../src/app/settings-routes";
+import type { LevelFile } from "../../src/app/config-read";
+import type { Setting } from "../../src/app/setting-list";
+import { settingsRoutes } from "../../src/app/settings-routes";
 import { type LiveEvent, LIVE_TOKEN_ENDED, type SettingsReply } from "../../src/shared/api";
 import { SESSION_PATH } from "../../src/ui/api";
 import { createClient, isJoined, KEY_LET_GO, replyOf, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
@@ -69,7 +70,7 @@ const places = route({
 });
 
 /** A limit of the settings the Settings page shows, with a most. */
-const CALLS: SettingDef = { key: "limits.turn.calls", default: 40, takes: { type: "whole", least: 1, most: 500 }, perConnection: false };
+const CALLS: Setting = { key: "limits.turn.calls", default: 40, takes: { type: "whole", least: 1, most: 500 }, perConnection: false, name: "Calls in a turn", about: "Model calls all the agents of one turn may make between them.", effect: "turn" };
 
 let root = "";
 let app: App;

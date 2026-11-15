@@ -25,6 +25,8 @@ export const CHATS_FOLDER = "chats";
 export const GLOBAL_CONFIG = "RPE-global.yml";
 /** A chat's config file. */
 export const CHAT_CONFIG = "RPE.yml";
+/** The keys of a level's config file the files layer reads (RPH's `CONFIG_KEYS`): the files switched off, read at every level, added for a kind of turn, added to stacks, and pinned. */
+export const FILE_KEYS = { off: "off", layered: "layered", added: "added", instructions: "instructions", pins: "pins" } as const;
 /** The chat's notes (plan §5 `persistent-workspace/`): agents read and write them. */
 export const NOTES_FOLDER = "persistent-workspace";
 /** The chat's sessions (plan §5 `sessions/<session-id>/`), each with its turns' folders. */

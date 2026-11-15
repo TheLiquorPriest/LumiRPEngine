@@ -12,7 +12,7 @@ import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import { runCli } from "../../src/app/cli";
 import { CONFIG_DEFAULTS } from "../../src/app/config";
-import { CONNECTION_PART, type SettingDef } from "../../src/app/setting-list";
+import { CONNECTION_PART, type Declared } from "../../src/app/setting-list";
 import { UPDATE_SETTINGS } from "../../src/app/update";
 import { CAST_SETTINGS } from "../../src/cast";
 import { IFACE_SETTINGS } from "../../src/iface";
@@ -26,8 +26,8 @@ import { TURN_SETTINGS } from "../../src/turn/settings";
 
 const ROOT = join(import.meta.dir, "../..");
 const DOCS = ["README.md", "docs/install.md", "docs/migration.md", "docs/behaviour.md", "docs/settings.md", "docs/security.md", "docs/troubleshooting.md"];
-const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...BOOTSTRAP_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS];
-/** The shipped config file. Beside settings, it holds the keys RPH's files layer reads (`off`, `layered`, `added`), which are in no settings list. */
+const SETTINGS: readonly Declared[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...BOOTSTRAP_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS];
+/** The shipped config file: settings, the files layer's keys (`off`, `layered`, `added`) among them. */
 const SHIPPED_CONFIG = Bun.YAML.parse(readFileSync(join(ROOT, "guidance/RPE-global.yml"), "utf8")) as Record<string, unknown>;
 
 /** A key the shipped config file has: a list or a value as it is, or one entry of a mapping (any situation of `added`, whose entries are lists). */
@@ -112,12 +112,13 @@ function commandLines(): { path: string; line: string; words: string[] }[] {
   return [...fromSpans, ...fromBlocks];
 }
 
-/** A setting's key as a page may write it: a per-connection key with any connection's name in its place. */
+/** A setting's key as a page may write it: a per-connection key with any connection's name in its place, or one entry of a table. */
 function settingMatches(key: string): boolean {
   const parts = key.split(".");
   return SETTINGS.some((def) => {
     const wanted = def.key.split(".");
-    return wanted.length === parts.length && wanted.every((w, i) => w === CONNECTION_PART || w === parts[i]);
+    const entry = def.takes.type === "table" && parts.length === wanted.length + 1;
+    return (wanted.length === parts.length || entry) && wanted.every((w, i) => w === CONNECTION_PART || w === parts[i]);
   });
 }
 

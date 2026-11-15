@@ -5,7 +5,7 @@
 // plus those lines, made with the engine's own answer builder, so every lane answers in one shape.
 
 import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
-import type { NumberSettings, SettingDef } from "../app/setting-list";
+import type { NumberSettings, Setting } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { described, Reply, type Writes } from "../iface/kit";
@@ -50,25 +50,25 @@ export type CastSettings = { -readonly [K in keyof typeof CAST_DEFAULTS]: number
 
 /**
  * Each of the cast's settings as a config file writes it, under `cast:`, read at every level and
- * taken in by the host (the turn lane) for the chat a call is in.
+ * taken in by the host (the turn lane) for the chat a call is in, at each turn.
  */
 export const CAST_SETTING_DEFS = {
-  queryItems: { key: "cast.queryItems", default: CAST_DEFAULTS.queryItems, takes: { type: "whole", least: 1 }, perConnection: false },
-  secretConfidence: { key: "cast.secretConfidence", default: CAST_DEFAULTS.secretConfidence, takes: { type: "number", least: 0, most: 1 }, perConnection: false },
-  topOfMind: { key: "cast.topOfMind", default: CAST_DEFAULTS.topOfMind, takes: { type: "whole", least: 0 }, perConnection: false },
-  shortTermDays: { key: "cast.shortTermDays", default: CAST_DEFAULTS.shortTermDays, takes: { type: "number", least: 0 }, perConnection: false },
+  queryItems: { key: "cast.queryItems", default: CAST_DEFAULTS.queryItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Items a cast query gives", about: "The most items of one part one cast_query answers with; the answer says how many more there are.", effect: "turn" },
+  secretConfidence: { key: "cast.secretConfidence", default: CAST_DEFAULTS.secretConfidence, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Sureness of a secret learned", about: "How sure, from 0 to 1, a character is of a secret a perception says they now know.", effect: "turn" },
+  topOfMind: { key: "cast.topOfMind", default: CAST_DEFAULTS.topOfMind, takes: { type: "whole", least: 0 }, perConnection: false, name: "Top of mind", about: "The most memories a character holds at top of mind.", effect: "turn", row: "Top of mind" },
+  shortTermDays: { key: "cast.shortTermDays", default: CAST_DEFAULTS.shortTermDays, takes: { type: "number", least: 0 }, perConnection: false, name: "Short-term memory", about: "Days of story time a memory stays short term, unless a dream settles it sooner.", effect: "turn", row: "Short-term memory" },
   // A memory that fades in no time at all would have no strength to measure.
-  fadeDays: { key: "cast.fadeDays", default: CAST_DEFAULTS.fadeDays, takes: { type: "number", least: 1 }, perConnection: false },
-  faintBelow: { key: "cast.faintBelow", default: CAST_DEFAULTS.faintBelow, takes: { type: "number", least: 0, most: 1 }, perConnection: false },
-  memoryWeight: { key: "cast.memoryWeight", default: CAST_DEFAULTS.memoryWeight, takes: { type: "whole", least: 1 }, perConnection: false },
-  weightMax: { key: "cast.weightMax", default: CAST_DEFAULTS.weightMax, takes: { type: "whole", least: 1 }, perConnection: false },
-  comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false },
-  charsPerToken: { key: "cast.charsPerToken", default: CAST_DEFAULTS.charsPerToken, takes: { type: "number", least: 1 }, perConnection: false },
-  recallItems: { key: "cast.recallItems", default: CAST_DEFAULTS.recallItems, takes: { type: "whole", least: 1 }, perConnection: false },
+  fadeDays: { key: "cast.fadeDays", default: CAST_DEFAULTS.fadeDays, takes: { type: "number", least: 1 }, perConnection: false, name: "Days a memory takes to fade", about: "Story days in which a memory of weight 1, never recalled, falls to half its strength; each point of weight doubles it, each recall adds as much again.", effect: "turn" },
+  faintBelow: { key: "cast.faintBelow", default: CAST_DEFAULTS.faintBelow, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Faint below", about: "The strength, from 0 to 1, under which a memory is faint and shown as its gist.", effect: "turn" },
+  memoryWeight: { key: "cast.memoryWeight", default: CAST_DEFAULTS.memoryWeight, takes: { type: "whole", least: 1 }, perConnection: false, name: "Weight of a memory given none", about: "The weight a memory has when it is written with none.", effect: "turn" },
+  weightMax: { key: "cast.weightMax", default: CAST_DEFAULTS.weightMax, takes: { type: "whole", least: 1 }, perConnection: false, name: "Highest weight of a memory", about: "The highest weight a memory can have; weights run from 1.", effect: "turn" },
+  comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false, name: "What comes to mind", about: "Tokens of a character's memories that come to mind for a scene.", effect: "turn", row: "What comes to mind" },
+  charsPerToken: { key: "cast.charsPerToken", default: CAST_DEFAULTS.charsPerToken, takes: { type: "number", least: 1 }, perConnection: false, name: "Characters per token, for the cast", about: "Characters counted as one token in the cast's budgets, where the model gives no count of its own.", effect: "turn" },
+  recallItems: { key: "cast.recallItems", default: CAST_DEFAULTS.recallItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Memories one recall brings back", about: "The most memories one recall brings back; the answer says how many more touch the cue.", effect: "turn" },
 } as const satisfies NumberSettings<keyof CastSettings>;
 
 /** Every setting the cast reads, as a config file writes it. */
-export const CAST_SETTINGS: readonly SettingDef[] = Object.values(CAST_SETTING_DEFS);
+export const CAST_SETTINGS: readonly Setting[] = Object.values(CAST_SETTING_DEFS);
 
 /** The prompt part every answer's sentences come from. */
 export const CAST_ANSWERS = "cast-answers";

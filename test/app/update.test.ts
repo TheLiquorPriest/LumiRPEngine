@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type Area, BUILDS_PATH, lineLog, openApp } from "../../src/app";
 import { runCli } from "../../src/app/cli";
-import { type AppFile, type BuildsStatus, startCheck, updateSettings, type UpdateSettings, versionOf } from "../../src/app/update";
+import { readConfig } from "../../src/app/config-read";
+import { type AppFile, type BuildsStatus, startCheck, UPDATE_SETTINGS, updateSettings, type UpdateSettings, versionOf } from "../../src/app/update";
 import { treeSums } from "../migrate/fixture";
 import { openTurnBed, type TurnBed } from "../turn/bed";
 import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, makeKey, OWNER, writeConfig } from "./helpers";
@@ -273,7 +274,7 @@ test("rpe check reads the config and applies this build's migrations to a copy o
 
 test("with update.restart off nothing exits, and rpe status says a restart is needed", async () => {
   // The user's own RPE-global.yml switches it off, over the shipped default.
-  stand.settings = updateSettings([null, "# Mine.\nupdate:\n  restart: false\n"], lineLog(() => undefined));
+  stand.settings = updateSettings(readConfig([{ level: "global", file: "RPE-global.yml", text: "# Mine.\nupdate:\n  restart: false\n" }], lineLog(() => undefined), UPDATE_SETTINGS));
   expect(stand.settings.restart).toBe(false);
   const running = await rpe();
   await writeFile(file, fileOf(NEW));

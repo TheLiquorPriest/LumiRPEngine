@@ -6,7 +6,7 @@
 // Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
-import { numbersIn, type SettingDef } from "../../src/app/setting-list";
+import { numbersIn, type Setting } from "../../src/app/setting-list";
 import type { SettingsReply, SettingView } from "../../src/app/settings-routes";
 import { CAST_DEFAULTS, CAST_SETTING_DEFS, CAST_SETTINGS } from "../../src/cast";
 import { LORE_SETTINGS } from "../../src/lore";
@@ -17,7 +17,7 @@ import { NO_SESSION } from "../../src/turn";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "../turn/bed";
 
 /** Every setting of the areas, by the area that reads it. */
-const AREAS: Readonly<Record<string, readonly SettingDef[]>> = { tree: TREE_SETTINGS, cast: CAST_SETTINGS, story: STORY_SETTINGS, lore: LORE_SETTINGS, store: STORE_SETTINGS };
+const AREAS: Readonly<Record<string, readonly Setting[]>> = { tree: TREE_SETTINGS, cast: CAST_SETTINGS, story: STORY_SETTINGS, lore: LORE_SETTINGS, store: STORE_SETTINGS };
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -64,7 +64,7 @@ test("every setting the tree, the cast, the story lane, the lore and the store r
       // Read at every level, or from the global level alone where its part is made once for every chat.
       const levels = def.levels === undefined ? ["global", "chat"] : ["global"];
       if (JSON.stringify(view.levels) !== JSON.stringify(levels)) wrong.push(`${area}: ${def.key} may be set at ${view.levels.join(", ")}`);
-      if (view.value !== def.default || view.default !== def.default) wrong.push(`${area}: ${def.key} shows ${JSON.stringify(view.value)}, default ${JSON.stringify(view.default)}`);
+      if (JSON.stringify(view.default) !== JSON.stringify(def.default) || (view.from === null && JSON.stringify(view.value) !== JSON.stringify(def.default))) wrong.push(`${area}: ${def.key} shows ${JSON.stringify(view.value)}, default ${JSON.stringify(view.default)}`);
     }
   }
   expect(wrong).toEqual([]);

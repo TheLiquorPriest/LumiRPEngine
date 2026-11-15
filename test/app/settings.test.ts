@@ -10,7 +10,7 @@ import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { NO_SESSION, turnSettings } from "../../src/turn";
 import { CHAT_CONFIG, CHATS_FOLDER, GLOBAL_CONFIG, SHIPPED_FOLDER } from "../../src/tree";
 import type { SettingsReply, SettingView } from "../../src/app/settings-routes";
-import { keyFor } from "../../src/app/setting-list";
+import { keyFor, type Setting } from "../../src/app/setting-list";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "../turn/bed";
 
 const beds: TurnBed[] = [];
@@ -162,4 +162,80 @@ test("a value of the wrong kind, a key RPE does not read, ~ where it is not take
   expect(await refused({ level: "chat", chat: CHAT, key: "passConnection", value: "Floor model" })).toBe("passConnection is read from the global level alone.");
   expect(await refused({ level: "chat", key: "history.window", value: 3 })).toContain("Name the chat");
   expect(await readFile(b.app.paths.globalConfig, "utf8")).toBe(before);
+});
+
+test("the files switched off at a level are listed under it, and a write switches one on again", async () => {
+  const b = await playedBed("off:\n  - rules/turn-unrecorded\n  - WORLD\n");
+  await writeFile(chatFile(b), "off: [SIMULATION]\n");
+  const listed = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "off");
+  // Every level's list, each under its level; together, what is off.
+  expect(listed).toMatchObject({ joined: true, value: ["rules/turn-unrecorded", "WORLD", "SIMULATION"], takes: { type: "texts" } });
+  expect(listed.set).toEqual([
+    { level: "shipped", file: "@shipped/RPE-global.yml", value: [] },
+    { level: "global", file: "@global/RPE-global.yml", value: ["rules/turn-unrecorded", "WORLD"] },
+    { level: "chat", file: "RPE.yml", value: ["SIMULATION"] },
+  ]);
+
+  // WORLD switched on again at the level that switched it off: written as the Files page writes it, a list under `off:`.
+  const on = await settings(b, "PUT", "", { level: "global", key: "off", value: ["rules/turn-unrecorded"] });
+  expect(on.status).toBe(200);
+  expect(setting(on.body, "off").value).toEqual(["rules/turn-unrecorded"]);
+  expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toEqual({ off: ["rules/turn-unrecorded"] });
+  const chatOn = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "off", value: [] });
+  expect(setting(chatOn.body, "off").value).toEqual(["rules/turn-unrecorded"]);
+});
+
+test("`added:` is shown and written as a table of situations, each with its files", async () => {
+  const b = await playedBed("");
+  const shipped = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "added");
+  expect(shipped).toMatchObject({ value: { swipe: ["SWIPE"], regenerate: ["SWIPE"], delete: ["DELETE"] }, from: "shipped", takes: { type: "table", of: { type: "texts" } } });
+  expect(shipped.takesWords).toBe("a table of names, each to a list of names");
+
+  // A situation's entry at the chat's level replaces the shipped one for that situation alone.
+  const set = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "added", value: { swipe: ["SWIPE", "RECAP"] } });
+  expect(set.status).toBe(200);
+  expect(setting(set.body, "added").value).toEqual({ swipe: ["SWIPE", "RECAP"], regenerate: ["SWIPE"], delete: ["DELETE"] });
+  expect(Bun.YAML.parse(await readFile(chatFile(b), "utf8"))).toEqual({ added: { swipe: ["SWIPE", "RECAP"] } });
+
+  const refused = await settings<{ error: string }>(b, "PUT", "", { level: "chat", chat: CHAT, key: "added", value: { swipe: "SWIPE" } });
+  expect(refused).toEqual({ status: 400, body: { error: 'added.swipe takes a list of names, not "SWIPE".' } });
+});
+
+test("a list of records a test area declares is shown as a table and written back with one record added and one taken out, his comments kept", async () => {
+  const marks: Setting = {
+    key: "keeper.marks",
+    default: [],
+    takes: {
+      type: "records",
+      fields: [
+        { name: "file", takes: { type: "text" }, about: "The note marked." },
+        { name: "agent", takes: { type: "text" }, about: "Who keeps it." },
+      ],
+    },
+    perConnection: false,
+    name: "Marked notes",
+    about: "Notes the keeper marks, each with the agent that keeps it.",
+    effect: "use",
+  };
+  const mine = ["# The keeper's marks.", "keeper:", "  marks:", "    # The tide first.", "    - { file: persistent-workspace/tides.md, agent: keeper }", "    - { file: persistent-workspace/gulls.md, agent: author }", "# The end.", ""].join("\n");
+  const b = await openTurnBed({ global: mine, answers: [], areas: () => [{ name: "keeper", settings: [marks] }] });
+  beds.push(b);
+
+  const shown = setting((await settings(b, "GET", "")).body, "keeper.marks");
+  expect(shown).toMatchObject({ value: [{ file: "persistent-workspace/tides.md", agent: "keeper" }, { file: "persistent-workspace/gulls.md", agent: "author" }], takes: { type: "records" } });
+  expect(shown.takesWords).toBe("a list of records, each with file (a line of text) and agent (a line of text)");
+
+  const written = [{ file: "persistent-workspace/tides.md", agent: "keeper" }, { file: "persistent-workspace/lamp.md", agent: "keeper" }];
+  const put = await settings(b, "PUT", "", { level: "global", key: "keeper.marks", value: written });
+  expect(put.status).toBe(200);
+  expect(setting(put.body, "keeper.marks").value).toEqual(written);
+  const text = await readFile(b.app.paths.globalConfig, "utf8");
+  for (const line of ["# The keeper's marks.", "# The end."]) expect(text.split("\n")).toContain(line);
+  expect(Bun.YAML.parse(text)).toEqual({ keeper: { marks: written } });
+
+  // A record short of a field is refused, and nothing is written.
+  const refused = await settings<{ error: string }>(b, "PUT", "", { level: "global", key: "keeper.marks", value: [{ file: "persistent-workspace/tides.md" }] });
+  expect(refused.status).toBe(400);
+  expect(refused.body.error).toBe('keeper.marks[1] is a record with file (a line of text) and agent (a line of text), not {"file":"persistent-workspace/tides.md"}.');
+  expect(await readFile(b.app.paths.globalConfig, "utf8")).toBe(text);
 });

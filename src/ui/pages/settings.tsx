@@ -4,8 +4,8 @@
 // With a chat open its own level is there too. What RPE refuses is shown in its words.
 
 import { useEffect, useState } from "preact/hooks";
-import type { LayerLevel, SettingsReply, SettingTakes, SettingView } from "../../shared/api";
-import type { JsonValue } from "../../shared/json";
+import type { LayerLevel, SettingsReply, SettingView, Takes } from "../../shared/api";
+import { isRecord, type JsonValue } from "../../shared/json";
 import { useApp } from "../app";
 import { Banner, Button, Fold, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
@@ -30,17 +30,18 @@ export function settingsCalls(client: Pick<RpeClient, "call">, chat: string | nu
 
 // ---------------------------------------------------------------- values as said and typed
 
-/** A list's items one after the other. */
-const listed = (items: readonly JsonValue[], gap: string): string => items.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(gap);
+/** A list's items one after the other: a record by its fields' values. */
+const listed = (items: readonly JsonValue[], gap: string): string => items.map((item) => (typeof item === "string" ? item : isRecord(item) ? Object.values(item).map((v) => valueWords(v as JsonValue, null)).join(" → ") : JSON.stringify(item))).join(gap);
 
-/** A value as the page says it: yes or no, a list item by item, and no value as what it means. */
+/** A value as the page says it: yes or no, a list item by item, a table entry by entry, and no value as what it means. */
 export function valueWords(value: JsonValue, none: string | null): string {
   if (value === null) return none ?? "none";
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "number") return num(value);
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.length === 0 ? "none listed" : listed(value, ", ");
-  return JSON.stringify(value);
+  const entries = Object.entries(value);
+  return entries.length === 0 ? "none listed" : entries.map(([name, v]) => `${name}: ${valueWords(v, null)}`).join("; ");
 }
 
 /** A setting being changed: the level it is set at, and its value as typed. */
@@ -50,24 +51,53 @@ export interface SettingDraft {
   text: string;
 }
 
+/** A line's parts between `by`, each trimmed, the blank ones left out. */
+const parts = (line: string, by: string): string[] => line.split(by).flatMap((part) => (part.trim() === "" ? [] : [part.trim()]));
+
+/** The lines of a text that hold something. */
+const lines = (text: string): string[] => text.split("\n").filter((line) => line.trim() !== "");
+
 /**
  * The value typed, as the setting takes it: a number where the text is one, yes or no, a list one name
- * per line. Anything else goes as typed, for RPE to take or refuse in its own words.
+ * per line, a table one entry per line (`swipe: SWIPE, RECAP`), a list of records one per line, its
+ * fields in order between `|`. Anything else goes as typed, for RPE to take or refuse in its own words.
  */
-export function draftValue(takes: SettingTakes, text: string): JsonValue {
+export function draftValue(takes: Takes, text: string): JsonValue {
   const trimmed = text.trim();
   if (takes.type === "whole" || takes.type === "number") return trimmed !== "" && Number.isFinite(Number(trimmed)) ? Number(trimmed) : text;
   if (takes.type === "yesNo") return trimmed === "yes" ? true : trimmed === "no" ? false : text;
-  if (takes.type === "texts") return text.split("\n").flatMap((line) => (line.trim() === "" ? [] : [line.trim()]));
+  if (takes.type === "texts") return lines(text).map((line) => line.trim());
+  if (takes.type === "table") {
+    const entries = lines(text);
+    // A list for every name, where the setting takes one and no line names an entry.
+    if (takes.whole === true && entries.every((line) => !line.includes(":"))) return entries.map((line) => line.trim());
+    return Object.fromEntries(entries.map((line) => (line.includes(":") ? [line.slice(0, line.indexOf(":")).trim(), parts(line.slice(line.indexOf(":") + 1), ",")] : [line.trim(), []])));
+  }
+  if (takes.type === "records") return lines(text).map((line) => Object.fromEntries(takes.fields.map((field, i) => [field.name, line.split("|")[i]?.trim() ?? ""])));
   return text;
 }
 
-/** The value in force as the change form starts with it. */
-function draftText(value: JsonValue): string {
+/** A value as the change form starts with it, by what the setting takes. */
+function draftText(value: JsonValue, takes: Takes): string {
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "string") return value;
+  if (takes.type === "records" && Array.isArray(value)) return value.map((item) => (isRecord(item) ? takes.fields.map((field) => valueWords((item[field.name] ?? "") as JsonValue, null)).join(" | ") : JSON.stringify(item))).join("\n");
+  if (takes.type === "table" && isRecord(value)) return Object.entries(value).map(([name, v]) => `${name}: ${Array.isArray(v) ? listed(v, ", ") : valueWords(v as JsonValue, null)}`).join("\n");
   return Array.isArray(value) ? listed(value, "\n") : JSON.stringify(value);
+}
+
+/** What a setting is changed from at a level: for one every level of which applies, that level's own; else the value in force. */
+function startingValue(s: SettingView, level: LayerLevel): JsonValue {
+  return s.joined ? (s.set.find((at) => at.level === level)?.value ?? s.default) : s.value;
+}
+
+/** How to type a value, where its field does not say. */
+function typingHelp(takes: Takes): string | null {
+  if (takes.type === "texts") return "One on each line.";
+  if (takes.type === "table") return `One on each line, a name, a colon, then its files between commas: swipe: SWIPE, RECAP.${takes.whole === true ? " Or one file on each line, for every name." : ""}`;
+  if (takes.type === "records") return `One on each line: ${takes.fields.map((f) => f.name).join(" | ")}.`;
+  return null;
 }
 
 // ---------------------------------------------------------------- what the page holds
@@ -121,7 +151,7 @@ export function settingsControl(calls: SettingsCalls, onChange: (shown: Settings
       const s = key === null ? undefined : shown.reply?.settings.find((one) => one.key === key);
       // Changed where it is decided, when that is a level it may be set at here; else at the user's own.
       const level = s?.from !== null && s?.from !== undefined && s.levels.includes(s.from) ? s.from : (s?.levels[0] ?? "global");
-      show({ ...shown, refusal: null, editing: s === undefined ? null : { key: s.key, level, text: draftText(s.value) } });
+      show({ ...shown, refusal: null, editing: s === undefined ? null : { key: s.key, level, text: draftText(startingValue(s, level), s.takes) } });
     },
     draft(draft) {
       show({ ...shown, editing: draft });
@@ -182,8 +212,39 @@ function ValueField(props: { setting: SettingView; draft: SettingDraft; onDraft(
       </select>
     );
   }
-  if (takes.type === "texts") return <textarea class="lre-input" spellcheck={false} value={draft.text} onInput={(event) => set(event.currentTarget.value)} />;
+  if (takes.type === "texts" || takes.type === "table" || takes.type === "records") return <textarea class="lre-input" spellcheck={false} value={draft.text} onInput={(event) => set(event.currentTarget.value)} />;
   return <input class="lre-input" inputMode={takes.type === "text" ? undefined : "decimal"} spellcheck={false} autoComplete="off" value={draft.text} onInput={(event) => set(event.currentTarget.value)} />;
+}
+
+/** A list of records as a table: a column for each field, a row for each record. It fills the row's width and wraps a long value, so it fits a phone. */
+function RecordsTable(props: { fields: readonly { name: string; about: string }[]; value: JsonValue }) {
+  const records = Array.isArray(props.value) ? props.value.flatMap((item) => (isRecord(item) ? [item as { readonly [field: string]: JsonValue }] : [])) : [];
+  if (records.length === 0) return <p class="rpe-meta">None listed.</p>;
+  const cell = { textAlign: "left", overflowWrap: "anywhere", padding: "2px 8px 2px 0", verticalAlign: "top" } as const;
+  return (
+    <table class="rpe-records" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+      <thead>
+        <tr>
+          {props.fields.map((f) => (
+            <th key={f.name} title={f.about} class="rpe-meta" style={cell}>
+              {f.name}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {records.map((record, i) => (
+          <tr key={i}>
+            {props.fields.map((f) => (
+              <td key={f.name} style={cell}>
+                {valueWords((record[f.name] ?? null) as JsonValue, "")}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
@@ -196,11 +257,22 @@ function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
   return (
     <li class="lre-stack rpe-setting" data-setting={s.key}>
       <div class="lre-row">
-        <span class="k">{s.key}</span>
-        <span class="v">{valueWords(s.value, s.none)}</span>
+        <span class="k">{s.name}</span>
+        <span class="v">{s.takes.type === "records" ? null : valueWords(s.value, s.none)}</span>
       </div>
+      <p class="rpe-line rpe-about">{s.about}</p>
+      {s.takes.type === "records" ? <RecordsTable fields={s.takes.fields} value={s.value} /> : null}
+      {s.joined ? (
+        <ul class="rpe-levels">
+          {s.set.map((at) => (
+            <li key={at.level} data-level={at.level}>
+              <span class="k">{`${at.file} (${LEVEL_WORDS[at.level]})`}</span> <span class="v">{valueWords(at.value, s.none)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <p class="rpe-meta">
-        {from} · default: {valueWords(s.default, s.none)} · takes {s.takesWords}
+        <code>{s.key}</code> · {from} · default: {valueWords(s.default, s.none)} · takes {s.takesWords} · a change holds {s.effectWords} · {s.row === null ? "beyond Appendix D.1, for the owner's approval" : `Appendix D.1: ${s.row}`}
       </p>
       {s.passed === null ? null : (
         <p class="rpe-line rpe-note">
@@ -223,7 +295,11 @@ function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
           <label class="lre-field">
             <span class="label">Set at</span>
             {/* A select's starting choice is its option marked selected: Preact gives a select no defaultValue. */}
-            <select class="lre-input" onChange={(event) => props.onDraft({ ...editing, level: s.levels.find((l) => l === event.currentTarget.value) ?? editing.level })}>
+            <select class="lre-input" onChange={(event) => {
+              const level = s.levels.find((l) => l === event.currentTarget.value) ?? editing.level;
+              // A setting every level of which applies is changed from that level's own value.
+              props.onDraft({ ...editing, level, ...(s.joined ? { text: draftText(startingValue(s, level), s.takes) } : {}) });
+            }}>
               {s.levels.map((level) => (
                 <option key={level} value={level} selected={level === editing.level}>
                   {LEVEL_WORDS[level]}
@@ -234,7 +310,7 @@ function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
           <label class="lre-field">
             <span class="label">Value</span>
             <ValueField setting={s} draft={editing} onDraft={props.onDraft} />
-            {s.takes.type === "texts" ? <span class="lre-field-help">One on each line.</span> : null}
+            {typingHelp(s.takes) === null ? null : <span class="lre-field-help">{typingHelp(s.takes)}</span>}
           </label>
           <div class="lre-inline rpe-wrap">
             <Button small kind="primary" busy={shown.busy} onClick={props.onSave}>

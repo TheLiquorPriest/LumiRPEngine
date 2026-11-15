@@ -205,17 +205,17 @@ Global file only, read when RPE starts.
 | `notes.listed` | `20` | Note files each of the Storage page's lists shows when it names no number. |
 | `notes.most` | `200` | The most note files each of those lists shows. |
 
-## Which files are in force
+## The files in force
 
-These keys say which of the files in [How behaviour lives in files](behaviour.md) are read. They are not settings, and RPE's API does not list them: RPH reads `off` and `layered` from every level at once, each level adding its names to the farther levels' (a setting takes the nearest level's value instead), and `added` takes any situation's name as its key. The Files page shows what they put in force.
+These settings say which of the files in [How behaviour lives in files](behaviour.md) are read. RPH reads them as it loads a turn's files, so a change holds from the next turn. Every level's `off`, `layered`, `instructions` and `pins` apply together, each adding to the farther levels'; `added` takes the nearer level's entry for each kind of turn. The defaults below hold where no file sets them: the shipped file reads `layered: [AGENTS]` and `added: {swipe: [SWIPE], regenerate: [SWIPE], delete: [DELETE]}`. The Files page shows what they put in force; the Settings page shows and writes each level's own.
 
-| Key | Default | What it does |
+| Setting | Default | What it does |
 |---|---|---|
-| `layered` | `["AGENTS"]` | Instruction files read at every level that has one, the farther first, instead of the nearest alone. |
-| `added.swipe` | `["SWIPE"]` | Instruction files added for a swipe. |
-| `added.regenerate` | `["SWIPE"]` | Instruction files added for a regenerate. |
-| `added.delete` | `["DELETE"]` | Instruction files added when turns were deleted since the last one. |
-| `off` | `[]` | Files switched off: an instruction file by its name (`WORLD`), anything else by folder and name (`rules/perceptions-owed`). |
+| `off` | `[]` | Files switched off: an instruction file by its name (`WORLD`), anything else by folder and name (`rules/perceptions-owed`). A name in any level's list is off everywhere. |
+| `layered` | `[]` | Instruction files read at every level that has one, the farther first, instead of the nearest alone. |
+| `added` | `{}` | For each kind of turn (`swipe`, `regenerate`, `delete`), the instruction files added to its briefing beside `TURN.md`. |
+| `instructions` | `[]` | Files added to the stack of every agent that reads instruction files, or, as a table, to each named agent's alone. |
+| `pins` | `[]` | Files handed whole to an agent at the start of each of its runs, each a `file` and the `agent` it is pinned for. |
 
 ## The application: config.json
 

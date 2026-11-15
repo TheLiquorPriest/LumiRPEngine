@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { SettingsReply } from "../../src/shared/api";
 import { NO_SETTINGS, settingsCalls, settingsControl, type SettingsShown, SettingsView, type SettingsViewProps } from "../../src/ui/pages/settings";
+import { UI_CSS } from "../../src/ui/styles";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";
 import { CHAT } from "./recorded";
@@ -42,13 +43,15 @@ describe("the Settings page", () => {
     const { tree, text } = view();
     expect(text).not.toContain("Not available yet");
     expect(text).toContain("Read from @shipped/RPE-global.yml (Shipped), @global/RPE-global.yml (Yours), RPE.yml (This chat's).");
-    expect(elements(tree).filter((e) => e.type === "summary").map((e) => textOf(e.props.children))).toEqual(["limits (2)", "reply (2)", "update (1)", "Connection: Flash (2)", "Names no connection there is now (1)"]);
-    expect(said(tree, "limits.turn.calls")).toContain("limits.turn.calls60set in @global/RPE-global.yml (Yours) · default: 40 · takes a whole number, 1 or more");
-    expect(said(tree, "limits.turn.time")).toContain("limits.turn.timeno limitno file sets it · default: no limit");
+    expect(elements(tree).filter((e) => e.type === "summary").map((e) => textOf(e.props.children))).toEqual(["limits (2)", "reply (2)", "update (1)", "off (1)", "added (1)", "pins (1)", "Connection: Flash (2)", "Names no connection there is now (1)"]);
+    expect(said(tree, "limits.turn.calls")).toContain(
+      "Calls in a turn60Model calls all the agents of one turn may make between them.limits.turn.calls · set in @global/RPE-global.yml (Yours) · default: 40 · takes a whole number, 1 or more · a change holds from the next turn · Appendix D.1: Calls in a turn across all agents",
+    );
+    expect(said(tree, "limits.turn.time")).toContain("limits.turn.timeno limitWhat limits.turn.time does.limits.turn.time · no file sets it · default: no limit");
     expect(said(tree, "reply.form")).toContain("A file sets it to markdown, which is not taken: reply.form takes one of tags, tools, text.");
-    expect(said(tree, "reply.streamAnyway")).toContain("reply.streamAnywaymoira, ashset in RPE.yml (This chat's) · default: none listed");
-    expect(said(tree, "update.restart")).toContain("update.restartnoset in @global/RPE-global.yml (Yours) · default: yes");
-    expect(said(tree, "reply.forms.c-flash")).toContain("reply.forms.c-flashtoolsset in RPE.yml (This chat's) · default: the reply's form");
+    expect(said(tree, "reply.streamAnyway")).toContain("reply.streamAnyway · set in RPE.yml (This chat's) · default: none listed");
+    expect(said(tree, "update.restart")).toContain("update.restart · set in @global/RPE-global.yml (Yours) · default: yes · takes yes or no · a change holds at its next use · beyond Appendix D.1, for the owner's approval");
+    expect(said(tree, "reply.forms.c-flash")).toContain("reply.forms.c-flashtoolsWhat reply.forms.c-flash does.reply.forms.c-flash · set in RPE.yml (This chat's) · default: the reply's form");
     // A file that cannot be read is said, in RPE's words.
     const broken: SettingsReply = { ...SETTINGS, files: SETTINGS.files.map((f) => (f.level === "chat" ? { ...f, problem: "RPE.yml: a mapping was expected at line 3." } : f)) };
     expect(banners(view({ reply: broken }).tree)).toEqual([{ title: "RPE.yml could not be read", text: "RPE.yml could not be readRPE.yml: a mapping was expected at line 3." }]);
@@ -143,5 +146,64 @@ describe("the Settings page", () => {
       ["GET /api/v1/settings", {}, null],
       ["PUT /api/v1/settings", null, { level: "global", chat: null, key: "update.restart", value: false, none: false }],
     ]);
+  });
+
+  test("the row shows the line, at 390 and at 1440 pixels", () => {
+    // One layout serves both widths: the line is its own paragraph of a class that wraps anywhere, and nothing in a row holds it to a width
+    // wider than the row. The browser rounds lay the page out at both widths (plan scenario 52).
+    const { tree } = view();
+    for (const s of SETTINGS.settings) {
+      const row = rowOf(tree, s.key);
+      const line = elements(row).find((e) => e.type === "p" && String(e.props.class).split(" ").includes("rpe-about"));
+      expect([s.key, textOf(line?.props.children)]).toEqual([s.key, s.about]);
+      expect(String(line?.props.class).split(" ")).toContain("rpe-line");
+      const widths = elements(row).flatMap((e) => (typeof e.props.style === "object" && e.props.style !== null && "width" in e.props.style ? [String((e.props.style as { width: unknown }).width)] : []));
+      expect(widths.filter((w) => w !== "100%")).toEqual([]);
+    }
+    expect(UI_CSS).toContain(".rpe-line{margin:0;overflow-wrap:anywhere}");
+    expect(UI_CSS).toContain(".rpe-meta{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}");
+  });
+
+  test("the files switched off at each level are listed under it, and changed from that level's own list", async () => {
+    const { tree } = view();
+    const levels = elements(rowOf(tree, "off")).filter((e) => e.type === "li" && e.props["data-level"] !== undefined);
+    expect(levels.map((e) => textOf(e.props.children))).toEqual(["@global/RPE-global.yml (Yours) WORLD", "RPE.yml (This chat's) rules/consent"]);
+
+    const { client, asked } = askingClient();
+    const states: SettingsShown[] = [];
+    const control = settingsControl(settingsCalls(client, CHAT), (s) => states.push(s));
+    asked[0]?.answer(SETTINGS);
+    await settle();
+    control.edit("off");
+    // The chat's own list, not every level's together: switched on again there by leaving it out.
+    expect(states.at(-1)?.editing).toEqual({ key: "off", level: "chat", text: "rules/consent" });
+    control.draft({ key: "off", level: "chat", text: "" });
+    control.save();
+    expect(asked[1]?.body).toEqual({ level: "chat", chat: CHAT, key: "off", value: [], none: false });
+  });
+
+  test("a table of situations is shown and typed entry by entry, and a list of records as a table, written whole", async () => {
+    const { tree } = view();
+    expect(said(tree, "added")).toContain("Files added for a kind of turnswipe: SWIPE; delete: DELETE");
+    const table = elements(rowOf(tree, "pins")).find((e) => e.type === "table");
+    expect(elements(table).filter((e) => e.type === "th").map((e) => textOf(e.props.children))).toEqual(["file", "agent"]);
+    expect(elements(table).filter((e) => e.type === "td").map((e) => textOf(e.props.children))).toEqual(["persistent-workspace/keeper-log.md", "keeper"]);
+
+    const { client, asked } = askingClient();
+    const states: SettingsShown[] = [];
+    const control = settingsControl(settingsCalls(client, CHAT), (s) => states.push(s));
+    asked[0]?.answer(SETTINGS);
+    await settle();
+    control.edit("added");
+    expect(states.at(-1)?.editing).toEqual({ key: "added", level: "global", text: "swipe: SWIPE\ndelete: DELETE" });
+    control.draft({ key: "added", level: "global", text: "swipe: SWIPE, RECAP\nregenerate: SWIPE\ndelete:" });
+    control.save();
+    expect(asked[1]?.body).toMatchObject({ key: "added", value: { swipe: ["SWIPE", "RECAP"], regenerate: ["SWIPE"], delete: [] } });
+
+    control.edit("pins");
+    expect(states.at(-1)?.editing).toEqual({ key: "pins", level: "chat", text: "persistent-workspace/keeper-log.md | keeper" });
+    control.draft({ key: "pins", level: "chat", text: "persistent-workspace/tide-table.md | author\n" });
+    control.save();
+    expect(asked[2]?.body).toMatchObject({ key: "pins", value: [{ file: "persistent-workspace/tide-table.md", agent: "author" }] });
   });
 });

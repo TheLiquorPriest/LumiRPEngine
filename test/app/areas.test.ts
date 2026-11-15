@@ -6,8 +6,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AgentRef, Scope, SettingDef } from "rp-harness/contract";
-import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
+import type { AgentRef, Scope } from "rp-harness/contract";
+import { harnessSettings, type Setting } from "../../src/app/setting-list";
 import { USER_HEADER } from "../../src/adapter/lumiverse/pipe-wire";
 import { LUMIVERSE_SETTINGS } from "../../src/adapter/lumiverse/settings";
 import { QUESTION_PATH, type Question } from "../../src/adapter/lumiverse/wire";
@@ -30,14 +30,14 @@ const SRC = resolve(import.meta.dir, "../../src");
 const COMPOSE = join(SRC, "app/compose.ts");
 
 /** Each area of RPE by name: the file that registers it, and the settings its file lists. */
-const OWN: Readonly<Record<string, { file: string; settings: readonly SettingDef[] }>> = {
+const OWN: Readonly<Record<string, { file: string; settings: readonly Setting[] }>> = {
   app: { file: "app/area.ts", settings: UPDATE_SETTINGS },
   store: { file: "store/area.ts", settings: STORE_SETTINGS },
   lore: { file: "lore/area.ts", settings: LORE_SETTINGS },
   iface: { file: "iface/area.ts", settings: IFACE_SETTINGS },
   migrate: { file: "migrate/area.ts", settings: [] },
   tree: { file: "tree/area.ts", settings: TREE_SETTINGS },
-  turn: { file: "turn/area.ts", settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS] },
+  turn: { file: "turn/area.ts", settings: [...harnessSettings(), ...TURN_SETTINGS] },
   bootstrap: { file: "turn/bootstrap/area.ts", settings: BOOTSTRAP_SETTINGS },
   cast: { file: "cast/area.ts", settings: CAST_SETTINGS },
   story: { file: "story/area.ts", settings: STORY_SETTINGS },

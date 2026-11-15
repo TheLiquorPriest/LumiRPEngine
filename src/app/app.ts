@@ -4,7 +4,7 @@
 // reaches the app through `App` and nothing else.
 
 import type { Database } from "bun:sqlite";
-import type { JsonValue, Log, ModelsPort, SettingDef } from "rp-harness/contract";
+import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
 import { Auth, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
@@ -19,6 +19,7 @@ import { migrate, Migrations } from "./migrations";
 import { type Exactly, type Holds, type Infer, route, RouteError, RouteTable, shape } from "./routes";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
+import type { Setting } from "./setting-list";
 import type { RunningServer } from "./server";
 import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
@@ -53,8 +54,8 @@ export interface Area {
   readonly name: string;
   /** Its tables: each migration area it brings (an area of RPE may bring more than one), and its migrations. */
   readonly tables?: readonly AreaTables[];
-  /** Its settings: listed once, with every other area's, by the Settings routes (`App.settings`). */
-  readonly settings?: readonly SettingDef[];
+  /** Its settings, each with its words and when it takes effect: listed once, with every other area's, in the registry (`App.settings`). */
+  readonly settings?: readonly Setting[];
   /** What it adds to the hooks of the other areas (`App.hooks`): a view an agent is given by name, a lane of the door. */
   readonly fills?: Fills;
   /** In the order of the areas. */
@@ -88,8 +89,8 @@ export interface App {
   /** Where RPH's model layer keeps the connections and their secrets: the host's `Environment.models`. */
   readonly models: ModelsPort;
   readonly log: Log;
-  /** Every setting the areas list, in the order of the areas: what the Settings routes show and write. */
-  readonly settings: readonly SettingDef[];
+  /** The settings registry: every setting the areas list, in the order of the areas, which the Settings routes show and write. */
+  readonly settings: readonly Setting[];
   /** What the areas add to each other's hooks, gathered from every area when the app opened. */
   readonly hooks: Hooks;
   readonly now: () => number;

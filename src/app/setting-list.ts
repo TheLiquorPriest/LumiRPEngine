@@ -1,16 +1,23 @@
-// A setting as the code that reads it declares it (plan §5.4 "Config", §14, Appendix D.1): its key as
-// a config file writes it, its default, what it takes, and whether it is set per connection. A reader
-// takes each of its values through its list, and the Settings routes show and write every setting
-// from the same lists, so a setting added to a list is read, shown and written with nothing else
-// changed. RPH's own list and the declaration every list uses (`SettingDef`, `SettingTakes`) are
-// RPH's (`rp-harness/helpers`, `rp-harness/contract`); RPE's lists declare RPE's settings the same way.
+// The settings registry (plan §5.4 "Config", §14, Appendix D.1): every value RPE and RPH read is a
+// setting, declared once by the area that reads it, in that area's own list: its key as a config file
+// writes it, its default, what it takes, the levels it is read from, whether it is set per connection,
+// when a change to it takes effect, what the Settings page calls it, one line on what it does, and its
+// row of Appendix D.1 where it has one. The app gathers every area's list into one registry
+// (`App.settings`); the readers read each value through it (`config-read.ts`), and the Settings routes
+// show and write every setting from it, so a setting added to a list is read, shown and written with
+// nothing else changed.
 //
-// The config files of a chat's levels (`RPE-global.yml` as shipped and the user's own, the chat's
-// `RPE.yml`) are read farthest first and merged by RPH's merge of levels (`mergedConfig`), so RPE
-// reads every level exactly as RPH reads it. A value a setting does not take is passed over, and its
-// default holds.
+// RPH's own list and the declaration it uses (`SettingDef`, `SettingTakes`) are RPH's
+// (`rp-harness/helpers`, `rp-harness/contract`). A key RPH declares is listed from RPH's list alone,
+// with RPH's default, and never declared again here (`harnessSettings`). RPE adds two shapes of its
+// own beside RPH's (`Takes`): a table of names to values, and a list of records with named fields.
+//
+// The config files of a chat's levels are merged by RPH's merge of levels (`mergedConfig`), so RPE
+// reads every level exactly as RPH reads it, and every value of a shape RPH declares is checked by
+// RPH's one check (`checkSettingValue`).
 
-import type { JsonValue, SettingDef } from "rp-harness/contract";
+import type { JsonValue, SettingDef, SettingTakes } from "rp-harness/contract";
+import { checkSettingValue, SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 
 export type { SettingDef, SettingTakes } from "rp-harness/contract";
 export { mergedConfig } from "rp-harness/helpers";
@@ -24,25 +31,104 @@ export function isMapping(value: unknown): value is Mapping {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ---------------------------------------------------------------- the registry's declaration
+
+/** A field of a record a list of records holds: its name, what it takes, and one line on what it is. */
+export interface RecordField {
+  readonly name: string;
+  readonly takes: SettingTakes;
+  readonly about: string;
+}
+
+/**
+ * The shapes RPE's registry declares beyond RPH's `SettingTakes`. `table`: a mapping of names (a
+ * situation, an agent) to values that each take `of`; with `whole`, a value that takes `of` alone is
+ * taken too, for every name at once (`instructions: [STYLE]`). `records`: a list of records, each a
+ * mapping holding every field, shown as a table and written whole (`pins:`).
+ */
+export type RpeTakes = { readonly type: "table"; readonly of: SettingTakes; readonly whole?: true } | { readonly type: "records"; readonly fields: readonly RecordField[] };
+
+/** What a level may set a setting to: one of RPH's shapes, or one of RPE's own. */
+export type Takes = SettingTakes | RpeTakes;
+
+/** When a change to a setting is in force: at its next use, from the next turn (or job), or from RPE's next start. */
+export type Effect = "use" | "turn" | "start";
+
+/** Each moment as the Settings page and the docs word it. */
+export const EFFECT_WORDS: Readonly<Record<Effect, string>> = Object.freeze({ use: "at its next use", turn: "from the next turn", start: "from RPE's next start" });
+
+/** A setting as any list declares it, RPH's or RPE's: what the readers and the checks need. */
+export type Declared = Omit<SettingDef, "takes"> & { readonly takes: Takes };
+
+/** A setting of the registry: declared with its words, when it takes effect and its row of Appendix D.1. */
+export interface Setting extends Omit<Declared, "name" | "about"> {
+  /** What the Settings page calls it. */
+  readonly name: string;
+  /** One line on what it does, on the Settings page and in docs/settings.md. Words for the owner, never sent to a model. */
+  readonly about: string;
+  readonly effect: Effect;
+  /** Its row of Appendix D.1, as the row's first column words it; absent for a value beyond D.1, listed for the owner's approval (N-9, N-10). */
+  readonly row?: string;
+  /**
+   * Every level's value applies, not the nearest alone: the value in force is each level's list, the
+   * farther first (`off:`, `layered:`, `instructions:`, `pins:`, as the files layer reads them).
+   */
+  readonly joined?: true;
+}
+
+/** A group of settings whose values are numbers, none of which takes `~`, by the name its reader takes each under. */
+export type NumberSettings<K extends string> = Readonly<Record<K, Setting & { readonly takes: { readonly type: "whole" | "number" } }>>;
+
+/** A setting's row of Appendix D.1 and when it takes effect, for the keys RPH declares: RPH reads its settings at each turn and each job. */
+const HARNESS_ROWS: Readonly<Record<string, string>> = Object.freeze({
+  "limits.turn.calls": "Calls in a turn across all agents",
+  "reply.form": "How a connection marks its reply",
+  "reply.heldSentences": "Reply held back when a rule that interrupts covers it",
+  "reply.tailSentences": "Sentences shown again to an agent that goes on after a rule stopped it",
+  "reply.leadSampling": "The Author's sampling",
+  "progress.silence": "Thinking block in the chat",
+  "rules.judge": "The model that answers a `question:` rule",
+  "compaction.reserve": "Compaction starts",
+  "compaction.keepTurns": "Compaction starts",
+  "compaction.records": "Carried records before folding (records mode)",
+});
+
+/** The keys of RPH's own list that a row above names. */
+export const HARNESS_ROW_KEYS: readonly string[] = Object.keys(HARNESS_ROWS);
+
+/**
+ * RPH's settings as the registry lists them: RPH's list as RPH exports it, each with its default,
+ * what it takes, its name and its line, and when a change to it is in force (a job's settings when
+ * the next job starts, every other at the next turn, since RPH reads its settings as each begins).
+ */
+export function harnessSettings(list: readonly SettingDef[] = RPH_SETTINGS): Setting[] {
+  return list.map((def) => {
+    const row = HARNESS_ROWS[def.key];
+    return { ...def, name: def.name ?? def.key, about: def.about ?? "", effect: def.key.startsWith("jobs.") ? "use" : "turn", ...(row !== undefined ? { row } : {}) };
+  });
+}
+
+// ---------------------------------------------------------------- keys and paths
+
 /** A setting's key with a connection's name or id in place of `<connection>`; the key itself for one that is not per connection. */
-export function keyFor(def: SettingDef, connection?: string): string {
+export function keyFor(def: Declared, connection?: string): string {
   return def.perConnection && connection !== undefined ? def.key.replace(CONNECTION_PART, connection) : def.key;
 }
 
 /** A setting's key as the path of mappings a config file holds it at. A connection's name stays whole, dots and all. */
-export function pathOf(def: SettingDef, connection?: string): string[] {
+export function pathOf(def: Declared, connection?: string): string[] {
   return def.key.split(".").map((part) => (part === CONNECTION_PART && connection !== undefined ? connection : part));
 }
 
 /** The keys before and after `<connection>` in a per-connection setting's key. */
-function aroundConnection(def: SettingDef): { before: string[]; after: string[] } {
+function aroundConnection(def: Declared): { before: string[]; after: string[] } {
   const parts = def.key.split(".");
   const at = parts.indexOf(CONNECTION_PART);
   return { before: parts.slice(0, at), after: parts.slice(at + 1) };
 }
 
 /** The setting a key as a file writes it names, and the connection it names; null for a key no setting of `defs` has. */
-export function settingOfKey(defs: readonly SettingDef[], key: string): { def: SettingDef; connection?: string } | null {
+export function settingOfKey<D extends Declared>(defs: readonly D[], key: string): { def: D; connection?: string } | null {
   for (const def of defs) {
     if (!def.perConnection) {
       if (def.key === key) return { def };
@@ -57,7 +143,7 @@ export function settingOfKey(defs: readonly SettingDef[], key: string): { def: S
 }
 
 /** The connections a config names for a per-connection setting, by the names or ids it writes. */
-export function connectionsNamed(config: Mapping, def: SettingDef): string[] {
+export function connectionsNamed(config: Mapping, def: Declared): string[] {
   let at: JsonValue | undefined = config;
   for (const part of aroundConnection(def).before) at = isMapping(at) ? at[part] : undefined;
   return isMapping(at) ? Object.keys(at) : [];
@@ -87,53 +173,92 @@ export function decidesAt(config: Mapping, path: readonly string[]): boolean {
   return true;
 }
 
+// ---------------------------------------------------------------- values
+
+/** One of RPH's shapes, in a page's words. */
+function shapeWords(t: SettingTakes): string {
+  return t.type === "whole"
+    ? t.most === undefined
+      ? `a whole number, at least ${t.least}`
+      : `a whole number from ${t.least} to ${t.most}`
+    : t.type === "number"
+      ? t.most === undefined
+        ? `a number, at least ${t.least}`
+        : `a number from ${t.least} to ${t.most}`
+      : t.type === "oneOf"
+        ? `one of ${t.values.join(", ")}`
+        : t.type === "yesNo"
+          ? "true or false"
+          : t.type === "text"
+            ? "a line of text"
+            : "a list of names";
+}
+
 /** What a setting takes, in a page's words: "a whole number, at least 1, or ~ for no limit". */
-export function takesWords(def: SettingDef): string {
+export function takesWords(def: Declared): string {
   const t = def.takes;
   const what =
-    t.type === "whole"
-      ? t.most === undefined
-        ? `a whole number, at least ${t.least}`
-        : `a whole number from ${t.least} to ${t.most}`
-      : t.type === "number"
-        ? t.most === undefined
-          ? `a number, at least ${t.least}`
-          : `a number from ${t.least} to ${t.most}`
-        : t.type === "oneOf"
-          ? `one of ${t.values.join(", ")}`
-          : t.type === "yesNo"
-            ? "true or false"
-            : t.type === "text"
-              ? "a line of text"
-              : "a list of names";
+    t.type === "table"
+      ? `a table of names, each to ${shapeWords(t.of)}${t.whole === true ? `, or ${shapeWords(t.of)} for every name` : ""}`
+      : t.type === "records"
+        ? `a list of records, each with ${t.fields.map((f) => `${f.name} (${shapeWords(f.takes)})`).join(" and ")}`
+        : shapeWords(t);
   return def.orNone === true ? `${what}, or ~ for ${def.none ?? "none"}` : what;
+}
+
+/** A value as a reason names it. */
+function words(value: JsonValue): string {
+  return typeof value === "number" && !Number.isFinite(value) ? String(value) : JSON.stringify(value);
+}
+
+type Taken = { ok: true; value: JsonValue } | { ok: false; why: string };
+
+/** A value checked by RPH's one check against a setting of one of RPH's shapes, named `key`; a list read with its names alone unless it is being written. */
+function takenShape(def: Omit<SettingDef, "key" | "perConnection">, key: string, value: JsonValue, writing: boolean): Taken {
+  const check = checkSettingValue({ ...def, key, perConnection: false }, value);
+  if (check.ok) return { ok: true, value: check.value };
+  return check.kept !== undefined && !writing ? { ok: true, value: check.kept } : { ok: false, why: check.why };
 }
 
 /**
  * A value a setting takes, as its reader uses it; or the reason, in RPE's words, that it takes no
- * such value. `writing`: a value about to be written, where a list must hold names alone.
+ * such value. `writing`: a value about to be written, where a list must hold names alone and every
+ * record every field; as read, what does not fit of a list is passed over and the rest read.
  */
-export function takenValue(def: SettingDef, value: JsonValue, key: string = def.key, writing = false): { ok: true; value: JsonValue } | { ok: false; why: string } {
-  const no = { ok: false as const, why: `${key} takes ${takesWords(def)}, not ${JSON.stringify(value)}.` };
+export function takenValue(def: Declared, value: JsonValue, key: string = def.key, writing = false): Taken {
+  const no: Taken = { ok: false, why: `${key} takes ${takesWords(def)}, not ${words(value)}.` };
   if (value === null) return def.orNone === true ? { ok: true, value: null } : no;
   const t = def.takes;
-  switch (t.type) {
-    case "whole":
-      return typeof value === "number" && Number.isInteger(value) && value >= t.least && (t.most === undefined || value <= t.most) ? { ok: true, value } : no;
-    case "number":
-      return typeof value === "number" && Number.isFinite(value) && value >= t.least && (t.most === undefined || value <= t.most) ? { ok: true, value } : no;
-    case "oneOf":
-      return typeof value === "string" && t.values.includes(value) ? { ok: true, value } : no;
-    case "yesNo":
-      return typeof value === "boolean" ? { ok: true, value } : no;
-    case "text":
-      return typeof value === "string" && value.trim() !== "" ? { ok: true, value: value.trim() } : no;
-    case "texts": {
-      if (!Array.isArray(value)) return no;
-      const names = value.filter((item): item is string => typeof item === "string");
-      return writing && (names.length !== value.length || names.some((name) => name.trim() === "")) ? no : { ok: true, value: names };
+  if (t.type === "table") {
+    if (t.whole === true && !isMapping(value)) return takenShape({ takes: t.of, default: null }, key, value, writing);
+    if (!isMapping(value)) return no;
+    const out: Mapping = {};
+    for (const [name, item] of Object.entries(value)) {
+      const taken = takenShape({ takes: t.of, default: null }, `${key}.${name}`, item, writing);
+      if (taken.ok) out[name] = taken.value;
+      else if (writing) return taken;
     }
+    return { ok: true, value: out };
   }
+  if (t.type === "records") {
+    if (!Array.isArray(value)) return no;
+    const out: Mapping[] = [];
+    for (const [i, item] of value.entries()) {
+      const record: Mapping = {};
+      let fits = isMapping(item);
+      for (const field of t.fields) {
+        if (!fits || !isMapping(item)) break;
+        const got = item[field.name];
+        const taken = got === undefined ? null : takenShape({ takes: field.takes, default: null }, `${key}[${i + 1}].${field.name}`, got, true);
+        if (taken === null || !taken.ok) fits = false;
+        else record[field.name] = taken.value;
+      }
+      if (fits) out.push(record);
+      else if (writing) return { ok: false, why: `${key}[${i + 1}] is a record with ${t.fields.map((f) => `${f.name} (${shapeWords(f.takes)})`).join(" and ")}, not ${words(item)}.` };
+    }
+    return { ok: true, value: out };
+  }
+  return takenShape({ ...def, takes: t }, key, value, writing);
 }
 
 /** A setting's value in a config: the value set, where it is one the setting takes; else its default, and what was set and why it was passed over. */
@@ -143,15 +268,12 @@ export interface SettingRead {
   passed: { value: JsonValue; why: string } | null;
 }
 
-export function settingIn(config: Mapping, def: SettingDef, connection?: string): SettingRead {
+export function settingIn(config: Mapping, def: Declared, connection?: string): SettingRead {
   const set = valueAt(config, pathOf(def, connection), def.short === true);
   if (set === undefined) return { value: def.default, passed: null };
   const taken = takenValue(def, set, keyFor(def, connection));
   return taken.ok ? { value: taken.value, passed: null } : { value: def.default, passed: { value: set, why: taken.why } };
 }
-
-/** A group of settings whose values are numbers, none of which takes `~`, by the name its reader takes each under. */
-export type NumberSettings<K extends string> = Readonly<Record<K, SettingDef & { readonly takes: { readonly type: "whole" | "number" } }>>;
 
 /**
  * Each setting of a group as a config sets it, by the name the group gives it: the value set where

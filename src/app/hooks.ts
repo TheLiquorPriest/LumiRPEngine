@@ -5,7 +5,8 @@
 // edits it. The app gathers every area's here when it opens, and the area that owns a hook reads it
 // from the app when it is asked.
 
-import type { AgentRef, Scope, SettingDef } from "rp-harness/contract";
+import type { AgentRef, Scope } from "rp-harness/contract";
+import type { Setting } from "./setting-list";
 
 /** A view an agent is given by name, beyond the turn's own: its text; null for a name that is none of the area's own. */
 export type ViewHook = (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
@@ -38,7 +39,7 @@ export interface Hooks {
 interface Giving {
   readonly name: string;
   readonly fills?: Fills;
-  readonly settings?: readonly SettingDef[];
+  readonly settings?: readonly Setting[];
 }
 
 /** Every area's fills as one set of hooks; a lane of the door that two areas fill is an error that names both. */
@@ -68,9 +69,9 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
   };
 }
 
-/** Every area's settings, in the order of the areas; a key two areas list is an error that names both. */
-export function gatherSettings(areas: readonly Giving[]): SettingDef[] {
-  const out: SettingDef[] = [];
+/** The registry: every area's settings, in the order of the areas; a key two areas list (RPH's among them, which one area lists) is an error that names both. */
+export function gatherSettings(areas: readonly Giving[]): Setting[] {
+  const out: Setting[] = [];
   const listedBy = new Map<string, string>();
   for (const area of areas) {
     for (const def of area.settings ?? []) {
