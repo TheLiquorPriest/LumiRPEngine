@@ -9,7 +9,7 @@
 // why.
 
 import { createStore, type Readable } from "./store";
-import { type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent, type MissingPermissionShown } from "../shared/api";
+import { ANSWER_STATUS, ANSWERS_PATH, type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent, type MissingPermissionShown } from "../shared/api";
 import { isRecord } from "../shared/json";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, SESSION_PATH, type StartFacts, type Timers } from "./roads";
 import { createUiSettings, type UiSettings } from "./ui-settings";
@@ -17,10 +17,6 @@ import { errorWords } from "./words";
 
 /** Every route the pages call, by method and path pattern, as the route table writes them (the generated types); `*` stands for the rest of the path. */
 export type RouteKey = keyof ApiRoutes & string;
-
-/** The status a route that may outlast the relay's 30 s answers at once with: its body is `{ answer: <id> }`, and the answer is read from `ANSWERS_PATH/:id` until it is ready. */
-const ANSWER_STATUS = 202;
-const ANSWERS_PATH = "/api/v1/answers";
 
 /** RPE refused a call, in its own words; `status` 0 when RPE was not reached at all. */
 export class RpeError extends Error {
