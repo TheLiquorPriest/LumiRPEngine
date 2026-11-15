@@ -43,9 +43,10 @@ const HEADINGS: Readonly<Record<RouteGroup, string>> = {
 
 const ACCESS_WORDS: Readonly<Record<RouteInfo["access"], string>> = {
   public: "anyone who reaches RPE",
-  page: "a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token)",
+  page: "a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket",
   provider: "Lumiverse on RPE's connection (the provider key)",
   extension: "the light extension (its registration key)",
+  command: "the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it",
 };
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -243,10 +244,13 @@ function socketConstants(): string[] {
 export function renderTypes(table: Table): string {
   const names = new Names();
   const { json, raw } = entries(table);
-  const routeLines = json.map((e) => {
+  const routeLine = (e: JsonEntry): string => {
     const lines = [`  /** ${e.does} */`, `  ${JSON.stringify(routeKey(e.info))}: {`, `    params: ${paramsType(e.info)};`, `    query: ${queryType(e, names)};`, `    body: ${e.body === null ? "undefined" : names.ts(e.body)};`, `    reply: ${names.ts(e.reply)};`, `    paged: ${e.paged};`, `    joined: ${e.joined};`, "  };"];
     return lines.join("\n");
-  });
+  };
+  // The command line's routes answer on its socket alone, so a page's client is never given a call to one.
+  const routeLines = json.filter((e) => e.info.access !== "command").map(routeLine);
+  const commandLines = json.filter((e) => e.info.access === "command").map(routeLine);
   const rawLines = raw.map((e) => [`  /** ${e.does} */`, `  ${JSON.stringify(routeKey(e.info))}: {`, `    params: ${paramsType(e.info)};`, `    answers: ${JSON.stringify(e.answers)};`, `    joined: ${e.joined};`, "  };"].join("\n"));
   const kindLines = Object.entries(table.kinds).map(([kind, k]) => `  /** ${k.does}${k.key === undefined ? "" : ` A newer one replaces one a page has not taken yet (key "${k.key}").`} */\n  ${key(kind)}: ${names.ts(k.data)};`);
   // The socket's own messages, and the answer a joined turn gets, are named shapes: written once, with the rest, below.
@@ -263,6 +267,9 @@ export function renderTypes(table: Table): string {
     ...names.all().flatMap((n) => [`/** ${n.doc} */`, n.text, ""]),
     "/** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, and whether it pages. */",
     `export interface ApiRoutes {\n${routeLines.join("\n")}\n}`,
+    "",
+    "/** The server's own command line's routes, which answer on its socket in the data folder alone (`command` access), in the same form; on that socket the routes of `ApiRoutes` that a page calls answer too, as the owner's. */",
+    `export interface CommandRoutes ${commandLines.length === 0 ? "{}" : `{\n${commandLines.join("\n")}\n}`}`,
     "",
     "/** Every route in the form that answers in its own way (a stream, a socket, a file), and what it answers. */",
     `export interface RawRoutes {\n${rawLines.join("\n")}\n}`,

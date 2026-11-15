@@ -61,7 +61,7 @@ The chats RPE played, the most recently played first, then the chats its store h
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -74,7 +74,7 @@ Holds a panel's request as part of the player's next message, for the turn that 
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
@@ -89,7 +89,7 @@ Settle now: a run on the chat's newest turn that writes nothing into the chat; a
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | none |
@@ -102,7 +102,7 @@ A chat's turns, newest first, each with what its runs spent together; `before` i
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | `limit` (may be left out): `number`, How many turns to give: 50 when left out, and at most 500<br>`before` (may be left out): [`TurnId`](#turnid), A turn's id: the turns older than it are given |
@@ -116,7 +116,7 @@ One turn, read on from where a page has read to: its intent record, what went to
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat`, `turn` |
 | Query | `run` (may be left out): `string`, One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole<br>`from` (may be left out): `number`, The named run's records are given from the one with this number; 1 when left out |
@@ -130,7 +130,7 @@ The whole of a turn's folder, every level down, each entry with its size; none f
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat`, `turn` |
 | Query | none |
@@ -144,7 +144,7 @@ One file of a turn's folder, by its path below the folder, as text; no path leav
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat`, `turn`, `*` (the rest of the path) |
 | Query | none |
@@ -158,7 +158,7 @@ Stops a turn going on now; says whether it was running.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat`, `turn` |
 | Query | none |
@@ -174,7 +174,7 @@ Tunnel for the previous build's messages: a panel's action as a page sends it, a
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
@@ -187,7 +187,7 @@ Tunnel for the previous build's messages: the Undo of a tap, sent as the previou
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
@@ -201,7 +201,7 @@ A chat's state view, at its head or as it stood at one of its turns, in the shap
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the state as it stood at that turn; left out, at the chat's head |
@@ -215,7 +215,7 @@ The world's tree for a chat: the level asked for, then each level below it to th
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | `at` (may be left out): `string`, The level to start at, by its ref; `world` when left out<br>`depth` (may be left out): `number`, How many levels below it to give; 1 when left out<br>`values` (may be left out): `"none" | "own" | "all"`, Which values each level carries: none, its own, or all; `own` when left out<br>`turn` (may be left out): [`TurnId`](#turnid), A turn's id: the world as it stood at that turn; left out, at the chat's head |
@@ -231,7 +231,7 @@ Every character a chat knows, with what each holds on the path read: at the chat
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the cast as it stood at that turn; left out, at the chat's newest |
@@ -245,7 +245,7 @@ Everything on one character's record, by kind: at the chat's newest turn, or as 
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat`, `character` |
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the cast as it stood at that turn; left out, at the chat's newest |
@@ -259,7 +259,7 @@ Strikes an entry of a character's record, or takes its strike back, as the playe
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
@@ -274,7 +274,7 @@ A chat's story record, at its newest turn or as it stood at one of its turns: th
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the record as it stood at that turn; left out, at the chat's newest<br>`part` (may be left out): [`StoryListName`](#storylistname), Read this list further back: with no part named, every list<br>`skip` (may be left out): `number`, How many of a list's newest items to pass over; 0 when left out |
@@ -288,7 +288,7 @@ Strikes an item of the story record, or takes its strike back, as the player's o
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
@@ -303,7 +303,7 @@ Every file of the chat's view of the tree; with no chat, of the shipped level an
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
@@ -316,7 +316,7 @@ A file's difference from the shipped file of its name, and what the update that 
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `*` (the rest of the path) |
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
@@ -329,7 +329,7 @@ Switches a file's name off or on again in the `off:` list of a level's config, w
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `*` (the rest of the path) |
 | Query | none |
@@ -342,7 +342,7 @@ Prunes a chat's old turn folders as the chat's retention setting says, never whi
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
@@ -355,7 +355,7 @@ The exact stack an agent gets in a chat, part by part, with the file each comes 
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | `chat`: `string`, The chat the agent runs in<br>`agent`: `string`, The agent's definition |
@@ -368,7 +368,7 @@ One file of the tree, as text.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `*` (the rest of the path) |
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
@@ -381,7 +381,7 @@ Writes a file's whole text as the user at a level (for a file of another level, 
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `*` (the rest of the path) |
 | Query | none |
@@ -394,7 +394,7 @@ Removes a file of the user's; for one in place of a default, that is resetting t
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `*` (the rest of the path) |
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
@@ -407,7 +407,7 @@ What the tree takes: each chat's folder by area, the user's own level, the shipp
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -420,7 +420,7 @@ A chat's largest notes, and those agents rewrote most.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | `chat`: `string`, The chat whose notes are listed<br>`limit` (may be left out): `number`, How many of each; the Storage page's setting when left out, and at most its largest |
@@ -433,7 +433,7 @@ A chat's suggestions from the agents (every chat's when none is named), newest f
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`state` (may be left out): [`SuggestionStatus`](#suggestionstatus), Only the suggestions in this state |
@@ -446,7 +446,7 @@ Accepts a suggestion as it is or edited, writing it as the user at a level; says
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
@@ -459,7 +459,7 @@ Dismisses a suggestion; says the suggestion as it now stands.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `id` |
 | Query | none |
@@ -474,7 +474,7 @@ Starts the bootstrap job for the chats named, or for every chat the last migrati
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
@@ -487,7 +487,7 @@ A chat's bootstrap: the six facts of "done enough", and the chat's bootstrap job
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | none |
@@ -500,7 +500,7 @@ Starts a chat's bootstrap job (taking on a story with a past), with the player's
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
@@ -513,7 +513,7 @@ The user's jobs of one chat, as RPH last kept each, the newest started first.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
 | Query | none |
@@ -526,7 +526,7 @@ The user's jobs, of every chat, as RPH last kept each, the newest started first.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -539,7 +539,7 @@ Cancels a job; one that has ended already is given as it ended.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `job` |
 | Query | none |
@@ -554,7 +554,7 @@ The connections, each with whether a key is set (nothing of the key) and its mod
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -567,7 +567,7 @@ Adds a connection, with its key when it has one.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
@@ -580,7 +580,7 @@ Changes a connection, whole: a field left out is cleared; its key stays when the
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
@@ -593,7 +593,7 @@ Removes a connection, and its key.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `id` |
 | Query | none |
@@ -606,7 +606,7 @@ Makes a connection the default.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `id` |
 | Query | none |
@@ -619,7 +619,7 @@ Tests a connection with one small call: how long it took, and the model that ans
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `id` |
 | Query | none |
@@ -634,7 +634,7 @@ Every setting RPH and RPE read, with the value in force for a chat (or for every
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | `chat` (may be left out): `string`, The chat whose levels are read; left out or empty, the levels every chat shares |
@@ -647,7 +647,7 @@ Writes one setting into one level's config file, as the user would write it, and
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
@@ -662,7 +662,7 @@ Tunnel for the previous build's messages: Build's page sends one of today's mess
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
@@ -677,7 +677,7 @@ The Migration page's data: the last run's report and its printed text, each chat
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -749,7 +749,7 @@ When RPE started, and the builds that meet at it, its app file read again.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -762,7 +762,7 @@ How RPE's extension in Lumiverse last said it stands with RPE.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -775,7 +775,7 @@ Whose the page's credential is, and when it ends.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -788,7 +788,7 @@ Whose the page's credential is, and when it ends.
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Query | none |
@@ -803,7 +803,7 @@ The live socket: a page follows chats on it, and is sent each one's events in or
 
 | | |
 |---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token) |
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
 | Answers | a WebSocket on the protocol rpe.live; 426 when the request is not a socket's, 400 when it offers protocols and not rpe.live |

@@ -1820,6 +1820,9 @@ export interface ApiRoutes {
   };
 }
 
+/** The server's own command line's routes, which answer on its socket in the data folder alone (`command` access), in the same form; on that socket the routes of `ApiRoutes` that a page calls answer too, as the owner's. */
+export interface CommandRoutes {}
+
 /** Every route in the form that answers in its own way (a stream, a socket, a file), and what it answers. */
 export interface RawRoutes {
   /** The extension asks whether the registration it holds is the one this RPE made. */

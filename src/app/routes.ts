@@ -26,12 +26,19 @@ export const METHODS: readonly Method[] = ["GET", "POST", "PUT", "PATCH", "DELET
  * - `public`: anyone who reaches the server (its status, the web UI's files);
  * - `page`: a page of the Lumiverse user this RPE belongs to, with a page token or the web UI's token;
  * - `provider`: Lumiverse on RPE's connection, with the provider key;
- * - `extension`: the light extension, with its registration key.
+ * - `extension`: the light extension, with its registration key;
+ * - `command`: the server's own command line, on the Unix socket in the data folder that only the
+ *   owner's account may open. Such a route is served there alone: never on the TCP listener, so never
+ *   through Lumiverse's relay either, and no page can reach it.
  *
  * Which a route may say follows from where it is: `/v1/` is the provider's, `/api/v1/ext/` the
- * extension's, the rest of `/api/v1/` is pages' (or public), and `/ui/` is public.
+ * extension's, `/api/v1/command/` the command line's, the rest of `/api/v1/` is pages' (or public),
+ * and `/ui/` is public.
  */
-export type Access = "public" | "page" | "provider" | "extension";
+export type Access = "public" | "page" | "provider" | "extension" | "command";
+
+/** Where the command line's routes live, and the only place a route of `command` access may be. */
+export const COMMAND_PREFIX = "/api/v1/command/";
 
 /**
  * The groups of §4.4 l.309, in the reference's order: the provider endpoint (`/v1/`), the API's groups
@@ -580,6 +587,7 @@ const SHAPE_KINDS: Readonly<Record<AnyShape["kind"], true>> = { text: true, numb
 function accessFor(path: string): readonly Access[] | null {
   if (path.startsWith("/v1/")) return ["provider"];
   if (path.startsWith("/api/v1/ext/")) return ["extension"];
+  if (path.startsWith(COMMAND_PREFIX)) return ["command"];
   if (path.startsWith("/api/v1/")) return ["page", "public"];
   if (path === "/ui" || path.startsWith("/ui/")) return ["public"];
   return null;

@@ -8,6 +8,7 @@ import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
 import { Auth } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
+import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
 import { LiveHub, liveRoute } from "./live";
@@ -44,13 +45,26 @@ export const UPDATE_PATH = "/api/v1/update";
  */
 export interface Area {
   readonly name: string;
-  /** Its tables: the migration area they are kept under, and its migrations. */
-  readonly tables?: { readonly area: MigrationArea; readonly migrations: readonly Migration[] };
+  /** Its tables: each migration area it brings (an area of RPE may bring more than one), and its migrations. */
+  readonly tables?: readonly AreaTables[];
+  /** Its settings: listed once, with every other area's, by the Settings routes (`App.settings`). */
+  readonly settings?: readonly SettingDef[];
+  /** What it adds to the hooks of the other areas (`App.hooks`): a view an agent is given by name, a lane of the door. */
+  readonly fills?: Fills;
+  /** In the order of the areas. */
   readonly mount?: (app: App) => void | Promise<void>;
+  /** Once every area is mounted, in the order of the areas: what is made from the parts of an area mounted after this one (its routes among them). */
+  readonly mounted?: (app: App) => void | Promise<void>;
   /** Once the server listens. It cannot add routes: the table is fixed by then. */
   readonly started?: (app: App) => void | Promise<void>;
   /** First thing at close. */
   readonly stopping?: (app: App) => void | Promise<void>;
+}
+
+/** The tables of one migration area an area brings. */
+export interface AreaTables {
+  readonly area: MigrationArea;
+  readonly migrations: readonly Migration[];
 }
 
 export interface App {
@@ -68,6 +82,10 @@ export interface App {
   /** Where RPH's model layer keeps the connections and their secrets: the host's `Environment.models`. */
   readonly models: ModelsPort;
   readonly log: Log;
+  /** Every setting the areas list, in the order of the areas: what the Settings routes show and write. */
+  readonly settings: readonly SettingDef[];
+  /** What the areas add to each other's hooks, gathered from every area when the app opened. */
+  readonly hooks: Hooks;
   readonly now: () => number;
   /** The builds that meet at RPE (its own, its app file's on disk, the extension's), and a restart onto a new app file. */
   readonly builds: Builds;
@@ -227,7 +245,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
       if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");
       if (starting !== null) throw new Error("RPE's server is already started.");
       const run = (async () => {
-        const server = startServer({ config, routes, auth, live, log, now });
+        const server = startServer({ config, routes, auth, live, log, now, commandSocket: commandSocketPath(paths.root) });
         running = server;
         for (const area of mounted) await hook(area, "started");
         return server;

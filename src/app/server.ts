@@ -6,14 +6,22 @@
 // does not take is refused with 400 before its handler runs, which is given only what was declared,
 // read and typed, and the caller's credential only where its route declares it. A page from an allowed
 // origin gets the CORS answers it needs to call RPE directly, the Lumiverse page among them.
+//
+// Two kinds of listener. TCP, where pages, Lumiverse and the extension reach RPE, serves every route but
+// the command line's. The command socket, a Unix socket in the data folder that only the owner's account
+// may open, serves the command line's routes (`command` access) and nothing else: the socket is their
+// credential, so a request there is held to no Host, Origin or key, and is given no CORS answers, which
+// no browser can use there.
 
 import type { BunRequest, Server } from "bun";
 import { createHmac, randomBytes } from "node:crypto";
+import { chmodSync, lstatSync, rmSync } from "node:fs";
 import type { Log } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { Auth } from "./auth";
 import { AuthRefused, bearerOf, NO_OWNER } from "./auth";
 import type { AppConfig } from "./config";
+import { OWNER_ONLY_FILE } from "./disk";
 import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
 import type { AnyShape, DeclaredRoute, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
@@ -26,6 +34,8 @@ export interface ServerParts {
   live: LiveHub;
   log: Log;
   now: () => number;
+  /** Where the command line's socket goes, in the data folder; absent, the command line's routes are served nowhere. */
+  commandSocket?: string;
 }
 
 export interface RunningServer {
@@ -34,9 +44,14 @@ export interface RunningServer {
   readonly url: string;
   /** Where RPE answers on this machine's loopback, whatever its address: `http://127.0.0.1:<port>`, its extension's road to it. */
   readonly loopback: string;
+  /** The Unix socket the command line's routes answer on; null where none was asked for. */
+  readonly commandSocket: string | null;
   /** Stops listening and closes every connection and socket. */
   stop(): Promise<void>;
 }
+
+/** Which listener a request came on: TCP, or the command line's socket. */
+type Listener = "tcp" | "command";
 
 const LOOPBACK: Readonly<Record<string, true>> = { localhost: true, "127.0.0.1": true, "[::1]": true };
 const WILDCARD: Readonly<Record<string, true>> = { "0.0.0.0": true, "[::]": true };
@@ -277,11 +292,12 @@ export function startServer(parts: ServerParts): RunningServer {
   let listening = config.port;
   const limits = [config.server.bodyBytes, config.server.providerBodyBytes, ...[...table.values()].flatMap((byMethod) => [...byMethod.values()].map((p) => p.route.maxBody ?? 0))];
 
-  const answer = async (request: Request, server: Server<LiveSocketData>, byMethod: Map<Method, Placed> | null, params: Record<string, string>): Promise<Response | undefined> => {
+  const answer = async (on: Listener, request: Request, server: Server<LiveSocketData> | null, byMethod: Map<Method, Placed> | null, params: Record<string, string>): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const path = url.pathname;
-    if (!hostAllowed(config, listening, request.headers.get("host"))) return refusal(path, 421, `This is RPE, and it answers only requests addressed to it by its own names. If you reach it by ${request.headers.get("host") ?? "another name"} on purpose, add that name to "hosts" in its config.`);
-    const origin = request.headers.get("origin");
+    // On the command socket the socket is the credential, and no browser reaches it: no Host, no Origin, no CORS.
+    if (on === "tcp" && !hostAllowed(config, listening, request.headers.get("host"))) return refusal(path, 421, `This is RPE, and it answers only requests addressed to it by its own names. If you reach it by ${request.headers.get("host") ?? "another name"} on purpose, add that name to "hosts" in its config.`);
+    const origin = on === "tcp" ? request.headers.get("origin") : null;
     if (origin !== null && !originAllowed(config, listening, origin)) return refusal(path, 403, `Pages from ${origin} may not call RPE. If that address is yours, add it to "origins" in RPE's config.`);
     const methods = byMethod === null ? [] : [...byMethod.keys()];
     if (request.method === "OPTIONS") {
@@ -306,9 +322,12 @@ export function startServer(parts: ServerParts): RunningServer {
     let user: string | null = auth.owner;
     if (route.access === "page") {
       if (auth.owner === null) return withCors(refusal(path, 503, NO_OWNER), origin);
-      user = auth.pageUser(credentialOf(request));
-      if (user === null) return withCors(refusal(path, 401, ACCESS_WORDS.page), origin);
-    } else if (route.access !== "public" && !auth.holds(route.access, credentialOf(request))) {
+      // On the owner's socket a page route is the owner's own call: only his account can open it.
+      if (on === "tcp") {
+        user = auth.pageUser(credentialOf(request));
+        if (user === null) return withCors(refusal(path, 401, ACCESS_WORDS.page), origin);
+      }
+    } else if (route.access !== "public" && route.access !== "command" && !auth.holds(route.access, credentialOf(request))) {
       return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "provider" | "extension"]), origin);
     }
     // Every request's body is held to its route's limit, whatever its method. Bun hands no route the body of a
@@ -329,7 +348,7 @@ export function startServer(parts: ServerParts): RunningServer {
     try {
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
-        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map(), credential, ends: undefined, catchUp: undefined }, ...(headers === undefined ? {} : { headers }) });
+        const openLiveSocket = (headers?: Record<string, string>): boolean => server?.upgrade(request, { data: { follows: new Map(), credential, ends: undefined, catchUp: undefined }, ...(headers === undefined ? {} : { headers }) }) ?? false;
         const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket });
         return response === undefined ? undefined : withCors(response, origin);
       }
@@ -346,8 +365,18 @@ export function startServer(parts: ServerParts): RunningServer {
     }
   };
 
-  const routes: Record<string, (request: BunRequest, server: Server<LiveSocketData>) => Promise<Response | undefined>> = {};
-  for (const [pattern, byMethod] of table) routes[pattern] = (request, server) => answer(request, server, byMethod, request.params);
+  // TCP serves every route but the command line's; the command socket serves the command line's and the pages', never the provider
+  // endpoint or the extension's, which are Lumiverse's roads, each with its own key. Nothing on the socket can become a live
+  // socket (it is handed no server to open one on), so every request there gets a response.
+  const onSocket = async (request: Request, byMethod: Map<Method, Placed> | null, params: Record<string, string>): Promise<Response> =>
+    (await answer("command", request, null, byMethod, params)) ?? refusal(new URL(request.url).pathname, 500, "RPE could not answer this request; its log says why.");
+  const tcpRoutes: Record<string, (request: BunRequest, server: Server<LiveSocketData>) => Promise<Response | undefined>> = {};
+  const socketRoutes: Record<string, (request: BunRequest) => Promise<Response>> = {};
+  for (const [pattern, byMethod] of table) {
+    const access = new Set([...byMethod.values()].map((p) => p.route.access));
+    if (!access.has("command")) tcpRoutes[pattern] = (request, server) => answer("tcp", request, server, byMethod, request.params);
+    if (!access.has("provider") && !access.has("extension")) socketRoutes[pattern] = (request) => onSocket(request, byMethod, request.params);
+  }
   const websocket = liveSockets(parts.live, {
     messageBytes: config.live.messageBytes,
     follows: config.live.follows,
@@ -357,21 +386,25 @@ export function startServer(parts: ServerParts): RunningServer {
     },
     now: parts.now,
   });
+  const common = {
+    // Above every route's own limit, so that each route refuses in its own words first.
+    maxRequestBodySize: Math.max(...limits) + 1024 * 1024,
+    error(error: Error) {
+      log.error("a request failed before its route answered", { error: error.message });
+      return Response.json({ error: "RPE could not answer this request; its log says why." }, { status: 500 });
+    },
+  };
   const serve = (hostname: string, port: number): Server<LiveSocketData> =>
     Bun.serve<LiveSocketData>({
+      ...common,
       hostname,
       port,
-      // A turn can stay silent for minutes (plan §10.7 keeps it alive inside ten), longer than Bun's longest idle limit.
+      // A turn can stay silent for minutes (plan §10.7 keeps it alive inside ten), longer than Bun's longest idle limit. A Unix
+      // socket has no idle limit to lift.
       idleTimeout: 0,
-      // Above every route's own limit, so that each route refuses in its own words first.
-      maxRequestBodySize: Math.max(...limits) + 1024 * 1024,
-      routes,
-      fetch: (request, server) => answer(request, server, null, {}),
+      routes: tcpRoutes,
+      fetch: (request, server) => answer("tcp", request, server, null, {}),
       websocket,
-      error(error) {
-        log.error("a request failed before its route answered", { error: error.message });
-        return Response.json({ error: "RPE could not answer this request; its log says why." }, { status: 500 });
-      },
     });
   const server = serve(config.address, config.port);
   listening = server.port ?? config.port;
@@ -388,13 +421,35 @@ export function startServer(parts: ServerParts): RunningServer {
       throw new Error(`RPE did not start: its extension in Lumiverse reaches it on 127.0.0.1:${listening}, and ${taken ? "another program holds that address" : `RPE could not listen there (${error instanceof Error ? error.message : String(error)})`}; give RPE another port.`);
     }
   }
+  const socket = parts.commandSocket ?? null;
+  let command: Server<undefined> | null = null;
+  if (socket !== null) {
+    try {
+      // A socket left by a server that ended without stopping is let go: one server runs on a data folder at a time (its lock).
+      if (lstatSync(socket, { throwIfNoEntry: false })?.isSocket() === true) rmSync(socket);
+      // The owner's alone from its first moment, whatever the process's umask, and said again in its mode.
+      const umask = process.umask(0o177);
+      try {
+        command = Bun.serve({ ...common, unix: socket, routes: socketRoutes, fetch: (request) => onSocket(request, null, {}) });
+      } finally {
+        process.umask(umask);
+      }
+      chmodSync(socket, OWNER_ONLY_FILE);
+    } catch (error) {
+      void server.stop(true);
+      void beside?.stop(true);
+      void command?.stop(true);
+      throw new Error(`RPE did not start: its command line reaches it on the socket ${socket}, and RPE could not listen there (${error instanceof Error ? error.message : String(error)}).`);
+    }
+  }
   const shown = Object.hasOwn(WILDCARD, own) ? "127.0.0.1" : config.address.includes(":") ? `[${config.address}]` : config.address;
   return {
     port: listening,
     url: `http://${shown}:${listening}`,
     loopback: `http://127.0.0.1:${listening}`,
+    commandSocket: socket,
     stop: async () => {
-      await Promise.all([server.stop(true), beside?.stop(true)]);
+      await Promise.all([server.stop(true), beside?.stop(true), command?.stop(true)]);
     },
   };
 }
