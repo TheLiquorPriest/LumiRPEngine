@@ -47,10 +47,25 @@
     "dirty": true
   },
   "rph": {
-    "commit": "9a8b7c6d5e4f3a21",
-    "pin": "9a8b7c6d5e4f3a21",
-    "pinned": true
+    "commit": "9a8b7c6d5e4f3a2190817263544f3e2d1c0b9a87",
+    "pin": "9a8b7c6d5e4f3a2190817263544f3e2d1c0b9a87",
+    "pinned": true,
+    "held": {
+      "name": "git+https://rph.invalid/RPHarness.git#9a8b7c6d5e4f3a2190817263544f3e2d1c0b9a87",
+      "from": "rph-repository",
+      "stage": "before-publishing",
+      "bundles": null
+    }
   },
+  "instance": {
+    "address": "http://lumiverse.test:7860",
+    "name": "bed-instance"
+  },
+  "user": "user-marlow",
+  "neverTouch": [
+    "chat-bed-",
+    "7744"
+  ],
   "lumiverse": {
     "version": "a70f4ed2"
   },

@@ -11,6 +11,7 @@ import { standingOf, type RunRecord } from "../../../scripts/proof/route/evidenc
 import { buildFrom, buildTree, countApart, floorTrials, folderTree, gitTree, plainReasoning, readRun, recordPath, repeated, sha256, shippedOf, standingLines, treeChanges, treeHash, writeRecord, type Observed, type TreeFile } from "../../../scripts/proof/lib/record";
 import { runs, table } from "../../../scripts/testbed/floor";
 import type { FloorRun } from "../../../scripts/testbed/floor-measure";
+import { FAKE_RPH, fakeHeld } from "../route/fake";
 import { recordedRun } from "./recorded";
 import { LEADS } from "./replay";
 
@@ -165,7 +166,7 @@ describe("the build's shipped tree, laid by RPE's one rule", () => {
       const laid = shippedOf(build.rph, build.rpe);
       const fromOf = (served: TreeFile[]) => ({ served: treeHash(served), build: treeHash(laid), changed: treeChanges(served, laid), layers: [], files: { served: served.length, build: laid.length }, names: { off: [], layered: [], added: [] } });
       const rpe = { commit: input.commit, dirty: false };
-      const rph = { commit: "9a8b7c6d5e4f3a21", pin: "9a8b7c6d5e4f3a21", pinned: true };
+      const rph = { commit: FAKE_RPH, pin: FAKE_RPH, pinned: true, held: fakeHeld() };
       expect(standingOf(rpe, rph, fromOf(laid)).is).toBe("verdict");
       const changed = laid.map((f) => (f.path === "TURN.md" ? { ...f, sha256: sha256("a turn changed on the server") } : f));
       expect(standingOf(rpe, rph, fromOf(changed))).toMatchObject({ is: "trial", why: ["the shipped tree the server ran is not the build's: 1 path differs (TURN.md)"] });

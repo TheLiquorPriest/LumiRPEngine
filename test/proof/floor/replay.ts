@@ -17,7 +17,7 @@ import { runRecord, type RunRecord } from "../../../scripts/proof/route/evidence
 import { standingFromFacts } from "../../../scripts/proof/route/runner";
 import { main } from "../../../scripts/proof/run";
 import type { FloorRun, PageTimes } from "../../../scripts/testbed/floor-measure";
-import { FakeBrowser } from "../route/fake";
+import { FAKE_RPH, fakeHeld, FakeBrowser } from "../route/fake";
 import { MODEL } from "./recorded";
 
 const REPO = resolve(import.meta.dir, "../../..");
@@ -78,7 +78,7 @@ export const FLOOR_GATE: ReplayGate = { id: "floor", gate: "scripts/proof/floor/
 export function factsOf(run: FloorRun, edit?: (facts: RunFacts) => void): RunFacts {
   const facts: RunFacts = {
     rpe: { commit: "4f1c2a9e7b3d5a61", dirty: false },
-    rph: { commit: "9a8b7c6d5e4f3a21", pin: "9a8b7c6d5e4f3a21" },
+    rph: { commit: FAKE_RPH, pin: FAKE_RPH, held: fakeHeld() },
     lumiverse: { version: "0.0.0-invented" },
     browser: { name: "fake", version: "1" },
     agents: [{ agent: "author", connection: "rpe-floor", model: MODEL, replyForm: run.form === "two-step" ? "two-step" : "tags", effort: "low", streams: run.streams }],
