@@ -31,7 +31,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import { check, fixturesDir, type Found } from "./check";
-import { guidanceOf, shippedOf, treeChanges, treeHash, type TreeFile } from "../lib/record";
+import { guidanceOf, SETTINGS_FILES, shippedOf, treeChanges, treeHash, type TreeFile } from "../lib/record";
 import { Bundle, factFaults, lookAt, readBundle, runRecord, standingOf, standingOfPlay, widthsOf, type PlayGuidance, type RunRecord, type StandingFrom } from "./evidence";
 import { isMeasured, pageSlug, parseStageId, partsOfStage, scenarioId, stageId, stagesOf, type Form, type GatePart, type Play, type ProofForm } from "./form";
 import type { GuidanceFacts, Host, HostOptions, Kept, LiveGuard, Mode, RoundStage, RunFacts, Session } from "./host";
@@ -357,7 +357,8 @@ export function standingFromFacts(given: GuidanceFacts | null | undefined): Stan
     served: treeHash(given.served),
     build: treeHash(build),
     changed: treeChanges(given.served, build),
-    layers: given.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files), guidance: guidanceOf(layer) })),
+    // A layer is hashed over its guidance files: a settings file holds no guidance, so changing a setting is no change of guidance (the names a config switches are in `names`).
+    layers: given.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files.filter((f) => !SETTINGS_FILES.includes(f.path.split("/").pop() ?? f.path))), guidance: guidanceOf(layer) })),
     files: { served: given.served.length, build: build.length },
     ...(named ? { names: { off: names.off.map((o) => ({ name: o.name, levels: [...o.levels] })), layered: [...names.layered], added: [...names.added] } } : {}),
   };

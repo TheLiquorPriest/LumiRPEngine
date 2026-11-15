@@ -195,6 +195,20 @@ test("in the rig an as-shipped part is its code path, judged as code whatever th
   expect(live.code).toBe(3);
 });
 
+test("a setting written during a play is no change of guidance: a layer is hashed over its guidance files, not its settings file", async () => {
+  // The play's chat has an RPE.yml when the footing is ready, and a different one when the form has ended (a gate writing `reply.forms.<connection>`).
+  const settings = (text: string) => fakeGuidance({ layers: [{ level: "chat", files: [{ path: "RPE.yml", sha256: sha256(text) }] }] });
+  const written: SessionGuidance = (_, when) => settings(when === "before" ? "reply:\n  streamAnyway: false\n" : "reply:\n  streamAnyway: true\n");
+  const kept = await runOn(root, CLEAN, { guidance: written });
+  expect(kept.printed).toContain("This run gives a verdict:");
+  expect(kept.code).toBe(0);
+  // A guidance file written in the same play is still a change, said so.
+  const guided: SessionGuidance = (_, when) => fakeGuidance({ layers: [{ level: "chat", files: when === "before" ? [] : [{ path: "author/turn.md", sha256: sha256("Write it as a sonnet.") }] }] });
+  const moved = await runOn(root, CLEAN, { guidance: guided });
+  expect(moved.printed).toContain("gate-timing, play 1: its guidance changed during the play (the chat layer) and its form did not say so");
+  expect(moved.code).toBe(3);
+});
+
 test("standing is worked out per play: guidance in the play's own chat, which the run's start never saw, makes that play a trial", async () => {
   // The run began on the build's shipped guidance; the chat the play made holds a layer with guidance.
   const chat: SessionGuidance = () => fakeGuidance({ layers: [{ level: "chat", files: [{ path: "author/turn.md", sha256: sha256("Write it as a sonnet.") }] }] });
