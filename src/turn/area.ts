@@ -7,7 +7,7 @@
 // migration carried of a chat. The views an agent is given by name come from every area's `fills`,
 // through the app's hook (`App.hooks.views`), not from one area's alone.
 
-import type { Clock, CreateHarnessOptions } from "rp-harness";
+import { type Clock, type CreateHarnessOptions, loadGuidance } from "rp-harness";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
 import { harnessSettings } from "../app/setting-list";
@@ -93,6 +93,15 @@ export function turnArea(takes: TurnTakes): TurnArea {
         // The model layer's pass, given the user this RPE belongs to: the door names no user of its own.
         models: { pass: (request, sink, signal) => made().harness.models.pass(owner(), request, sink, signal) },
         passConnection: () => (app === null ? null : passConnection(app.paths.files, app.log)),
+        // A passed request's failure in the shipped file's words, from the levels every chat shares; its key alone where it has none or cannot be read.
+        passWords: async (key, fields) => {
+          try {
+            const part = await loadGuidance(made().files, { user: owner() }).part("reply-errors");
+            return (part?.format === "lines" ? part.line(key, fields) : undefined) ?? key;
+          } catch {
+            return key;
+          }
+        },
       },
     },
     async mount(at) {
