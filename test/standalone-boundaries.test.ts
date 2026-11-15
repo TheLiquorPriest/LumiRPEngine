@@ -19,7 +19,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { NEW_ZONES } from "./removal/fates";
+import { atHome, homes, NEW_ZONES, readFates } from "./removal/fates";
 import { scan } from "./removal/imports";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -228,13 +228,18 @@ describe("the standalone application's boundaries", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("nothing the engine carries along imports the application", () => {
+  test("nothing the engine carries along imports the application, but its panels the shell files PlanSwap-6 moved out of the frontend", () => {
+    // The kept panels (src/packs/<pack>/ui/) stand on the five shell files the new pages share; they live in src/ui/ now, each named by its file.
+    const shell = homes(readFates()).filter(({ from, home, by }) => by === "PlanSwap-6" && from.startsWith("src/frontend/") && !home.endsWith("/"));
     const offenders: string[] = [];
     for (const carried of ["shared", "engine", "packs"]) {
       for (const file of files(join(SRC, carried))) {
+        const panel = /^packs\/[^/]+\/ui\//.test(relative(SRC, file).split("\\").join("/"));
         for (const { spec } of specsOf(readFileSync(file, "utf8"))) {
           if (!spec.startsWith(".")) continue;
-          const top = relative(SRC, resolveLocal(file, spec)).split("\\").join("/").split("/")[0] ?? "";
+          const target = relative(SRC, resolveLocal(file, spec)).split("\\").join("/");
+          if (panel && shell.some(({ home }) => atHome(`src/${target}`, home))) continue;
+          const top = target.split("/")[0] ?? "";
           if (isZone(top)) offenders.push(`${relative(SRC, file)} → ${spec}`);
         }
       }

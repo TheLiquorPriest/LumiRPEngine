@@ -317,3 +317,39 @@ describe("signing out (`POST /api/auth/sign-out`, Better Auth: `app.ts:356-357`)
   });
 });
 
+
+describe("what refuses a request with a 403 (`auth/middleware.ts:92-103`, `app.ts:233-240`, Better Auth's get-session)", () => {
+  const accounts = [
+    { id: USER, username: "mara", password: PASSWORD },
+    { id: OTHER, username: "pell", password: PASSWORD, role: "admin" as const },
+  ];
+  const session = (w: Weir, user: string): Promise<Response> => w.as(user).get("/api/auth/get-session");
+
+  test("a session names its user's role: \"user\" unless the account has another", async () => {
+    const w = await weirOf(closing, {}, { accounts });
+    expect(((await (await session(w, USER)).json()) as { user: unknown }).user).toEqual({ id: USER, role: "user" });
+    expect(((await (await session(w, OTHER)).json()) as { user: unknown }).user).toEqual({ id: OTHER, role: "admin" });
+  });
+
+  test("an owner-gated route tells a user 403 {error: Forbidden}, and an admin or the owner its list; no session is a 401 before the gate", async () => {
+    const w = await weirOf(closing, {}, { accounts });
+    const denied = await w.as(USER).get("/api/v1/users");
+    expect([denied.status, await denied.json()]).toEqual([403, { error: "Forbidden" }]);
+    const listed = await w.as(OTHER).get("/api/v1/users");
+    expect(listed.status).toBe(200);
+    expect(((await listed.json()) as { username: string; role: string }[]).map((u) => `${u.username}:${u.role}`)).toEqual(["mara:user", "pell:admin"]);
+    const none = await w.server.fetch(`${w.server.base}/api/v1/users`, { method: "GET" });
+    expect([none.status, await none.json()]).toEqual([401, { error: "Unauthorized", code: "SESSION_EXPIRED" }]);
+  });
+
+  test("an untrusted host is told 403 {error: Forbidden} on every route under /api/, the sign-in and get-session among them, until it is trusted", async () => {
+    const w = await weirOf(closing, {}, { accounts });
+    w.server.untrustedHost = true;
+    for (const [method, path] of [["POST", "/api/auth/sign-in/username"], ["GET", "/api/auth/get-session"], ["GET", "/api/v1/chats/none"]] as const) {
+      const res = await w.server.fetch(`${w.server.base}${path}`, { method });
+      expect([path, res.status, await res.json()]).toEqual([path, 403, { error: "Forbidden" }]);
+    }
+    w.server.untrustedHost = false;
+    expect((await session(w, USER)).status).toBe(200);
+  });
+});

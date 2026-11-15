@@ -28,6 +28,8 @@ export interface Account {
   id: string;
   username: string;
   password: string;
+  /** The user's role (`auth/index.ts:117-125`, the admin plugin's `defaultRole`); "user" when none is given. */
+  role?: "owner" | "admin" | "user";
 }
 
 interface Session {
@@ -147,6 +149,8 @@ export class LumiverseServer {
   answerPings = true;
   /** It refuses every ticket, as `ws/handler.ts:124-137` does an unknown or expired one. */
   refuseTickets = false;
+  /** Its Host guard (`app.ts:233-240`, `isHostAllowed`) refuses every `/api/` request, as it does a request whose Host is not one of the trusted hosts: 403 `{error: "Forbidden"}`, after the lockout check and before any route. */
+  untrustedHost = false;
   /** It lets a socket in only after this long (its `onOpen`, `ws/handler.ts:122-248`); never, when null. */
   openDelayMs: number | null = 0;
 
@@ -256,6 +260,12 @@ export class LumiverseServer {
     return this.clock.now() < s.expiresAt;
   }
 
+  /** A user's role as Lumiverse stores it: the account's own, else the admin plugin's default (`auth/index.ts:117-125`). */
+  private roleOf(user: string): "owner" | "admin" | "user" {
+    for (const account of this.accounts.values()) if (account.id === user) return account.role ?? "user";
+    return "user";
+  }
+
   /** The session a request's bearer names, renewed as Better Auth renews it (`auth/index.ts:109-112`); null for none alive. */
   private sessionOf(request: Request): Session | null {
     const token = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
@@ -346,6 +356,9 @@ export class LumiverseServer {
       if (locked !== null) return this.lockoutAnswer(locked, "Too many authentication failures from this client. Try again later.", now);
     }
 
+    // The Host guard (`app.ts:233-240`) comes after the lockout check, for every route under `/api/`.
+    if (path.startsWith("/api/") && this.untrustedHost) return json(403, { error: "Forbidden" });
+
     if (request.method === "POST" && path === "/api/auth/sign-in/username") return this.afterSignIn(await this.signIn(request, now), now);
 
     // `POST /api/auth/sign-out` (Better Auth, `app.ts:356-357`; `better-auth/dist/api/routes/sign-out.mjs:27-61`): the session the request holds is ended, and `{success: true}` answered, with or without one.
@@ -358,7 +371,7 @@ export class LumiverseServer {
     // `GET /api/auth/get-session` (`better-auth/dist/api/routes/session.mjs:19-130`): the session and its user, or `null`.
     if (request.method === "GET" && path === "/api/auth/get-session") {
       const s = this.sessionOf(request);
-      return json(200, s === null ? null : { session: { id: s.token.slice(0, 8), userId: s.user, token: s.token, expiresAt: new Date(s.expiresAt).toISOString() }, user: { id: s.user } });
+      return json(200, s === null ? null : { session: { id: s.token.slice(0, 8), userId: s.user, token: s.token, expiresAt: new Date(s.expiresAt).toISOString() }, user: { id: s.user, role: this.roleOf(s.user) } });
     }
 
     if (!path.startsWith("/api/v1/")) return json(404, { error: "Not found" });
@@ -374,6 +387,13 @@ export class LumiverseServer {
       this.ticketsLive.set(ticket, { user, expires: now + TICKET_TTL_MS });
       this.tickets.push(ticket);
       return json(200, { ticket });
+    }
+
+    // `GET /api/v1/users` (`routes/users.routes.ts:88-96`): behind `requireOwner` (`auth/middleware.ts:92-103`), which admits the owner and an admin and tells any other role 403 `{error: "Forbidden"}`.
+    if (request.method === "GET" && /^\/api\/v1\/users\/?$/.test(path)) {
+      if (this.roleOf(user) === "user") return json(403, { error: "Forbidden" });
+      const at = new Date(this.clock.now()).toISOString();
+      return json(200, [...this.accounts.values()].map((a) => ({ id: a.id, name: a.username, email: `${a.username}@example.invalid`, username: a.username, role: a.role ?? "user", banned: 0, createdAt: at, updatedAt: at })));
     }
 
     // `GET /api/v1/spindle` (`routes/spindle.routes.ts:45-58`): the extensions the user may use.
@@ -828,7 +848,7 @@ export class LumiverseServer {
       this.clock.clearTimeout(admission);
       served.admit(user, session);
       this.register(served);
-      served.send(JSON.stringify({ event: "CONNECTED", payload: { message: "Connected to Lumiverse event bus", userId: user, role: "user", extensionCommands: [] }, timestamp: this.clock.now() }));
+      served.send(JSON.stringify({ event: "CONNECTED", payload: { message: "Connected to Lumiverse event bus", userId: user, role: this.roleOf(user), extensionCommands: [] }, timestamp: this.clock.now() }));
     };
     if (this.openDelayMs !== null) later(this.openDelayMs, handshake);
     return {
