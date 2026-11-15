@@ -23,7 +23,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
-import type { SettingsReply } from "../../../src/ui/api";
+import type { SettingsReply } from "../../../src/shared/api";
 import { wordFaults } from "./check";
 import { gateIdFault, pageSlug, scenarioId, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
 import type { AgentFacts, Browser, Kept, Mode, RunFacts, Shot } from "./host";

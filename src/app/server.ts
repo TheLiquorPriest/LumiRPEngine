@@ -2,8 +2,10 @@
 // route's code runs, every request is held to four things: it is addressed to RPE by a name RPE
 // answers to (the Host check, which a page on a rebound DNS name fails); a page's Origin is one that
 // may call RPE; it carries what its route's access asks for; and its body is within the route's
-// limit. A page from an allowed origin gets the CORS answers it needs to call RPE directly, the
-// Lumiverse page among them.
+// limit. A route in the form is held to its declaration too: a query or a body it does not take is
+// refused with 400 before its handler runs, which is given only what was declared, read and typed. A
+// page from an allowed origin gets the CORS answers it needs to call RPE directly, the Lumiverse page
+// among them.
 
 import type { BunRequest, Server } from "bun";
 import type { Log } from "rp-harness/contract";
@@ -13,8 +15,8 @@ import { AuthRefused, bearerOf, NO_OWNER } from "./auth";
 import type { AppConfig } from "./config";
 import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
-import type { Method, Placed, RouteTable } from "./routes";
-import { RouteError } from "./routes";
+import type { AnyShape, DeclaredRoute, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
+import { isDeclared, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
 
 export interface ServerParts {
   config: AppConfig;
@@ -153,6 +155,64 @@ const ACCESS_WORDS: Readonly<Record<"page" | "provider" | "extension", string>> 
   extension: "This needs the extension's registration with this RPE.",
 };
 
+/** What a paged route takes in its query beside what it declares: the size of the page it asks for, and where it starts. */
+const PAGE_QUERY: QueryFields = { limit: shape.optional(shape.whole({ least: 1 })), cursor: shape.optional(shape.text({ blank: false })) };
+
+/** The rest of the path a pattern's last `*` stands for: each segment decoded, or as sent where one cannot be. */
+function restOf(pattern: string, pathname: string): { decoded: string | null; sent: string } {
+  const parts = pathname.split("/").slice(pattern.split("/").length - 1);
+  const sent = parts.join("/");
+  try {
+    return { decoded: parts.map((part) => decodeURIComponent(part)).join("/"), sent };
+  } catch {
+    return { decoded: null, sent };
+  }
+}
+
+/** What a route in the form is asked, before its handler is given it. */
+interface Asked {
+  path: string;
+  params: Record<string, string>;
+  search: URLSearchParams;
+  user: string | null;
+  credential: string | null;
+  bytes: Uint8Array<ArrayBuffer> | null;
+  signal: AbortSignal;
+}
+
+/** A route in the form, answered: its query and its body held to its declaration (refused with 400 in RPE's words), then its handler given what they hold. */
+async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>, asked: Asked): Promise<Response> {
+  const at = `${route.method} ${route.path}`;
+  const fields: QueryFields = route.paged === undefined ? (route.query ?? {}) : { ...route.query, ...PAGE_QUERY };
+  const read = readQuery(fields, asked.search, at);
+  if (!read.ok) return refusal(asked.path, 400, read.why);
+  const query = read.value;
+  const sizes: PageSizes | undefined = await route.paged?.sizes?.({ params: asked.params, user: asked.user });
+  if (sizes !== undefined) {
+    const limit = query.limit as number | undefined;
+    if (limit !== undefined && limit > sizes.most) return refusal(asked.path, 400, `${at} gives at most ${sizes.most} a page, and this asks for ${limit}.`);
+    query.limit = limit ?? sizes.default;
+  }
+  let body: unknown;
+  const sent = asked.bytes !== null && asked.bytes.length > 0;
+  if (route.body === undefined) {
+    if (sent) return refusal(asked.path, 400, `${at} takes no body.`);
+  } else {
+    const declared: AnyShape = route.body;
+    if (asked.bytes === null || !sent) return refusal(asked.path, 400, `${at} takes a JSON body: ${shapeWords(declared)}.`);
+    try {
+      body = JSON.parse(new TextDecoder().decode(asked.bytes));
+    } catch {
+      return refusal(asked.path, 400, "The request's body is not JSON.");
+    }
+    const problems = problemsOf(declared, body, "body");
+    if (problems.length > 0) return refusal(asked.path, 400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
+  }
+  const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, credential: asked.credential, signal: asked.signal });
+  if ((route.reply as AnyShape).kind === "nothing") return new Response(null, { status: 204 });
+  return Response.json(reply, { headers: { "cache-control": "no-store" } });
+}
+
 export function startServer(parts: ServerParts): RunningServer {
   const { config, auth, log } = parts;
   const table = parts.routes.fix();
@@ -200,12 +260,19 @@ export function startServer(parts: ServerParts): RunningServer {
       if ("tooLarge" in read) return withCors(refusal(path, 413, `This request's body is ${sizeWords(read.tooLarge)}, and ${request.method} ${route.path} takes at most ${sizeWords(limit)}.`), origin);
       bytes = read.bytes;
     }
+    const credential = credentialOf(request);
+    const rest = route.path.endsWith("/*") ? restOf(route.path, path) : null;
     try {
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
-        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map(), credential: credentialOf(request), ends: undefined }, ...(headers === undefined ? {} : { headers }) });
-        const response = await route.raw(given, { params, user, openLiveSocket });
+        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map(), credential, ends: undefined }, ...(headers === undefined ? {} : { headers }) });
+        const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket });
         return response === undefined ? undefined : withCors(response, origin);
+      }
+      if (isDeclared(route)) {
+        if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
+        const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal };
+        return withCors(await answerDeclared(route, asked), origin);
       }
       let body: unknown;
       if (route.body !== undefined) {
@@ -218,7 +285,7 @@ export function startServer(parts: ServerParts): RunningServer {
         }
         body = route.body(value);
       }
-      const reply: unknown = await route.handle({ params, query: url.searchParams, body, user, request, signal: request.signal });
+      const reply: unknown = await route.handle({ params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, query: url.searchParams, body, user, request, signal: request.signal });
       if (reply instanceof Response) return withCors(reply, origin);
       const response = reply === undefined ? new Response(null, { status: 204 }) : Response.json(reply, { headers: { "cache-control": "no-store" } });
       return withCors(response, origin);

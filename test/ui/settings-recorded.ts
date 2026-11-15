@@ -3,7 +3,7 @@
 // there is and for a name no connection has. For the Settings page's tests and the preview. Every value
 // here is made up.
 
-import type { SettingsReply, SettingView } from "../../src/ui/api";
+import type { SettingsReply, SettingView } from "../../src/shared/api";
 import { CHAT } from "./recorded";
 
 const GLOBAL_FILE = "@global/RPE-global.yml";

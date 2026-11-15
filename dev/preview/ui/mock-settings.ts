@@ -3,8 +3,8 @@
 // a key away leaves its default (the stand-in keeps no farther level's value under it). A value a
 // setting does not take is refused, as RPE refuses it. Every chat is served the same settings.
 
+import type { SettingsReply, SettingsWrite, SettingView } from "../../../src/shared/api";
 import type { JsonValue } from "../../../src/shared/json";
-import type { SettingsReply, SettingsWrite, SettingView } from "../../../src/ui/api";
 import { SETTINGS } from "../../../test/ui/settings-recorded";
 
 const answer = (status: number, body: unknown): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -26,7 +26,7 @@ function takes(setting: SettingView, value: JsonValue): boolean {
 export async function settingsAnswer(request: Request, url: URL): Promise<Response> {
   if (request.method === "GET") return answer(200, { ...reply, chat: url.searchParams.get("chat") || null });
   if (request.method !== "PUT") return answer(405, { error: `RPE has no ${request.method} ${url.pathname}.` });
-  const body = (await request.json().catch(() => null)) as SettingsWrite | null;
+  const body = await request.json().then((sent: SettingsWrite | null) => (sent === null ? null : { ...sent, chat: sent.chat ?? null, value: sent.value ?? null }), () => null);
   if (body === null || typeof body.key !== "string") return answer(400, { error: 'Send {"level": "global" or "chat", "chat": "<its id>", "key": "<the setting>", "value": …}: null takes the key away at that level, and "none": true sets ~.' });
   const setting = reply.settings.find((s) => s.key === body.key);
   if (setting === undefined) return answer(400, { error: `RPE reads no setting "${body.key}".` });

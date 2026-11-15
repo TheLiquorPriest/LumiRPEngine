@@ -70,8 +70,8 @@ async function busyTurn(flushMs?: number): Promise<Run> {
     const write = (): void => {
       if (clock.now() >= end) return;
       tick++;
-      run.published.push(b.app.live.publish(CHAT, { kind: "agent.text", data: { agent, text: `Agent ${agent}, piece ${tick}: the tide comes in over the harbor wall.` } }));
-      if (tick % STATE_EVERY === 0) run.published.push(b.app.live.publish(CHAT, { kind: "agent.state", key: `agent-${agent}`, data: { agent, calls: tick / STATE_EVERY, doing: "writing the scene" } }));
+      run.published.push(b.app.live.publish(CHAT, { kind: "delta", data: { run: "turn-harbor", agent: `agent-${agent}`, call: 1, text: `Agent ${agent}, piece ${tick}: the tide comes in over the harbor wall.`, at: clock.now() } }));
+      if (tick % STATE_EVERY === 0) run.published.push(b.app.live.publish(CHAT, { kind: "state", data: {} }));
       clock.setTimeout(write, DELTA_MS);
     };
     clock.setTimeout(write, agent * 3);

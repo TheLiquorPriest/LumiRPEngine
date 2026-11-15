@@ -11,9 +11,8 @@
 import { dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import type { JsonValue, LayerLevel } from "rp-harness/contract";
-import { isRecord } from "../shared/json";
 import { readText, writeWhole } from "./disk";
-import { route, RouteError } from "./routes";
+import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
 import { connectionsNamed, decidesAt, isMapping, keyFor, type Mapping, mergedConfig, pathOf, type SettingDef, settingIn, settingOfKey, type SettingTakes, takenValue, takesWords, valueAt } from "./setting-list";
 import { configWrites, withKeyAt, yamlMapping } from "./yaml";
 
@@ -35,49 +34,56 @@ export interface SettingsDeps {
   connections(): Promise<{ id: string; name: string }[]>;
 }
 
-/** A setting as the page shows it. */
-export interface SettingView {
-  /** As a config file writes it; a per-connection setting's names the connection. */
-  key: string;
-  /** The value in force. */
-  value: JsonValue;
-  default: JsonValue;
-  /** The level whose file decides the value in force; null where no file does, and the default holds. */
-  from: LayerLevel | null;
-  /** That level's file, as the Files page names it. */
-  file: string | null;
-  takes: SettingTakes;
-  /** What it takes, in words. */
-  takesWords: string;
-  /** What no value means, where the default is none or `~` may be set. */
-  none: string | null;
-  /** `~` may be set (`none: true` in a write). */
-  orNone: boolean;
-  /** The levels it may be set at here. */
-  levels: LayerLevel[];
-  /** For a per-connection setting, the connection it names; null for a name or id no connection has now. */
-  connection?: { id: string; name: string } | null;
-  /** A value a file sets that the setting does not take, and why: the default holds in its place. */
-  passed: { value: JsonValue; why: string } | null;
-}
+const T = shape.text();
+const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
+const takes = shape.named(
+  "SettingTakes",
+  "What a level may set a setting to: a whole number or a number, at least `least` and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.",
+  shape.union(
+    shape.object({ type: shape.literal("whole"), least: shape.number(), most: shape.optional(shape.number()) }),
+    shape.object({ type: shape.literal("number"), least: shape.number(), most: shape.optional(shape.number()) }),
+    shape.object({ type: shape.literal("oneOf"), values: shape.list(T, { readonly: true }) }),
+    shape.object({ type: shape.literal("yesNo") }),
+    shape.object({ type: shape.literal("text") }),
+    shape.object({ type: shape.literal("texts") }),
+  ),
+);
+// The setting list's own types, which the readers read by: the declaration says the same.
+type LevelMirrored = Holds<Exactly<Infer<typeof layerLevel>, LayerLevel>>;
+type TakesMirrored = Holds<Exactly<Infer<typeof takes>, SettingTakes>>;
 
-export interface SettingsReply {
-  chat: string | null;
-  /** Each level's file, farthest first, and what is wrong with it where it cannot be read (its settings are then passed over). */
-  files: { level: LayerLevel; file: string; problem: string | null }[];
-  settings: SettingView[];
-}
+const settingView = shape.named(
+  "SettingView",
+  "A setting as the Settings page shows it.",
+  shape.object({
+    key: shape.field(T, "As a config file writes it; a per-connection setting's names the connection."),
+    value: shape.field(shape.json(), "The value in force."),
+    default: shape.json(),
+    from: shape.field(shape.nullable(layerLevel), "The level whose file decides the value in force; null where no file does, and the default holds."),
+    file: shape.field(shape.nullable(T), "That level's file, as the Files page names it."),
+    takes,
+    takesWords: shape.field(T, "What it takes, in words."),
+    none: shape.field(shape.nullable(T), "What no value means, where the default is none or `~` may be set."),
+    orNone: shape.field(shape.yesNo(), "`~` may be set (`none: true` in a write)."),
+    levels: shape.field(shape.list(layerLevel), "The levels it may be set at here."),
+    connection: shape.optional(shape.nullable(shape.object({ id: T, name: T })), "For a per-connection setting, the connection it names; null for a name or id no connection has now."),
+    passed: shape.field(shape.nullable(shape.object({ value: shape.json(), why: T })), "A value a file sets that the setting does not take, and why: the default holds in its place."),
+  }),
+);
+export type SettingView = Infer<typeof settingView>;
 
-/** What a write asks: the level and, for a chat's, the chat; the key; and the value, null to take the key away at that level, or `none` to set `~`. */
-export interface SettingsWrite {
-  level: LayerLevel;
-  chat: string | null;
-  key: string;
-  value: JsonValue;
-  none: boolean;
-}
+const settingsReply = shape.named(
+  "SettingsReply",
+  "Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); and every setting.",
+  shape.object({ chat: shape.nullable(T), files: shape.list(shape.object({ level: layerLevel, file: T, problem: shape.nullable(T) })), settings: shape.list(settingView) }),
+);
+export type SettingsReply = Infer<typeof settingsReply>;
 
-const LEVELS: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
+const settingsWrite = shape.named(
+  "SettingsWrite",
+  "A key written at a level, a chat's naming the chat (left out or null: no chat): its value, null to take the key away at that level, or `none: true` to set `~`.",
+  shape.object({ level: layerLevel, chat: shape.optional(shape.nullable(shape.text({ blank: false }))), key: shape.text({ blank: false }), value: shape.optional(shape.json()), none: shape.optional(shape.yesNo()) }),
+);
 
 interface LevelConfig extends LevelFile {
   config: Mapping;
@@ -139,17 +145,6 @@ function reply(chat: string | null, levels: readonly LevelConfig[], defs: readon
   return { chat, files: levels.map((l) => ({ level: l.level, file: l.file, problem: l.problem })), settings };
 }
 
-function writeBody(value: unknown): SettingsWrite {
-  const shape = 'Send {"level": "global" or "chat", "chat": "<its id>", "key": "<the setting>", "value": …}: null takes the key away at that level, and "none": true sets ~.';
-  if (!isRecord(value) || typeof value.level !== "string" || typeof value.key !== "string" || value.key.trim() === "" || !(value.value !== undefined || value.none === true)) throw new RouteError(400, shape);
-  const level = LEVELS.find((l) => l === value.level);
-  if (level === undefined) throw new RouteError(400, `There is no level "${value.level}": the levels are ${LEVELS.join(", ")}.`);
-  if (value.chat !== undefined && value.chat !== null && (typeof value.chat !== "string" || value.chat === "")) throw new RouteError(400, "A chat is named by its id.");
-  if (value.none !== undefined && typeof value.none !== "boolean") throw new RouteError(400, shape);
-  const chat = typeof value.chat === "string" ? value.chat : null;
-  return { level, chat, key: value.key, value: (value.value ?? null) as JsonValue, none: value.none === true };
-}
-
 /** `GET` and `PUT /api/v1/settings`. */
 export function settingsRoutes(deps: SettingsDeps) {
   const now = async (chat: string | null): Promise<SettingsReply> => reply(chat, await readLevels(await deps.levels(chat)), deps.settings, await deps.connections());
@@ -158,14 +153,23 @@ export function settingsRoutes(deps: SettingsDeps) {
       method: "GET",
       path: SETTINGS_PATH,
       access: "page",
-      handle: ({ query }): Promise<SettingsReply> => now(query.get("chat") || null),
+      group: "settings",
+      does: "Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, and the level and file it comes from.",
+      query: { chat: shape.optional(T, "The chat whose levels are read; left out or empty, the levels every chat shares.") },
+      reply: settingsReply,
+      handle: ({ query }) => now(query.chat || null),
     }),
     route({
       method: "PUT",
       path: SETTINGS_PATH,
       access: "page",
-      body: writeBody,
-      handle: async ({ body }): Promise<SettingsReply> => {
+      group: "settings",
+      does: "Writes one setting into one level's config file, as the user would write it, and answers every setting as it then stands.",
+      body: settingsWrite,
+      reply: settingsReply,
+      handle: async ({ body: asked }) => {
+        if (asked.value === undefined && asked.none !== true) throw new RouteError(400, 'Send the setting\'s "value" (null takes the key away at that level), or "none": true to set ~.');
+        const body = { level: asked.level, chat: asked.chat ?? null, key: asked.key, value: asked.value ?? null, none: asked.none === true };
         if (body.level === "shipped") throw new RouteError(400, "The shipped file is never written: set the value at the global level, or a chat's.");
         if (body.level === "chat" && body.chat === null) throw new RouteError(400, 'Name the chat whose level this is: "chat": "<its id>".');
         const found = settingOfKey(deps.settings, body.key);

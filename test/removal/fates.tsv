@@ -832,6 +832,7 @@ src/shared/agents.ts	kept	under
 src/shared/character.ts	kept	under
 src/shared/claims.ts	kept	under		the claim policy a world and a chat carry; shared/world.ts:56, engine/state.ts and engine/realism.ts read it
 src/shared/classes.ts	kept	under
+src/shared/api/index.ts	kept	under		the route table's generated types (scripts/api, PlanApp-2)
 src/shared/diagnostics.ts	kept	under
 src/shared/final-review.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
 src/shared/finance.ts	kept	under

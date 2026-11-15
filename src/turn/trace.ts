@@ -7,7 +7,6 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Log, Scope, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
 import type { LiveHub } from "../app";
-import type { JsonValue } from "../shared/json";
 import type { TreeFiles } from "../tree";
 
 /** The turn folder's transcripts. */
@@ -67,12 +66,12 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
 
   return {
     event(record) {
-      deps.live.publish(record.scope.chat, { kind: "trace", data: record as unknown as JsonValue });
+      deps.live.publish(record.scope.chat, { kind: "trace", data: record });
       keep(record);
     },
     delta(delta: TraceDelta) {
       const chat = deps.chatOfRun(delta.run);
-      if (chat !== null) deps.live.publish(chat, { kind: "delta", data: delta as unknown as JsonValue });
+      if (chat !== null) deps.live.publish(chat, { kind: "delta", data: delta });
     },
     async flush() {
       while (pending.size > 0) await Promise.allSettled([...pending]);

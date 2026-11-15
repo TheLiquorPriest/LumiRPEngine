@@ -4,10 +4,22 @@
 // and to its Origin, its Host and its body limit, before the route's own code runs. Routes are fixed
 // once the server has started.
 //
-// A route is typed from its path to its reply: its params come from the path's pattern, its body from
-// the reader it gives, its reply from what its handler returns. The UI's client takes its types from
-// the routes themselves (`RouteBody`, `RouteReply`, `PathParams`), and `list()` says what the table
-// holds, for the API reference.
+// The route form. A route declares, as values the code reads while it runs, what it takes and what it
+// answers: its params (named by its path's pattern), its query, its body and its reply, each a shape
+// (below), with the group of §4.4 it belongs to and one line saying what it does. A raw route declares
+// what it answers in words (an OpenAI stream, a socket, a file). The server holds each request to its
+// route's declaration before the handler runs, and refuses with 400, in RPE's words, what the route does
+// not take; the handler is given only what was declared, typed by the declaration. The client's types
+// and the API reference (`docs/api.md`) are written from the same declarations (`bun run api`,
+// `scripts/api/`), and a test holds every reply to its declaration, so no route's shape is kept by hand
+// anywhere else.
+//
+// Routes written before the form (a handler that reads the query as it came and its body through a
+// reader of its own) are taken as they are until their area declares them: the server holds them to
+// their access, Origin, Host and body limit, and the reference lists them as not declared.
+
+import type { JsonValue } from "../shared/json";
+import { isRecord } from "../shared/json";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export const METHODS: readonly Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -24,39 +36,380 @@ export const METHODS: readonly Method[] = ["GET", "POST", "PUT", "PATCH", "DELET
  */
 export type Access = "public" | "page" | "provider" | "extension";
 
-type ParamName<S extends string> = S extends `:${infer Name}` ? Name : never;
-/** The names of a path pattern's params: `/api/v1/chats/:chat/turns/:turn` has `chat` and `turn`. */
+/**
+ * The groups of §4.4 l.309, in the reference's order: the provider endpoint (`/v1/`), the API's groups
+ * (`/api/v1/`), the live socket and the web UI (`/ui/`).
+ */
+export const ROUTE_GROUPS = ["provider", "chats", "turns", "state", "cast", "story", "places", "quests", "lore", "files", "sessions", "jobs", "agents", "rules", "connections", "settings", "worlds", "migration", "service", "live", "ui"] as const;
+export type RouteGroup = (typeof ROUTE_GROUPS)[number];
+
+/** A segment's param name: `:chat` names `chat`; the last segment `*`, the rest of the path, is named `*`. */
+type ParamName<S extends string> = S extends `:${infer Name}` ? Name : S extends "*" ? "*" : never;
+/** The names of a path pattern's params: `/api/v1/chats/:chat/turns/:turn` has `chat` and `turn`, `/api/v1/files/*` has `*`. */
 export type ParamNames<P extends string> = P extends `${infer Head}/${infer Tail}` ? ParamName<Head> | ParamNames<Tail> : ParamName<P>;
 export type PathParams<P extends string> = { readonly [K in ParamNames<P>]: string };
 
 /** The user a route acts for: on a page route, the user this RPE belongs to; elsewhere that user, or null before one is set. */
 export type UserFor<A extends Access> = A extends "page" ? string : string | null;
 
-/** What a route's handler is given. */
-export interface RouteCall<P extends string, A extends Access, B> {
+// ---------------------------------------------------------------- shapes
+
+/** The type a shape describes: a mark for the compiler, never set. */
+declare const DESCRIBES: unique symbol;
+
+interface ShapeOf<T> {
+  readonly [DESCRIBES]?: T;
+  /** The generated types write a named shape once, under its name, and the reference lists it there. */
+  readonly name?: string;
+  /** What a value of it is, in a line: a named shape's, beside its name. */
+  readonly doc?: string;
+}
+
+/** Text; not blank, where `blank` is false (the space at its ends is not counted). */
+export interface TextShape extends ShapeOf<string> {
+  readonly kind: "text";
+  readonly blank: boolean;
+}
+
+/** A number, or a whole number; at least `least` and at most `most` where each is given. */
+export interface NumberShape extends ShapeOf<number> {
+  readonly kind: "number";
+  readonly whole: boolean;
+  readonly least: number | null;
+  readonly most: number | null;
+}
+
+export interface YesNoShape extends ShapeOf<boolean> {
+  readonly kind: "yesNo";
+}
+
+export type LiteralValue = string | number | boolean | null;
+
+/** Exactly one value. */
+export interface LiteralShape<V extends LiteralValue = LiteralValue> extends ShapeOf<V> {
+  readonly kind: "literal";
+  readonly value: V;
+}
+
+/** One of a few words. */
+export interface OneOfShape<V extends string = string> extends ShapeOf<V> {
+  readonly kind: "oneOf";
+  readonly values: readonly V[];
+}
+
+/** A list, each item of one shape; `readonly` where the server hands on a list it may not change. */
+export interface ListShape<A extends readonly unknown[] = readonly unknown[]> extends ShapeOf<A> {
+  readonly kind: "list";
+  readonly of: AnyShape;
+  readonly readonly: boolean;
+}
+
+/** An object with named fields, and no others; `page` marks the reply of a route that pages. */
+export interface ObjectShape<T = unknown> extends ShapeOf<T> {
+  readonly kind: "object";
+  readonly fields: Fields;
+  readonly page?: true;
+}
+
+/** An object whose keys are any names and whose values are each of one shape. */
+export interface RecordShape<T = unknown> extends ShapeOf<{ [key: string]: T }> {
+  readonly kind: "record";
+  readonly of: AnyShape;
+}
+
+/** Any one of several shapes. */
+export interface UnionShape<T = unknown> extends ShapeOf<T> {
+  readonly kind: "union";
+  readonly of: readonly AnyShape[];
+}
+
+/** Any JSON value, carried as it is. */
+export interface JsonShape extends ShapeOf<JsonValue> {
+  readonly kind: "json";
+}
+
+/** No value: a reply of nothing (204), or a body a route does not take. */
+export interface NothingShape extends ShapeOf<void> {
+  readonly kind: "nothing";
+}
+
+export type AnyShape = TextShape | NumberShape | YesNoShape | LiteralShape | OneOfShape | ListShape | ObjectShape | RecordShape | UnionShape | JsonShape | NothingShape;
+
+/** A field of an object: its shape, whether it may be left out, and what it is, in a line. */
+export interface FieldShape<S extends AnyShape = AnyShape, O extends boolean = boolean> {
+  readonly kind: "field";
+  readonly of: S;
+  readonly optional: O;
+  readonly doc?: string;
+}
+
+export type Fields = { readonly [name: string]: AnyShape | FieldShape };
+
+/** The type a shape describes. */
+export type Infer<S> = S extends ShapeOf<infer T> ? T : never;
+
+/** True when two types are the same, each field's optional mark included: a declaration that mirrors another's type stops compiling where they part. */
+export type Exactly<A, B> = (<X>() => X extends A ? 1 : 2) extends (<X>() => X extends B ? 1 : 2) ? true : false;
+/** Compiles only for `true`. */
+export type Holds<T extends true> = T;
+
+type FieldOf<F> = F extends FieldShape<infer S, boolean> ? S : F;
+type OptionalNames<F extends Fields> = { [K in keyof F]: F[K] extends FieldShape<AnyShape, true> ? K : never }[keyof F];
+type Flat<T> = { [K in keyof T]: T[K] };
+/** The object type a set of fields describes. */
+export type FieldsOut<F extends Fields> = Flat<{ [K in Exclude<keyof F, OptionalNames<F>>]: Infer<FieldOf<F[K]>> } & { [K in OptionalNames<F>]?: Infer<FieldOf<F[K]>> }>;
+
+const TEXT: TextShape = { kind: "text", blank: true };
+const NULL: LiteralShape<null> = { kind: "literal", value: null };
+
+function list<S extends AnyShape>(of: S): ListShape<Infer<S>[]>;
+function list<S extends AnyShape>(of: S, options: { readonly: true }): ListShape<readonly Infer<S>[]>;
+function list(of: AnyShape, options?: { readonly: true }): ListShape {
+  return { kind: "list", of, readonly: options?.readonly === true };
+}
+
+function nullable<S extends AnyShape>(of: S): UnionShape<Infer<S> | null> {
+  return { kind: "union", of: [of, NULL] };
+}
+
+/** The shapes a route's query, body and reply are declared in. */
+export const shape = {
+  /** Text; `{ blank: false }` for text that is not blank. */
+  text: (options: { blank?: false } = {}): TextShape => (options.blank === false ? { kind: "text", blank: false } : TEXT),
+  number: (bounds: { least?: number; most?: number } = {}): NumberShape => ({ kind: "number", whole: false, least: bounds.least ?? null, most: bounds.most ?? null }),
+  whole: (bounds: { least?: number; most?: number } = {}): NumberShape => ({ kind: "number", whole: true, least: bounds.least ?? null, most: bounds.most ?? null }),
+  yesNo: (): YesNoShape => ({ kind: "yesNo" }),
+  literal: <const V extends LiteralValue>(value: V): LiteralShape<V> => ({ kind: "literal", value }),
+  oneOf: <const V extends string>(...values: V[]): OneOfShape<V> => ({ kind: "oneOf", values }),
+  list,
+  object: <const F extends Fields>(fields: F): ObjectShape<FieldsOut<F>> => ({ kind: "object", fields }),
+  record: <S extends AnyShape>(of: S): RecordShape<Infer<S>> => ({ kind: "record", of }),
+  union: <const S extends readonly AnyShape[]>(...of: S): UnionShape<Infer<S[number]>> => ({ kind: "union", of }),
+  nullable,
+  json: (): JsonShape => ({ kind: "json" }),
+  nothing: (): NothingShape => ({ kind: "nothing" }),
+  /** A field that may be left out. */
+  optional: <S extends AnyShape>(of: S, doc?: string): FieldShape<S, true> => ({ kind: "field", of, optional: true, ...(doc === undefined ? {} : { doc }) }),
+  /** A field with a line saying what it is. */
+  field: <S extends AnyShape>(of: S, doc: string): FieldShape<S, false> => ({ kind: "field", of, optional: false, doc }),
+  /** `of`, written once under `name` in the generated types and the reference. */
+  named: <S extends AnyShape>(name: string, doc: string, of: S): S => ({ ...of, name, doc }) as S,
+  /** A page of a list, as a route that pages answers: its items, and where the next page starts (null at the end). */
+  page: <S extends AnyShape>(item: S): ObjectShape<{ items: Infer<S>[]; next: string | null }> => ({ kind: "object", fields: { items: list(item), next: nullable(TEXT) }, page: true }),
+};
+
+/** What a value of `s` is, in words, for a refusal. */
+export function shapeWords(s: AnyShape): string {
+  if (s.name !== undefined) return `a ${s.name}`;
+  switch (s.kind) {
+    case "text":
+      return s.blank ? "text" : "text that is not blank";
+    case "number": {
+      const what = s.whole ? "a whole number" : "a number";
+      if (s.least !== null && s.most !== null) return `${what} from ${s.least} to ${s.most}`;
+      if (s.least !== null) return `${what} of at least ${s.least}`;
+      if (s.most !== null) return `${what} of at most ${s.most}`;
+      return what;
+    }
+    case "yesNo":
+      return "true or false";
+    case "literal":
+      return JSON.stringify(s.value);
+    case "oneOf":
+      return s.values.length === 1 ? JSON.stringify(s.values[0]) : `one of ${s.values.slice(0, -1).map((v) => JSON.stringify(v)).join(", ")} or ${JSON.stringify(s.values.at(-1))}`;
+    case "list":
+      return `a list of ${plural(s.of)}`;
+    case "object":
+      return Object.keys(s.fields).length === 0 ? "an empty object" : `an object of ${Object.keys(s.fields).join(", ")}`;
+    case "record":
+      return `an object whose every value is ${shapeWords(s.of)}`;
+    case "union":
+      return s.of.map(shapeWords).join(", or ");
+    case "json":
+      return "any JSON value";
+    case "nothing":
+      return "nothing";
+  }
+}
+
+function plural(s: AnyShape): string {
+  if (s.name !== undefined) return `${s.name} items`;
+  if (s.kind === "text") return s.blank ? "texts" : "texts that are not blank";
+  return `items, each ${shapeWords(s)}`;
+}
+
+function fieldOf(f: AnyShape | FieldShape): { of: AnyShape; optional: boolean } {
+  return f.kind === "field" ? { of: f.of, optional: f.optional } : { of: f, optional: false };
+}
+
+/** The field every alternative of a union of objects holds as a literal, by which a value picks its alternative; null when there is none. */
+function discriminant(alternatives: readonly AnyShape[]): string | null {
+  const objects = alternatives.filter((a): a is ObjectShape => a.kind === "object");
+  if (objects.length !== alternatives.length || objects.length === 0) return null;
+  const first = objects[0] as ObjectShape;
+  for (const name of Object.keys(first.fields)) if (objects.every((o) => o.fields[name] !== undefined && fieldOf(o.fields[name] as AnyShape | FieldShape).of.kind === "literal")) return name;
+  return null;
+}
+
+/**
+ * What is wrong with `value` as a value of `s` (each problem a sentence naming where it is, from `at`);
+ * none when it holds. Strict: an object with a field its shape does not name is refused.
+ */
+export function problemsOf(s: AnyShape, value: unknown, at = "value"): string[] {
+  const not = (): string[] => [`${at} must be ${shapeWords(s)}.`];
+  switch (s.kind) {
+    case "text":
+      return typeof value === "string" && (s.blank || value.trim() !== "") ? [] : not();
+    case "number":
+      return typeof value === "number" && Number.isFinite(value) && (!s.whole || Number.isInteger(value)) && (s.least === null || value >= s.least) && (s.most === null || value <= s.most) ? [] : not();
+    case "yesNo":
+      return typeof value === "boolean" ? [] : not();
+    case "literal":
+      return value === s.value ? [] : not();
+    case "oneOf":
+      return typeof value === "string" && (s.values as readonly string[]).includes(value) ? [] : not();
+    case "list":
+      return Array.isArray(value) ? value.flatMap((item, i) => problemsOf(s.of, item, `${at}[${i}]`)) : not();
+    case "object": {
+      if (!isRecord(value)) return not();
+      const out: string[] = [];
+      for (const [name, f] of Object.entries(s.fields)) {
+        const { of, optional } = fieldOf(f);
+        const given = Object.hasOwn(value, name) ? value[name] : undefined;
+        if (given === undefined) {
+          if (!optional) out.push(`${at} needs ${name}: ${shapeWords(of)}.`);
+        } else out.push(...problemsOf(of, given, `${at}.${name}`));
+      }
+      for (const name of Object.keys(value)) if (!Object.hasOwn(s.fields, name) && value[name] !== undefined) out.push(`${at} has ${name}, which it does not take.`);
+      return out;
+    }
+    case "record":
+      return isRecord(value) ? Object.entries(value).flatMap(([name, item]) => problemsOf(s.of, item, `${at}.${name}`)) : not();
+    case "union": {
+      if (s.of.some((alternative) => problemsOf(alternative, value, at).length === 0)) return [];
+      // A union of objects told apart by one field: the alternative the value names says what is wrong with it.
+      const by = discriminant(s.of);
+      if (by !== null && isRecord(value)) {
+        const picked = s.of.find((o) => o.kind === "object" && problemsOf(fieldOf(o.fields[by] as AnyShape | FieldShape).of, value[by]).length === 0);
+        if (picked !== undefined) return problemsOf(picked, value, at);
+      }
+      return not();
+    }
+    case "json":
+      return isJson(value) ? [] : not();
+    case "nothing":
+      return value === undefined ? [] : not();
+  }
+}
+
+function isJson(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJson);
+  return isRecord(value) && Object.values(value).every(isJson);
+}
+
+// ---------------------------------------------------------------- the query
+
+/** What a query string can carry: text, a number, true or false, one word of a few. */
+export type QueryShape = TextShape | NumberShape | YesNoShape | LiteralShape<string | number | boolean> | OneOfShape;
+export type QueryFields = { readonly [name: string]: QueryShape | FieldShape<QueryShape> };
+
+const QUERY_KINDS: Readonly<Record<QueryShape["kind"], true>> = { text: true, number: true, yesNo: true, literal: true, oneOf: true };
+const DECIMAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+
+/** A query value as its shape reads it; undefined when it is not one. */
+function queryValue(s: QueryShape, given: string): unknown {
+  switch (s.kind) {
+    case "text":
+    case "oneOf":
+      return given;
+    case "number":
+      return DECIMAL.test(given) ? Number(given) : undefined;
+    case "yesNo":
+      return given === "true" ? true : given === "false" ? false : undefined;
+    case "literal":
+      return typeof s.value === "number" ? (DECIMAL.test(given) ? Number(given) : undefined) : typeof s.value === "boolean" ? (given === "true" ? true : given === "false" ? false : undefined) : given;
+  }
+}
+
+/** The query as `fields` read it, or why it is not one they take: a name they do not hold, one given twice, one left out, or a value of the wrong kind. */
+export function readQuery(fields: QueryFields, given: URLSearchParams, route: string): { ok: true; value: Record<string, unknown> } | { ok: false; why: string } {
+  const names = Object.keys(fields);
+  const value: Record<string, unknown> = {};
+  for (const name of new Set(given.keys())) {
+    if (!Object.hasOwn(fields, name)) return { ok: false, why: names.length === 0 ? `${route} takes no query, and this one gives ${name}.` : `${route} takes no ${name} in its query: it takes ${names.join(", ")}.` };
+    const all = given.getAll(name);
+    if (all.length > 1) return { ok: false, why: `The query gives ${name} ${all.length} times, and ${route} takes it once.` };
+    const { of } = fieldOf(fields[name] as QueryShape | FieldShape<QueryShape>);
+    const raw = all[0] ?? "";
+    const read = queryValue(of as QueryShape, raw);
+    if (read === undefined || problemsOf(of, read).length > 0) return { ok: false, why: `The query's ${name} is ${shapeWords(of)}, not ${JSON.stringify(raw)}.` };
+    value[name] = read;
+  }
+  for (const name of names) {
+    const { of, optional } = fieldOf(fields[name] as QueryShape | FieldShape<QueryShape>);
+    if (!optional && !Object.hasOwn(value, name)) return { ok: false, why: `${route} needs ${name} in its query: ${shapeWords(of)}.` };
+  }
+  return { ok: true, value };
+}
+
+// ---------------------------------------------------------------- routes
+
+/** A paged route's sizes: the page's when the caller names none, and the most it may name. */
+export interface PageSizes {
+  readonly default: number;
+  readonly most: number;
+}
+
+/**
+ * How a route pages: it takes `limit` and `cursor` in its query and answers a page (`shape.page`).
+ * `sizes` gives the page's size when the caller names none and the most it may name, each from a setting
+ * of the route's own area; absent, the route hands the caller's limit to the list it reads (one of RPH's),
+ * which holds it to its own.
+ */
+export interface Paging<P extends string = string, A extends Access = Access> {
+  readonly sizes?: (at: { readonly params: PathParams<P>; readonly user: UserFor<A> }) => PageSizes | Promise<PageSizes>;
+}
+
+/** What a paged route's handler finds in its query beside what it declared: the size asked for (with `sizes`, the default when none was), and where to start. */
+type PageQuery<G> = G extends { readonly sizes: (...args: never[]) => unknown } ? { limit: number; cursor?: string } : { limit?: number; cursor?: string };
+type QueryOut<Q extends QueryFields, G> = [G] extends [Paging] ? Flat<FieldsOut<Q> & PageQuery<G>> : FieldsOut<Q>;
+
+/** What a declared route's handler is given: what its declaration takes, read and typed, and nothing else of the request. */
+export interface DeclaredCall<P extends string, A extends Access, Q extends QueryFields, B extends AnyShape | undefined, G> {
   readonly params: PathParams<P>;
-  readonly query: URLSearchParams;
-  /** The body as the route's reader gave it back; undefined for a route with no reader. */
-  readonly body: B;
+  readonly query: QueryOut<Q, G>;
+  /** The body, held to its declaration; undefined for a route that takes none. */
+  readonly body: B extends AnyShape ? Infer<B> : undefined;
   readonly user: UserFor<A>;
-  readonly request: Request;
+  /** The credential the request carried (its bearer, or a page's socket token), which the server has held to the route's access. */
+  readonly credential: string | null;
   /** Aborts when the caller goes away. */
   readonly signal: AbortSignal;
 }
 
 /**
- * A route that answers in JSON. Its handler returns the reply's value (sent with 200), undefined
- * (204), or a `Response` of its own; it throws a `RouteError` to refuse.
+ * A route in the form that answers in JSON: its group, what it does, its query, its body and its reply.
+ * The handler returns the reply (sent with 200; nothing, for a reply of `shape.nothing()`, with 204), or
+ * throws a `RouteError` to refuse.
  */
-export interface JsonRoute<P extends string = string, A extends Access = Access, B = unknown, R = unknown> {
+export interface DeclaredRoute<P extends string = string, A extends Access = Access, Q extends QueryFields = QueryFields, B extends AnyShape | undefined = AnyShape | undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = Paging<P, A> | undefined> {
   readonly method: Method;
   readonly path: P;
   readonly access: A;
+  readonly group: RouteGroup;
+  /** What it does, in one line. */
+  readonly does: string;
   /** The largest body it takes, in bytes; the server's setting when absent. */
   readonly maxBody?: number;
-  /** Reads the JSON body into what the handler takes, throwing a `RouteError` (400) for one it does not take. Absent: the route reads no body. */
-  readonly body?: (value: unknown) => B;
-  readonly handle: (call: RouteCall<P, A, B>) => R | Promise<R>;
+  /** The names its query takes, each with its shape; absent, it takes no query. */
+  readonly query?: Q;
+  /** Its body's shape; absent, it takes no body. */
+  readonly body?: B;
+  readonly reply: R;
+  readonly paged?: G;
+  readonly handle: (call: DeclaredCall<P, A, Q, B, G>) => Infer<R> | Promise<Infer<R>>;
 }
 
 /** What a raw route's handler is given besides the request. */
@@ -71,11 +424,46 @@ export interface RawCall<P extends string, A extends Access> {
 }
 
 /**
- * A route that takes the request as it came (its body already read and held to its limit) and makes
- * its own response: a handler another area wrote from a request to a response (the provider
- * endpoint, the extension's question), the web UI's files, the live socket. Undefined: the request
- * became a socket.
+ * A route in the form that takes the request as it came (its body already read and held to its limit)
+ * and makes its own response, saying in words what it answers: a handler another area wrote from a
+ * request to a response (the provider endpoint, the extension's question), the web UI's files, the live
+ * socket. Undefined: the request became a socket.
  */
+export interface DeclaredRawRoute<P extends string = string, A extends Access = Access> {
+  readonly method: Method;
+  readonly path: P;
+  readonly access: A;
+  readonly group: RouteGroup;
+  readonly does: string;
+  /** What it answers, in words: an OpenAI stream, a socket, a file. */
+  readonly answers: string;
+  readonly maxBody?: number;
+  readonly raw: (request: Request, call: RawCall<P, A>) => Response | undefined | Promise<Response | undefined>;
+}
+
+/** What a route written before the form is given. */
+export interface RouteCall<P extends string, A extends Access, B> {
+  readonly params: PathParams<P>;
+  readonly query: URLSearchParams;
+  /** The body as the route's reader gave it back; undefined for a route with no reader. */
+  readonly body: B;
+  readonly user: UserFor<A>;
+  readonly request: Request;
+  /** Aborts when the caller goes away. */
+  readonly signal: AbortSignal;
+}
+
+/** A route that answers in JSON, written before the form: taken as it is until its area declares it. */
+export interface JsonRoute<P extends string = string, A extends Access = Access, B = unknown, R = unknown> {
+  readonly method: Method;
+  readonly path: P;
+  readonly access: A;
+  readonly maxBody?: number;
+  readonly body?: (value: unknown) => B;
+  readonly handle: (call: RouteCall<P, A, B>) => R | Promise<R>;
+}
+
+/** A raw route written before the form: taken as it is until its area declares it. */
 export interface RawRoute<P extends string = string, A extends Access = Access> {
   readonly method: Method;
   readonly path: P;
@@ -84,23 +472,34 @@ export interface RawRoute<P extends string = string, A extends Access = Access> 
   readonly raw: (request: Request, call: RawCall<P, A>) => Response | undefined | Promise<Response | undefined>;
 }
 
+/** A route in the form, of any types. */
+export type Declared = DeclaredRoute<any, any, any, any, any, any> | DeclaredRawRoute<any, any>;
 // A table holds routes of every shape; each keeps its own types where it is written.
-export type Route = JsonRoute<any, any, any, any> | RawRoute<any, any>;
+export type Route = Declared | JsonRoute<any, any, any, any> | RawRoute<any, any>;
 
-/** Writes a JSON route, keeping its types. */
-export function route<const P extends string, const A extends Access, B = undefined, R = unknown>(def: JsonRoute<P, A, B, R>): JsonRoute<P, A, B, R> {
+/** Writes a JSON route in the form, keeping its types; a route written before the form is taken as it was. */
+export function route<const P extends string, const A extends Access, const Q extends QueryFields = {}, B extends AnyShape | undefined = undefined, R extends AnyShape = AnyShape, G extends Paging<P, A> | undefined = undefined>(def: DeclaredRoute<P, A, Q, B, R, G>): DeclaredRoute<P, A, Q, B, R, G>;
+export function route<const P extends string, const A extends Access, B = undefined, R = unknown>(def: JsonRoute<P, A, B, R>): JsonRoute<P, A, B, R>;
+export function route(def: Route): Route {
   return def;
 }
 
-/** Writes a raw route, keeping its types. */
-export function rawRoute<const P extends string, const A extends Access>(def: RawRoute<P, A>): RawRoute<P, A> {
+/** Writes a raw route in the form, keeping its types; a route written before the form is taken as it was. */
+export function rawRoute<const P extends string, const A extends Access>(def: DeclaredRawRoute<P, A>): DeclaredRawRoute<P, A>;
+export function rawRoute<const P extends string, const A extends Access>(def: RawRoute<P, A>): RawRoute<P, A>;
+export function rawRoute(def: Route): Route {
   return def;
 }
 
-/** The reply a JSON route's handler gives, for a client. */
-export type RouteReply<T> = T extends JsonRoute<any, any, any, infer R> ? Exclude<Awaited<R>, Response> : never;
+/** Whether a route is in the form. */
+export function isDeclared(r: Route): r is Declared {
+  return "group" in r && typeof r.group === "string";
+}
+
+/** The reply a JSON route gives, for a client. */
+export type RouteReply<T> = T extends DeclaredRoute<any, any, any, any, infer R, any> ? Infer<R> : T extends JsonRoute<any, any, any, infer R> ? Exclude<Awaited<R>, Response> : never;
 /** The body a JSON route takes, for a client. */
-export type RouteBody<T> = T extends JsonRoute<any, any, infer B, any> ? B : never;
+export type RouteBody<T> = T extends DeclaredRoute<any, any, any, infer B, any, any> ? (B extends AnyShape ? Infer<B> : undefined) : T extends JsonRoute<any, any, infer B, any> ? B : never;
 
 /** A refusal a route's handler throws: its status and the words the caller is shown. */
 export class RouteError extends Error {
@@ -114,6 +513,11 @@ export class RouteError extends Error {
   }
 }
 
+/** A route's declaration as the table lists it: what a JSON route takes and answers, or what a raw route answers. */
+export type RouteDeclaration =
+  | { readonly group: RouteGroup; readonly does: string; readonly query: QueryFields; readonly body: AnyShape | null; readonly reply: AnyShape; readonly paged: boolean }
+  | { readonly group: RouteGroup; readonly does: string; readonly answers: string };
+
 /** A route as the table lists it. */
 export interface RouteInfo {
   area: string;
@@ -122,6 +526,10 @@ export interface RouteInfo {
   access: Access;
   maxBody: number | null;
   raw: boolean;
+  /** Its params, by the names its pattern gives them (`*` for the rest of the path). */
+  params: string[];
+  /** Its declaration; null for a route written before the form. */
+  declared: RouteDeclaration | null;
 }
 
 export interface Placed {
@@ -131,6 +539,7 @@ export interface Placed {
 
 const LITERAL = /^[A-Za-z0-9._~-]+$/;
 const PARAM = /^:[A-Za-z_][A-Za-z0-9_]*$/;
+const SHAPE_KINDS: Readonly<Record<AnyShape["kind"], true>> = { text: true, number: true, yesNo: true, literal: true, oneOf: true, list: true, object: true, record: true, union: true, json: true, nothing: true };
 
 /** The access a path's place allows. */
 function accessFor(path: string): readonly Access[] | null {
@@ -141,12 +550,61 @@ function accessFor(path: string): readonly Access[] | null {
   return null;
 }
 
+/** The groups a path's place allows: the provider endpoint's under `/v1/`, the web UI's under `/ui/`, the API's under `/api/v1/`. */
+function groupsFor(path: string): (group: RouteGroup) => boolean {
+  if (path.startsWith("/v1/")) return (g) => g === "provider";
+  if (path === "/ui" || path.startsWith("/ui/")) return (g) => g === "ui";
+  return (g) => g !== "provider" && g !== "ui";
+}
+
 /** A pattern's shape: its params unnamed, so that two patterns that match the same paths compare equal. */
 function shapeOf(path: string): string {
   return path
     .split("/")
     .map((s) => (s.startsWith(":") ? ":" : s))
     .join("/");
+}
+
+/** A pattern's params, in order: `:name` segments by name, and `*` for the rest of the path. */
+export function paramsOf(path: string): string[] {
+  return path.split("/").flatMap((s) => (s.startsWith(":") ? [s.slice(1)] : s === "*" ? ["*"] : []));
+}
+
+function isShape(value: unknown): value is AnyShape {
+  return isRecord(value) && typeof value.kind === "string" && Object.hasOwn(SHAPE_KINDS, value.kind);
+}
+
+/** Why a route in the form cannot be held to its declaration as written; null when it can. */
+function declarationProblem(r: Declared): string | null {
+  if (!(ROUTE_GROUPS as readonly string[]).includes(r.group)) return `its group is one of §4.4's: ${ROUTE_GROUPS.join(", ")}.`;
+  if (!groupsFor(r.path)(r.group)) return `a route at ${r.path} is not in the ${r.group} group.`;
+  if (typeof r.does !== "string" || r.does.trim() === "" || r.does.includes("\n")) return "it says what it does in one line.";
+  if ("raw" in r) return typeof r.answers !== "string" || r.answers.trim() === "" || r.answers.includes("\n") ? "a raw route says what it answers in one line." : null;
+  const params = new Set(paramsOf(r.path));
+  for (const [name, f] of Object.entries(r.query ?? {})) {
+    const of: unknown = isRecord(f) && f.kind === "field" ? f.of : f;
+    if (!isShape(of) || !Object.hasOwn(QUERY_KINDS, of.kind)) return `its query's ${name} is text, a number, true or false, or one of a few words: a query string carries nothing else.`;
+    if (params.has(name)) return `${name} is a param of its path, and its query names it again.`;
+  }
+  if (r.body !== undefined) {
+    if (r.method === "GET" || r.method === "DELETE") return `a ${r.method} takes no body.`;
+    if (!isShape(r.body)) return "it declares its body as a shape: a reader of its own is no declaration, and the server could not hold a request to it.";
+    if (r.body.kind === "nothing") return "a route that takes no body leaves its body out.";
+  }
+  if (!isShape(r.reply)) return "it declares its reply as a shape.";
+  if (r.paged !== undefined) {
+    if (r.method !== "GET") return "a route that pages is a GET.";
+    if (r.query !== undefined && (Object.hasOwn(r.query, "limit") || Object.hasOwn(r.query, "cursor"))) return "a route that pages takes limit and cursor already: its query declares neither.";
+    if (r.reply.kind !== "object" || r.reply.page !== true) return "a route that pages answers a page (shape.page).";
+  }
+  return null;
+}
+
+/** A route's declaration as the table lists it; null for a route written before the form. */
+function declarationOf(r: Route): RouteDeclaration | null {
+  if (!isDeclared(r)) return null;
+  if ("answers" in r) return { group: r.group, does: r.does, answers: r.answers };
+  return { group: r.group, does: r.does, query: r.query ?? {}, body: r.body ?? null, reply: r.reply, paged: r.paged !== undefined };
 }
 
 export class RouteTable {
@@ -165,13 +623,17 @@ export class RouteTable {
       const path: string = r.path;
       const segments = path.split("/");
       const wildcard = segments.at(-1) === "*";
-      if (segments[0] !== "" || segments.length < 2 || !segments.slice(1).every((s, i) => LITERAL.test(s) || PARAM.test(s) || (s === "*" && i === segments.length - 2))) throw new Error(`${at}: a path is made of words and :params between slashes, with * last for a raw route.`);
-      if (wildcard && !("raw" in r)) throw new Error(`${at}: only a raw route may end in *.`);
+      const declared = isDeclared(r);
+      if (segments[0] !== "" || segments.length < 2 || !segments.slice(1).every((s, i) => LITERAL.test(s) || PARAM.test(s) || (s === "*" && i === segments.length - 2))) throw new Error(`${at}: a path is made of words and :params between slashes, with * last.`);
+      if (wildcard && !declared && !("raw" in r)) throw new Error(`${at}: only a raw route, or a route in the form, may end in *.`);
       const allowed = accessFor(r.path);
       if (allowed === null) throw new Error(`${at}: routes live under /v1/, /api/v1/ or /ui/.`);
       if (!allowed.includes(r.access)) throw new Error(`${at}: a route there is for ${allowed.join(" or ")}, not ${r.access}.`);
       if (r.maxBody !== undefined && (!Number.isInteger(r.maxBody) || r.maxBody < 0)) throw new Error(`${at}: maxBody is a whole number of bytes.`);
-      if ("body" in r && r.body !== undefined && (r.method === "GET" || r.method === "DELETE")) throw new Error(`${at}: a ${r.method} takes no body.`);
+      if (declared) {
+        const problem = declarationProblem(r);
+        if (problem !== null) throw new Error(`${at}: ${problem}`);
+      } else if ("body" in r && r.body !== undefined && (r.method === "GET" || r.method === "DELETE")) throw new Error(`${at}: a ${r.method} takes no body.`);
       const shape = shapeOf(r.path);
       const key = `${r.method} ${shape}`;
       if (taken.has(key)) throw new Error(`${at}: another route already answers ${r.method} on that path.`);
@@ -185,7 +647,7 @@ export class RouteTable {
   }
 
   list(): RouteInfo[] {
-    return this.placed.map(({ area, route: r }) => ({ area, method: r.method, path: r.path, access: r.access, maxBody: r.maxBody ?? null, raw: "raw" in r }));
+    return this.placed.map(({ area, route: r }) => ({ area, method: r.method, path: r.path, access: r.access, maxBody: r.maxBody ?? null, raw: "raw" in r, params: paramsOf(r.path), declared: declarationOf(r) }));
   }
 
   /** Fixes the table for the server: each path pattern with its routes by method. */

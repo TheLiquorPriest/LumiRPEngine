@@ -7,7 +7,7 @@
 // key with no end. The drawer's page token is renewed by the extension as it runs out, so its end is
 // nothing the player acts on, and the drawer does not show it.
 
-import type { BuildsReply, BuildsStatus } from "../api";
+import type { BuildsReply, BuildsStatus } from "../../shared/api";
 import { Banner, Button, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { errorWords, when } from "../words";

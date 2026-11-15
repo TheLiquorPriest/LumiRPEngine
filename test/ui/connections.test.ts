@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, draftOf, testConnection } from "../../src/ui/pages/connections";
-import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../../src/ui/api";
+import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../../src/shared/api";
 import { duration } from "../../src/ui/words";
 import { askingClient, settle } from "./asking";
 import { banners, elements, expand, press, textOf } from "./vnodes";

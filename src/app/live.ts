@@ -6,6 +6,10 @@
 // the reader has not taken yet), and, past a limit, the oldest of the other events dropped and named,
 // so the page can read again what it needs. A slow reader never holds up a turn.
 //
+// Each kind the socket carries is declared once, below (`LIVE_KINDS`), with what its data is and the key
+// it is coalesced by; the hub takes no other kind, and the pages' types and the API reference are
+// written from the same declaration (`bun run api`).
+//
 // The socket's messages, as JSON:
 // - from the page: `{"op":"follow","chat":…}`, `{"op":"unfollow","chat":…}`;
 // - to the page: `{"type":"following","chat":…,"seq":…}` (the chat's last number when following
@@ -16,31 +20,186 @@
 // once that runs out or is replaced, RPE closes it with code 4401 and a reason the page can show.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
+import type { TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import { rawRoute } from "./routes";
+import { type AnyShape, type Exactly, type Holds, type Infer, rawRoute, shape } from "./routes";
 
 export const LIVE_PATH = "/api/v1/live";
 export const LIVE_PROTOCOL = "rpe.live";
 export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";
 
+// ---------------------------------------------------------------- the kinds the socket carries
+
+// RPH's trace, as the turn lane hands it on whole: its record of every event of a run, and the text of
+// a model call as it streams. Declared here field by field so that the pages' types and the reference say
+// what a page is sent; each is held to RPH's own type below, so a change to it in RPH stops this
+// compiling until the declaration says the same.
+const T = shape.text();
+const N = shape.number();
+const opt = shape.optional;
+const scope = shape.named("Scope", "Where work is: the user, the chat, the session, and the turn where it belongs to one.", shape.object({ user: T, chat: T, session: T, turn: opt(T) }));
+const agentRef = shape.named("AgentRef", "One agent of a run: its handle, its definition, the agent that started it, its job, and the character it plays.", shape.object({ id: T, definition: T, parent: opt(T), job: opt(T), plays: opt(T) }));
+const usage = shape.named("Usage", "Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.", shape.object({ calls: N, input: N, cacheRead: N, cacheWrite: N, output: N, reasoning: opt(N) }));
+const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
+const sampling = shape.named("Sampling", "Sampling by its usual names, as a preset sets it; each one absent is the connection's own.", shape.object({ temperature: opt(N), top_p: opt(N), top_k: opt(N), min_p: opt(N), frequency_penalty: opt(N), presence_penalty: opt(N), repetition_penalty: opt(N), seed: opt(N), stop: opt(shape.list(T)) }));
+const toolCall = shape.named("ToolCallView", "A tool call a model made: the model's id for it, the tool, and its arguments.", shape.object({ id: T, name: T, args: shape.json() }));
+const toolContent = shape.union(shape.object({ type: shape.literal("text"), text: T }), shape.object({ type: shape.literal("image"), data: T, mimeType: T }));
+const toolResult = shape.named("ToolResult", "A tool's answer: what the model is shown, whether it failed, what it reports beyond it, its marks, and data for the live view.", shape.object({ content: shape.list(toolContent), error: opt(shape.literal(true)), reports: opt(shape.list(T)), marks: opt(shape.list(T)), details: opt(shape.json()) }));
+const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
+const factValue = shape.object({ count: N, names: opt(shape.list(T)), by: opt(shape.record(N)), namesBy: opt(shape.record(shape.list(T))), fields: opt(shape.record(shape.json())) });
+const ruleThen = shape.union(shape.object({ did: shape.literal("called"), tools: shape.list(T) }), shape.object({ did: shape.literal("wrote") }), shape.object({ did: shape.literal("released") }), shape.object({ did: shape.literal("ended") }));
+const ruleFiring = shape.named(
+  "RuleFiring",
+  "A rule that fired: which, from where, at what moment, on what, what it did, and what the agent did next.",
+  shape.object({
+    rule: T,
+    path: T,
+    level: layerLevel,
+    moment: shape.oneOf("stream", "tool-call", "tool-result", "after-message", "run-end", "turn-start", "before-compaction", "interval"),
+    watched: opt(shape.oneOf("text", "thinking", "reply", "arguments", "result")),
+    agent: agentRef,
+    callId: opt(T),
+    tool: opt(T),
+    matched: opt(T),
+    fact: opt(shape.object({ name: T, value: factValue })),
+    action: shape.oneOf("cut", "remind", "hold", "follow-up", "briefing", "call"),
+    dropped: opt(T),
+    then: opt(ruleThen),
+  }),
+);
+const presetRef = shape.object({ id: T, name: opt(T), revision: opt(T) });
+const promptNotice = shape.named(
+  "PromptNotice",
+  "What changed in the prompt's shape since the turn before, or that it is not mapped or could not be told apart.",
+  shape.union(
+    shape.object({ kind: shape.literal("changed"), marker: T }),
+    shape.object({ kind: shape.literal("gone"), marker: T }),
+    shape.object({ kind: shape.literal("unclaimed"), message: N, start: N, end: N }),
+    shape.object({ kind: shape.literal("order"), markers: shape.list(T) }),
+    shape.object({ kind: shape.literal("preset"), was: shape.nullable(presetRef), now: shape.nullable(presetRef) }),
+    shape.object({ kind: shape.literal("unmapped") }),
+    shape.object({ kind: shape.literal("incomplete") }),
+  ),
+);
+const limitHit = shape.named(
+  "LimitHit",
+  "A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs.",
+  shape.object({ limit: shape.oneOf("calls", "tokensIn", "tokensOut", "tokens", "time", "depth", "agents", "jobs"), per: shape.oneOf("turn", "agent", "job", "day"), max: N, value: N, agent: opt(agentRef), connection: opt(T) }),
+);
+const release = shape.named(
+  "Release",
+  "The reply's release: whose text, in which form, the file for a file released, its length, and whether it went out before the turn's intent record was taken.",
+  shape.object({ by: agentRef, form: shape.oneOf("tags", "message", "narrator", "narrator-live", "file"), path: opt(T), length: N, withoutIntent: opt(shape.literal(true)) }),
+);
+const jobView = shape.named(
+  "JobView",
+  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, and the limit it ended at.",
+  shape.object({
+    id: T,
+    agent: T,
+    brief: T,
+    state: shape.oneOf("queued", "running", "done", "failed", "cancelled", "off-path", "interrupted"),
+    scope,
+    startedBy: shape.union(agentRef, shape.literal("user")),
+    started: N,
+    ended: opt(N),
+    usage,
+    report: opt(T),
+    limit: opt(limitHit),
+  }),
+);
+const replyError = shape.object({ code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed"), limit: opt(limitHit), detail: opt(T) });
+const runOutcome = shape.named(
+  "RunOutcome",
+  "How a run ended, whether a reply was released, the limit or the failure, and what every agent of it spent.",
+  shape.object({ status: shape.oneOf("released", "no-reply", "stopped", "limit", "failed"), released: shape.yesNo(), limit: opt(limitHit), error: opt(replyError), usage }),
+);
+const traceEvent = shape.named(
+  "TraceEvent",
+  "What RPH did; each kind's fields are the facts of it.",
+  shape.union(
+    shape.object({ kind: shape.literal("run_started"), run: shape.oneOf("turn", "job", "talk"), turn: opt(shape.named("TurnKind", "What a generation asks for.", shape.oneOf("new", "swipe", "regenerate", "continue", "impersonate"))), lead: T }),
+    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T) }),
+    shape.object({ kind: shape.literal("intent"), text: T }),
+    shape.object({ kind: shape.literal("call_started"), call: N, connection: T, model: T, sampling: opt(sampling), maxTokens: opt(N), messages: N, tools: N, request: opt(T), toolTokens: opt(N), openingTokens: opt(N) }),
+    shape.object({ kind: shape.literal("call_ended"), call: N, model: T, text: T, thinking: opt(T), toolCalls: shape.list(toolCall), stop: T, usage, ms: N, error: opt(T) }),
+    shape.object({ kind: shape.literal("tool_started"), callId: T, tool: T, args: shape.json(), closing: shape.yesNo(), via: opt(shape.literal("tool_use")) }),
+    shape.object({ kind: shape.literal("tool_update"), callId: T, tool: T, partial: toolResult }),
+    shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N }),
+    shape.object({ kind: shape.literal("rule_fired"), firing: ruleFiring }),
+    shape.object({
+      kind: shape.literal("hook"),
+      hook: T,
+      on: shape.oneOf("turn-start", "before-tool", "after-tool", "before-release", "after-release", "run-end", "session-close", "before-compaction", "job-start", "job-end"),
+      outcome: shape.oneOf("ok", "added", "changed", "blocked", "failed", "timed-out"),
+      ms: N,
+    }),
+    shape.object({ kind: shape.literal("approval_asked"), callId: T, tool: T, lane: T }),
+    shape.object({ kind: shape.literal("approval_answered"), callId: T, tool: T, lane: T, answer: shape.union(shape.object({ go: shape.literal(true) }), shape.object({ go: shape.literal(false), reason: opt(T) })) }),
+    shape.object({ kind: shape.literal("prompt_notices"), notices: shape.list(promptNotice) }),
+    shape.object({ kind: shape.literal("todo"), items: shape.list(shape.object({ text: T, done: shape.yesNo() })) }),
+    shape.object({ kind: shape.literal("limit"), hit: limitHit }),
+    shape.object({ kind: shape.literal("released"), release }),
+    shape.object({ kind: shape.literal("compacted"), session: T, before: N, after: N, keptTurns: N }),
+    shape.object({ kind: shape.literal("session"), session: T, change: shape.oneOf("opened", "closed", "forked", "reopened"), from: opt(T) }),
+    shape.object({ kind: shape.literal("job"), job: jobView }),
+    shape.object({ kind: shape.literal("agent_ended"), status: shape.oneOf("done", "asked", "limit", "stopped", "failed"), limit: opt(limitHit), usage }),
+    shape.object({ kind: shape.literal("run_ended"), outcome: runOutcome }),
+  ),
+);
+const traceRecord = shape.named(
+  "TraceRecord",
+  "An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it.",
+  shape.object({ seq: N, run: T, scope, at: N, agent: agentRef, parent: opt(shape.object({ agent: T, run: T, call: T })), event: traceEvent }),
+);
+const traceDelta = shape.named("TraceDelta", "Text of a model call as it streams: what arrived since the last piece, never numbered.", shape.object({ run: T, agent: T, call: N, text: opt(T), thinking: opt(T), at: N }));
+type TraceMirrored = Holds<Exactly<Infer<typeof traceRecord>, TraceRecord>>;
+type DeltaMirrored = Holds<Exactly<Infer<typeof traceDelta>, TraceDelta>>;
+
+/** A kind the live socket carries: what its data is, what it says, and the key a newer event of it replaces an older one by, for a reader that fell behind. */
+export interface LiveKindDeclaration {
+  readonly data: AnyShape;
+  readonly does: string;
+  readonly key?: string;
+}
+
+/** Every kind a chat's live socket carries, each declared once. The hub publishes no other. */
+export const LIVE_KINDS = {
+  trace: { data: traceRecord, does: "A record of RPH's trace, for a run played in the chat: every event of the run, as RPH gave it." },
+  delta: { data: traceDelta, does: "A piece of a model call's text as it streams, for the live view; the call's call_ended record holds it whole." },
+  reply: {
+    data: shape.named(
+      "ReplyPiece",
+      "What went to the chat: a piece of the reply's text at its offset in the reply (UTF-16 code units), or one progress line of the chat's thinking block, counted from 0.",
+      shape.union(shape.object({ run: T, from: N, text: T }), shape.object({ run: T, line: N, progress: T })),
+    ),
+    does: "What went to the chat as the reply was written: its text, and the progress lines of its thinking block.",
+  },
+  state: { data: shape.object({}), key: "state", does: "The chat's state changed, and a page reads it again." },
+  handler_failed: { data: shape.object({ op: T, error: T }), does: "An engine handler failed on a change, which is recorded as not applied: the operation, and the handler's error." },
+} as const satisfies Readonly<Record<string, LiveKindDeclaration>>;
+
+export type LiveKind = keyof typeof LIVE_KINDS;
+/** What an event of a kind carries. */
+export type LiveData<K extends LiveKind> = Infer<(typeof LIVE_KINDS)[K]["data"]>;
+
 export interface LiveEvent {
   chat: string;
   /** Rises by one with each of the chat's events, from 1. */
   seq: number;
-  /** What happened, in the publishing area's words. */
+  /** What happened: one of the kinds declared above. */
   kind: string;
-  /** Present on a state push: a newer push with the same key replaces this one for a reader that has not taken it yet. */
+  /** Present on a kind declared with a key: a newer event with the same key replaces this one for a reader that has not taken it yet. */
   key?: string;
   at: number;
   data: JsonValue;
 }
 
-/** An event as an area publishes it. */
-export interface LivePublish {
-  kind: string;
-  key?: string;
-  data: JsonValue;
+/** An event as an area publishes it: a declared kind, and the data that kind carries. */
+export interface LivePublish<K extends LiveKind = LiveKind> {
+  kind: K;
+  data: LiveData<K>;
 }
 
 /** What a reader is given: a chat's events in order, and the numbers of those dropped before them when it fell behind. */
@@ -150,11 +309,18 @@ export class LiveHub {
 
   constructor(private readonly options: LiveHubOptions) {}
 
-  /** Publishes an event to everyone following `chat`, and returns it with its number. Never waits. */
-  publish(chat: string, event: LivePublish): LiveEvent {
+  /**
+   * Publishes an event of a declared kind to everyone following `chat`, and returns it with its number.
+   * Never waits. A kind the declaration does not hold is refused, so nothing reaches a page that its
+   * types and the reference do not describe.
+   */
+  publish<K extends LiveKind>(chat: string, event: LivePublish<K>): LiveEvent {
+    if (!Object.hasOwn(LIVE_KINDS, event.kind)) throw new Error(`The live socket carries no "${String(event.kind)}" events: the kinds it carries are declared in src/app/live.ts (${Object.keys(LIVE_KINDS).join(", ")}).`);
+    const declared: LiveKindDeclaration = LIVE_KINDS[event.kind];
     const seq = (this.seqs.get(chat) ?? 0) + 1;
     this.seqs.set(chat, seq);
-    const out: LiveEvent = { chat, seq, kind: event.kind, ...(event.key === undefined ? {} : { key: event.key }), at: this.options.now(), data: event.data };
+    // A kind's data is declared in shapes, which describe JSON values only.
+    const out: LiveEvent = { chat, seq, kind: event.kind, ...(declared.key === undefined ? {} : { key: declared.key }), at: this.options.now(), data: event.data as JsonValue };
     const followers = this.followers.get(chat);
     if (followers === undefined) return out;
     const json = JSON.stringify(out);
@@ -287,6 +453,9 @@ export const liveRoute = rawRoute({
   method: "GET",
   path: LIVE_PATH,
   access: "page",
+  group: "live",
+  does: "The live socket: a page follows chats on it, and is sent each one's events in order (the live kinds), held to the token it opened with.",
+  answers: "a WebSocket on the protocol rpe.live; 426 when the request is not a socket's, 400 when it offers protocols and not rpe.live",
   raw(request, { openLiveSocket }) {
     const offered = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((p) => p.trim()).filter((p) => p !== "");
     if (offered.length > 0 && !offered.includes(LIVE_PROTOCOL)) return Response.json({ error: `Offer the protocol ${LIVE_PROTOCOL} to open the live socket.` }, { status: 400 });

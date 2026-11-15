@@ -5,7 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
-import { Auth, bearerOf } from "./auth";
+import { Auth } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
 import { modelsPort } from "./connections";
@@ -13,14 +13,14 @@ import { openDatabase, WriteQueue } from "./database";
 import { LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
 import { migrate, Migrations } from "./migrations";
-import { route, RouteError, RouteTable } from "./routes";
+import { type Exactly, type Holds, type Infer, route, RouteError, RouteTable, shape } from "./routes";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
 import type { RunningServer } from "./server";
 import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
 import { RPE_UI, uiRoute } from "./ui";
-import { type AppFile, Builds } from "./update";
+import { type AppFile, Builds, type BuildsStatus } from "./update";
 
 /** Public: that RPE answers here, and its build; nothing more, and no work to say it. */
 export const STATUS_PATH = "/api/v1/status";
@@ -104,6 +104,29 @@ export function lineLog(write: (line: string) => void, now: () => number = Date.
   return { debug: line("debug"), info: line("info"), warn: line("warn"), error: line("error") };
 }
 
+// What the app's own routes answer.
+const T = shape.text();
+const restartState = shape.named(
+  "RestartState",
+  "Where a restart onto RPE's app file on disk stands: nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand.",
+  shape.oneOf("none", "waiting", "restarting", "off", "by hand"),
+);
+const buildsStatus = shape.named(
+  "BuildsStatus",
+  "The builds that meet at RPE, as its builds route and \"Update now\" give them.",
+  shape.object({
+    running: shape.field(T, "The build this process runs."),
+    disk: shape.field(shape.nullable(T), "The build of the app file on disk; null where there is no file, or it gives none."),
+    broken: shape.field(shape.nullable(T), "Why the file on disk gave no build: it is not there, does not start, or says something else."),
+    extension: shape.field(shape.nullable(T), "The extension's build as it said at its last registration; null before it has."),
+    agree: shape.field(shape.yesNo(), "Every build known is the running one, and the file on disk starts."),
+    restart: restartState,
+    words: shape.field(T, "All of it in a sentence or two, as `rpe status` prints it."),
+  }),
+);
+type BuildsMirrored = Holds<Exactly<Infer<typeof buildsStatus>, BuildsStatus>>;
+const statusReply = shape.named("Status", "That RPE answers here, and its build: nothing more.", shape.object({ name: shape.literal("rpe"), version: T }));
+
 /**
  * The app's own routes: its status to anyone, only that it answers and its build; its builds to a
  * page, which reads the app file again each time it is asked; "Update now", which answers what RPE
@@ -111,15 +134,26 @@ export function lineLog(write: (line: string) => void, now: () => number = Date.
  */
 export function appRoutes(version: string, started: number, auth: Auth, ui: string | null, builds: Builds) {
   return [
-    route({ method: "GET", path: STATUS_PATH, access: "public", handle: () => ({ name: "rpe", version }) }),
-    route({ method: "POST", path: UPDATE_PATH, access: "page", handle: () => builds.now() }),
-    route({ method: "GET", path: BUILDS_PATH, access: "page", handle: async () => ({ name: "rpe", version, started, builds: await builds.check() }) }),
+    route({ method: "GET", path: STATUS_PATH, access: "public", group: "service", does: "Says that RPE answers here, and its build; nothing more, and no work to say it.", reply: statusReply, handle: () => ({ name: "rpe" as const, version }) }),
+    route({ method: "POST", path: UPDATE_PATH, access: "page", group: "service", does: '"Update now": RPE restarts onto its new app file once no turn or job runs, whatever update.restart says, and answers where that stands.', reply: buildsStatus, handle: () => builds.now() }),
+    route({
+      method: "GET",
+      path: BUILDS_PATH,
+      access: "page",
+      group: "service",
+      does: "When RPE started, and the builds that meet at it, its app file read again.",
+      reply: shape.named("BuildsReply", "When RPE started (epoch milliseconds), and the builds that meet at it.", shape.object({ name: shape.literal("rpe"), version: T, started: shape.number(), builds: buildsStatus })),
+      handle: async () => ({ name: "rpe" as const, version, started, builds: await builds.check() }),
+    }),
     route({
       method: "GET",
       path: SESSION_PATH,
       access: "page",
-      handle: ({ request }) => {
-        const hold = auth.pageHold(bearerOf(request));
+      group: "service",
+      does: "Whose the page's credential is, and when it ends.",
+      reply: shape.named("SessionReply", "Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).", shape.object({ user: T, ends: shape.nullable(shape.number()) })),
+      handle: ({ credential }) => {
+        const hold = auth.pageHold(credential);
         if (hold === null) throw new RouteError(401, "This needs a page token or the web UI's token.");
         return { user: hold.user, ends: hold.until };
       },

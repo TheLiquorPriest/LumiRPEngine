@@ -113,9 +113,6 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
 /** The notice that tells each way a job can end (plan §13.5): a job that did not finish is never told as finished. */
 const JOB_ENDS: Readonly<Partial<Record<JobState, string>>> = { done: "job_finished", failed: "job_failed", cancelled: "job_cancelled", interrupted: "job_interrupted", "off-path": "job_off_path" };
 
-/** The live kind, and its key, that tells a chat's followers its state changed; a page answers it by reading the chat's state again (plan §4.4). The Play page's server publishes the same. */
-const STATE_KIND = "state";
-
 export interface TurnLaneDeps {
   store: Store;
   writes: Writes;
@@ -1370,7 +1367,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * Lumiverse's end of its reply is heard, which can come after its run has ended.
    */
   #stateChanged(chat: string): void {
-    this.#d.live.publish(chat, { kind: STATE_KIND, key: STATE_KIND, data: {} });
+    this.#d.live.publish(chat, { kind: "state", data: {} });
   }
 
   /**

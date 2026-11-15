@@ -5,7 +5,7 @@
 // each by that path and asks it for the facts of the run, a fresh footing for every play and a browser
 // that reads pages as a person does. Every wait a host makes is on something shown, never a fixed time.
 
-import type { SettingsReply } from "../../../src/ui/api";
+import type { SettingsReply } from "../../../src/shared/api";
 
 export type Mode = "rig" | "live";
 

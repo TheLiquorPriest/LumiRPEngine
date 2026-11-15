@@ -11,7 +11,8 @@
 //   default, so "Update now" is offered).
 
 import type { JobView } from "rp-harness/contract";
-import type { BootstrapChat, BuildsStatus, CastCharacter, CastEntryShown, CastStrike, CastStruck, SettleAnswer, StoryAnswer, StoryItemShown, StoryStrike, StoryStruck } from "../../../src/ui/api";
+import type { BuildsStatus } from "../../../src/shared/api";
+import type { BootstrapChat, CastCharacter, CastEntryShown, CastStrike, CastStruck, SettleAnswer, StoryAnswer, StoryItemShown, StoryStrike, StoryStruck } from "../../../src/ui/api";
 import { AGREE, BATCH, BOOT, buildsReply, job, NEWER } from "../../../test/ui/bootstrap-recorded";
 import { CHAT as PLAYED } from "../../../test/ui/recorded";
 import { CAST, ODILE_RECORD, OLDER_BEATS, STORY, TOBIN } from "../../../test/ui/records-recorded";

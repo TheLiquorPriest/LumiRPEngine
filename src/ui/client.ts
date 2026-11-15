@@ -1,11 +1,15 @@
 // One typed client over RPE's API (plan §4.4), the same for both shells and every page. A call names its
 // route as the route table writes it ("GET /api/v1/chats/:chat/turns") and gets back what that route
-// answers; whoever follows a chat gets its live events. Behind it is one of the two roads (roads.ts). The
-// web shell, served by RPE itself, is always direct. In Lumiverse's drawer the client asks the extension
-// for its start-up facts, tries RPE's addresses from the page, and takes the relay when none answers,
-// keeping why, so the page can say which road it is on and why.
+// answers: a route in the form is typed by the generated types (`src/shared/api`, written from the route
+// table by `bun run api`), the rest by the map `api.ts` still keeps. A route that pages is read a page at
+// a time with `call`, or walked to its end with `walk`. Whoever follows a chat gets its live events.
+// Behind it is one of the two roads (roads.ts). The web shell, served by RPE itself, is always direct. In
+// Lumiverse's drawer the client asks the extension for its start-up facts, tries RPE's addresses from the
+// page, and takes the relay when none answers, keeping why, so the page can say which road it is on and
+// why.
 
 import { createStore, type Readable } from "../frontend/store";
+import type { ApiRoutes } from "../shared/api";
 import { isRecord } from "../shared/json";
 import { type LiveEvent, type MissingPermission, type RouteKey, type Routes, SESSION_PATH } from "./api";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
@@ -42,10 +46,18 @@ type ParamNames<P extends string> = P extends `${infer Head}/${infer Tail}` ? Pa
 /** A route's path params, by the names its pattern gives them. */
 export type ParamsOf<K extends RouteKey> = { readonly [N in ParamNames<PathOf<K>>]: string };
 
+/** What a route takes and answers: a route in the form's from the generated types, any other's from the map `api.ts` keeps. */
+export type RouteShapes<K extends RouteKey> = K extends keyof ApiRoutes ? ApiRoutes[K] : K extends keyof Routes ? Routes[K] : never;
+
 export interface CallOptions<K extends RouteKey> {
-  query?: Routes[K]["query"];
-  body?: Routes[K]["body"];
+  query?: RouteShapes<K>["query"];
+  body?: RouteShapes<K>["body"];
 }
+
+/** The routes that page: each takes `limit` and `cursor` in its query and answers `{ items, next }`. */
+export type PagedKey = { [K in keyof ApiRoutes]: ApiRoutes[K]["paged"] extends true ? K : never }[keyof ApiRoutes] & string;
+/** An item of a paged route's list. */
+export type PageItem<K extends PagedKey> = ApiRoutes[K]["reply"] extends { items: readonly (infer I)[] } ? I : never;
 
 /** Whoever follows a chat. */
 export interface LiveListener {
@@ -61,7 +73,7 @@ export interface RpeClient {
   readonly state: Readable<ClientState>;
   /** What the extension says it lacks, in its own word (the drawer); null where the page has none (the web shell: RPE's status route says it). */
   readonly missing: Readable<readonly MissingPermission[] | null>;
-  call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<Routes[K]["reply"]>;
+  call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<RouteShapes<K>["reply"]>;
   /** Follows a chat's live events; the returned function stops. */
   follow(chat: string, listener: LiveListener): () => void;
   /**
@@ -136,6 +148,25 @@ function readAnswer(answer: RoadAnswer): unknown {
     return JSON.parse(answer.text);
   } catch {
     throw new RpeError(answer.status, "RPE's answer was not JSON.");
+  }
+}
+
+/**
+ * Every item of a paged route, its pages read one after another from the first to the end, each of
+ * `limit` items where the query gives one, else of the route's own size.
+ */
+export async function walk<K extends PagedKey>(client: Pick<RpeClient, "call">, key: K, params: ParamsOf<K>, options: { query?: Omit<NonNullable<CallOptions<K>["query"]>, "cursor"> } = {}): Promise<PageItem<K>[]> {
+  const items: PageItem<K>[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const query = { ...options.query, ...(cursor === null ? {} : { cursor }) };
+    const page: unknown = await client.call(key, params, { query } as CallOptions<K>);
+    if (!isRecord(page) || !Array.isArray(page.items) || (page.next !== null && typeof page.next !== "string")) throw new RpeError(200, `RPE's answer to ${key} is not a page of its list.`);
+    items.push(...(page.items as PageItem<K>[]));
+    if (page.next === null) return items;
+    // A route that pages moves on from where it was asked to start; one that does not would be walked forever.
+    if (page.next === cursor) throw new RpeError(200, `RPE answered ${key} with the same page again, from ${cursor}.`);
+    cursor = page.next;
   }
 }
 
@@ -256,7 +287,7 @@ export function createClient(connector: Connector): RpeClient {
         signOut(refused);
         throw refused;
       }
-      return readAnswer(answer) as Routes[typeof key]["reply"];
+      return readAnswer(answer) as RouteShapes<typeof key>["reply"];
     },
     follow(chat, listener) {
       let set = listeners.get(chat);

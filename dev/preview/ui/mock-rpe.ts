@@ -21,8 +21,9 @@
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { ConnectionView, ModelLimit, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
+import type { ConnectionShown, SaveConnection } from "../../../src/shared/api";
 import type { JsonValue } from "../../../src/shared/json";
-import type { ConnectionShown, ExtensionStatus, LiveEvent, ReplyPiece, SaveConnection, TurnDetail, TurnRun } from "../../../src/ui/api";
+import type { ExtensionStatus, LiveEvent, ReplyPiece, TurnDetail, TurnRun } from "../../../src/ui/api";
 import { buildAnswer, buildControl } from "./mock-build";
 import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
 import { migrationAnswer, migrationControl } from "./mock-migration";

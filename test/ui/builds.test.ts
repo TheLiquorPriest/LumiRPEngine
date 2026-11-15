@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { BuildsStatus, RestartState } from "../../src/ui/api";
+import type { BuildsStatus, RestartState } from "../../src/shared/api";
 import { type BuildsShown, BuildsView, canUpdate, NO_BUILDS, readBuilds, readSession } from "../../src/ui/pages/builds";
 import { NO_SETTINGS, SettingsView } from "../../src/ui/pages/settings";
 import { when } from "../../src/ui/words";

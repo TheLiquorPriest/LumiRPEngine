@@ -8,16 +8,13 @@
 import type { LiveHub } from "../app";
 import { isRecord } from "../shared/json";
 
-/** The live kind that says a chat's state changed; also the key that coalesces it. */
-export const STATE_KIND = "state";
-
 /** The kind the turn lane publishes RPH's trace records under, and the event that ends a run. */
 const TRACE_KIND = "trace";
 const RUN_ENDED = "run_ended";
 
 /** Tells everyone following `chat` that its state changed. */
 export function stateChanged(live: Pick<LiveHub, "publish">, chat: string): void {
-  live.publish(chat, { kind: STATE_KIND, key: STATE_KIND, data: {} });
+  live.publish(chat, { kind: "state", data: {} });
 }
 
 /** Follows chats on the live hub, each once, and tells their followers when a run of theirs ends. */

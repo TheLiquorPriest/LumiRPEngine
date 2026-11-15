@@ -8,10 +8,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionStatus as SentExtensionStatus } from "../../src/adapter/lumiverse/pipe-wire";
-import { type App, appRoutes, dataPaths, LIVE_TOKEN_ENDED as SENT_TOKEN_ENDED, lineLog, openApp, route, type RouteBody, type RouteReply, SESSION_PATH as SENT_SESSION_PATH } from "../../src/app";
+import { type AnyShape, type App, dataPaths, LIVE_TOKEN_ENDED as SENT_TOKEN_ENDED, lineLog, type LivePublish, openApp, problemsOf, route, type RouteBody, type RouteReply, SESSION_PATH as SENT_SESSION_PATH, shape } from "../../src/app";
 import { configOf } from "../../src/app/config";
 import { connectionRoutes } from "../../src/app/connections";
-import { settingsRoutes } from "../../src/app/settings-routes";
+import type { SettingDef } from "../../src/app/setting-list";
+import { type LevelFile, settingsRoutes } from "../../src/app/settings-routes";
 import { buildRoutes } from "../../src/build/routes";
 import { castRoutes } from "../../src/cast";
 import { migrateRoutes } from "../../src/migrate/routes";
@@ -20,11 +21,13 @@ import { storyRoutes } from "../../src/story";
 import { type BootstrapChat, type BootstrapStart, bootstrapRoutes } from "../../src/turn/bootstrap";
 import { turnRoutes } from "../../src/turn/routes";
 import { type TreeFileDiff as SentFileDiff, type TreeFileEntry as SentFileEntry, type TreeFileText as SentFileText, treeRoutes } from "../../src/tree";
+import type { SettingsReply } from "../../src/shared/api";
 import { type LiveEvent, LIVE_TOKEN_ENDED, type Routes, SESSION_PATH, type TurnList } from "../../src/ui/api";
-import { createClient, KEY_LET_GO, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
+import { createClient, KEY_LET_GO, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
 import { readSession } from "../../src/ui/pages/builds";
 import { browserDeps, probeDirect } from "../../src/ui/roads";
+import { testModelLayer } from "../app/helpers";
 import { CHAT, RECORDED, RECORDS, turnListAt, USER } from "./recorded";
 
 /** True when each of A and B is assignable to the other: a field one has and the other lacks parts them. */
@@ -62,20 +65,6 @@ const TURN_KEYS = [
   "POST /api/v1/jobs/:job/cancel",
 ] as const satisfies readonly (keyof Routes)[];
 
-/** The connection routes, by their place in their table: two share a path there, so the test below holds each place to its method and path. */
-type ConnectionTable = ReturnType<typeof connectionRoutes>;
-const CONNECTION_KEYS = ["GET /api/v1/connections", "POST /api/v1/connections", "PUT /api/v1/connections/:id", "DELETE /api/v1/connections/:id", "PUT /api/v1/connections/:id/default", "POST /api/v1/connections/:id/test"] as const satisfies readonly (keyof Routes)[];
-const connections: [
-  Same<Routes["GET /api/v1/connections"]["reply"], RouteReply<ConnectionTable[0]>>,
-  Same<Routes["POST /api/v1/connections"]["reply"], RouteReply<ConnectionTable[1]>>,
-  Same<Routes["POST /api/v1/connections"]["body"], RouteBody<ConnectionTable[1]>>,
-  Same<Routes["PUT /api/v1/connections/:id"]["reply"], RouteReply<ConnectionTable[2]>>,
-  Same<Routes["PUT /api/v1/connections/:id"]["body"], RouteBody<ConnectionTable[2]>>,
-  Same<Routes["DELETE /api/v1/connections/:id"]["reply"], RouteReply<ConnectionTable[3]>>,
-  Same<Routes["PUT /api/v1/connections/:id/default"]["reply"], RouteReply<ConnectionTable[4]>>,
-  Same<Routes["POST /api/v1/connections/:id/test"]["reply"], RouteReply<ConnectionTable[5]>>,
-] = [true, true, true, true, true, true, true, true];
-
 /** The tree's route at a path pattern, and the reply its handler gives. A raw route (a file, its difference, a write, a switch) makes its own response; its page type is held to the types the route builds it from. */
 type TreeReply<P extends string> = RouteReply<Extract<ReturnType<typeof treeRoutes>[number], { path: P }>>;
 const TREE_KEYS = [
@@ -111,30 +100,11 @@ const tree: [
   Same<Routes["GET /api/v1/files-stack"]["reply"], TreeReply<"/api/v1/files-stack">>,
 ] = [true, true, true, true, true, true, true, true, true, true, true, true, true];
 
-/** The settings routes, by their place in their table: both are at one path. */
-type SettingsTable = ReturnType<typeof settingsRoutes>;
-const SETTINGS_KEYS = ["GET /api/v1/settings", "PUT /api/v1/settings"] as const satisfies readonly (keyof Routes)[];
-const settings: [
-  Same<Routes["GET /api/v1/settings"]["reply"], RouteReply<SettingsTable[0]>>,
-  Same<Routes["PUT /api/v1/settings"]["reply"], RouteReply<SettingsTable[1]>>,
-  Same<Routes["PUT /api/v1/settings"]["body"], RouteBody<SettingsTable[1]>>,
-] = [true, true, true];
-
 /** The migration's route, and what the page reads of its reply: all of it but the rest of the report (shown as its printed text) beside what became of each world in Build, what today's build put in Lumiverse, and what was carried of each chat. */
 type SentMigration = RouteReply<ReturnType<typeof migrateRoutes>[0]>;
 const migration: [
   Same<Routes["GET /api/v1/migration"]["reply"], Omit<SentMigration, "report" | "lumiverse" | "chats"> & { report: Pick<NonNullable<SentMigration["report"]>, "worldsInBuild"> | null; chats: Omit<SentMigration["chats"][number], "carried">[] }>,
 ] = [true];
-
-/** The app's own routes the pages call, by their place in its table: its public status, "Update now", its builds, and the page's session. The handlers' `name` comes out as any string, where the page holds it to "rpe". */
-type AppTable = ReturnType<typeof appRoutes>;
-const APP_KEYS = ["GET /api/v1/status", "POST /api/v1/update", "GET /api/v1/status/builds", "GET /api/v1/status/session"] as const satisfies readonly (keyof Routes)[];
-const appReplies: [
-  Same<Omit<Routes["GET /api/v1/status"]["reply"], "name">, Omit<RouteReply<AppTable[0]>, "name">>,
-  Same<Routes["POST /api/v1/update"]["reply"], RouteReply<AppTable[1]>>,
-  Same<Omit<Routes["GET /api/v1/status/builds"]["reply"], "name">, Omit<RouteReply<AppTable[2]>, "name">>,
-  Same<Routes["GET /api/v1/status/session"]["reply"], RouteReply<AppTable[3]>>,
-] = [true, true, true, true];
 
 /** The Cast and Story pages' routes, by their place in their tables; the strike routes read their bodies in the handler, so only the replies compare. */
 type CastTable = ReturnType<typeof castRoutes>;
@@ -182,6 +152,30 @@ const turnsRoute = route({
   handle: ({ params, query }): TurnList & { asked: { chat: string; limit: string | null } } => ({ ...turnListAt(), asked: { chat: params.chat, limit: query.get("limit") } }),
 });
 
+const HARBOR = ["the quay", "the lighthouse", "the chandlery", "the ropewalk", "the fish market", "the customs house", "the tide pool"];
+const PLACES = "GET /api/v1/probe/places";
+let pagesRead = 0;
+
+/** A route of the fixture's own that pages: the harbor's places, 3 a page unless the caller asks, and at most 4. */
+const places = route({
+  method: "GET",
+  path: "/api/v1/probe/places",
+  access: "page",
+  group: "places",
+  does: "The harbor's places, a page at a time.",
+  paged: { sizes: () => ({ default: 3, most: 4 }) },
+  reply: shape.page(shape.text()),
+  handle: ({ query }) => {
+    pagesRead++;
+    const from = query.cursor === undefined ? 0 : Number(query.cursor);
+    const to = from + query.limit;
+    return { items: HARBOR.slice(from, to), next: to < HARBOR.length ? String(to) : null };
+  },
+});
+
+/** A limit of the settings the Settings page shows, with a most. */
+const CALLS: SettingDef = { key: "limits.turn.calls", default: 40, takes: { type: "whole", least: 1, most: 500 }, perConnection: false };
+
 let root = "";
 let app: App;
 let base = "";
@@ -190,11 +184,17 @@ const clients: RpeClient[] = [];
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "rpe-ui-"));
+  const global: LevelFile = { level: "global", file: "@global/RPE-global.yml", disk: join(root, "RPE-global.yml") };
   app = await openApp({
     paths: dataPaths(join(root, "data")),
     config: configOf({ port: 0, lumiverse: { url: "http://127.0.0.1:7860", user: USER } }, {}, "the test's config"),
     version: "1.0.0",
-    areas: [{ name: "turns", mount: (at) => at.routes.add("turns", [turnsRoute]) }],
+    areas: [
+      { name: "turns", mount: (at) => at.routes.add("turns", [turnsRoute]) },
+      { name: "settings", mount: (at) => at.routes.add("settings", settingsRoutes({ settings: [CALLS], levels: async () => [global], connections: async () => [] })) },
+      { name: "connections", mount: (at) => at.routes.add("connections", connectionRoutes(testModelLayer(at.models), async () => null)) },
+      { name: "probe", mount: (at) => at.routes.add("probe", [places]) },
+    ],
     log: lineLog(() => undefined),
   });
   base = (await app.start()).url;
@@ -222,13 +222,6 @@ describe("the pages' route map, against the routes themselves", () => {
     expect(replies.every((same) => same)).toBe(true);
   });
 
-  test("each connection route the type checks above compare sits at its place in its table, with the method and path the pages call it by", () => {
-    const layer = { list: async () => ({ connections: [], default: null, providers: [] }), save: async () => undefined as never, remove: async () => undefined, setDefault: async () => undefined, test: async () => undefined as never, limits: async () => undefined as never };
-    const table = connectionRoutes(layer, async () => null).map((r) => `${r.method} ${r.path}`);
-    expect(table).toEqual([...CONNECTION_KEYS]);
-    expect(connections.every((same) => same)).toBe(true);
-  });
-
   test("each route of the tree's the type checks above compare is in its table, with the method and path the pages call it by", () => {
     // The handlers reach the tree, its database and the harness only when a request comes.
     const table = treeRoutes({ files: "", chats: undefined as never, db: undefined as never, suggestions: undefined as never, turning: () => false, stack: async () => [] }).map((r) => `${r.method} ${r.path}`);
@@ -236,23 +229,10 @@ describe("the pages' route map, against the routes themselves", () => {
     expect(tree.every((same) => same)).toBe(true);
   });
 
-  test("both settings routes sit at their places in their table, with the method and path the pages call them by", () => {
-    const table = settingsRoutes({ settings: [], levels: async () => [], connections: async () => [] }).map((r) => `${r.method} ${r.path}`);
-    expect(table).toEqual([...SETTINGS_KEYS]);
-    expect(settings.every((same) => same)).toBe(true);
-  });
-
   test("the migration's route is in its table, with the method and path the page calls it by", () => {
     const table = migrateRoutes({ db: undefined as never, identifier: "lumi_rp_engine" }).map((r) => `${r.method} ${r.path}`);
     expect(table).toEqual(["GET /api/v1/migration"]);
     expect(migration.every((same) => same)).toBe(true);
-  });
-
-  test("the app's status, its \"Update now\", its builds and the page's session sit at their places in its table, with the method and path the pages call them by", () => {
-    // The handlers reach the auth and the builds only when a request comes.
-    const table = appRoutes("1.0.0", 0, undefined as never, null, undefined as never).map((r) => `${r.method} ${r.path}`);
-    expect(table.slice(0, 4)).toEqual([...APP_KEYS]);
-    expect(appReplies.every((same) => same)).toBe(true);
   });
 
   test("the Cast, Story, Settle now and bootstrap routes sit at their places in their tables, with the methods and paths the pages call them by", () => {
@@ -334,13 +314,52 @@ describe("the direct road, against RPE's own server", () => {
       refused: (words) => began.reject(new Error(words)),
     });
     await began.promise;
-    app.live.publish("chat-other", { kind: "trace", data: { not: "this chat's" } });
-    for (const event of RECORDED) app.live.publish(CHAT, { kind: event.kind, data: event.data });
+    app.live.publish("chat-other", { kind: "delta", data: { run: "turn-other", agent: "author-1", call: 1, text: "not this chat's", at: 0 } });
+    // The recorded events are RPH's records and replies as the turn lane published them, each of a kind the live socket carries.
+    for (const event of RECORDED as unknown as LivePublish[]) app.live.publish(CHAT, { kind: event.kind, data: event.data });
     await all.promise;
     off();
     expect(got.map((e) => e.seq)).toEqual(RECORDED.map((_, i) => i + 1));
     expect(got.map((e) => e.data)).toEqual(RECORDED.map((e) => e.data));
     const run = got.reduce(applyLive, EMPTY_LIVE).runs[0];
     expect(run?.seq).toBe(RECORDS.length);
+  });
+
+  test("each of these routes answers, through the client on a running app, a reply its declaration takes", async () => {
+    const client = webClient(token);
+    const declared = new Map(app.routes.list().map((r) => [`${r.method} ${r.path}`, r.declared]));
+    const created = await client.call("POST /api/v1/connections", {}, { body: { connection: { name: "Harbor watch", provider: "deepseek", auth: "none", model: "deepseek-chat" } } });
+    const id = { id: created.id };
+    const answers: [string, unknown][] = [
+      ["GET /api/v1/status", await client.call("GET /api/v1/status", {})],
+      ["GET /api/v1/status/builds", await client.call("GET /api/v1/status/builds", {})],
+      ["GET /api/v1/status/session", await client.call("GET /api/v1/status/session", {})],
+      ["POST /api/v1/update", await client.call("POST /api/v1/update", {})],
+      ["PUT /api/v1/settings", await client.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "limits.turn.calls", value: 75 } })],
+      ["GET /api/v1/settings", await client.call("GET /api/v1/settings", {}, { query: { chat: CHAT } })],
+      ["POST /api/v1/connections", created],
+      ["GET /api/v1/connections", await client.call("GET /api/v1/connections", {})],
+      ["PUT /api/v1/connections/:id", await client.call("PUT /api/v1/connections/:id", id, { body: { connection: { name: "Harbor watch", provider: "deepseek", auth: "none", effort: "low" } } })],
+      ["POST /api/v1/connections/:id/test", await client.call("POST /api/v1/connections/:id/test", id)],
+      ["PUT /api/v1/connections/:id/default", await client.call("PUT /api/v1/connections/:id/default", id)],
+      ["DELETE /api/v1/connections/:id", await client.call("DELETE /api/v1/connections/:id", id)],
+    ];
+    for (const [key, reply] of answers) {
+      const d = declared.get(key);
+      const replyShape: AnyShape | null = d !== undefined && d !== null && "reply" in d ? d.reply : null;
+      expect({ key, problems: replyShape === null ? [`${key} is not a route in the form`] : problemsOf(replyShape, reply, "reply") }).toEqual({ key, problems: [] });
+    }
+    // The setting's limits reach the page as the server's own type holds them, its most among them.
+    const settings = answers.find(([key]) => key === "GET /api/v1/settings")?.[1] as SettingsReply;
+    expect(settings.settings[0]).toMatchObject({ key: "limits.turn.calls", value: 75, from: "global", takes: { type: "whole", least: 1, most: 500 } });
+  });
+
+  test("the client walks a paged route to its end", async () => {
+    const client = webClient(token);
+    pagesRead = 0;
+    // No route of RPE's own pages yet, so the fixture's paged route is in this app's table and in no generated type: its key is given as a paged one's would be.
+    const items = await walk(client, PLACES as never, {} as never, { query: { limit: 2 } as never });
+    expect(items).toEqual(HARBOR);
+    expect(pagesRead).toBe(4);
   });
 });

@@ -19,7 +19,7 @@ import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { DataPaths } from "./config";
 import { OneAtATime, readText, writeWhole } from "./disk";
-import { route, RouteError } from "./routes";
+import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
 import type { SecretsFile } from "./secrets";
 import { configWrites, withTopLevelKey, yamlMapping } from "./yaml";
 
@@ -73,15 +73,86 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile): ModelsPort {
 /** What the routes need of the model layer: `harness.models`. */
 export type ConnectionsApi = Pick<ModelsApi, "list" | "save" | "remove" | "setDefault" | "test" | "limits">;
 
+// What the routes take and answer. A connection is the model layer's (`rp-harness/contract`): each of its
+// types the routes carry is declared field by field here, so the pages' types and the reference say what a
+// page sends and is sent, and each is held to RPH's own type, so a change to it in RPH stops this compiling
+// until the declaration says the same.
+const T = shape.text();
+const N = shape.number();
+const opt = shape.optional;
+const auth = shape.named("ConnectionAuth", "How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing.", shape.oneOf("key", "signin", "none"));
+const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
+const limitsEntry = shape.named("ModelLimitsEntry", "A model's limits as entered or reported: its context window and its longest answer, in tokens.", shape.object({ contextWindow: opt(N), maxTokens: opt(N) }));
+const limit = shape.named("ModelLimit", "One limit of a model, in tokens, and where it came from.", shape.object({ tokens: N, from: shape.oneOf("user", "pi", "connection") }));
+const limits = shape.named("ModelLimits", "A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it.", shape.object({ contextWindow: shape.nullable(limit), maxTokens: shape.nullable(limit) }));
+/** A connection as the layer shows it, but for its key. */
+const viewFields = {
+  id: T,
+  name: T,
+  provider: shape.field(T, "The provider kind the layer offers (anthropic, deepseek, openai-compatible, …)."),
+  auth,
+  baseUrl: opt(T, "Where its calls go instead of the provider's own address."),
+  api: opt(T, "The API a compatible server speaks, where it may speak more than one."),
+  model: opt(T, "Its model, for an agent whose definition names none."),
+  effort: opt(effort, "Its own effort, for an agent that names none."),
+  serialTools: opt(shape.literal(true), "It takes one tool call per answer."),
+  messageThreads: opt(shape.literal(true), "Message threads are on."),
+  retries: opt(N, "How many times a call that failed before any answer arrived is tried again; 2 when absent."),
+  limits: opt(shape.record(limitsEntry), "What the user entered as each model's limits, by model id."),
+  reported: opt(shape.record(limitsEntry), "What the connection's server reported as each model's limits, by model id."),
+  headers: opt(shape.list(shape.object({ name: T, set: shape.yesNo() })), "Its headers by name, and whether each has a value; never a value."),
+  default: shape.yesNo(),
+  signedIn: opt(shape.yesNo(), "For a connection that signs in: whether the sign-in holds."),
+} as const;
+const providers = { default: shape.nullable(T), providers: shape.list(shape.named("ProviderOffer", "A provider the Connections page offers, how its connections may sign their calls, the APIs it speaks, and whether a connection of it must give its address.", shape.object({ id: T, name: T, auth: shape.list(auth), apis: shape.list(T), needsBaseUrl: shape.yesNo() }))) } as const;
+const tested = { ok: { ok: shape.literal(true), ms: N, model: T }, failed: { ok: shape.literal(false), ms: N, error: T } } as const;
+const connectionView = shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo(), last4: shape.nullable(T) })) });
+const connectionInput = shape.named(
+  "ConnectionInput",
+  "A connection to save, whole: with the id of one that exists it replaces that one, and a field left out (or null) is cleared; headers left out keep the stored ones.",
+  shape.object({
+    id: opt(T),
+    name: shape.text({ blank: false }),
+    provider: shape.text({ blank: false }),
+    auth,
+    baseUrl: opt(shape.nullable(T)),
+    api: opt(shape.nullable(T)),
+    model: opt(shape.nullable(T)),
+    effort: opt(shape.nullable(effort)),
+    headers: opt(shape.nullable(shape.record(shape.nullable(T))), "Exactly these headers, a text setting a value and null keeping the stored one; null takes them all away."),
+    serialTools: opt(shape.nullable(shape.yesNo())),
+    messageThreads: opt(shape.nullable(shape.yesNo())),
+    retries: opt(shape.nullable(N)),
+    limits: opt(shape.nullable(shape.record(limitsEntry)), "The user's limits for its models, by model id; null clears them."),
+  }),
+);
+// The layer's own types, held to these declarations.
+const connectionList = shape.object({ connections: shape.list(connectionView), ...providers });
+const connectionTest = shape.union(shape.object(tested.ok), shape.object(tested.failed));
+type ViewMirrored = Holds<Exactly<Infer<typeof connectionView>, ConnectionView>>;
+type ListMirrored = Holds<Exactly<Infer<typeof connectionList>, ConnectionList>>;
+type TestMirrored = Holds<Exactly<Infer<typeof connectionTest>, ConnectionTest>>;
+type LimitsMirrored = Holds<Exactly<Infer<typeof limits>, ModelLimits>>;
+type InputMirrored = Holds<Exactly<Infer<typeof connectionInput>, ConnectionInput>>;
+
+const connectionShown = shape.named(
+  "ConnectionShown",
+  "A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them.",
+  shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo() })), limitsInForce: shape.nullable(limits) }),
+);
 /** A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them. */
-export type ConnectionShown = Omit<ConnectionView, "key"> & { key: { set: boolean } | null; limitsInForce: ModelLimits | null };
+export type ConnectionShown = Infer<typeof connectionShown>;
 
-export interface ConnectionsShown extends Omit<ConnectionList, "connections"> {
-  connections: ConnectionShown[];
-}
+const connectionsShown = shape.named("ConnectionsShown", "The connections as shown, the default, and the providers offered.", shape.object({ connections: shape.list(connectionShown), ...providers }));
+export type ConnectionsShown = Infer<typeof connectionsShown>;
 
+const connectionTested = shape.named(
+  "ConnectionTested",
+  "A connection's test: how long it took, and the model that answered or the provider's words; and that model's limits where RPH knows them.",
+  shape.union(shape.object({ ...tested.ok, limits: shape.nullable(limits) }), shape.object({ ...tested.failed, limits: shape.nullable(limits) })),
+);
 /** A connection's test: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them. */
-export type ConnectionTested = ConnectionTest & { limits: ModelLimits | null };
+export type ConnectionTested = Infer<typeof connectionTested>;
 
 /** A model's limits as RPH uses them; null for a connection whose model RPH cannot place (a provider no longer offered, say). */
 async function limitsOf(api: ConnectionsApi, id: string, model?: string): Promise<ModelLimits | null> {
@@ -112,24 +183,13 @@ export function storedKey(port: ModelsPort): (id: string) => Promise<string | nu
   };
 }
 
+const saveConnection = shape.named(
+  "SaveConnection",
+  "A connection to save, and its key: left out keeps the key there is, null takes it away.",
+  shape.object({ connection: connectionInput, key: opt(shape.nullable(shape.text({ blank: false }))) }),
+);
 /** A connection to save, and its key: absent keeps the key there is, null takes it away. */
-export interface SaveConnection {
-  connection: ConnectionInput;
-  key?: string | null;
-}
-
-function saveBody(value: unknown): SaveConnection {
-  if (!isRecord(value) || !isRecord(value.connection)) throw new RouteError(400, 'Send {"connection": {…}, "key": "…"}: the connection, and its key when it has a new one.');
-  const { name, provider, auth } = value.connection;
-  if (typeof name !== "string" || name.trim() === "") throw new RouteError(400, "A connection needs a name.");
-  if (typeof provider !== "string" || provider.trim() === "") throw new RouteError(400, "A connection needs a provider.");
-  if (auth !== "key" && auth !== "signin" && auth !== "none") throw new RouteError(400, 'A connection signs its calls with "key", "signin" or "none".');
-  const key = value.key;
-  if (key !== undefined && key !== null && (typeof key !== "string" || key.trim() === "")) throw new RouteError(400, "A key is text. Leave it out to keep the one there is, or send null to take it away.");
-  // Its other fields are the model layer's to check: it holds the rules for what a connection may say.
-  const connection = value.connection as unknown as ConnectionInput;
-  return { connection, ...(key === undefined ? {} : { key }) };
-}
+export type SaveConnection = Infer<typeof saveConnection>;
 
 /** The layer's call, its refusal sent back in its own words, which never repeat a key. */
 async function layer<T>(call: () => Promise<T>): Promise<T> {
@@ -150,7 +210,10 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Pro
       method: "GET",
       path: "/api/v1/connections",
       access: "page",
-      handle: async (): Promise<ConnectionsShown> => {
+      group: "connections",
+      does: "The connections, each with whether a key is set (nothing of the key) and its model's limits as RPH uses them; the default; the providers offered.",
+      reply: connectionsShown,
+      handle: async () => {
         const list = await api.list();
         return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, c))) };
       },
@@ -159,23 +222,38 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Pro
       method: "POST",
       path: "/api/v1/connections",
       access: "page",
-      body: saveBody,
-      handle: async ({ body }): Promise<ConnectionShown> => {
+      group: "connections",
+      does: "Adds a connection, with its key when it has one.",
+      body: saveConnection,
+      reply: connectionShown,
+      handle: async ({ body }) => {
         if (body.connection.id !== undefined) throw new RouteError(400, "A new connection has no id: to change one, PUT /api/v1/connections/<its id>.");
         return await shown(api, await layer(() => api.save(body.connection, body.key)));
       },
     }),
-    route({ method: "PUT", path: "/api/v1/connections/:id", access: "page", body: saveBody, handle: async ({ params, body }): Promise<ConnectionShown> => await shown(api, await layer(() => api.save({ ...body.connection, id: params.id }, body.key))) }),
-    route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", handle: ({ params }): Promise<void> => layer(() => api.remove(params.id)) }),
-    route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", handle: ({ params }): Promise<void> => layer(() => api.setDefault(params.id)) }),
+    route({
+      method: "PUT",
+      path: "/api/v1/connections/:id",
+      access: "page",
+      group: "connections",
+      does: "Changes a connection, whole: a field left out is cleared; its key stays when the body leaves it out, and goes when it is null.",
+      body: saveConnection,
+      reply: connectionShown,
+      handle: async ({ params, body }) => await shown(api, await layer(() => api.save({ ...body.connection, id: params.id }, body.key))),
+    }),
+    route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", group: "connections", does: "Removes a connection, and its key.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.remove(params.id)) }),
+    route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", group: "connections", does: "Makes a connection the default.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.setDefault(params.id)) }),
     route({
       method: "POST",
       path: "/api/v1/connections/:id/test",
       access: "page",
-      handle: async ({ params, signal }): Promise<ConnectionTested> => {
-        const tested = await api.test(params.id, signal);
-        if (tested.ok) return { ...tested, limits: await limitsOf(api, params.id, tested.model) };
-        return { ...tested, error: withoutKey(tested.error, await keyOf(params.id)), limits: null };
+      group: "connections",
+      does: "Tests a connection with one small call: how long it took, and the model that answered or the provider's words with its key taken out; and that model's limits.",
+      reply: connectionTested,
+      handle: async ({ params, signal }) => {
+        const test = await api.test(params.id, signal);
+        if (test.ok) return { ...test, limits: await limitsOf(api, params.id, test.model) };
+        return { ...test, error: withoutKey(test.error, await keyOf(params.id)), limits: null };
       },
     }),
   ] as const;

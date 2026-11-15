@@ -1,54 +1,17 @@
-// What the pages read from RPE (plan §4.4, §14): the routes they call, with what each answers, and the
-// live events a turn publishes on its chat. The route table is where these come from: the plan has the
-// UI client's types generated from it. Until a generator exists they are kept here by hand, because the
-// zone rules keep the pages from importing the server's code, its types included; `test/ui/direct.test.ts`
-// holds each one to the route itself. The app's own routes (its status with its builds, "Update now",
-// the live socket) are mirrored from `src/app/`; the turn routes and the live kinds are what the turn
-// lane implements; a connection's shapes are RPH's contract's own.
+// What the pages read from RPE (plan §4.4, §14) that the generated types (`src/shared/api`, written by
+// `bun run api` from the route table) do not hold yet: the shapes of the routes not yet declared in the
+// route form, with what each answers, kept here by hand until their areas declare them, each held to its
+// route by `test/ui/direct.test.ts`; and the live events a turn publishes on its chat. A route in the form
+// takes its types from the generated file and from nowhere else: the app's own, the settings' and the
+// connections' are there.
 
-import type { AgentRef, ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, FileKind, JobView, JsonObject, LayerLevel, ModelLimits, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { AgentRef, FileKind, JobView, JsonObject, LayerLevel, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { ApiRoutes } from "../shared/api";
 import type { JsonValue } from "../shared/json";
 import type { ChipRequest, DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 
 // ---------------------------------------------------------------- the app's own
-
-/** `GET /api/v1/status` (public): that RPE answers here, and its build; nothing more. */
-export interface Status {
-  name: "rpe";
-  version: string;
-}
-
-/** `GET /api/v1/status/builds` (page): when RPE started, and the builds that meet at it, read again from its app file. */
-export interface BuildsReply extends Status {
-  started: number;
-  builds: BuildsStatus;
-}
-
-/** `GET /api/v1/status/session` (page): whose the credential the page holds is, and when it runs out (epoch milliseconds; null: it has no end). */
-export interface SessionReply {
-  user: string;
-  ends: number | null;
-}
-
-/** Where a restart onto RPE's app file on disk stands (`src/app/update.ts`): nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand. */
-export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand";
-
-/**
- * The builds that meet at RPE, as its builds route and "Update now" (`POST /api/v1/update`) give them: the
- * build it runs; its app file's on disk (null: no single file, or one that gives none); why the file on
- * disk gave none; the extension's, as it last said (null: not yet); whether all agree; where a restart
- * stands; and all of it in RPE's own words.
- */
-export interface BuildsStatus {
-  running: string;
-  disk: string | null;
-  broken: string | null;
-  extension: string | null;
-  agree: boolean;
-  restart: RestartState;
-  words: string;
-}
 
 /** A permission RPE's extension in Lumiverse lacks, and why it needs it. */
 export interface MissingPermission {
@@ -451,49 +414,6 @@ export interface AgentStack {
   parts: StackPart[];
 }
 
-// ---------------------------------------------------------------- settings (the app's, plan §5.4 "Config", §14)
-
-/** What a level may set a setting to: a whole number or a number at least `least`, one of `values`, yes or no, a line of text, or a list of names. */
-export type SettingTakes = { type: "whole"; least: number } | { type: "number"; least: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
-
-/**
- * A setting as the Settings page shows it: its key as a config file writes it (a per-connection one
- * names its connection), the value in force, its default, the level whose file decides the value (null:
- * no file does, and the default holds) and that file, what it takes and that in words, what no value
- * means, whether `~` may be set, the levels it may be set at here, the connection it names (null: a name
- * no connection has now), and a value a file sets that it does not take, with why.
- */
-export interface SettingView {
-  key: string;
-  value: JsonValue;
-  default: JsonValue;
-  from: LayerLevel | null;
-  file: string | null;
-  takes: SettingTakes;
-  takesWords: string;
-  none: string | null;
-  orNone: boolean;
-  levels: LayerLevel[];
-  connection?: { id: string; name: string } | null;
-  passed: { value: JsonValue; why: string } | null;
-}
-
-/** `GET /api/v1/settings?chat=`, and what `PUT` answers: each level's config file, farthest first, with what is wrong with one that cannot be read; and every setting. */
-export interface SettingsReply {
-  chat: string | null;
-  files: { level: LayerLevel; file: string; problem: string | null }[];
-  settings: SettingView[];
-}
-
-/** `PUT /api/v1/settings`: a key written at a level, a chat's naming the chat; `value` null takes the key away there, and `none` sets `~`. */
-export interface SettingsWrite {
-  level: LayerLevel;
-  chat: string | null;
-  key: string;
-  value: JsonValue;
-  none: boolean;
-}
-
 // ---------------------------------------------------------------- the migration (the migration's, plan §15.5, §15.6)
 
 /** What came of a chat the last run looked at, in the run's own words. */
@@ -855,7 +775,7 @@ export interface BootstrapBatch {
   refused: { chat: string; why: string }[];
 }
 
-// ---------------------------------------------------------------- the route map the client is typed by
+// ---------------------------------------------------------------- the route map the client is typed by, for the routes not yet in the form
 
 /** A route's reply, its query and its body. */
 export interface RouteShape<Reply, Query extends Record<string, string | number | undefined> = Record<string, never>, Body = undefined> {
@@ -864,29 +784,8 @@ export interface RouteShape<Reply, Query extends Record<string, string | number 
   body: Body;
 }
 
-/** What saving a connection sends (`POST /api/v1/connections`, `PUT /api/v1/connections/:id`): the connection whole, and its key: absent keeps the one there is, null takes it away. */
-export interface SaveConnection {
-  connection: ConnectionInput;
-  key?: string | null;
-}
-
-/** A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them. */
-export type ConnectionShown = Omit<ConnectionView, "key"> & { key: { set: boolean } | null; limitsInForce: ModelLimits | null };
-
-/** `GET /api/v1/connections`: the connections as shown, the default and the providers offered. */
-export interface ConnectionsShown extends Omit<ConnectionList, "connections"> {
-  connections: ConnectionShown[];
-}
-
-/** `POST /api/v1/connections/:id/test`: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them. */
-export type ConnectionTested = ConnectionTest & { limits: ModelLimits | null };
-
-/** Every route the pages call, by method and path pattern, as the route table writes them; `*` stands for the rest of the path. */
+/** Every route the pages call that is not yet declared in the route form, by method and path pattern, as the route table writes them; `*` stands for the rest of the path. */
 export interface Routes {
-  "GET /api/v1/status": RouteShape<Status>;
-  "POST /api/v1/update": RouteShape<BuildsStatus>;
-  "GET /api/v1/status/builds": RouteShape<BuildsReply>;
-  "GET /api/v1/status/session": RouteShape<SessionReply>;
   "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
   "GET /api/v1/chats": RouteShape<ChatList>;
   "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
@@ -895,12 +794,6 @@ export interface Routes {
   "GET /api/v1/chats/:chat/turns/:turn/files": RouteShape<TurnFiles>;
   "GET /api/v1/chats/:chat/turns/:turn/files/*": RouteShape<TurnFile>;
   "GET /api/v1/chats/:chat/world": RouteShape<WorldAnswer, { at?: string; depth?: number; values?: ValuesShown; turn?: string }>;
-  "GET /api/v1/connections": RouteShape<ConnectionsShown>;
-  "POST /api/v1/connections": RouteShape<ConnectionShown, Record<string, never>, SaveConnection>;
-  "PUT /api/v1/connections/:id": RouteShape<ConnectionShown, Record<string, never>, SaveConnection>;
-  "DELETE /api/v1/connections/:id": RouteShape<void>;
-  "PUT /api/v1/connections/:id/default": RouteShape<void>;
-  "POST /api/v1/connections/:id/test": RouteShape<ConnectionTested>;
   "POST /api/v1/build": RouteShape<{ result: ResultMessage | ErrorMessage; pushes: DraftChanged[] }, Record<string, never>, FrontendToBackend>;
   "GET /api/v1/chats/:chat/state": RouteShape<StateView, { turn?: string }>;
   "POST /api/v1/chats/:chat/actions": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, FrontendToBackend>;
@@ -914,8 +807,6 @@ export interface Routes {
   "GET /api/v1/suggestions": RouteShape<SuggestionList, { chat?: string; state?: SuggestionState }>;
   "POST /api/v1/suggestions/:id/accept": RouteShape<SuggestionAccepted, Record<string, never>, SuggestionAccept>;
   "POST /api/v1/suggestions/:id/dismiss": RouteShape<SuggestionDismissed>;
-  "GET /api/v1/settings": RouteShape<SettingsReply, { chat?: string }>;
-  "PUT /api/v1/settings": RouteShape<SettingsReply, Record<string, never>, SettingsWrite>;
   "GET /api/v1/migration": RouteShape<MigrationShown>;
   "GET /api/v1/storage": RouteShape<TreeStorage>;
   "GET /api/v1/storage/notes": RouteShape<NoteFiles, { chat: string; limit?: number }>;
@@ -935,7 +826,8 @@ export interface Routes {
   "POST /api/v1/jobs/:job/cancel": RouteShape<JobCancelled>;
 }
 
-export type RouteKey = keyof Routes & string;
+/** Every route the pages call: those in the form, as the generated types write them, and those above. */
+export type RouteKey = (keyof ApiRoutes | keyof Routes) & string;
 
 // ---------------------------------------------------------------- what a turn publishes on its chat
 

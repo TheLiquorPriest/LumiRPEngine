@@ -107,9 +107,9 @@ describe("the Play page on RPE's own routes", () => {
 
     // The run: begun, the time passed by the Author's tool, and ended at the reply's release, before Lumiverse saved the reply.
     const turn = await rpe.begin(PLAYED);
-    rpe.live.publish(PLAYED, { kind: "trace", data: { run: turn, seq: 1, event: { kind: "run_started" } } });
+    rpe.live.publish(PLAYED, { kind: "trace", data: { seq: 1, run: turn, scope: { user: USER, chat: PLAYED, session: "session-larkspur", turn }, at: 0, agent: { id: "author-1", definition: "author" }, event: { kind: "run_started", run: "turn", lead: "author" } } });
     await rpe.apply(PLAYED, turn, [{ op: "pass_time", minutes: 90, source: { from: "prose", message: "msg-reply-later" } }]);
-    rpe.live.publish(PLAYED, { kind: "trace", data: { run: turn, seq: 2, event: { kind: "run_ended" } } });
+    rpe.live.publish(PLAYED, { kind: "trace", data: { seq: 2, run: turn, scope: { user: USER, chat: PLAYED, session: "session-larkspur", turn }, at: 0, agent: { id: "author-1", definition: "author" }, event: { kind: "run_ended", outcome: { status: "released", released: true, usage: { calls: 1, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 } } } } });
     const reads = (): number => rpe.asked.filter((call) => call.key === "GET /api/v1/chats/:chat/state").length;
     const atEnd = reads();
     await until("the read at the run's end", () => reads() > atEnd);
@@ -119,7 +119,7 @@ describe("the Play page on RPE's own routes", () => {
 
     // Lumiverse's end of the generation: the turn is tied to its saved reply, and the turn lane says the chat's state changed.
     await rpe.tie(turn);
-    rpe.live.publish(PLAYED, { kind: "state", key: "state", data: {} });
+    rpe.live.publish(PLAYED, { kind: "state", data: {} });
     const after = timeOf(await stateOf(rpe, PLAYED));
     expect(after).not.toBe(before);
     await until("the time after the turn", () => hud(root).includes(after));

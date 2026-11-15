@@ -1,10 +1,11 @@
 // The live hub: a page follows a chat's events over the socket and gets them in order, and only that
 // chat's; a page that falls behind gets fewer, newer updates when it reads again, and the publisher
-// never waits for it. The socket tests start the server in-process on a free loopback port.
+// never waits for it. Only the kinds the declaration holds are published, each with its data. The
+// socket tests start the server in-process on a free loopback port.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { App, LiveBatch, LiveEvent, RunningServer } from "../../src/app";
-import { LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
+import type { App, LiveBatch, LiveData, LiveEvent, LivePublish, RunningServer } from "../../src/app";
+import { LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
 import { type Bed, makeBed, makeKey, rawSocket } from "./helpers";
 
 /** A reader that takes what it is given until told it is full. */
@@ -20,6 +21,21 @@ function reader(): { batches: LiveBatch[]; full: boolean; take(batch: LiveBatch)
   return out;
 }
 
+/** A piece of a model call's text as it streams, the `i`th. */
+function delta(i: number, text = `The tide comes in over the harbor wall, piece ${i}.`): LivePublish<"delta"> {
+  return { kind: "delta", data: { run: "turn-harbor", agent: "author-1", call: 1, text, at: i } };
+}
+
+/** A record of RPH's trace as the turn lane publishes it. */
+const RECORD: LiveData<"trace"> = {
+  seq: 1,
+  run: "turn-harbor",
+  scope: { user: "user-owner", chat: "chat-a", session: "session-1", turn: "turn-harbor" },
+  at: 0,
+  agent: { id: "author-1", definition: "author" },
+  event: { kind: "intent", text: "The keeper answers the knock, and the stranger asks for the ferryman." },
+};
+
 describe("the live hub", () => {
   const hub = () => new LiveHub({ queueEvents: 5, now: () => 0 });
 
@@ -28,28 +44,27 @@ describe("the live hub", () => {
     const r = reader();
     live.follow("chat-a", r);
     for (let i = 0; i < 20; i++) {
-      live.publish("chat-a", { kind: "step", data: i });
-      live.publish("chat-b", { kind: "step", data: i });
+      live.publish("chat-a", delta(i));
+      live.publish("chat-b", delta(i));
     }
     expect(r.batches).toHaveLength(20);
-    expect(r.batches.flatMap((b) => b.events.map((e) => [e.chat, e.seq, e.data]))).toEqual(Array.from({ length: 20 }, (_, i) => ["chat-a", i + 1, i]));
+    expect(r.batches.flatMap((b) => b.events.map((e) => [e.chat, e.seq, e.data]))).toEqual(Array.from({ length: 20 }, (_, i) => ["chat-a", i + 1, delta(i).data]));
   });
 
-  test("a reader that falls behind is given, when it is ready, only the newest of each state push", () => {
+  test("a reader that falls behind is given, when it is ready, only the newest state push", () => {
     const live = hub();
     const r = reader();
     const following = live.follow("chat-a", r);
     r.full = true;
-    live.publish("chat-a", { kind: "status", key: "turn", data: "starting" });
-    for (let i = 0; i < 100; i++) live.publish("chat-a", { kind: "status", key: "turn", data: `step ${i}` });
-    live.publish("chat-a", { kind: "status", key: "agent", data: "author" });
+    for (let i = 0; i < 100; i++) live.publish("chat-a", { kind: "state", data: {} });
+    live.publish("chat-a", delta(1));
     expect(r.batches).toHaveLength(1);
     r.full = false;
     following.ready();
     expect(r.batches).toHaveLength(2);
-    expect(r.batches[1]?.events.map((e) => [e.seq, e.key, e.data])).toEqual([
-      [101, "turn", "step 99"],
-      [102, "agent", "author"],
+    expect(r.batches[1]?.events.map((e) => [e.seq, e.kind, e.key])).toEqual([
+      [100, "state", "state"],
+      [101, "delta", undefined],
     ]);
   });
 
@@ -58,7 +73,7 @@ describe("the live hub", () => {
     const r = reader();
     const following = live.follow("chat-a", r);
     r.full = true;
-    for (let i = 0; i < 20; i++) live.publish("chat-a", { kind: "delta", data: i });
+    for (let i = 0; i < 20; i++) live.publish("chat-a", delta(i));
     following.ready();
     const last = r.batches.at(-1);
     expect(last?.missed).toEqual({ from: 2, to: 15 });
@@ -71,8 +86,31 @@ describe("the live hub", () => {
     const following = live.follow("chat-a", r);
     following.stop();
     expect(live.readers("chat-a")).toBe(0);
-    expect(live.publish("chat-a", { kind: "step", data: null }).seq).toBe(1);
+    expect(live.publish("chat-a", delta(0)).seq).toBe(1);
     expect(r.batches).toEqual([]);
+  });
+
+  test("publishing a kind the declaration does not hold throws, and each declared kind reaches a follower with its data", () => {
+    const live = hub();
+    const r = reader();
+    live.follow("chat-a", r);
+    // A caller the types would stop: a kind made up where it is published.
+    const invented = { kind: "agent.text", data: { text: "a line no page was told of" } } as unknown as LivePublish;
+    expect(() => live.publish("chat-a", invented)).toThrow('carries no "agent.text" events');
+    expect(live.seq("chat-a")).toBe(0);
+    expect(r.batches).toEqual([]);
+
+    const each: LivePublish[] = [
+      { kind: "trace", data: RECORD },
+      delta(1),
+      { kind: "reply", data: { run: "turn-harbor", from: 0, text: "The door opens on a wet night." } },
+      { kind: "reply", data: { run: "turn-harbor", line: 0, progress: "Weighing what the stranger wants." } },
+      { kind: "state", data: {} },
+      { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } },
+    ];
+    for (const event of each) live.publish("chat-a", event);
+    expect(new Set<string>(each.map((e) => e.kind))).toEqual(new Set(Object.keys(LIVE_KINDS)));
+    expect(r.batches.flatMap((b) => b.events.map((e) => ({ kind: e.kind, key: e.key, data: e.data })))).toEqual(each.map((e) => ({ kind: e.kind, key: e.kind === "state" ? "state" : undefined, data: e.data })));
   });
 });
 
@@ -106,43 +144,18 @@ describe("the live socket", () => {
     });
     await new Promise<void>((resolve) => socket.addEventListener("open", () => resolve()));
     expect(socket.protocol).toBe(LIVE_PROTOCOL);
-    app.live.publish("chat-a", { kind: "before", data: null });
+    app.live.publish("chat-a", { kind: "trace", data: RECORD });
     socket.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
     expect(await following.promise).toBe(1);
     for (let i = 0; i < 200; i++) {
-      app.live.publish("chat-a", { kind: "step", data: i });
-      app.live.publish("chat-b", { kind: "step", data: i });
+      app.live.publish("chat-a", delta(i));
+      app.live.publish("chat-b", delta(i));
     }
     await all.promise;
     socket.close();
     expect(got.map((e) => e.chat)).toEqual(Array.from({ length: 200 }, () => "chat-a"));
     expect(got.map((e) => e.seq)).toEqual(Array.from({ length: 200 }, (_, i) => i + 2));
-    expect(got.map((e) => e.data)).toEqual(Array.from({ length: 200 }, (_, i) => i));
-  });
-
-  test("a page that falls behind gets fewer, newer updates when it reads again, and the publisher never waits for it", async () => {
-    const page = await rawSocket(server, LIVE_PATH, [LIVE_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${token}`]);
-    expect(page.status).toBe(101);
-    page.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
-    await page.waitFor((messages) => messages.some((m) => m.includes('"type":"following"')));
-    page.pause();
-    const published = 3000;
-    const filler = "x".repeat(8 * 1024);
-    const started = performance.now();
-    for (let i = 1; i <= published; i++) app.live.publish("chat-a", { kind: "state", key: "turn", data: { step: i, filler } });
-    const publishing = performance.now() - started;
-    page.resume();
-    await page.waitFor((messages) => messages.some((m) => m.includes(`"seq":${published},`)));
-    page.close();
-    const seqs = page.messages
-      .map((m) => JSON.parse(m) as { type: string; events?: LiveEvent[] })
-      .flatMap((m) => (m.type === "events" ? (m.events ?? []).map((e) => e.seq) : []));
-    expect(seqs.length).toBeLessThan(published / 2);
-    expect(seqs.at(-1)).toBe(published);
-    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
-    expect(new Set(seqs).size).toBe(seqs.length);
-    // Publishing took no longer than the work of publishing: nothing waited on the page that stopped reading.
-    expect(publishing).toBeLessThan(2000);
+    expect(got.map((e) => e.data)).toEqual(Array.from({ length: 200 }, (_, i) => delta(i).data));
   });
 });
 
@@ -181,6 +194,35 @@ describe("the live socket's bounds", () => {
     await bed.remove();
   });
 
+  test("a page that falls behind gets fewer, newer updates when it reads again, and the publisher never waits for it", async () => {
+    // Held for the page: the newest 4 events, so what it is given when it reads again is one message of 32 KiB.
+    const app = await bed.open({ config: { live: { queueEvents: 4 } } });
+    const server = await app.start();
+    const page = await rawSocket(server, LIVE_PATH, [LIVE_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${await makeKey(app, "web")}`]);
+    expect(page.status).toBe(101);
+    page.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
+    await page.waitFor((messages) => messages.some((m) => m.includes('"type":"following"')));
+    page.pause();
+    const published = 3000;
+    const filler = "x".repeat(8 * 1024);
+    const started = performance.now();
+    for (let i = 1; i <= published; i++) app.live.publish("chat-a", delta(i, filler));
+    const publishing = performance.now() - started;
+    page.resume();
+    await page.waitFor((messages) => messages.some((m) => m.includes(`"seq":${published},`)));
+    page.close();
+    const batches = page.messages.map((m) => JSON.parse(m) as { type: string; events?: LiveEvent[]; missed?: { from: number; to: number } }).filter((m) => m.type === "events");
+    const seqs = batches.flatMap((m) => (m.events ?? []).map((e) => e.seq));
+    expect(seqs.length).toBeLessThan(published / 2);
+    expect(seqs.at(-1)).toBe(published);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(new Set(seqs).size).toBe(seqs.length);
+    // What it was not given is named, so the page can read again what it needs.
+    expect(batches.some((m) => m.missed !== undefined)).toBe(true);
+    // Publishing took no longer than the work of publishing: nothing waited on the page that stopped reading.
+    expect(publishing).toBeLessThan(2000);
+  });
+
   test("a page follows at most live.follows chats at once: one more is refused in words that name the setting, and after an unfollow it may follow another", async () => {
     const app = await bed.open({ config: { live: { follows: 2 } } });
     const server = await app.start();
@@ -209,7 +251,7 @@ describe("the live socket's bounds", () => {
     p.socket.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
     await following;
     bed.clock.now = expires;
-    app.live.publish("chat-a", { kind: "step", data: 1 });
+    app.live.publish("chat-a", delta(1));
     const closed = await p.closed;
     expect(closed.code).toBe(LIVE_TOKEN_ENDED);
     expect(closed.reason).toContain("token");

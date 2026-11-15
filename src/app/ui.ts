@@ -64,6 +64,9 @@ export function uiRoute(folder: string | null) {
     method: "GET",
     path: "/ui/*",
     access: "public",
+    group: "ui",
+    does: "The web app's files, to anyone who reaches RPE; what a page then does is held to its own token by the API.",
+    answers: "a file of the built web app (its page, scripts and styles), or 404 with words saying why there is none",
     raw: async (request) => {
       if (folder === null) return notFound("This RPE was run from its source, where the web app is not built, so there is no web app to show.");
       root ??= realpath(folder).catch(() => null);

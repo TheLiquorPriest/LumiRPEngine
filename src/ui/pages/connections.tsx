@@ -6,7 +6,7 @@
 
 import type { ConnectionAuth, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { ConnectionShown, ConnectionsShown, ConnectionTested, SaveConnection } from "../api";
+import type { ConnectionShown, ConnectionsShown, ConnectionTested, SaveConnection } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";

@@ -3,7 +3,8 @@
 // name and number here is made up.
 
 import type { JobView } from "rp-harness/contract";
-import type { BootstrapBatch, BootstrapChat, BuildsReply, BuildsStatus } from "../../src/ui/api";
+import type { BuildsReply, BuildsStatus } from "../../src/shared/api";
+import type { BootstrapBatch, BootstrapChat } from "../../src/ui/api";
 import { CHAT } from "./records-recorded";
 
 const usage = { calls: 4, input: 12_000, output: 900, cacheRead: 0, cacheWrite: 0 };

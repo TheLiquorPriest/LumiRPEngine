@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { SettingsReply } from "../../src/ui/api";
+import type { SettingsReply } from "../../src/shared/api";
 import { NO_SETTINGS, settingsCalls, settingsControl, type SettingsShown, SettingsView, type SettingsViewProps } from "../../src/ui/pages/settings";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";

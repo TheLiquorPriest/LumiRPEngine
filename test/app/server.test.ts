@@ -1,11 +1,11 @@
 // The server holds every request to its Host, its Origin and its body limit before any route's code
 // runs, answers a page from an allowed origin with what CORS needs, and keeps routes where their
-// access allows. Each test starts the server in-process on a free loopback port.
+// access allows. A route in the form is held to its declaration: what it does not take is refused,
+// when it is added and when it is asked. Each test starts the server in-process on a free loopback port.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { App, RunningServer } from "../../src/app";
-import { RouteError, RouteTable, rawRoute, route } from "../../src/app";
-import { isRecord } from "../../src/shared/json";
+import type { App, QueryFields, Route, RunningServer } from "../../src/app";
+import { RouteTable, rawRoute, route, shape } from "../../src/app";
 import { bearer, type Bed, LUMIVERSE, makeBed, makeKey } from "./helpers";
 
 /** A page route that says how much it was sent, held to 1 KiB. */
@@ -13,12 +13,73 @@ const echo = route({
   method: "POST",
   path: "/api/v1/probe/echo",
   access: "page",
+  group: "service",
+  does: "Says how long the text it was sent is.",
   maxBody: 1024,
-  body: (value: unknown) => {
-    if (!isRecord(value) || typeof value.text !== "string") throw new RouteError(400, "Send {text}.");
-    return { text: value.text };
-  },
+  body: shape.object({ text: shape.text() }),
+  reply: shape.object({ length: shape.whole() }),
   handle: ({ body }) => ({ length: body.text.length }),
+});
+
+/** How many times a probe's handler ran: a request refused before it runs leaves this as it was. */
+let ran = 0;
+
+/** A harbor's notes, by tag and how many; one is written with a body that says what it takes. */
+const notes = [
+  route({
+    method: "GET",
+    path: "/api/v1/probe/notes",
+    access: "page",
+    group: "service",
+    does: "The harbor's notes, by tag.",
+    query: { tag: shape.optional(shape.oneOf("harbor", "market")), most: shape.optional(shape.whole({ least: 1, most: 20 })) },
+    reply: shape.object({ tag: shape.nullable(shape.text()), most: shape.nullable(shape.whole()) }),
+    handle: ({ query }) => {
+      ran++;
+      return { tag: query.tag ?? null, most: query.most ?? null };
+    },
+  }),
+  route({
+    method: "PUT",
+    path: "/api/v1/probe/notes",
+    access: "page",
+    group: "service",
+    does: "Writes a note.",
+    body: shape.object({ text: shape.text({ blank: false }), pinned: shape.optional(shape.yesNo()) }),
+    reply: shape.nothing(),
+    handle: () => {
+      ran++;
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/v1/probe/notes/tidy",
+    access: "page",
+    group: "service",
+    does: "Tidies the notes.",
+    reply: shape.nothing(),
+    handle: () => {
+      ran++;
+    },
+  }),
+];
+
+const HARBOR = ["the quay", "the lighthouse", "the chandlery", "the ropewalk", "the fish market", "the customs house", "the tide pool"];
+
+/** The harbor's places, a page at a time: 3 a page unless the caller asks, and at most 4. */
+const places = route({
+  method: "GET",
+  path: "/api/v1/probe/places",
+  access: "page",
+  group: "places",
+  does: "The harbor's places, a page at a time.",
+  paged: { sizes: () => ({ default: 3, most: 4 }) },
+  reply: shape.page(shape.text()),
+  handle: ({ query }) => {
+    const from = query.cursor === undefined ? 0 : Number(query.cursor);
+    const to = from + query.limit;
+    return { items: HARBOR.slice(from, to), next: to < HARBOR.length ? String(to) : null };
+  },
 });
 
 describe("the server", () => {
@@ -28,10 +89,11 @@ describe("the server", () => {
   let page: Record<string, string>;
 
   beforeEach(async () => {
+    ran = 0;
     bed = await makeBed();
     app = await bed.open({
       config: { hosts: ["rpe.example"], origins: ["https://lumiverse.example"] },
-      areas: [{ name: "probe", mount: (a) => a.routes.add("probe", [echo]) }],
+      areas: [{ name: "probe", mount: (a) => a.routes.add("probe", [echo, ...notes, places]) }],
     });
     server = await app.start();
     page = bearer(await makeKey(app, "web"));
@@ -130,6 +192,103 @@ describe("the server", () => {
     expect(() => table.add("other", [route({ method: "GET", path: "/elsewhere", access: "public", handle: () => null })])).toThrow("routes live under");
     expect(() => table.add("other", [route({ method: "GET", path: "/api/v1/files/*", access: "page", handle: () => null })])).toThrow("only a raw route");
     expect(() => app.routes.add("late", [rawRoute({ method: "GET", path: "/ui/*", access: "public", raw: () => new Response("ui") })])).toThrow("after the server started");
+  });
+
+  test("a route that reads a query or a body it does not declare is refused when it is added to the table", () => {
+    const table = new RouteTable();
+    const reply = shape.object({ chat: shape.text() });
+    // A handler is given only what its route declares, typed by it: one that reads more does not compile, so it never reaches the table.
+    table.add("chats", [
+      route({
+        method: "GET",
+        path: "/api/v1/chats/:chat/notes",
+        access: "page",
+        group: "chats",
+        does: "A chat's notes, by tag.",
+        query: { tag: shape.optional(shape.text()) },
+        reply,
+        // @ts-expect-error `day` is no name its query declares.
+        handle: ({ params, query }) => ({ chat: `${params.chat} ${query.day}` }),
+      }),
+      route({
+        method: "POST",
+        path: "/api/v1/chats/:chat/notes",
+        access: "page",
+        group: "chats",
+        does: "Adds a note to a chat.",
+        reply,
+        // @ts-expect-error It declares no body, so it is given none to read.
+        handle: ({ params, body }) => ({ chat: `${params.chat} ${body.text}` }),
+      }),
+    ]);
+    // What the compiler cannot see is refused as the route is added: a body read by a reader of its own (the server could not hold a request to it),
+    // a query a query string cannot carry, a name the path already gives, a body on a GET.
+    const declared = { access: "page", group: "chats", does: "Reads a chat's marks.", reply, handle: () => ({ chat: "chat-harbor" }) } as const;
+    const refused: [Route, string][] = [
+      [{ ...declared, method: "PUT", path: "/api/v1/chats/:chat/notes", body: (value: unknown) => value } as unknown as Route, "declares its body as a shape"],
+      [{ ...declared, method: "GET", path: "/api/v1/chats/:chat/marks", query: { at: shape.list(shape.text()) } as unknown as QueryFields } as Route, "a query string carries nothing else"],
+      [{ ...declared, method: "GET", path: "/api/v1/chats/:chat/marks", query: { chat: shape.text() } } as Route, "chat is a param of its path"],
+      [{ ...declared, method: "GET", path: "/api/v1/chats/:chat/marks", body: shape.object({ text: shape.text() }) } as unknown as Route, "a GET takes no body"],
+      [{ ...declared, method: "GET", path: "/api/v1/chats/:chat/marks", group: "ui" } as unknown as Route, "not in the ui group"],
+    ];
+    for (const [r, words] of refused) expect(() => table.add("marks", [r])).toThrow(words);
+    // A route in the form may end in *: a turn's file, say, is a typed route.
+    table.add("files", [route({ method: "GET", path: "/api/v1/chats/:chat/files/*", access: "page", group: "files", does: "A file of a chat.", reply: shape.object({ name: shape.text() }), handle: ({ params }) => ({ name: params["*"] }) })]);
+    expect(table.list().map((r) => `${r.method} ${r.path}`)).toEqual(["GET /api/v1/chats/:chat/notes", "POST /api/v1/chats/:chat/notes", "GET /api/v1/chats/:chat/files/*"]);
+  });
+
+  test("a request whose query or body its route does not take is refused with 400 before the handler runs", async () => {
+    const ask = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> => {
+      const res = await fetch(`${server.url}${path}`, { method, headers: { ...page, ...(body === undefined ? {} : { "content-type": "application/json" }) }, ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) });
+      return { status: res.status, body: res.status === 204 ? null : await res.json() };
+    };
+    expect(await ask("GET", "/api/v1/probe/notes?tag=harbor&most=5")).toEqual({ status: 200, body: { tag: "harbor", most: 5 } });
+    expect(await ask("PUT", "/api/v1/probe/notes", { text: "The ferry runs at dawn.", pinned: true })).toEqual({ status: 204, body: null });
+    expect(ran).toBe(2);
+    const refusals: [string, string, unknown, string][] = [
+      ["GET", "/api/v1/probe/notes?colour=red", undefined, "GET /api/v1/probe/notes takes no colour in its query: it takes tag, most."],
+      ["GET", "/api/v1/probe/notes?tag=forest", undefined, 'The query\'s tag is one of "harbor" or "market", not "forest".'],
+      ["GET", "/api/v1/probe/notes?most=50", undefined, 'The query\'s most is a whole number from 1 to 20, not "50".'],
+      ["GET", "/api/v1/probe/notes?most=two", undefined, 'The query\'s most is a whole number from 1 to 20, not "two".'],
+      ["GET", "/api/v1/probe/notes?tag=harbor&tag=market", undefined, "The query gives tag 2 times, and GET /api/v1/probe/notes takes it once."],
+      ["PUT", "/api/v1/probe/notes", { text: "The ferry runs at dawn.", colour: "red" }, "body has colour, which it does not take."],
+      ["PUT", "/api/v1/probe/notes", { text: "   " }, "body.text must be text that is not blank."],
+      ["PUT", "/api/v1/probe/notes", { pinned: "yes" }, "body needs text: text that is not blank. body.pinned must be true or false."],
+      ["PUT", "/api/v1/probe/notes", undefined, "PUT /api/v1/probe/notes takes a JSON body: an object of text, pinned."],
+      ["PUT", "/api/v1/probe/notes", "{", "The request's body is not JSON."],
+      ["POST", "/api/v1/probe/notes/tidy", { all: true }, "POST /api/v1/probe/notes/tidy takes no body."],
+    ];
+    for (const [method, path, body, words] of refusals) {
+      const answer = await ask(method, path, body);
+      expect({ method, path, answer }).toEqual({ method, path, answer: { status: 400, body: { error: expect.stringContaining(words) } } });
+    }
+    expect(ran).toBe(2);
+  });
+
+  test("a paged route refuses a limit above its most and answers next until the end", async () => {
+    /** What the places route answers: a page, or a refusal. */
+    type Answer = { items?: string[]; next?: string | null; error?: string };
+    const get = async (query: string): Promise<{ status: number; body: Answer }> => {
+      const res = await fetch(`${server.url}/api/v1/probe/places${query}`, { headers: page });
+      // The route's own answer, which this test then holds to what it should be.
+      const body = (await res.json()) as Answer;
+      return { status: res.status, body };
+    };
+    expect(await get("?limit=5")).toEqual({ status: 400, body: { error: "GET /api/v1/probe/places gives at most 4 a page, and this asks for 5." } });
+    expect(await get("")).toEqual({ status: 200, body: { items: ["the quay", "the lighthouse", "the chandlery"], next: "3" } });
+    const walked: unknown[] = [];
+    let cursor: string | null = null;
+    do {
+      const at = await get(`?limit=4${cursor === null ? "" : `&cursor=${cursor}`}`);
+      expect(at.status).toBe(200);
+      walked.push(at.body);
+      cursor = at.body.next ?? null;
+    } while (cursor !== null);
+    expect(walked).toEqual([
+      { items: ["the quay", "the lighthouse", "the chandlery", "the ropewalk"], next: "4" },
+      { items: ["the fish market", "the customs house", "the tide pool"], next: null },
+    ]);
+    expect((await get("?cursor=")).status).toBe(400);
   });
 });
 

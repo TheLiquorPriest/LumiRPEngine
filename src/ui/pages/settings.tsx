@@ -5,8 +5,8 @@
 
 import type { LayerLevel } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
+import type { SettingsReply, SettingTakes, SettingView } from "../../shared/api";
 import type { JsonValue } from "../../shared/json";
-import type { SettingsReply, SettingTakes, SettingView } from "../api";
 import { useApp } from "../app";
 import { Banner, Button, Fold, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
