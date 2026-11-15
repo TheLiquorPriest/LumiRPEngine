@@ -148,11 +148,11 @@ function knowingOf(at: WorldAt, entry: LoreEntryDef, open: (entry: LoreEntryDef)
   return { by: "characters", names };
 }
 
-function worldEntry(at: WorldAt, key: string, entry: LoreEntryDef, knowing?: LoreKnowing): LoreEntry {
+function worldEntry(at: WorldAt, n: number, key: string, entry: LoreEntryDef, knowing?: LoreKnowing): LoreEntry {
   const title = worldTitle(entry, key);
   const keys = Array.isArray(entry.keys) ? entry.keys.filter((k): k is string => typeof k === "string") : [];
   const content = typeof entry.content === "string" ? entry.content : "";
-  return { id: worldEntryId(key), source: at.world.name, title, keys, text: publicText(content), revision: hashJson([title, keys, content]), ...(knowing ? { knowing } : {}) };
+  return { id: worldEntryId(n), source: at.world.name, title, keys, text: publicText(content), revision: hashJson([title, keys, content]), ...(knowing ? { knowing } : {}) };
 }
 
 function bookEntry(n: number, row: LoreBookEntry, book: LoreBook, title: string): LoreEntry {
@@ -181,7 +181,7 @@ function snippetOf(text: string, words: readonly string[], room: number): string
 }
 
 /** What a search found, before its book entries are numbered. */
-type Found = { kind: "world"; id: string; source: string; title: string; text: string } | { kind: "book"; entry: string; source: string; title: string; text: string };
+type Found = { kind: "world"; key: string; source: string; title: string; text: string } | { kind: "book"; entry: string; source: string; title: string; text: string };
 
 /** An entry of the chat's lore as today's lore reads it, with what any reader may read of its text. */
 type Gathered = { kind: "world"; key: string; entry: LoreEntryDef; source: string; title: string; text: string } | { kind: "book"; book: LoreBook; row: LoreBookEntry; title: string; text: string };
@@ -195,7 +195,7 @@ export type LoreActivation = "constant" | "keyword" | "vector";
 
 /** An entry of a chat's lore as the database holds it now (plan §9.1): read at once, never by a run. */
 export interface LoreCatalogEntry {
-  /** RPE's id: `e-` and its number, or `w-` and its key. */
+  /** RPE's id: `e-` or `w-` and its number. */
   id: string;
   /** For a world entry, its world's id, which its key is unique in; '' for a book entry, whose number is the user's for good. */
   world: string;
@@ -297,7 +297,12 @@ export class Lore {
     const at = this.worlds.at(ask.user, ask.chat, ask.turn);
     if (at === null) return { inPrompt, world: [] };
     const said = keysIn(ask.messages, ask.matching ?? LUMIVERSE_KEY_MATCHING);
-    const world = Object.entries(at.world.lore).flatMap(([key, entry]): LoreMapLine[] => (hasOwn(at.world.lore, key) && !isCopy(entry) && Array.isArray(entry.keys) && entry.keys.some((k) => typeof k === "string" && said(k)) ? [{ id: worldEntryId(key), title: worldTitle(entry, key) }] : []));
+    const matched = Object.entries(at.world.lore).filter(([key, entry]) => hasOwn(at.world.lore, key) && !isCopy(entry) && Array.isArray(entry.keys) && entry.keys.some((k) => typeof k === "string" && said(k)));
+    const numbers = await this.numbers.ofWorld(ask.user, at.world.id, matched.map(([key]) => key));
+    const world = matched.flatMap(([key, entry]): LoreMapLine[] => {
+      const n = numbers.get(key);
+      return n === undefined ? [] : [{ id: worldEntryId(n), title: worldTitle(entry, key) }];
+    });
     return { inPrompt, world };
   }
 
@@ -318,12 +323,15 @@ export class Lore {
     const out: LoreEntry[] = [];
     for (const ref of refs) {
       if (ref?.kind === "world") {
-        const entry = world !== null && hasOwn(world.world.lore, ref.key) ? world.world.lore[ref.key] : undefined;
-        if (world === null || open === null || entry === undefined || isCopy(entry)) continue;
+        const numbered = this.numbers.worldEntry(at.user, ref.n);
+        // A world entry is read from the chat's own world only, as a book entry is read only from a book the chat reads.
+        const key = world !== null && numbered?.world === world.world.id ? numbered.key : null;
+        const entry = world !== null && key !== null && hasOwn(world.world.lore, key) ? world.world.lore[key] : undefined;
+        if (world === null || open === null || key === null || entry === undefined || isCopy(entry)) continue;
         if (as === undefined) {
           people ??= peopleOf(world);
-          out.push(worldEntry(world, ref.key, entry, knowingOf(world, entry, open, people)));
-        } else if (loreReadable(world.registry, world.world, world.state, entry, AS_CHARACTER, false, open, as)) out.push(worldEntry(world, ref.key, entry));
+          out.push(worldEntry(world, ref.n, key, entry, knowingOf(world, entry, open, people)));
+        } else if (loreReadable(world.registry, world.world, world.state, entry, AS_CHARACTER, false, open, as)) out.push(worldEntry(world, ref.n, key, entry));
       } else if (ref?.kind === "book" && as === undefined) {
         const id = this.numbers.entry(at.user, ref.n);
         const row = id === null ? null : await this.books.entry(at.user, id);
@@ -347,7 +355,7 @@ export class Lore {
     for (const g of await this.gather(at, world, asked, as === undefined)) {
       if (g.kind === "world") {
         lore[g.key] = g.text === g.entry.content ? g.entry : { ...g.entry, content: g.text };
-        found.set(g.key, { kind: "world", id: worldEntryId(g.key), source: g.source, title: g.title, text: g.text });
+        found.set(g.key, { kind: "world", key: g.key, source: g.source, title: g.title, text: g.text });
       } else {
         // Today's id of a book entry read as lore (`backend/book-lore.ts:42`): the world's lookup table may lead a term to one by it.
         const key = `book:${g.book.id}/${g.row.id}`;
@@ -360,10 +368,11 @@ export class Lore {
     const { hits } = loreSearch({ reg: base.registry, world: { ...base.world, lore }, state: base.state, tokens: () => 0 }, { query: query.text, purpose: as === undefined ? "gm" : AS_CHARACTER, ...(as === undefined ? {} : { as }), tokenBudget: 0, limit });
     const hit = hits.flatMap((h) => found.get(h.id) ?? []);
     const numbers = await this.numbers.of(at.user, hit.flatMap((f) => (f.kind === "book" ? [f.entry] : [])));
+    const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, hit.flatMap((f) => (f.kind === "world" ? [f.key] : [])));
     const words = wordsOf(query.text);
     return hit.flatMap((f): LoreHit[] => {
-      const n = f.kind === "book" ? numbers.get(f.entry) : undefined;
-      const id = f.kind === "world" ? f.id : n === undefined ? null : bookEntryId(n);
+      const n = f.kind === "book" ? numbers.get(f.entry) : worldNumbers.get(f.key);
+      const id = n === undefined ? null : f.kind === "book" ? bookEntryId(n) : worldEntryId(n);
       return id === null ? [] : [{ id, source: f.source, title: f.title, snippet: snippetOf(f.text, words, this.settings.snippetChars) || f.title, how: "words" }];
     });
   }
@@ -377,13 +386,16 @@ export class Lore {
     const world = this.worlds.at(at.user, at.chat, at.turn);
     const gathered = await this.gather(at, world, () => true, true);
     const numbers = await this.numbers.of(at.user, gathered.flatMap((g) => (g.kind === "book" ? [g.row.id] : [])));
+    const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, gathered.flatMap((g) => (g.kind === "world" ? [g.key] : [])));
     return gathered.flatMap((g): LoreCatalogEntry[] => {
       if (g.kind === "world") {
+        const n = worldNumbers.get(g.key);
+        if (n === undefined) return [];
         const keys = Array.isArray(g.entry.keys) ? g.entry.keys.filter((k): k is string => typeof k === "string") : [];
         const content = typeof g.entry.content === "string" ? g.entry.content : "";
         const activation: LoreActivation[] = keys.some((k) => k !== "") ? ["keyword"] : [];
         // The revision `lore_read` gives the same entry (`worldEntry`).
-        return [{ id: worldEntryId(g.key), world: world?.world.id ?? "", source: g.source, book: null, title: g.title, keys, size: content.length, activation, revision: hashJson([g.title, keys, content]), text: g.text }];
+        return [{ id: worldEntryId(n), world: world?.world.id ?? "", source: g.source, book: null, title: g.title, keys, size: content.length, activation, revision: hashJson([g.title, keys, content]), text: g.text }];
       }
       const n = numbers.get(g.row.id);
       if (n === undefined) return [];

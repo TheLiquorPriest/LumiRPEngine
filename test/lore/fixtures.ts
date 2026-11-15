@@ -13,6 +13,7 @@ import type { JsonObject } from "../../src/shared/json";
 import { defaultTiers } from "../../src/shared/tiers";
 import { DEFAULT_CURRENCY, type LoreEntryDef, WORLD_FORMAT, type WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, defaultTables } from "../../src/packs/index";
+import { giveWorldNumbers } from "../../src/lore/ids";
 import { type ActivatedEntry, EntryNumbers, LORE_MIGRATIONS, type LoreBook, type LoreBookEntry, type LoreBooks, type LoreTurns, type LoreWorlds, type LoreWrites } from "../../src/lore/index";
 import { STORE_MIGRATIONS } from "../../src/store";
 
@@ -29,6 +30,11 @@ export function registry(): Registry {
 }
 
 const entry = (id: string, title: string, keys: string[], content: string, more: Partial<LoreEntryDef> = {}): LoreEntryDef => ({ id, title, keys, content, links: [], ...more });
+
+const COAST_KEYS = ["tithe_law", "cove_route", "drowned_crown", "ferry_draft", "gull_copy", "keeper_log"] as const;
+
+/** The id each of the coast's own entries goes by once it has been seen: numbered in this order. */
+export const W = Object.fromEntries(COAST_KEYS.map((key, i) => [key, `w-${i + 1}`])) as Record<(typeof COAST_KEYS)[number], string>;
 
 /** The Reed Coast's own lore: public, known only to those who know what it links, secret, awaiting review, an earlier build's copy of a book entry, and one titled by words its keys never say. */
 export const COAST_LORE: Record<string, LoreEntryDef> = {
@@ -189,13 +195,15 @@ export interface LoreDb {
 }
 
 /** RPE's database with the store's tables and the lore's, brought up by the application's own runner, every write through its queue. */
-export function loreDb(file: string, backups: string): LoreDb {
+export function loreDb(file: string, backups: string, numberCoast = true): LoreDb {
   const db = openDatabase(file, 2_000);
   const migrations = new Migrations();
   // As on RPE's database, the store's turns are there: an overlay's write reads whether its turn was joined to another.
   migrations.add("store", STORE_MIGRATIONS);
   migrations.add("lore", LORE_MIGRATIONS);
   migrate(db, migrations, { user: USER, version: "lore-test", backups, now: () => 0 });
+  // The coast's own entries have been seen, in this order, so each goes by the id `W` gives it.
+  if (numberCoast) giveWorldNumbers(db, USER, "world-reed-coast", COAST_KEYS);
   const queue = new WriteQueue(db, 50);
   return {
     db,

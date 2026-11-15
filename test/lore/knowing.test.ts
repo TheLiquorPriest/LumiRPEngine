@@ -13,11 +13,11 @@ import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
 import type { TurnRow } from "../../src/store/types";
-import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, POV, registry, Shelf, Tags, USER } from "./fixtures";
+import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, POV, registry, Shelf, Tags, USER, W } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
-const CROWN = ["w-drowned_crown"];
-const COVE = ["w-cove_route"];
+const CROWN = [W.drowned_crown];
+const COVE = [W.cove_route];
 
 const ids = (entries: readonly { id: string }[]): string[] => entries.map((e) => e.id);
 
@@ -98,14 +98,14 @@ describe("who may know a world entry", () => {
   });
 
   test("an entry an agent wrote that awaits review is the GM's alone; the lead reads every entry, marked with who may know it now", async () => {
-    for (const who of [POV, "orrin", "sefa", "tobin"]) expect(await lore.readAs(AT, who, ["w-ferry_draft"])).toEqual([]);
-    expect(ids(await lore.readAs(AT, "tobin", ["w-tithe_law"]))).toEqual(["w-tithe_law"]);
-    const lead = await lore.read(AT, ["w-tithe_law", "w-cove_route", "w-drowned_crown", "w-ferry_draft"]);
+    for (const who of [POV, "orrin", "sefa", "tobin"]) expect(await lore.readAs(AT, who, [W.ferry_draft])).toEqual([]);
+    expect(ids(await lore.readAs(AT, "tobin", [W.tithe_law]))).toEqual([W.tithe_law]);
+    const lead = await lore.read(AT, [W.tithe_law, W.cove_route, W.drowned_crown, W.ferry_draft]);
     expect(lead.map((e) => [e.id, e.knowing])).toEqual([
-      ["w-tithe_law", undefined],
-      ["w-cove_route", { by: "characters", names: ["Sefa Moor", "Tobin Reed"] }],
-      ["w-drowned_crown", { by: "characters", names: ["Orrin Pell"] }],
-      ["w-ferry_draft", { by: "characters", names: [] }],
+      [W.tithe_law, undefined],
+      [W.cove_route, { by: "characters", names: ["Sefa Moor", "Tobin Reed"] }],
+      [W.drowned_crown, { by: "characters", names: ["Orrin Pell"] }],
+      [W.ferry_draft, { by: "characters", names: [] }],
     ]);
     expect(lead.map((e) => e.text)).toEqual([
       "Every boat pays a tenth of its catch at the harbor steps.",

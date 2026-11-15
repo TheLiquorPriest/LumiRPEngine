@@ -10,6 +10,8 @@ import type { AgentRef, HostTool, ToolCtx } from "rp-harness/contract";
 import { shippedTexts } from "../../src/iface/texts";
 import { overlayNotes, overlayWrite, storePath, storeWorlds } from "../../src/lore/index";
 import { dropStoryStaged, storyMark, storyTools, takeBackStory } from "../../src/story/index";
+import { giveWorldNumbers } from "../../src/lore/ids";
+import { CHAT as COAST_CHAT, startingWorlds, USER as COAST_USER } from "./fixtures";
 import { CHAT, openTable, type Table, USER } from "../story/rig";
 
 const AUTHOR: AgentRef = { id: "author-1", definition: "author" };
@@ -110,5 +112,19 @@ describe("overlays", () => {
     expect(texts).toContain("Operation 2 (overlay): there is no lore entry e-9.");
     expect(t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM lore_overlay").get()?.n).toBe(0);
     expect(t.record(turn).items.size).toBe(0);
+  });
+
+  test("a world entry is known by its number in the chat's own world, and an id that names none is answered with the entries its text names, by number", async () => {
+    const { t } = await table();
+    const turn = await t.begin();
+    const coast = startingWorlds();
+    const write = overlayWrite({ ...coast, at: () => coast.at(COAST_USER, COAST_CHAT) }, () => 7);
+    const input = (entry: string) => ({ user: USER, chat: CHAT, turn: turn.id, entry, note: "The tithe was lifted.", by: null, agent: null, job: null, ord: 0 });
+    const answers = await t.writes.run((db) => {
+      giveWorldNumbers(db, USER, "world-reed-coast", ["tithe_law"]);
+      return ["w-1", "w-2", "The harbor tithe", "cove route", "w-tithe_law"].map((entry) => write(db, input(entry)));
+    });
+    expect(answers.map((a) => ("written" in a ? "written" : a.near ?? [])).slice(0, 5)).toEqual(["written", [], ["w-1"], ["w-2"], []]);
+    expect(t.db.query("SELECT entry FROM lore_overlay").all()).toEqual([{ entry: "w-1" }]);
   });
 });

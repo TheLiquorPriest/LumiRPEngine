@@ -14,7 +14,7 @@
 import type { Database } from "bun:sqlite";
 import type { JsonObject } from "rp-harness/contract";
 import { hasOwn } from "../shared/json";
-import { loreRefOf, worldEntryId } from "./ids";
+import { giveWorldNumbers, loreRefOf, worldEntryId } from "./ids";
 import { foldName } from "./keys";
 import { refuseJoined } from "../store";
 import type { LoreWorlds } from "./sources";
@@ -45,28 +45,37 @@ export type OverlayWrite = (db: Database, input: OverlayInput) => { written: Jso
 
 /**
  * The overlay write for the story's `overlay` operation. An entry is known when it is a book entry RPE
- * has numbered for the user (it has been shown to an agent), or an entry of the chat's world where the
- * turn stands. A turn joined to another is refused first, with the typed error naming the turn it
- * joined (`refuseJoined`).
+ * has numbered for the user (it has been shown to an agent), or a world entry RPE has numbered that is
+ * an entry of the chat's world where the turn stands. An id that names none is answered with the world
+ * entries of the chat that its text names by title or key, by their numbers. A turn joined to another
+ * is refused first, with the typed error naming the turn it joined (`refuseJoined`).
  */
 export function overlayWrite(worlds: LoreWorlds, now: () => number = Date.now): OverlayWrite {
   return (db, input) => {
     refuseJoined(db, input.user, input.turn);
     const ref = loreRefOf(input.entry);
     const world = ref?.kind === "book" ? null : worlds.at(input.user, input.chat, input.turn);
+    // A world entry is known when it is numbered and is an entry of the chat's own world.
+    const numbered = ref?.kind === "world" ? db.query<{ world: string; key: string }, [string, number]>("SELECT world, key FROM lore_world_number WHERE user = ? AND n = ?").get(input.user, ref.n) : null;
     const known =
       ref?.kind === "book"
         ? db.query<{ n: number }, [string, number]>("SELECT n FROM lore_entry_number WHERE user = ? AND n = ?").get(input.user, ref.n) !== null
-        : ref?.kind === "world" && world !== null && hasOwn(world.world.lore, ref.key);
+        : ref?.kind === "world" && world !== null && numbered !== null && numbered.world === world.world.id && hasOwn(world.world.lore, numbered.key);
     if (!known) {
       const asked = foldName(input.entry);
-      const near =
+      const matches =
         world === null
           ? []
           : Object.entries(world.world.lore).flatMap(([key, entry]) => {
               const names = [key, typeof entry.title === "string" ? entry.title : "", ...(Array.isArray(entry.keys) ? entry.keys : [])].filter((n): n is string => typeof n === "string" && n !== "");
-              return asked !== "" && names.some((n) => foldName(n) === asked) ? [worldEntryId(key)] : [];
+              return asked !== "" && names.some((n) => foldName(n) === asked) ? [key] : [];
             });
+      // The near entries are named as the map names them, so each is numbered here, in the caller's write.
+      const numbers = world === null ? new Map<string, number>() : giveWorldNumbers(db, input.user, world.world.id, matches);
+      const near = matches.flatMap((key) => {
+        const n = numbers.get(key);
+        return n === undefined ? [] : [worldEntryId(n)];
+      });
       return { unknown: input.entry, ...(near.length > 0 ? { near } : {}) };
     }
     const row = db

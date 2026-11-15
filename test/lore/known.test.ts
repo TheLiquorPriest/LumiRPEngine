@@ -12,11 +12,11 @@ import { addCharacter, CAST_MIGRATIONS, chatLine, findCharacter } from "../../sr
 import { Lore, LoreIndex, loreKnownBlock, lorePort, storeWorlds } from "../../src/lore/index";
 import { hashJson } from "../../src/shared/hash";
 import { openStore, type Store } from "../../src/store/store";
-import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, registry, Shelf, Tags, USER } from "./fixtures";
+import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, registry, Shelf, Tags, USER, W } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
 
 const AT = { user: USER, chat: CHAT };
-const CROWN = ["w-drowned_crown"];
+const CROWN = [W.drowned_crown];
 const ids = (entries: readonly { id: string }[]): string[] => entries.map((e) => e.id);
 const agent = (plays?: string): AgentRef => ({ id: "character-1", definition: "character", ...(plays !== undefined ? { plays } : {}) });
 
@@ -50,7 +50,7 @@ describe("the lore a character knows", () => {
     const read = await index.entries(AT);
     const revisionOf = (id: string): string => read.find((e) => e.id === id)?.revision ?? "";
     const bound = (id: string, what: string) => ({ id, revision: revisionOf(id), kind: "item", line: `${id}.`, defines: [{ what, aspect: "" }], related: [] });
-    await index.write(AT, [bound("w-drowned_crown", "Orrin Pell"), bound("w-keeper_log", "entity:orrin"), bound("w-cove_route", "orrin"), bound("w-tithe_law", "Sefa Moor")], "indexer");
+    await index.write(AT, [bound(W.drowned_crown, "Orrin Pell"), bound(W.keeper_log, "entity:orrin"), bound(W.cove_route, "orrin"), bound(W.tithe_law, "Sefa Moor")], "indexer");
   });
   afterAll(async () => {
     store.close();
@@ -78,8 +78,8 @@ describe("the lore a character knows", () => {
     const guidance = files.guidance(CHAT);
     const block = await loreKnownBlock(index, AT, agent(orrin), guidance);
     expect(block.split("\n\n")).toEqual([
-      "### [w-drowned_crown] The drowned crown (from The Reed Coast)\nOrrin hid the old queen's crown under the lighthouse stair.",
-      "### [w-keeper_log] The lighthouse keeper's log (from The Reed Coast)\nForty winters of weather, written in a cramped hand.",
+      `### [${W.drowned_crown}] The drowned crown (from The Reed Coast)\nOrrin hid the old queen's crown under the lighthouse stair.`,
+      `### [${W.keeper_log}] The lighthouse keeper's log (from The Reed Coast)\nForty winters of weather, written in a cramped hand.`,
     ]);
     expect(await loreKnownBlock(index, AT, agent("orrin"), guidance)).toBe(block);
     // Bound to nothing, the part's line says so; an agent that plays no one is given nothing.

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore, LoreIndex, loreLines, loreMapFields, type LoreWorlds, overlayWrite } from "../../src/lore/index";
 import type { TurnLoreMap } from "../../src/lore/indexing";
-import { ATLAS, CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER } from "./fixtures";
+import { ATLAS, CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
 
 const AT = { user: USER, chat: CHAT };
@@ -51,10 +51,10 @@ describe("the lore map in full", () => {
         { id: "e-1", revision: revision("e-1"), kind: "style", line: "A song of the lamp room.", defines: [{ what: "nell", aspect: "voice" }], related: [] },
         { id: "e-2", revision: revision("e-2"), kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], related: [] },
         { id: "e-4", revision: revision("e-4"), kind: "item", line: "The bell on the market quay.", defines: [{ what: "the  FISHMARKET", aspect: "sound" }], related: [] },
-        { id: "w-tithe_law", revision: revision("w-tithe_law"), kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }], related: [] },
-        { id: "w-cove_route", revision: revision("w-cove_route"), kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], related: [] },
-        { id: "w-ferry_draft", revision: revision("w-ferry_draft"), kind: "place", line: "The estuary ferry.", defines: [{ what: "Tobin Reed", aspect: "" }], related: [] },
-        { id: "w-keeper_log", revision: revision("w-keeper_log"), kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], related: [] },
+        { id: W.tithe_law, revision: revision(W.tithe_law), kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }], related: [] },
+        { id: W.cove_route, revision: revision(W.cove_route), kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], related: [] },
+        { id: W.ferry_draft, revision: revision(W.ferry_draft), kind: "place", line: "The estuary ferry.", defines: [{ what: "Tobin Reed", aspect: "" }], related: [] },
+        { id: W.keeper_log, revision: revision(W.keeper_log), kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], related: [] },
       ],
       "indexer",
     );
@@ -81,13 +81,13 @@ describe("the lore map in full", () => {
       ],
       // Only the overlays of the turns on the path, oldest first.
       changed: [{ id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], notes: ["The lamp was relit after the wreck.", "Its glass cracked in the storm."] }],
-      world: [{ id: "w-tithe_law", title: "The harbor tithe", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }] }],
+      world: [{ id: W.tithe_law, title: "The harbor tithe", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }] }],
       // The player's character's first, then each character present, then the places; none that is in the parts above.
       // The tide bell, bound to the fishmarket, is past the limit; the ferry is bound to nobody on the horizon.
       bound: [
         { id: "e-1", title: "The Lamplighter's Shanty", kind: "style", line: "A song of the lamp room.", defines: [{ what: "nell", aspect: "voice" }], bound: ["Nell Harrow"] },
-        { id: "w-keeper_log", title: "The lighthouse keeper's log", kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], bound: ["Orrin Pell"] },
-        { id: "w-cove_route", title: "The cove route", kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], bound: ["Sefa Moor"] },
+        { id: W.keeper_log, title: "The lighthouse keeper's log", kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], bound: ["Orrin Pell"] },
+        { id: W.cove_route, title: "The cove route", kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], bound: ["Sefa Moor"] },
       ],
       leftOut: 1,
       // The gulls and the drowned crown.
@@ -117,13 +117,13 @@ describe("the lore map in full", () => {
       "",
       "### From the world's own lore, not in the prompt",
       "",
-      "- [w-tithe_law] The harbor tithe (rule): A tenth of every catch.",
+      `- [${W.tithe_law}] The harbor tithe (rule): A tenth of every catch.`,
       "",
       "### Not in the prompt, but bound to who and what is at hand",
       "",
       "- [e-1] The Lamplighter's Shanty (style): A song of the lamp room. Bound to Nell Harrow.",
-      "- [w-keeper_log] The lighthouse keeper's log (item): Forty winters of weather. Bound to Orrin Pell.",
-      "- [w-cove_route] The cove route (rule): Sefa's brandy run. Bound to Sefa Moor.",
+      `- [${W.keeper_log}] The lighthouse keeper's log (item): Forty winters of weather. Bound to Orrin Pell.`,
+      `- [${W.cove_route}] The cove route (rule): Sefa's brandy run. Bound to Sefa Moor.`,
       "- and 1 more",
       "",
       "2 attached entries are not indexed yet. They show by title and keys only.",
@@ -139,7 +139,7 @@ describe("the lore map in full", () => {
     // Nell's song, then the ferry bound to Tobin, who is in the lofts; the tithe, out of the world part now, is bound to Orrin, who is not.
     expect(lofts.bound?.map((l) => [l.id, l.bound])).toEqual([
       ["e-1", ["Nell Harrow"]],
-      ["w-ferry_draft", ["Tobin Reed"]],
+      [W.ferry_draft, ["Tobin Reed"]],
     ]);
   });
 });

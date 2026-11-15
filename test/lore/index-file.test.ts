@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore, LoreIndex, loreLines } from "../../src/lore/index";
-import { CHAT, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER } from "./fixtures";
+import { CHAT, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
 
 const AT = { user: USER, chat: CHAT };
@@ -43,11 +43,11 @@ describe("LORE-INDEX.md", () => {
     expect(existsSync(path)).toBe(false);
     const entries = await index.entries(AT);
     const lamp = entries.find((e) => e.title === "The lamp room");
-    const tithe = entries.find((e) => e.id === "w-tithe_law");
+    const tithe = entries.find((e) => e.id === W.tithe_law);
     await index.write(
       AT,
       [
-        { id: "w-tithe_law", revision: tithe?.revision ?? "", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: [lamp?.id ?? ""] },
+        { id: W.tithe_law, revision: tithe?.revision ?? "", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: [lamp?.id ?? ""] },
         { id: lamp?.id ?? "", revision: lamp?.revision ?? "", kind: "place", line: "Green glass and whale oil.", defines: [], related: [] },
       ],
       "indexer",
@@ -58,13 +58,13 @@ describe("LORE-INDEX.md", () => {
       "",
       "The lore this chat reads: 9 entries, 7 of them not indexed yet. Each line gives the entry's id, its title, where it is from, how it comes into the prompt and its size, then what the index says of it.",
     ]);
-    expect(lines).toContain(`- [w-tithe_law] The harbor tithe (The Reed Coast; keyword; 57 characters): rule. A tenth of every catch. Defines: The harbor steps (rules). Related: ${lamp?.id}.`);
+    expect(lines).toContain(`- [${W.tithe_law}] The harbor tithe (The Reed Coast; keyword; 57 characters): rule. A tenth of every catch. Defines: The harbor steps (rules). Related: ${lamp?.id}.`);
     expect(lines).toContain(`- [${lamp?.id}] The lamp room (Reed Coast Atlas; keyword; 59 characters): place. Green glass and whale oil.`);
     // Before a run reaches it, an entry shows its title and keys.
-    expect(lines).toContain("- [w-cove_route] The cove route (The Reed Coast; keyword; 50 characters) Not indexed yet. Keys: cove route.");
+    expect(lines).toContain(`- [${W.cove_route}] The cove route (The Reed Coast; keyword; 50 characters) Not indexed yet. Keys: cove route.`);
 
-    await index.edit(AT, "w-tithe_law", { kind: "law", defines: [{ what: "The harbor steps", aspect: "" }] });
-    expect(readFileSync(path, "utf8")).toContain(`- [w-tithe_law] The harbor tithe (The Reed Coast; keyword; 57 characters): law. A tenth of every catch. Defines: The harbor steps. Related: ${lamp?.id}.`);
+    await index.edit(AT, W.tithe_law, { kind: "law", defines: [{ what: "The harbor steps", aspect: "" }] });
+    expect(readFileSync(path, "utf8")).toContain(`- [${W.tithe_law}] The harbor tithe (The Reed Coast; keyword; 57 characters): law. A tenth of every catch. Defines: The harbor steps. Related: ${lamp?.id}.`);
   });
 
   test("a chat with no folder yet has nowhere to write it", async () => {

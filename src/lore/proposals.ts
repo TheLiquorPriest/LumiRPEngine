@@ -159,7 +159,7 @@ export class LoreProposals {
     if ("file" in target) return null;
     const named = "lore" in target ? target.lore : null;
     const ref = named === null ? null : loreRefOf(named);
-    // Only a book entry RPE has numbered is one of the user's books; anything else is kept as asked and refused at approval.
+    // Only a book entry RPE has numbered is one of the user's books; anything else (a world entry by its number, or an id RPE gave to nothing) is kept as asked, under the id the agent used, and refused at approval.
     const entry = ref?.kind === "book" ? this.deps.numbers.entry(scope.user, ref.n) : null;
     const current = entry === null ? null : await this.deps.books.entry(scope.user, entry);
     const id = await this.deps.writes.run(

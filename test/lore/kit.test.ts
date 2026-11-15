@@ -14,10 +14,11 @@ import { loreDb, registry, Shelf, Tags } from "./fixtures";
 
 async function laid(seed: KitSeed, place: string): Promise<KitPorts<"lore">> {
   const { user, chat } = seed.scope;
-  const db = loreDb(join(place, "rpe.db"), join(place, "backups"));
+  const db = loreDb(join(place, "rpe.db"), join(place, "backups"), false);
   const books = new Map<string, LoreBook>();
   const entries: LoreBookEntry[] = [];
   const numbered: [number, string][] = [];
+  const keyed: [number, string][] = [];
   const lore: Record<string, LoreEntryDef> = {};
   const people: Record<string, string> = {};
   let worldName = "";
@@ -30,7 +31,8 @@ async function laid(seed: KitSeed, place: string): Promise<KitPorts<"lore">> {
       numbered.push([ref.n, `kit-entry-${ref.n}`]);
     } else if (ref?.kind === "world") {
       worldName = e.source;
-      const def: LoreEntryDef = { id: ref.key, title: e.title, content: e.text, keys: e.keys, links: [] };
+      const key = `kit-lore-${ref.n}`;
+      const def: LoreEntryDef = { id: key, title: e.title, content: e.text, keys: e.keys, links: [] };
       if (e.knowing?.by === "characters") {
         // Those who may know it, ever and none else: the people who hold it as a secret.
         const holders = e.knowing.names.map((name) => {
@@ -40,12 +42,14 @@ async function laid(seed: KitSeed, place: string): Promise<KitPorts<"lore">> {
         });
         Object.assign(def, { secret: true, gate: "false", holders });
       } else if (e.knowing !== undefined) throw new Error(`The kit's entry ${e.id} is known ${e.knowing.by}, which this laying does not lay`);
-      lore[ref.key] = def;
+      lore[key] = def;
+      keyed.push([ref.n, key]);
     } else throw new Error(`The kit's entry ${e.id} has no id RPE gives an entry`);
   }
-  // The numbers the seed's book entries go by, kept where RPE keeps them.
+  // The numbers the seed's entries go by, kept where RPE keeps them.
   await db.writes.run((d) => {
     for (const [n, id] of numbered) d.run("INSERT INTO lore_entry_number (user, n, entry) VALUES (?, ?, ?)", [user, n, id]);
+    for (const [n, key] of keyed) d.run("INSERT INTO lore_world_number (user, n, world, key) VALUES (?, ?, 'kit-world', ?)", [user, n, key]);
   });
 
   const reg = registry();

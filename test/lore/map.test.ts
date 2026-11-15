@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keysIn, Lore, loreMapFields, LUMIVERSE_KEY_MATCHING } from "../../src/lore/index";
-import { ATLAS, CHAT, dbFile, type LoreDb, loreDb, Shelf, SONGS, startingWorlds, Tags, USER } from "./fixtures";
+import { ATLAS, CHAT, dbFile, type LoreDb, loreDb, Shelf, SONGS, startingWorlds, Tags, USER, W } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
 const WHOLE_WORDS = { caseSensitive: false, wholeWords: true };
@@ -50,13 +50,13 @@ describe("the lore map", () => {
       ],
       // Not the keeper's log, whose title comes up but none of its keys; not the world's copy of the gull entry.
       world: [
-        { id: "w-tithe_law", title: "The harbor tithe" },
-        { id: "w-drowned_crown", title: "The drowned crown" },
+        { id: W.tithe_law, title: "The harbor tithe" },
+        { id: W.drowned_crown, title: "The drowned crown" },
       ],
     });
     expect(loreMapFields(map)).toEqual({
       in_prompt: { lines: [`[${lamp?.id}] The lamp room`, `[${gull?.id}] ${gullTitle}`] },
-      world: { lines: ["[w-tithe_law] The harbor tithe", "[w-drowned_crown] The drowned crown"] },
+      world: { lines: [`[${W.tithe_law}] The harbor tithe`, `[${W.drowned_crown}] The drowned crown`] },
     });
   });
 
@@ -70,7 +70,7 @@ describe("the lore map", () => {
 
   test("the user's own key matching in Lumiverse is followed", async () => {
     const messages = ["The crowned heron stands in the shallows."];
-    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages })).world.map((l) => l.id)).toEqual(["w-drowned_crown"]);
+    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages })).world.map((l) => l.id)).toEqual([W.drowned_crown]);
     expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages, matching: WHOLE_WORDS })).world).toEqual([]);
     expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages: ["Pay the Tithe."], matching: CASED })).world).toEqual([]);
   });
