@@ -38,15 +38,15 @@ const TOKEN_ENDED_WORDS = "The page's token has run out or was replaced: open th
 const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
-const scope = shape.named("Scope", "Where work is: the user, the chat, the session, and the turn where it belongs to one.", shape.object({ user: T, chat: T, session: T, turn: opt(T) }));
-const agentRef = shape.named("AgentRef", "One agent of a run: its handle, its definition, the agent that started it, its job, and the character it plays.", shape.object({ id: T, definition: T, parent: opt(T), job: opt(T), plays: opt(T) }));
-const usage = shape.named("Usage", "Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.", shape.object({ calls: N, input: N, cacheRead: N, cacheWrite: N, output: N, reasoning: opt(N) }));
-const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
+export const scope = shape.named("Scope", "Where work is: the user, the chat, the session, and the turn where it belongs to one.", shape.object({ user: T, chat: T, session: T, turn: opt(T) }));
+export const agentRef = shape.named("AgentRef", "One agent of a run: its handle, its definition, the agent that started it, its job, and the character it plays.", shape.object({ id: T, definition: T, parent: opt(T), job: opt(T), plays: opt(T) }));
+export const usage = shape.named("Usage", "Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.", shape.object({ calls: N, input: N, cacheRead: N, cacheWrite: N, output: N, reasoning: opt(N) }));
+export const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
 const sampling = shape.named("Sampling", "Sampling by its usual names, as a preset sets it; each one absent is the connection's own.", shape.object({ temperature: opt(N), top_p: opt(N), top_k: opt(N), min_p: opt(N), frequency_penalty: opt(N), presence_penalty: opt(N), repetition_penalty: opt(N), seed: opt(N), stop: opt(shape.list(T)) }));
 const toolCall = shape.named("ToolCallView", "A tool call a model made: the model's id for it, the tool, its arguments, and when the model began writing it, where the provider gave it in pieces.", shape.object({ id: T, name: T, args: shape.json(), began: opt(N) }));
 const toolContent = shape.union(shape.object({ type: shape.literal("text"), text: T }), shape.object({ type: shape.literal("image"), data: T, mimeType: T }));
 const toolResult = shape.named("ToolResult", "A tool's answer: what the model is shown, whether it failed, what it reports beyond it, its marks, and data for the live view.", shape.object({ content: shape.list(toolContent), error: opt(shape.literal(true)), reports: opt(shape.list(T)), marks: opt(shape.list(T)), details: opt(shape.json()) }));
-const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
+export const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
 const factValue = shape.object({ count: N, names: opt(shape.list(T)), by: opt(shape.record(N)), namesBy: opt(shape.record(shape.list(T))), fields: opt(shape.record(shape.json())) });
 const ruleThen = shape.union(shape.object({ did: shape.literal("called"), tools: shape.list(T) }), shape.object({ did: shape.literal("wrote") }), shape.object({ did: shape.literal("released") }), shape.object({ did: shape.literal("ended") }));
 const ruleFiring = shape.named(
@@ -82,7 +82,7 @@ const promptNotice = shape.named(
     shape.object({ kind: shape.literal("incomplete") }),
   ),
 );
-const limitHit = shape.named(
+export const limitHit = shape.named(
   "LimitHit",
   "A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs.",
   shape.object({ limit: shape.oneOf("calls", "tokensIn", "tokensOut", "tokens", "time", "depth", "agents", "jobs"), per: shape.oneOf("turn", "agent", "job", "day"), max: N, value: N, agent: opt(agentRef), connection: opt(T) }),
@@ -98,7 +98,7 @@ const callPermission = shape.named(
   "The permission a write or external tool's call ran under: the lane its tier puts it under (external for a tool of the external tier), the user's setting for that lane, and under Confirm the user's word on the call.",
   shape.object({ lane: T, setting: shape.oneOf("auto", "confirm", "never"), answer: opt(approvalAnswer) }),
 );
-const jobView = shape.named(
+export const jobView = shape.named(
   "JobView",
   "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, and the limit it ended at.",
   shape.object({
@@ -115,7 +115,7 @@ const jobView = shape.named(
     limit: opt(limitHit),
   }),
 );
-const replyError = shape.object({ code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed"), limit: opt(limitHit), detail: opt(T) });
+export const replyError = shape.object({ code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed"), limit: opt(limitHit), detail: opt(T) });
 const runOutcome = shape.named(
   "RunOutcome",
   "How a run ended, whether a reply was released, the limit or the failure, and what every agent of it spent.",
@@ -154,7 +154,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("run_ended"), outcome: runOutcome }),
   ),
 );
-const traceRecord = shape.named(
+export const traceRecord = shape.named(
   "TraceRecord",
   "An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it.",
   shape.object({ seq: N, run: T, scope, at: N, agent: agentRef, parent: opt(shape.object({ agent: T, run: T, call: T })), event: traceEvent }),
