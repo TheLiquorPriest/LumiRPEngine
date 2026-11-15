@@ -51,7 +51,13 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   cut_pictures: { dropped: 1 },
   cut_uncut: { history: 3 },
   cut_joining_unread: { why: "the preset could not be read" },
+  cut_clipped_memory: { count: 4 },
+  cut_clipped_message_limit: { count: 2 },
+  cut_clipped_context_size: { count: 6 },
 };
+
+/** The lines of `reply-errors.md` for a request passed on to a model, by name: each is said with and without the provider's or the layer's own words. */
+const PASS_ERRORS = ["pass-no-connection", "pass-not-carried", "pass-provider", "pass-stopped"];
 
 let set: OpenSet;
 let guidance: Guidance;
@@ -207,6 +213,18 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(part.line("file_changed", { path: "WRITING.md" })).toStartWith("WRITING.md was changed since this session opened.");
     // A chat whose progress file has no still line: what that costs, and the limit the turn was held to.
     expect(part.line("progress_missing", { time: 540000 })).toBe("This chat's progress.md has no still line, so nothing keeps a long turn alive: the chat application ends a generation that shows nothing after ten minutes. The turn's own time limit was held at 540000 milliseconds.");
+  });
+
+  test("reply-errors.md words each way a passed request has no answer, with the detail's words where there are some, and nothing is left unfilled without them", async () => {
+    const part = await lines("reply-errors");
+    expect(part.names).toEqual(expect.arrayContaining(PASS_ERRORS));
+    for (const name of PASS_ERRORS) {
+      for (const fields of [{ detail: "The key is missing." }, {}]) {
+        const said = part.line(name, fields as never) ?? "";
+        expect({ name, said: said.trim().length > 0, unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ name, said: true, unfilled: false, asks: false });
+      }
+      expect(part.line(name, { detail: "The key is missing." })).toContain(name === "pass-stopped" ? "stopped" : "The key is missing.");
+    }
   });
 
   test("judge.md and engine-answers.md stay, the build's own for the owner's approval: the judge's question and the engine's sentences", async () => {
