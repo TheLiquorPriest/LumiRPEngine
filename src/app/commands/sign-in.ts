@@ -68,6 +68,12 @@ export async function signInTo(url: string, username: string, more: Record<strin
   return session;
 }
 
+/** The username of the sign-in kept for this RPE's Lumiverse at `url`, which `rpe up` takes as the one asked for when none is given; null where none is kept. */
+export async function keptUsername(url: string, paths: DataPaths, config: AppConfig): Promise<string | null> {
+  const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);
+  return config.lumiverse.url === url && config.lumiverse.user !== null && isRecord(kept) && kept.user === config.lumiverse.user && typeof kept.username === "string" ? kept.username : null;
+}
+
 /** The kept sign-in, when it is to `url` as `username` for the user this RPE belongs to and Lumiverse still takes it; null otherwise. */
 export async function keptSession(url: string, username: string, paths: DataPaths, config: AppConfig, io: CliIO): Promise<LumiverseSession | null> {
   const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);

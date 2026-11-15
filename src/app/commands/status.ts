@@ -7,6 +7,7 @@ import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { appliedMigrations } from "../migrations";
 import { listSwitches } from "../switches";
+import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { atWords } from "./words";
 import { runningServer } from "./writer";
@@ -49,7 +50,7 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
     const switches = said !== null ? said.switches : listSwitches(db, user);
     const waiting = switches.filter((s) => s.state === "waiting");
     io.out(`Switches: ${waiting.length} waiting, ${switches.filter((s) => s.state === "on").length} on, ${switches.filter((s) => s.state === "off").length} off`);
-    for (const s of waiting) io.out(`  waiting: ${s.name} (${s.kind}) runs ${s.what}. Switch it on with: rpe allow ${s.name}`);
+    for (const s of waiting) io.out(`  waiting: ${s.name} (${s.kind}) runs ${s.what}. Switch it on with: ${runLine(io, paths, "allow", s.name)}`);
   } finally {
     db.close();
   }

@@ -58,7 +58,9 @@ export const USAGE = [
   "                                 set RPE up with Lumiverse: ask for the username and password, sign in,",
   "                                 make RPE's connection there, print a web token the first time, say what",
   "                                 is left to do, and serve in the foreground until told to stop; run again,",
-  "                                 it changes nothing. --url defaults to the address the config holds.",
+  "                                 it changes nothing. --url defaults to the address the config holds;",
+  "                                 the username is asked for unless --user (or --username) or",
+  "                                 LUMIVERSE_USERNAME gives it",
   "                                 --systemd: run RPE as a service of this account (rpe-<name>.service)",
   "                                 --port, --listen, --allow-http, --bun, --memory: as the install line of",
   "                                 the previous build took them",
@@ -124,7 +126,7 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
     if (command === "version" || command === "--version") return versionCommand(command, rest, io, options.version);
     // The migration reads its own line, and writes only once it is not a rehearsal; `up` and `down` read theirs, `up` with its switches.
     if (command === "migrate") return await migrateCommand(rest, io, options.version);
-    if (command === "up") return await upCommand(rest, io, options);
+    if (command === "up") return await upCommand(rest, io, options, (paths, config) => serveCommand(paths, config, io, options));
     if (command === "down") return await downCommand(rest, io);
     const allowed = FLAGS[command];
     if (allowed === undefined) throw new UsageError(`rpe has no command "${command}".`);

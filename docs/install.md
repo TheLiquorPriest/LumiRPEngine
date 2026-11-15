@@ -2,7 +2,7 @@
 
 RPE is one program, `dist/rpe.js`, run with Bun 1.4 or later. It runs on the same machine as Lumiverse: the extension reaches it only on that machine's own address (loopback).
 
-In this page `rpe` stands for `bun <folder>/dist/rpe.js`, where `<folder>` is a copy of this repository. Once the extension is installed, Lumiverse keeps a copy in `<Lumiverse's data folder>/extensions/lumi_rp_engine/repo`. Use that copy for the service: an update of the extension then updates RPE too.
+In this page `rpe` stands for `bun <folder>/dist/rpe.js`, where `<folder>` is a copy of this repository: every line RPE prints for you to run begins with the Bun and the app file that started it, so it runs as printed. An install that links the package's `rpe` command gets the same word. Once the extension is installed, Lumiverse keeps a copy in `<Lumiverse's data folder>/extensions/lumi_rp_engine/repo`; run `rpe up` from that copy, and an update of the extension then updates RPE too.
 
 If you run the previous build of this extension, read [Moving from the previous build](migration.md) instead. Do not install over it.
 
@@ -29,22 +29,31 @@ The extension is small. It has no settings and keeps no story data. It passes RP
 
 When a permission is missing, RPE's pages say which one and why, and RPE refuses the replies it cannot play rather than play them wrong.
 
-## The service: `rpe up`
+## Setting RPE up: `rpe up`
 
 ```sh
-rpe up --url <Lumiverse's address> --user <your Lumiverse username> --systemd
+bun <Lumiverse's data folder>/extensions/lumi_rp_engine/repo/dist/rpe.js up --url <Lumiverse's address> [--systemd]
 ```
 
 `rpe up` does all of this:
 
-- It signs in to Lumiverse as you. It asks for your password and does not keep it; it keeps the sign-in Lumiverse gives back, in RPE's secrets file. A later run reuses that sign-in while Lumiverse still accepts it. With no terminal, as from a script, it reads the password from the first line piped into it.
-- It makes RPE's connection in Lumiverse, called "RPE", or brings it up to date (see below).
+- It asks for your Lumiverse username (or takes `--user <name>`, `--username <name>` or `LUMIVERSE_USERNAME`) and for your password, and signs in to Lumiverse as you. It does not keep the password; it keeps the sign-in Lumiverse gives back, in RPE's secrets file. A later run reuses that sign-in while Lumiverse still accepts it, takes the address from RPE's config where `--url` is left out, and asks for nothing. With no terminal, as from a script, it reads the answers from the lines piped into it, one for each question.
+- It writes RPE's config before it opens or makes the database or starts anything: the Lumiverse address, your user, and, where it runs from the extension's folder in Lumiverse's data folder, Lumiverse's database file (`lumiverse.database`), which RPE then reads directly. From another folder, `--database <file>` names it.
+- It makes RPE's connection in Lumiverse, called "RPE", or brings it up to date (see below). It finds the connection again by its address and model if RPE's config has lost it.
+- The first time, it prints the token for RPE's web app, once (see [The web app](#the-web-app-and-its-key)). A later run prints none, and says how to make a new one.
 - With `--systemd`, it installs and starts RPE as a service of your account, named `rpe-<name>.service`. `--name <name>` chooses the name; without it, the name comes from your username. This needs Linux with systemd.
-- Last, it prints a numbered list of what is left for you to do.
+- Without `--systemd`, after the list of what is left for you to do, it serves RPE in the foreground until you stop it (Ctrl-C). Where RPE already answers, it says so and starts none; where something else holds RPE's port, it says so and names `--port`.
+
+Its other options are the previous build's install line's:
+
+- `--port <port>`: the port RPE's connection in Lumiverse points at, on loopback; 7871 until you give another. Where the port is taken, a first install takes the first free one after it, up to the setting `service.portLast` (7899).
+- `--listen <address>`: also listen on that address, so that other machines reach RPE. RPE says what that means (plain http off loopback) and still answers on loopback, where Lumiverse's extension reaches it.
+- `--allow-http`: accept a Lumiverse address that is plain http to another machine, where your password and the session token cross the network in clear.
+- `--bun <path>`: the Bun the service runs, by its real path (an absolute path).
+- `--memory <size>`: the most memory the service may hold, as systemd reads a size (`768M`, `2G`, or `infinity`), at least `256M`; kept as the setting `service.memory`.
+- `--name <name>`: the service's name.
 
 A second run changes only what is not as it should be.
-
-Without `--systemd`, run RPE in the foreground with `rpe serve`, and keep it running.
 
 One RPE serves one Lumiverse user. A sign-in as another user is refused before anything is written.
 

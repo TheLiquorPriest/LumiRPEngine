@@ -6,7 +6,7 @@
 
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { secretHash } from "../../src/app/auth";
 import { runCli } from "../../src/app/cli";
 import { isRecord } from "../../src/shared/json";
@@ -125,12 +125,15 @@ describe("rpe up", () => {
     await bed.remove();
   });
 
-  async function up(password: string | null = null): Promise<{ code: number; out: string; err: string; asked: number }> {
+  /** `rpe up` as typed: `line` is what follows `rpe up`, `answers` the lines the user types when asked. It serves in the foreground, so it is told to stop before it starts. */
+  async function up(password: string | null = null, line: string[] = ["--url", lumiverse.url, "--user", ACCOUNT.username], answers: string[] = []): Promise<{ code: number; out: string; err: string; asked: number; asks: string[] }> {
     const io = cliIo({ secret: password });
+    io.stop();
     let asked = 0;
-    const counted = { ...io, secret: async (q: string) => (asked++, await io.secret(q)) };
-    const code = await runCli(["up", "--url", lumiverse.url, "--user", ACCOUNT.username, "--data", bed.paths.root], counted, { version: "1.0.0" });
-    return { code, out: io.outs.join("\n"), err: io.errs.join("\n"), asked };
+    const asks: string[] = [];
+    const counted = { ...io, secret: async (q: string) => (asked++, await io.secret(q)), ask: async (q: string) => (asks.push(q), answers[asks.length - 1] ?? null) };
+    const code = await runCli(["up", ...line, "--data", bed.paths.root], counted, { version: "1.0.0" });
+    return { code, out: io.outs.join("\n"), err: io.errs.join("\n"), asked, asks };
   }
 
   /** The provider keys RPE keeps, as hashes, with whether each is in force. */
@@ -160,9 +163,55 @@ describe("rpe up", () => {
     expect(first.out).toContain(`Made RPE's connection in Lumiverse, "RPE" (${made.id})`);
     expect(first.out).toContain("What is left for you to do:");
     expect(first.out).toContain("Install RPE's extension in Lumiverse");
-    expect(first.out).toContain("Start RPE: rpe serve.");
+    expect(first.out).toContain("RPE serves in the foreground now");
+    expect(first.out).toMatch(/The token for RPE's web app, shown this once[\s\S]*rpw_[0-9a-f]{64}[\s\S]*It has no end/);
     expect(first.out).toContain(`choose the connection "RPE"`);
     expect(first.out + first.err).not.toContain(made.key ?? "-");
+  });
+
+  test("the plan's line, up --url <lumiverse>, asks for the username and the password and sets RPE up; again with no --url it takes the config's address and asks for nothing", async () => {
+    const first = await up(ACCOUNT.password, ["--url", lumiverse.url], [ACCOUNT.username]);
+    expect(first.code).toBe(0);
+    expect(first.asks).toEqual(["Lumiverse username: "]);
+    expect(first.asked).toBe(1);
+    expect(only()).toMatchObject({ name: "RPE", has_api_key: true });
+    const again = await up(null, []);
+    expect(again.code).toBe(0);
+    expect(again.asks).toEqual([]);
+    expect(again.asked).toBe(0);
+    expect(lumiverse.signIns).toBe(1);
+    // The token is shown at the first run, and a later one says how to make a new one.
+    expect(first.out).toContain("rpw_");
+    expect(again.out).not.toContain("rpw_");
+    expect(again.out).toContain("is not shown again");
+  });
+
+  test("with something else on RPE's port, up says so and names how to move RPE; with a free one after it, a first install takes that", async () => {
+    await mkdir(bed.paths.files, { recursive: true });
+    await writeFile(bed.paths.globalConfig, "service:\n  portLast: 65535\n");
+    const squatter = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("not rpe", { status: 200 }) });
+    try {
+      const first = await up(ACCOUNT.password);
+      expect(first.code).toBe(0);
+      expect(first.out).toMatch(/Port \d+ is taken, so RPE uses \d+/);
+      const used = Number(/RPE uses (\d+)/.exec(first.out)?.[1]);
+      expect(used).toBeGreaterThan(port);
+      expect(only().api_url).toBe(`http://127.0.0.1:${used}/v1`);
+      expect((await config()).port).toBe(used);
+      // Installed: its port is its connection's, so what holds it is said and RPE does not move by itself.
+      await squatter.stop(true);
+      const held = Bun.serve({ hostname: "127.0.0.1", port: used, fetch: () => new Response("not rpe", { status: 200 }) });
+      try {
+        const again = await up(null);
+        expect(again.code).toBe(1);
+        expect(again.out).toContain(`Something other than RPE answers at http://127.0.0.1:${used}`);
+        expect(again.out).toContain("--port");
+      } finally {
+        await held.stop(true);
+      }
+    } finally {
+      await squatter.stop(true);
+    }
   });
 
   test("`rpe down` after an install on a connection of RPE's own says to give the chats moved to it the connection they had", async () => {

@@ -7,12 +7,13 @@ import type { AppConfig, DataPaths } from "../config";
 import type { ConnectionShown, ConnectionsShown } from "../connections";
 import { type Flags, UsageError } from "./args";
 import { serverUrl } from "./running";
+import { runLine } from "./run-line";
 import { type Api, runningServer } from "./writer";
 
 /** Calls the running server's API as the user this RPE belongs to, over its socket: no token is made, nothing is written. */
 export async function withServer<T>(paths: DataPaths, config: AppConfig, io: CliIO, call: (api: Api) => Promise<T>): Promise<T> {
   const server = await runningServer(paths, config, io);
-  if (server === null) throw new Error(`RPE is not answering at ${serverUrl(config)}: start it with \`rpe serve\`.`);
+  if (server === null) throw new Error(`RPE is not answering at ${serverUrl(config)}: start it with \`${runLine(io, paths, "serve")}\`.`);
   return await call(server.api);
 }
 
@@ -35,7 +36,7 @@ export async function connectionCommand(words: readonly string[], flags: Flags, 
   const sub = words[0];
   if (sub === "list" && words.length === 1) {
     const list = await withServer(paths, config, io, async (api) => replyOf<ConnectionsShown>(await api("GET", "/api/v1/connections")));
-    if (list.connections.length === 0) io.out("No connections yet: add one with `rpe connection add`.");
+    if (list.connections.length === 0) io.out(`No connections yet: add one with ${runLine(io, paths, "connection", "add", "--name", "<name>", "--provider", "<provider>")}`);
     for (const c of list.connections) {
       const key = c.key === null ? "signs with no key" : c.key.set ? "key set" : "no key set";
       io.out(`${c.default ? "*" : " "} ${c.name} (${c.id}): ${c.provider}${c.model === undefined ? "" : `, ${c.model}`}${c.effort === undefined ? "" : `, effort ${c.effort}`}, ${key}`);

@@ -3,7 +3,6 @@
 import { resolve } from "node:path";
 import { rm } from "node:fs/promises";
 import { EXTENSION_IDENTIFIER } from "../../adapter/lumiverse/pipe-wire";
-import { shellWord } from "../../migrate/going-back";
 import { type Loopback, otherBuildInstalled, swapCheck, swapRun, swapStands } from "../../migrate/swap";
 import { runtimeFoldersOf } from "../../migrate/runtime-folders";
 import type { CliIO } from "../cli";
@@ -14,6 +13,7 @@ import { accountSystemctl, localUrl, type RpeService } from "../up";
 import type { Flags } from "./args";
 import { extensionLeft, sayLeft } from "./left";
 import { ownConnection } from "./own-connection";
+import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { treeLayout } from "./tree-layout";
 import { takeLock, withWriter, type WriterContext } from "./writer";
@@ -97,7 +97,7 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
   // The migration is the data folder's one writer: a running RPE outside a service is stopped by the user, one in its service by the swap.
   const answer = await serverAnswer(current, io);
   if (answer !== null && "rpe" in answer && existing === null) {
-    io.err(`RPE is running at ${serverUrl(current)}, outside a service: stop it (rpe serve), then run rpe up again. Nothing was stopped or changed.`);
+    io.err(`RPE is running at ${serverUrl(current)}, outside a service: stop it (${runLine(io, paths, "serve")}), then run ${runLine(io, paths, "up", "--lumiverse", resolve(flags.lumiverse ?? ""))} again. Nothing was stopped or changed.`);
     return 1;
   }
   // The extension is switched to the new build first (§15.3 step 10): today's, left running in Lumiverse, would go on writing today's storage after the run had read it.
@@ -116,7 +116,7 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
   const standing = existing === null ? null : await swapStands({ sources, data: paths.root, rpe: { address: current.address, port: current.port, unit: existing.unit }, waitMs: current.commandLine.waitMs }, swapIo);
   if (standing !== null) {
     const runtimeFlags = [...(switches.has("no-runtime") ? ["--no-runtime"] : []), ...(["runtime", "runtime-config", "runtime-data", "identifier"] as const).flatMap((flag) => (flags[flag] === undefined ? [] : [`--${flag}`, flags[flag]]))];
-    const migrateLine = ["rpe", "migrate", "--lumiverse", lumiverse, "--user", user, "--data", resolve(paths.root), ...runtimeFlags].map(shellWord).join(" ");
+    const migrateLine = runLine(io, paths, "migrate", "--lumiverse", lumiverse, "--user", user, ...runtimeFlags);
     io.out(`The swap stands: RPE's service ${standing.unit} runs, and RPE answers at ${standing.at}, where today's runtime ${standing.runtime} answered${standing.todays === null ? "" : `; today's service ${standing.todays} is switched off`}; the extension Lumiverse has installed is this build (${version}). Nothing was stopped or changed, and the migration was not made again.`);
     io.out(`rpe migrate carries what changed on today's side since the last run (read at ${standing.since}): stop RPE's service (systemctl --user stop ${standing.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing.unit}).`);
     const left = await extensionLeft(call);

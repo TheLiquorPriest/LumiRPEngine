@@ -7,9 +7,12 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes, rawRoute } from "../../src/app";
+import { invokedAs, runLine } from "../../src/app/commands/run-line";
+import { dataPaths, defaultDataFolder } from "../../src/app/config";
 import { runCli, USAGE } from "../../src/app/cli";
 import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
 
@@ -55,7 +58,7 @@ describe("rpe", () => {
     const served = runCli(["serve", "--data", bed.paths.root], io, { version: "1.0.0" });
     const status = async (): Promise<number> => (await fetch(`http://127.0.0.1:${port}/api/v1/status`)).status;
     let answered = 0;
-    for (let tries = 0; tries < 200 && answered !== 200; tries++) answered = await status().catch(() => 0);
+    for (let tries = 0; tries < 400 && answered !== 200; tries++) answered = await status().catch(async () => (await Bun.sleep(10), 0));
     expect(answered).toBe(200);
     expect(io.outs.join("\n")).toContain(`listens on http://127.0.0.1:${port}`);
     expect(io.outs.join("\n")).toContain("There is no provider key yet");
@@ -194,5 +197,11 @@ describe("rpe", () => {
         expect(stems.has(imported) ? `${name} imports ${imported}` : "").toBe("");
       }
     }
+  });
+
+  test("every line the command line prints for the owner to run is a whole line it takes, beginning with the Bun and the app file that started it and naming a data folder that is not the default", async () => {
+    const io = { ...cliIo(), invoked: invokedAs("/opt/bun dir/bun", "/srv/rpe/dist/rpe.js") };
+    expect(runLine(io, bed.paths, "key", "web")).toBe(`'/opt/bun dir/bun' /srv/rpe/dist/rpe.js key web --data ${bed.paths.root}`);
+    expect(runLine(cliIo(), dataPaths(defaultDataFolder({}, tmpdir())), "status")).toBe("rpe status");
   });
 });

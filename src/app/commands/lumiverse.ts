@@ -8,6 +8,7 @@ import type { AppConfig, DataPaths } from "../config";
 import { CONFIG_ENV, loadConfig, plainText, webAddress } from "../config";
 import { SIGN_IN_PART } from "../command-routes";
 import { SecretsFile } from "../secrets";
+import { runLine } from "./run-line";
 import { type Flags, UsageError } from "./args";
 import { serverAnswer, serverUrl } from "./running";
 import { oneUser, signInTo } from "./sign-in";
@@ -44,6 +45,6 @@ export async function lumiverseCommand(flags: Flags, paths: DataPaths, config: A
   await signInTo(url, username, { ...(database === undefined ? {} : { database }), ...(connection === undefined ? {} : { connection }) }, { paths, config, io, version, what: "rpe lumiverse" }, oneUser(paths, config));
   await showLumiverse(paths, await loadConfig(paths, io.env), io);
   const answer = await serverAnswer(config, io);
-  if (answer !== null && "rpe" in answer) io.out(`RPE is running at ${serverUrl(config)}: restart it (stop \`rpe serve\` and start it again) for it to take this.`);
+  if (answer !== null && "rpe" in answer) io.out(`RPE is running at ${serverUrl(config)}: restart it (stop \`${runLine(io, paths, "serve")}\` and start it again) for it to take this.`);
   return 0;
 }

@@ -5,6 +5,7 @@ import { migrateCli } from "../../migrate/cli";
 import type { CliIO } from "../cli";
 import { dataPaths, defaultDataFolder, loadConfig } from "../config";
 import { rpeServiceOf } from "../up";
+import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { treeLayout } from "./tree-layout";
 import { takeLock } from "./writer";
@@ -29,7 +30,7 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
   const answer = await serverAnswer(config, io);
   if (answer !== null && "rpe" in answer) {
     const service = await rpeServiceOf(resolve(paths.root), io.env, io.home);
-    io.err(`RPE is running at ${serverUrl(config)}, the address this data folder's config gives it: stop it (${service === null ? "rpe serve" : `systemctl --user stop ${service.unit}`}), then run rpe migrate again${service === null ? "" : `, and start it again after (systemctl --user start ${service.unit})`}. Nothing was read or changed.`);
+    io.err(`RPE is running at ${serverUrl(config)}, the address this data folder's config gives it: stop it (${service === null ? runLine(io, paths, "serve") : `systemctl --user stop ${service.unit}`}), then run ${runLine(io, paths, "migrate")} again${service === null ? "" : `, and start it again after (systemctl --user start ${service.unit})`}. Nothing was read or changed.`);
     return 1;
   }
   // The migration refuses an install that has named no user, writing nothing: no lock is made first, which would make the folder.

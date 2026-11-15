@@ -6,6 +6,7 @@ import type { CliIO, CliOptions } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { accountSystemctl, rpeServiceOf } from "../up";
 import { type AppFile, startCheck, versionOf } from "../update";
+import { runLine } from "./run-line";
 import { updateSettingsOf } from "./update-settings";
 import { takeLock } from "./writer";
 
@@ -53,9 +54,9 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
     // Told to stop from here on, RPE closes and ends cleanly: the wait begins before anything else that takes time.
     const stop = io.stopped();
     io.out(`RPE ${options.version} listens on ${running.url} (data folder: ${paths.root}).`);
-    if (!currentKeys(app.db, app.auth.owner).some((k) => k.kind === "provider")) io.out("There is no provider key yet: make one with `rpe key`.");
+    if (!currentKeys(app.db, app.auth.owner).some((k) => k.kind === "provider")) io.out(`There is no provider key yet: make one with ${runLine(io, paths, "key", "provider")}`);
     const waiting = app.switches.list().filter((s) => s.state === "waiting").length;
-    if (waiting > 0) io.out(`${waiting} waiting to be switched on: \`rpe status\` lists them.`);
+    if (waiting > 0) io.out(`${waiting} waiting to be switched on: \`${runLine(io, paths, "status")}\` lists them.`);
     // The file as it is once RPE listens: a build put there while it started is noticed now.
     await Promise.race([app.builds.check(), stop]);
     await Promise.race([stop, restart.promise]);
