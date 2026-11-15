@@ -248,7 +248,7 @@ test("the server's limits are listed under RPE-global.yml with their defaults, a
   const configBefore = await readFile(b.app.paths.config, "utf8");
   const listed = (await settings(b, "GET", "")).body;
   for (const def of SERVER_SETTINGS) {
-    expect({ key: def.key, ...setting(listed, def.key) }).toMatchObject({ key: def.key, default: def.default, effect: "start", levels: ["global"], name: def.name, about: def.about });
+    expect(setting(listed, def.key)).toMatchObject({ key: def.key, default: def.default, effect: "start", levels: ["global"], name: def.name, about: def.about });
   }
   // The one of Appendix D.1: RPE listens on loopback unless an address is set.
   expect(setting(listed, "server.address")).toMatchObject({ value: "127.0.0.1", row: "RPE listens on", effectWords: "from RPE's next start" });
