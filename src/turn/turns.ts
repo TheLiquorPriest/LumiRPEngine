@@ -25,7 +25,7 @@ import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
-import type { PromptNotice } from "../adapter/lumiverse/receipt";
+import type { Cut, PromptNotice } from "../adapter/lumiverse/receipt";
 import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { textHash } from "../adapter/lumiverse/wire";
@@ -212,14 +212,13 @@ const CUT_LINES: Readonly<Record<PromptNotice["kind"], string>> = {
   "joining-unread": "cut_joining_unread",
 };
 
-/** What the receipt found of the prompt, one line of the notices part each, with its fields. */
-function cutText(found: readonly PromptNotice[], notices: LinesPart | undefined): string {
-  return found
-    .flatMap(({ kind, ...fields }) => {
-      const line = notices?.line(CUT_LINES[kind], fields);
-      return line === undefined || line.trim() === "" ? [] : [line];
-    })
-    .join("\n");
+/**
+ * What the receipt found of the prompt, one line of the notices part each, with its fields; then what Lumiverse's own clipping left
+ * out inside the window, by its line for what clipped it (`cut_clipped_<by>`), where it left any out.
+ */
+function cutText(cut: Pick<Cut, "notices" | "clipped">, notices: LinesPart | undefined): string {
+  const clipped = cut.clipped !== null && cut.clipped.count > 0 && cut.clipped.by !== null ? [notices?.line(`cut_clipped_${cut.clipped.by.replaceAll("-", "_")}`, { count: cut.clipped.count })] : [];
+  return [...cut.notices.map(({ kind, ...fields }) => notices?.line(CUT_LINES[kind], fields)), ...clipped].flatMap((line) => (line === undefined || line.trim() === "" ? [] : [line])).join("\n");
 }
 
 function words(error: unknown): string {
@@ -301,8 +300,8 @@ interface BriefingFor {
   limits: () => Promise<ModelLimits | null>;
   /** What of the prompt the lead's model is not given (`promptOf`); none for a run given no prompt. */
   notGiven: NotGiven[];
-  /** What the receipt found of the prompt that is not as the chat application listed it (R-103); none for a run given no prompt. */
-  cut: readonly PromptNotice[];
+  /** What the receipt found of the prompt that is not as the chat application listed it (R-103), and what Lumiverse's own clipping left out; none for a run given no prompt. */
+  cut: Pick<Cut, "notices" | "clipped">;
 }
 
 /** What a Settle now gives back: the turn its run is on and the run's id, or the words it was refused in. */
@@ -543,7 +542,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // The briefing's blocks, and what has happened since the last turn.
         const found = { steps, notices: lines(notices), guidance, last, stopped, again: continued !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
-        const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut.notices };
+        const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, begun, found)]);
         run.notGiven = notGiven;
         lap("briefing");
@@ -828,7 +827,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       try {
         const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(guidance, settings.lead, user, turn.id);
-        const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: [] };
+        const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
         const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
         run.notGiven = notGiven;
         const asked = lines(notices)?.line("settle_asked");
