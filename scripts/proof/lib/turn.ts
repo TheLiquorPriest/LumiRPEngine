@@ -15,9 +15,11 @@
 // - `call_ended.toolCalls[].began`, when the model began writing each tool call (pi's `toolcall_start`):
 //   PlanHarnessCore-1 item 9, contract change C7, as its lane writes it in RPH `src/contract/trace.ts`
 //   (`ToolCallView.began?: number`, the host's clock). Read where present; absent before it lands.
-// - The kept request file: RPH `src/harness/requests.ts` at the pin, `{"messages":[{"role","text"}]}`;
-//   a message's `block`, RPH's name for its own block (the session's carry, the briefing), is read where
-//   the file gives one (PlanGates-4-fix1 item 8). RPH at the pin names none.
+// - The kept request: RPE `GET /api/v1/chats/:chat/turns/:turn/requests/*` (`requestReply`, RPE `src/turn/shapes.ts`),
+//   `{ name, same, messages: [{ role, text, block? }], tools: [{ name, file? }] }`: RPH keeps a request as pointers into the
+//   turn's files, so the file itself holds no messages and the route rebuilds them exactly as sent. `same: false` is a rebuild
+//   that is not what was sent, which shows nothing and is not read. A message's `block`, RPH's name for its own block (the
+//   session's carry, the briefing), is read where the route gives one.
 // - A run's id is its own, made by RPH when the run starts: a turn's first run, a continue and a "Settle
 //   now" each have one, and none is the turn's (RPH `ff1c9839`; PlanHarnessTools-20). A record carries
 //   its run's id in `run` and its turn in `scope.turn`; a streamed piece (`TraceDelta`) carries only
@@ -155,21 +157,21 @@ export function callsBefore(calls: readonly Call[], moment: number): number {
   return calls.filter((c) => c.startedAt < moment).length;
 }
 
-/** The kept request of a call: its messages in order, each with the RPH block the file names it as, and the tools it names where the file gives them. */
+/** The kept request of a call: its messages in order, each with the RPH block the route names it as, and the tools it names. */
 export interface KeptRequest {
   messages: { role: string; text: string; block: string | null }[];
   tools: string[] | null;
 }
 
-export function keptRequest(text: string): KeptRequest {
-  const raw: unknown = JSON.parse(text);
-  if (!isRecord(raw) || !Array.isArray(raw.messages)) throw new Error("the kept request file holds no list of messages");
-  const messages = raw.messages.map((m, i) => {
+/** A kept request from the route's answer: only a rebuild that is exactly what was sent is read; any other is an error that says so. */
+export function keptRequest(answer: unknown): KeptRequest {
+  if (!isRecord(answer) || typeof answer.same !== "boolean" || !Array.isArray(answer.messages)) throw new Error("RPE's request route gave no `same` and no list of messages");
+  if (!answer.same) throw new Error("RPE could not rebuild the request exactly as it was sent (`same: false`)");
+  const messages = answer.messages.map((m, i) => {
     if (!isRecord(m) || typeof m.role !== "string" || typeof m.text !== "string") throw new Error(`message ${i + 1} of the kept request is not a role and a text`);
     return { role: m.role, text: m.text, block: typeof m.block === "string" && m.block !== "" ? m.block : null };
   });
-  // PlanHarnessTools-5 item 3 names each declared tool in the kept request; an older file names none.
-  const tools = Array.isArray(raw.tools) ? raw.tools.flatMap((t) => (typeof t === "string" ? [t] : isRecord(t) && typeof t.name === "string" ? [t.name] : [])) : null;
+  const tools = Array.isArray(answer.tools) ? answer.tools.flatMap((t) => (isRecord(t) && typeof t.name === "string" ? [t.name] : [])) : null;
   return { messages, tools };
 }
 

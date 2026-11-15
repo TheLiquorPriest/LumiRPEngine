@@ -4,8 +4,10 @@
 // the floor's facts are made from them by the pure readers beside this file.
 //
 // Routes, and where each shape was taken from:
-// - RPE `GET /api/v1/chats/:chat/turns/:turn`, `.../files/*`, `GET /api/v1/files?chat=`, `GET /api/v1/files/*?chat=`,
-//   `GET /api/v1/settings?chat=`: RPE `src/ui/api.ts` (`TurnDetail`, `TurnFile`, `TreeListing`, `TreeFileText`, `SettingsReply`).
+// - RPE `GET /api/v1/chats/:chat/turns/:turn`, `GET /api/v1/files?chat=`, `GET /api/v1/files/*?chat=`, `GET /api/v1/settings?chat=`:
+//   RPE `src/ui/api.ts` (`TurnDetail`, `TreeListing`, `TreeFileText`, `SettingsReply`).
+// - RPE `GET /api/v1/chats/:chat/turns/:turn/requests/*`: one model call's kept request, which RPH keeps as pointers into the turn's
+//   files, rebuilt exactly as it was sent (RPE `src/turn/shapes.ts` `requestReply`: `{ name, same, messages, tools }`).
 // - RPE `GET /api/v1/chats/:chat/turns/:turn/lore` (PlanLore-13): `{ entries: LoreEntry[] }`, the shape the lead ruled on 15 Nov.
 // - Lumiverse `GET /api/v1/generate/breakdown/:messageId`: `src/routes/generate.routes.ts:175-181`, its `messages` written at
 //   `src/services/generate.service.ts:4448-4459`; `GET /api/v1/connections/:id`: `src/routes/connections.routes.ts:71-76`;
@@ -14,7 +16,7 @@
 //   own speed figure takes of a response's visible text (`src/services/generate.service.ts:4340-4356`).
 
 import type { ConnectionsShown, SettingsReply, SettingsWrite } from "../../../src/shared/api";
-import type { TreeFileEntry, TreeFileText, TurnFile } from "../../../src/ui/api";
+import type { TreeFileEntry, TreeFileText } from "../../../src/ui/api";
 import { isRecord } from "../../../src/shared/json";
 import { HttpError, type Lumiverse } from "../../testbed/lib/lumiverse";
 import { plainReasoning, sha256, type Layer, type OffFile, type OwnLevel, type PlainReasoning, type TreeFile } from "./record";
@@ -54,9 +56,9 @@ export class RpeReader {
     return this.get(this.turnPath(chat, turn));
   }
 
-  async turnFile(chat: string, turn: string, file: string): Promise<string> {
-    const answer = (await this.get(`${this.turnPath(chat, turn)}/files/${segments(file)}`)) as TurnFile;
-    return answer.text;
+  /** One model call's request, by its file below the turn's folder, as RPE rebuilds it from the pointers RPH kept; the answer as it came (`same` says whether the rebuild is what was sent). */
+  request(chat: string, turn: string, file: string): Promise<unknown> {
+    return this.get(`${this.turnPath(chat, turn)}/requests/${segments(file)}`);
   }
 
   /** The lore route's entries; "not served" by an RPE without the route (PlanLore-13), which answers 404. */

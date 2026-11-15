@@ -369,7 +369,7 @@ async function rpeSide(api: RpeApi, reader: RpeReader, lumiverse: LumiverseReade
   try {
     const kept = detail.runs?.[0]?.requests.find((r) => r.agent === lead?.id && r.call === 1);
     if (kept === undefined) missing.request = "RPE kept no first request of the lead (its trace.requests setting, or an older turn shape)";
-    else request = keptRequest(await reader.turnFile(chat, tied.id, kept.file));
+    else request = keptRequest(await reader.request(chat, tied.id, kept.file));
   } catch (error) {
     missing.request = `the lead's kept request could not be read: ${words(error)}`;
   }
