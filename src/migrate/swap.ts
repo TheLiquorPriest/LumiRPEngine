@@ -57,10 +57,11 @@ export interface Loopback {
   is(connection: { model: string; url: string }): boolean;
 }
 
-/** A connection in Lumiverse that reaches today's runtime, by its id and its name there. */
+/** A connection in Lumiverse that reaches today's runtime, by its id, its name there and the model name it names, under which RPE answers it once it is RPE's (R-109). */
 export interface TakenConnection {
   id: string;
   name: string;
+  model: string;
 }
 
 /** What the swap found before stopping anything. */
