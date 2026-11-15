@@ -13,3 +13,4 @@ export { LoreProjection, type LoreProjectionDeps, type ProjectionBooks, type Pro
 export { type LoreMap, type LoreMapFields, loreMapFields, type LoreMapLine } from "./map";
 export { lorePort } from "./port";
 export { type ActivatedEntry, type LoreBook, type LoreBookEntry, type LoreBooks, type LorePath, type LoreTurns, type LoreWorlds, storePath, storeWorlds, type WorldAt } from "./sources";
+export { type ActivatedLoreDeps, type ActivatedLoreEntry, activatedLore, type ActivationWord } from "./activated";

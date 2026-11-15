@@ -78,7 +78,7 @@ export interface LoreMapAsk extends LoreAt {
 const AS_CHARACTER: StepPurpose = "mind";
 
 /** How an entry activated, in the words of the contract; anything else Lumiverse says is left unsaid. */
-const HOWS = ["constant", "keyword", "vector", "sticky"] as const;
+export const HOWS = ["constant", "keyword", "vector", "sticky"] as const;
 
 /** A world entry an earlier build copied from a book entry: today's lore reads the book entry instead, as its book has it now (`backend/book-lore.ts:296-338`). */
 function isCopy(entry: LoreEntryDef): boolean {
