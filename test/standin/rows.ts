@@ -155,13 +155,13 @@ export class ChatRows extends ExtensionHost {
   }
 
   /** `addSwipe` (`services/chats.service.ts:3301-3344`): a new swipe with this text, dated now and shown; an assistant's raises no revision. */
-  protected addSwipeRow(chat: Chat, id: string, text: string): number | null {
+  protected addSwipeRow(chat: Chat, id: string, text: string, select = true): number | null {
     const row = this.messageRow(id);
     if (this.db === null || row === null) return null;
     const swipes = [...(row.swipes as string[]), text];
     const dates = [...(row.swipe_dates as number[]), Math.floor(this.now() / 1000)];
     const swipe = swipes.length - 1;
-    this.db.run("UPDATE messages SET swipes = ?, swipe_dates = ?, swipe_id = ?, content = ? WHERE id = ? AND chat_id = ?", JSON.stringify(swipes), JSON.stringify(dates), swipe, text, id, chat.id);
+    this.db.run("UPDATE messages SET swipes = ?, swipe_dates = ?, swipe_id = ?, content = ? WHERE id = ? AND chat_id = ?", JSON.stringify(swipes), JSON.stringify(dates), select ? swipe : Number(row.swipe_id), select ? text : String(row.content), id, chat.id);
     this.emit("MESSAGE_SWIPED", { chatId: chat.id, message: this.messageRow(id), action: "added", swipeId: swipe }, chat.user);
     return swipe;
   }
