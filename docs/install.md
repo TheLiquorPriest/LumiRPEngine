@@ -214,13 +214,7 @@ For everything:
 
 RPE serves the same pages as the drawer tab at its own address, under `/ui/`: by default `http://127.0.0.1:7871/ui/`. The web app also has the **Chats** page.
 
-The web app asks for a key once. Make one on the machine RPE runs on:
-
-```sh
-rpe key web
-```
-
-It is shown once. The browser keeps it until you sign out, or until RPE stops taking it. A new one makes the one before it stop working. As shipped a web key has no end; with `auth.webKeyDays` set, it runs out that many days after it is made, and `rpe key web` prints when.
+The web app takes two ways in: the token `rpe up` printed, or your Lumiverse account. The token is shown once, at the first `rpe up`; `rpe key web` makes a new one, which replaces it. The web app trades it once for a session, and the browser keeps the session, which ends `auth.webSessionMinutes` (30) after it was made unless a page that is open renews it, and never the token. With your Lumiverse account, you give the web app your Lumiverse username and password (RPE keeps neither); RPE checks them against Lumiverse, and accepts them only for the Lumiverse user this RPE belongs to. As shipped a web key has no end; with `auth.webKeyDays` set, it runs out that many days after it is made, and `rpe key web` prints when. See [Security](security.md#signing-in-to-the-web-app).
 
 RPE listens only on this machine unless you change that. To open the web app from another device, publish RPE's address over HTTPS (with a reverse proxy, for example), then list that address in `files/RPE-global.yml`: its origin in `server.origins`, and its host name in `server.hosts`. Setting `server.address` makes RPE listen on another address as well, from its next start; it always listens on `127.0.0.1` too, which the extension uses.
 

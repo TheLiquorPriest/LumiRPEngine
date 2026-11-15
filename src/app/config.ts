@@ -134,6 +134,14 @@ export interface AppConfig {
     commandLineSeconds: number;
     /** How long the web UI's key holds after it is made, in days; null: it has no end, and holds until a new one replaces it. */
     webKeyDays: number | null;
+    /** How long a session of the web app holds, in minutes (renewed while a page is open). */
+    webSessionMinutes: number;
+    /** How long RPE remembers a nonce a page sent for its proof, in seconds; the same nonce is not answered twice within it. */
+    nonceSeconds: number;
+    /** How many wrong Lumiverse passwords RPE sends Lumiverse before it pauses (held below Lumiverse's own lockout). */
+    signInTries: number;
+    /** How long RPE sends no password to Lumiverse after `signInTries` wrong ones, in minutes. */
+    signInPauseMinutes: number;
   };
   live: {
     /** Events held for one slow reader of one chat; past it the oldest it has not taken are dropped, and it is told which. */
@@ -152,6 +160,10 @@ export interface AppConfig {
     busyMs: number;
     /** How long the write queue runs writes before it lets other work in, in milliseconds. */
     sliceMs: number;
+    /** How many copies of the file taken before migrations are kept (`database.copiesKept`); the oldest go once a new version has started. */
+    copiesKept: number;
+    /** The piece, in bytes, an archive (`rpe backup`'s, the migration's) reads each file in (`backup.pieceBytes`). */
+    pieceBytes: number;
   };
   commandLine: {
     /** How long `rpe status` and `rpe connection` wait for the running server, and a command for the data folder's lock, in milliseconds. */
@@ -197,9 +209,9 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   origins: [],
   hosts: [],
   server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300 },
-  auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null },
+  auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null, webSessionMinutes: 30, nonceSeconds: 60, signInTries: 4, signInPauseMinutes: 15 },
   live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64, chatIdChars: 200, sockets: 64 },
-  database: { busyMs: 5000, sliceMs: 10 },
+  database: { busyMs: 5000, sliceMs: 10, copiesKept: 3, pieceBytes: 1024 * 1024 },
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000, askEveryMs: 250 },
   service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000 },
   workers: { threads: null },
@@ -234,6 +246,10 @@ export const SERVER_SETTING_DEFS = {
   pageTokenMinutes: { key: "auth.pageTokenMinutes", default: D.auth.pageTokenMinutes, takes: whole(1, 7 * 24 * 60), levels: GLOBAL, perConnection: false, name: "A page token holds", about: "Minutes a page token holds before the page needs a new one.", effect: "start" },
   commandLineSeconds: { key: "auth.commandLineSeconds", default: D.auth.commandLineSeconds, takes: whole(5, 3600), levels: GLOBAL, perConnection: false, name: "The command line's token holds", about: "Seconds the token the command line makes to call the running server holds.", effect: "start" },
   webKeyDays: { key: "auth.webKeyDays", default: D.auth.webKeyDays, takes: { type: "whole", least: 1, most: 36_500 }, orNone: true, none: "no end: it holds until a new one replaces it", levels: GLOBAL, perConnection: false, name: "The web app's key holds", about: "Days the web app's key holds after it is made.", effect: "start" },
+  webSessionMinutes: { key: "auth.webSessionMinutes", default: D.auth.webSessionMinutes, takes: whole(1, 7 * 24 * 60), levels: GLOBAL, perConnection: false, name: "A web session holds", about: "Minutes a session of the web app holds, which the printed token or a Lumiverse sign-in opens; it is renewed while a page is open.", effect: "start" },
+  nonceSeconds: { key: "auth.nonceSeconds", default: D.auth.nonceSeconds, takes: whole(1, 3600), levels: GLOBAL, perConnection: false, name: "A page's nonce is remembered", about: "Seconds RPE remembers a nonce a page sent for its proof that this is RPE; the same nonce is not answered twice within them.", effect: "start" },
+  signInTries: { key: "auth.signInTries", default: D.auth.signInTries, takes: whole(1, 4), levels: GLOBAL, perConnection: false, name: "Wrong Lumiverse passwords tried", about: "Wrong Lumiverse passwords RPE sends Lumiverse before it pauses; at most 4, below the 5 after which Lumiverse locks RPE's own address out.", effect: "start" },
+  signInPauseMinutes: { key: "auth.signInPauseMinutes", default: D.auth.signInPauseMinutes, takes: whole(1, 24 * 60), levels: GLOBAL, perConnection: false, name: "Pause after wrong Lumiverse passwords", about: "Minutes RPE sends Lumiverse no password after the wrong ones the setting before allows.", effect: "start" },
   queueEvents: { key: "liveSocket.queueEvents", default: D.live.queueEvents, takes: whole(1, 1_000_000), levels: GLOBAL, perConnection: false, name: "Events held for a slow page", about: "Events the live socket holds for one slow page following one chat; past it the oldest are dropped, and the page is told which.", effect: "start" },
   messageBytes: { key: "liveSocket.messageBytes", default: D.live.messageBytes, takes: whole(256, 16 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Largest live message", about: "Bytes of the largest message a page may send on the live socket.", effect: "start" },
   follows: { key: "liveSocket.follows", default: D.live.follows, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once; the user's jobs and his own events count as one each.", effect: "start" },
@@ -255,6 +271,8 @@ export const SERVER_SETTING_DEFS = {
   workerParseBytes: { key: "server.workerParseBytes", default: D.server.workerParseBytes, takes: whole(1024, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Parsed on a worker from", about: "Bytes from which a request's body is parsed on a worker thread, so that a long prompt's parse never holds up another request.", effect: "start" },
   threads: { key: "workers.threads", default: D.workers.threads, takes: { type: "whole", least: 1, most: 256 }, orNone: true, none: "the machine's cores less one, at least one", levels: GLOBAL, perConnection: false, name: "Worker threads", about: "The most worker threads RPE runs its heavy work on at once: parsing very large requests, searching.", effect: "start" },
   batch: { key: "index.batch", default: D.index.batch, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Index rows written at once", about: "Rows the index file's writer writes in one transaction.", effect: "start" },
+  copiesKept: { key: "database.copiesKept", default: D.database.copiesKept, takes: whole(0, 1000), levels: GLOBAL, perConnection: false, name: "Copies before migrations kept", about: "Copies of RPE's database taken before a new version's migrations that are kept; the oldest are removed once a new version has started. rpe backup's archives and the migration's backups are never removed.", effect: "start" },
+  pieceBytes: { key: "backup.pieceBytes", default: D.database.pieceBytes, takes: whole(4096, 64 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Archive piece", about: "Bytes an archive (rpe backup's, the migration's backup) reads each file in at a time.", effect: "start" },
 } as const satisfies Record<string, Setting>;
 
 /** Every setting of the app's own limits. */
@@ -387,9 +405,9 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     origins: checkedSetting(read, s.origins, listOf(origin), D.origins, log),
     hosts: checkedSetting(read, s.hosts, listOf(hostName), D.hosts, log),
     server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds) },
-    auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null },
+    auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null, webSessionMinutes: n(s.webSessionMinutes), nonceSeconds: n(s.nonceSeconds), signInTries: n(s.signInTries), signInPauseMinutes: n(s.signInPauseMinutes) },
     live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows), chatIdChars: n(s.chatIdChars), sockets: n(s.sockets) },
-    database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs) },
+    database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs), copiesKept: n(s.copiesKept), pieceBytes: n(s.pieceBytes) },
     commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs), askEveryMs: n(s.askEveryMs) },
     service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000 },
     workers: { threads: read.value(s.threads) as number | null },
@@ -409,7 +427,7 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
   const l = limits;
   if (isRecord(raw) && raw.v !== undefined && raw.v !== 1) throw new ConfigError(`${where} is of a format this RPE does not read (v ${String(raw.v)}).`);
   const { v: _v, ...rest } = isRecord(raw) ? raw : ({} as Record<string, unknown>);
-  const read = readGroup<Omit<AppConfig, "fromEnvironment" | "service" | "workers" | "index">>(isRecord(raw) ? rest : raw, where, {
+  const read = readGroup<Omit<AppConfig, "fromEnvironment" | "service" | "workers" | "index" | "auth"> & { auth: Pick<AppConfig["auth"], "pageTokenMinutes" | "commandLineSeconds" | "webKeyDays"> }>(isRecord(raw) ? rest : raw, where, {
     address: [hostName, l.address],
     port: [wholeIn(0, 65535), D.port],
     lumiverse: [
@@ -462,11 +480,15 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
       l.live,
     ],
     database: [
-      (value, at) =>
-        readGroup(value, at, {
+      (value, at) => ({
+        // No build before this one wrote these to config.json: they are the settings' alone.
+        copiesKept: l.database.copiesKept,
+        pieceBytes: l.database.pieceBytes,
+        ...readGroup(value, at, {
           busyMs: [wholeIn(0, 600_000), l.database.busyMs],
           sliceMs: [wholeIn(1, 10_000), l.database.sliceMs],
         }),
+      }),
       l.database,
     ],
     commandLine: [
@@ -482,7 +504,9 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
       l.commandLine,
     ],
   });
-  const config: AppConfig = { ...read, service: structuredClone(l.service), workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
+  // The web sessions' own settings were never in config.json: they are the settings' alone.
+  const { webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes } = l.auth;
+  const config: AppConfig = { ...read, auth: { ...read.auth, webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes }, service: structuredClone(l.service), workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
   const set = (name: string): string | undefined => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;

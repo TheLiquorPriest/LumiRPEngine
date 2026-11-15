@@ -27,6 +27,20 @@ export interface Arrived {
   words: string;
 }
 
+/** A file of the backups folder: its name, its kind (a copy of the database taken before a new version's migrations, an archive `rpe backup` made, or the migration's backup of today's data), its size and when it was made. */
+export interface BackupShown {
+  name: string;
+  kind: "copy" | "migration" | "archive";
+  bytes: number;
+  at: number;
+}
+
+/** The backups folder's files, newest first, and where the folder is. */
+export interface BackupsReply {
+  folder: string;
+  items: BackupShown[];
+}
+
 /** The base's four documents. */
 export type BaseDocument = "seed" | "soul" | "inner_voice" | "background";
 
@@ -1067,6 +1081,18 @@ export interface Scope {
   turn?: string;
 }
 
+/** A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password for the command line or the MCP server, the Lumiverse session token too, for the client to keep as it keeps its own. */
+export interface Session {
+  /** The session's token: given as the bearer of every call, and traded again for a new one before it ends. */
+  session: string;
+  /** When it ends, epoch milliseconds. */
+  ends: number;
+  /** The Lumiverse user it is of. */
+  user: string;
+  /** Lumiverse's own session, handed back for a client that keeps one (the command line); never for the web shell. */
+  lumiverse?: { token: string; username: string };
+}
+
 /** Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end). */
 export interface SessionReply {
   user: string;
@@ -1137,6 +1163,22 @@ export interface SettingView {
 export interface SettleReply {
   turn: TurnId;
   run: string;
+}
+
+/** A sign-in started: its flow, to finish with what the user pastes back or to cancel; the address the user opens to sign in; and what to know first. */
+export interface SignInStart {
+  flow: string;
+  url: string;
+  note: string;
+}
+
+/** Where a provider's sign-in stands: signed in or not, until when its token holds (RPH renews it when a call needs it), the flow open for it, and why its last flow ended without signing in. */
+export interface SignInState {
+  provider: "anthropic" | "openai";
+  signedIn: boolean;
+  until: number | null;
+  flow: string | null;
+  ended: string | null;
 }
 
 /** What a source bound to a character points at. */
@@ -1630,6 +1672,16 @@ export interface WorldsInBuildShown {
 
 /** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, whether it pages, and whether it is long (answered at once with an id, its answer read from `ANSWERS_PATH`). */
 export interface ApiRoutes {
+  /** Every copy of the database taken before a migration, every archive rpe backup made in the data folder, and every backup the migration took, with its kind, size and date; RPE removes none but the copies past database.copiesKept. */
+  "GET /api/v1/backups": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: BackupsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Starts the bootstrap job for the chats named, or for every chat the last migration carried, one after another; says which started and which were refused, and why. */
   "POST /api/v1/bootstrap": {
     params: Record<string, never>;
@@ -1920,6 +1972,56 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** Where the sign-in of a connection that signs in to its provider stands: signed in or not, until when, its open flow. */
+  "GET /api/v1/connections/:id/signin": {
+    params: { id: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: SignInState;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Starts signing a connection in to its provider: the flow, and the address the user opens to sign in. */
+  "POST /api/v1/connections/:id/signin": {
+    params: { id: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: SignInStart;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Signs a connection's provider out: its tokens are forgotten. */
+  "DELETE /api/v1/connections/:id/signin": {
+    params: { id: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: void;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Cancels a sign-in's open flow; nothing of it is kept. */
+  "POST /api/v1/connections/:id/signin/cancel": {
+    params: { id: string };
+    query: Record<string, never>;
+    body: { flow: string };
+    reply: void;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Finishes a sign-in with what the user pasted back, and says how it stands; the token is kept by the model layer and never answered. */
+  "POST /api/v1/connections/:id/signin/finish": {
+    params: { id: string };
+    query: Record<string, never>;
+    body: { flow: string; code: string };
+    reply: SignInState;
+    paged: false;
+    long: true;
+    joined: false;
+  };
   /** Tests a connection with one small call: how long it took, and the model that answered or the provider's words with its key taken out; and that model's limits. */
   "POST /api/v1/connections/:id/test": {
     params: { id: string };
@@ -2066,6 +2168,36 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: SettingsWrite;
     reply: SettingsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session the caller names, through the door to Lumiverse. */
+  "POST /api/v1/signin/end": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { lumiverse?: string };
+    reply: void;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Signs in with a Lumiverse account: a username and password, or a Lumiverse session the caller holds. RPE checks it against Lumiverse and accepts it only for the user it belongs to; it keeps no password. The answer is a session. */
+  "POST /api/v1/signin/lumiverse": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { client?: "web shell" | "command line" | "mcp server"; username?: string; password?: string; session?: string };
+    reply: Session;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Trades the web app's printed token for a session, or a session that is still in time for a new one before it ends; the session says which client asked for it (the web shell where none is named). */
+  "POST /api/v1/signin/session": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { client?: "web shell" | "command line" | "mcp server" };
+    reply: Session;
     paged: false;
     long: false;
     joined: false;

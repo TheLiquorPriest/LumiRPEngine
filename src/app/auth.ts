@@ -51,7 +51,11 @@ export interface PageToken {
 }
 
 /** Who made a token, as `page_token` keeps it: the extension for a page, the command line for the web token, RPE itself at its start for the extension's registration. */
-export type TokenMaker = "extension" | "command line" | "rpe start";
+export type TokenMaker = "extension" | "command line" | "web shell" | "mcp server" | "rpe start";
+
+/** The clients that sign in to RPE and are given a session, each naming itself when it does: the web shell, the command line, the MCP server (plan §4.4; a session that names none is the web shell's). */
+export const CLIENTS = ["web shell", "command line", "mcp server"] as const satisfies readonly TokenMaker[];
+export type Client = (typeof CLIENTS)[number];
 
 /** The kinds of token `page_token` holds. */
 export type TokenKind = "page" | "web" | "extension";
@@ -147,6 +151,8 @@ export interface AuthDeps {
   owner: string;
   now: () => number;
   pageTokenMs: number;
+  /** How long a session of a client holds (`auth.webSessionMinutes`). */
+  sessionMs: number;
   /** How long the web UI's key holds after it is made (`auth.webKeyDays`); null: it has no end. */
   webKeyMs: number | null;
 }
@@ -194,6 +200,16 @@ export class Auth {
   async mintPageToken(user: string, by: TokenMaker): Promise<PageToken> {
     if (user !== this.deps.owner) throw new AuthRefused(403, "Page tokens are made only for the Lumiverse user this RPE belongs to.");
     return await this.deps.writes.run((db) => insertPageToken(db, user, by, this.deps.pageTokenMs, this.deps.now()), "a page token");
+  }
+
+  /** A session for `client` (a page token of the user this RPE belongs to, held `sessionMs`), which the printed web token or a Lumiverse sign-in is traded for. It says who asked for it. */
+  async mintSession(client: Client): Promise<PageToken> {
+    return await this.deps.writes.run((db) => insertPageToken(db, this.deps.owner, client, this.deps.sessionMs, this.deps.now()), "a session");
+  }
+
+  /** Ends the session by its hash: it opens nothing from now on. */
+  async endSession(hash: string): Promise<void> {
+    await this.deps.writes.run((db) => db.run("DELETE FROM page_token WHERE hash = ? AND user = ? AND kind = 'page'", [hash, this.deps.owner]), "ending a session");
   }
 
   /**

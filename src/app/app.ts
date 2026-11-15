@@ -10,7 +10,6 @@ import { Auth, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { moveLimits, prepareDataFolder } from "./config";
 import { commandRoutes } from "./command-routes";
-import { signinRoutes } from "./signin-routes";
 import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
@@ -18,7 +17,7 @@ import { type Fills, gatherHooks, gatherSettings, type Hooks } from "./hooks";
 import { IndexFile } from "./index-file/index-file";
 import { type AreaLiveKind, gatherLiveKinds, LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
-import { migrate, Migrations } from "./migrations";
+import { migrate, Migrations, pruneCopies } from "./migrations";
 import { type Exactly, type Holds, type Infer, route, RouteError, RouteTable, shape } from "./routes";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
@@ -238,7 +237,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     db.close();
     throw error;
   }
-  const auth = new Auth({ db, writes, owner: user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
+  const auth = new Auth({ db, writes, owner: user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, sessionMs: config.auth.webSessionMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now, kinds: liveKinds });
   const answers = new Answers(config.server.answerKeepSeconds * 1000);
@@ -248,8 +247,6 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const builds = new Builds({ version, file: options.appFile ?? null, log });
   await builds.start();
   routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers));
-  // The web UI's sign-in: the proof a page asks for before it sends RPE its token.
-  routes.add("signin", signinRoutes({ db, owner: user, now }));
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
   routes.add("command", commandRoutes({ paths, secrets, db, user, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
   let running: RunningServer | null = null;
@@ -291,6 +288,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
         const server = startServer({ config, routes, auth, live, log, now, workers, answers, commandSocket: commandSocketPath(paths.root) });
         running = server;
         for (const area of mounted) await hook(area, "started");
+        // This version has started: the copies taken before migrations are kept to the setting, the oldest let go.
+        await pruneCopies(paths.backups, config.database.copiesKept, log);
         return server;
       })();
       starting = run;

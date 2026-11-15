@@ -53,7 +53,7 @@ describe("the web app at /ui/", () => {
     for (const path of ["/ui/", "/ui/assets/app.js"]) {
       const res = await fetch(`${server.url}${path}`);
       expect(res.headers.get("x-frame-options")).toBe("DENY");
-      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
       await res.text();
     }
   });
@@ -112,5 +112,29 @@ describe("the web app at /ui/", () => {
     const words = await res.text();
     expect(words).toContain("web app");
     expect(words).not.toContain(bed.root);
+  });
+
+  test("the web app is served with a policy that runs its own scripts only, and its built page holds no inline script", async () => {
+    const server = await serve(built);
+    for (const path of ["/ui/", "/ui/assets/app.js"]) {
+      const policy = (await fetch(`${server.url}${path}`)).headers.get("content-security-policy") ?? "";
+      expect(policy).toContain("script-src 'self'");
+      expect(policy).toContain("frame-ancestors 'none'");
+      expect(policy).not.toContain("unsafe-inline");
+      expect(policy).not.toContain("unsafe-eval");
+    }
+    // The page the build makes from the shell's own: its scripts are files, none is written into the page.
+    for (const page of [join(import.meta.dir, "../../src/ui/index.html"), join(import.meta.dir, "../../dist/ui/index.html")]) {
+      const file = Bun.file(page);
+      if (!(await file.exists())) continue;
+      const html = await file.text();
+      const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+      expect(scripts.length).toBeGreaterThan(0);
+      for (const [, attributes, body] of scripts) {
+        expect(attributes).toMatch(/\bsrc=/);
+        expect(body?.trim()).toBe("");
+      }
+      expect(html).not.toMatch(/\son[a-z]+=/i);
+    }
   });
 });

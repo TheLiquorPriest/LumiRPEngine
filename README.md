@@ -56,7 +56,6 @@ Do not install over it. Read [Moving from the previous build](docs/migration.md)
 - The Places, Quests, Rules, Lore, Prompt, Agents, Sessions and Runtime pages, and a Jobs page of its own: a chat's jobs are listed on its Turns page and all of yours on Chats, each with Cancel while it is queued or running.
 - On the pages there are: Live's pause and "say something to the Author"; the Turn page's lanes, perceptions, gap checks, consents, unsourced items, open items, and a migrated turn's old record; editing the world, and a value's history; the Story page's beats beside the prose, its uncovered stretches and its story so far; the Cast page's game side, lore bindings and setting a casting.
 - Anything RPE adds to the chat itself in Lumiverse.
-- Signing in to the web app with your Lumiverse account: it takes a web key.
 - Talk.
 - Tools that run a command or call out: command tools, HTTP tools, MCP servers and hooks.
 - Writing to your Lumiverse lore books.

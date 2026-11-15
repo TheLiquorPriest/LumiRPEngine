@@ -17,9 +17,11 @@ const INDEX = "index.html";
 /**
  * The web app signs itself in from this browser's storage when it loads, so a page of another site
  * that could frame it could have its buttons clicked for it. No other site may frame it. Lumiverse
- * never does: its drawer runs the extension's own bundle, not these files.
+ * never does: its drawer runs the extension's own bundle, not these files. Beside that, the page runs
+ * no script but RPE's own: its scripts are files served from this address, the built page holds none
+ * inline, and no plugin or base address another site could name stands in their place (plan §16).
  */
-const NO_FRAMING = { "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" } as const;
+const POLICY = { "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'none'" } as const;
 
 function notFound(words: string): Response {
   return new Response(words, { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -78,7 +80,7 @@ export function uiRoute(folder: string | null) {
       const real = parts === null ? null : await fileInside(base, join(base, ...parts));
       if (real === null) return notFound(`The web app has no file at ${pathname}.`);
       const file = Bun.file(real);
-      return new Response(file, { headers: { "content-type": file.type, ...NO_FRAMING } });
+      return new Response(file, { headers: { "content-type": file.type, ...POLICY } });
     },
   });
 }

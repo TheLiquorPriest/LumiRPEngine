@@ -3,10 +3,13 @@
 // Its other routes are its own (`appRoutes`), made where the app opens. Mounted first, it tells the
 // composition the app it is mounted in (`opened`), for what the composition hands the other areas.
 
+import type { LumiverseAccounts } from "./accounts";
 import type { App, Area } from "./app";
+import { backupsRoute } from "./backups-route";
 import { installFacts, SERVER_SETTINGS } from "./config";
 import { PAGE_SETTINGS } from "./page-settings";
 import { serviceRoutes } from "./service-routes";
+import { signinDeps, signinRoutes } from "./signin-routes";
 import { type SettingsDeps, settingsRoutes } from "./settings-routes";
 import { UPDATE_SETTINGS } from "./update";
 
@@ -16,6 +19,8 @@ export interface AppTakes {
   opened(app: App): void;
   /** Where a chat's levels are on disk and the model layer's connections, from the areas that know them, for the Settings routes. */
   settings(app: App): Pick<SettingsDeps, "levels" | "connections">;
+  /** What RPE asks of Lumiverse to sign a user in to the web app, from the door; none where RPE reaches no Lumiverse, and the sign-in with a Lumiverse account then says so. */
+  accounts?: LumiverseAccounts;
 }
 
 export function appArea(takes?: AppTakes): Area {
@@ -28,6 +33,8 @@ export function appArea(takes?: AppTakes): Area {
           mount: (at: App) => {
             takes.opened(at);
             at.routes.add("service", serviceRoutes({ builds: at.builds }));
+            at.routes.add("backups", [backupsRoute(at.paths.backups)]);
+            at.routes.add("signin", signinRoutes(signinDeps(at, takes.accounts ?? null)));
           },
           // Once every area is mounted: the levels and connections come from the tree and the turn lane.
           mounted: (at: App) => at.routes.add("settings", settingsRoutes({ settings: at.settings, facts: () => installFacts(at.config, at.paths), ...takes.settings(at) })),

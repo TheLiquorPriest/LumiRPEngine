@@ -644,6 +644,72 @@ Makes a connection the default.
 | Body | none |
 | Reply | nothing (204) |
 
+### `GET /api/v1/connections/:id/signin`
+
+Where the sign-in of a connection that signs in to its provider stands: signed in or not, until when, its open flow.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | [`SignInState`](#signinstate) |
+
+### `POST /api/v1/connections/:id/signin`
+
+Starts signing a connection in to its provider: the flow, and the address the user opens to sign in.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | [`SignInStart`](#signinstart) |
+
+### `DELETE /api/v1/connections/:id/signin`
+
+Signs a connection's provider out: its tokens are forgotten.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | nothing (204) |
+
+### `POST /api/v1/connections/:id/signin/cancel`
+
+Cancels a sign-in's open flow; nothing of it is kept.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `id` |
+| Query | none |
+| Body | `{ flow: string }` |
+| Reply | nothing (204) |
+
+### `POST /api/v1/connections/:id/signin/finish`
+
+Finishes a sign-in with what the user pasted back, and says how it stands; the token is kept by the model layer and never answered.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `id` |
+| Query | none |
+| Body | `{ flow: string; code: string }` |
+| Reply | [`SignInState`](#signinstate) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
 ### `POST /api/v1/connections/:id/test`
 
 Tests a connection with one small call: how long it took, and the model that answered or the provider's words with its key taken out; and that model's limits.
@@ -727,6 +793,19 @@ The answer of a request to a long route, by the id it was answered with: the sam
 | Body limit | takes no body |
 | Params | `id` |
 | Answers | 202 with `{ answer: <id> }` while the work runs; then the route's own status and body, once; 404 for an id RPE does not hold |
+
+### `GET /api/v1/backups`
+
+Every copy of the database taken before a migration, every archive rpe backup made in the data folder, and every backup the migration took, with its kind, size and date; RPE removes none but the copies past database.copiesKept.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`BackupsReply`](#backupsreply) |
 
 ### `GET /api/v1/command/busy`
 
@@ -873,6 +952,45 @@ The extension's record of a generation it stopped because it could not tell whos
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Answers | JSON: `{ kept: true }`, or 400 for a record the extension does not send |
+
+### `POST /api/v1/signin/end`
+
+Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session the caller names, through the door to Lumiverse.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ lumiverse?: string }` |
+| Reply | nothing (204) |
+
+### `POST /api/v1/signin/lumiverse`
+
+Signs in with a Lumiverse account: a username and password, or a Lumiverse session the caller holds. RPE checks it against Lumiverse and accepts it only for the user it belongs to; it keeps no password. The answer is a session.
+
+| | |
+|---|---|
+| Access | public: anyone who reaches RPE |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ client?: "web shell" | "command line" | "mcp server"; username?: string; password?: string; session?: string }` |
+| Reply | [`Session`](#session) |
+
+### `POST /api/v1/signin/session`
+
+Trades the web app's printed token for a session, or a session that is still in time for a new one before it ends; the session says which client asked for it (the web shell where none is named).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ client?: "web shell" | "command line" | "mcp server" }` |
+| Reply | [`Session`](#session) |
 
 ### `GET /api/v1/status`
 
@@ -1031,6 +1149,30 @@ export interface Arrived {
   taken: boolean;
   /** Where the builds stand, in a sentence or two, with why a build was not taken. */
   words: string;
+}
+```
+
+### `BackupShown`
+
+A file of the backups folder: its name, its kind (a copy of the database taken before a new version's migrations, an archive `rpe backup` made, or the migration's backup of today's data), its size and when it was made.
+
+```ts
+export interface BackupShown {
+  name: string;
+  kind: "copy" | "migration" | "archive";
+  bytes: number;
+  at: number;
+}
+```
+
+### `BackupsReply`
+
+The backups folder's files, newest first, and where the folder is.
+
+```ts
+export interface BackupsReply {
+  folder: string;
+  items: BackupShown[];
 }
 ```
 
@@ -2654,6 +2796,23 @@ export interface Scope {
 }
 ```
 
+### `Session`
+
+A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password for the command line or the MCP server, the Lumiverse session token too, for the client to keep as it keeps its own.
+
+```ts
+export interface Session {
+  /** The session's token: given as the bearer of every call, and traded again for a new one before it ends. */
+  session: string;
+  /** When it ends, epoch milliseconds. */
+  ends: number;
+  /** The Lumiverse user it is of. */
+  user: string;
+  /** Lumiverse's own session, handed back for a client that keeps one (the command line); never for the web shell. */
+  lumiverse?: { token: string; username: string };
+}
+```
+
 ### `SessionReply`
 
 Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).
@@ -2753,6 +2912,32 @@ The newest turn, and the Settle now run begun on it.
 export interface SettleReply {
   turn: TurnId;
   run: string;
+}
+```
+
+### `SignInStart`
+
+A sign-in started: its flow, to finish with what the user pastes back or to cancel; the address the user opens to sign in; and what to know first.
+
+```ts
+export interface SignInStart {
+  flow: string;
+  url: string;
+  note: string;
+}
+```
+
+### `SignInState`
+
+Where a provider's sign-in stands: signed in or not, until when its token holds (RPH renews it when a call needs it), the flow open for it, and why its last flow ended without signing in.
+
+```ts
+export interface SignInState {
+  provider: "anthropic" | "openai";
+  signedIn: boolean;
+  until: number | null;
+  flow: string | null;
+  ended: string | null;
 }
 ```
 

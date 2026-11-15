@@ -91,7 +91,7 @@ describe("auth", () => {
   test("a page token made for one user is refused once this RPE belongs to another", async () => {
     const { token } = await app.auth.mintPageToken(OWNER, "extension");
     // The same database, as an RPE that belongs to another user sees it: such an RPE opens no other user's database at all.
-    const next = new Auth({ db: app.db, writes: app.writes, owner: "user-next", now: app.now, pageTokenMs: 60_000, webKeyMs: null });
+    const next = new Auth({ db: app.db, writes: app.writes, owner: "user-next", now: app.now, pageTokenMs: 60_000, sessionMs: 1_800_000, webKeyMs: null });
     expect(next.pageUser(token)).toBeNull();
     expect(app.auth.pageUser(token)).toBe(OWNER);
   });
@@ -132,7 +132,7 @@ describe("auth", () => {
     expect(app.auth.holds("provider", provider)).toBe(true);
     expect(app.auth.pageUser(web)).toBe(OWNER);
     // The same database, as an RPE that belongs to another user sees it.
-    const other = new Auth({ db: app.db, writes: app.writes, owner: "user-other", now: app.now, pageTokenMs: 60_000, webKeyMs: null });
+    const other = new Auth({ db: app.db, writes: app.writes, owner: "user-other", now: app.now, pageTokenMs: 60_000, sessionMs: 1_800_000, webKeyMs: null });
     expect(other.holds("provider", provider)).toBe(false);
     expect(other.pageUser(web)).toBeNull();
     const rows = app.db.query<{ user: string }, []>("SELECT user FROM provider_key UNION ALL SELECT user FROM page_token WHERE kind = 'web'").all();

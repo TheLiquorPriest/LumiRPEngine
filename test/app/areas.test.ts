@@ -104,8 +104,11 @@ describe("each area registers from a file of its own", () => {
     expect(new Set(byAreas).size).toBe(byAreas.length);
     expect([...ownRoutes, ...byAreas].sort()).toEqual([...table].sort());
     for (const name of ["migrate", "turn", "bootstrap", "tree", "lore", "cast", "story", "build", "play", "lumiverse"]) expect({ name, routes: (added.get(name) ?? []).length > 0 }).toEqual({ name, routes: true });
-    // The app's own area adds the Settings routes, over the whole registry, once every area is mounted.
-    expect({ name: "app", routes: (added.get("app") ?? []).sort() }).toEqual({ name: "app", routes: ["GET /api/v1/settings", "PUT /api/v1/settings"] });
+    // The app's own area adds the Settings routes, over the whole registry, once every area is mounted, and when it mounts the backups list, the service's routes (how many turns and jobs run, an app file's arrival) and the sign-in's (the proof, the trade, the Lumiverse sign-in, the sign-out).
+    expect({ name: "app", routes: (added.get("app") ?? []).sort() }).toEqual({
+      name: "app",
+      routes: ["GET /api/v1/backups", "GET /api/v1/command/busy", "GET /api/v1/settings", "GET /api/v1/status/proof", "POST /api/v1/ext/arrived", "POST /api/v1/signin/end", "POST /api/v1/signin/lumiverse", "POST /api/v1/signin/session", "PUT /api/v1/settings"],
+    });
     for (const name of ["store", "iface"]) expect({ name, routes: added.get(name) ?? [] }).toEqual({ name, routes: [] });
 
     // Every migration step the database ran is one of an area's own, and every area of tables has an area that brings it.

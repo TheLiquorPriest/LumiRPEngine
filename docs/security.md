@@ -15,7 +15,21 @@ Each key is random, shown once when it is made, and kept only as a hash. A new k
 | Provider key | `rpe_` | RPE's provider endpoint (`/v1/chat/completions` and `/v1/models`): the replies Lumiverse asks for on RPE's connection. Nothing else. | `rpe up` makes it and gives it to RPE's connection in Lumiverse. `rpe key provider` makes a new one; put it in that connection as its API key. After the switch from the previous build, the one provider key is the one the connection RPE took over already holds (`rpe status` lists it as taken from today's connection), which replaces RPE's own earlier key; RPE then makes no new provider key, because a new one would have to be put in that connection and that would make going back harder. |
 | Extension key | `rpx_` | The routes only RPE's extension calls: the questions before each reply, the page tokens, and the confirmation of RPE's registration. | RPE makes a new one at every start and hands it to its extension. There is no command that makes one: a key made by hand would cut the extension off until RPE started again, and `rpe key extension` says so. |
 | Web key | `rpw_` | RPE's web app and its API, as you. | `rpe key web`, on the machine RPE runs on. As shipped it has no end, and works until a new one replaces it. With `auth.webKeyDays` set, it runs out that many days after it is made: `rpe key web` prints when, and `rpe status` lists it. |
+| Session | `rpp_` | RPE's API, as you, from the web app (or the command line or the MCP server that asked for it), for `auth.webSessionMinutes` (30 minutes), renewed while a page is open. | Made by trading the printed web key, or by signing in with your Lumiverse account (below). It names the client that asked for it. |
 | Page token | `rpp_` | RPE's API, as you, for 30 minutes (`auth.pageTokenMinutes`). | The extension asks RPE for one for a page in Lumiverse, and only for the Lumiverse user this RPE belongs to. Another user of the same Lumiverse gets none. |
+
+## Signing in to the web app
+
+The web app (`/ui/`) takes two ways in, and the browser keeps only a session, which ends at its time:
+
+- **The printed token.** `rpe up` prints the web key once, at the first install (`rpe key web` makes a new one). The web app trades it, once, for a session; the browser keeps the session and never the key. The session ends `auth.webSessionMinutes` after it was made unless a page that is open renews it. A key that has been replaced opens no session.
+- **Your Lumiverse account.** The web app takes your Lumiverse username and password, or a Lumiverse sign-in the command line already holds, and RPE checks it against Lumiverse and accepts it only for the Lumiverse user this RPE belongs to. RPE keeps no password. It sends Lumiverse no more than `auth.signInTries` wrong passwords (4, below the 5 after which Lumiverse locks an address out) and then none for `auth.signInPauseMinutes` (15), so that RPE's own address is never locked out. For the web app it ends the Lumiverse session it made as soon as it has checked it; signing out of the web app ends the web session, and the Lumiverse session too where one was held.
+
+A session says which client asked for it: the web app, the command line or the MCP server. A route reads that from the session it was called with: a commit made with the command line's or the MCP server's session is the agent's, and one made from a page is Build's.
+
+Before a page sends RPE a token, it asks RPE to prove that it is RPE: the page sends the first characters of the hash of its token and a nonce of its own, and RPE answers with the nonce's keyed hash, which only something that holds RPE's table of tokens can make. The page offers its token only to an address whose answer matches. RPE answers a nonce once within `auth.nonceSeconds` (60), and only for a page token still in time.
+
+The web app is served with a policy that runs RPE's own scripts only (`script-src 'self'`) beside the one that lets no other site frame it, and its built page holds no inline script.
 
 ## The command line
 
