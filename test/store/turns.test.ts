@@ -754,8 +754,8 @@ describe("heard between turns", () => {
 });
 
 describe("a continue's held turn", () => {
-  /** Two played replies, compared as shown, and a continue of the second running on an open turn of its own (R-192 (e)). */
-  function continued(options: { snapshotEvery?: number } = {}) {
+  /** Two played replies, the second making Bram's lantern Wren's, compared as shown. */
+  function twoReplies(options: { snapshotEvery?: number } = {}) {
     // A clock that moves on at every reading, so a turn begun after a job ended begins later than it ended (§10.9).
     let clock = 0;
     const ts = testStore({ now: () => ++clock, ...options });
@@ -764,21 +764,42 @@ describe("a continue's held turn", () => {
     const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
     const t2 = play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV), tick(5)));
     s.sync("c", asShown(seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "light"], ["m2", "Bram lends her a lantern.", 0]), { m1: 1, m2: 2 }));
-    // The player asks the second reply to go on. Until the generation's end names a message, what the continue's run changes is
-    // held on its own open turn, begun where the reply's turn ends (§10.8), and a job it starts records there too (§10.9).
-    const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    return { ...ts, t1, t2 };
+  }
+
+  /**
+   * A continue of the second reply running on an open turn of its own (R-192 (e)). With `afterLater`, a third reply is played first
+   * and the continue is the one the tag could not place: held after the path's last turn, its end naming the earlier reply (R-192 (a)).
+   */
+  function continued(options: { snapshotEvery?: number; afterLater?: true } = {}) {
+    const ts = twoReplies(options);
+    const { s, t2 } = ts;
+    const later = options.afterLater ? play(s, "c", "m3", "The rain stops.", 3, engine(tick(1))) : null;
+    // The player asks the reply to go on. Until the generation's end names a message, what the continue's run changes is held on its
+    // own open turn, begun where the path's turn ends (§10.8), and a job it starts records there too (§10.9).
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: (later ?? t2).node });
     s.addChanges(held.id, engine(goTo(POV, "cellar")));
     s.addChanges(held.id, engine(...hand("lantern", POV, "cask")).map((c) => ({ ...c, job: "j-cellar" })));
     s.addChanges(held.id, engine(tick(30)));
-    return { ...ts, t1, t2, held };
+    return { ...ts, later, held };
   }
 
+  /** Who of Wren, Bram and the cask holds the lantern. */
+  const holders = (world: { entities: Record<string, { relations: { type: string; to: string }[] }> }): string[] => [POV, "bram", "cask"].filter((who) => carried(world, who).includes("lantern"));
+
+  /** A turn's rows as made, whatever store they are in: their order, what they say, their job, and whether each applied with its reports. */
+  const asMade = (rows: readonly { ord: number; op: string; value: unknown; job: string | null; applied: boolean; reports: unknown[] }[]) => rows.map((c) => ({ ord: c.ord, op: c.op, value: c.value, job: c.job, applied: c.applied, reports: c.reports }));
+
+  /** A state as JSON with each turn's id put as its name, so states made in two stores compare. */
+  const named = (state: unknown, turns: Readonly<Record<string, string>>): string => Object.entries(turns).reduce((text, [name, id]) => text.replaceAll(id, name), JSON.stringify(state));
+
   test("a continue's held changes join the turn it extends, after its own and in their order, a job's change with its job, and that turn's state is the one they make", () => {
-    // Every turn keeps its state stored, so one stored on a path through the extended turn is there to go stale.
-    const ts = continued({ snapshotEvery: 1 });
+    // Every turn keeps its state stored, so one stored on a path through the extended turn is there to go stale. The road Lumiverse
+    // takes to a later reply standing after the extended one: a continue the tag could not place, held after the path's last turn,
+    // whose end names the earlier reply (R-192 (a)). The later turn stays recorded after the extended one, its state stored.
+    const ts = continued({ snapshotEvery: 1, afterLater: true });
     const { s, t1, t2, held } = ts;
-    // A later reply made after the one extended and gone before the continue: its turn stays recorded after it, its state stored.
-    const later = play(s, "c", "m3", "The rain stops.", 3, engine(tick(1)));
+    const later = ts.later as TurnRow;
     const own = s.changes(t2.id);
     const heldRows = s.changes(held.id);
     expect(s.stateAt(t2.id).state.world.entities[POV]?.fields.place).toBe("common_room");
@@ -845,6 +866,7 @@ describe("a continue's held turn", () => {
     const ts = continued();
     const { s, t1, t2, held } = ts;
     s.joinTurn(held.id, t2.id);
+    const scene = s.openSession({ chat: "c", scene: "the inn", turn: t2.id });
     const before = written(ts);
     // Every write, and every reading of its state, a job's included: the store never sends it on to the turn it joined itself.
     const calls: [string, () => unknown][] = [
@@ -860,6 +882,10 @@ describe("a continue's held turn", () => {
       ["its record", () => s.updateTurn(held.id, { intent: "Go on." })],
       ["a starting state", () => s.setBase(held.id, s.stateAt(t2.id).state.world)],
       ["a session", () => s.openSession({ chat: "c", scene: "the cellar", turn: held.id })],
+      ["closing a session", () => s.closeSession(scene.id, held.id)],
+      ["its path", () => s.extendPath(t1.node, held.id)],
+      ["where it started", () => s.startOf(held.id)],
+      ["the jobs before it", () => s.jobsBefore(held.id)],
       ["joining it again", () => s.joinTurn(held.id, t2.id)],
     ];
     for (const [what, call] of calls) {
@@ -882,6 +908,174 @@ describe("a continue's held turn", () => {
     s.createChat({ id: "other", revision: ts.revision });
     const elsewhere = s.beginTurn({ chat: "other", kind: "continue" });
     expect(() => s.joinTurn(elsewhere.id, t2.id)).toThrow(StoreInputError);
+  });
+
+  test("a change the extended turn took while the continue was held: the continue's move is listed as not applied, and the lantern is held by Bram alone", () => {
+    const ts = twoReplies();
+    const { s, t2 } = ts;
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    s.addChanges(held.id, engine(goTo(POV, "cellar")));
+    s.addChanges(held.id, engine(...hand("lantern", POV, "cask")));
+    // The player hands the lantern to Bram while the continue runs: a change placed after the newest reply, on the turn being
+    // continued (R-22). The continue's move was checked while Wren still held it.
+    s.addChanges(t2.id, engine(...hand("lantern", POV, "bram")));
+    expect(s.changes(held.id).map((c) => c.applied)).toEqual([true, true, true]);
+    const joined = s.joinTurn(held.id, t2.id);
+    expect(joined.map((c) => [c.op, c.applied])).toEqual([
+      ["set", true],
+      ["unlink", false],
+      ["link", false],
+    ]);
+    expect(joined[1]?.reports).not.toEqual([]);
+    expect(holders(s.stateAt(t2.id).state.world)).toEqual(["bram"]);
+    expect(holders(reopened(ts).user(USER).stateAt(t2.id).state.world)).toEqual(["bram"]);
+    expect(s.stateAt(t2.id).state.world.entities[POV]?.fields.place).toBe("cellar");
+
+    // The same changes made on that turn in that order: the same rows, the same reports, the same state.
+    const direct = twoReplies();
+    direct.s.addChanges(direct.t2.id, engine(...hand("lantern", POV, "bram")));
+    direct.s.addChanges(direct.t2.id, engine(goTo(POV, "cellar")));
+    direct.s.addChanges(direct.t2.id, engine(...hand("lantern", POV, "cask")));
+    expect(asMade(s.changes(t2.id))).toEqual(asMade(direct.s.changes(direct.t2.id)));
+    const ids = (t: { t1: TurnRow; t2: TurnRow }) => ({ T1: t.t1.id, T2: t.t2.id });
+    expect(named(s.stateAt(t2.id).state, ids(ts))).toBe(named(direct.s.stateAt(direct.t2.id).state, ids(direct)));
+    expect(named(reopened(ts).user(USER).stateAt(t2.id).state, ids(ts))).toBe(named(direct.s.stateAt(direct.t2.id).state, ids(direct)));
+  });
+
+  test("a held turn that stood on a later turn, joined into an earlier one: the lantern ends where the same changes made there put it, a change that could not apply on the later turn now applies, and the later turn's changes that no longer apply are listed", () => {
+    const ts = twoReplies();
+    const { s, t2 } = ts;
+    const t3 = play(s, "c", "m3", "Wren tucks the lantern away.", 3, engine(...hand("lantern", POV, "satchel")));
+    // A continue the tag could not place goes after the path's last turn; its end names the earlier reply (R-192 (a)). Handing the
+    // lantern to Bram could not apply there: it was in the satchel.
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: t3.node });
+    s.addChanges(held.id, engine(...hand("lantern", POV, "bram")));
+    expect(s.changes(held.id).map((c) => c.applied)).toEqual([false, false]);
+    const joined = s.joinTurn(held.id, t2.id);
+    expect(joined.map((c) => [c.op, c.applied, c.reports])).toEqual([
+      ["unlink", true, []],
+      ["link", true, []],
+    ]);
+    for (const at of [s.stateAt(t3.id), reopened(ts).user(USER).stateAt(t3.id)]) {
+      expect(holders(at.state.world)).toEqual(["bram"]);
+      expect(at.notApplied.map((n) => [n.turn, n.op])).toEqual([
+        [t3.id, "unlink"],
+        [t3.id, "link"],
+      ]);
+    }
+    // Made there in that order, the same changes put the lantern in the same hands.
+    const direct = twoReplies();
+    direct.s.addChanges(direct.t2.id, engine(...hand("lantern", POV, "bram")));
+    const d3 = play(direct.s, "c", "m3", "Wren tucks the lantern away.", 3, engine(...hand("lantern", POV, "satchel")));
+    expect(named(s.stateAt(t3.id).state, { T1: ts.t1.id, T2: t2.id, T3: t3.id })).toBe(named(direct.s.stateAt(d3.id).state, { T1: direct.t1.id, T2: direct.t2.id, T3: d3.id }));
+  });
+
+  test("a job's change moved by the join is checked on the job's state on the extended turn", () => {
+    const ts = twoReplies();
+    const { s, t2 } = ts;
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    s.addChanges(held.id, engine(...hand("lantern", POV, "cask")).map((c) => ({ ...c, job: "j-cellar" })));
+    s.addChanges(t2.id, engine(...hand("lantern", POV, "bram")));
+    const joined = s.joinTurn(held.id, t2.id);
+    expect(joined.map((c) => [c.op, c.job, c.applied])).toEqual([
+      ["unlink", "j-cellar", false],
+      ["link", "j-cellar", false],
+    ]);
+    // The job's view is as if its changes had been made there: Bram holds the lantern, not the cask.
+    expect(holders(s.stateFor(t2.id, "j-cellar").state.world)).toEqual(["bram"]);
+    const direct = twoReplies();
+    direct.s.addChanges(direct.t2.id, engine(...hand("lantern", POV, "bram")));
+    direct.s.addChanges(direct.t2.id, engine(...hand("lantern", POV, "cask")).map((c) => ({ ...c, job: "j-cellar" })));
+    expect(asMade(s.changes(t2.id))).toEqual(asMade(direct.s.changes(direct.t2.id)));
+  });
+
+  test("a session the held turn opened is found at the extended turn after the join, on the chat's line", () => {
+    const { s, t2, held } = continued();
+    const cellar = s.openSession({ chat: "c", scene: "the cellar", turn: held.id });
+    const inn = s.openSession({ chat: "c", scene: "the inn", turn: t2.id });
+    s.closeSession(inn.id, held.id);
+    s.joinTurn(held.id, t2.id);
+    expect(s.session(cellar.id)).toMatchObject({ openedBy: t2.id, closedBy: null });
+    expect(s.session(inn.id)).toMatchObject({ openedBy: t2.id, closedBy: t2.id });
+    expect(s.line("c").map((l) => l.turn)).toContain(t2.id);
+    expect(s.sessions("c").flatMap((x) => [x.openedBy, x.closedBy])).not.toContain(held.id);
+  });
+
+  test("a branch's continue of a reply the branch shares is refused by the chat check", () => {
+    const { s, t2 } = twoReplies();
+    s.branchChat({ id: "b", from: "c", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" }, at: "m2" });
+    s.sync("b", asShown(seen(["b-u1", "in"], ["b-m1", "Wren comes in from the rain.", 0], ["b-u2", "light"], ["b-m2", "Bram lends her a lantern.", 0]), { "b-m1": 1, "b-m2": 2 }));
+    const on = s.path("b").find((e) => e.message === "b-m2")?.node ?? null;
+    const held = s.beginTurn({ chat: "b", kind: "continue", on });
+    s.addChanges(held.id, engine(goTo(POV, "cellar")));
+    // The turn tied to the branch's copy of the reply is the source's: shared history stays shared.
+    expect(s.swipes("b", "b-m2").map((t) => t.id)).toEqual([t2.id]);
+    expect(() => s.joinTurn(held.id, t2.id)).toThrow(`turn ${held.id} is chat b's and turn ${t2.id} is chat c's: a continue extends a turn of its own chat`);
+    expect(s.turn(held.id)?.status).toBe("open");
+  });
+
+  test("a swipe of the extended turn takes the joined changes with it, and a flip back brings them", () => {
+    const { s, t2, held } = continued();
+    s.joinTurn(held.id, t2.id);
+    // The caller ties the extended turn again to the longer text Lumiverse saved.
+    const longer = "Bram lends her a lantern. She takes it down the cellar steps.";
+    s.tieTurn(t2.id, { message: "m2", hash: hashOf(longer), date: 2 });
+    const showing = (text: string, date: number) => asShown(seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "light"], ["m2", text, 0]), { m1: 1, m2: date });
+    expect(placeOf(s, "c")).toBe("cellar");
+    play(s, "c", "m2", "Bram keeps his lantern.", 5, engine(tick(2)), { target: "m2" });
+    s.sync("c", showing("Bram keeps his lantern.", 5));
+    expect(placeOf(s, "c")).toBe("common_room");
+    s.sync("c", showing(longer, 2));
+    expect(placeOf(s, "c")).toBe("cellar");
+    expect(s.path("c").find((e) => e.message === "m2")?.turn).toBe(t2.id);
+  });
+
+  test("after the join the later turn's state read from memory is the one read after a restart", () => {
+    const ts = continued({ afterLater: true });
+    const { s, t2, held } = ts;
+    const later = ts.later as TurnRow;
+    expect(s.stateAt(later.id).state.world.entities[POV]?.fields.place).toBe("common_room");
+    s.joinTurn(held.id, t2.id);
+    const warm = s.stateAt(later.id);
+    const cold = reopened(ts).user(USER).stateAt(later.id);
+    expect(warm.state.world.entities[POV]?.fields.place).toBe("cellar");
+    expect(hashJson(warm.state)).toBe(hashJson(cold.state));
+    expect([warm.notApplied, warm.rebased]).toEqual([cold.notApplied, cold.rebased]);
+  });
+
+  test("the stored states on a rebased node and on a branch's path through the extended turn are dropped", () => {
+    const ts = twoReplies({ snapshotEvery: 1 });
+    const { s, t2 } = ts;
+    // A branch from the second reply, with a turn of its own after it: its path runs through the extended turn.
+    s.branchChat({ id: "b", from: "c", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" }, at: "m2" });
+    s.sync("b", asShown(seen(["b-u1", "in"], ["b-m1", "Wren comes in from the rain.", 0], ["b-u2", "light"], ["b-m2", "Bram lends her a lantern.", 0]), { "b-m1": 1, "b-m2": 2 }));
+    const branchOwn = play(s, "b", "b-m3", "Out to the market.", 3, engine(tick(3)));
+    // The first reply's other swipe flipped to: the second reply's turn stands rebased, on a node of its own after it.
+    play(s, "c", "m1", "Wren shakes off the rain.", 4, engine(tick(20)), { target: "m1" });
+    s.sync("c", asShown(seen(["u1", "in"], ["m1", "Wren shakes off the rain.", 0], ["u2", "light"], ["m2", "Bram lends her a lantern.", 0]), { m1: 4, m2: 2 }));
+    const rebasedNode = s.path("c").find((e) => e.message === "m2")?.node ?? null;
+    expect(rebasedNode).not.toBe(t2.node);
+    // Both heads folded; the next write stores what they found worth keeping.
+    s.headState("c");
+    s.headState("b");
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: rebasedNode });
+    s.addChanges(held.id, engine(goTo(POV, "cellar")));
+    const storedThrough = (): string[] =>
+      ts.store.db
+        .query<{ node: string }, [string, string]>(
+          `WITH RECURSIVE down(key) AS (SELECT key FROM path_node WHERE user = ?1 AND turn = ?2 UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
+           SELECT node FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM down) ORDER BY node`,
+        )
+        .all(USER, t2.id)
+        .map((r) => r.node);
+    expect(storedThrough()).toEqual(expect.arrayContaining([rebasedNode as string, branchOwn.node]));
+    s.joinTurn(held.id, t2.id);
+    expect(storedThrough()).toEqual([]);
+    // Folded again, both paths take the joined change.
+    for (const store of [s, reopened(ts).user(USER)]) {
+      expect(placeOf(store, "c")).toBe("cellar");
+      expect(placeOf(store, "b")).toBe("cellar");
+    }
   });
 });
 

@@ -20,7 +20,7 @@ import type { RevisionId, WorldId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
-import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type StoredChange } from "./fold";
+import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type StoredChange } from "./fold";
 import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
 import { chainOf, comparePaths, matchTurn, nodeKey, turnByHash, turnsShown, type ShowingTurn } from "./path";
@@ -1061,13 +1061,21 @@ export class UserStore {
   }
 
   /**
-   * A continue's held turn joins the turn it extended (plan §10.10, "Continue: the same turn, extended"; R-192 (e), (f)): when the
-   * generation's end names a message `into` is tied to, what the continue's run held on its own open turn is added to `into`. Its own
-   * changes come after `into`'s own, in the order they were made, and a job's with their job kept, a job being recorded with the turn
-   * that started it, which is now `into` (§10.9); each as it was recorded, nothing folded or worked out again. The held turn is kept,
-   * marked as joined, never dropped: a job it started may still be running with it in its scope, and `joinedTo` names where that job
-   * writes. A held turn that is not open, a turn that is not tied, and a turn of another chat are refused. The changes it added, as
-   * they now stand on `into`.
+   * A continue's held turn joins the turn it extended (plan §10.10, "Continue: the same turn, extended"; R-192 (e), (f), R-203): when
+   * the generation's end names a message `into` is tied to, what the continue's run held on its own open turn lands on `into` as if
+   * it had been made there, in that order. Its own changes come after `into`'s own, in the order they were made, and a job's keep their
+   * job, a job being recorded with the turn that started it, which is now `into` (§10.9). Each is checked again where it lands by the
+   * store's ordinary check, as a write on `into` checks it: the held turn's own on the state inside `into` after `into`'s own changes, a
+   * job's on the job's own state there (`stateFor`), with the groups that fell earlier in the turn. Its outcome, whether it applies
+   * and its reports, is recorded: a change that no longer applies is recorded as not applied, with its reports, and one that now
+   * applies as applied (§6.1: code reports what does not add up and never decides). The join is never refused for this. Everything
+   * the store keeps by the held turn moves in the same write: a session it opened or closed names `into`; its stored states go. The
+   * held turn is kept, with its own row and path node, marked as joined, never dropped: a job it started may still be running with
+   * it in its scope, and `joinedTo` names where that job writes. A held turn that is not open, a turn that is not tied, and a turn of
+   * another chat are refused. The store relies on its caller joining before anything else of the chat begins (a missed end is
+   * joined at the next intake before the next turn is begun): a job of the continue that ended before then would otherwise be
+   * placed before a turn begun already. The changes it moved, in order, as they now stand on `into`: each with whether it applies
+   * there and its reports.
    */
   joinTurn(held: string, into: string): ChangeRow[] {
     const from = this.turnToWrite(held);
@@ -1076,15 +1084,50 @@ export class UserStore {
     if (to.status !== "done" && to.status !== "cut") throw new StoreInputError(`turn ${into} is ${to.status}: a continue joins the turn tied to the message it extended`);
     if (from.chat !== to.chat) throw new StoreInputError(`turn ${held} is chat ${from.chat}'s and turn ${into} is chat ${to.chat}'s: a continue extends a turn of its own chat`);
     const moved = this.changes(held);
-    const next = (this.changes(into).at(-1)?.ord ?? -1) + 1;
+    const own = this.changes(into);
+    const outcomes = this.landing(to, own, moved);
+    const next = (own.at(-1)?.ord ?? -1) + 1;
     this.write(true, () => {
-      const put = this.db.query("UPDATE change SET turn = ?, ord = ? WHERE user = ? AND id = ?");
-      moved.forEach((c, i) => put.run(into, next + i, this.id, c.id));
+      const put = this.db.query("UPDATE change SET turn = ?, ord = ?, applied = ?, reports = ? WHERE user = ? AND id = ?");
+      moved.forEach((c, i) => {
+        const o = outcomes[i] ?? { applied: false, reports: [] };
+        put.run(into, next + i, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, this.id, c.id);
+      });
+      this.db.run("UPDATE session SET opened_by = ? WHERE user = ? AND opened_by = ?", [into, this.id, held]);
+      this.db.run("UPDATE session SET closed_by = ? WHERE user = ? AND closed_by = ?", [into, this.id, held]);
+      this.db.run("DELETE FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM path_node WHERE user = ?1 AND turn = ?2)", [this.id, held]);
       this.db.run("UPDATE turn SET status = 'joined', joined = ? WHERE user = ? AND id = ?", [into, this.id, held]);
       this.dropSnapshotsThrough(into);
     });
     const ids = new Set(moved.map((c) => c.id));
     return this.changes(into).filter((c) => ids.has(c.id));
+  }
+
+  /**
+   * What each of `moved` comes to where it lands on `into`, after `own`, `into`'s rows: checked in order as `addChanges` checks a
+   * write there. A run of the turn's own on the state inside `into` so far; a run of a job's on that job's state there, the turn's
+   * state with the job's rows that apply on top (`stateFor`). The groups that fell earlier in the turn fall with them.
+   */
+  private landing(into: TurnRow, own: readonly ChangeRow[], moved: readonly ChangeRow[]): Outcome[] {
+    const state = structuredClone(this.foldNode(into.node).folded.state);
+    const fell = new Set(own.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
+    const item = (c: ChangeRow): Item => ({ op: c.op, value: structuredClone(c.value), turn: into.id, n: into.depth + 1, by: c.by, precision: c.precision, standing: c.standing, source: c.source });
+    const out: Outcome[] = [];
+    for (let i = 0; i < moved.length; ) {
+      const job = moved[i]?.job ?? null;
+      let end = i + 1;
+      while (end < moved.length && (moved[end]?.job ?? null) === job) end++;
+      const run = moved.slice(i, end).map(item);
+      if (job === null) out.push(...applyChecked(this.store.env, state, run, fell));
+      else {
+        const mine = structuredClone(state);
+        const before = [...own.filter((c) => c.job === job && c.applied), ...moved.slice(0, i).filter((c, k) => c.job === job && out[k]?.applied === true)];
+        applyChecked(this.store.env, mine, before.map(item), new Set());
+        out.push(...applyChecked(this.store.env, mine, run, fell));
+      }
+      i = end;
+    }
+    return out;
   }
 
   /** The turn a joined turn joined (`joinTurn`); null for a turn that joined none. The one place that resolves a joined turn asks it. */
@@ -1132,10 +1175,11 @@ export class UserStore {
 
   /**
    * The state a turn started from, along the path it was made on: before any change of its own. What
-   * a briefing at its start was shown, whatever the turn recorded since.
+   * a briefing at its start was shown, whatever the turn recorded since. A joined turn is refused, as
+   * every reading of one is, naming the turn it joined.
    */
   startOf(turnId: string): Folded {
-    const t = this.turnOrThrow(turnId);
+    const t = this.turnToWrite(turnId);
     const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
     return prev === null ? this.initial(this.chatOrThrow(t.chat).revision) : this.foldNode(prev).folded;
   }
@@ -1438,10 +1482,11 @@ export class UserStore {
 
   /**
    * What jobs changed at the start of a turn, for its briefing (plan §10.9): their changes placed just
-   * before it, on the path it was made on, each with whether it took effect and what was reported.
+   * before it, on the path it was made on, each with whether it took effect and what was reported. A
+   * joined turn is refused, as every reading of one is, naming the turn it joined.
    */
   jobsBefore(turnId: string): { change: ChangeRow; applied: boolean; reports: Report[] }[] {
-    const t = this.turnOrThrow(turnId);
+    const t = this.turnToWrite(turnId);
     const placed = this.jobsPlaced(t.node).get(t.node) ?? [];
     if (placed.length === 0) return [];
     const missed = new Map(this.stateAt(t.id).notApplied.map((n) => [n.change, n.reports]));
