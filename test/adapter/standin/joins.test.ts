@@ -220,7 +220,7 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
     // "Before" at its marker, the "at marker" pool inside the block that asks for it with no flag of its own, "after" (no marker for
     // it) just after the history.
     expect(marked.handed).toEqual([["MAIN", false], ["FERRY-LORE", true], ["LORE-NOTES", false], ...HISTORY, ["REEDS-LORE", true], ["POST", false]]);
-    expect(marked.texts[2]).toBe("LORE-NOTES What the marsh holds:\nBELL-LORE The bell rings at the tide.\n\nMIST-LORE Mist rolls in at dusk.");
+    expect(marked.texts[2]).toBe("LORE-NOTES What the marsh holds:\nMIST-LORE Mist rolls in at dusk.\n\nBELL-LORE The bell rings at the tide.");
     // Named as Lumiverse names them, the block with its id and the lore by position and label with none; the pool's tokens are the block's.
     const stored = marked.out.stored!;
     expect(stored.entries.map((e) => [e.type, e.name, e.blockId ?? null])).toEqual([
@@ -229,15 +229,15 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
       ["block", "Marsh lore", "b-lore"],
       ["block", "Post", "b-post"],
       ["world_info", "World Info After (auto): Reeds", null],
-      ["world_info", "WI At Marker: bell", null],
       ["world_info", "WI At Marker: Mist", null],
+      ["world_info", "WI At Marker: bell", null],
     ]);
     expect(stored.totalTokens).toBe(stored.chatHistoryTokens + stored.entries.filter((e) => !e.name.startsWith("WI At Marker")).reduce((n, e) => n + e.tokens, 0));
 
     // No markers: "before" just before the history, "after" just after it.
     const unmarked = await placed({ blocks: [MAIN, POST] }, book());
     expect(unmarked.handed).toEqual([["MAIN", false], ["POST", false], ["FERRY-LORE", true], ...HISTORY, ["REEDS-LORE", true]]);
-    expect(unmarked.out.stored!.entries.filter((e) => e.type === "world_info").map((e) => e.name)).toEqual(["World Info Before (auto): The ferry", "World Info After (auto): Reeds", "WI At Marker: bell", "WI At Marker: Mist"]);
+    expect(unmarked.out.stored!.entries.filter((e) => e.type === "world_info").map((e) => e.name)).toEqual(["World Info Before (auto): The ferry", "World Info After (auto): Reeds", "WI At Marker: Mist", "WI At Marker: bell"]);
 
     // An "after" marker placed in the history: its lore spliced one history message from the end, still flagged.
     const inHistory = await placed({ blocks: [MAIN, { id: "b-wia", name: "World Info (after)", role: "system", content: "", marker: "world_info_after", depth: 1 }] }, book());

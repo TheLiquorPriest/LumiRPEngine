@@ -8,7 +8,7 @@
 // the generation that runs through them all, and the chat connections and presets it reads.
 
 import { assemble, type BreakdownEntry, type GenerationType, type Preset } from "./assembly";
-import { activate, activatedWorldInfo, worldInfoChain, worldInfoContext, type Entry } from "./lore";
+import { activateLore, DEFAULT_EMBEDDING_SETTINGS, worldInfoChain, worldInfoContext, type Activation, type BookSource, type EmbeddingSettings, type Entry, type VectorSearch, type WiState, type WorldInfoSettings } from "./lore";
 import { ChatRows, type Chat, type ChatMessage, type Stored } from "./rows";
 import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, textOf, type LlmMessage, type StreamSeen, type StreamedReply } from "./steps";
 
@@ -58,8 +58,8 @@ export interface Outcome {
   /** The generation's parameters as Lumiverse merged them, the interceptors' among them; null when it failed before. */
   parameters: Record<string, unknown> | null;
   stored: Stored | null;
-  /** The World Info chain: how long it took, and the entries as it left them. */
-  worldInfo: { ms: number; entries: Entry[] };
+  /** The World Info chain: how long it took, and the entries as it left them; and how each entry that activated did, as Lumiverse works it out and does not tell. */
+  worldInfo: { ms: number; entries: Entry[]; activated: Activation[] };
   /**
    * A dry run's: the breakdown its assembly made, the chat history's entry left out (`services/generate.service.ts:3255`); its
    * interceptors add none. Absent for a generation, whose breakdown is the one Lumiverse stores beside the reply (`stored`).
@@ -82,6 +82,16 @@ export class StandIn extends ChatRows {
    * (`services/generate.service.ts:2881-2893`), so no interceptor ever sees it.
    */
   councilBlock: string | null = null;
+  /** The user's `worldInfoSettings` (`services/prompt-assembly.service.ts:2273-2280`): Lumiverse's defaults where unset. */
+  worldInfoSettings: Partial<WorldInfoSettings> = {};
+  /** Each book's name and where it is attached for the chat (`bookNameMap`, `bookSourceMap`, `services/world-info-sources.service.ts`), until the stand-in reads a chat's books from their four places (PlanAdapter-S18). */
+  readonly worldBooks = new Map<string, { name: string; source: BookSource }>();
+  /** The vector search a test scripts; null, no embeddings connection, as on the test bed, and no entry activates by vector. */
+  vectorSearch: VectorSearch | null = null;
+  /** The user's embeddings settings the ranking reads. */
+  embeddingSettings: EmbeddingSettings = DEFAULT_EMBEDDING_SETTINGS;
+  /** The draws of a probability or a group (`Math.random` in Lumiverse); a test may give its own. */
+  random: () => number = Math.random;
   /** The generations going on, by id, with what stops each (`services/generation/active-generation-registry.ts`). */
   private readonly going = new Map<string, { user: string; chat: string; stop: AbortController }>();
 
@@ -173,39 +183,47 @@ export class StandIn extends ChatRows {
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const messages = chat.messages.filter((m) => m.id !== excluded);
-
-    // ---- lore, before activation (`prompt-assembly.service.ts:2282-2316`)
-    const wiStarted = performance.now();
-    const entries = this.worldInfo.length === 0 ? [...chat.books] : await worldInfoChain(this.worldInfo, chat.books, worldInfoContext(chat, messages), chat.user, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
-    const wiMs = performance.now() - wiStarted;
-    const active = activate(entries, messages);
-
-    // ---- the prompt (the stand-in's own assembly). The stand-in keeps no personas, so the name for the user's messages is
-    // Lumiverse's own when there is none (`services/prompt-assembly.service.ts:7186-7189`).
-    const bound = connection.metadata?.reasoningBindings?.promptBias;
+    // The stand-in keeps no personas, so the name for the user's messages is Lumiverse's own when there is none
+    // (`services/prompt-assembly.service.ts:7186-7189`), as the stand-in's rows name them.
     const names = { user: "User", character: chat.character.name };
-    const { prompt, breakdown } = assemble(preset, active, messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
-    // The chat history as Lumiverse counts it beside the reply: the prompt's history messages before the interceptors, blank ones left out
-    // (`services/generate.service.ts:1211-1215`, `:1424-1426`).
-    const history = dropBlank(prompt.filter((m) => m.__chatHistorySource === true));
-
-    // ---- the interceptors (`generate.service.ts:1063-1072`, `:1217-1247`; `spindle/world-info-capture.ts:17-52`)
-    const context = {
-      frontendSessionId: undefined,
-      chatId: chat.id,
-      connectionId: connection.id,
-      personaId: input.persona,
-      generationType: type,
-      dryRun,
-      userId: chat.user,
-      activatedWorldInfo: activatedWorldInfo(active),
-      presetId: preset.id,
-      presetMetadata: undefined,
-    };
-    let sent: LlmMessage[] = prompt;
+    // Every entry has a uid of its own from here on, as every entry Lumiverse holds has (`services/world-books.service.ts:842`).
+    for (const e of chat.books) e.uid ??= crypto.randomUUID();
+    let sent: LlmMessage[] = [];
     let body: Record<string, unknown> | null = null;
-    const worldInfo = { ms: wiMs, entries };
+    let worldInfo: Outcome["worldInfo"] = { ms: 0, entries: [], activated: [] };
     try {
+      // ---- the extensions' context handlers, first in the pipeline (`generate.service.ts:1063-1083`): what they give back is the
+      // context, the frontend session put back; one that asks to cancel stops the generation.
+      let context: Record<string, unknown> = { frontendSessionId: undefined, chatId: chat.id, connectionId: connection.id, personaId: input.persona, generationType: type, dryRun, userId: chat.user };
+      if (this.contextHandlers.length > 0) {
+        const handled = await this.contextHandlerChain(context, chat.user);
+        if (handled) context = { ...(handled as Record<string, unknown>), frontendSessionId: undefined };
+        if (context.cancelGeneration === true) throw new CancelledByExtension();
+      }
+
+      // ---- lore (`prompt-assembly.service.ts:2242-2597`): the chain before activation, then activation over the chat's own counts
+      // (`:2272`), which change in place and are saved after the interceptors.
+      const wiStarted = performance.now();
+      const entries = this.worldInfo.length === 0 ? [...chat.books] : await worldInfoChain(this.worldInfo, chat.books, worldInfoContext(chat, messages), chat.user, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
+      const wiMs = performance.now() - wiStarted;
+      const wiState = structuredClone((this.metadataOf(chat).wi_state ?? {}) as WiState);
+      const lore = activateLore({ entries, messages, wiState, settings: this.worldInfoSettings, random: this.random, vector: this.vectorSearch, embedding: this.embeddingSettings, books: this.worldBooks, names });
+      worldInfo = { ms: wiMs, entries, activated: lore.activated };
+
+      // ---- the prompt (`assembly.ts`)
+      const bound = connection.metadata?.reasoningBindings?.promptBias;
+      const { prompt, breakdown } = assemble(preset, lore.entries, messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
+      sent = prompt;
+      // The chat history as Lumiverse counts it beside the reply: the prompt's history messages before the interceptors, blank ones left out
+      // (`services/generate.service.ts:1211-1215`, `:1424-1426`).
+      const history = dropBlank(prompt.filter((m) => m.__chatHistorySource === true));
+
+      // ---- the interceptors (`generate.service.ts:1217-1247`), each handed the context as its own (`host.ts`). Assembly gives activated lore
+      // only when some activated (`services/prompt-assembly.service.ts:4455-4456`): with none, the context keeps what a context handler left.
+      if (lore.told.length > 0) context.activatedWorldInfo = lore.told;
+      delete context.__spindleWorldInfoCaptures;
+      context.presetId = preset.id;
+      context.presetMetadata = undefined;
       const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context) : { messages: prompt, parameters: undefined };
       // After the interceptors: post-processing, the blank filter, collapse, then the parameters (`:1249-1256`, `:1414-1441`).
       sent = intercepted.messages;
@@ -214,7 +232,10 @@ export class StandIn extends ChatRows {
       if (preset.collapse === true) collapse(sent);
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
       if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
-      this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: context.activatedWorldInfo }, chat.user);
+      // The counts saved into the chat's metadata, then the lore told, before the provider is called (`:2827-2879`); a dry run saves none,
+      // and with no lore activated no event is sent (`:2869`).
+      this.mergeChatMetadata(chat, { wi_state: wiState });
+      if (lore.told.length > 0) this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: lore.told, stats: lore.stats }, chat.user);
       if (this.councilBlock !== null) sent.splice(Math.max(0, sent.length - 4), 0, { role: "system", content: this.councilBlock });
       // The streaming switch decides the call and is never sent (`generate.service.ts:3725-3726`): a stream,
       // or one whole answer in one call (`:3793-3815`).
@@ -291,6 +312,13 @@ export class StandIn extends ChatRows {
       this.storeBreakdown(chat, messageId, stored);
       return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo };
     } catch (error) {
+      if (error instanceof CancelledByExtension && generationId !== null) {
+        // A context handler's cancel ends it as a stop does, its empty message removed and nothing saved (`:3003-3022`).
+        this.going.delete(generationId);
+        if (staged !== null) this.deleteMessage(chat.id, staged);
+        this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: "" }, chat.user);
+        return { generationId, error: null, stopped: true, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo };
+      }
       // A failed setup or call ends the generation with its error, its empty message removed (`:2987-3048`).
       const message = error instanceof Error ? error.message : String(error);
       if (generationId !== null) this.going.delete(generationId);
@@ -298,6 +326,28 @@ export class StandIn extends ChatRows {
       if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, error: message, generationType: type }, chat.user);
       return { generationId, error: message, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo };
     }
+  }
+
+  /** The chat's metadata as its row holds it now; the chat held in memory where there is no database. */
+  private metadataOf(chat: Chat): Record<string, unknown> {
+    const row = this.db?.rows("SELECT metadata FROM chats WHERE id = ? AND user_id = ?", chat.id, chat.user)[0];
+    return row === undefined ? (chat.metadata ?? {}) : (JSON.parse(String(row.metadata)) as Record<string, unknown>);
+  }
+
+  /**
+   * `mergeChatMetadataAsync` (`services/chats.service.ts:5241-5244`; `db/chat-operations.ts:22-33`, `:57-80`): each key given replaces
+   * the chat's own, the row's stamp is raised, and the change is told as `CHAT_CHANGED` with the keys that differ
+   * (`services/chats.service.ts:1466-1500`, `:5198-5204`).
+   */
+  private mergeChatMetadata(chat: Chat, partial: Record<string, unknown>): void {
+    const before = this.metadataOf(chat);
+    const metadata = { ...before, ...partial };
+    chat.metadata = metadata;
+    const changedFields = Object.keys(partial).filter((key) => !(key in before) || JSON.stringify(before[key]) !== JSON.stringify(partial[key])).map((key) => `metadata.${key}`);
+    this.db?.run("UPDATE chats SET metadata = ?, updated_at = ? WHERE id = ? AND user_id = ?", JSON.stringify(metadata), Math.floor(this.now() / 1000), chat.id, chat.user);
+    const row = this.db?.rows("SELECT * FROM chats WHERE id = ? AND user_id = ?", chat.id, chat.user)[0];
+    const shown = row === undefined ? { id: chat.id, user_id: chat.user, character_id: chat.character.id, name: chat.name ?? "", metadata } : { ...row, metadata };
+    this.emit("CHAT_CHANGED", { chat: shown, changedFields }, chat.user);
   }
 
   /** What a stopped generation saves (`persistPartialContent`, `services/generate.service.ts:3565-3660`), and the text it saved. */
@@ -324,5 +374,13 @@ export class StandIn extends ChatRows {
       return joined;
     }
     return seen.content;
+  }
+}
+
+/** `GenerationCancelledByExtensionError` (`services/generate.service.ts:525-530`). */
+class CancelledByExtension extends Error {
+  constructor() {
+    super("Generation cancelled by extension context handler");
+    this.name = "GenerationCancelledByExtension";
   }
 }

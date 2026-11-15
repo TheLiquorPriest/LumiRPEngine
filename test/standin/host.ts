@@ -24,6 +24,11 @@ export interface Installed extends ExtSpindle {
   fromFrontend(payload: unknown, user: string, session?: string): void;
   /** The modals it opened and has not closed, by user. */
   readonly modals: Map<string, { title: string; items: unknown[] }>;
+  /**
+   * `spindle.registerContextHandler` (`spindle/worker-runtime.ts:4288-4296`), which RPE's own extension does not call: another
+   * extension's handler, given each generation's context first and giving back the context the generation goes on with.
+   */
+  registerContextHandler(handler: ContextHandler, priority?: number, opts?: { timeoutMs?: number; required?: boolean }): void;
 }
 
 export interface Ext {
@@ -47,6 +52,7 @@ export interface Registration<H> {
 
 export type WorldInfoHandler = (ctx: unknown) => Promise<WorldInfoReturn>;
 type PromptHandler = (messages: PromptMessageDTO[], context: unknown) => Promise<InterceptorReturn>;
+export type ContextHandler = (context: unknown, signal?: AbortSignal) => Promise<unknown>;
 
 /** Events that need `generation` (`spindle/worker-host.ts:2877-2883`). */
 const GENERATION_EVENTS: Record<string, true> = { GENERATION_STARTED: true, GENERATION_IN_PROGRESS: true, GENERATION_ENDED: true, GENERATION_STOPPED: true, STREAM_TOKEN_RECEIVED: true };
@@ -80,6 +86,13 @@ export class ExtensionHost {
   proxyTimeoutMs = 30_000;
   protected worldInfo: Registration<WorldInfoHandler>[] = [];
   protected interceptors: Registration<PromptHandler>[] = [];
+  /** The context handlers (`spindle/context-handler.ts`), each with its wall-clock budget. */
+  protected contextHandlers: (Registration<ContextHandler> & { timeoutMs: number })[] = [];
+  /** The timer a context handler's budget runs on: the process's own unless a test gives one; gives what clears it. */
+  budgetTimer: (ms: number, fire: () => void) => () => void = (ms, fire) => {
+    const timer = quietTimer(ms, fire);
+    return () => clearTimeout(timer);
+  };
 
   /** Installs an extension with these permissions granted, and gives its worker's view of Spindle. */
   install(granted: readonly string[]): Installed {
@@ -92,8 +105,9 @@ export class ExtensionHost {
       // `permission_changed` (`spindle/worker-runtime.ts:5065-5090`).
       for (const handler of ext.changed) handler({ permission, granted, allGranted: [...ext.granted] });
     };
-    // Both are kept sorted by priority, lowest first; equal ones in the order registered (`spindle/interceptor-pipeline.ts:87-90`, `spindle/world-info-interceptor.ts:192-194`).
-    const place = <H>(list: Registration<H>[], registration: Registration<H>): Registration<H>[] =>
+    // Each list is kept sorted by priority, lowest first; equal ones in the order registered (`spindle/interceptor-pipeline.ts:87-90`,
+    // `spindle/world-info-interceptor.ts:192-194`, `spindle/context-handler.ts:23-26`).
+    const place = <R extends Registration<unknown>>(list: R[], registration: R): R[] =>
       [...list.filter((r) => r.ext !== ext), registration].sort((a, b) => a.priority - b.priority);
     const api: Installed = {
       logs: ext.logs,
@@ -146,6 +160,7 @@ export class ExtensionHost {
       stop() {
         host.worldInfo = host.worldInfo.filter((r) => r.ext !== ext);
         host.interceptors = host.interceptors.filter((r) => r.ext !== ext);
+        host.contextHandlers = host.contextHandlers.filter((r) => r.ext !== ext);
         ext.handlers.clear();
         ext.forwarded.clear();
         ext.changed.clear();
@@ -170,6 +185,17 @@ export class ExtensionHost {
         return () => {
           host.interceptors = host.interceptors.filter((r) => r !== registration);
         };
+      },
+      registerContextHandler(handler, priority, opts) {
+        // `spindle/worker-host.ts:4745-4797`: needs `context_handler`; one per extension, a second replacing the first; its budget
+        // 10 seconds, or the one asked for held between 1 and 120.
+        if (!ext.granted.has("context_handler")) {
+          host.log.push(`[Spindle:${ext.id}] Context handler permission not granted`);
+          ext.logs.push("permission_denied: context_handler (registerContextHandler)");
+          return;
+        }
+        const timeoutMs = typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) ? Math.min(Math.max(opts.timeoutMs, 1_000), 120_000) : 10_000;
+        host.contextHandlers = place(host.contextHandlers, { ext, priority: priority ?? 100, handler, required: opts?.required === true, timeoutMs });
       },
       on(event, handler) {
         // `spindle/worker-runtime.ts:1747-1765`: the host is asked once, when the first handler is added.
@@ -244,6 +270,48 @@ export class ExtensionHost {
     }
   }
 
+  // ---------------------------------------------------------------- the context handlers
+
+  /**
+   * `ContextHandlerChain.run` (`spindle/context-handler.ts:39-131`), each handler behind its worker call (`spindle/worker-host.ts:
+   * 4771-4796`, `spindle/worker-runtime.ts:4886-4917`): lowest priority first, each given the context the one before gave back and
+   * giving back the one after, within its budget. A handler that throws or runs out of budget is passed over, the context as it
+   * was, unless it is required: then the generation fails with its error.
+   */
+  protected async contextHandlerChain(context: Record<string, unknown>, userId: string): Promise<unknown> {
+    let result: unknown = context;
+    for (const registration of this.contextHandlers) {
+      const controller = new AbortController();
+      const timeout = Promise.withResolvers<never>();
+      const clear = this.budgetTimer(registration.timeoutMs, () => {
+        const error = new Error(`Context handler from ${registration.ext.id} timed out (${Math.round(registration.timeoutMs / 1000)}s)`);
+        controller.abort(error);
+        timeout.reject(error);
+      });
+      try {
+        const call = (async () => {
+          try {
+            // Across the worker's boundary both ways, so a copy each way (`spindle/worker-runtime.ts:4891-4896`).
+            return structuredClone(await registration.handler(structuredClone(result), controller.signal));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            registration.ext.logs.push(`Context handler error: ${message}`);
+            throw new Error(message);
+          }
+        })();
+        // A handler that fails after its budget ran out fails no one: the chain has gone on.
+        call.catch(() => undefined);
+        result = await Promise.race([call, timeout.promise]);
+      } catch (error) {
+        this.log.push(`[Spindle] Context handler error from ${registration.ext.id} (user ${userId}): ${error instanceof Error ? error.message : String(error)}`);
+        if (registration.required) throw error;
+      } finally {
+        clear();
+      }
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------------- the interceptor pipeline
 
   /**
@@ -288,7 +356,7 @@ export class ExtensionHost {
         const call = (async () => {
           let returned: InterceptorReturn;
           try {
-            returned = await registration.handler(structuredClone(dto) as PromptMessageDTO[], { ...structuredClone(context), signal: controller.signal });
+            returned = await registration.handler(structuredClone(dto) as PromptMessageDTO[], { ...projectedContext(context, registration.ext.id), signal: controller.signal });
           } catch (error) {
             throw new Error(error instanceof Error ? error.message : String(error));
           }
@@ -312,4 +380,33 @@ export class ExtensionHost {
     }
     return { messages: result, parameters: merged };
   }
+}
+
+/** `toCaptureDTO` (`spindle/world-info-capture.ts:17-29`): an activated entry as an extension is told it, a peer's book told as a persona's. */
+function toldEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  const dto: Record<string, unknown> = { id: entry.id, comment: entry.comment, keys: entry.keys, source: entry.source };
+  if (entry.score !== undefined) dto.score = entry.score;
+  if (entry.bookId !== undefined) dto.bookId = entry.bookId;
+  if (entry.bookSource === "peer") dto.bookSource = "persona";
+  else if (entry.bookSource !== undefined) dto.bookSource = entry.bookSource;
+  return dto;
+}
+
+/**
+ * `projectWorldInfoCaptureContext` (`spindle/world-info-capture.ts:31-73`), as the worker host hands an interceptor its context
+ * (`spindle/worker-host.ts:3200-3204`): a copy, each activated entry cut to what an extension is told, and `capturedWorldInfo` only
+ * for the extension that asked to capture, never one the context already held.
+ */
+function projectedContext(context: Record<string, unknown>, extensionId: string): Record<string, unknown> {
+  const projected = structuredClone(context);
+  const captures = projected.__spindleWorldInfoCaptures;
+  delete projected.__spindleWorldInfoCaptures;
+  delete projected.capturedWorldInfo;
+  const told = (entries: unknown[]): Record<string, unknown>[] => entries.filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null && typeof (e as { id?: unknown }).id === "string").map(toldEntry);
+  if (Array.isArray(projected.activatedWorldInfo)) projected.activatedWorldInfo = told(projected.activatedWorldInfo);
+  if (typeof captures === "object" && captures !== null && Object.hasOwn(captures, extensionId)) {
+    const entries: unknown = (captures as Record<string, unknown>)[extensionId];
+    projected.capturedWorldInfo = Array.isArray(entries) ? told(entries) : [];
+  }
+  return projected;
 }
