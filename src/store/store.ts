@@ -30,6 +30,7 @@ import { isWorldDoc } from "../engine/authoring";
 import { migrateStore, missingStoreTables } from "./schema";
 import { TreeView } from "./view";
 import {
+  JoinedTurnError,
   LANES,
   StoreInputError,
   StoreSchemaError,
@@ -129,6 +130,7 @@ interface TurnDb {
   swipe_date: number | null;
   status: string;
   edited: string | null;
+  joined: string | null;
   intent: string | null;
   story_time: number | null;
   timings: string | null;
@@ -197,6 +199,7 @@ function turnOf(r: TurnDb): TurnRow {
     date: r.swipe_date,
     status: r.status as TurnStatus,
     edited: r.edited,
+    joined: r.joined,
     intent: r.intent,
     storyTime: r.story_time,
     timings: r.timings === null ? null : (JSON.parse(r.timings) as JsonValue),
@@ -593,11 +596,21 @@ export class UserStore {
   }
 
   /**
+   * A turn a write, or a reading of its state, is addressed to: one there is, and not one joined to another turn, which is refused,
+   * naming the turn it joined (plan §10.10, R-192 (f)). The store never sends such a call on itself.
+   */
+  private turnToWrite(id: string): TurnRow {
+    const t = this.turnOrThrow(id);
+    if (t.joined !== null) throw new JoinedTurnError(id, t.joined);
+    return t;
+  }
+
+  /**
    * The path node for `turn`, one of this user's, standing after the node `on` (null: at the
    * start), made if new. For importers that rebuild a recorded path.
    */
   extendPath(on: string | null, turn: string): string {
-    this.turnOrThrow(turn);
+    this.turnToWrite(turn);
     let depth = 0;
     if (on !== null) {
       const before = this.db.query<{ depth: number }, [string, string]>("SELECT depth FROM path_node WHERE user = ? AND key = ?").get(this.id, on);
@@ -642,7 +655,7 @@ export class UserStore {
    * reply it shares); anything else waits for the next comparison (`sync`).
    */
   tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut" }): TurnRow {
-    const t = this.turnOrThrow(id);
+    const t = this.turnToWrite(id);
     if (t.status === "dropped") throw new StoreInputError(`turn ${id} was dropped`);
     // A finished turn every `snapshotEvery` along its path keeps its state, so a cold start is short.
     const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.foldNode(t.node) : null;
@@ -683,14 +696,14 @@ export class UserStore {
 
   /** A turn whose generation stopped with nothing saved: it never joins a path. */
   dropTurn(id: string): TurnRow {
-    const t = this.turnOrThrow(id);
+    const t = this.turnToWrite(id);
     if (t.status !== "open") throw new StoreInputError(`turn ${id} is ${t.status}, not open`);
     this.write(false, () => this.db.run("UPDATE turn SET status = 'dropped' WHERE user = ? AND id = ?", [this.id, id]));
     return this.turnOrThrow(id);
   }
 
   updateTurn(id: string, input: { intent?: string | null; storyTime?: number | null; timings?: JsonValue | null; tokensIn?: number | null; tokensOut?: number | null }): TurnRow {
-    this.turnOrThrow(id);
+    this.turnToWrite(id);
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
     const put = (column: string, value: string | number | null): void => {
@@ -950,7 +963,7 @@ export class UserStore {
    * and the state returned for them is that one.
    */
   addChanges(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; state: StoreState } {
-    const turn = this.turnOrThrow(turnId);
+    const turn = this.turnToWrite(turnId);
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
     inputs.forEach((c, i) => checkChange(c, i));
     const jobs = [...new Set(inputs.flatMap((c) => (c.job ? [c.job] : [])))];
@@ -984,7 +997,7 @@ export class UserStore {
 
   /** Takes back an open turn's staged changes, all or one agent's (the lead dropping a sub-agent's writes). How many went. */
   dropStaged(turnId: string, by?: string): number {
-    const turn = this.turnOrThrow(turnId);
+    const turn = this.turnToWrite(turnId);
     if (turn.status !== "open") throw new StoreInputError(`turn ${turnId} is ${turn.status}: only an open turn's staged changes can be taken back`);
     return this.write(true, () => {
       const r = by === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND by = ?", [this.id, turnId, by]);
@@ -999,13 +1012,45 @@ export class UserStore {
    * (plan §10.9), and stay. How many went.
    */
   takeBack(turnId: string, after: number): number {
-    const turn = this.turnOrThrow(turnId);
+    const turn = this.turnToWrite(turnId);
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
     return this.write(true, () => {
       const r = this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [this.id, turnId, after]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
     });
+  }
+
+  /**
+   * A continue's held turn joins the turn it extended (plan §10.10, "Continue: the same turn, extended"; R-192 (e), (f)): when the
+   * generation's end names a message `into` is tied to, what the continue's run held on its own open turn is added to `into`. Its own
+   * changes come after `into`'s own, in the order they were made, and a job's with their job kept, a job being recorded with the turn
+   * that started it, which is now `into` (§10.9); each as it was recorded, nothing folded or worked out again. The held turn is kept,
+   * marked as joined, never dropped: a job it started may still be running with it in its scope, and `joinedTo` names where that job
+   * writes. A held turn that is not open, a turn that is not tied, and a turn of another chat are refused. The changes it added, as
+   * they now stand on `into`.
+   */
+  joinTurn(held: string, into: string): ChangeRow[] {
+    const from = this.turnToWrite(held);
+    const to = this.turnToWrite(into);
+    if (from.status !== "open") throw new StoreInputError(`turn ${held} is ${from.status}: only a continue's open turn joins another`);
+    if (to.status !== "done" && to.status !== "cut") throw new StoreInputError(`turn ${into} is ${to.status}: a continue joins the turn tied to the message it extended`);
+    if (from.chat !== to.chat) throw new StoreInputError(`turn ${held} is chat ${from.chat}'s and turn ${into} is chat ${to.chat}'s: a continue extends a turn of its own chat`);
+    const moved = this.changes(held);
+    const next = (this.changes(into).at(-1)?.ord ?? -1) + 1;
+    this.write(true, () => {
+      const put = this.db.query("UPDATE change SET turn = ?, ord = ? WHERE user = ? AND id = ?");
+      moved.forEach((c, i) => put.run(into, next + i, this.id, c.id));
+      this.db.run("UPDATE turn SET status = 'joined', joined = ? WHERE user = ? AND id = ?", [into, this.id, held]);
+      this.dropSnapshotsThrough(into);
+    });
+    const ids = new Set(moved.map((c) => c.id));
+    return this.changes(into).filter((c) => ids.has(c.id));
+  }
+
+  /** The turn a joined turn joined (`joinTurn`); null for a turn that joined none. The one place that resolves a joined turn asks it. */
+  joinedTo(turn: string): string | null {
+    return this.turnOrThrow(turn).joined;
   }
 
   /** Cached snapshots on every path through the turn, and after it, no longer hold. */
@@ -1021,9 +1066,12 @@ export class UserStore {
 
   // ------------------------------------------------------------ state
 
-  /** State at a turn, along the path it was made on; inside an open turn, with its staged changes. */
+  /**
+   * State at a turn, along the path it was made on; inside an open turn, with its staged changes. A turn joined to another holds no
+   * changes of its own any more: reading it is refused, naming the turn it joined.
+   */
   stateAt(turnId: string): Folded {
-    return this.foldNode(this.turnOrThrow(turnId).node).folded;
+    return this.foldNode(this.turnToWrite(turnId).node).folded;
   }
 
   /**
@@ -1105,7 +1153,7 @@ export class UserStore {
    * changed last) is the turn's own as folded.
    */
   setBase(turnId: string, world: WorldState): void {
-    const turn = this.turnOrThrow(turnId);
+    const turn = this.turnToWrite(turnId);
     const own = this.foldNode(turn.node).folded.state;
     const doc: SnapshotDoc = { state: { ...own, world }, notApplied: [], rebased: [] };
     this.write(true, () => {
@@ -1339,7 +1387,7 @@ export class UserStore {
   /** A session: the scene it is, opened by a turn of the user's. */
   openSession(input: { chat: string; scene: string; turn: string }): SessionRow {
     this.chatOrThrow(input.chat);
-    this.turnOrThrow(input.turn);
+    this.turnToWrite(input.turn);
     const id = crypto.randomUUID();
     this.write(false, () => this.db.run("INSERT INTO session (user, id, chat, scene, opened_by) VALUES (?, ?, ?, ?, ?)", [this.id, id, input.chat, input.scene, input.turn]));
     return this.session(id) as SessionRow;
@@ -1347,7 +1395,7 @@ export class UserStore {
 
   closeSession(id: string, turn: string): SessionRow {
     if (!this.session(id)) throw new StoreInputError(`no session ${id}`);
-    this.turnOrThrow(turn);
+    this.turnToWrite(turn);
     this.write(false, () => this.db.run("UPDATE session SET closed_by = ? WHERE user = ? AND id = ?", [turn, this.id, id]));
     return this.session(id) as SessionRow;
   }

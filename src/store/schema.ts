@@ -156,6 +156,12 @@ CREATE INDEX change_job ON change (user, job) WHERE job IS NOT NULL;
     // The path column keeps the path and nothing else. A chat made before this comes up having heard nothing.
     sql: `ALTER TABLE chat ADD COLUMN heard TEXT NOT NULL DEFAULT '{}';`,
   },
+  {
+    version: 4,
+    // A continue's held turn joined to the turn it extended (plan §10.10, R-192 (e), (f)): the turn whose changes it joined, kept
+    // so a job the continue started, still holding that turn, is told where to write. A turn made before this joined none.
+    sql: `ALTER TABLE turn ADD COLUMN joined TEXT;`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

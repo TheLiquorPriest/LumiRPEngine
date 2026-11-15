@@ -12,7 +12,7 @@ import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
 import { migrateStore, STORE_MIGRATIONS } from "../../src/store/schema";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
-import { StoreInputError, type SeenMessage, type ShownMessage } from "../../src/store/types";
+import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
 import { carried, engine, goTo, hand, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
@@ -517,7 +517,7 @@ describe("heard between turns", () => {
       // The store's tables as the build before this one left them, with a chat in them.
       expect(migrateStore(db, STORE_MIGRATIONS.filter((m) => m.version <= 2))).toBe(2);
       db.run("INSERT INTO chat (user, id, created) VALUES (?, 'old', 1)", [USER]);
-      expect(migrateStore(db)).toBe(3);
+      expect(migrateStore(db)).toBe(4);
       expect(db.query<{ heard: string }, []>("SELECT heard FROM chat").get()?.heard).toBe("{}");
       const s = openStore({ db, registry: registry(), worlds: () => undefined }).user(USER);
       const path = seen(["u1", "(an aside)"], ["u2", "go on"]);
@@ -567,6 +567,138 @@ describe("heard between turns", () => {
     // A swipe no turn was played on, and one that shows its text as saved, are left to the comparison.
     expect(s.heardEdit("c", "m3", 3, hashOf("A reply written elsewhere."))).toBeNull();
     expect(s.heardEdit("c", "m1", 1, hashOf("Wren comes in from the rain."))).toBeNull();
+  });
+});
+
+describe("a continue's held turn", () => {
+  /** Two played replies, compared as shown, and a continue of the second running on an open turn of its own (R-192 (e)). */
+  function continued(options: { snapshotEvery?: number } = {}) {
+    // A clock that moves on at every reading, so a turn begun after a job ended begins later than it ended (§10.9).
+    let clock = 0;
+    const ts = testStore({ now: () => ++clock, ...options });
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const t2 = play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV), tick(5)));
+    s.sync("c", asShown(seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "light"], ["m2", "Bram lends her a lantern.", 0]), { m1: 1, m2: 2 }));
+    // The player asks the second reply to go on. Until the generation's end names a message, what the continue's run changes is
+    // held on its own open turn, begun where the reply's turn ends (§10.8), and a job it starts records there too (§10.9).
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    s.addChanges(held.id, engine(goTo(POV, "cellar")));
+    s.addChanges(held.id, engine(...hand("lantern", POV, "cask")).map((c) => ({ ...c, job: "j-cellar" })));
+    s.addChanges(held.id, engine(tick(30)));
+    return { ...ts, t1, t2, held };
+  }
+
+  test("a continue's held changes join the turn it extends, after its own and in their order, a job's change with its job, and that turn's state is the one they make", () => {
+    // Every turn keeps its state stored, so one stored on a path through the extended turn is there to go stale.
+    const ts = continued({ snapshotEvery: 1 });
+    const { s, t1, t2, held } = ts;
+    // A later reply made after the one extended and gone before the continue: its turn stays recorded after it, its state stored.
+    const later = play(s, "c", "m3", "The rain stops.", 3, engine(tick(1)));
+    const own = s.changes(t2.id);
+    const heldRows = s.changes(held.id);
+    expect(s.stateAt(t2.id).state.world.entities[POV]?.fields.place).toBe("common_room");
+    // The end names the second reply, which t2 is tied to: the continue was that turn, extended (§10.10).
+    const joined = s.joinTurn(held.id, t2.id);
+    // Its own changes first, as they were; then the continue's, in the order they were made, the job's with their job; each the
+    // row as it was recorded, its place in the turn going on from the last.
+    expect(s.changes(t2.id)).toEqual([...own, ...heldRows.map((c, i) => ({ ...c, turn: t2.id, ord: own.length + i }))]);
+    expect(joined).toEqual(s.changes(t2.id).slice(own.length));
+    expect(joined.map((c) => [c.op, c.job])).toEqual([
+      ["set", null],
+      ["unlink", "j-cellar"],
+      ["link", "j-cellar"],
+      ["clock", null],
+    ]);
+    expect(s.changes(held.id)).toEqual([]);
+    // That turn's state is the one they make, as if the continue had been made on it: cold, from the store alone, too.
+    const at = s.stateAt(t2.id).state.world;
+    expect(at.entities[POV]?.fields.place).toBe("cellar");
+    expect(at.clock - s.stateAt(t1.id).state.world.clock).toBe(5 + 30);
+    expect(hashJson(reopened(ts).user(USER).stateAt(t2.id).state)).toBe(hashJson(s.stateAt(t2.id).state));
+    // What was stored on every path through it is let go: the later turn's state is made again on top of it.
+    expect(reopened(ts).user(USER).stateAt(later.id).state.world.entities[POV]?.fields.place).toBe("cellar");
+    // The job's change takes effect as a job's does: once the job has ended, just before the next turn to begin (§10.9).
+    expect(carried(at, "cask")).toEqual([]);
+    s.endJob("j-cellar");
+    const next = s.beginTurn({ chat: "c", kind: "normal" });
+    expect(carried(s.stateAt(next.id).state.world, "cask")).toEqual(["lantern"]);
+    // A delete of the extended turn's message takes the joined changes with it.
+    s.sync("c", asShown(seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0]), { m1: 1 }));
+    expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("common_room");
+  });
+
+  test("the held turn is kept, marked as joined, and the lookup names the turn it joined", () => {
+    const ts = continued();
+    const { s, t2, held } = ts;
+    expect(s.joinedTo(held.id)).toBeNull();
+    s.joinTurn(held.id, t2.id);
+    // Kept, never dropped: a job the continue started may still hold it in its scope.
+    expect(s.turn(held.id)).toMatchObject({ status: "joined", joined: t2.id });
+    expect([s.joinedTo(held.id), s.joinedTo(t2.id)]).toEqual([t2.id, null]);
+    expect(reopened(ts).user(USER).joinedTo(held.id)).toBe(t2.id);
+    // A continue that saved nothing new loses its own changes, as today, while its job's still join (R-192 (f)).
+    const quiet = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    s.addChanges(quiet.id, engine(tick(45)));
+    s.addChanges(quiet.id, engine(make("note", "Folded note", POV)).map((c) => ({ ...c, job: "j-note" })));
+    s.takeBack(quiet.id, -1);
+    expect(s.joinTurn(quiet.id, t2.id).map((c) => [c.op, c.job])).toEqual([["spawn", "j-note"]]);
+    expect(s.joinedTo(quiet.id)).toBe(t2.id);
+    // A turn made before turns could join comes up joined to none.
+    const db = new Database(":memory:");
+    try {
+      migrateStore(db, STORE_MIGRATIONS.filter((m) => m.version <= 3));
+      db.run("INSERT INTO chat (user, id, created) VALUES (?, 'old', 1)", [USER]);
+      db.run("INSERT INTO turn (user, id, chat, node, depth, kind, status, created) VALUES (?, 'old-turn', 'old', 'n', 0, 'normal', 'open', 1)", [USER]);
+      expect(migrateStore(db)).toBe(4);
+      expect(openStore({ db, registry: registry(), worlds: () => undefined }).user(USER).joinedTo("old-turn")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a write addressed to a joined turn is refused, naming the turn it joined", () => {
+    const ts = continued();
+    const { s, t1, t2, held } = ts;
+    s.joinTurn(held.id, t2.id);
+    const before = written(ts);
+    // Every write, and every reading of its state, a job's included: the store never sends it on to the turn it joined itself.
+    const calls: [string, () => unknown][] = [
+      ["a change", () => s.addChanges(held.id, engine(tick(1)))],
+      ["a job's change", () => s.addChanges(held.id, engine(tick(1)).map((c) => ({ ...c, job: "j-cellar" })))],
+      ["a job's reading", () => s.stateFor(held.id, "j-cellar")],
+      ["a reading", () => s.stateAt(held.id)],
+      ["the tree at it", () => s.viewFor(held.id, "j-cellar")],
+      ["taking staged changes back", () => s.dropStaged(held.id)],
+      ["taking changes back", () => s.takeBack(held.id, -1)],
+      ["a tie", () => s.tieTurn(held.id, { message: "m2", hash: hashOf("Bram lends her a lantern.") })],
+      ["a drop", () => s.dropTurn(held.id)],
+      ["its record", () => s.updateTurn(held.id, { intent: "Go on." })],
+      ["a starting state", () => s.setBase(held.id, s.stateAt(t2.id).state.world)],
+      ["a session", () => s.openSession({ chat: "c", scene: "the cellar", turn: held.id })],
+      ["joining it again", () => s.joinTurn(held.id, t2.id)],
+    ];
+    for (const [what, call] of calls) {
+      let refused: unknown = null;
+      try {
+        call();
+      } catch (error) {
+        refused = error;
+      }
+      expect([what, refused instanceof JoinedTurnError ? [refused.turn, refused.joined] : refused]).toEqual([what, [held.id, t2.id]]);
+    }
+    expect(written(ts)).toBe(before);
+    // Resolved to the turn it joined, the same write lands there.
+    s.addChanges(t2.id, engine(tick(1)).map((c) => ({ ...c, job: "j-cellar" })));
+    expect(s.changes(t2.id).filter((c) => c.job === "j-cellar").map((c) => c.op)).toEqual(["unlink", "link", "clock"]);
+    // A join is refused where it cannot be one: a turn that is not open, a turn not tied, a turn of another chat.
+    const open = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    expect(() => s.joinTurn(t1.id, t2.id)).toThrow(StoreInputError);
+    expect(() => s.joinTurn(open.id, s.beginTurn({ chat: "c", kind: "normal" }).id)).toThrow(StoreInputError);
+    s.createChat({ id: "other", revision: ts.revision });
+    const elsewhere = s.beginTurn({ chat: "other", kind: "continue" });
+    expect(() => s.joinTurn(elsewhere.id, t2.id)).toThrow(StoreInputError);
   });
 });
 

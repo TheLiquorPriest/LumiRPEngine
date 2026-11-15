@@ -21,8 +21,11 @@ export type Precision = (typeof PRECISIONS)[number];
 export const SOURCES = ["prose", "lore", "author", "gm", "character", "player", "import", "default", "invented"] as const;
 export type Source = (typeof SOURCES)[number];
 
-/** A turn's life: staged while open, then tied to a saved reply (`done`, or `cut` when only part was saved), or dropped when nothing was saved. */
-export const TURN_STATUSES = ["open", "done", "cut", "dropped"] as const;
+/**
+ * A turn's life: staged while open, then tied to a saved reply (`done`, or `cut` when only part was saved), dropped when nothing was
+ * saved, or `joined`: a continue's held turn whose changes joined the turn it extended (plan §10.10, R-192 (e), (f)).
+ */
+export const TURN_STATUSES = ["open", "done", "cut", "dropped", "joined"] as const;
 export type TurnStatus = (typeof TURN_STATUSES)[number];
 
 /**
@@ -127,6 +130,11 @@ export interface TurnRow {
   status: TurnStatus;
   /** The hash the chat showed last when it differs from the saved one: the reply was edited. */
   edited: string | null;
+  /**
+   * The turn whose changes it joined (`UserStore.joinTurn`): a continue's held turn, joined to the turn it extended when the
+   * generation's end named that turn's message. Null for any other. A write or a reading of its state addressed to it is refused.
+   */
+  joined: string | null;
   /** The intent record, as text. */
   intent: string | null;
   /** The world clock at the turn's end, minutes since the world's epoch. */
@@ -316,6 +324,21 @@ export class StoreInputError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "StoreInputError";
+  }
+}
+
+/**
+ * A write, or a reading of its state, addressed to a turn that was joined to another (plan §10.10, R-192 (f)): refused, naming the
+ * turn it joined (`joined`). The store never sends it on there itself: one place resolves a joined turn, and a caller that missed
+ * that place is found by this, not by a change landing where nobody reads it.
+ */
+export class JoinedTurnError extends StoreInputError {
+  constructor(
+    readonly turn: string,
+    readonly joined: string,
+  ) {
+    super(`turn ${turn} was joined to turn ${joined}: address that turn instead`);
+    this.name = "JoinedTurnError";
   }
 }
 
