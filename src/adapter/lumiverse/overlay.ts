@@ -1,11 +1,15 @@
-// Laying the tag's message list over the request body Lumiverse sent (STANDALONE-PLAN §4.2). The
-// extension's interceptor lists every message as it hands the prompt on; after it Lumiverse may join
-// neighbouring messages (`promptPostProcessing`), drop blank ones and collapse the prompt into one user
-// message (`generate.service.ts:1249-1256`, `:1414-1429`). Those steps are replayed here on the list's
-// shape, as Lumiverse's code makes them, until one way explains the body. Then every stretch of every
-// body message is known as one listed message, a separator Lumiverse put between two, or text no
-// listed message accounts for; and the body can be made again with some listed messages left out, as
-// Lumiverse would have made it had the interceptor left them out (`rebuild`).
+// Laying the tag's message list over the request body Lumiverse sent (STANDALONE-PLAN §4.2; READINGS
+// R-103). The extension's interceptor lists every message as it hands the prompt on; after it Lumiverse
+// may join neighbouring messages (`promptPostProcessing`), drop blank ones and collapse the prompt into
+// one user message (`generate.service.ts:1249-1256`, `:1414-1429`), as the user's setting and the
+// preset say: those settings are read (`joiningOf`) and the steps replayed here on the list's shape as
+// Lumiverse's code makes them; only where the settings could not be read is the way found from the
+// body. Then every stretch of every body message is known as one listed message, a separator Lumiverse
+// put between two, or text no listed message accounts for (a message Lumiverse adds after its
+// interceptors, such as a council's deliberation, `generate.service.ts:2881-2893`); and the body can be
+// made again with some listed messages left out, as Lumiverse would have made it had the interceptor
+// left them out (`rebuild`). Nothing Lumiverse dropped is put back. The thinking Lumiverse sends back
+// with an earlier reply (`reasoning_content`, `openai-compatible.ts:442-460`) is read apart from its text.
 
 import { isRecord } from "../../shared/json";
 import { textHash, type Role, type TagMessage } from "./wire";
@@ -35,6 +39,17 @@ export const JOININGS: readonly Joining[] = [
   { post: "single", collapse: true },
 ];
 
+/**
+ * The joining Lumiverse's settings give: the user's `promptPostProcessing` value, applied where it is set
+ * (`generate.service.ts:1249-1256`, `applyPostProcessing` `:5406-5430`), and the preset's
+ * `prompts.advancedSettings.collapseMessages`, on only where it is `true` (`prompt-assembly.service.ts:4452`).
+ */
+export function joiningOf(postProcessing: unknown, presetPrompts: unknown): Joining {
+  const post = postProcessing === "merge" || postProcessing === "semi" || postProcessing === "strict" ? "merge" : postProcessing === "single" ? "single" : "none";
+  const advanced = isRecord(presetPrompts) && isRecord(presetPrompts.advancedSettings) ? presetPrompts.advancedSettings : null;
+  return { post, collapse: advanced?.collapseMessages === true };
+}
+
 /** One message of the request body: its role, its text (its text parts run together, as `getTextContent` reads it) and its other parts. */
 export interface BodyMessage {
   role: string;
@@ -45,16 +60,19 @@ export interface BodyMessage {
   textParts: number[] | null;
   /** Its parts that are not text, as sent. */
   media: unknown[];
+  /** The thinking sent back with it (`reasoning_content`), apart from its text; null where none. */
+  thinking: string | null;
 }
 
-/** The body's messages, read (OpenAI's chat format: `openai-compatible.ts:359-435`); null when they are not a list of messages. */
+/** The body's messages, read (OpenAI's chat format: `openai-compatible.ts:359-460`); null when they are not a list of messages. */
 export function readBodyMessages(messages: unknown): BodyMessage[] | null {
   if (!Array.isArray(messages)) return null;
   const out: BodyMessage[] = [];
   for (const m of messages) {
     if (!isRecord(m) || typeof m.role !== "string") return null;
     const content = m.content;
-    if (typeof content === "string") out.push({ role: m.role, content, text: content, textParts: null, media: [] });
+    const thinking = typeof m.reasoning_content === "string" && m.reasoning_content !== "" ? m.reasoning_content : null;
+    if (typeof content === "string") out.push({ role: m.role, content, text: content, textParts: null, media: [], thinking });
     else if (Array.isArray(content)) {
       const texts: string[] = [];
       const media: unknown[] = [];
@@ -62,8 +80,8 @@ export function readBodyMessages(messages: unknown): BodyMessage[] | null {
         if (isRecord(part) && part.type === "text" && typeof part.text === "string") texts.push(part.text);
         else media.push(part);
       }
-      out.push({ role: m.role, content, text: texts.join(""), textParts: texts.map((t) => t.length), media });
-    } else if (content === null || content === undefined) out.push({ role: m.role, content: "", text: "", textParts: null, media: [] });
+      out.push({ role: m.role, content, text: texts.join(""), textParts: texts.map((t) => t.length), media, thinking });
+    } else if (content === null || content === undefined) out.push({ role: m.role, content: "", text: "", textParts: null, media: [], thinking });
     else return null;
   }
   return out;
@@ -166,6 +184,8 @@ export interface LaidMessage {
   media: number;
   /** Each listed message's stretch of `text` (UTF-16 offsets), in order; empty when no listed message accounts for this message. */
   places: { member: number; start: number; end: number }[];
+  /** The thinking Lumiverse sent back with it (an earlier reply's), read apart from its text: no part of what the model is shown as the message. */
+  thinking?: string;
 }
 
 /** Where each chunk of `x` stands in a text made the way `x` is, its chunks having these lengths. */
@@ -209,8 +229,12 @@ export interface Overlay {
   absent: number[];
   /** Listed messages not found where the replay put them: the body is not fully told apart. */
   missing: number[];
-  /** Every stretch of every body message is told apart, and every listed message is found or left out as Lumiverse leaves it out. */
+  /** Body messages no listed message accounts for, by their place in the body: text Lumiverse added after its interceptors, or text changed after them. */
+  unlisted: number[];
+  /** Every listed message is found, in order, or left out as Lumiverse leaves blank ones out; a body message no listed message accounts for may stand between them. */
   complete: boolean;
+  /** The parts that are not text (pictures): how many the listed messages carried, and how many the body messages they were found in carry. */
+  pictures: { listed: number; sent: number };
   /** The messages each body message is (null: none of the list's), for `rebuild`. */
   made: (Made | null)[];
 }
@@ -230,33 +254,51 @@ function lay(joining: Joining, tag: readonly TagMessage[], body: readonly BodyMe
   const absent = all.filter((m) => !shown.has(m));
   const messages: LaidMessage[] = [];
   const which: (Made | null)[] = [];
+  const missing: number[] = [];
   let k = 0;
   for (const b of body) {
-    const x = made[k];
-    const places = x === undefined ? null : placesIn(x, b, tag);
-    messages.push({ role: b.role, content: b.content, text: b.text, media: b.media.length, places: places ?? [] });
-    which.push(places ? x! : null);
-    if (places) k++;
+    // The next made message this body message is; one changed after the interceptors is passed over, and found missing.
+    let found: { at: number; places: LaidMessage["places"] } | null = null;
+    for (let j = k; j < made.length && found === null; j++) {
+      const places = placesIn(made[j]!, b, tag);
+      if (places !== null) found = { at: j, places };
+    }
+    messages.push({ role: b.role, content: b.content, text: b.text, media: b.media.length, places: found?.places ?? [], ...(b.thinking !== null ? { thinking: b.thinking } : {}) });
+    which.push(found === null ? null : made[found.at]!);
+    if (found === null) continue;
+    for (const skipped of made.slice(k, found.at)) missing.push(...membersOf(skipped));
+    k = found.at + 1;
   }
-  const missing = made.slice(k).flatMap(membersOf);
-  const complete = missing.length === 0 && which.every((x) => x !== null);
-  return { joining, messages, absent, missing, complete, made: which };
+  for (const left of made.slice(k)) missing.push(...membersOf(left));
+  const unlisted = which.flatMap((x, i) => (x === null ? [i] : []));
+  const listed = tag.reduce((n, t) => n + (t.media ?? 0), 0);
+  const sent = messages.reduce((n, m, i) => n + (which[i] === null ? 0 : m.media), 0);
+  return { joining, messages, absent, missing, unlisted, complete: missing.length === 0, pictures: { listed, sent }, made: which };
+}
+
+/** Each found body message carries the parts that are not text the replay gives it: a join drops a message's pictures (`getTextContent`), collapse keeps them. */
+function picturesAgree(laid: Overlay, tag: readonly TagMessage[]): boolean {
+  return laid.messages.every((m, i) => {
+    const x = laid.made[i];
+    return x === null || x === undefined || m.media === x.media.reduce((n, member) => n + (tag[member]!.media ?? 0), 0);
+  });
 }
 
 /**
- * The tag's list laid over the body by the first way of joining that explains all of it, its pictures
- * included where one does: a join drops a message's pictures (`getTextContent`), and collapse keeps
- * them, so two ways that give the same text can differ in them. Else the way that explains the most.
+ * The tag's list laid over the body by the way Lumiverse's settings say it joins (`joining`). Where they
+ * could not be read (null), by the way that finds every listed message with the fewest body messages left
+ * unaccounted for, its pictures agreeing where one does (two ways that give the same text can differ in
+ * them); else the way that explains the most.
  */
-export function overlay(tag: readonly TagMessage[], body: readonly BodyMessage[]): Overlay {
-  let complete: Overlay | null = null;
+export function overlay(tag: readonly TagMessage[], body: readonly BodyMessage[], joining: Joining | null): Overlay {
+  if (joining !== null) return lay(joining, tag, body);
+  let found: Overlay | null = null;
   let best: Overlay | null = null;
   let bestScore = -1;
-  for (const joining of JOININGS) {
-    const laid = lay(joining, tag, body);
+  for (const way of JOININGS) {
+    const laid = lay(way, tag, body);
     if (laid.complete) {
-      if (laid.messages.every((m, i) => m.media === laid.made[i]!.media.reduce((n, member) => n + (tag[member]!.media ?? 0), 0))) return laid;
-      complete ??= laid;
+      if (found === null || laid.unlisted.length < found.unlisted.length || (laid.unlisted.length === found.unlisted.length && picturesAgree(laid, tag) && !picturesAgree(found, tag))) found = laid;
       continue;
     }
     const score = laid.messages.reduce((n, m) => n + m.places.reduce((a, p) => a + (p.end - p.start) + 1, 0), 0);
@@ -265,7 +307,7 @@ export function overlay(tag: readonly TagMessage[], body: readonly BodyMessage[]
       bestScore = score;
     }
   }
-  return complete ?? best!;
+  return found ?? best!;
 }
 
 /** Each listed message's text as the body holds it: its stretches run together; a blank one Lumiverse left out stands as spaces of its length. */
@@ -298,19 +340,29 @@ function sameMade(a: Made, b: Made): boolean {
   return a.role === b.role && a.form === b.form && a.owner === b.owner && a.chunks.length === b.chunks.length && a.chunks.every((c, i) => c.member === b.chunks[i]!.member && c.part === b.chunks[i]!.part) && a.media.length === b.media.length && a.media.every((m, i) => m === b.media[i]);
 }
 
+/** The listed message whose other fields a message Lumiverse makes keeps: its first (a merge keeps the first's, `generate.service.ts:5411-5418`). */
+function firstOf(x: Made): number | null {
+  return x.owner ?? x.chunks[0]?.member ?? null;
+}
+
 /**
  * The body as Lumiverse would have sent it had the interceptor left the listed messages `removed`
  * out: the same steps replayed without them. A body message that holds the same as before is kept
  * exactly as sent; one that changed is made again from the texts the body holds. Parts that are not
  * text go with the listed message they came with where the body says which; where it can't, all are
- * kept. Needs a complete overlay.
+ * kept. A body message no listed message accounts for stays as it came, before the first message that
+ * holds a listed message from after it. Needs a complete overlay.
  */
 export function rebuild(laid: Overlay, tag: readonly TagMessage[], removed: ReadonlySet<number>): LaidMessage[] {
-  if (!laid.complete) throw new Error("the prompt's parts were not all told apart");
+  if (!laid.complete) throw new Error("the prompt's listed messages were not all found");
   const texts = textsOf(laid, tag);
-  const before = laid.made.map((x, i) => ({ x: x!, message: laid.messages[i]! }));
+  const before = laid.made.flatMap((x, i) => (x === null ? [] : [{ x, message: laid.messages[i]! }]));
   const mediaOf = new Map<number, unknown[]>();
+  // An assistant message's thinking stays with the listed message whose fields it kept.
+  const thinkingOf = new Map<number, string>();
   for (const { x, message } of before) {
+    const first = firstOf(x);
+    if (message.thinking !== undefined && first !== null) thinkingOf.set(first, message.thinking);
     if (x.media.length === 0 || !Array.isArray(message.content)) continue;
     const parts = message.content.filter((p) => !(isRecord(p) && p.type === "text" && typeof p.text === "string"));
     const counts = x.media.map((m) => tag[m]!.media ?? 0);
@@ -326,9 +378,17 @@ export function rebuild(laid: Overlay, tag: readonly TagMessage[], removed: Read
       at += counts[i]!;
     });
   }
+  // Each unaccounted body message, with the first listed message of the found message after it (none: it stays at the end).
+  const unlisted = laid.unlisted.map((i) => {
+    const next = laid.made.slice(i + 1).find((x) => x !== null);
+    return { message: laid.messages[i]!, before: next ? Math.min(...membersOf(next)) : Number.POSITIVE_INFINITY };
+  });
+  let u = 0;
   const kept = tag.map((_, i) => i).filter((m) => !removed.has(m));
   const out: LaidMessage[] = [];
   for (const x of replay(laid.joining, tag, kept)) {
+    const least = Math.min(...membersOf(x));
+    while (u < unlisted.length && unlisted[u]!.before <= least) out.push(unlisted[u++]!.message);
     const same = before.find((b) => sameMade(b.x, x));
     if (same) {
       out.push(same.message);
@@ -347,7 +407,30 @@ export function rebuild(laid: Overlay, tag: readonly TagMessage[], removed: Read
       const place = places.get(chunk.member);
       places.set(chunk.member, { start: place?.start ?? start, end: start + chunk.length });
     }
-    out.push({ role: x.role, content, text, media: media.length, places: [...places].map(([member, p]) => ({ member, ...p })) });
+    const first = firstOf(x);
+    const thinking = x.role === "assistant" && first !== null ? thinkingOf.get(first) : undefined;
+    out.push({ role: x.role, content, text, media: media.length, places: [...places].map(([member, p]) => ({ member, ...p })), ...(thinking !== undefined ? { thinking } : {}) });
   }
+  while (u < unlisted.length) out.push(unlisted[u++]!.message);
   return out;
+}
+
+/**
+ * Where the body is not fully told apart: the listed messages `removed` left out as far as the body
+ * says where they are. A body message found to be listed messages that are all removed goes; every other
+ * body message stays as it came. `stillSent` counts the removed ones that stay: inside a message that
+ * holds others too, or not found at all.
+ */
+export function partialCut(laid: Overlay, removed: ReadonlySet<number>): { messages: LaidMessage[]; stillSent: number } {
+  const messages: LaidMessage[] = [];
+  const stays = new Set<number>();
+  laid.messages.forEach((message, i) => {
+    const x = laid.made[i];
+    const members = x ? membersOf(x) : [];
+    if (members.length > 0 && members.every((m) => removed.has(m))) return;
+    messages.push(message);
+    for (const m of members) if (removed.has(m)) stays.add(m);
+  });
+  for (const m of laid.missing) if (removed.has(m)) stays.add(m);
+  return { messages, stillSent: stays.size };
 }

@@ -6,7 +6,7 @@
 // text, system sent as the user's. The list is the extension's own (`listedMessage`).
 
 import { describe, expect, test } from "bun:test";
-import { overlay, readBodyMessages, rebuild, type BodyMessage } from "../../src/adapter/lumiverse/overlay";
+import { joiningOf, overlay, readBodyMessages, rebuild, type BodyMessage, type LaidMessage } from "../../src/adapter/lumiverse/overlay";
 import { historyCut, textHash } from "../../src/adapter/lumiverse/wire";
 import { listedMessage } from "../../src/ext/prompt";
 import type { PromptMessageDTO } from "../../src/ext/spindle";
@@ -60,6 +60,12 @@ function inventPrompt(rand: () => number, n: number): Prompt {
 }
 
 const MODES = ["", "merge", "semi", "strict", "single"];
+
+/** The joining Lumiverse's settings say for a mode and collapse, as RPE reads them. */
+const read = (post: string, collapseOn: boolean) => joiningOf(post, { advancedSettings: { collapseMessages: collapseOn } });
+
+/** Messages RPE passes on, read as a body is. */
+const bodyOf = (messages: readonly LaidMessage[]): BodyMessage[] => messages.map((m) => readBodyMessages([{ role: m.role, content: m.content }])![0]!);
 
 /** The body Lumiverse sends for a prompt handed on by the interceptors: its steps after them, then the connection's body. */
 function lumiverse(prompt: Prompt, post: string, collapseOn: boolean): BodyMessage[] {
@@ -117,8 +123,10 @@ describe("the tag's list over the body", () => {
       for (const post of MODES) {
         for (const collapseOn of [false, true]) {
           const body = lumiverse(prompt, post, collapseOn);
-          const laid = overlay(tag, body);
-          expect({ round, post, collapseOn, complete: laid.complete }).toEqual({ round, post, collapseOn, complete: true });
+          const laid = overlay(tag, body, read(post, collapseOn));
+          expect({ round, post, collapseOn, complete: laid.complete, unlisted: laid.unlisted }).toEqual({ round, post, collapseOn, complete: true, unlisted: [] });
+          // Found from the body alone too, where Lumiverse's settings cannot be read.
+          expect({ round, post, collapseOn, guessed: overlay(tag, body, null).complete }).toEqual({ round, post, collapseOn, guessed: true });
           const seen: number[] = [];
           for (const m of laid.messages) {
             let at = 0;
@@ -144,13 +152,13 @@ describe("the tag's list over the body", () => {
       const prompt = inventPrompt(rand, 10);
       const tag = prompt.map(listedMessage);
       for (const post of MODES) {
-        const laid = overlay(tag, lumiverse(prompt, post, false));
+        const laid = overlay(tag, lumiverse(prompt, post, false), read(post, false));
         for (const m of laid.messages) for (const p of m.places) if (tag[p.member]!.parts === undefined || post !== "") expect(textHash(m.text.slice(p.start, p.end))).toBe(tag[p.member]!.hash);
       }
     }
   });
 
-  test("history left out after Lumiverse joined the prompt gives the body Lumiverse makes when the interceptor leaves it out first, by a way of joining that explains the body received; a picture Lumiverse dropped in a join does not come back", () => {
+  test("history left out after Lumiverse joined the prompt gives the body Lumiverse makes with its settings when the interceptor leaves it out first, and, where the settings cannot be read, by a way of joining that explains the body received; a picture Lumiverse dropped in a join does not come back", () => {
     const rand = seeded(424242);
     const settings = MODES.flatMap((post) => [false, true].map((collapseOn) => ({ post, collapseOn })));
     const shown = (messages: BodyMessage[]): { role: string; content: unknown }[] => messages.map((m) => ({ role: m.role, content: m.content }));
@@ -165,31 +173,72 @@ describe("the tag's list over the body", () => {
       const left = new Set(historyCut(tag.map((t) => ({ history: t.history === true, index: t.source?.index ?? null })), keep));
       for (const { post, collapseOn } of settings) {
         const received = lumiverse(prompt, post, collapseOn);
-        const made = rebuild(overlay(tag, received), tag, left).map((m) => readBodyMessages([{ role: m.role, content: m.content }])![0]!);
-        // Every setting that would have sent this same body; each makes its own body without the history left out.
+        const had = new Set(pictures(received));
+        // By the settings Lumiverse holds: exactly the body it makes with them.
+        const expected = lumiverse(prompt.filter((_, i) => !left.has(i)), post, collapseOn);
+        const made = bodyOf(rebuild(overlay(tag, received, read(post, collapseOn)), tag, left));
+        expect({ round, post, collapseOn, same: Bun.deepEquals(bodyTexts(made), bodyTexts(expected)) }).toEqual({ round, post, collapseOn, same: true });
+        // Every picture still in the body received stays where Lumiverse would have it; none other appears.
+        expect(pictures(made)).toEqual(pictures(expected).filter((p) => had.has(p)));
+        // Where they cannot be read: every setting that would have sent this same body makes its own body without the history left out.
+        const guessed = bodyOf(rebuild(overlay(tag, received, null), tag, left));
         const alike = settings.filter((s) => Bun.deepEquals(shown(lumiverse(prompt, s.post, s.collapseOn)), shown(received)));
         const possible = alike.map((s) => lumiverse(prompt.filter((_, i) => !left.has(i)), s.post, s.collapseOn));
-        const match = possible.find((p) => Bun.deepEquals(bodyTexts(p), bodyTexts(made)));
+        const match = possible.find((p) => Bun.deepEquals(bodyTexts(p), bodyTexts(guessed)));
         expect({ round, post, collapseOn, found: match !== undefined }).toEqual({ round, post, collapseOn, found: true });
-        // Every picture still in the body received stays where Lumiverse would have it; none other appears.
-        const had = new Set(pictures(received));
-        expect(pictures(made)).toEqual(pictures(match!).filter((p) => had.has(p)));
+        expect(pictures(guessed)).toEqual(pictures(match!).filter((p) => had.has(p)));
       }
     }
   });
 
-  test("a message Lumiverse adds after the interceptors (a council's deliberation) is told apart as one no listed message accounts for, and the rest still is", () => {
+  test("a council block after the interceptor is kept as unlisted text and the cut is still made", () => {
     const rand = seeded(99);
     const prompt = inventPrompt(rand, 12);
     const tag = prompt.map(listedMessage);
     const body = lumiverse(prompt, "", false);
     // Spliced four from the end after the pipeline (`generate.service.ts:2881-2893`).
     const at = Math.max(0, body.length - 4);
-    body.splice(at, 0, { role: "system", content: "COUNCIL notes", text: "COUNCIL notes", textParts: null, media: [] });
-    const laid = overlay(tag, body);
-    expect(laid.complete).toBe(false);
+    const council: BodyMessage = { role: "system", content: "COUNCIL notes", text: "COUNCIL notes", textParts: null, media: [], thinking: null };
+    body.splice(at, 0, council);
+    const laid = overlay(tag, body, read("", false));
+    expect(laid.complete).toBe(true);
     expect(laid.missing).toEqual([]);
-    expect(laid.messages.map((m, i) => (m.places.length === 0 ? i : -1)).filter((i) => i >= 0)).toEqual([at]);
+    expect(laid.unlisted).toEqual([at]);
+    expect(laid.messages[at]!.places).toEqual([]);
+    // A cut at the last history message before the council: every history message before it goes, the council stays where it stood.
+    const before = laid.made.slice(0, at).flatMap((x, i) => (x === null ? [] : laid.messages[i]!.places.map((p) => p.member)));
+    const keep = before.map((m) => tag[m]!.source).filter((s) => s !== undefined).at(-1)!;
+    const left = new Set(historyCut(tag.map((t) => ({ history: t.history === true, index: t.source?.index ?? null })), keep));
+    expect(left.size).toBeGreaterThan(0);
+    const made = bodyOf(rebuild(laid, tag, left));
+    const expected = lumiverse(prompt.filter((_, i) => !left.has(i)), "", false);
+    expected.splice(expected.findIndex((m) => m.text === body[at + 1]!.text), 0, council);
+    expect(bodyTexts(made)).toEqual(bodyTexts(expected));
+  });
+
+  test("an earlier reply's thinking sent back by Lumiverse is read apart from its text", () => {
+    const prompt: Prompt = [
+      { role: "system", content: "RULES-1 Keep it short." },
+      { role: "assistant", content: "REPLY-0 The gull cries.", __isChatHistory: true, sourceMessageId: "msg-0", sourceIndexInChat: 0, reasoning_content: "Looking at the harbor." },
+      { role: "user", content: "LINE-1 I wave.", __isChatHistory: true, sourceMessageId: "msg-1", sourceIndexInChat: 1 },
+      { role: "assistant", content: "REPLY-2 The ferry sounds its horn.", __isChatHistory: true, sourceMessageId: "msg-2", sourceIndexInChat: 2, reasoning_content: "Weighing the tide." },
+      { role: "assistant", content: "REPLY-3 Fog rolls in.", __isChatHistory: true, sourceMessageId: "msg-3", sourceIndexInChat: 3, reasoning_content: "Not kept by a merge." },
+      { role: "user", content: "LINE-4 I wait.", __isChatHistory: true, sourceMessageId: "msg-4", sourceIndexInChat: 4 },
+    ];
+    const tag = prompt.map(listedMessage);
+    // The list is of the text alone.
+    expect(tag[3]!.hash).toBe(textHash("REPLY-2 The ferry sounds its horn."));
+    for (const post of ["", "merge"]) {
+      const body = lumiverse(prompt, post, false);
+      const laid = overlay(tag, body, read(post, false));
+      expect(laid.complete).toBe(true);
+      const replies = laid.messages.filter((m) => m.role === "assistant");
+      for (const m of replies) expect(m.text).not.toContain("Weighing");
+      expect(replies.map((m) => m.thinking ?? null)).toEqual(post === "" ? ["Looking at the harbor.", "Weighing the tide.", "Not kept by a merge."] : ["Looking at the harbor.", "Weighing the tide."]);
+      // The window's cut leaves the first reply out; the rest keep the thinking Lumiverse sent with them.
+      const kept = rebuild(laid, tag, new Set([1])).filter((m) => m.role === "assistant");
+      expect(kept.map((m) => m.thinking ?? null)).toEqual(post === "" ? ["Weighing the tide.", "Not kept by a merge."] : ["Weighing the tide."]);
+    }
   });
 
   test("on prompts Lumiverse joined before the interceptor (queued lines, squashed system messages, names in content, system as user), under every mode every listed message is found once and in order, and the history left out gives the body Lumiverse makes", () => {
@@ -215,7 +264,7 @@ describe("the tag's list over the body", () => {
       const left = new Set(historyCut(tag.map((t) => ({ history: t.history === true, index: t.source?.index ?? null })), keep));
       for (const { post, collapseOn } of settings) {
         const body = lumiverse(prompt, post, collapseOn);
-        const laid = overlay(tag, body);
+        const laid = overlay(tag, body, read(post, collapseOn));
         expect({ round, post, collapseOn, complete: laid.complete }).toEqual({ round, post, collapseOn, complete: true });
         const seen: number[] = [];
         for (const m of laid.messages) {
@@ -229,12 +278,11 @@ describe("the tag's list over the body", () => {
         }
         expect(seen).toEqual([...seen].sort((a, b) => a - b));
         expect(new Set(seen).size).toBe(seen.length);
-        // History left out of the joined prompt on receipt gives the body Lumiverse makes when the interceptor leaves it out first, by a
-        // way of joining that explains the body received.
-        const made = rebuild(laid, tag, left).map((m) => readBodyMessages([{ role: m.role, content: m.content }])![0]!);
-        const alike = settings.filter((s) => Bun.deepEquals(bodyTexts(lumiverse(prompt, s.post, s.collapseOn)), bodyTexts(body)));
-        const possible = alike.map((s) => lumiverse(prompt.filter((_, i) => !left.has(i)), s.post, s.collapseOn));
-        expect({ round, post, collapseOn, found: possible.some((p) => Bun.deepEquals(bodyTexts(p), bodyTexts(made))) }).toEqual({ round, post, collapseOn, found: true });
+        // History left out of the joined prompt on receipt gives the body Lumiverse makes with its settings when the interceptor leaves
+        // it out first.
+        const made = bodyOf(rebuild(laid, tag, left));
+        const expected = lumiverse(prompt.filter((_, i) => !left.has(i)), post, collapseOn);
+        expect({ round, post, collapseOn, same: Bun.deepEquals(bodyTexts(made), bodyTexts(expected)) }).toEqual({ round, post, collapseOn, same: true });
       }
     }
     // The rounds are not empty of what they test: most had queued lines joined.

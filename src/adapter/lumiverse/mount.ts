@@ -26,6 +26,7 @@ import { createHttpReads } from "./http-reads";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
+import { promptReads } from "./receipt";
 import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
@@ -229,7 +230,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             user,
             allowed: providerKey,
             window: lanes.window,
-            rows: (chat) => p.reads.path(chat),
+            reads: promptReads(p.reads),
             blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => settings().dryRunMs }),
             models: lanes.models,
             passConnection: lanes.passConnection,

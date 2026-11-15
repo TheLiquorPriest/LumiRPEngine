@@ -11,15 +11,18 @@ import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
 import { rawLayout, type BlocksHint } from "./layout";
 import type { RawLayout } from "rp-harness/contract";
-import { receive, Refused, type ChatRows, type Cut } from "./receipt";
+import { receive, Refused, type Cut, type PromptReads } from "./receipt";
 import { streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
 import { readTag, TAG_FIELD, type Role, type Tag } from "./wire";
 
 /** A tagged chat reply, ready for a turn (§10.1). */
 export interface TaggedTurn {
   tag: Tag;
-  /** The prompt the model is to read, in order, after the history window's cut; content as Lumiverse sent it (text, or a list of parts with pictures). */
-  prompt: { role: Role; content: string | unknown[] }[];
+  /**
+   * The prompt the model is to read, in order, after the history window's cut; content as Lumiverse sent it (text, or a list of parts with
+   * pictures). `thinking`: what Lumiverse sent back as an earlier reply's thinking (`reasoning_content`), read apart and no part of its text.
+   */
+  prompt: { role: Role; content: string | unknown[]; thinking?: string }[];
   layout: RawLayout;
   cut: Cut;
   /** The model the request names: the connection's model in Lumiverse. */
@@ -56,8 +59,8 @@ export interface ProviderDeps {
   /** Whether the request carries RPE's provider key. */
   allowed(request: Request): boolean | Promise<boolean>;
   window: HistoryWindow;
-  /** The chat's rows as Lumiverse holds them when the request arrives, by RPE's own reads: what the window counts when RPE makes the cut itself (`receipt.ts`). */
-  rows: ChatRows;
+  /** What the receipt reads of Lumiverse when the request arrives, by RPE's own reads (`receipt.ts`): the chat's rows the window counts when RPE makes the cut itself and that tell Lumiverse's own clipping, and the settings that say how Lumiverse joined the prompt. */
+  reads: PromptReads;
   /** Lumiverse's breakdown of the chat's prompt, a hint for names (`hint.ts`); null when it has none. */
   blocks(tag: Tag, signal: AbortSignal): Promise<BlocksHint | null>;
   /** RPH's model layer, for requests passed through: its pass, given the user this RPE belongs to. */
@@ -125,7 +128,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {
-      received = await receive(read.tag, body, { user: deps.user, window: deps.window, rows: deps.rows }, request.signal);
+      received = await receive(read.tag, body, { user: deps.user, window: deps.window, reads: deps.reads }, request.signal);
     } catch (e) {
       // The window is the user's setting: a reply whose window RPE could not work out is not sent with more history than it allows.
       return e instanceof Refused ? error(e.status, e.message) : error(500, `RPE could not prepare this reply: ${e instanceof Error ? e.message : String(e)}`);
@@ -138,8 +141,8 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     const { messages: _messages, model, stream, [TAG_FIELD]: _tag, ...parameters } = body;
     const turn: TaggedTurn = {
       tag: received.tag,
-      prompt: received.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as Role) : "user", content: m.content })),
-      layout: rawLayout(received.tag, received.messages, received.overlay.complete, hint),
+      prompt: received.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as Role) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
+      layout: rawLayout(received.tag, received.messages, received.cut.told, hint),
       cut: received.cut,
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true }),

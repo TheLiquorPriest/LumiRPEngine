@@ -5,6 +5,7 @@
 
 import { questionRoute, type HistoryWindow, type SecrecyAsk, type WindowStep } from "../../src/adapter/lumiverse/answer";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
+import { joiningOf } from "../../src/adapter/lumiverse/overlay";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
@@ -14,6 +15,7 @@ import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/
 import { textOf as textKey } from "../../src/secrecy/lore-secrets";
 import type { JsonObject } from "../../src/shared/json";
 import { FakeClock, settle } from "../standin/clock";
+import type { StandInDb } from "../standin/db";
 import { ADMIN, installRpe } from "../standin/install";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
 import type { Book } from "../standin/books";
@@ -115,6 +117,8 @@ export interface RigOptions {
   council?: string;
   /** A clock the test moves by hand, for everything of Lumiverse's that waits (its limits, its later tasks) and for RPE's delay to answer; the process's own where none is given. */
   clock?: FakeClock;
+  /** Lumiverse's database file, holding the rig's user: the stand-in keeps its chat there as Lumiverse stores it, for RPE's own reads. */
+  db?: StandInDb;
 }
 
 /** RPE's scripted secrecy rules: the ferry's mark shown as RPE words it; the vault (a whole-entry secret), its unmarked copy and the entry a world secret was indexed from kept out. */
@@ -155,6 +159,7 @@ export class Rig {
 
   constructor(readonly options: RigOptions = {}) {
     if (options.clock !== undefined) this.lv.clock = options.clock;
+    if (options.db !== undefined) this.lv.db = options.db;
     const hidden = new Set(harborMessages().filter((m) => m.hidden).map((m) => m.id));
     const keep = options.window ?? 4;
     // The window as RPE counts it, the latest `keep`. The question's path carries no hidden mark yet, so the fixture's hidden ids are
@@ -174,8 +179,16 @@ export class Rig {
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
       window: onReceipt,
-      // Lumiverse's rows as they stand when the request arrives: the stand-in's chat, each message at its stored number.
-      rows: async (chat) => this.lv.rowsOf(chat),
+      reads: {
+        // Lumiverse's rows as they stand when the request arrives: the stand-in's chat, each message at its stored number.
+        rows: async (chat) => this.lv.rowsOf(chat),
+        // How the stand-in joins after its interceptors: its post-processing setting and the preset's collapse, as Lumiverse's settings say.
+        joining: async (preset) => joiningOf(this.lv.postProcessing, { advancedSettings: { collapseMessages: preset !== null && this.lv.presets.get(preset)?.collapse === true } }),
+        messageLimit: async () => {
+          const limit = this.lv.library.setting(USER, "summarization") as { messageLimitEnabled?: boolean; messageLimitCount?: number } | undefined;
+          return limit?.messageLimitEnabled === true && (limit.messageLimitCount ?? 0) > 0 ? limit.messageLimitCount! : null;
+        },
+      },
       blocks: async (tag) => {
         const last = [...this.lv.stored.values()].filter((s) => s.chatId === tag.chat).at(-1);
         return last === undefined ? null : readBlocksHint(last.data, "breakdown");

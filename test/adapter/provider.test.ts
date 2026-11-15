@@ -40,8 +40,8 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     user: "user-a",
     allowed: (r) => r.headers.get("authorization") === "Bearer rpe_key",
     window: async () => null,
-    // Every tag here carries the extension's cut, so the chat's rows are never read.
-    rows: async () => null,
+    // Every tag here carries the extension's cut; the chat's rows are not there, so Lumiverse's own clipping is not known.
+    reads: { rows: async () => null, joining: async () => ({ post: "none", collapse: false }), messageLimit: async () => null },
     blocks: async () => null,
     models: {
       pass: async (request: PassRequest, sink: PassSink) => {

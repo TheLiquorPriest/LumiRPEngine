@@ -58,7 +58,7 @@ describe("the question before lore activates", () => {
     const turn = rig.turns[0]!;
     expect(turn.tag).toMatchObject({ user: USER, chat: "chat-harbor", generation: out.generationId!, kind: "new", connection: "conn-rpe", preset: PRESET.id, target: { message: announced.targetMessageId, swipe: 0 }, speaker: { id: "char-ilsa", name: "Ilsa" } });
     expect(turn.tag.lore.map((l) => l.id).sort()).toEqual(["e-ferry", "e-public"]);
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
+    expect(turn.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0, told: true, notices: [] });
     expect(turn.layout.complete).toBe(true);
     // The player's last two lines, sent in a row, reach the interceptor as one message with the first one's id and number, the second
     // one's words inside it (`prompt-assembly.service.ts:3456-3461`, `:6754-6843`).
@@ -114,7 +114,7 @@ describe("the question before lore activates", () => {
 
     const turn = rig.turns[0]!;
     expect(turn.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: null, byRpe: 7 });
+    expect(turn.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: null, byRpe: 7, told: true, notices: [] });
     expect(historyOf(turn)).toEqual(["m8", "m9", "m10"]);
     const played = promptText(turn.prompt);
     for (const i of LEFT_OUT) expect(played).not.toContain(label(i));
@@ -418,7 +418,7 @@ describe("RPE's secrets failing", () => {
     expect(out.error).toBeNull();
     const turn = rig.turns[0]!;
     expect(turn.tag.cut).toEqual({ answered: true, keep: { id: "m8", index: 8 }, removed: 7 });
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
+    expect(turn.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
     // What Lumiverse stores beside the reply holds only the window.
     const stored = out.stored!.messages.map((m) => m.content).join("\n");
     for (const i of WINDOW) expect(stored).toContain(label(i));
@@ -434,19 +434,26 @@ describe("RPE's secrets failing", () => {
     expect(rig.rpeLog.filter((line) => line.includes("could not work out its lore's secrets"))).toEqual([expect.stringContaining("chat chat-harbor:")]);
   });
 
-  test("under prompt post-processing, with a part Lumiverse adds after the extension, that chat is not refused: the extension made the cut RPE could not make on receipt", async () => {
+  test("under prompt post-processing, with a part Lumiverse adds after the extension, no chat is refused: the extension's cut, or RPE's on receipt, leaves the council's part where it stood", async () => {
     const options = { postProcessing: "merge", council: COUNCIL };
-    // With no cut from the extension, RPE must cut on receipt, cannot tell the council's part from the rest, and refuses.
+    // With no cut from the extension, RPE cuts on receipt by the tag's list over the body, the council's part kept as text no listed
+    // message accounts for (R-103).
     const uncut = await new Rig({ ...options, windowFailsAtQuestion: true }).start();
-    const refused = await uncut.generate("conn-rpe");
-    expect(refused.error).toContain("could not tell this prompt's parts apart");
+    const cutOnReceipt = await uncut.generate("conn-rpe");
+    expect(cutOnReceipt.error).toBeNull();
+    expect(uncut.turns[0]!.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: null, byRpe: 7, told: true, joining: { post: "merge", collapse: false, from: "settings" }, notices: [] });
 
     const rig = await new Rig({ ...options, secretsFail: true }).start();
     const out = await rig.generate("conn-rpe");
     expect(out.error).toBeNull();
     expect(out.reply?.content).toBe("The tide turns.");
     const turn = rig.turns[0]!;
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
+    expect(turn.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
+    // RPE's cut on receipt gives the prompt Lumiverse makes when the extension cuts.
+    const byExtension = await new Rig(options).start();
+    await byExtension.generate("conn-rpe");
+    expect(uncut.turns[0]!.prompt).toEqual(byExtension.turns[0]!.prompt);
+    expect(promptText(uncut.turns[0]!.prompt)).toContain(COUNCIL);
     expect(promptText(turn.prompt)).toContain(COUNCIL);
     for (const i of LEFT_OUT) expect(promptText(turn.prompt)).not.toContain(label(i));
   });

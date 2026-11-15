@@ -76,10 +76,15 @@ function placeBlocks(messages: RawMessage[], texts: readonly string[], blocks: r
   });
 }
 
-/** The raw layout of the prompt RPE passes on (`messages`), from the tag that listed it and Lumiverse's breakdown of it. */
-export function rawLayout(tag: Tag, messages: readonly LaidMessage[], complete: boolean, hint: BlocksHint | null): RawLayout {
+/**
+ * The raw layout of the prompt RPE passes on (`messages`), from the tag that listed it and Lumiverse's breakdown of it. `told`: every
+ * listed message was found in the body (`Cut.told`). Where not, the prompt is unsupported for slicing (§18.1 row 0.4): each message is
+ * carried whole as one part no listed message accounts for, so the Author still gets the whole prompt. A message Lumiverse added after
+ * its interceptors is such a part in a told prompt too.
+ */
+export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: boolean, hint: BlocksHint | null): RawLayout {
   const out: RawMessage[] = messages.map((m) => {
-    const parts: RawPart[] = m.places.length === 0
+    const parts: RawPart[] = !told || m.places.length === 0
       ? [{ start: 0, end: m.text.length, role: role(m.role) ?? "user", hash: textHash(m.text), kind: "unknown", blocks: [] }]
       : m.places.map((p) => {
           const listed = tag.messages[p.member]!;
@@ -99,5 +104,5 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], complete: 
   const blocks = hint?.blocks ?? [];
   placeBlocks(out, messages.map((m) => m.text), blocks);
   const preset = tag.preset === null ? null : { id: tag.preset, ...(hint !== null && hint.presetId === tag.preset && hint.presetName !== null ? { name: hint.presetName } : {}) };
-  return { preset, messages: out, complete: complete && messages.every((m) => m.places.length > 0), blocks, blocksFrom: hint?.from ?? null };
+  return { preset, messages: out, complete: told, blocks, blocksFrom: hint?.from ?? null };
 }

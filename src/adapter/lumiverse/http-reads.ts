@@ -47,20 +47,20 @@ function mapped<T>(what: string, map: () => T): T {
 
 /** The reads over HTTP; `settings` gives a changing chat's rereads and the replies asked for a stored breakdown at each read (the door's settings). */
 export function createHttpReads(session: LumiverseSession, settings: () => { rereads: number; breakdownReplies: number } = () => ({ rereads: REREADS, breakdownReplies: BREAKDOWN_TRIES })): LumiverseReads {
-  const get = (path: string): Promise<unknown> => session.json("GET", path);
+  const get = (path: string, signal?: AbortSignal): Promise<unknown> => session.json("GET", path, undefined, signal);
 
-  /** Every message of a chat, in order, from its pages; null when Lumiverse has no such chat of this user. */
-  async function allMessages(chat: string): Promise<LvMessage[] | null> {
+  /** Every message of a chat, in order, from its pages; null when Lumiverse has no such chat of this user. `signal` ends the reading. */
+  async function allMessages(chat: string, signal?: AbortSignal): Promise<LvMessage[] | null> {
     const asked = `the messages of chat ${chat}`;
     const { rereads } = settings();
     for (let attempt = 1; ; attempt++) {
-      const first = await get(`/api/v1/chats/${enc(chat)}/messages?limit=${PAGE}&offset=0`);
+      const first = await get(`/api/v1/chats/${enc(chat)}/messages?limit=${PAGE}&offset=0`, signal);
       if (first === null) return null;
       const page = pageOf(first, asked);
       const rows = [...page.data];
       let agreed = true;
       for (let offset = PAGE; offset < page.total; offset += PAGE) {
-        const next = pageOf(await get(`/api/v1/chats/${enc(chat)}/messages?limit=${PAGE}&offset=${offset}`), asked);
+        const next = pageOf(await get(`/api/v1/chats/${enc(chat)}/messages?limit=${PAGE}&offset=${offset}`, signal), asked);
         if (next.total !== page.total) {
           agreed = false;
           break;
@@ -95,8 +95,8 @@ export function createHttpReads(session: LumiverseSession, settings: () => { rer
       return body === null ? null : mapped(`chat ${chat}`, () => chatFrom(rowOf(body, `chat ${chat}`)));
     },
     // `GET /api/v1/chats/:id/messages` (`routes/chats.routes.ts:792-821`), every page.
-    async path(chat) {
-      const messages = await allMessages(chat);
+    async path(chat, signal) {
+      const messages = await allMessages(chat, signal);
       return messages === null ? null : messages.map(step);
     },
     async messages(chat, places: Places) {

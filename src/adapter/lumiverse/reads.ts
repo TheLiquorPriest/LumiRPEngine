@@ -20,8 +20,8 @@ export interface LumiverseReads {
   /** Which source answers now. */
   readonly kind: "database" | "http";
   chat(chat: string): Promise<LvChat | null>;
-  /** The chat's messages in Lumiverse's order, every one listed with no text; null when there is no such chat of this user. */
-  path(chat: string): Promise<LvStep[] | null>;
+  /** The chat's messages in Lumiverse's order, every one listed with no text; null when there is no such chat of this user. `signal` ends a read that takes time (over HTTP). */
+  path(chat: string, signal?: AbortSignal): Promise<LvStep[] | null>;
   /** The messages at these places on the chat's path, in order; a stretch past the end is cut to the chat. */
   messages(chat: string, places: Places): Promise<LvMessage[]>;
   /** These messages of the chat, by id; an id that is not the chat's is left out. */
@@ -67,7 +67,7 @@ export function preferDatabase(database: LumiverseReads & { state(): { off: stri
       return database.state().off === null ? database.kind : http.kind;
     },
     chat: (chat) => ask((s) => s.chat(chat)),
-    path: (chat) => ask((s) => s.path(chat)),
+    path: (chat, signal) => ask((s) => s.path(chat, signal)),
     messages: (chat, places) => ask((s) => s.messages(chat, places)),
     messagesById: (chat, ids) => ask((s) => s.messagesById(chat, ids)),
     book: (book) => ask((s) => s.book(book)),
