@@ -1,0 +1,154 @@
+// `run.ts check` on scripts written in the form (PlanScenarios-1 items 1 and 2): a scenario missing a
+// form, a wave or a mark on a part is refused, by file; a gate may lack a rig form but not a live one;
+// the list of the 68 is checked against the files, by number, wave and the plan's own words.
+
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { check } from "../../../scripts/proof/route/check";
+import { LIST } from "../../../scripts/proof/route/list";
+
+const RUN = resolve(import.meta.dir, "../../../scripts/proof/run.ts");
+const FORM = resolve(import.meta.dir, "../../../scripts/proof/route/form.ts");
+
+let root = "";
+/** A proof folder holding a file for every one of the 68 but scenario 22. */
+let all = "";
+
+/** A scenario file of the form, its fields given as source text so one can be left out. */
+function scenarioFile(fields: Record<string, string>): string {
+  const body = Object.entries(fields)
+    .map(([key, value]) => `  ${key}: ${value},`)
+    .join("\n");
+  return `import { scenario } from ${JSON.stringify(FORM)};\nconst sees = async () => ({ found: true as const, shows: ["seen"] });\nexport default scenario({\n${body}\n} as never);\n`;
+}
+
+const scenario22: Record<string, string> = {
+  number: "22",
+  wave: "2",
+  line: "1836",
+  parts: `[
+    { id: "four-values", words: "The four values are as before those turns", mark: "code", on: [{ page: "World", check: sees }] },
+    { id: "note", words: "a note written in them is back to its earlier text", mark: "code", on: [{ page: "Files", check: sees }] },
+  ]`,
+  fixtures: "[]",
+  bed: "[]",
+  rig: "async () => {}",
+  live: "async () => {}",
+};
+function runCheck(at = root): { code: number; text: string } {
+  const done = Bun.spawnSync({ cmd: [process.execPath, RUN, "check", "--root", at], stdout: "pipe", stderr: "pipe" });
+  return { code: done.exitCode ?? -1, text: `${done.stdout.toString()}${done.stderr.toString()}` };
+}
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), "proof-form-"));
+  mkdirSync(join(root, "scenarios"));
+  writeFileSync(join(root, "scenarios/22-delete-two.ts"), scenarioFile(scenario22));
+  const noRig: Record<string, string> = { ...scenario22, number: "23", line: "1837" };
+  delete noRig.rig;
+  writeFileSync(join(root, "scenarios/23-branch.ts"), scenarioFile(noRig));
+  const noWave: Record<string, string> = { ...scenario22, number: "20", line: "1834" };
+  delete noWave.wave;
+  writeFileSync(join(root, "scenarios/20-swipe.ts"), scenarioFile(noWave));
+  writeFileSync(
+    join(root, "scenarios/21-flip-back.ts"),
+    scenarioFile({ ...scenario22, number: "21", line: "1835", parts: `[{ id: "right-state", words: "The right text with the right state, by the same four values", on: [{ page: "World", check: sees }] }]` }),
+  );
+  mkdirSync(join(root, "floor"));
+  writeFileSync(
+    join(root, "floor/gate.ts"),
+    `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: "floor", waves: [1, 5], parts: [{ id: "calls", words: "Exactly 1 in at least 9 of 10", mark: "as shipped", measured: "calls begun before the reply's first piece", wants: { hits: 9, of: 10 } }], fixtures: [], bed: [], live: async () => {} });\n`,
+  );
+  mkdirSync(join(root, "intent"));
+  writeFileSync(
+    join(root, "intent/gate.ts"),
+    `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: "gate-17.3-intent", waves: [3], parts: [{ id: "record", words: "an intent record with a line for each lane", mark: "as shipped", on: [{ page: "Turn", check: async () => ({ found: false as const, what: "none" }) }] }], fixtures: [], bed: [], rig: async () => {} } as never);\n`,
+  );
+  // A wave's checkpoint items kept with the scenarios, as a gate named for its wave.
+  const checkpoint = (id: string, wave: number) => `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: "${id}", waves: [${wave}], parts: [{ id: "streamed", words: "a chat on RPE's connection gets a streamed reply", mark: "code", on: [{ page: "Lumiverse chat", check: async () => ({ found: true as const, shows: ["reply"] }) }] }], fixtures: [], bed: [], rig: async () => {}, live: async () => {} });\n`;
+  writeFileSync(join(root, "scenarios/w1-checkpoint.ts"), checkpoint("w1", 1));
+  writeFileSync(join(root, "scenarios/w2-checkpoint.ts"), checkpoint("w3", 3));
+  writeFileSync(join(root, "scenarios/notes.ts"), "export const helper = 1;\n");
+  // Against the list: a wave not the table's, words not the plan's, words left out, an "as shipped" clause marked code.
+  writeFileSync(join(root, "scenarios/16-unseen-preset.ts"), scenarioFile({ ...scenario22, number: "16", wave: "3", line: "1829", parts: wholeRow(16) }));
+  writeFileSync(join(root, "scenarios/34-sixty-entries.ts"), scenarioFile({ ...scenario22, number: "34", line: "1849", parts: `[{ id: "calls", words: "At most four calls; then one entry redone", mark: "code", on: [{ page: "Lore", check: sees }] }]` }));
+  writeFileSync(join(root, "scenarios/17-preset-changes.ts"), scenarioFile({ ...scenario22, number: "17", line: "1830", parts: `[{ id: "notices", words: "Each shows as its own notice in the next briefing and on the Prompt page", mark: "code", on: [{ page: "Prompt", check: sees }] }]` }));
+  writeFileSync(
+    join(root, "scenarios/26-other-connection.ts"),
+    scenarioFile({
+      ...scenario22,
+      number: "26",
+      wave: "3",
+      line: "1840",
+      parts: `[{ id: "range", words: "The briefing gives the range", mark: "code", on: [{ page: "Turn", check: sees }] }, { id: "records", words: "the Author records what matters", mark: "code", on: [{ page: "Story", check: sees }] }]`,
+    }),
+  );
+  all = mkdtempSync(join(tmpdir(), "proof-all-"));
+  mkdirSync(join(all, "scenarios"));
+  for (const row of LIST) {
+    if (row.number === 22) continue;
+    const fields = { ...scenario22, number: String(row.number), wave: String(row.wave), line: String(row.line), parts: wholeRow(row.number) };
+    writeFileSync(join(all, `scenarios/${String(row.number).padStart(2, "0")}-whole.ts`), scenarioFile(fields));
+  }
+});
+
+afterAll(() => {
+  for (const dir of [root, all]) if (dir !== "") rmSync(dir, { recursive: true, force: true });
+});
+
+/** One part carrying a row's whole words, marked as the row's own "as shipped" asks. */
+function wholeRow(number: number): string {
+  const row = LIST.find((r) => r.number === number);
+  if (!row) throw new Error(`no row ${number}`);
+  return `[{ id: "whole", words: ${JSON.stringify(row.seen)}, mark: ${/as shipped/i.test(row.seen) ? '"as shipped"' : '"code"'}, on: [{ page: "World", check: sees }] }]`;
+}
+
+test("a scenario missing a form, a wave or a mark on a part is refused by run.ts check, by file", () => {
+  const { code, text } = runCheck();
+  expect(code).toBe(1);
+  expect(text).toContain("scenarios/23-branch.ts: it has no rig form");
+  expect(text).toContain("scenarios/20-swipe.ts: it has no wave");
+  expect(text).toContain('scenarios/21-flip-back.ts: part right-state has no mark ("code" or "as shipped")');
+  // The whole one is listed with both forms and nothing of its own refused.
+  expect(text).toMatch(/22 +wave 2 +scenarios\/22-delete-two\.ts +rig and live/);
+  expect(text).not.toContain("scenarios/22-delete-two.ts:");
+});
+
+test("a gate may lack a rig form, never a live one; a wave's checkpoint kept with the scenarios is a gate named for its wave", () => {
+  const { text } = runCheck();
+  expect(text).toMatch(/floor +waves 1, 5 +floor\/gate\.ts +live/);
+  expect(text).not.toContain("floor/gate.ts:");
+  expect(text).toContain("intent/gate.ts: it has no live form");
+  expect(text).toMatch(/w1 +waves 1 +scenarios\/w1-checkpoint\.ts +rig and live/);
+  expect(text).not.toContain("scenarios/w1-checkpoint.ts:");
+  expect(text).toContain("scenarios/w2-checkpoint.ts: a wave's checkpoint named for wave 2 has the id w2 and is played at wave 2 alone");
+  expect(text).toContain("scenarios/notes.ts: it is neither a scenario named <nn>-<word>.ts nor a wave's checkpoint named w<n>-checkpoint.ts");
+});
+
+test("a file missing for scenario 22 fails run.ts check by its number, and all 68 are listed with their waves", () => {
+  const { code, text } = runCheck(all);
+  expect(code).toBe(1);
+  expect(text).toContain("The plan's 68 scenarios: 67 with a file, 1 with none.");
+  expect(text).toMatch(/\n {2}22 +wave 2 +no file\n/);
+  expect(text).toMatch(/\n {2}38 +wave 1 +scenarios\/38-whole\.ts +rig and live\n/);
+  expect(text).toContain("scenario 22: no file plays it");
+  expect(text.match(/no file plays it/g)?.length).toBe(1);
+  expect(text).toContain("Faults (1):");
+});
+
+test("a list with scenario 22 missing fails the check by its number", async () => {
+  const result = await check(root, LIST.filter((row) => row.number !== 22));
+  expect(result.faults).toContainEqual({ where: "scenario 22", what: "the list of the 68 lacks it" });
+  expect(result.faults).toContainEqual({ where: "scenarios/22-delete-two.ts", what: "the list of the 68 has no scenario 22" });
+});
+
+test("a file whose wave or words differ from the list is a fault, as is a clause under \"as shipped\" marked code", () => {
+  const { text } = runCheck();
+  expect(text).toContain("scenarios/16-unseen-preset.ts: its wave is 3, and §18.3's table lists scenario 16 at wave 2");
+  expect(text).toContain(`scenarios/34-sixty-entries.ts: part calls's words are not in scenario 34's row as the plan writes it: "At most four calls; then one entry redone"`);
+  expect(text).toContain(`scenarios/17-preset-changes.ts: no part carries the plan's words "Nothing is blocked"`);
+  expect(text).toContain(`scenarios/26-other-connection.ts: part records is marked "code", and the plan's row puts "the Author records what matters" under "as shipped"`);
+  expect(text).not.toContain("scenarios/26-other-connection.ts: part range");
+});
