@@ -10,7 +10,7 @@ import { Generations } from "../../src/ext/generations";
 import { promptInterceptor } from "../../src/ext/prompt";
 import { worldInfoInterceptor } from "../../src/ext/question";
 import { PRIORITY } from "../../src/ext/start";
-import { ALL, FERRY_SECRET, FERRY_SHOWN, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET } from "./rig";
+import { ALL, FERRY_SECRET, FERRY_SHOWN, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
 import { settle } from "../standin/clock";
 
 const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
@@ -58,7 +58,11 @@ describe("the question before lore activates", () => {
     expect(turn.tag.lore.map((l) => l.id).sort()).toEqual(["e-ferry", "e-public"]);
     expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
     expect(turn.layout.complete).toBe(true);
-    expect(historyOf(turn)).toEqual(["m8", "m9", "m10", "m11"]);
+    // The player's last two lines, sent in a row, reach the interceptor as one message with the first one's id and number, the second
+    // one's words inside it (`prompt-assembly.service.ts:3456-3461`, `:6754-6843`).
+    expect(historyOf(turn)).toEqual(["m8", "m9", "m10"]);
+    expect(turn.tag.messages.find((m) => m.source?.id === "m10")).toMatchObject({ role: "user", history: true, source: { id: "m10", index: 10 }, hash: textHash("HIST-10 I watch the shore.\n\nHIST-11 And I wait.") });
+    expect(turn.tag.messages.some((m) => m.source?.id === "m11")).toBe(false);
   });
 
   test("with RPE stopped, every marked passage and every copy of one stays out at once, and a chat on another connection goes on with its whole prompt", async () => {
@@ -93,7 +97,7 @@ describe("the question before lore activates", () => {
     const turn = rig.turns[0]!;
     expect(turn.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
     expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: null, remembered: false, byRpe: 7 });
-    expect(historyOf(turn)).toEqual(["m8", "m9", "m10", "m11"]);
+    expect(historyOf(turn)).toEqual(["m8", "m9", "m10"]);
     const played = promptText(turn.prompt);
     for (const i of LEFT_OUT) expect(played).not.toContain(label(i));
     // With no answer to cut by, Lumiverse sent the whole history and stored it beside the reply.
@@ -155,49 +159,65 @@ describe("the request's parts, told apart", () => {
   const MODES = ["", "merge", "semi", "strict", "single"];
   /** The preset's prefill, which Lumiverse sends as a partial last message (`prompt-assembly.service.ts:4183-4192`). */
   const PREFILL = "PREFILL-HARBOR Ilsa looks up from the nets and";
+  /**
+   * The joins Lumiverse makes inside its assembly, before the interceptor sees the prompt (`prompt-assembly.service.ts:4210`,
+   * `:7129-7231`): the player's two last lines are joined in every case (`:6754-6843`); the preset may also squash its system messages,
+   * write the speakers' names into the text, and send system as the user's.
+   */
+  const JOINED: { name: string; completion: NonNullable<RigOptions["completion"]> }[] = [
+    { name: "queued lines joined", completion: {} },
+    { name: "queued lines joined, system messages squashed, names in content", completion: { squashSystemMessages: true, namesBehavior: 2 } },
+    { name: "queued lines joined, squashed, names in content, system as user", completion: { squashSystemMessages: true, namesBehavior: 2, useSystemPrompt: false } },
+  ];
   for (const post of MODES) {
     for (const collapse of [false, true]) {
-      test(`post-processing "${post || "none"}", collapse ${collapse ? "on" : "off"}: every part of the body is accounted for by the tag`, async () => {
-        const rig = await new Rig({ postProcessing: post, collapse, prefill: PREFILL, picture: true }).start();
-        const out = await rig.generate("conn-rpe");
-        expect(out.error).toBeNull();
-        const turn = rig.turns[0]!;
-        expect(turn.layout.complete).toBe(true);
-        expect(turn.cut.byRpe).toBe(0);
-        turn.layout.messages.forEach((m, k) => {
-          const text = promptText([turn.prompt[k]!]);
-          expect(m.length).toBe(text.length);
-          let at = 0;
-          for (const part of m.parts) {
-            expect(part.kind).not.toBe("unknown");
-            // Between two parts stands only what Lumiverse put there when it joined them.
-            expect(["", "\n\n"]).toContain(text.slice(at, part.start));
-            expect(textHash(text.slice(part.start, part.end))).toBe(part.hash);
-            at = part.end;
-          }
-          expect(text.slice(at)).toBe("");
+      for (const { name, completion } of JOINED) {
+        const mode = `post-processing "${post || "none"}", collapse ${collapse ? "on" : "off"}, ${name}`;
+        test(`${mode}: every part of the body is accounted for by the tag`, async () => {
+          const rig = await new Rig({ postProcessing: post, collapse, prefill: PREFILL, picture: true, completion }).start();
+          const out = await rig.generate("conn-rpe");
+          expect(out.error).toBeNull();
+          const turn = rig.turns[0]!;
+          expect(turn.layout.complete).toBe(true);
+          expect(turn.cut.byRpe).toBe(0);
+          turn.layout.messages.forEach((m, k) => {
+            const text = promptText([turn.prompt[k]!]);
+            expect(m.length).toBe(text.length);
+            let at = 0;
+            for (const part of m.parts) {
+              expect(part.kind).not.toBe("unknown");
+              // Between two parts stands only what Lumiverse put there when it joined them.
+              expect(["", "\n\n"]).toContain(text.slice(at, part.start));
+              expect(textHash(text.slice(part.start, part.end))).toBe(part.hash);
+              at = part.end;
+            }
+            expect(text.slice(at)).toBe("");
+          });
+          expect(historyOf(turn)).toEqual(["m8", "m9", "m10"]);
+          // The prefill is the body's last part, as the tag listed it: the partial assistant message that ends the prompt, the
+          // character's name before it where the preset writes names into the text (`:7196-7208`, after the prefill at `:4183-4192`).
+          const prefill = completion.namesBehavior === 2 ? `Ilsa: ${PREFILL}` : PREFILL;
+          expect(turn.tag.messages.at(-1)).toMatchObject({ role: "assistant", partial: true, hash: textHash(prefill) });
+          const last = turn.layout.messages.at(-1)!.parts.at(-1)!;
+          expect([last.role, last.kind, last.hash]).toEqual(["assistant", "other", textHash(prefill)]);
+          expect(promptText([turn.prompt.at(-1)!]).endsWith(PREFILL)).toBe(true);
         });
-        expect(historyOf(turn)).toEqual(["m8", "m9", "m10", "m11"]);
-        // The prefill is the body's last part, as the tag listed it: the partial assistant message that ends the prompt.
-        expect(turn.tag.messages.at(-1)).toMatchObject({ role: "assistant", partial: true, hash: textHash(PREFILL) });
-        const last = turn.layout.messages.at(-1)!.parts.at(-1)!;
-        expect([last.role, last.kind, last.hash]).toEqual(["assistant", "other", textHash(PREFILL)]);
-        expect(promptText([turn.prompt.at(-1)!]).endsWith(PREFILL)).toBe(true);
-      });
 
-      test(`post-processing "${post || "none"}", collapse ${collapse ? "on" : "off"}: a window RPE cuts on receipt gives the prompt Lumiverse makes when the extension cuts`, async () => {
-        const options = { postProcessing: post, collapse, prefill: PREFILL, picture: true };
-        const cutByExtension = await new Rig(options).start();
-        await cutByExtension.generate("conn-rpe");
-        const cutByRpe = await new Rig({ ...options, windowFailsAtQuestion: true }).start();
-        await cutByRpe.generate("conn-rpe");
-        const [a, b] = [cutByExtension.turns[0]!, cutByRpe.turns[0]!];
-        expect(a.tag.cut).toMatchObject({ answered: true });
-        expect(b.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
-        expect(b.cut.byRpe).toBe(7);
-        expect(b.prompt).toEqual(a.prompt);
-        expect(b.layout.messages.map((m) => m.parts.map((p) => [p.kind, p.source?.id ?? null, p.start, p.end]))).toEqual(a.layout.messages.map((m) => m.parts.map((p) => [p.kind, p.source?.id ?? null, p.start, p.end])));
-      });
+        test(`${mode}: a window RPE cuts on receipt gives the prompt Lumiverse makes when the extension cuts`, async () => {
+          const options = { postProcessing: post, collapse, prefill: PREFILL, picture: true, completion };
+          const cutByExtension = await new Rig(options).start();
+          await cutByExtension.generate("conn-rpe");
+          const cutByRpe = await new Rig({ ...options, windowFailsAtQuestion: true }).start();
+          await cutByRpe.generate("conn-rpe");
+          const [a, b] = [cutByExtension.turns[0]!, cutByRpe.turns[0]!];
+          expect(a.tag.cut).toMatchObject({ answered: true });
+          expect(b.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
+          // Counted by the chat's rows (`receipt.ts`): m11, inside m10's message, counts as a message of the window.
+          expect(b.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byRpe: 7 });
+          expect(b.prompt).toEqual(a.prompt);
+          expect(b.layout.messages.map((m) => m.parts.map((p) => [p.kind, p.source?.id ?? null, p.start, p.end]))).toEqual(a.layout.messages.map((m) => m.parts.map((p) => [p.kind, p.source?.id ?? null, p.start, p.end])));
+        });
+      }
     }
   }
 
@@ -211,7 +231,7 @@ describe("the request's parts, told apart", () => {
     expect(promptText([sent.at(-1)!])).toContain("HIST-11 And I wait.");
     const turn = rig.turns[0]!;
     expect(turn.tag.messages.some((m) => m.partial === true)).toBe(false);
-    expect(turn.tag.messages.at(-1)).toMatchObject({ role: "user", history: true, source: { id: "m11" } });
+    expect(turn.tag.messages.at(-1)).toMatchObject({ role: "user", history: true, source: { id: "m10" } });
   });
 
   test("the second reply's layout names the prompt's blocks from the breakdown Lumiverse stored after the first", async () => {
@@ -222,7 +242,9 @@ describe("the request's parts, told apart", () => {
     expect(layout.blocksFrom).toBe("breakdown");
     expect(layout.preset).toEqual({ id: PRESET.id, name: PRESET.name });
     const named = layout.messages.flatMap((m) => m.parts.flatMap((p) => p.blocks.map((b) => [p.kind, layout.blocks[b.block]!.name])));
-    expect(named).toEqual(expect.arrayContaining([["other", "Main"], ["other", "Style"], ["other", "Depth note"], ["lore", "The bay"]]));
+    // Lore is named as Lumiverse names it, by its position and its label: with no marker in the preset, "before" goes just before the
+    // history (`prompt-assembly.service.ts:3728-3741`, `:6612-6617`).
+    expect(named).toEqual(expect.arrayContaining([["other", "Main"], ["other", "Style"], ["other", "Depth note"], ["lore", "World Info Before (auto): The bay"]]));
   });
 });
 

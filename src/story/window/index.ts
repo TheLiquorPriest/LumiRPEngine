@@ -3,12 +3,15 @@
 // cut back to X, so the front of the prompt stays the same between cuts; the hold, when on, keeps an
 // uncovered message in the prompt for at most its cap of extra messages. The answer is worked out
 // from the count of messages and which of them the story record covers, never from what they say,
-// and it holds no state: the same path and settings give the same first message every time.
+// and it holds no state: the same path and settings give the same first message every time. A
+// message the user hid is not in the prompt and is not counted (READINGS R-21).
 
-/** A message on the chat's path, as the adapter names it: its id and its place in the chat. */
+/** A message on the chat's path, as the adapter names it: its id, its place in the chat, and whether the user hid it. */
 export interface WindowMessage {
   id: string;
   index: number;
+  /** Hidden from the prompt by the user: never kept, never left out by the window, and not counted toward its size. */
+  hidden?: boolean;
 }
 
 export interface WindowSettings {
@@ -73,13 +76,15 @@ export function windowStart(count: number, settings: WindowSettings, covered: (p
 
 /**
  * The window over the chat's messages on the path, oldest first. `covered` holds the ids of the
- * messages the story record covers; it matters only to the hold, and to how `left` is split.
+ * messages the story record covers; it matters only to the hold, and to how `left` is split. Only the
+ * messages the user did not hide are counted, kept or left out.
  */
 export function historyWindow(messages: readonly WindowMessage[], settings: WindowSettings, covered: ReadonlySet<string>): WindowCut {
-  const first = windowStart(messages.length, settings, (place) => covered.has(messages[place]?.id ?? ""));
+  const counted = messages.filter((m) => m.hidden !== true);
+  const first = windowStart(counted.length, settings, (place) => covered.has(counted[place]?.id ?? ""));
   const left: LeftOutRange[] = [];
   for (let i = 0; i < first; i++) {
-    const message = messages[i];
+    const message = counted[i];
     if (message === undefined) continue;
     const isCovered = covered.has(message.id);
     const point = { id: message.id, index: message.index };
@@ -90,6 +95,6 @@ export function historyWindow(messages: readonly WindowMessage[], settings: Wind
     } else left.push({ from: point, to: point, count: 1, covered: isCovered });
   }
 
-  const kept = first > 0 ? messages[first] : undefined;
+  const kept = first > 0 ? counted[first] : undefined;
   return { first: kept === undefined ? null : { id: kept.id, index: kept.index }, left };
 }

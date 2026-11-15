@@ -1,11 +1,22 @@
 // A tagged chat reply's request, as RPE receives it (STANDALONE-PLAN §4.2, §10.1 step 4): the tag
 // checked, its message list laid over the body, and the history window checked, or made here when the
 // extension had no answer to cut by. What comes out is the prompt RPE passes on: never more history
-// than the window lets through.
+// than the window lets through. Where the window is made here, it counts the chat's messages as
+// Lumiverse's own rows have them, read as they stand when the request arrives.
 
 import type { HistoryWindow } from "./answer";
 import { overlay, readBodyMessages, rebuild, type LaidMessage, type Overlay } from "./overlay";
 import { historyCut, type KeepPoint, type PathStep, type Tag } from "./wire";
+
+/** One of a chat's messages as Lumiverse's rows hold it: its id, the number Lumiverse stored for it (`index_in_chat`), and whether the user hid it. */
+export interface ChatRow {
+  id: string;
+  index: number;
+  hidden: boolean;
+}
+
+/** A chat's rows as they stand, every message in Lumiverse's order; null when the chat is not the user's. */
+export type ChatRows = (chat: string, signal: AbortSignal) => Promise<readonly ChatRow[] | null>;
 
 /** Why a tagged request is not played; the words reach the user as the reply's error. */
 export class Refused extends Error {
@@ -41,14 +52,29 @@ export interface Received {
 const LUMIVERSE_TYPE: Record<Tag["kind"], string> = { new: "normal", swipe: "swipe", regenerate: "regenerate", continue: "continue", impersonate: "impersonate" };
 
 /**
+ * The chat's messages the window counts on receipt, oldest first, as Lumiverse's rows have them (§4.2; READINGS R-21, R-103):
+ * each at the number Lumiverse stored for it, gaps after deletes and all (a place counted from 0 would not compare with the tag's
+ * sources). The same messages the question's path holds: the chat's rows less the reply being written, which Lumiverse leaves out
+ * of the prompt (a new reply's empty message, the message a swipe or a regenerate replaces). So a message Lumiverse joined into the
+ * one before it ahead of the interceptor (two sends queued in a row arrive as one carrying the first one's id,
+ * `src/services/prompt-assembly.service.ts:6754-6843` in Lumiverse) counts as every row it stands for. A hidden row is not in the
+ * prompt and is not counted (R-21).
+ */
+function windowPath(tag: Tag, rows: readonly ChatRow[]): PathStep[] {
+  const writing = tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
+  return rows.filter((r) => !r.hidden && r.id !== writing).map((r) => ({ id: r.id, index: r.index, swipe: null }));
+}
+
+/**
  * The tag checked against RPE's own user and laid over the body, and the window applied. Where the
  * extension cut on RPE's answer, the cut is checked and any history it left before the first kept
- * message is cut here. Where it had no answer, the window is asked here, from the prompt's history, and
- * the cut made here; what the extension already cut where RPE last said to cannot be put back. A cut
- * made here needs every part of the body told apart; where they can't be, the request is refused
- * rather than sent with more history than the window allows.
+ * message is cut here. Where it had no answer, the window is asked here, over the chat's rows read now
+ * (`rows`), and the cut made here; what the extension already cut where RPE last said to cannot be put
+ * back. A cut made here needs every part of the body told apart; where they can't be, the request is
+ * refused rather than sent with more history than the window allows, as it is where the chat's rows
+ * cannot be read.
  */
-export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow }, signal: AbortSignal): Promise<Received> {
+export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow; rows: ChatRows }, signal: AbortSignal): Promise<Received> {
   if (tag.user !== own.user) throw new Refused(403, "This reply's chat belongs to another Lumiverse user than the one this RPE plays for.");
   const messages = readBodyMessages(body.messages);
   if (messages === null) throw new Refused(400, "The request's messages are not in the chat format RPE reads.");
@@ -56,9 +82,10 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
   let keep: KeepPoint | null;
   if (tag.cut.answered) keep = tag.cut.keep;
   else {
-    const path: PathStep[] = tag.messages.flatMap((m) => (m.history && m.source ? [{ id: m.source.id, index: m.source.index, swipe: null }] : []));
+    const rows = await own.rows(tag.chat, signal);
+    if (rows === null) throw new Refused(404, "RPE could not read this chat's messages in Lumiverse, so it could not count your history window, and sent nothing. Send the message again.");
     const generation = { id: tag.generation, type: LUMIVERSE_TYPE[tag.kind], target: tag.target, speaker: tag.speaker, model: null };
-    keep = await own.window({ user: tag.user, chat: tag.chat, generation, path }, signal);
+    keep = await own.window({ user: tag.user, chat: tag.chat, generation, path: windowPath(tag, rows) }, signal);
   }
   const left = historyCut(tag.messages.map((m) => ({ history: m.history === true, index: m.source?.index ?? null })), keep);
   const remembered = !tag.cut.answered && tag.cut.remembered !== null;

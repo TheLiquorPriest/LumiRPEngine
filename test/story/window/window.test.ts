@@ -97,6 +97,21 @@ describe("the history window", () => {
     ]);
   });
 
+  test("hidden messages do not count toward the window", () => {
+    // m3 and m7 hidden: of the ten, eight count, and the window of five keeps the latest five of them (READINGS R-21).
+    const messages = chat(10).map((m) => (m.id === "m3" || m.id === "m7" ? { ...m, hidden: true } : m));
+    const cut = historyWindow(messages, settings({ size: 5 }), NOTHING);
+    expect(cut.first).toEqual({ id: "m4", index: 4 });
+    // What the window leaves out is what it counted: the hidden m3 is neither kept nor left out by it.
+    expect(cut.left).toEqual([{ from: { id: "m0", index: 0 }, to: { id: "m2", index: 2 }, count: 3, covered: false }]);
+    // Hiding the message the window began at lets one older message in: the five it keeps are m2, m5, m6, m8 and m9.
+    const later = historyWindow(messages.map((m) => (m.id === "m4" ? { ...m, hidden: true } : m)), settings({ size: 5 }), NOTHING);
+    expect(later.first).toEqual({ id: "m2", index: 2 });
+    // With the step and the hold, the same: they count only what is not hidden (four of eight with a step of two: m5 on).
+    expect(historyWindow(messages, settings({ size: 4, step: 2 }), NOTHING).first).toEqual({ id: "m5", index: 5 });
+    expect(historyWindow(messages, settings({ size: 5, hold: { on: true, cap: 2 } }), new Set(["m4", "m5", "m6", "m8", "m9"])).first).toEqual({ id: "m1", index: 1 });
+  });
+
   test("refuses a setting it cannot carry out", () => {
     expect(() => historyWindow(chat(10), settings({ size: 0 }), NOTHING)).toThrow(RangeError);
     expect(() => historyWindow(chat(10), settings({ size: 4, step: 2.5 }), NOTHING)).toThrow(RangeError);

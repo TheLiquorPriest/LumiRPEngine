@@ -11,7 +11,7 @@ import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
 import { rawLayout, type BlocksHint } from "./layout";
 import type { RawLayout } from "rp-harness/contract";
-import { receive, Refused, type Cut } from "./receipt";
+import { receive, Refused, type ChatRows, type Cut } from "./receipt";
 import { KEEP_ALIVE_MS, streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
 import { readTag, TAG_FIELD, type Role, type Tag } from "./wire";
 
@@ -47,6 +47,8 @@ export interface ProviderDeps {
   /** Whether the request carries RPE's provider key. */
   allowed(request: Request): boolean | Promise<boolean>;
   window: HistoryWindow;
+  /** The chat's rows as Lumiverse holds them when the request arrives, by RPE's own reads: what the window counts when RPE makes the cut itself (`receipt.ts`). */
+  rows: ChatRows;
   /** Lumiverse's breakdown of the chat's prompt, a hint for names (`hint.ts`); null when it has none. */
   blocks(tag: Tag, signal: AbortSignal): Promise<BlocksHint | null>;
   /** RPH's model layer, for requests passed through. */
@@ -114,7 +116,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {
-      received = await receive(read.tag, body, { user: deps.user, window: deps.window }, request.signal);
+      received = await receive(read.tag, body, { user: deps.user, window: deps.window, rows: deps.rows }, request.signal);
     } catch (e) {
       // The window is the user's setting: a reply whose window RPE could not work out is not sent with more history than it allows.
       return e instanceof Refused ? error(e.status, e.message) : error(500, `RPE could not prepare this reply: ${e instanceof Error ? e.message : String(e)}`);

@@ -37,6 +37,8 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     user: "user-a",
     allowed: (r) => r.headers.get("authorization") === "Bearer rpe_key",
     window: async () => null,
+    // Every tag here carries the extension's cut, so the chat's rows are never read.
+    rows: async () => null,
     blocks: async () => null,
     models: {
       pass: async (request: PassRequest, sink: PassSink) => {

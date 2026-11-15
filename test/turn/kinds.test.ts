@@ -89,6 +89,24 @@ describe("the other kinds of turn", () => {
     ]);
   });
 
+  test("a delete in the middle of the chat leaves a gap in Lumiverse's numbers, and play goes on over it: the window keeps exactly the latest messages and the turn is tied to its reply", async () => {
+    // A window of two: the next prompt's history must be exactly the two latest of the chat's messages.
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up."), replying("Wren waits by the lamp.")], global: "history:\n  window: 2\n" });
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const second = await settledTurn(b, await play(b, "normal", "I look around."));
+    // The first reply is deleted: Lumiverse's numbers keep a gap where it was (`services/chats.service.ts:3236-3240`), and the player's two
+    // lines, now neighbours, reach the interceptor as one (`services/prompt-assembly.service.ts:6754-6843`).
+    const first = b.host.chats.get(CHAT)!.messages.find((m) => m.content === "The lamp turns.")!;
+    b.host.deleteMessage(CHAT, first.id);
+    const next = await settledTurn(b, await play(b, "normal", "I wait."));
+    expect(next).toMatchObject({ status: "done", hash: textHash("Wren waits by the lamp.") });
+    expect(b.db.rows("SELECT index_in_chat AS n FROM messages WHERE chat_id = ? ORDER BY index_in_chat", CHAT).map((r) => r.n)).toEqual([0, 1, 3, 4, 5, 6]);
+    const history = JSON.stringify(b.model.requests.at(-1)!.messages);
+    for (const kept of ["Wren looks up.", "I wait."]) expect(history).toContain(kept);
+    for (const gone of ["I climb the stairs.", "I look around.", "The lamp turns above you"]) expect(history).not.toContain(gone);
+    expect(second.message).not.toBe(next.message);
+  });
+
   test("a swipe of the chat's first turn follows no turn: RPH is asked with parent null, and carries nothing of the attempt it replaces", async () => {
     const b = await bed({ answers: [replying("The lamp turns.", "INTENT-FIRST-ATTEMPT"), replying("Wren taps the barometer.")] });
     const first = await settledTurn(b, await play(b, "normal", "I climb the stairs."));

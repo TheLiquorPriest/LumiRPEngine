@@ -5,7 +5,8 @@
 // Lumiverse's `src/`.
 
 import { quietTimer, type Registration, type WorldInfoHandler } from "./host";
-import type { Chat, ChatMessage } from "./rows";
+import { indexInChat, type Chat, type ChatMessage } from "./rows";
+import type { Role } from "./steps";
 
 export interface Entry {
   id: string;
@@ -16,20 +17,28 @@ export interface Entry {
   constant?: boolean;
   disabled?: boolean;
   extensions?: Record<string, unknown>;
+  /**
+   * Where Lumiverse puts it (`world_book_entries.position`, `services/world-info-activation.service.ts:971-1021`): 0 at the
+   * preset's "World Info Before" marker, else just before the history; 1 at "World Info After", else just after it; 7 in the pool a
+   * block's `{{wi_marker}}` takes. Absent, 0. The stand-in places no other position.
+   */
+  position?: 0 | 1 | 7;
+  /** The role it is sent with where no marker block gives one (`normalizeRole`, `:1049-1052`): absent, system. */
+  role?: Role;
 }
 
 /**
  * What a World Info interceptor is told of the generation (`services/prompt-assembly.service.ts:2282-2313`):
- * the chat's messages the prompt is built from, hidden ones included, each with its text, its place in the
- * chat and the swipe it shows, a greeting marked as one (`:2289-2305`).
+ * the chat's messages the prompt is built from, hidden ones included with no mark of it, each with its text,
+ * the number Lumiverse stored for it (`index_in_chat`, `:2304`: a delete leaves a gap) and the swipe it shows,
+ * a greeting marked as one (`:2289-2305`).
  */
 export function worldInfoContext(chat: Chat, messages: readonly ChatMessage[]): Record<string, unknown> {
-  const indexOf = (id: string): number => chat.messages.findIndex((m) => m.id === id);
   return {
     purpose: "prompt",
     chatId: chat.id,
     characterId: chat.character.id,
-    messages: messages.map((m) => ({ id: m.id, role: m.role, content: m.content, is_user: m.role === "user", is_greeting: m.greeting !== undefined, ...(m.greeting !== undefined ? { greeting_index: m.greeting } : {}), swipe_id: m.swipeId ?? 0, index_in_chat: indexOf(m.id) })),
+    messages: messages.map((m) => ({ id: m.id, role: m.role, content: m.content, is_user: m.role === "user", is_greeting: m.greeting !== undefined, ...(m.greeting !== undefined ? { greeting_index: m.greeting } : {}), swipe_id: m.swipeId ?? 0, index_in_chat: indexInChat(m) })),
     chatTurn: messages.length,
     chatMetadata: chat.metadata ?? {},
     activationSettings: { globalScanDepth: null, maxRecursionPasses: 0 },

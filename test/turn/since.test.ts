@@ -146,6 +146,22 @@ describe("the turn before, told and kept", () => {
     expect(sent(b, 1)).toContain("replies were written in this chat without a turn of yours (messages 3, counting the chat's first message as 0)");
   });
 
+  test("after a delete leaves a gap in Lumiverse's numbers, the chat plays on: a reply written without a turn is still told by its place as chat_read counts it", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up."), replying("Wren lets the dog in.")] });
+    // The greeting is message 0; the player's lines 1 and 3 with the turns' replies 2 and 4. The player's second line is deleted, so
+    // Lumiverse's numbers run 0, 1, 2, 4 (`services/chats.service.ts:3236-3240`), and the reply written without a turn is stored as 5,
+    // its place on the path, counting from 0, being 4.
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const second = await play(b, "normal", "I look around.");
+    await settledTurn(b, second);
+    const asked = b.host.chats.get(CHAT)!.messages.find((m) => m.content === "I look around.")!;
+    b.host.deleteMessage(CHAT, asked.id);
+    const dog = b.host.reply(CHAT, "The keeper's dog barks at the door.");
+    expect(b.db.rows("SELECT index_in_chat AS n FROM messages WHERE id = ?", dog)).toEqual([{ n: 5 }]);
+    await settledTurn(b, await play(b, "normal", "I let the dog in."));
+    expect(sent(b, 2)).toContain("replies were written in this chat without a turn of yours (messages 4, counting the chat's first message as 0)");
+  });
+
   test("a reply written without a turn is told to the turn after it, and not again to the two after that", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("Wren lets the dog in."), replying("The dog shakes off the rain."), replying("Wren laughs.")] });
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));

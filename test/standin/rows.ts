@@ -20,6 +20,13 @@ export interface ChatMessage {
   images?: { data: string; mime_type: string }[];
   /** A greeting of the chat's character, by its place among the card's greetings (`services/chats.service.ts:1239-1260`). */
   greeting?: number;
+  /**
+   * Lumiverse's stored number for it (`index_in_chat`): one past the chat's highest when it is made (`createMessage`,
+   * `services/chats.service.ts:2642-2647`), and kept, so a delete leaves a gap and the next message made after a deleted last one
+   * takes its number again (`:3236-3240`). A fixture may give it (a chat with earlier deletes); one held without it is numbered as
+   * a new message is, in the chat's order, when the stand-in first holds it.
+   */
+  index?: number;
 }
 
 export interface Chat {
@@ -46,6 +53,12 @@ export interface Stored {
   usage: Record<string, unknown> | null;
   presetName: string;
   presetId: string;
+}
+
+/** A message's stored number, once the stand-in holds it (`ChatRows.numbered`). */
+export function indexInChat(m: ChatMessage): number {
+  if (m.index === undefined) throw new Error(`the stand-in has not numbered message ${m.id}`);
+  return m.index;
 }
 
 export class ChatRows extends ExtensionHost {
@@ -77,17 +90,35 @@ export class ChatRows extends ExtensionHost {
     return { ...row, is_user: row.is_user === 1, swipes: JSON.parse(String(row.swipes)) as unknown, swipe_dates: JSON.parse(String(row.swipe_dates)) as unknown, extra: JSON.parse(String(row.extra)) as unknown };
   }
 
-  /** `createMessage` (`services/chats.service.ts:2638-2683`): the next place in the chat, its text its one swipe, dated now; a greeting marked as `createChat` marks it (`:1250-1259`). */
+  /**
+   * Numbers each message of the chat that has no stored number yet, in the chat's order, one past the chat's highest, as
+   * `createMessage` numbers a new one (`services/chats.service.ts:2642-2647`). Nothing already numbered changes.
+   */
+  protected numbered(chat: Chat): void {
+    let max = -1;
+    for (const m of chat.messages) if (m.index !== undefined && m.index > max) max = m.index;
+    for (const m of chat.messages) if (m.index === undefined) m.index = ++max;
+  }
+
+  /** A chat's messages as its rows list them, in Lumiverse's order (`index_in_chat`), each with its stored number and its hidden mark (`extra.hidden`); null for no such chat. */
+  rowsOf(chatId: string): { id: string; index: number; hidden: boolean }[] | null {
+    const chat = this.chats.get(chatId);
+    if (chat === undefined) return null;
+    this.numbered(chat);
+    return chat.messages.map((m) => ({ id: m.id, index: indexInChat(m), hidden: m.hidden === true })).sort((a, b) => a.index - b.index);
+  }
+
+  /** `createMessage` (`services/chats.service.ts:2638-2683`): its stored number, its text its one swipe, dated now; a greeting marked as `createChat` marks it (`:1250-1259`). */
   protected createRow(chat: Chat, m: ChatMessage, name: string, extra: Record<string, unknown> = {}): void {
+    this.numbered(chat);
     if (this.db === null) return;
     const now = Math.floor(this.now() / 1000);
-    const max = Number(this.db.rows("SELECT COALESCE(MAX(index_in_chat), -1) AS max_idx FROM messages WHERE chat_id = ?", chat.id)[0]?.max_idx ?? -1);
     const marks = { ...extra, ...(m.hidden ? { hidden: true } : {}), ...(m.greeting !== undefined ? { greeting: true, greeting_character_id: chat.character.id, greeting_index: m.greeting } : {}) };
     this.db.run(
       "INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, send_date, swipe_id, swipes, swipe_dates, extra, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
       m.id,
       chat.id,
-      max + 1,
+      indexInChat(m),
       m.role === "user" ? 1 : 0,
       name,
       m.content,
@@ -144,9 +175,10 @@ export class ChatRows extends ExtensionHost {
     this.db?.run("INSERT INTO message_breakdowns (message_id, chat_id, user_id, data) VALUES (?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET data = excluded.data, chat_id = excluded.chat_id, user_id = excluded.user_id", messageId, chat.id, chat.user, JSON.stringify(stored));
   }
 
-  /** A chat as Lumiverse holds one: its character's row, its own, and each message's in order. */
+  /** A chat as Lumiverse holds one: its character's row, its own, and each message's in order, each numbered as it was made. */
   addChat(chat: Chat): void {
     this.chats.set(chat.id, chat);
+    this.numbered(chat);
     if (this.db === null) return;
     this.db.run("INSERT OR IGNORE INTO characters (id, name, user_id) VALUES (?, ?, ?)", chat.character.id, chat.character.name, chat.user);
     this.db.run("INSERT INTO chats (id, character_id, name, metadata, user_id) VALUES (?, ?, ?, ?, ?)", chat.id, chat.character.id, chat.name ?? "", JSON.stringify(chat.metadata ?? {}), chat.user);
@@ -175,11 +207,13 @@ export class ChatRows extends ExtensionHost {
     return m.id;
   }
 
-  /** `deleteMessage` (`services/chats.service.ts:3230-3270`): the row and its breakdown gone, then told (`MESSAGE_DELETED`). */
+  /** `deleteMessage` (`services/chats.service.ts:3230-3270`): the row and its breakdown gone, then told (`MESSAGE_DELETED`); no other message is numbered again. */
   deleteMessage(chatId: string, id: string): void {
     const chat = this.chats.get(chatId);
     const at = chat?.messages.findIndex((m) => m.id === id) ?? -1;
     if (!chat || at < 0) throw new Error("the stand-in has no such message");
+    // A chat put in place by hand is numbered before its first delete, so the gap is where Lumiverse would leave it.
+    this.numbered(chat);
     chat.messages.splice(at, 1);
     this.db?.run("DELETE FROM messages WHERE id = ? AND chat_id = ?", id, chatId);
     this.db?.run("DELETE FROM message_breakdowns WHERE message_id = ?", id);

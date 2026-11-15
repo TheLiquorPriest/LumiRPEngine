@@ -7,7 +7,7 @@
 // the World Info chain and activation (`lore.ts`); the prompt's assembly (`assembly.ts`). This file is
 // the generation that runs through them all, and the chat connections and presets it reads.
 
-import { assemble, type GenerationType, type Preset } from "./assembly";
+import { assemble, type BreakdownEntry, type GenerationType, type Preset } from "./assembly";
 import { activate, activatedWorldInfo, worldInfoChain, worldInfoContext, type Entry } from "./lore";
 import { ChatRows, type Chat, type ChatMessage, type Stored } from "./rows";
 import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, textOf, type LlmMessage, type StreamSeen, type StreamedReply } from "./steps";
@@ -60,6 +60,11 @@ export interface Outcome {
   stored: Stored | null;
   /** The World Info chain: how long it took, and the entries as it left them. */
   worldInfo: { ms: number; entries: Entry[] };
+  /**
+   * A dry run's: the breakdown its assembly made, the chat history's entry left out (`services/generate.service.ts:3255`); its
+   * interceptors add none. Absent for a generation, whose breakdown is the one Lumiverse stores beside the reply (`stored`).
+   */
+  breakdown?: BreakdownEntry[];
 }
 
 export class StandIn extends ChatRows {
@@ -107,6 +112,8 @@ export class StandIn extends ChatRows {
     const connection = this.connections.get(input.connection);
     const preset = this.presets.get(input.preset);
     if (!chat || !connection || !preset) throw new Error("the stand-in has no such chat, connection or preset");
+    // Every message the stand-in holds has its stored number from here on (`ChatRows.numbered`).
+    this.numbered(chat);
     const type = input.type ?? "normal";
     const dryRun = input.dryRun === true;
     const generationId = dryRun ? null : crypto.randomUUID();
@@ -166,7 +173,6 @@ export class StandIn extends ChatRows {
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const messages = chat.messages.filter((m) => m.id !== excluded);
-    const indexOf = (id: string): number => chat.messages.findIndex((m) => m.id === id);
 
     // ---- lore, before activation (`prompt-assembly.service.ts:2282-2316`)
     const wiStarted = performance.now();
@@ -174,9 +180,11 @@ export class StandIn extends ChatRows {
     const wiMs = performance.now() - wiStarted;
     const active = activate(entries, messages);
 
-    // ---- the prompt (the stand-in's own assembly)
+    // ---- the prompt (the stand-in's own assembly). The stand-in keeps no personas, so the name for the user's messages is
+    // Lumiverse's own when there is none (`services/prompt-assembly.service.ts:7186-7189`).
     const bound = connection.metadata?.reasoningBindings?.promptBias;
-    const { prompt, breakdown } = assemble(preset, active, messages, indexOf, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
+    const names = { user: "User", character: chat.character.name };
+    const { prompt, breakdown } = assemble(preset, active, messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
     // The chat history as Lumiverse counts it beside the reply: the prompt's history messages before the interceptors, blank ones left out
     // (`services/generate.service.ts:1211-1215`, `:1424-1426`).
     const history = dropBlank(prompt.filter((m) => m.__chatHistorySource === true));
@@ -205,7 +213,7 @@ export class StandIn extends ChatRows {
       sent = dropBlank(sent);
       if (preset.collapse === true) collapse(sent);
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
-      if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo };
+      if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
       this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: context.activatedWorldInfo }, chat.user);
       if (this.councilBlock !== null) sent.splice(Math.max(0, sent.length - 4), 0, { role: "system", content: this.councilBlock });
       // The streaming switch decides the call and is never sent (`generate.service.ts:3725-3726`): a stream,
@@ -270,7 +278,8 @@ export class StandIn extends ChatRows {
         entries: entriesStored.filter((e) => e.type !== "chat_history"),
         chatHistoryTokens: historyTokens,
         messages: sent.map((m) => ({ role: m.role, content: textOf(m) })),
-        totalTokens: entriesStored.reduce((n, e) => n + e.tokens, 0),
+        // An entry whose text a block already holds is not counted twice (`services/tokenizer.service.ts:550-552`).
+        totalTokens: entriesStored.reduce((n, e, i) => (breakdown[i]!.excludeFromTotal === true ? n : n + e.tokens), 0),
         maxContext: 0,
         model: connection.model,
         provider: "custom",

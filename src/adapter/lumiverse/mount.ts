@@ -229,6 +229,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             user,
             allowed: providerKey,
             window: lanes.window,
+            rows: (chat) => p.reads.path(chat),
             blocks: blocksHint({ reads: p.reads, session: p.session, log }),
             models: lanes.models,
             passConnection: lanes.passConnection,

@@ -137,7 +137,7 @@ describe("a continue, as Lumiverse picks its message and makes its prompt", () =
     const hidden = quay([...quayLines().slice(0, 2), { id: "m2", role: "assistant", content: "ASIDE Oona mutters to herself.", hidden: true }, { id: "m3", role: "user", content: "USER-2 I ask her about the boat." }], { continuePostfix: " " });
     const unmoved = await generate(hidden, "continue");
     expect(textNow(hidden, "m2")).toBe("ASIDE Oona mutters to herself. NEW-TEXT she says.");
-    expect(ending(unmoved, 2)).toEqual([["user", "USER-2 I ask her about the boat.", false], ["system", NUDGE, false]]);
+    expect(ending(unmoved, 2)).toEqual([["user", "USER-1 I walk to the end of the quay.\n\nUSER-2 I ask her about the boat.", false], ["system", NUDGE, false]]);
     expect(utilities(unmoved).map(([name]) => name)).not.toContain("Continue Target");
 
     // A message the caller names: an earlier reply of Oona's.

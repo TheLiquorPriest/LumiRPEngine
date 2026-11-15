@@ -73,8 +73,10 @@ export interface RigOptions {
   collapse?: boolean;
   /** The preset's prefill (`completionSettings.assistantPrefill`). */
   prefill?: string;
-  /** A picture on the player's last message but one. */
+  /** A picture on the player's last message but one (m10, which Lumiverse joins with m11 before the interceptor: its picture follows their joined text). */
   picture?: boolean;
+  /** The preset's completion settings, which Lumiverse applies inside its assembly, before any interceptor (`prompt-assembly.service.ts:4210`, `:7129-7231`). */
+  completion?: Pick<Preset, "squashSystemMessages" | "useSystemPrompt" | "namesBehavior">;
   /** The preset's streaming switch (`prompt-assembly.service.ts:7743-7745`); on unless said. */
   streaming?: false;
   /** RPE cannot work out the lore's secrets: its secrecy rules fail, as the composition's do until the secrets lane lands. */
@@ -131,6 +133,8 @@ export class Rig {
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
       window,
+      // Lumiverse's rows as they stand when the request arrives: the stand-in's chat, each message at its stored number.
+      rows: async (chat) => this.lv.rowsOf(chat),
       blocks: async (tag) => {
         const last = [...this.lv.stored.values()].filter((s) => s.chatId === tag.chat).at(-1);
         return last === undefined ? null : readBlocksHint(last.data, "breakdown");
@@ -192,7 +196,7 @@ export class Rig {
     this.lv.councilBlock = options.council ?? null;
     this.lv.connections.set("conn-rpe", { id: "conn-rpe", base: `${RPE}/v1`, key: PROVIDER_KEY, model: "rpe" });
     this.lv.connections.set("conn-other", { id: "conn-other", base: `${OTHER}/v1`, key: "other-key", model: "other" });
-    this.lv.presets.set(PRESET.id, { ...PRESET, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { assistantPrefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });
+    this.lv.presets.set(PRESET.id, { ...PRESET, ...options.completion, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { assistantPrefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });
     const messages = harborMessages();
     if (options.picture) messages[10] = { ...messages[10]!, images: [{ data: "aGFyYm9y", mime_type: "image/png" }] };
     this.chat = {
