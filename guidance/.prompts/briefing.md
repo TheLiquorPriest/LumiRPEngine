@@ -71,6 +71,12 @@ The reply already begins with these words. The chat application puts them in fro
 
 {{prompt_notices}}
 {{/prompt_notices}}
+{{#not_given}}
+
+## Not given to you
+
+{{not_given}}
+{{/not_given}}
 {{#story_so_far}}
 
 ## The story so far (history that is not in the prompt)

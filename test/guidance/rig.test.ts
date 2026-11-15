@@ -5,10 +5,15 @@
 // definition names. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { TraceRecord } from "rp-harness/contract";
 import type { RecordedRequest } from "rp-harness/testing/rig";
 import type { TurnDetail } from "../../src/ui/api";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed } from "../turn/bed";
+import { shippedTexts } from "./set";
+
+const SHIPPED = shippedTexts();
 
 let bed: TurnBed | null = null;
 afterEach(async () => {
@@ -96,4 +101,35 @@ test("the reply contract is in the Author's opening block once: the briefing hol
   expect(first).not.toContain("How what you write now is marked");
   expect(first).toContain("# Briefing for this turn");
   expect(first).toContain("The same material is on disk for agents you delegate to:");
+});
+
+/** The turn of a bed, played with a picture added to the player's last message, which the stand-in's model does not take; the Author's first request, as text. */
+async function picturedFirst(b: TurnBed): Promise<string> {
+  const lane = b.turns.lane;
+  const lanePlay = lane.play.bind(lane);
+  lane.play = (turn, out, signal) => {
+    const last = turn.prompt.findLastIndex((m) => m.role === "user");
+    const prompt = turn.prompt.map((m, i) => (i !== last ? m : { ...m, content: [...(typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content), { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }));
+    return lanePlay({ ...turn, prompt }, out, signal);
+  };
+  await play(b, "I hold up the sketch.");
+  return textsOf(b.model.requests[0]);
+}
+
+test("a picture the Author's model takes none of is told in the notices file's words, shown with its message's place; with that line deleted nothing is told and nothing else changes", async () => {
+  const told = (bed = await openTurnBed({ answers: [replying("The gull circles.")] }));
+  const first = await picturedFirst(told);
+  expect(first).toMatch(/## Not given to you\n\nPictures in the prompt were left out: 1, in messages \d+, counting the prompt's first message as 0\. Your model is not known to take pictures\./);
+  await told.close();
+
+  const own = (bed = await openTurnBed({ answers: [replying("The gull circles.")] }));
+  const notices = SHIPPED.get(".prompts/notices.md") ?? "";
+  await mkdir(join(own.app.paths.files, ".prompts"), { recursive: true });
+  await writeFile(join(own.app.paths.files, ".prompts", "notices.md"), notices.replace(/^pictures_not_taken: .*\n/m, ""), "utf8");
+  const without = await picturedFirst(own);
+  expect(without).not.toContain("Not given to you");
+  expect(without).not.toContain("were left out");
+  // Nothing else changed: the two requests are alike but for the section the line gave, and the ids each run makes for itself.
+  const alike = (text: string): string => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "ID").replace(/turn-1-[0-9a-f]{8}/g, "TURN");
+  expect(alike(first.replace(/\n*## Not given to you\n\n[^\n]*\n/, "\n"))).toBe(alike(without));
 });
