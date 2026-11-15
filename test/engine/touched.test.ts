@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { blobHash } from "../../src/shared/stores";
-import type { WorldDoc } from "../../src/shared/world";
+import type { MapCellDef, WorldDoc } from "../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { applyEvent, applyMarker, coreEventTypes, EXTERNAL_ACCOUNT_PREFIX, validateEvent } from "../../src/engine/events";
 import { own } from "../../src/engine/pack-kit";
@@ -17,6 +17,7 @@ import { touchedAspect, touchedField, touchedRelation } from "../../src/engine/t
 import { chatDraftOf, draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
+import { doorsAt, editedMap, shapeOf, squareEditsOf, type DoorState, type Shape } from "../../src/packs/space/core/grid-play";
 import { baseWorld, fold, POV, startState } from "../packs/support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -117,6 +118,8 @@ function everythingWorld(): WorldDoc {
   // A schedule of Dev's, for a chat's own change to one.
   w.schedules.dev_shift = { id: "dev_shift", owner: "dev", target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: "inn" }] };
   w.entities.rat = { id: "rat", kind: "person", name: "Rat", tier: "background", fields: { place: "taproom", max_hp: 3 }, relations: [] };
+  // A long table in the taproom, for a footprint given in play.
+  w.entities.table = { id: "table", kind: "thing", name: "Long table", tier: "background", fields: { place: "taproom" }, relations: [] };
   w.entities.acct = { id: "acct", kind: "account", name: "Checking", tier: "background", fields: { owner: "you", type: "checking" }, relations: [] };
   w.entities.card = { id: "card", kind: "account", name: "Card", tier: "background", fields: { owner: "you", type: "card" }, relations: [] };
   // The Taproom is half Dev's and half the POV's, so both modules' events have an owner to name.
@@ -203,6 +206,10 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "space.route", data: { route: "lane", open: false } },
   // A place made in play is the space slice's (ITEMS-SPEC §3.5), never an entity's definition.
   { type: "space.place", data: { place: "booth", def: { id: "booth", name: "Booth", parent: "taproom", fields: {}, made: { as: "spot", by: "story", at: 0, why: "A quiet corner" } } } },
+  // What play changes on a grid besides who stands where (plan §8.2) is the space slice's too, never an entity's definition: a door's state, a thing's footprint and what it blocks, and squares of a map drawn anew. An Upgrade carries each as play left it, as the test of what play changed on a grid shows below.
+  { type: "space.door", data: { scope: "inn", x: 6, y: 2, state: "locked" } },
+  { type: "space.shape", data: { entity: "table", size: [2, 1], way: true, view: false } },
+  { type: "space.squares", data: { map: "inn_ground", squares: [{ x: 9, y: 3, symbol: "o" }], legend: { o: { terrain: "oven", blocked: true } } } },
   // This chat's own change to the world's places, paths and maps is the engine's world slice (DEPTH2-PLAN §2), never an entity's definition: an Upgrade carries it to the new revision itself (`carryDraft`), as the last test here shows.
   { type: "engine.world", data: { collection: "routes", id: "back_way", value: { id: "back_way", from: "inn", to: "town", modes: { walk: { minutes: 5 } }, bidirectional: true }, over: null } },
   { type: "economy.anchor", data: { entity: "dev", band: "comfortable", typical: 3000, base: 2000 } },
@@ -374,6 +381,50 @@ describe("the event types", () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+});
+
+describe("what play changed on a grid, across an Upgrade (plan §8.2)", () => {
+  test("a door locked, a footprint given and a square drawn anew stay as play left them, over each new revision's map", () => {
+    const hearth: MapCellDef = { terrain: "hearth", blocked: true };
+    const bench: MapCellDef = { terrain: "bench" };
+    const rubble: MapCellDef = { terrain: "rubble", blocked: true };
+    const pane: MapCellDef = { terrain: "window", blocked: true };
+    /** The Gull's common room as a revision draws it (`rows`, with the symbols of its own `legend`), and its long table by the name the revision gives it. */
+    const revision = (rows: string[], legend: Record<string, MapCellDef>, table: string): WorldDoc => {
+      const w = blankWorld("w_room", "Common room");
+      w.places.inn = { id: "inn", name: "The Gull", fields: {} };
+      w.maps.room = { id: "room", scope: "inn", layout: rows, legend };
+      w.entities.table = { id: "table", kind: "thing", name: table, tier: "background", fields: { place: "inn" }, relations: [] };
+      return migrateWorld(w);
+    };
+    const a = revision(["#########", "#.......#", "#.......+", "#########"], {}, "Long table");
+    // In play the east door is locked, the table is set out three squares long, blocking the way, and rubble falls on a square.
+    const state = fold(reg, a, initialState(a, "ra", reg), [
+      { type: "space.door", data: { scope: "inn", x: 8, y: 2, state: "locked" } },
+      { type: "space.shape", data: { entity: "table", size: [3, 1], way: true, view: false } },
+      { type: "space.squares", data: { map: "room", squares: [{ x: 3, y: 1, symbol: "x" }], legend: { x: rubble } } },
+    ]);
+    // The next revision is the user's own edit of the map in Build: a hearth in a corner, and a bench on the square the rubble covers.
+    const b = revision(["#########", "#H.b....#", "#.......+", "#########"], { H: hearth, b: bench }, "Long table");
+    // A later one puts a window in the north wall and renames the table.
+    const c = revision(["####w####", "#H.b....#", "#.......+", "#########"], { H: hearth, b: bench, w: pane }, "Trestle table");
+    const docs: Record<string, WorldDoc> = { ra: a, rb: b, rc: c };
+    const env = { worlds: (r: string) => own(docs, r), types: reg };
+    /** The room as the chat plays it on `world`: the doors play set, the table's footprint, and the map with the squares play drew laid over it. */
+    const room = (world: WorldDoc) => {
+      const drawn = editedMap(playedWorld(world, state).maps.room, squareEditsOf(state, "room") ?? { cells: {}, legend: {} });
+      return { doors: doorsAt(state, "inn"), table: shapeOf(state, "table"), layout: drawn.layout, legend: drawn.legend };
+    };
+    const asPlayed: { doors: Record<string, DoorState>; table: Shape } = { doors: { "8,2": "locked" }, table: { size: [3, 1], way: true, view: false } };
+    // Switched to the next revision with no picks: the rubble stays over the bench drawn beneath it, and the revision's hearth shows through.
+    applyMarker(state, { kind: "migrate", to: "rb" }, env);
+    expect(state.revision).toBe("rb");
+    expect(room(b)).toEqual({ ...asPlayed, layout: ["#########", "#H.x....#", "#.......+", "#########"], legend: { H: hearth, b: bench, x: rubble } });
+    // An Upgrade with picks takes the table's new name, which play never wrote; its footprint is play's and stays, and the window shows through.
+    applyMarker(state, { kind: "migrate", to: "rc", merge: {} }, env);
+    expect(state.entities.table?.name).toBe("Trestle table");
+    expect(room(c)).toEqual({ ...asPlayed, layout: ["####w####", "#H.x....#", "#.......+", "#########"], legend: { H: hearth, b: bench, w: pane, x: rubble } });
   });
 });
 

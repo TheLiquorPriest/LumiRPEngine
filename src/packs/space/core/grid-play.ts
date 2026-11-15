@@ -2,11 +2,13 @@
 // each writing its record whole into the pack's slice: a door's state (`space.door`: open, closed or
 // locked), a thing's footprint and what it blocks (`space.shape`), and a change to some squares of a
 // map and to its legend (`space.squares`), kept as that change over the map so that a later edit of
-// the map shows through wherever the change did not touch it. Two optional fields of the map format
-// (`lre-map-v1`) carry what a map draws once: a terrain that blocks the way and not the view
-// (`seeThrough`), and the grid's time step (`step`). A record is replaced, never changed in place, so
-// a reader may keep what it works out from one by its identity. None is told in a line, as a step on
-// a grid is not (`space.pos`): the grid's tools report them.
+// the map shows through wherever the change did not touch it. None writes an entity's definition, so
+// none declares `touches`: an Upgrade to a new revision carries each record as it stands, to play
+// over what that revision draws. Two optional fields of the map format (`lre-map-v1`) carry what a
+// map draws once: a terrain that blocks the way and not the view (`seeThrough`), and the grid's time
+// step (`step`). A record is replaced, never changed in place, so a reader may keep what it works out
+// from one by its identity. None is told in a line, as a step on a grid is not (`space.pos`): the
+// grid's tools report them.
 
 import { hasOwn, isRecord, safeKey } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
