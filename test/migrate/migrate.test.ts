@@ -98,6 +98,7 @@ describe("migrate", () => {
       home: fixture.root,
       now: () => Date.parse("2026-11-14T11:00:00.000Z"),
       secret: async () => null,
+      ask: async () => null,
       stopped: () => new Promise(() => {}),
       fetch: async () => {
         throw new Error("The migration calls out to nothing.");

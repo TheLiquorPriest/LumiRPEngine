@@ -28,10 +28,14 @@ export interface CliIO {
   now(): number;
   /** A secret the user gives: piped in, or typed at a prompt that does not show it; null when none is given. */
   secret(question: string): Promise<string | null>;
+  /** A line the user types, shown as typed, or the next line piped in; null when none is given. */
+  ask(question: string): Promise<string | null>;
   /** Resolves when the process is told to stop (Ctrl-C, the service stopping). */
   stopped(): Promise<void>;
   /** Over the network, or, given `unix`, over that Unix socket (the running server's command socket). */
   fetch(url: string, init: BunFetchRequestInit): Promise<Response>;
+  /** How this process was started, as the words that run it again: the Bun and the app file. Every line the command line prints for the owner to run begins with it (`rpe` where it is not known). */
+  invoked?: string;
 }
 
 export interface CliOptions {
@@ -40,17 +44,24 @@ export interface CliOptions {
   areas?: readonly Area[];
   /** The app file this process runs (`dist/rpe.js`, as `rpe up`'s service starts it): `serve` keeps its hash and restarts onto a new build of it. Absent where there is none. */
   appFile?: string;
+  /** The machine the command runs on, as `rpe up --systemd` needs to know it: its platform, the account's number (null where there is none) and the Bun running it. Read from the process where absent. */
+  host?: { platform: string; uid: number | null; bun: string };
 }
 
 export const USAGE = [
   "rpe: RPEngine's own application.",
   "",
-  "  rpe up --url <address> --user <username> [--systemd] [--name <name>]",
+  "  rpe up [--url <address>] [--user <username>] [--systemd] [--name <name>] [--port <port>]",
+  "         [--listen <address>] [--allow-http] [--bun <path>] [--memory <size>] [--database <file>]",
   "         [--lumiverse <folder> [--runtime <name> | --no-runtime] [--runtime-config <folder>]",
   "          [--runtime-data <folder>] [--identifier <id>]]",
-  "                                 set RPE up with Lumiverse: sign in, make RPE's connection there,",
-  "                                 and say what is left to do; run again, it changes nothing.",
-  "                                 --systemd: run RPE as a service of this account (rpe-<name>.service).",
+  "                                 set RPE up with Lumiverse: ask for the username and password, sign in,",
+  "                                 make RPE's connection there, print a web token the first time, say what",
+  "                                 is left to do, and serve in the foreground until told to stop; run again,",
+  "                                 it changes nothing. --url defaults to the address the config holds.",
+  "                                 --systemd: run RPE as a service of this account (rpe-<name>.service)",
+  "                                 --port, --listen, --allow-http, --bun, --memory: as the install line of",
+  "                                 the previous build took them",
   "                                 --lumiverse: the swap, once the extension runs the new build: wait for",
   "                                 today's build to be idle, stop its service, migrate again from",
   "                                 Lumiverse's data folder, and start RPE's service in its place, at its",
@@ -113,7 +124,7 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
     if (command === "version" || command === "--version") return versionCommand(command, rest, io, options.version);
     // The migration reads its own line, and writes only once it is not a rehearsal; `up` and `down` read theirs, `up` with its switches.
     if (command === "migrate") return await migrateCommand(rest, io, options.version);
-    if (command === "up") return await upCommand(rest, io, options.version);
+    if (command === "up") return await upCommand(rest, io, options);
     if (command === "down") return await downCommand(rest, io);
     const allowed = FLAGS[command];
     if (allowed === undefined) throw new UsageError(`rpe has no command "${command}".`);

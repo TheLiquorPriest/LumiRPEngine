@@ -175,6 +175,7 @@ describe("the swap, and going back", () => {
       home,
       now: () => Date.UTC(2026, 10, 14, 12, 0, 0),
       secret: async () => PASSWORD,
+      ask: async () => null,
       stopped: () => new Promise(() => {}),
       // Nothing listens at today's address while neither service runs there: a call to it can't connect.
       fetch: (url, init) => (url.startsWith(`http://127.0.0.1:${place.port}/`) && !existsSync(flags.today) && !existsSync(flags.rpe) ? Promise.reject(new TypeError(`Unable to connect to ${url}`)) : fetch(url, init)),

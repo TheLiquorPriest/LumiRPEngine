@@ -89,6 +89,7 @@ export function cliIo(answers: { secret?: string | null } = {}): CliIO & { outs:
     home: tmpdir(),
     now: () => Date.UTC(2026, 10, 13, 12, 0, 0),
     secret: async () => answers.secret ?? null,
+    ask: async () => null,
     stopped: () => stop.promise,
     stop: () => stop.resolve(),
     fetch: (url, init) => fetch(url, init),

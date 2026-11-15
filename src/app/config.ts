@@ -1,6 +1,6 @@
 // RPE's data folder, its config file and the app's own limits (plan §4.4, §4.5, §5.4, §16; R-133).
-// One folder holds everything RPE keeps: the database, the file tree agents work in, the secrets file
-// and the config file, and a folder for backups.
+// One folder holds everything RPE keeps: the database, the index file beside it, the file tree agents
+// work in, the secrets file and the config file, and a folder for backups.
 //
 // The config file, `config.json`, holds only the install's facts: which Lumiverse (its address and,
 // where it is read, its database file), which of its users this RPE belongs to, the port RPE's
@@ -10,7 +10,8 @@
 //
 // Every limit the app keeps (the address it listens on besides loopback, the origins and names allowed,
 // the body limits and the preflight's life, the lives of tokens, the live socket's bounds, the
-// database's waits and the command line's waits) is a setting in `RPE-global.yml`, at the global
+// database's waits, the command line's waits, the worker threads and the index file's batches) is a
+// setting in `RPE-global.yml`, at the global
 // level alone (`SERVER_SETTINGS`), shown and written on the Settings page and in force from RPE's next
 // start. The app's config (`AppConfig`), which the server, auth, the live socket, the database and the
 // command line read, is put together from the facts and those settings when it is loaded.
@@ -29,11 +30,14 @@ import { type ConfigRead, diskTexts, readConfig } from "./config-read";
 import { takeFolderLock } from "./data-folder";
 import { isMissing, oneFileAtATime, OWNER_ONLY_FILE, ownerOnlyFolder, readText, writeWhole } from "./disk";
 import type { Setting } from "./setting-list";
+import { memoryRefusal } from "./service-memory";
 import { withKeyAt } from "./yaml";
 
 export const CONFIG_FILE = "config.json";
 export const SECRETS_FILE = "secrets.json";
 export const DATABASE_FILE = "rpe.db";
+/** The index file (plan Appendix B), beside the database: rebuilt from its sources, so not in a backup (R-14). */
+export const INDEX_FILE = "index.db";
 export const FILES_FOLDER = "files";
 export const BACKUPS_FOLDER = "backups";
 /** The file tree's global config (plan §5): connection profiles live in it, beside what other areas keep there. */
@@ -49,6 +53,8 @@ export interface DataPaths {
   config: string;
   secrets: string;
   database: string;
+  /** The index file: contentless full-text indexes, written by its own worker thread. */
+  index: string;
   /** The file tree agents work in (plan §5). */
   files: string;
   /** The user's own global config, and the shipped copy it is read over. */
@@ -64,6 +70,7 @@ export function dataPaths(root: string): DataPaths {
     config: join(root, CONFIG_FILE),
     secrets: join(root, SECRETS_FILE),
     database: join(root, DATABASE_FILE),
+    index: join(root, INDEX_FILE),
     files,
     globalConfig: join(files, GLOBAL_CONFIG_FILE),
     shippedConfig: join(files, SHIPPED_FOLDER, GLOBAL_CONFIG_FILE),
@@ -111,6 +118,8 @@ export interface AppConfig {
     providerBodyBytes: number;
     /** How long a browser may keep RPE's answer to a page's preflight, in seconds. */
     preflightSeconds: number;
+    /** A request body larger than this, in bytes, is parsed on a worker thread. */
+    workerParseBytes: number;
   };
   auth: {
     /** How long a page token holds, in minutes. */
@@ -142,10 +151,28 @@ export interface AppConfig {
     /** How long `rpe up` waits for RPE to answer once it has started RPE's service, before it puts back what it did, in milliseconds. */
     startMs: number;
   };
+  service: {
+    /** The highest port `rpe up` tries when the configured one is taken (`service.portLast`). */
+    portLast: number;
+    /** The most memory RPE's service may hold, as systemd reads a size (`service.memory`): its unit's `MemoryMax`. */
+    memory: string;
+    /** Seconds the service manager waits before it starts RPE again (`service.restartWait`): its unit's `RestartSec`. */
+    restartWait: number;
+    /** How long a later `rpe up` waits for the turns under way to end before it restarts RPE's service, in milliseconds (`service.drainWait`). */
+    drainWaitMs: number;
+  };
+  workers: {
+    /** The most worker threads RPE runs heavy work on at once; null: the machine's cores less one, at least one. */
+    threads: number | null;
+  };
+  index: {
+    /** Rows the index file's writer writes in one transaction. */
+    batch: number;
+  };
 }
 
 /** The app's limits: everything of its config but the install's facts. */
-export type AppLimits = Pick<AppConfig, "address" | "origins" | "hosts" | "server" | "auth" | "live" | "database" | "commandLine">;
+export type AppLimits = Pick<AppConfig, "address" | "origins" | "hosts" | "server" | "auth" | "live" | "database" | "commandLine" | "service" | "workers" | "index">;
 
 /** Loopback, where RPE always listens and where its connection in Lumiverse reaches it. */
 export const LOOPBACK = "127.0.0.1";
@@ -157,11 +184,14 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   fromEnvironment: [],
   origins: [],
   hosts: [],
-  server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600 },
+  server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024 },
   auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null },
   live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64 },
   database: { busyMs: 5000, sliceMs: 10 },
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000 },
+  service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000 },
+  workers: { threads: null },
+  index: { batch: 500 },
 });
 
 /** The environment's names for the facts it may give. */
@@ -200,6 +230,13 @@ export const SERVER_SETTING_DEFS = {
   waitMs: { key: "commandLine.waitMs", default: D.commandLine.waitMs, takes: whole(100, 600_000), levels: GLOBAL, perConnection: false, name: "The command line waits for RPE", about: "Milliseconds rpe status and rpe connection wait for the running server, and a command waits for the data folder's lock.", effect: "start" },
   signInMs: { key: "commandLine.signInMs", default: D.commandLine.signInMs, takes: whole(1000, 600_000), levels: GLOBAL, perConnection: false, name: "The command line waits for a sign-in", about: "Milliseconds rpe lumiverse waits for Lumiverse to answer its sign-in.", effect: "start" },
   startMs: { key: "commandLine.startMs", default: D.commandLine.startMs, takes: whole(1000, 600_000), levels: GLOBAL, perConnection: false, name: "rpe up waits for RPE to start", about: "Milliseconds rpe up waits for RPE to answer once it has started RPE's service, before it puts back what it did.", effect: "start" },
+  portLast: { key: "service.portLast", default: D.service.portLast, takes: whole(1, 65_535), levels: GLOBAL, perConnection: false, name: "The highest port rpe up tries", about: "The highest port rpe up tries when RPE's port is taken, counting up from it; rpe up then keeps the first free one.", effect: "start" },
+  memory: { key: "service.memory", default: D.service.memory, takes: { type: "text" }, levels: GLOBAL, perConnection: false, name: "Memory RPE's service may hold", about: "The most memory RPE's service may hold, as systemd reads a size (768M, 2G) or infinity for none, at least 256M: the unit's MemoryMax. rpe up --memory sets it; the service holds to it from the next rpe up --systemd.", effect: "start" },
+  restartWait: { key: "service.restartWait", default: D.service.restartWait, takes: whole(1, 3600), levels: GLOBAL, perConnection: false, name: "Wait before the service starts RPE again", about: "Seconds the service manager waits before it starts RPE again once it has stopped: the unit's RestartSec, written by rpe up --systemd.", effect: "start" },
+  drainWait: { key: "service.drainWait", default: D.service.drainWaitMs / 1000, takes: whole(0, 86_400), levels: GLOBAL, perConnection: false, name: "A later rpe up waits for turns to end", about: "Seconds a later rpe up waits for the turns under way to end before it restarts RPE's service; it restarts it at the end of the wait all the same.", effect: "start" },
+  workerParseBytes: { key: "server.workerParseBytes", default: D.server.workerParseBytes, takes: whole(1024, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Parsed on a worker from", about: "Bytes from which a request's body is parsed on a worker thread, so that a long prompt's parse never holds up another request.", effect: "start" },
+  threads: { key: "workers.threads", default: D.workers.threads, takes: { type: "whole", least: 1, most: 256 }, orNone: true, none: "the machine's cores less one, at least one", levels: GLOBAL, perConnection: false, name: "Worker threads", about: "The most worker threads RPE runs its heavy work on at once: parsing very large requests, searching.", effect: "start" },
+  batch: { key: "index.batch", default: D.index.batch, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Index rows written at once", about: "Rows the index file's writer writes in one transaction.", effect: "start" },
 } as const satisfies Record<string, Setting>;
 
 /** Every setting of the app's own limits. */
@@ -280,6 +317,14 @@ const listOf =
     return value.map((item, i) => read(item, `${where}[${i}]`));
   };
 
+/** A size systemd reads, at least what RPE needs to start (`service.memory`). */
+const memoryText: Reader<string> = (value, where) => {
+  const text = plainText(value, where);
+  const why = memoryRefusal(text);
+  if (why !== null) throw new ConfigError(`${where} is "${text}": ${why}.`);
+  return text;
+};
+
 const hostName: Reader<string> = (value, where) => {
   const text = plainText(value, where).toLowerCase();
   if (/[\s/@]/.test(text)) throw new ConfigError(`${where} must be a host name, with a port after a colon if it should hold to one.`);
@@ -323,11 +368,14 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     address: checkedSetting(read, s.address, hostName, D.address, log),
     origins: checkedSetting(read, s.origins, listOf(origin), D.origins, log),
     hosts: checkedSetting(read, s.hosts, listOf(hostName), D.hosts, log),
-    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds) },
+    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes) },
     auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null },
     live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows) },
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs) },
     commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs) },
+    service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000 },
+    workers: { threads: read.value(s.threads) as number | null },
+    index: { batch: n(s.batch) },
   };
 }
 
@@ -343,7 +391,7 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
   const l = limits;
   if (isRecord(raw) && raw.v !== undefined && raw.v !== 1) throw new ConfigError(`${where} is of a format this RPE does not read (v ${String(raw.v)}).`);
   const { v: _v, ...rest } = isRecord(raw) ? raw : ({} as Record<string, unknown>);
-  const read = readGroup<Omit<AppConfig, "fromEnvironment">>(isRecord(raw) ? rest : raw, where, {
+  const read = readGroup<Omit<AppConfig, "fromEnvironment" | "service" | "workers" | "index">>(isRecord(raw) ? rest : raw, where, {
     address: [hostName, l.address],
     port: [wholeIn(0, 65535), D.port],
     lumiverse: [
@@ -360,12 +408,15 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
     origins: [listOf(origin), l.origins],
     hosts: [listOf(hostName), l.hosts],
     server: [
-      (value, at) =>
-        readGroup(value, at, {
+      (value, at) => ({
+        // No build before this one wrote it to config.json: it is the setting's alone.
+        workerParseBytes: l.server.workerParseBytes,
+        ...readGroup(value, at, {
           bodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.bodyBytes],
           providerBodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.providerBodyBytes],
           preflightSeconds: [wholeIn(0, 86_400), l.server.preflightSeconds],
         }),
+      }),
       l.server,
     ],
     auth: [
@@ -404,7 +455,7 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
       l.commandLine,
     ],
   });
-  const config: AppConfig = { ...read, fromEnvironment: [] };
+  const config: AppConfig = { ...read, service: structuredClone(l.service), workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
   const set = (name: string): string | undefined => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;

@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { dataPaths, defaultDataFolder, loadConfig, webAddress } from "../config";
 import { lineLog } from "../app";
-import type { CliIO } from "../cli";
+import type { CliIO, CliOptions } from "../cli";
 import type { LumiverseCall } from "../../adapter/lumiverse/install-calls";
 import { accountSystemctl, removeRpeService, rpeService, rpeServiceOf, rpeUnitText, serviceNameOf, startRpeService } from "../up";
 import { parseArgs, UsageError } from "./args";
@@ -33,7 +33,8 @@ const SERVICE_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
  * it says what is left for the user to do. What already matches is left alone, so a second run
  * changes nothing.
  */
-export async function upCommand(argv: readonly string[], io: CliIO, version: string): Promise<number> {
+export async function upCommand(argv: readonly string[], io: CliIO, options: CliOptions): Promise<number> {
+  const version = options.version;
   const switched = argv.filter((a) => a.startsWith("--") && (UP_SWITCHES as readonly string[]).includes(a.slice(2)));
   const switches = new Set(switched.map((a) => a.slice(2)));
   const { words, flags } = parseArgs(

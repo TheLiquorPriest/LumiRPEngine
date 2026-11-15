@@ -57,6 +57,7 @@ async function printed(argv: string[]): Promise<string> {
     home: "/nonexistent-home",
     now: () => 0,
     secret: async () => null,
+    ask: async () => null,
     stopped: () => new Promise<void>(() => {}),
     fetch: async () => {
       throw new Error("no network in this test");

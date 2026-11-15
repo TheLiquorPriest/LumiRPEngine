@@ -3,15 +3,23 @@
 // the real terminal, environment, network and signals; everything else is in cli.ts. Built for Bun.
 
 import { homedir } from "node:os";
+import { createInterface } from "node:readline/promises";
 import { runCli } from "./cli";
+import { invokedAs } from "./commands/run-line";
 import { compose } from "./compose";
 
-/** A secret from the user: the first line piped in, or typed at the terminal without being shown. */
+/** The lines piped in, read once and handed out one for each question, so a username and a password can arrive on one input. */
+let piped: string[] | null = null;
+
+async function nextPiped(): Promise<string | null> {
+  piped ??= (await Bun.stdin.text()).split(/\r?\n/);
+  const line = piped.shift()?.trim() ?? "";
+  return line === "" ? null : line;
+}
+
+/** A secret from the user: the next line piped in, or typed at the terminal without being shown. */
 async function secret(question: string): Promise<string | null> {
-  if (!process.stdin.isTTY) {
-    const first = (await Bun.stdin.text()).split(/\r?\n/)[0]?.trim() ?? "";
-    return first === "" ? null : first;
-  }
+  if (!process.stdin.isTTY) return await nextPiped();
   process.stderr.write(question);
   const stdin = process.stdin;
   const answered = Promise.withResolvers<string | null>();
@@ -38,13 +46,26 @@ async function secret(question: string): Promise<string | null> {
   return await answered.promise;
 }
 
+/** A line from the user: the next line piped in, or typed at the terminal and shown as typed. */
+async function ask(question: string): Promise<string | null> {
+  if (!process.stdin.isTTY) return await nextPiped();
+  const terminal = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = (await terminal.question(question)).trim();
+    return answer === "" ? null : answer;
+  } finally {
+    terminal.close();
+  }
+}
+
 function stopped(): Promise<void> {
   const stop = Promise.withResolvers<void>();
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => stop.resolve());
   return stop.promise;
 }
 
-process.exitCode = await runCli(
+// RPE's worker threads run this file too (src/app/workers/pool.ts): there it serves tasks, and starts no command line.
+if (Bun.isMainThread) process.exitCode = await runCli(
   process.argv.slice(2),
   {
     out: (line) => process.stdout.write(`${line}\n`),
@@ -53,10 +74,12 @@ process.exitCode = await runCli(
     home: homedir(),
     now: Date.now,
     secret,
+    ask,
     stopped,
     fetch: (url, init) => fetch(url, init),
+    invoked: invokedAs(process.execPath, Bun.main),
   },
   // The build stamps its id here (scripts/build.ts); run from source, it is the development build. The
   // app file is this one: the file `rpe up`'s service runs, which an update of the extension replaces.
-  { version: process.env.LRE_BUILD_ID ?? "dev", areas: compose().areas, appFile: Bun.main },
+  { version: process.env.LRE_BUILD_ID ?? "dev", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } },
 );

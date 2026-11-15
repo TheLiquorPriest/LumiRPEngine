@@ -39,6 +39,8 @@ const SECTIONS: Readonly<Record<string, string>> = {
   liveSocket: "The server",
   database: "The server",
   commandLine: "The server",
+  service: "The service",
+  switches: "Switches",
   store: "The store",
   worldState: "The world state",
   lore: "Lore",

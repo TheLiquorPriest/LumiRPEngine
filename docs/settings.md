@@ -55,6 +55,28 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `commandLine.waitMs` | `3000` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | The command line waits for RPE: Milliseconds rpe status and rpe connection wait for the running server, and a command waits for the data folder's lock. |
 | `commandLine.signInMs` | `30000` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | The command line waits for a sign-in: Milliseconds rpe lumiverse waits for Lumiverse to answer its sign-in. |
 | `commandLine.startMs` | `30000` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | rpe up waits for RPE to start: Milliseconds rpe up waits for RPE to answer once it has started RPE's service, before it puts back what it did. |
+| `server.workerParseBytes` | `1048576` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Parsed on a worker from: Bytes from which a request's body is parsed on a worker thread, so that a long prompt's parse never holds up another request. |
+
+## The service
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `service.portLast` | `7899` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | The highest port rpe up tries: The highest port rpe up tries when RPE's port is taken, counting up from it; rpe up then keeps the first free one. |
+| `service.memory` | `1G` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Memory RPE's service may hold: The most memory RPE's service may hold, as systemd reads a size (768M, 2G) or infinity for none, at least 256M: the unit's MemoryMax. rpe up --memory sets it; the service holds to it from the next rpe up --systemd. |
+| `service.restartWait` | `2` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Wait before the service starts RPE again: Seconds the service manager waits before it starts RPE again once it has stopped: the unit's RestartSec, written by rpe up --systemd. |
+| `service.drainWait` | `300` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | A later rpe up waits for turns to end: Seconds a later rpe up waits for the turns under way to end before it restarts RPE's service; it restarts it at the end of the wait all the same. |
+
+## `workers`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `workers.threads` | none (the machine's cores less one, at least one) | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Worker threads: The most worker threads RPE runs its heavy work on at once: parsing very large requests, searching. |
+
+## `index`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `index.batch` | `500` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Index rows written at once: Rows the index file's writer writes in one transaction. |
 
 ## The store
 
