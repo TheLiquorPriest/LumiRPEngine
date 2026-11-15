@@ -24,7 +24,7 @@ import type { BlobStore } from "./agents/blobs";
 import type { HostPort } from "../shared/host";
 import { readStoredJson } from "../worlds/stored-json";
 import { type DiagAt, type DiagVerdict, messageOf } from "../migrate/today/diagnostics";
-import { agentLabel } from "../frontend/review-card";
+import { agentLabel } from "../shared/agent-settings";
 
 export type DiagHost = Pick<HostPort, "storage" | "log" | "frontend">;
 
