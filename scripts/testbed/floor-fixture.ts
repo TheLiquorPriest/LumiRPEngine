@@ -75,9 +75,9 @@ const INSTRUCTIONS = [
   "Write about 120 to 200 words.",
 ].join("\n\n");
 
-const block = (name: string, content: string, marker: string | null = null) => ({ name, content, role: "system", enabled: true, position: "pre_history", depth: 0, marker });
+export const block = (name: string, content: string, marker: string | null = null) => ({ name, content, role: "system", enabled: true, position: "pre_history", depth: 0, marker });
 
-const PRESET = {
+export const PRESET = {
   name: "Floor test (invented)",
   provider: "loom",
   engine: "classic",
@@ -121,6 +121,27 @@ export const LINES: readonly string[] = [
   "I ask whether she would like a hand with supper.",
   "I say I should check on my boat once the wind drops, and ask if the path down is safe.",
 ];
+
+/**
+ * Ten more simple lines after the twenty, in the same place and the same voice, so the floor model's
+ * reply form is counted over the thirty turns the plan asks (row 0.2, PlanGates-24). None holds a key of
+ * the floor's book.
+ */
+export const MORE_LINES: readonly string[] = [
+  "I ask Marta whether the kettle is ever allowed to go cold.",
+  "I look at the clock above the stove and ask if it keeps good time.",
+  "I ask how far the nearest harbor really is by oar.",
+  "I rub my hands together and say it is colder in here than I thought.",
+  "I ask whether she sleeps in the kitchen or up in the tower.",
+  "I ask what the keepers before her left on the walls.",
+  "I thank her again for letting me in out of the weather.",
+  "I ask whether the rock has a name for the wind that is coming.",
+  "I lean my elbows on the table and ask what she would do if I stayed the week.",
+  "I ask whether she would tell me when the light is lit tonight.",
+];
+
+/** The thirty lines the reply form is counted over: the floor's twenty, then ten more. */
+export const LINES_30: readonly string[] = [...LINES, ...MORE_LINES];
 
 /** One entry of the floor's book as designed: its title, how it is made to come in, its keys, its sticky count, its text. */
 export interface LoreDesign {
@@ -308,7 +329,7 @@ export function cardBooks(extensions: unknown): string[] {
 }
 
 /** The card's extensions with `ids` as its books, written as Lumiverse writes them (`src/utils/character-world-books.ts:15-22`). */
-function withBooks(extensions: Record<string, unknown>, ids: readonly string[]): Record<string, unknown> {
+export function withBooks(extensions: Record<string, unknown>, ids: readonly string[]): Record<string, unknown> {
   const next: Record<string, unknown> = { ...extensions, world_book_ids: [...ids] };
   delete next.world_book_id;
   return next;
@@ -455,7 +476,7 @@ export function recordOfEnv(env: Record<string, string | undefined>): FixtureRec
   return existsSync(path) ? fileRecord(path).read() : null;
 }
 
-type Row = { id: string; name: string; metadata?: unknown; extensions?: unknown };
+export type Row = { id: string; name: string; metadata?: unknown; extensions?: unknown };
 
 /** Every row of a paged list route (`{ data, total }`, or a bare array). */
 async function every(host: FixtureHost, path: string): Promise<Row[]> {
@@ -472,15 +493,15 @@ async function every(host: FixtureHost, path: string): Promise<Row[]> {
 const isMarked = (row: Row, where: "metadata" | "extensions"): boolean => isRecord(row[where]) && (row[where] as Record<string, unknown>)[MARK] === true;
 
 /** The rows of a list route that carry the mark: in their metadata, or for cards (whose list rows hold their extensions: Lumiverse `src/services/characters.service.ts:728-736`) in their extensions. */
-async function marked(host: FixtureHost, path: string, where: "metadata" | "extensions" = "metadata"): Promise<Row[]> {
+export async function marked(host: FixtureHost, path: string, where: "metadata" | "extensions" = "metadata"): Promise<Row[]> {
   return (await every(host, path)).filter((row) => isMarked(row, where));
 }
 
-const CARDS = "/api/v1/characters";
-const BOOKS = "/api/v1/world-books";
+export const CARDS = "/api/v1/characters";
+export const BOOKS = "/api/v1/world-books";
 
 /** The marked rows of a list route whose ids the fixture's record lists: a thing that only carries the mark is not the fixture's. */
-async function listed(host: FixtureHost, path: string, ids: readonly string[], where: "metadata" | "extensions" = "metadata"): Promise<Row[]> {
+export async function listed(host: FixtureHost, path: string, ids: readonly string[], where: "metadata" | "extensions" = "metadata"): Promise<Row[]> {
   return (await marked(host, path, where)).filter((row) => ids.includes(row.id));
 }
 
