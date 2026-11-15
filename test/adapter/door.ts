@@ -15,6 +15,7 @@ import { lumiverseDoor, type AdapterLanes, type LumiverseDoor } from "../../src/
 import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import type { TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import type { RelaySettings } from "../../src/adapter/lumiverse/relay";
+import { LUMIVERSE_DEFAULTS } from "../../src/adapter/lumiverse/settings";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { startExtension } from "../../src/ext/start";
 import { ALL } from "../ext/rig";
@@ -101,7 +102,6 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
           out.reasoning("Reading the harbor.");
           out.content("The tide turns.");
         },
-        standbyLine: () => "Still at the harbor.",
       },
       changes: { changed: () => undefined, reopened: () => undefined },
       window: async (ask) => {
@@ -124,7 +124,8 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
       },
       passConnection: () => "conn-author",
     };
-    const door = lumiverseDoor(lanes, { fetch: server.fetch, open: server.open, clock, sleep: (ms) => Bun.sleep(ms), ...(options.relay ? { relay: options.relay } : {}) });
+    const relay = options.relay;
+    const door = lumiverseDoor(lanes, { fetch: server.fetch, open: server.open, clock, sleep: (ms) => Bun.sleep(ms), ...(relay ? { settings: () => ({ ...LUMIVERSE_DEFAULTS, relay: { ...LUMIVERSE_DEFAULTS.relay, ...relay } }) } : {}) });
     const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: "conn-rpe" }, ...options.config }, {}, "the test's config");
     const logs: string[] = [];
     const app = await openApp({ paths, config, version: "build-7", areas: [door.area, ...(options.areas ?? [])], now: () => clock.now(), log: lineLog((line) => logs.push(line), () => clock.now()) });

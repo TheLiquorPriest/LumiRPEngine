@@ -196,13 +196,13 @@ describe("the run's timings", () => {
       before.add("store", STORE_MIGRATIONS);
       before.add("prompt", PROMPT_MIGRATIONS);
       before.add("harness", HARNESS_MIGRATIONS.filter((step) => step.version < 8));
-      migrate(db, before, { version: "before", backups: join(place, "backups"), now: () => 0 });
+      migrate(db, before, { user: USER, version: "before", backups: join(place, "backups"), now: () => 0 });
       db.run("INSERT INTO turn_run (user, id, turn, chat, session, generation, kind, status, received, started, ended, settled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [USER, "run-old", "turn-old", CHAT, "session-old", "gen-old", "new", "released", 1_000, 1_010, 2_000, 2_000]);
       const now = new Migrations();
       now.add("store", STORE_MIGRATIONS);
       now.add("prompt", PROMPT_MIGRATIONS);
       now.add("harness", HARNESS_MIGRATIONS);
-      migrate(db, now, { version: "after", backups: join(place, "backups"), now: () => 0 });
+      migrate(db, now, { user: USER, version: "after", backups: join(place, "backups"), now: () => 0 });
 
       const columns = db.query<{ name: string }, []>("SELECT name FROM pragma_table_info('turn_run')").all().map((c) => c.name);
       expect(columns).toEqual(expect.arrayContaining(["intake", "wait", "folder"]));

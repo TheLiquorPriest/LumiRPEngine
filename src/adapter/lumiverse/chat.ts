@@ -45,7 +45,7 @@ export interface ChatSearchSettings {
   snippetChars: number;
 }
 
-/** Defaults: as many hits as a lore search gives, and a snippet of a line's length (`src/lore/lore.ts`, `LORE_DEFAULTS`). */
+/** The defaults of `lumiverse.search`: as many hits as a lore search gives, and a snippet of a line's length (`src/lore/lore.ts`, `LORE_DEFAULTS`). */
 export const CHAT_SEARCH_DEFAULTS: ChatSearchSettings = { limit: 20, snippetChars: 80 };
 
 export interface ChatDeps {
@@ -58,7 +58,8 @@ export interface ChatDeps {
   ranges(chat: string): Promise<Record<string, HistoryRange>>;
   /** The messages Lumiverse's memory stands in for with a summary in the chat's prompt (the turn lane's, from the tag's `summary` marks). */
   summarized(chat: string): Promise<ReadonlySet<string>>;
-  search?: Partial<ChatSearchSettings>;
+  /** The search's limits, read at each search (the door's settings); `CHAT_SEARCH_DEFAULTS` when not given. */
+  search?: () => ChatSearchSettings;
 }
 
 /** Why a chat cannot be read, in words an agent and the user can read. */
@@ -94,7 +95,6 @@ function snippetOf(text: string, at: number, chars: number): string {
 }
 
 export function createChatReads(deps: ChatDeps): ChatReads {
-  const settings = { ...CHAT_SEARCH_DEFAULTS, ...deps.search };
   const own = (scope: Scope): string => {
     if (scope.user !== deps.user) throw new NoSuchChat(scope.chat);
     return scope.chat;
@@ -127,6 +127,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     },
     async search(scope, query: ChatQuery): Promise<ChatHit[]> {
       const chat = own(scope);
+      const settings = deps.search?.() ?? CHAT_SEARCH_DEFAULTS;
       const wanted = [...new Set(wordsOf(query.text).map((w) => w.word))];
       const limit = Math.max(0, Math.floor(query.limit ?? settings.limit));
       if (wanted.length === 0 || limit === 0) return [];

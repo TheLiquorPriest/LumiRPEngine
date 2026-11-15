@@ -10,15 +10,15 @@ import type { LumiverseReads } from "./reads";
 import type { LumiverseSession } from "./session";
 import type { Tag } from "./wire";
 
-/** Fixed: how long a dry run is waited for before the reply goes on without the hint. */
+/** The default of `lumiverse.dryRun.wait`: how long a dry run is waited for before the reply goes on without the hint. */
 export const DRY_RUN_MS = 10_000;
 
 export interface HintDeps {
   reads: LumiverseReads;
   session: LumiverseSession;
   log(message: string): void;
-  /** `DRY_RUN_MS` when not said. */
-  dryRunMs?: number;
+  /** The dry run's wait, read at each reply (the door's settings); `DRY_RUN_MS` when not given. */
+  dryRunMs?: () => number;
 }
 
 /** The hint for a tagged reply's prompt; null when Lumiverse has stored none and the dry run gave none in time. */
@@ -26,7 +26,7 @@ export function blocksHint(deps: HintDeps): (tag: Tag, signal: AbortSignal) => P
   return async (tag, signal) => {
     const stored = readBlocksHint(await deps.reads.breakdown(tag.chat), "breakdown");
     if (stored !== null) return stored;
-    const stop = AbortSignal.any([signal, AbortSignal.timeout(deps.dryRunMs ?? DRY_RUN_MS)]);
+    const stop = AbortSignal.any([signal, AbortSignal.timeout(deps.dryRunMs?.() ?? DRY_RUN_MS)]);
     try {
       const body = { chat_id: tag.chat, connection_id: tag.connection, ...(tag.preset !== null ? { preset_id: tag.preset } : {}), ...(tag.persona !== null ? { persona_id: tag.persona } : {}) };
       const hint = readBlocksHint(await deps.session.json("POST", "/api/v1/generate/dry-run", body, stop), "dry-run");

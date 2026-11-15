@@ -19,13 +19,13 @@ import { textOf } from "../../src/turn/request";
 import { layTree } from "../tree/fixtures";
 
 /** RPE's database under `place`, with the turn lane's tables and the store's, and its write queue. */
-function database(place: string) {
+function database(place: string, user: string) {
   const db = openDatabase(join(place, "rpe.db"), 2_000);
   const migrations = new Migrations();
   migrations.add("store", STORE_MIGRATIONS);
   migrations.add("prompt", PROMPT_MIGRATIONS);
   migrations.add("harness", HARNESS_MIGRATIONS);
-  migrate(db, migrations, { version: "turn-kit", backups: join(place, "backups"), now: () => 0 });
+  migrate(db, migrations, { user, version: "turn-kit", backups: join(place, "backups"), now: () => 0 });
   const writes = new WriteQueue(db, 50);
   return {
     db,
@@ -38,7 +38,7 @@ function database(place: string) {
 }
 
 runKitPart("RPE's prompt port", "prompt", async (seed, place) => {
-  const { db, writes, close } = database(place);
+  const { db, writes, close } = database(place, seed.scope.user);
   const prompts = turnPrompts(db, writes, () => 0);
   for (const [at, p] of seed.prompts.entries()) {
     // Each message as the interceptor listed it, and the body as Lumiverse sent it, nothing joined.
@@ -71,16 +71,16 @@ runKitPart("RPE's prompt port", "prompt", async (seed, place) => {
   return { prompt: prompts, close };
 });
 
-runKitPart("RPE's turn facts", "facts", async (_seed, place) => {
-  const { db, close } = database(place);
+runKitPart("RPE's turn facts", "facts", async (seed, place) => {
+  const { db, close } = database(place, seed.scope.user);
   const facts = new FactsRegistry();
   // The kit's turns have no runs: what a turn recorded is counted whole, and none owes anything.
   facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), () => []));
   return { facts, close };
 });
 
-runKitPart("RPE's harness state", "store", async (_seed, place) => {
-  const { db, writes, close } = database(place);
+runKitPart("RPE's harness state", "store", async (seed, place) => {
+  const { db, writes, close } = database(place, seed.scope.user);
   return { store: kvStore(db, writes), close };
 });
 

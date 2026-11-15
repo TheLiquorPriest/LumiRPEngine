@@ -13,9 +13,9 @@ import { LumiverseError, type LumiverseSession } from "./session";
 
 /** Lumiverse's own cap on a page (`types/pagination.ts:12-14`). */
 const PAGE = 1000;
-/** Fixed: how many times a chat whose pages disagreed is read again before the read fails. */
+/** The default of `lumiverse.reads.rereads`: how many times a chat whose pages disagreed is read again before the read fails. */
 export const REREADS = 3;
-/** Fixed: how many of a chat's newest replies are asked for a stored breakdown over HTTP, which has no route for a chat's latest. */
+/** The default of `lumiverse.reads.breakdownReplies`: how many of a chat's newest replies are asked for a stored breakdown over HTTP, which has no route for a chat's latest. */
 export const BREAKDOWN_TRIES = 10;
 
 const enc = encodeURIComponent;
@@ -45,12 +45,14 @@ function mapped<T>(what: string, map: () => T): T {
   }
 }
 
-export function createHttpReads(session: LumiverseSession): LumiverseReads {
+/** The reads over HTTP; `settings` gives a changing chat's rereads and the replies asked for a stored breakdown at each read (the door's settings). */
+export function createHttpReads(session: LumiverseSession, settings: () => { rereads: number; breakdownReplies: number } = () => ({ rereads: REREADS, breakdownReplies: BREAKDOWN_TRIES })): LumiverseReads {
   const get = (path: string): Promise<unknown> => session.json("GET", path);
 
   /** Every message of a chat, in order, from its pages; null when Lumiverse has no such chat of this user. */
   async function allMessages(chat: string): Promise<LvMessage[] | null> {
     const asked = `the messages of chat ${chat}`;
+    const { rereads } = settings();
     for (let attempt = 1; ; attempt++) {
       const first = await get(`/api/v1/chats/${enc(chat)}/messages?limit=${PAGE}&offset=0`);
       if (first === null) return null;
@@ -67,7 +69,7 @@ export function createHttpReads(session: LumiverseSession): LumiverseReads {
       }
       const messages = rows.map((r) => mapped(`a message of chat ${chat}`, () => messageFrom(rowOf(r, asked))));
       if (agreed && messages.length === page.total && new Set(messages.map((m) => m.id)).size === messages.length) return messages;
-      if (attempt >= REREADS) throw new LumiverseError("protocol", `Chat ${chat} kept changing while RPE read it (${REREADS} times).`);
+      if (attempt >= rereads) throw new LumiverseError("protocol", `Chat ${chat} kept changing while RPE read it (${rereads} times).`);
     }
   }
 
@@ -173,7 +175,7 @@ export function createHttpReads(session: LumiverseSession): LumiverseReads {
     },
     // `GET /api/v1/generate/breakdown/:messageId` (`routes/generate.routes.ts:175-181`) for the chat's newest replies.
     async breakdown(chat) {
-      const body = await get(`/api/v1/chats/${enc(chat)}/messages?tail=true&limit=${BREAKDOWN_TRIES}`);
+      const body = await get(`/api/v1/chats/${enc(chat)}/messages?tail=true&limit=${settings().breakdownReplies}`);
       if (body === null) return null;
       const replies = pageOf(body, `the newest messages of chat ${chat}`)
         .data.map((r) => mapped(`a message of chat ${chat}`, () => messageFrom(rowOf(r, `chat ${chat}`))))

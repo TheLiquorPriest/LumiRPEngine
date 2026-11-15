@@ -60,7 +60,8 @@ export interface RelayDeps {
   permissions(missing: MissingPermission[]): void;
   /** The extension's build, each time it takes RPE's registration; null where it does not say. */
   extensionBuild(build: string | null): void;
-  settings?: Partial<RelaySettings>;
+  /** Its limits, read at each use (the door's settings, `settings.ts`); `RELAY_DEFAULTS` when not given. */
+  settings?: () => RelaySettings;
 }
 
 interface Page {
@@ -77,7 +78,6 @@ interface Page {
 }
 
 export class Relay {
-  private readonly settings: RelaySettings;
   private readonly pages = new Map<string, Page>();
   private timer: unknown = null;
   /** The next registration, armed while the extension does not hold RPE's. */
@@ -85,8 +85,11 @@ export class Relay {
   private extensionId: string | null = null;
   private offs: (() => void)[] = [];
 
-  constructor(private readonly deps: RelayDeps) {
-    this.settings = { ...RELAY_DEFAULTS, ...deps.settings };
+  constructor(private readonly deps: RelayDeps) {}
+
+  /** Its limits as they stand now: a change holds from the next flush, frame, follow or registration on. */
+  private get settings(): RelaySettings {
+    return this.deps.settings?.() ?? RELAY_DEFAULTS;
   }
 
   /**

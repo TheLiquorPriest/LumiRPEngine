@@ -22,7 +22,7 @@ test("the store port takes the user from the scope", async () => {
   const migrations = new Migrations();
   migrations.add("store", STORE_MIGRATIONS);
   migrations.add("harness", HARNESS_MIGRATIONS);
-  migrate(db, migrations, { version: "kv-test", backups: join(place, "backups"), now: () => 0 });
+  migrate(db, migrations, { user: "user-ada", version: "kv-test", backups: join(place, "backups"), now: () => 0 });
   const writes = new WriteQueue(db, 50);
   try {
     const store = kvStore(db, writes);

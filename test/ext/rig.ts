@@ -181,7 +181,6 @@ export class Rig {
           out.content("The tide turns.");
           out.finish({ usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } });
         },
-        standbyLine: () => "Still at the harbor.",
       },
       clock: REAL_CLOCK,
     });
@@ -215,7 +214,7 @@ export class Rig {
       this.otherBodies.push(body);
       const meta = { id: "other", model: "other", created: 0 };
       const run = async (out: { content(text: string): void }): Promise<void> => out.content("Another model's reply.");
-      return body.stream === false ? await wholeReply(run, meta, request.signal) : streamedReply(run, meta, request.signal, { clock: REAL_CLOCK, keepAlive: null });
+      return body.stream === false ? await wholeReply(run, meta, request.signal) : streamedReply(run, meta, request.signal, { clock: REAL_CLOCK, turn: false });
     });
     this.lv.postProcessing = options.postProcessing ?? "";
     this.lv.councilBlock = options.council ?? null;

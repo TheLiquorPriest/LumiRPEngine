@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { followChanges } from "../../src/adapter/lumiverse/events";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
-import { LumiverseSocket } from "../../src/adapter/lumiverse/socket";
+import { LumiverseSocket, SOCKET_DEFAULTS } from "../../src/adapter/lumiverse/socket";
 import { FakeClock } from "../standin/clock";
 import { LumiverseServer } from "../standin/http";
 
@@ -54,7 +54,7 @@ describe("the event socket", () => {
   test("a socket that sends nothing is closed by Lumiverse's sweep: why the pings are there", async () => {
     const { clock, server, session } = await bed();
     // Pings far apart: the sweep finds the socket silent.
-    const quiet = new LumiverseSocket({ session, open: server.open, clock, log: () => undefined, settings: { pingMs: 10 * MINUTE } });
+    const quiet = new LumiverseSocket({ session, open: server.open, clock, log: () => undefined, settings: () => ({ ...SOCKET_DEFAULTS, pingMs: 10 * MINUTE }) });
     running.push({ server, socket: quiet });
     quiet.start();
     await clock.advance(0);

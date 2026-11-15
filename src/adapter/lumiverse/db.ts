@@ -149,8 +149,8 @@ export interface DbReaderDeps {
   user: string;
   sleep(ms: number): Promise<void>;
   log(message: string): void;
-  tries?: number;
-  retryMs?: number;
+  /** Its tries and first wait, read at each statement (the door's settings); `TRIES` and `RETRY_MS` when not given. */
+  settings?: () => { tries: number; retryMs: number };
 }
 
 export interface DbState {
@@ -218,8 +218,6 @@ interface Open {
 }
 
 export function createDbReader(deps: DbReaderDeps): DbReader {
-  const tries = Math.max(1, deps.tries ?? TRIES);
-  const retryMs = deps.retryMs ?? RETRY_MS;
   let open: Open | null = null;
   let off: string | null = null;
   let checked: DbState["checked"] = null;
@@ -272,6 +270,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
 
   /** One statement, tried again after a short wait while another connection holds the file locked. */
   async function step<T>(what: string, run: (db: Database) => T): Promise<T> {
+    const { tries, retryMs } = deps.settings?.() ?? { tries: TRIES, retryMs: RETRY_MS };
     for (let tried = 1; ; tried++) {
       try {
         return run(file().db);

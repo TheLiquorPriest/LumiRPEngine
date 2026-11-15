@@ -55,8 +55,8 @@ export interface SessionDeps {
   owner(): string | null;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
   log(message: string): void;
-  /** How often the session is asked after while kept; `KEEP_EVERY_MS` when not said. */
-  keepEveryMs?: number;
+  /** How often the session is asked after while kept, read at each ask (the door's settings); `KEEP_EVERY_MS` when not given. */
+  keepEveryMs?: () => number;
 }
 
 /** Fixed: the session is asked after twice a day, so it is renewed long before its seven days end. */
@@ -184,14 +184,14 @@ export class LumiverseSession {
   /** Asks after the session every `keepEveryMs` until `stop`, so Lumiverse renews it while RPE runs. */
   keep(): void {
     this.stop();
-    const every = this.deps.keepEveryMs ?? KEEP_EVERY_MS;
+    const every = (): number => this.deps.keepEveryMs?.() ?? KEEP_EVERY_MS;
     const tick = (): void => {
-      this.timer = this.deps.clock.setTimeout(tick, every);
+      this.timer = this.deps.clock.setTimeout(tick, every());
       void this.check().catch(() => {
         // A lost session has said so; an outage is asked again at the next tick.
       });
     };
-    this.timer = this.deps.clock.setTimeout(tick, every);
+    this.timer = this.deps.clock.setTimeout(tick, every());
   }
 
   stop(): void {

@@ -69,7 +69,8 @@ export interface LumiverseSocketDeps {
   log(message: string): void;
   /** A frontend session of its own (32 lowercase hex digits), so the extension can address this socket alone. */
   frontendSession?: string;
-  settings?: Partial<SocketSettings>;
+  /** Its limits, read at each use (the door's settings, `settings.ts`); `SOCKET_DEFAULTS` when not given. */
+  settings?: () => SocketSettings;
 }
 
 export type SocketState =
@@ -92,7 +93,6 @@ type EventHandler = (event: string, payload: unknown) => void;
 export class LumiverseSocket {
   private socket: Socket | null = null;
   private current: SocketState = { state: "stopped" };
-  private readonly settings: SocketSettings;
   private readonly handlers = new Set<EventHandler>();
   private readonly opened = new Set<() => void>();
   private readonly changed = new Set<(state: SocketState) => void>();
@@ -101,8 +101,11 @@ export class LumiverseSocket {
   private running = false;
   private offSession: (() => void) | null = null;
 
-  constructor(private readonly deps: LumiverseSocketDeps) {
-    this.settings = { ...SOCKET_DEFAULTS, ...deps.settings };
+  constructor(private readonly deps: LumiverseSocketDeps) {}
+
+  /** Its limits as they stand now: a change holds from the next ping, wait or opening on. */
+  private get settings(): SocketSettings {
+    return this.deps.settings?.() ?? SOCKET_DEFAULTS;
   }
 
   state(): SocketState {

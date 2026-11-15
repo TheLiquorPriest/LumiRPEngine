@@ -15,14 +15,14 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-test("a fresh RPE that belongs to no Lumiverse user yet starts its harness with no error in its log", async () => {
+test("a fresh RPE starts its harness with no error in its log", async () => {
   const root = await mkdtemp(join(tmpdir(), "rpe-fresh-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const paths = dataPaths(join(root, "rpe"));
   await prepareDataFolder(paths);
   const lines: string[] = [];
   const composition = compose();
-  const app = await openApp({ paths, config: configOf({ port: 0, lumiverse: { url: null, user: null } }, {}, "the test's config"), version: "build-9", areas: composition.areas, ui: null, log: lineLog((line) => lines.push(line), () => 0) });
+  const app = await openApp({ paths, config: configOf({ port: 0, lumiverse: { url: null, user: "user-fresh" } }, {}, "the test's config"), version: "build-9", areas: composition.areas, ui: null, log: lineLog((line) => lines.push(line), () => 0) });
   cleanups.push(() => app.close());
   const turns = composition.turns();
   expect(turns).not.toBeNull();

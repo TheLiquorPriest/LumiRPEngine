@@ -6,13 +6,11 @@
 // (`llm/providers/openai-compatible.ts:233-303`); and turns a chunk carrying `error` into the
 // generation's error (`provider-sse.ts:11-21`).
 //
-// A long turn is kept alive. Lumiverse ends a generation that has given it no reply or thinking text
-// for ten minutes, checked every minute (`services/generation/active-generation-registry.ts:140-153`);
-// only a chunk with text resets that clock (`services/generate.service.ts:3866-3873`), and an empty
-// one is not even passed on (`openai-compatible.ts:284-286`). So while a turn is silent the stream
-// restates its latest progress line in the thinking block, a line of its own, inside every
-// `keepAliveMs`. The words are the turn's own, from a file: no text of the stream's is ever shown.
-// Comment lines go out more often still, which Lumiverse skips: they keep the connection itself busy.
+// A long turn is kept alive by the turn's own progress lines. Lumiverse ends a generation that has given it no reply or thinking
+// text for ten minutes, checked every minute (`services/generation/active-generation-registry.ts:140-158`); only a chunk with text
+// resets that clock (`services/generate.service.ts:3866-3873`). RPH writes a progress line after `progress.silence` seconds of
+// nothing shown, at most 540 (its own settings), so one reaches Lumiverse inside every ten minutes; the stream adds none of its own.
+// Comment lines go out more often, which Lumiverse skips: they keep the connection itself busy.
 
 import type { Clock } from "rp-harness/contract";
 
@@ -33,7 +31,7 @@ export interface ToolCall {
 export interface ReplyStream {
   reasoning(text: string): void;
   content(text: string): void;
-  /** A short line saying what the turn is doing, put in the thinking block on a line of its own; restated while the turn is otherwise silent. */
+  /** A short line saying what the turn is doing, put in the thinking block on a line of its own. */
   progress(line: string): void;
   toolCalls(calls: readonly ToolCall[]): void;
   finish(end?: { reason?: string; usage?: Usage }): void;
@@ -53,23 +51,15 @@ export interface ReplyMeta {
   created: number;
 }
 
-/** Keeping a silent stream alive: the line restated when no progress line was given yet (from a file), and how long silence may last. */
-export interface KeepAlive {
-  everyMs: number;
-  line: string;
-}
-
 export interface StreamLife {
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
-  /** Null for a reply that is no turn of RPE's (a request passed through): its silence is the model's, and nothing is put in its thinking. */
-  keepAlive: KeepAlive | null;
+  /** A turn of RPE's: a reply that ends in an error puts its kept line in the thinking. False for a request passed through, whose thinking is the model's. */
+  turn: boolean;
   /** How long the stream may send nothing at all before a comment line; `COMMENT_MS` when not said. */
   commentMs?: number;
 }
 
-/** Fixed: inside Lumiverse's ten minutes, with room for its one-minute check and the time a line takes to reach it. */
-export const KEEP_ALIVE_MS = 8 * 60 * 1000;
-/** Fixed: under the ten seconds Bun's server lets a connection idle by default. */
+/** The default of `lumiverse.stream.comment`: under the ten seconds Bun's server lets a connection idle by default. */
 export const COMMENT_MS = 5_000;
 
 /** Writes a reply: `run` is given the stream and a signal that aborts when Lumiverse stops listening; when it returns without ending the reply, the reply ends there. */
@@ -91,8 +81,6 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
   let lineEnded = true;
   /** Whether thinking text went out: Lumiverse then keeps the message even when the reply ends in an error. */
   let thought = false;
-  let latest: string | null = null;
-  let silence: unknown = null;
   let idle: unknown = null;
 
   const send = (text: string): void => {
@@ -110,21 +98,10 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
     if (idle !== null) clock.clearTimeout(idle);
     idle = ended ? null : clock.setTimeout(() => send(": keep-alive\n\n"), commentMs);
   }
-  /** Text reached Lumiverse: its clock starts again, and so does this one. */
-  function armSilence(): void {
-    if (silence !== null) clock.clearTimeout(silence);
-    silence = ended || life.keepAlive === null ? null : clock.setTimeout(restate, life.keepAlive.everyMs);
-  }
-  function restate(): void {
-    silence = null;
-    if (ended || life.keepAlive === null) return;
-    thinking(`${lineEnded ? "" : "\n"}${latest ?? oneLine(life.keepAlive.line)}\n`);
-  }
   function thinking(text: string): void {
     lineEnded = text.endsWith("\n");
     thought = true;
     send(chunk({ reasoning_content: text }, null));
-    armSilence();
   }
   /** Ends the reply with an error Lumiverse shows. */
   const fail = (message: string): void => {
@@ -134,8 +111,8 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
   };
   const end = (): void => {
     ended = true;
-    for (const t of [silence, idle]) if (t !== null) clock.clearTimeout(t);
-    silence = idle = null;
+    if (idle !== null) clock.clearTimeout(idle);
+    idle = null;
     try {
       control?.close();
     } catch {
@@ -150,12 +127,10 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
     content(text) {
       if (ended || text === "") return;
       send(chunk({ content: text }, null));
-      armSilence();
     },
     progress(line) {
       const text = oneLine(line);
       if (ended || text === "") return;
-      latest = text;
       thinking(`${lineEnded ? "" : "\n"}${text}\n`);
     },
     toolCalls(calls) {
@@ -171,7 +146,7 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
     error(message, kept) {
       if (ended) return;
       const text = oneLine(kept ?? "");
-      if (thought && life.keepAlive !== null && text !== "") thinking(`${lineEnded ? "" : "\n"}${text}\n`);
+      if (thought && life.turn && text !== "") thinking(`${lineEnded ? "" : "\n"}${text}\n`);
       fail(message);
     },
   };
@@ -179,7 +154,6 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
     start(controller) {
       control = controller;
       armComment();
-      armSilence();
       void run(out, both).then(
         () => out.finish(),
         (error: unknown) => fail(error instanceof Error ? error.message : String(error)),
@@ -187,7 +161,7 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
     },
     cancel() {
       ended = true;
-      for (const t of [silence, idle]) if (t !== null) clock.clearTimeout(t);
+      if (idle !== null) clock.clearTimeout(idle);
       stop.abort(new Error("Lumiverse stopped reading the reply"));
     },
   });

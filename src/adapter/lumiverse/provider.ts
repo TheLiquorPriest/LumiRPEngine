@@ -12,7 +12,7 @@ import type { HistoryWindow } from "./answer";
 import { rawLayout, type BlocksHint } from "./layout";
 import type { RawLayout } from "rp-harness/contract";
 import { receive, Refused, type ChatRows, type Cut } from "./receipt";
-import { KEEP_ALIVE_MS, streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
+import { streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
 import { readTag, TAG_FIELD, type Role, type Tag } from "./wire";
 
 /** A tagged chat reply, ready for a turn (§10.1). */
@@ -43,8 +43,6 @@ export interface TurnPlayer {
    * without ending the reply ends it; a throw ends it with the error's words.
    */
   play(turn: TaggedTurn, out: ReplyStream, signal: AbortSignal): Promise<void>;
-  /** The line the thinking block restates while the turn is silent and has given no progress line yet: from the shipped list of progress lines. */
-  standbyLine(turn: TaggedTurn): string;
 }
 
 /** RPH's model layer's pass (`ModelsApi.pass`), given the user this RPE belongs to: the door names no user of its own. */
@@ -77,8 +75,8 @@ export interface ProviderDeps {
   modelNames(): string[];
   turns: TurnPlayer;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
-  /** How long a turn may be silent before its progress line is restated; `KEEP_ALIVE_MS` when not said. */
-  keepAliveMs?: number;
+  /** How long a stream may send nothing at all before a comment line, read at each reply (the door's settings); `COMMENT_MS` when not given. */
+  commentMs?: () => number;
   log?(message: string): void;
 }
 
@@ -150,7 +148,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };
     const run = (out: ReplyStream, signal: AbortSignal): Promise<void> => deps.turns.play(turn, out, signal);
     if (turn.whole === true) return await wholeReply(run, meta, request.signal);
-    return streamedReply(run, meta, request.signal, { clock: deps.clock, keepAlive: { everyMs: deps.keepAliveMs ?? KEEP_ALIVE_MS, line: deps.turns.standbyLine(turn) } });
+    return streamedReply(run, meta, request.signal, { clock: deps.clock, turn: true, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) });
   };
 }
 
@@ -172,7 +170,7 @@ function passThrough(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, 
       stop,
     );
   };
-  return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, keepAlive: null }) : wholeReply(run, meta, signal);
+  return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, turn: false, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) }) : wholeReply(run, meta, signal);
 }
 
 /** `GET /v1/models`: the names RPE's connection may name, as an OpenAI-compatible list (Lumiverse reads `data[].id`, `openai-compatible.ts:324-334`). */

@@ -25,9 +25,10 @@ import { createHttpReads } from "./http-reads";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
-import { Relay, type RelaySettings } from "./relay";
+import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
-import { LumiverseSocket, newFrontendSession, type OpenSocket, type SocketSettings } from "./socket";
+import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
+import { LUMIVERSE_DEFAULTS, type LumiverseSettings } from "./settings";
 import { extensionStatusReply } from "./shapes";
 import { QUESTION_PATH } from "./wire";
 
@@ -58,10 +59,8 @@ export interface AdapterDeps {
   open: OpenSocket;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
   sleep(ms: number): Promise<void>;
-  socket?: Partial<SocketSettings>;
-  relay?: Partial<RelaySettings>;
-  /** How long a turn may be silent before its progress line is restated. */
-  keepAliveMs?: number;
+  /** The door's limits (`settings.ts`), read at each use from the settings the composition hands the door; their defaults when not given. */
+  settings?: () => LumiverseSettings;
 }
 
 /** RPE's door to Lumiverse, once mounted. */
@@ -101,9 +100,6 @@ export interface LumiverseDoor {
   /** What RPE tells the extension of itself; null until the server listens. */
   registration(): Registration | null;
 }
-
-/** Fixed: a question carries the chat's whole path and the marked lore's text, past the app's 1 MiB for other bodies. */
-export const QUESTION_BODY_BYTES = 8 * 1024 * 1024;
 
 const NOT_SET_UP = "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up).";
 const NOT_HEARD = "RPE has not heard from its extension in Lumiverse since it started.";
@@ -145,14 +141,15 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
     const cfg = at.config.lumiverse;
-    const session = new LumiverseSession({ base: url.replace(/\/+$/, ""), fetch: deps.fetch, signIn, save: (s) => at.secrets.write("lumiverse", s === null ? null : { ...s }), owner: () => user, clock: deps.clock, log });
-    const http = createHttpReads(session);
-    const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log });
+    const settings = deps.settings ?? (() => LUMIVERSE_DEFAULTS);
+    const session = new LumiverseSession({ base: url.replace(/\/+$/, ""), fetch: deps.fetch, signIn, save: (s) => at.secrets.write("lumiverse", s === null ? null : { ...s }), owner: () => user, clock: deps.clock, log, keepEveryMs: () => settings().sessionCheckMs });
+    const http = createHttpReads(session, () => settings().reads);
+    const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log, settings: () => settings().database });
     const reads = database === null ? http : preferDatabase(database, http);
-    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized });
-    const settings = deps.socket ? { settings: deps.socket } : {};
-    const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), ...settings });
-    const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, ...settings });
+    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search });
+    const sockets = (): LumiverseSettings["socket"] => settings().socket;
+    const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), settings: sockets });
+    const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, settings: sockets });
     const relay = new Relay({
       socket: relaySocket,
       extension: async () => {
@@ -180,7 +177,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       },
       // An update of the extension brings a new app file with it: RPE reads its own file again when the extension is another build.
       extensionBuild: (build) => at.builds.registered(build),
-      ...(deps.relay ? { settings: deps.relay } : {}),
+      settings: () => settings().relay,
     });
     const stopGeneration = async (generation: string): Promise<boolean> => {
       if (generation === "") throw new Error("RPE did not ask Lumiverse to stop a generation it could not name: Lumiverse would stop every one of your generations instead.");
@@ -231,7 +228,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             allowed: providerKey,
             window: lanes.window,
             rows: (chat) => p.reads.path(chat),
-            blocks: blocksHint({ reads: p.reads, session: p.session, log }),
+            blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => (deps.settings ?? (() => LUMIVERSE_DEFAULTS))().dryRunMs }),
             models: lanes.models,
             passConnection: lanes.passConnection,
             unpassable: () => {
@@ -243,7 +240,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             modelNames,
             turns: lanes.turns,
             clock: deps.clock,
-            ...(deps.keepAliveMs !== undefined ? { keepAliveMs: deps.keepAliveMs } : {}),
+            commentMs: () => (deps.settings ?? (() => LUMIVERSE_DEFAULTS))().commentMs,
             log,
           }),
           question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
@@ -268,7 +265,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           group: "service",
           does: "The extension's question for a prompt it is about to send: which of its lore entries and messages RPE keeps, by its window and its secrecy rules.",
           answers: "JSON, the extension's own message (`src/adapter/lumiverse/wire.ts`)",
-          maxBody: QUESTION_BODY_BYTES,
+          maxBody: (deps.settings ?? (() => LUMIVERSE_DEFAULTS))().questionBytes,
           raw: (request) => (handlers === null ? notSetUp() : handlers.question(request)),
         }),
         rawRoute({

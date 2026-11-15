@@ -283,10 +283,6 @@ type Ended = Extract<ChatChange, { kind: "generation-ended" }>;
 
 export class TurnLane implements TurnPlayer, ChatChanges {
   readonly #d: TurnLaneDeps;
-  /** Each chat's standby line, from its progress part at its last intake. */
-  readonly #standby = new Map<string, string>();
-  /** The standby line of a chat RPE has not met yet: the shipped and global levels' progress part. */
-  #standbyDefault: string | null = null;
   /** Ends heard for a generation whose intake goes on and has no run yet; recorded once its run has given its reply. */
   readonly #early = new Map<string, Ended>();
   /** The generations whose intake goes on and has no run yet. */
@@ -302,18 +298,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     this.#d = deps;
   }
 
-  // ---------------------------------------------------------------- the adapter's side
-
-  standbyLine(turn: TaggedTurn): string {
-    return this.#standby.get(`${turn.tag.user}\u0000${turn.tag.chat}`) ?? this.#standbyDefault ?? "";
-  }
-
   /**
    * What the lane does once at a start, before any chat is played. Every run kept as going on is one RPE stopped during (plan §10.10
    * "RPE restarted mid-turn"), whatever became of its generation: each is closed, failed in the words of the turn-errors part
    * (`stopped_mid_run`), so its record and the pages say it ended and how. One whose generation's end was recorded keeps its turn as
-   * it was tied; one whose end was not is tied or dropped at its chat's next intake (`#catchUp`). And the standby line a chat RPE has
-   * not met yet is read: the progress part of the shipped and global levels.
+   * it was tied; one whose end was not is tied or dropped at its chat's next intake (`#catchUp`).
    */
   async preload(): Promise<void> {
     const left = this.#d.runs.leftGoing();
@@ -321,10 +310,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const ended = await Promise.all(left.map(async (r): Promise<RunRecord> => ({ ...r, status: "failed", ended: r.ended ?? this.#d.clock.now(), error: { code: "failed", detail: await turnErrorWords(this.#d.files, r, "stopped_mid_run") } })));
       await this.#d.writes.run((db) => ended.forEach((r) => this.#d.runs.put(db, r)), "ending the runs RPE stopped during");
     }
-    const user = this.#d.owner();
-    if (user === null) return;
-    const part = lines(await loadGuidance(this.#d.files, { user, chat: crypto.randomUUID(), session: NO_SESSION }).part(PARTS.progress));
-    this.#standbyDefault = part?.line("started") ?? null;
   }
 
   async play(tagged: TaggedTurn, out: ReplyStream, signal: AbortSignal): Promise<void> {
@@ -397,8 +382,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const base: Scope = { user, chat, session: NO_SESSION };
       const guidance = loadGuidance(this.#d.files, base);
       const [settings, progress, notices, errors] = await Promise.all([turnSettings(this.#d.files, base, this.#d.log), guidance.part(PARTS.progress), guidance.part(PARTS.notices), guidance.part(PARTS.errors)]);
-      const started = lines(progress)?.line("started");
-      if (started !== undefined) this.#standby.set(`${user}\u0000${chat}`, started);
       lap("settings");
 
       // The previous turn's run: waited for up to its limit, then stopped where it stands; Lumiverse stopping this request first ends the
