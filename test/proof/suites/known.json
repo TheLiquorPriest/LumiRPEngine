@@ -1,12 +1,6 @@
 {
   "failures": [
     {
-      "file": "test/boundaries.test.ts",
-      "owner": "PlanSwap-4",
-      "wave": "1",
-      "why": "the previous build's layering test fails on the new src/build/ files (imports across the old layers, bun:sqlite and node: modules outside the old I/O layer, rp-harness/contract); it passes once PlanSwap-4's change to it lands"
-    },
-    {
       "file": "test/turn/intake.test.ts",
       "owner": "PlanTurn-1",
       "wave": "1",
