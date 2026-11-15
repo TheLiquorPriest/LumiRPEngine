@@ -11,12 +11,10 @@ import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, storedKey, type App, type Area } from "../app";
 import { harnessSettings } from "../app/setting-list";
-import { settingsRoutes } from "../app/settings-routes";
 import type { LoreBooks } from "../lore";
 import type { Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
-import { levelFiles } from "../tree";
 import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
 import { turnRoutes } from "./routes";
 import { passConnection, TURN_SETTINGS, turnSettings } from "./settings";
@@ -108,21 +106,9 @@ export function turnArea(takes: TurnTakes): TurnArea {
         ...(takes.harness !== undefined ? { harness: takes.harness } : {}),
       });
       at.routes.add("connections", connectionRoutes(turns.harness.models, storedKey(at.models), owner));
-      const { chats, harness, lane, runs } = turns;
+      const { harness, lane, runs } = turns;
       // A restart onto a new app file waits for the turns and the jobs that run, and for a request whose turn is still being taken in.
-      at.builds.counts(async () => runs.chatsGoing().length + lane.intakesGoing() + ((await harness.jobs?.list({ user: owner(), states: ["running", "queued"] })) ?? []).length);
-      at.routes.add(
-        "settings",
-        settingsRoutes({
-          settings: at.settings,
-          // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
-          levels: async (chat) => {
-            const folders = chat === null ? null : chats.folders(owner(), chat);
-            return levelFiles({ files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null });
-          },
-          connections: async () => (await harness.models.list(owner())).connections.map((c) => ({ id: c.id, name: c.name })),
-        }),
-      );
+      at.builds.counts(async () => runs.chatsGoing().length + lane.intakesGoing() + (await harness.jobs.list({ user: owner(), states: ["running", "queued"] })).jobs.length);
       at.routes.add("turn", turnRoutes({ turns, chatName: async (chat) => (await takes.lumiverse()?.reads.chat(chat))?.name ?? null }));
       await lane.preload();
     },
