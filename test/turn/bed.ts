@@ -161,7 +161,8 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
 
     /** An RPE on the bed's data folder: listening, registered with the extension, and the connection in Lumiverse pointing at it. */
     const startRpe = async () => {
-      const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: { agentModel: async () => model.agentModel() } } });
+      // Each agent starts on the effort its definition names, as the model layer gives it: `auto` and `inherit` are the connection's own, which the one scripted model has none of.
+      const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: { agentModel: async (choice) => model.agentModel(choice.effort === undefined || choice.effort === "inherit" || choice.effort === "auto" ? "off" : choice.effort) } } });
       const app = await openApp({ paths, config, version: "build-9", areas: composition.areas, ui: null, log: recordingLog(logged) });
       cleanups.push(() => app.close());
       const turns = composition.turns();
