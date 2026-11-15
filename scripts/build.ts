@@ -14,6 +14,10 @@
 //   around the UI's extension shell, put together here because neither may import the other
 //   (test/standalone-boundaries.test.ts).
 // - dist/ui/: the web app RPE serves at /ui/ (§14), the UI's web shell.
+// - dist/rpe.files.json: the build's statement of itself (READINGS R-12): the hash of the app file and of
+//   every file of the folders it reads beside it. The hash of the statement is stamped into the backend
+//   (`process.env.RPE_STATED_HASH`), for the extension to state when it tells RPE a new app file has
+//   arrived; RPE takes the file only when every file matches.
 // - dist/agent-kit.js and dist/lumirpengine.js: today's command line and MCP server, kept where outside
 //   harnesses run them and load the kit from (§4.4).
 //
@@ -31,9 +35,10 @@
 //
 // dist/ is replaced whole, and only once all of it is made: a build that fails leaves dist/ as it was.
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import pkg from "../package.json";
+import { statedHash, STATEMENT_FILE, statementOf, statementText } from "../src/app/build-statement";
 import { installScan } from "./install-scan";
 import { writePageList } from "./ui/pages";
 
@@ -51,7 +56,7 @@ const UI_SHELLS = {
 } as const;
 
 /** What a build makes, by name in dist/. spindle.json names the extension's two. */
-export const OUT = { app: "rpe.js", backend: "backend.js", frontend: "frontend.js", ui: "ui", kit: "agent-kit.js", core: "lumirpengine.js" } as const;
+export const OUT = { app: "rpe.js", backend: "backend.js", frontend: "frontend.js", ui: "ui", kit: "agent-kit.js", core: "lumirpengine.js", statement: STATEMENT_FILE } as const;
 
 const ENTRIES = { app: "src/app/main.ts", backend: "src/ext/backend.ts", loader: "src/ext/loader.ts", kit: "src/cli/agent-kit.ts", core: "src/cli/main.ts" } as const;
 
@@ -73,7 +78,7 @@ const BESIDE_APP = {
 } as const;
 
 /** What a server needs of dist/ to run RPE: the application and what it reads beside itself. */
-export const SERVER: readonly string[] = [OUT.app, ...Object.values(BESIDE_APP).map(({ dir }) => dir)];
+export const SERVER: readonly string[] = [OUT.app, OUT.statement, ...Object.values(BESIDE_APP).map(({ dir }) => dir)];
 
 /**
  * Optional requires of packages nothing here installs, left in every bundle as a `require` of the
@@ -238,12 +243,6 @@ async function main(argv: readonly string[]): Promise<number> {
     copyShipped(ROOT, "guidance", join(STAGE, BESIDE_APP.guidance.dir));
     copyShipped(harness, "guidance", join(STAGE, BESIDE_APP.harness.dir));
 
-    const backendInputs = await oneFile("the extension's backend", join(ROOT, ENTRIES.backend), OUT.backend, "bun", stamp, roots);
-    const held = backendInputs.filter((input) => APPLICATION.test(input));
-    if (held.length > 0) fail(`the extension's backend holds what belongs to the application: ${held.join(", ")}`);
-    const refused = installScan(readFileSync(join(STAGE, OUT.backend), "utf8"));
-    if (refused.length > 0) fail(`Lumiverse's install scan would refuse ${OUT.backend}:\n${refused.map((hit) => `  ${hit.what}, near: ${hit.near}`).join("\n")}`);
-
     if (pages) {
       const from = (path: string): string => relative(dirname(FRONTEND_ENTRY), join(ROOT, path));
       const entry = [`import { loader } from ${JSON.stringify(from(ENTRIES.loader))};`, `import { mount } from ${JSON.stringify(from(UI_SHELLS.extension))};`, "export const setup = loader(mount);", ""].join("\n");
@@ -251,6 +250,17 @@ async function main(argv: readonly string[]): Promise<number> {
       const web = await bundle("the web app", { entrypoints: [join(ROOT, UI_SHELLS.web)], outdir: join(STAGE, OUT.ui), target: "browser", define: stamp }, roots);
       if (!web.outputs.some((path) => path === join(STAGE, OUT.ui, "index.html"))) fail(`the web app came out without ${OUT.ui}/index.html, which RPE serves at /ui/`);
     }
+
+    // The build's statement of its files, once all of them are staged; its hash goes into the backend.
+    const statement = statementText(await statementOf(STAGE, id));
+    writeFileSync(join(STAGE, OUT.statement), statement);
+    const stated = { ...stamp, "process.env.RPE_STATED_HASH": JSON.stringify(statedHash(statement)) };
+
+    const backendInputs = await oneFile("the extension's backend", join(ROOT, ENTRIES.backend), OUT.backend, "bun", stated, roots);
+    const held = backendInputs.filter((input) => APPLICATION.test(input));
+    if (held.length > 0) fail(`the extension's backend holds what belongs to the application: ${held.join(", ")}`);
+    const refused = installScan(readFileSync(join(STAGE, OUT.backend), "utf8"));
+    if (refused.length > 0) fail(`Lumiverse's install scan would refuse ${OUT.backend}:\n${refused.map((hit) => `  ${hit.what}, near: ${hit.near}`).join("\n")}`);
 
     await oneFile("the agent kit", join(ROOT, ENTRIES.kit), OUT.kit, "node", stamp, roots);
     await oneFile("the command line", join(ROOT, ENTRIES.core), OUT.core, "node", stamp, roots);
@@ -272,6 +282,7 @@ async function main(argv: readonly string[]): Promise<number> {
       rows.push([`dist/${name}/`, sizeWords(files.reduce((sum, file) => sum + file.size, 0)), `${files.length} files: ${what}`]);
     };
     add(OUT.app, "the application");
+    add(OUT.statement, "the hash of every file a server runs or reads beside the application");
     folder(BESIDE_APP.guidance.dir, "RPE's shipped guidance");
     folder(BESIDE_APP.harness.dir, "RPH's own shipped files");
     add(OUT.backend, "the extension's backend");

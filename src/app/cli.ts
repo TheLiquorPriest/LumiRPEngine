@@ -95,9 +95,13 @@ export const USAGE = [
   "  rpe migrate [--rehearse] --lumiverse <folder> --user <id> [...]",
   "                                 carry today's build's data into RPE; --rehearse writes nothing",
   "                                 (rpe migrate alone lists the rest)",
-  "  rpe check [--into <folder>]    whether this build starts on the data folder: its config read, and its",
-  "                                 migrations applied to a copy of its database, made under --into (a",
-  "                                 temporary folder where none is given) and removed once it ends",
+  "  rpe check [--into <folder>] [--within <seconds>]",
+  "                                 whether this build starts on the data folder: it is started, as serve",
+  "                                 starts it, on a scratch copy of the data (a copy of its database, a fresh",
+  "                                 file tree, no Lumiverse), made under --into (a temporary folder where none",
+  "                                 is given) and removed once it ends; it passes once it has mounted every",
+  "                                 area, laid its shipped files and answered its status with its build,",
+  "                                 within --within seconds (the setting commandLine.startMs where none)",
   "",
   "Every command takes --data <folder>: the data folder (default: $RPE_DATA, else ~/.local/share/rpe).",
 ].join("\n");
@@ -112,8 +116,16 @@ const FLAGS: Readonly<Record<string, readonly string[]>> = {
   deny: ["data"],
   backup: ["data", "out"],
   connection: ["data", "name", "provider", "auth", "model", "effort", "base-url", "context-window", "max-tokens"],
-  check: ["data", "into"],
+  check: ["data", "into", "within"],
 };
+
+/** `--within`: a number of seconds. */
+function withinOf(given: string | undefined): number | undefined {
+  if (given === undefined) return undefined;
+  const seconds = Number(given);
+  if (!/^\d+$/.test(given) || seconds < 1) throw new UsageError(`--within is "${given}": give a number of seconds, at least 1.`);
+  return seconds;
+}
 
 /** Runs one command; returns the exit code. */
 export async function runCli(argv: readonly string[], io: CliIO, options: CliOptions): Promise<number> {
@@ -138,7 +150,7 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
       case "serve":
         return await serveCommand(paths, config, io, options);
       case "check":
-        return await checkCommand(paths, config, flags.into, io, options);
+        return await checkCommand(paths, config, flags.into, withinOf(flags.within), io, options);
       case "status":
         return await statusCommand(paths, config, io, options.version);
       case "lumiverse":

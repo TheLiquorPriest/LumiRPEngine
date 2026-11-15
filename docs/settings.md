@@ -32,6 +32,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `update.lookEvery` | `2` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Look again for running work: Seconds a waiting restart waits before it looks again whether turns or jobs still run. |
 | `update.startTries` | `5` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Starts allowed in the start window: Starts of RPE's service its unit allows within the start window before the service manager stops starting it; rpe up writes it into the unit. |
 | `update.startWindow` | `60` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Start window: Seconds within which the starts of RPE's service are counted. |
+| `update.keepCopies` | `1` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Known-good copies kept: Copies of RPE's own build kept beside the one that runs, the newest first, for the service's pre-start step to put back when a swapped-in build does not come up. |
 | `update.checkWait` | `120` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Wait for a new build's check: Seconds a new app file is given to check that it starts on this RPE's data. |
 
 ## The server

@@ -50,7 +50,7 @@ beforeEach(async () => {
   await writeConfig(bed.paths, { port, lumiverse: { url: LUMIVERSE, user: OWNER } });
   file = join(bed.root, "rpe.js");
   await writeFile(file, fileOf(RUNNING));
-  stand = { service: true, settings: { restart: true, versionWaitMs: 10_000, lookEveryMs: 1, startTries: 5, startWindowMs: 60_000, checkWaitMs: 10_000 }, restarts: 0, running: 0, looked: [] };
+  stand = { service: true, settings: { restart: true, versionWaitMs: 10_000, lookEveryMs: 1, startTries: 5, startWindowMs: 60_000, checkWaitMs: 10_000, keepCopies: 1 }, restarts: 0, running: 0, looked: [] };
   app = null;
 });
 

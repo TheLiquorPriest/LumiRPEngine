@@ -17,7 +17,9 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { isRecord } from "../shared/json";
+import { statedHash, STATEMENT_FILE, verifyBuild } from "./build-statement";
 import { ownerOnlyFolder, readText, writeWhole } from "./disk";
+import type { CopyUpdate } from "./update";
 
 /** The app file in a build's folder, and the folders the app reads beside it. */
 export const APP_FILE = "rpe.js";
@@ -97,6 +99,7 @@ export async function copyBuild(appFile: string, into: string): Promise<void> {
   await rm(into, { recursive: true, force: true });
   await mkdir(into, { recursive: true });
   await cp(appFile, join(into, APP_FILE));
+  if (existsSync(join(dirname(appFile), STATEMENT_FILE))) await cp(join(dirname(appFile), STATEMENT_FILE), join(into, STATEMENT_FILE));
   for (const name of BESIDE_APP) if (existsSync(join(dirname(appFile), name))) await cp(join(dirname(appFile), name), join(into, name), { recursive: true });
 }
 
@@ -131,4 +134,65 @@ export async function installCopy(data: string, appFile: string, now: number): P
   await rm(places.swapped, { force: true });
   await rm(places.fellBack, { force: true });
   await writeWhole(places.source, `${JSON.stringify({ file: resolve(appFile), recorded: now }, null, 2)}\n`);
+}
+
+/** What the unit's pre-start step wrote when a swapped-in build did not come up, as words; null where it did nothing. */
+async function fellBackWords(places: AppCopyPlaces): Promise<string | null> {
+  const text = await readText(places.fellBack);
+  if (text === null) return null;
+  try {
+    const said: unknown = JSON.parse(text);
+    if (!isRecord(said)) return null;
+    const build = (value: unknown): string => (typeof value === "string" ? `build ${value}` : "the build before it");
+    const when = typeof said.at === "number" ? ` at ${new Date(said.at).toISOString().slice(0, 16).replace("T", " ")} UTC` : "";
+    return `${build(said.from).replace(/^./, (c) => c.toUpperCase())} did not come up within the ${typeof said.starts === "number" ? `${said.starts} ` : ""}starts it was allowed after it was swapped in, so RPE's service put back the known-good copy${when}, and RPE runs ${build(said.to)}.`;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps `keep` copies of RPE's own build as `known-good`, `known-good-2`, and so on, the newest first, making room for the one the swap is about to put there. */
+async function makeRoomForKnownGood(places: AppCopyPlaces, keep: number): Promise<void> {
+  const named = (n: number): string => (n === 1 ? places.knownGood : `${places.knownGood}-${n}`);
+  await rm(named(keep), { recursive: true, force: true });
+  for (let n = keep - 1; n >= 1; n--) if (existsSync(named(n))) await rename(named(n), named(n + 1));
+}
+
+/**
+ * What RPE does about a new build as its own installed copy (`CopyUpdate`, update.ts): the build is
+ * copied from the recorded `source` into `next/` and checked there, against the hash stated for it, so
+ * that what is started and swapped in is what was checked; `startsOn` starts it for real on a scratch
+ * copy of the data.
+ */
+export function copyUpdate(data: string, source: string, startsOn: (file: string, waitMs: number) => Promise<string | null>): CopyUpdate {
+  const places = appCopyPlaces(data);
+  return {
+    source,
+    async installed() {
+      const text = await readText(join(places.current, STATEMENT_FILE));
+      return text === null ? null : statedHash(text);
+    },
+    async fetch(hash) {
+      const why = buildRefusal(source);
+      if (why !== null) return { refused: "the folder the extension updates holds no whole build beside its app file (its guidance folders are not there), so there is nothing to take" };
+      try {
+        await copyBuild(source, places.next);
+      } catch (error) {
+        return { refused: `the build could not be copied beside RPE's own copy (${error instanceof Error ? error.message.replace(/\s\S*\/\S+/g, "") : String(error)})` };
+      }
+      const verified = await verifyBuild(places.next, hash);
+      return "refused" in verified ? verified : { build: verified.statement.build };
+    },
+    tryStart: (waitMs) => startsOn(join(places.next, APP_FILE), waitMs),
+    drop: () => rm(places.next, { recursive: true, force: true }),
+    async swapIn(from, to, keep) {
+      await makeRoomForKnownGood(places, keep);
+      await rename(places.current, places.knownGood);
+      await rename(places.next, places.current);
+      await rm(places.fellBack, { force: true });
+      await writeWhole(places.swapped, `${JSON.stringify({ from, to, starts: 0, at: Date.now() })}\n`);
+    },
+    fellBack: () => fellBackWords(places),
+    cameUp: () => rm(places.swapped, { force: true }),
+  };
 }

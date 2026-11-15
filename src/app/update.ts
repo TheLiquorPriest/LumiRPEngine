@@ -33,6 +33,7 @@ const DEFS = {
   lookEvery: { key: "update.lookEvery", name: "Look again for running work", about: "Seconds a waiting restart waits before it looks again whether turns or jobs still run.", effect: "use", default: 2, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
   startTries: { key: "update.startTries", name: "Starts allowed in the start window", about: "Starts of RPE's service its unit allows within the start window before the service manager stops starting it; rpe up writes it into the unit.", effect: "use", default: 5, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
   startWindow: { key: "update.startWindow", name: "Start window", about: "Seconds within which the starts of RPE's service are counted.", effect: "use", default: 60, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  keepCopies: { key: "update.keepCopies", name: "Known-good copies kept", about: "Copies of RPE's own build kept beside the one that runs, the newest first, for the service's pre-start step to put back when a swapped-in build does not come up.", effect: "use", default: 1, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
   checkWait: { key: "update.checkWait", name: "Wait for a new build's check", about: "Seconds a new app file is given to check that it starts on this RPE's data.", effect: "use", default: 120, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
 } as const satisfies Record<string, Setting>;
 
@@ -51,13 +52,15 @@ export interface UpdateSettings {
   startWindowMs: number;
   /** How long a new app file is given to check that it starts on this RPE's data, in milliseconds. */
   checkWaitMs: number;
+  /** How many copies of RPE's own build are kept beside the one that runs, for the service's pre-start step to put back. */
+  keepCopies: number;
 }
 
 /** The update's settings as the one reader of the config files gives them (the global level's, the shipped file's and the user's own over it). */
 export function updateSettings(read: ConfigRead): UpdateSettings {
   // Each value is one its setting takes, so of the type its `takes` says.
   const value = (def: Setting): JsonValue => read.value(def);
-  return { restart: value(DEFS.restart) as boolean, versionWaitMs: (value(DEFS.versionWait) as number) * 1000, lookEveryMs: (value(DEFS.lookEvery) as number) * 1000, startTries: value(DEFS.startTries) as number, startWindowMs: (value(DEFS.startWindow) as number) * 1000, checkWaitMs: (value(DEFS.checkWait) as number) * 1000 };
+  return { restart: value(DEFS.restart) as boolean, versionWaitMs: (value(DEFS.versionWait) as number) * 1000, lookEveryMs: (value(DEFS.lookEvery) as number) * 1000, startTries: value(DEFS.startTries) as number, startWindowMs: (value(DEFS.startWindow) as number) * 1000, checkWaitMs: (value(DEFS.checkWait) as number) * 1000, keepCopies: value(DEFS.keepCopies) as number };
 }
 
 /** A regular expression's text that matches `text` as it is. */
@@ -108,7 +111,7 @@ export async function startCheck(bun: string, file: string, data: string, waitMs
   let into: string | null = null;
   try {
     into = await mkdtemp(join(tmpdir(), "rpe-check-"));
-    const proc = Bun.spawn([bun, file, "check", "--data", data, "--into", into], { stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout: waitMs, killSignal: "SIGKILL" });
+    const proc = Bun.spawn([bun, file, "check", "--data", data, "--into", into, "--within", String(Math.max(1, Math.floor(waitMs / 1000) - 1))], { stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout: waitMs, killSignal: "SIGKILL" });
     const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     if (code === 0) return null;
     if (proc.signalCode !== null) return `it did not finish checking that it starts on this RPE's data within ${waitMs / 1000} s`;
@@ -131,7 +134,7 @@ async function hashOf(file: string): Promise<string | null> {
   }
 }
 
-/** Where a restart onto the file on disk stands. */
+/** Where a restart onto a new build stands. */
 export type RestartState =
   /** There is nothing to restart onto. */
   | "none"
@@ -147,9 +150,9 @@ export type RestartState =
 export interface BuildsStatus {
   /** The build this process runs. */
   running: string;
-  /** The build of the app file on disk: the running one while the file is as it was at the start; null where there is no file, or it gives none. */
+  /** The build waiting to be run: the app file's on disk, or, for an installed copy, the one the extension told RPE of; the running one while there is none. Null where there is no file, or it gives none. */
   disk: string | null;
-  /** Why the file on disk gave no build: it is not there, does not start, or says something else. Never restarted onto. */
+  /** Why the new build was not taken: the file is not there, does not start, does not match what was stated for it, or the extension stated nothing. Never restarted onto. */
   broken: string | null;
   /** The extension's build as it said at its last registration; null before it has. */
   extension: string | null;
@@ -158,6 +161,32 @@ export interface BuildsStatus {
   restart: RestartState;
   /** All of it in a sentence or two, as `rpe status` prints it and a page shows it. */
   words: string;
+}
+
+/**
+ * What RPE does about a new build when it runs as its own installed copy (READINGS R-13): the one file
+ * updates come from was recorded at install, and a new build is taken from it only on the extension's
+ * word, with the hash stated for it; it is copied beside the installed copy, checked against that hash,
+ * started for real on a scratch copy of the data, and swapped in with the one it replaces kept as
+ * known-good.
+ */
+export interface CopyUpdate {
+  /** The file updates come from, as the install recorded it. */
+  source: string;
+  /** The hash of the statement of the build the installed copy holds; null where it holds none. */
+  installed(): Promise<string | null>;
+  /** Copies the build beside the source app file next to the installed copy and checks the copy against the hash stated for the build: its build id, or why it is not taken. */
+  fetch(hash: string): Promise<{ build: string } | { refused: string }>;
+  /** Starts the copy fetched on a scratch copy of the data, giving it `waitMs`; null where it starts, else why not. */
+  tryStart(waitMs: number): Promise<string | null>;
+  /** Drops the copy fetched. */
+  drop(): Promise<void>;
+  /** Once the app has closed: the copy fetched takes the installed copy's place, the `keep` that it replaces kept as known-good, and the swap is marked until the new build comes up. */
+  swapIn(from: string, to: string, keep: number): Promise<void>;
+  /** What the unit's pre-start step did last when a swapped-in build did not come up, in words; null where it did nothing. */
+  fellBack(): Promise<string | null>;
+  /** This build has come up: the mark of a swap is let go. */
+  cameUp(): Promise<void>;
 }
 
 /** The app file this process was started from, and what a restart onto another build of it needs. */
@@ -171,9 +200,11 @@ export interface AppFile {
   settings(): Promise<UpdateSettings>;
   /** Whether this process runs as its service, which starts it again when it exits. */
   service(): Promise<boolean>;
-  /** Closes the app as on a stop and ends the process, for its service to start it again. */
-  restart(): void;
+  /** Closes the app as on a stop and ends the process, for its service to start it again; `after` runs once the app has closed, before the process ends. */
+  restart(after?: () => Promise<void>): void;
   sleep(ms: number): Promise<void>;
+  /** Set where this process runs as RPE's installed copy and the install recorded where updates come from. */
+  copy?: CopyUpdate;
 }
 
 export interface BuildsDeps {
@@ -182,6 +213,9 @@ export interface BuildsDeps {
   file: AppFile | null;
   log: Log;
 }
+
+/** What `rpe status` and a page say of a new build the extension has not told RPE of, or that was not taken. */
+const NOT_TOLD = "The extension's build is not the running one, and the extension has not told RPE that a new app file arrived with the hash stated for it, so RPE has taken none: an update of the extension that does not state its hash is not taken.";
 
 /** The app's file and builds: the start's hash, the file as read last, the extension's build, and a restart onto a new one. */
 export class Builds {
@@ -194,12 +228,29 @@ export class Builds {
   #waiting = false;
   /** What may be running, by area: each gives how many of its turns or jobs run now. */
   readonly #running: (() => number | Promise<number>)[] = [];
+  /** For an installed copy: the build of the source last told of, why it was not taken, the build checked and waiting, and what the pre-start step did. */
+  #sourceBuild: string | null = null;
+  #refused: string | null = null;
+  #ready: { build: string; hash: string } | null = null;
+  #fellBack: string | null = null;
+  #arriving: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: BuildsDeps) {}
 
-  /** Keeps the app file's hash as it is at the start. */
+  /** Keeps the app file's hash as it is at the start; an installed copy keeps what happened to the last swap. */
   async start(): Promise<void> {
+    const copy = this.deps.file?.copy;
+    if (copy !== undefined) {
+      this.#fellBack = await copy.fellBack();
+      if (this.#fellBack !== null) this.deps.log.warn("RPE's service put back the known-good copy.", { why: this.#fellBack });
+      return;
+    }
     if (this.deps.file !== null) this.#started = await hashOf(this.deps.file.path);
+  }
+
+  /** This build is up and listening: the mark of the swap that brought it is let go. */
+  async cameUp(): Promise<void> {
+    await this.deps.file?.copy?.cameUp();
   }
 
   /** An area's turns or jobs, counted each time a restart waits for them to end. */
@@ -212,14 +263,16 @@ export class Builds {
     return (await Promise.all(this.#running.map(async (count) => await count()))).reduce((sum, n) => sum + n, 0);
   }
 
-  /** The extension registered, as `build`; null where it did not say. Another build than the running one has the file read again. */
+  /** The extension registered, as `build`; null where it did not say. A file that is its own source reads the file again where it is another build; an installed copy takes nothing on a registration, which states no hash. */
   registered(build: string | null): void {
     this.#extension = build;
+    if (this.deps.file?.copy !== undefined) return;
     if (build !== null && build !== this.deps.version) void this.check().catch((error: unknown) => this.deps.log.error("RPE's app file could not be read again", { error: error instanceof Error ? error.message : String(error) }));
   }
 
-  /** Reads the app file again, and restarts onto a new build where its settings let it; what it found. */
+  /** Reads the app file again, and restarts onto a new build where its settings let it; what it found. An installed copy reads nothing: it takes a build only on the extension's word (`arrived`). */
   check(): Promise<BuildsStatus> {
+    if (this.deps.file?.copy !== undefined) return Promise.resolve(this.status());
     this.#checking ??= this.#read(false).finally(() => {
       this.#checking = null;
     });
@@ -227,10 +280,86 @@ export class Builds {
   }
 
   /**
+   * The extension's word that a new app file has arrived, with the hash stated for it (installed copy
+   * only). RPE copies the source it was set up from beside its own copy, takes the build only when
+   * every file matches what was stated, starts it for real on a scratch copy of its data, and then
+   * restarts onto it once no turn or job runs, or at once where `now` says so. A word with no stated
+   * hash is not taken. Whether it was taken, and where it stands, in words.
+   */
+  arrived(hash: string | null, now = false): Promise<{ taken: boolean; words: string }> {
+    const run = this.#arriving.then(() => this.#arrive(hash, now));
+    this.#arriving = run.catch(() => undefined);
+    return run;
+  }
+
+  async #arrive(hash: string | null, now: boolean): Promise<{ taken: boolean; words: string }> {
+    const { file, log, version } = this.deps;
+    const copy = file?.copy;
+    const answer = (taken: boolean): { taken: boolean; words: string } => ({ taken, words: this.status().words });
+    if (file === null || copy === undefined) {
+      this.#refused = "RPE runs from no installed copy of its own, so it takes no app file the extension brings: restart it onto a new one by hand";
+      return answer(false);
+    }
+    if (hash === null || hash === "") {
+      this.#refused = "the extension said an app file arrived and stated no hash for it, so RPE takes none";
+      log.warn("RPE did not take the app file the extension brought: no hash was stated for it.");
+      return answer(false);
+    }
+    const settings = await file.settings();
+    const stated = hash.toLowerCase();
+    if ((await copy.installed()) === stated && this.#ready === null) {
+      this.#refused = null;
+      this.#sourceBuild = null;
+      return answer(false);
+    }
+    const fetched = await copy.fetch(stated);
+    if ("refused" in fetched) {
+      await copy.drop();
+      this.#refused = fetched.refused;
+      this.#sourceBuild = null;
+      log.warn("RPE did not take the app file the extension brought; it goes on running its own build.", { running: version, why: fetched.refused });
+      return answer(false);
+    }
+    this.#sourceBuild = fetched.build;
+    const why = await copy.tryStart(settings.checkWaitMs);
+    if (why !== null) {
+      await copy.drop();
+      this.#refused = why;
+      log.warn("RPE did not take the app file the extension brought: the build does not start; it goes on running its own build.", { running: version, build: fetched.build, why });
+      return answer(false);
+    }
+    this.#refused = null;
+    this.#ready = { build: fetched.build, hash: stated };
+    log.info("RPE has a new build that starts, and will swap onto it.", { running: version, build: fetched.build });
+    if (!settings.restart && !now) this.#restart = "off";
+    else if (!(await file.service())) this.#restart = "by hand";
+    else {
+      this.#restart = "waiting";
+      void this.#waitThenRestart(file, copy, now).catch((error: unknown) => {
+        this.#restart = "none";
+        log.error("RPE's restart onto its new build failed; it goes on running its build", { error: error instanceof Error ? error.message : String(error) });
+      });
+    }
+    return answer(true);
+  }
+
+  /**
    * "Update now": reads the file again, and restarts onto a new build whatever `update.restart` says,
-   * once no turn or job runs; what it will do. Run by hand, it cannot.
+   * once no turn or job runs; an installed copy restarts at once onto the build checked and waiting.
+   * Run by hand, it cannot.
    */
   async now(): Promise<BuildsStatus> {
+    const { file } = this.deps;
+    if (file?.copy !== undefined) {
+      const ready = this.#ready;
+      if (ready === null) return this.status();
+      if (!(await file.service())) this.#restart = "by hand";
+      else if (this.#restart !== "restarting") {
+        this.#restart = "restarting";
+        this.#swap(file, file.copy);
+      }
+      return this.status();
+    }
     // Asked by the user, a file whose check failed is checked again: the check may have failed for a reason that has passed (a full temporary folder, a machine under load).
     if (this.#seen !== null && "failed" in this.#seen.result) this.#seen = null;
     await this.check();
@@ -240,12 +369,24 @@ export class Builds {
   /** As known now, without reading the file. */
   status(): BuildsStatus {
     const { version } = this.deps;
+    const copy = this.deps.file?.copy !== undefined;
     const seen = this.#seen?.result ?? null;
-    const disk = this.deps.file === null ? null : seen === null ? version : "build" in seen ? seen.build : null;
-    const broken = seen !== null && "failed" in seen ? seen.failed : null;
+    const disk = this.deps.file === null ? null : copy ? (this.#ready?.build ?? this.#sourceBuild ?? version) : seen === null ? version : "build" in seen ? seen.build : null;
+    const broken = copy ? this.#refused : seen !== null && "failed" in seen ? seen.failed : null;
     const extension = this.#extension;
     const agree = broken === null && (disk === null || disk === version) && (extension === null || extension === version);
-    return { running: version, disk, broken, extension, agree, restart: this.#restart, words: wordsOf({ running: version, disk, broken, extension, agree, restart: this.#restart }) };
+    const parts = { running: version, disk, broken, extension, agree, restart: this.#restart };
+    return { ...parts, words: wordsOf(parts, copy, this.#extras(copy, disk)) };
+  }
+
+  /** What an installed copy adds to the words: that the extension's build is not taken until it says so with its hash, and what the pre-start step did. */
+  #extras(copy: boolean, disk: string | null): string[] {
+    if (!copy) return [];
+    const { version } = this.deps;
+    const extras: string[] = [];
+    if (this.#extension !== null && this.#extension !== version && this.#ready === null && this.#refused === null && (disk === null || disk === version)) extras.push(NOT_TOLD);
+    if (this.#fellBack !== null) extras.push(this.#fellBack);
+    return extras;
   }
 
   async #read(asked: boolean): Promise<BuildsStatus> {
@@ -263,7 +404,7 @@ export class Builds {
     else if (!(await file.service())) this.#restart = "by hand";
     else {
       this.#restart = "waiting";
-      void this.#waitThenRestart(file).catch((error: unknown) => {
+      void this.#waitThenRestart(file, undefined, false).catch((error: unknown) => {
         this.#restart = "none";
         this.deps.log.error("RPE's restart onto its new app file failed; it goes on running its build", { error: error instanceof Error ? error.message : String(error) });
       });
@@ -291,49 +432,67 @@ export class Builds {
     else if (result.build !== version) log.info("RPE's app file on disk is another build.", { running: version, disk: result.build });
   }
 
-  /** Waits until no turn or job runs, then restarts, the file read again first: given up where it is the running build again, or does not start. */
-  async #waitThenRestart(file: AppFile): Promise<void> {
+  /** Closes the app and ends the process for its service to start it again; an installed copy first swaps the build checked into the copy's place, once the app has closed. */
+  #swap(file: AppFile, copy: CopyUpdate | undefined): void {
+    const ready = this.#ready;
+    this.deps.log.info("RPE restarts on the new build.", { running: this.deps.version, build: ready?.build ?? this.status().disk });
+    if (copy === undefined || ready === null) file.restart();
+    else
+      file.restart(async () => {
+        const settings = await file.settings();
+        await copy.swapIn(this.deps.version, ready.build, settings.keepCopies);
+      });
+  }
+
+  /** Waits until no turn or job runs (at once where `now`), then restarts; a file read again first, and given up where it is the running build again, or does not start. */
+  async #waitThenRestart(file: AppFile, copy: CopyUpdate | undefined, now: boolean): Promise<void> {
     if (this.#waiting) return;
     this.#waiting = true;
     try {
       for (;;) {
         const settings = await file.settings();
-        await this.#readFile(file, settings);
-        const disk = this.status().disk;
-        if (disk === null || disk === this.deps.version) {
+        if (copy === undefined) {
+          await this.#readFile(file, settings);
+          const disk = this.status().disk;
+          if (disk === null || disk === this.deps.version) {
+            this.#restart = "none";
+            return;
+          }
+        } else if (this.#ready === null) {
           this.#restart = "none";
           return;
         }
+        if (now) break;
         const counts = await Promise.all(this.#running.map(async (count) => await count()));
         if (counts.every((n) => n === 0)) break;
         await file.sleep(settings.lookEveryMs);
       }
       this.#restart = "restarting";
-      this.deps.log.info("RPE restarts on the new build of its app file.", { running: this.deps.version, disk: this.status().disk });
-      file.restart();
+      this.#swap(file, copy);
     } finally {
       this.#waiting = false;
     }
   }
 }
 
-/** The builds in a sentence or two, as `rpe status` prints them and a page shows them. */
-function wordsOf(s: Omit<BuildsStatus, "words">): string {
+/** The builds in a sentence or two, as `rpe status` prints them and a page shows them; `extras` are what an installed copy adds. */
+function wordsOf(s: Omit<BuildsStatus, "words">, copy: boolean, extras: readonly string[] = []): string {
+  const more = extras.length === 0 ? "" : ` ${extras.join(" ")}`;
   const extension = s.extension === null ? "the extension has not said its build yet" : `the extension is build ${s.extension}`;
-  if (s.broken !== null) return `RPE runs build ${s.running}. Its app file on disk was replaced by one that does not start (${s.broken}), so RPE goes on running build ${s.running}; ${extension}.`;
-  if (s.disk === null) return `RPE runs build ${s.running}, from no single app file; ${extension}.`;
-  if (s.disk === s.running) return s.agree ? `RPE runs build ${s.running}, the build of its app file on disk${s.extension === null ? `; ${extension}` : " and of the extension"}.` : `RPE runs build ${s.running}, the build of its app file on disk; ${extension}.`;
+  if (s.broken !== null) return `RPE runs build ${s.running}. ${copy ? `A new app file was not taken (${s.broken})` : `Its app file on disk was replaced by one that does not start (${s.broken})`}, so RPE goes on running build ${s.running}; ${extension}.${more}`;
+  if (s.disk === null) return `RPE runs build ${s.running}, from no single app file; ${extension}.${more}`;
+  if (s.disk === s.running) return `${s.agree ? `RPE runs build ${s.running}, the build of its app file on disk${s.extension === null ? `; ${extension}` : " and of the extension"}.` : `RPE runs build ${s.running}, the build of its app file on disk; ${extension}.`}${more}`;
   const head = `RPE runs build ${s.running}; its app file on disk is build ${s.disk}; ${extension}.`;
   switch (s.restart) {
     case "waiting":
-      return `${head} RPE restarts on build ${s.disk} once no turn or job is running.`;
+      return `${head} RPE restarts on build ${s.disk} once no turn or job is running.${more}`;
     case "restarting":
-      return `${head} RPE is restarting on build ${s.disk}.`;
+      return `${head} RPE is restarting on build ${s.disk}.${more}`;
     case "off":
-      return `${head} A restart is needed to run build ${s.disk}: RPE does not restart by itself while update.restart is off. Choose "Update now", or restart RPE's service.`;
+      return `${head} A restart is needed to run build ${s.disk}: RPE does not restart by itself while update.restart is off. Choose "Update now", or restart RPE's service.${more}`;
     case "by hand":
-      return `${head} A restart is needed to run build ${s.disk}: RPE was started by hand, so nothing would start it again. Stop it, and start it again.`;
+      return `${head} A restart is needed to run build ${s.disk}: RPE was started by hand, so nothing would start it again. Stop it, and start it again.${more}`;
     case "none":
-      return `${head} A restart is needed to run build ${s.disk}.`;
+      return `${head} A restart is needed to run build ${s.disk}.${more}`;
   }
 }
