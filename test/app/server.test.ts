@@ -480,7 +480,7 @@ describe("the server", () => {
     });
     const table = new RouteTable();
     table.add("app", watched);
-    const own = startServer({ config: { ...app.config, port: 0 }, routes: table, auth: app.auth, live: app.live, log: lineLog(() => undefined), now: () => bed.clock.now });
+    const own = startServer({ config: { ...app.config, port: 0 }, routes: table, auth: app.auth, live: app.live, log: lineLog(() => undefined), now: () => bed.clock.now, workers: app.workers });
     try {
       const token = await makeKey(app, "web");
       for (const [method, path] of [["GET", "/api/v1/status"], ["GET", "/api/v1/status/builds"], ["POST", "/api/v1/update"], ["GET", "/api/v1/status/session"]] as const) {

@@ -5,7 +5,9 @@
 // within the route's limit. A route in the form is held to its declaration too: a query or a body it
 // does not take is refused with 400 before its handler runs, which is given only what was declared,
 // read and typed, and the caller's credential only where its route declares it. A page from an allowed
-// origin gets the CORS answers it needs to call RPE directly, the Lumiverse page among them.
+// origin gets the CORS answers it needs to call RPE directly, the Lumiverse page among them. A body larger
+// than `server.workerParseBytes` is parsed on a worker thread, a JSON route's and a raw route's alike, so a
+// long prompt's parse never holds up another request.
 //
 // Two kinds of listener. TCP, where pages, Lumiverse and the extension reach RPE, serves every route but
 // the command line's. The command socket, a Unix socket in the data folder that only the owner's account
@@ -26,6 +28,7 @@ import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
 import type { AnyShape, DeclaredRoute, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
 import { JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
+import type { Workers } from "./workers/pool";
 
 export interface ServerParts {
   config: AppConfig;
@@ -34,6 +37,8 @@ export interface ServerParts {
   live: LiveHub;
   log: Log;
   now: () => number;
+  /** The worker threads a large body is parsed on. */
+  workers: Workers;
   /** Where the command line's socket goes, in the data folder; absent, the command line's routes are served nowhere. */
   commandSocket?: string;
 }
@@ -236,6 +241,8 @@ interface Asked {
   credential: string | null;
   bytes: Uint8Array<ArrayBuffer> | null;
   signal: AbortSignal;
+  /** The body as JSON, parsed on a worker thread when it is large; rejects when it is not JSON. */
+  json: () => Promise<unknown>;
 }
 
 /**
@@ -269,7 +276,7 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any,
     const declared: AnyShape = route.body;
     if (asked.bytes === null || !sent) return refusal(asked.path, 400, `${at} takes a JSON body: ${shapeWords(declared)}.`);
     try {
-      body = JSON.parse(new TextDecoder().decode(asked.bytes));
+      body = await asked.json();
     } catch {
       return refusal(asked.path, 400, "The request's body is not JSON.");
     }
@@ -341,16 +348,22 @@ export function startServer(parts: ServerParts): RunningServer {
       bytes = read.bytes;
     }
     const credential = credentialOf(request);
+    // A body read is parsed here or, when large, on a worker thread; a JSON route's buffer is handed to the thread, a raw route's is kept with its request.
+    const json = (handOver: boolean) => async (): Promise<unknown> => {
+      if (bytes === null || bytes.byteLength === 0) throw new SyntaxError("The request has no body.");
+      if (bytes.byteLength <= config.server.workerParseBytes) return JSON.parse(new TextDecoder().decode(bytes));
+      return await parts.workers.run("parseJson", bytes, handOver ? [bytes.buffer] : []);
+    };
     const rest = route.path.endsWith("/*") ? restOf(route.path, path) : null;
     try {
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
         const openLiveSocket = (headers?: Record<string, string>): boolean => server?.upgrade(request, { data: { follows: new Map(), credential, ends: undefined, catchUp: undefined }, ...(headers === undefined ? {} : { headers }) }) ?? false;
-        const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket });
+        const response = await route.raw(given, { params: rest === null ? params : { ...params, "*": rest.decoded ?? rest.sent }, user, openLiveSocket, json: json(false) });
         return response === undefined ? undefined : withCors(response, origin);
       }
       if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
-      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal };
+      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, credential, bytes, signal: request.signal, json: json(true) };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
       if (error instanceof RouteError || error instanceof AuthRefused) return withCors(refusal(path, error.status, error.message), origin);

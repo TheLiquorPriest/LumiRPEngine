@@ -487,6 +487,11 @@ export interface RawCall<P extends string, A extends Access> {
    * the answer; false when the request is not a socket's.
    */
   readonly openLiveSocket: (headers?: Record<string, string>) => boolean;
+  /**
+   * The request's body as JSON, parsed on a worker thread when it is larger than `server.workerParseBytes`
+   * (a long prompt's parse holds up no other request); rejects when there is no body or it is not JSON.
+   */
+  readonly json: () => Promise<unknown>;
 }
 
 /**

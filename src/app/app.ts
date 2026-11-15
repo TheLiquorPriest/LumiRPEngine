@@ -13,6 +13,7 @@ import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
 import { openDatabase, WriteQueue } from "./database";
 import { type Fills, gatherHooks, gatherSettings, type Hooks } from "./hooks";
+import { IndexFile } from "./index-file/index-file";
 import { LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
 import { migrate, Migrations } from "./migrations";
@@ -25,6 +26,7 @@ import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
 import { RPE_UI, uiRoute } from "./ui";
 import { type AppFile, Builds, type BuildsStatus } from "./update";
+import { defaultThreads, Workers } from "./workers/pool";
 
 /** Public: that RPE answers here, and its build; nothing more, and no work to say it. */
 export const STATUS_PATH = "/api/v1/status";
@@ -96,13 +98,17 @@ export interface App {
   readonly now: () => number;
   /** The builds that meet at RPE (its own, its app file's on disk, the extension's), and a restart onto a new app file. */
   readonly builds: Builds;
+  /** The worker threads heavy work runs on (plan §4.1): a task of the one list (`workers/tasks.ts`), its answer back. */
+  readonly workers: Workers;
+  /** The index file: contentless full-text indexes the lanes feed and search (`index-file/index-file.ts`). */
+  readonly index: IndexFile;
   /** What the migrations did when the app opened. */
   readonly migrated: MigrationOutcome;
   /** Listens, with the route table as it stands (it takes no more routes after), then runs each area's `started`, in order. */
   start(): Promise<RunningServer>;
   /** The server once it listens (its port and address, for the addresses a page is handed); null before. */
   listening(): RunningServer | null;
-  /** Runs each mounted area's `stopping`, in reverse order, then stops listening, lets the writes already queued land, and closes the database. */
+  /** Runs each mounted area's `stopping`, in reverse order, then stops listening, lets the writes already queued land, closes the index file, stops the worker threads and closes the database. */
   close(): Promise<void>;
 }
 
@@ -219,6 +225,16 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   if (migrated.backup !== null) log.info("the database was copied before this version's first migration", { copy: migrated.backup });
   for (const step of migrated.applied) log.info("migrated", { area: step.area, version: step.version });
   const writes = new WriteQueue(db, config.database.sliceMs);
+  const workers = new Workers({ threads: config.workers.threads ?? defaultThreads(), name: "RPE's worker threads", log });
+  let index: IndexFile;
+  try {
+    index = await IndexFile.open({ path: paths.index, workers, batch: config.index.batch, log });
+  } catch (error) {
+    await workers.close();
+    await writes.close();
+    db.close();
+    throw error;
+  }
   const auth = new Auth({ db, writes, owner: user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now });
@@ -259,12 +275,14 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     hooks,
     now,
     builds,
+    workers,
+    index,
     migrated,
     async start() {
       if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");
       if (starting !== null) throw new Error("RPE's server is already started.");
       const run = (async () => {
-        const server = startServer({ config, routes, auth, live, log, now, commandSocket: commandSocketPath(paths.root) });
+        const server = startServer({ config, routes, auth, live, log, now, workers, commandSocket: commandSocketPath(paths.root) });
         running = server;
         for (const area of mounted) await hook(area, "started");
         return server;
@@ -288,6 +306,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
         running = null;
         await server?.stop();
         await writes.close();
+        await index.close().catch((error: unknown) => log.error("the index file did not close cleanly", { error: error instanceof Error ? error.message : String(error) }));
+        await workers.close();
         db.close();
       })();
       return closing;
