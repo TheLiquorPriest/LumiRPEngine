@@ -13,11 +13,11 @@
 // (only what the user changed, each a value put whole at a path: `H/extension/backend/settings.ts`)
 // and `harness/story.json`, and each runtime's config.
 
+import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { hashJson } from "../shared/hash";
 import { isRecord, type JsonValue } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { readText, writeWhole } from "../app/disk";
-import { HARNESS_SETTINGS } from "../app/harness-settings";
 import { takenValue } from "../app/setting-list";
 import { UPDATE_SETTINGS } from "../app/update";
 import { withKeyAt, yamlMapping } from "../app/yaml";
@@ -100,7 +100,7 @@ export function oneToolAtATime(own: Record<string, JsonValue>): Set<string> {
 }
 
 /**
- * What RPE's settings a run writes take, as the app declares them: the harness's and the update's.
+ * What RPE's settings a run writes take, as their readers declare them: RPH's own list and the update's.
  * The turn lane's two a run writes, `chat.hiddenReadable` and `history.window`, are declared where the
  * migration may not reach (`test/standalone-boundaries.test.ts`): their values are made to fit where
  * they are read from today's.
@@ -109,7 +109,7 @@ const RPE_SETTINGS = [...HARNESS_SETTINGS, ...UPDATE_SETTINGS];
 
 /**
  * LumiAH's settings RPE has a setting of the same meaning for (RPH kept most of them from it: its
- * `src/harness/settings.ts`), by their paths in its sections (`H/core/settings.ts`): the setting each
+ * `src/harness/settings/`), by their paths in its sections (`H/core/settings.ts`): the setting each
  * becomes, and for a time, that LumiAH keeps it in milliseconds where RPE takes seconds.
  */
 const LUMIAH_SAME: Readonly<Record<string, { to: string; seconds?: true }>> = {

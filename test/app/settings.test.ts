@@ -6,9 +6,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { NO_SESSION, turnSettings } from "../../src/turn";
 import { CHAT_CONFIG, CHATS_FOLDER, GLOBAL_CONFIG, SHIPPED_FOLDER } from "../../src/tree";
 import type { SettingsReply, SettingView } from "../../src/app/settings-routes";
+import { keyFor } from "../../src/app/setting-list";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "../turn/bed";
 
 const beds: TurnBed[] = [];
@@ -86,6 +88,20 @@ test("every setting RPH and RPE read is listed for a chat: the value in force, i
   const shared = await settings(b, "GET", "");
   expect(shared.body.files.map((f) => f.level)).toEqual(["shipped", "global"]);
   expect(setting(shared.body, "history.window")).toMatchObject({ value: 30, from: "global" });
+});
+
+test("GET /api/v1/settings offers every setting of RPH's exported list with its default and what it takes", async () => {
+  const b = await playedBed("");
+  const made = await b.page<{ id: string; error?: string }>("POST", "/api/v1/connections", { connection: { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, key: "sk-invented-0000-1111" });
+  expect(made.body.error).toBeUndefined();
+
+  const { status, body } = await settings(b, "GET", `?chat=${CHAT}`);
+  expect(status).toBe(200);
+  expect(HARNESS_SETTINGS.length).toBeGreaterThan(0);
+  for (const def of HARNESS_SETTINGS) {
+    const shown = setting(body, keyFor(def, made.body.id));
+    expect({ key: def.key, default: shown.default, takes: shown.takes, none: shown.none, orNone: shown.orNone }).toEqual({ key: def.key, default: def.default, takes: def.takes, none: def.none ?? null, orNone: def.orNone === true });
+  }
 });
 
 test("a value set at a chat's level is in force at the chat's next turn, over the global one; taken away, the global one shows through; the shipped file is never written", async () => {

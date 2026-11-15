@@ -59,15 +59,15 @@ The files are read again at every turn, so a change holds from the next turn on.
 | `reply.heldSentences` | `1` | Sentences held back while a rule that can interrupt covers the reply. |
 | `reply.tailSentences` | `3` | Sentences of what was already shown that an agent is given when it goes on after a rule stopped it. |
 | `reply.leadSampling` | `own` | The lead's sampling: its `own`, or the `preset`'s. |
-| `reply.intentWait` | `2` | Seconds a tool or the reply waits, at most, for the intent record written before it to be taken. `0` waits for nothing. |
 
 ## What you see while a turn runs
 
 | Setting | Default | What it does |
 |---|---|---|
 | `progress.show` | `all` | `all` the progress lines, or `least`: only the line that keeps a silent turn alive. |
-| `progress.silence` | `60` | Seconds with nothing shown before that line. |
+| `progress.silence` | `60` | Seconds with nothing shown before that line, at most 540: the line reaches Lumiverse inside the ten minutes it waits before ending a silent generation. |
 | `trace.requests` | `first` | Which calls have what they were sent kept in the turn's folder: each agent's `first`, `all`, or `none`. |
+| `live.backlog` | `5000` | Items of one run a page following it live may have yet to take; past that, the page is cut off and told so, and no run waits on a slow page. |
 
 ## Tools and rules
 

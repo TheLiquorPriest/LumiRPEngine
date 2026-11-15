@@ -48,9 +48,11 @@ const takes = shape.named(
     shape.object({ type: shape.literal("texts") }),
   ),
 );
-// The setting list's own types, which the readers read by: the declaration says the same.
+// The setting list's own types, which the readers read by: the declaration says the same. RPH's
+// `SettingTakes` marks its members readonly; a reply's shape carries the same members, written.
+type Written<T> = T extends unknown ? { -readonly [K in keyof T]: T[K] } : never;
 type LevelMirrored = Holds<Exactly<Infer<typeof layerLevel>, LayerLevel>>;
-type TakesMirrored = Holds<Exactly<Infer<typeof takes>, SettingTakes>>;
+type TakesMirrored = Holds<Exactly<Infer<typeof takes>, Written<SettingTakes>>>;
 
 const settingView = shape.named(
   "SettingView",

@@ -2,62 +2,26 @@
 // a config file writes it, its default, what it takes, and whether it is set per connection. A reader
 // takes each of its values through its list, and the Settings routes show and write every setting
 // from the same lists, so a setting added to a list is read, shown and written with nothing else
-// changed.
+// changed. RPH's own list and the declaration every list uses (`SettingDef`, `SettingTakes`) are
+// RPH's (`rp-harness/helpers`, `rp-harness/contract`); RPE's lists declare RPE's settings the same way.
 //
 // The config files of a chat's levels (`RPE-global.yml` as shipped and the user's own, the chat's
-// `RPE.yml`) are read farthest first and merged mapping by mapping, the nearer level's value over the
-// farther one's. A value a setting does not take is passed over, and its default holds.
+// `RPE.yml`) are read farthest first and merged by RPH's merge of levels (`mergedConfig`), so RPE
+// reads every level exactly as RPH reads it. A value a setting does not take is passed over, and its
+// default holds.
 
-import type { JsonValue, LayerLevel } from "rp-harness/contract";
+import type { JsonValue, SettingDef } from "rp-harness/contract";
+
+export type { SettingDef, SettingTakes } from "rp-harness/contract";
+export { mergedConfig } from "rp-harness/helpers";
 
 /** Where a per-connection setting's key names the connection, by its name or its id. */
 export const CONNECTION_PART = "<connection>";
-
-/** What a level may set a setting to. */
-export type SettingTakes =
-  /** A whole number, at least `least`, and at most `most` where it has one. */
-  | { type: "whole"; least: number; most?: number }
-  /** A number, at least `least`, and at most `most` where it has one. */
-  | { type: "number"; least: number; most?: number }
-  | { type: "oneOf"; values: readonly string[] }
-  | { type: "yesNo" }
-  /** A line of text that is not blank, read without the space at its ends. */
-  | { type: "text" }
-  /** A list of names; as read, an item that is no text is passed over, and written, refused. */
-  | { type: "texts" };
-
-export interface SettingDef {
-  /** The key as a config file writes it, dotted; `<connection>` where a per-connection setting names its connection. */
-  readonly key: string;
-  /** What holds where no level sets it: null for nothing, whose meaning `none` gives. */
-  readonly default: JsonValue;
-  readonly takes: SettingTakes;
-  /** What no value means, in a page's words, where the default is null or `~` may be set. */
-  readonly none?: string;
-  /** A level may set `~` (null), which means what `none` says: a limit lifted, a window that keeps every message. */
-  readonly orNone?: true;
-  /** Set for one connection at a time, named by its name or its id where the key has `<connection>`. */
-  readonly perConnection: boolean;
-  /** The key above it may hold this value in place of a mapping (`hold: true` for `hold: { on: true }`), the mapping's other keys then at their defaults. */
-  readonly short?: true;
-  /** The levels it is read from; absent, every level that has a config file. */
-  readonly levels?: readonly LayerLevel[];
-}
 
 export type Mapping = { [key: string]: JsonValue };
 
 export function isMapping(value: unknown): value is Mapping {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Two configs as one: the nearer one's values over the farther one's, mapping by mapping. */
-export function mergedConfig(far: Mapping, near: Mapping): Mapping {
-  const out: Mapping = { ...far };
-  for (const [key, value] of Object.entries(near)) {
-    const before = out[key];
-    out[key] = isMapping(before) && isMapping(value) ? mergedConfig(before, value) : value;
-  }
-  return out;
 }
 
 /** A setting's key with a connection's name or id in place of `<connection>`; the key itself for one that is not per connection. */

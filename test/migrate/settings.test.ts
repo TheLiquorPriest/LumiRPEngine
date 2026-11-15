@@ -137,7 +137,7 @@ describe("today's settings into RPE's config", () => {
     }
   });
 
-  test("a later run takes today's changes into a carried setting only while RPE's value is still the one a run put there; one no longer set today is taken away", async () => {
+  test("a later run takes today's changes into a carried setting only while RPE's value is still the one a run put there; a limit lifted today is lifted in RPE", async () => {
     const fixture = await buildFixture("operator");
     try {
       await rm(join(fixture.userFolder, STRAY));
@@ -156,7 +156,8 @@ describe("today's settings into RPE's config", () => {
       ]);
       const second = await run(fixture, data, 10);
 
-      expect({ clip: await setIn(data, "results.clip"), keepTurns: await setIn(data, "compaction.keepTurns"), time: await setIn(data, "limits.turn.time") }).toEqual({ clip: 5_000, keepTurns: 4, time: undefined });
+      // RPH's limits.turn.time takes `~`, so the turn's time lifted today is written as `~`.
+      expect({ clip: await setIn(data, "results.clip"), keepTurns: await setIn(data, "compaction.keepTurns"), time: await setIn(data, "limits.turn.time") }).toEqual({ clip: 5_000, keepTurns: 4, time: null });
       const settings = second.carried?.settings;
       expect(settings?.keptInRpe).toEqual([{ from: lumiah("core.loop.clipChars"), to: global("results.clip") }]);
       expect(settings?.carried).toEqual(expect.arrayContaining([{ from: lumiah("core.session.keepTurns"), to: global("compaction.keepTurns") }, { from: lumiah("core.turn.wallMs"), to: global("limits.turn.time") }]));

@@ -8,10 +8,10 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import { runCli } from "../../src/app/cli";
 import { CONFIG_DEFAULTS } from "../../src/app/config";
-import { HARNESS_SETTINGS } from "../../src/app/harness-settings";
 import { CONNECTION_PART, type SettingDef } from "../../src/app/setting-list";
 import { UPDATE_SETTINGS } from "../../src/app/update";
 import { CAST_SETTINGS } from "../../src/cast";

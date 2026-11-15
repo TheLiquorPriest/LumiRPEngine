@@ -39,6 +39,8 @@ interface Rule {
   sandboxed?: true;
   /** May import the harness package. */
   harness?: true;
+  /** May import RPH's module of pure helpers (`HELPERS`) though not the harness: the migration, which carries today's settings into RPH's. */
+  helpers?: true;
 }
 
 const PURE: readonly Carried[] = ["shared", "engine", "packs"];
@@ -54,7 +56,7 @@ const RULES: Record<Zone, Rule> = {
   cast: { zones: ["app", "store", "iface"], carried: PURE, harness: true },
   story: { zones: ["app", "store", "iface", "cast"], carried: PURE, harness: true },
   // The migration's database is whole: the story's writes count the lore's overlays, so it lays the lore's tables too.
-  migrate: { zones: ["app", "store", "cast", "story", "build", "lore", "worlds"], carried: [...PURE, "backend"] },
+  migrate: { zones: ["app", "store", "cast", "story", "build", "lore", "worlds"], carried: [...PURE, "backend"], helpers: true },
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter", "secrecy"], carried: ["shared", "backend"], sandboxed: true },
@@ -69,6 +71,21 @@ const RULES: Record<Zone, Rule> = {
 
 /** The harness's contract is types only; importing it as types costs nothing anywhere, a page included. */
 const CONTRACT = "rp-harness/contract";
+
+/** RPH's one module of pure helpers (its settings list and the merge of levels, among others): data and functions that read only what they are given, no pi and no `node:` module. */
+const HELPERS = "rp-harness/helpers";
+
+/** The entries RPH names for a host (CONTRACT condition 4, RPH `package.json` `exports`): RPE imports RPH through these and no other, a deep `rp-harness/src/...` never. */
+const HARNESS_ENTRIES: readonly string[] = ["rp-harness", CONTRACT, HELPERS, "rp-harness/hosts/folder", "rp-harness/testing/rig", "rp-harness/testing/kit"];
+
+/** Why a zone's import of the harness package breaks its rule, or null where it keeps it. */
+function harnessImport(spec: string, typeOnly: boolean, zone: Zone, rule: Rule): string | null {
+  if (!HARNESS_ENTRIES.includes(spec)) return `${zone}: ${spec} is none of the entries RPH names (${HARNESS_ENTRIES.join(", ")})`;
+  if (rule.harness) return null;
+  if (typeOnly && spec === CONTRACT) return null;
+  if (rule.helpers && spec === HELPERS) return null;
+  return `${zone}: the harness package is not imported here`;
+}
 
 /** The one place everything is put together: the application's entry may import every server zone. */
 const COMPOSITION = /^app\/(main|cli|compose)\.ts$/;
@@ -168,7 +185,8 @@ describe("the standalone application's boundaries", () => {
         } else if (spec.startsWith("node:") || spec.startsWith("bun:") || spec === "bun") {
           if (sandboxed) violations.push(`${rel}: ${spec} in code that runs in a page or inside Lumiverse`);
         } else if (spec === "rp-harness" || spec.startsWith("rp-harness/")) {
-          if (!rule.harness && !(typeOnly && spec === CONTRACT)) violations.push(`${rel} (${zone}): the harness package is not imported here`);
+          const broken = harnessImport(spec, typeOnly, zone, rule);
+          if (broken !== null) violations.push(`${rel} (${broken})`);
         } else if (spec === "lumi-ah" || spec.startsWith("lumi-ah/")) {
           // LumiAH is the fence's (test/removal/fence.ts), judged through every chain of what stays.
         } else if (spec.startsWith("@earendil-works/")) {
@@ -183,6 +201,23 @@ describe("the standalone application's boundaries", () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  test("a zone that imports rp-harness through any other entry, a deep import of rp-harness/src/... among them, fails; each named entry passes", () => {
+    for (const entry of HARNESS_ENTRIES) {
+      expect(harnessImport(entry, false, "turn", RULES.turn)).toBeNull();
+      expect(harnessImport(entry, true, "turn", RULES.turn)).toBeNull();
+    }
+    for (const other of ["rp-harness/src/harness/settings", "rp-harness/src/helpers.ts", "rp-harness/src/contract/index.ts", "rp-harness/hosts", "rp-harness/testing", "rp-harness/package.json", "rp-harness/contract/settings"]) {
+      expect(harnessImport(other, false, "turn", RULES.turn)).toContain("none of the entries RPH names");
+      expect(harnessImport(other, true, "migrate", RULES.migrate)).toContain("none of the entries RPH names");
+    }
+    // A named entry is still imported only where the zone's rule allows it.
+    expect(harnessImport(CONTRACT, true, "store", RULES.store)).toBeNull();
+    expect(harnessImport(CONTRACT, false, "store", RULES.store)).toContain("not imported here");
+    expect(harnessImport(HELPERS, false, "migrate", RULES.migrate)).toBeNull();
+    expect(harnessImport(HELPERS, false, "store", RULES.store)).toContain("not imported here");
+    expect(harnessImport("rp-harness", false, "migrate", RULES.migrate)).toContain("not imported here");
   });
 
   test("only the extension touches the spindle global", () => {
