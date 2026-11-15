@@ -26,6 +26,7 @@ export const COMMAND_PATHS = Object.freeze({
   switches: "/api/v1/command/switches/:name",
   lumiverse: "/api/v1/command/lumiverse",
   status: "/api/v1/command/status",
+  busy: "/api/v1/command/busy",
 });
 
 const T = shape.text();

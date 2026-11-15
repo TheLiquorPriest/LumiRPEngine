@@ -6,6 +6,7 @@
 import type { App, Area } from "./app";
 import { installFacts, SERVER_SETTINGS } from "./config";
 import { PAGE_SETTINGS } from "./page-settings";
+import { serviceRoutes } from "./service-routes";
 import { type SettingsDeps, settingsRoutes } from "./settings-routes";
 import { UPDATE_SETTINGS } from "./update";
 
@@ -24,7 +25,10 @@ export function appArea(takes?: AppTakes): Area {
     ...(takes === undefined
       ? {}
       : {
-          mount: (at: App) => takes.opened(at),
+          mount: (at: App) => {
+            takes.opened(at);
+            at.routes.add("service", serviceRoutes({ builds: at.builds }));
+          },
           // Once every area is mounted: the levels and connections come from the tree and the turn lane.
           mounted: (at: App) => at.routes.add("settings", settingsRoutes({ settings: at.settings, facts: () => installFacts(at.config, at.paths), ...takes.settings(at) })),
         }),

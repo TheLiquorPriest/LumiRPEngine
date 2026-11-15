@@ -207,6 +207,11 @@ export class Builds {
     this.#running.push(running);
   }
 
+  /** How many turns and jobs run now, over every area that counts them: what a restart of RPE's service waits to be none. */
+  async busy(): Promise<number> {
+    return (await Promise.all(this.#running.map(async (count) => await count()))).reduce((sum, n) => sum + n, 0);
+  }
+
   /** The extension registered, as `build`; null where it did not say. Another build than the running one has the file read again. */
   registered(build: string | null): void {
     this.#extension = build;

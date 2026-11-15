@@ -717,6 +717,19 @@ The Migration page's data: the last run's report and its printed text, each chat
 
 ## Service
 
+### `GET /api/v1/command/busy`
+
+How many turns and jobs run now: what a later `rpe up` waits to be none before it restarts RPE's service.
+
+| | |
+|---|---|
+| Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`Busy`](#busy) |
+
 ### `POST /api/v1/command/keys`
 
 Makes a new key of a kind, which retires the one before it; shown this once.
@@ -1100,6 +1113,17 @@ Today's answer to the message, and the pushes the request caused.
 export interface BuildTunnelReply {
   result: ResultMessage | ErrorMessage;
   pushes: DraftChanged[];
+}
+```
+
+### `Busy`
+
+The turns and jobs running now.
+
+```ts
+export interface Busy {
+  /** How many turns and jobs run now. */
+  busy: number;
 }
 ```
 

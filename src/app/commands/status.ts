@@ -2,6 +2,7 @@
 
 import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
+import { recordedSource } from "../app-copy";
 import { currentKeys } from "../auth";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
@@ -21,6 +22,9 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
   const running = await runningServer(paths, config, io);
   const said = running === null ? null : await running.ops.status();
   if (said !== null && said.builds !== null) io.out(`Builds: ${said.builds}`);
+  // The one file an update of RPE's installed copy comes from: where `rpe up` ran from.
+  const source = await recordedSource(paths.root);
+  if (source !== null) io.out(`Updates come from: ${source}`);
   io.out(`Lumiverse: ${config.lumiverse.url ?? "not set"}, for user ${config.lumiverse.user ?? "not set"}`);
   if (!existsSync(paths.database)) {
     io.out("Database: not made yet");

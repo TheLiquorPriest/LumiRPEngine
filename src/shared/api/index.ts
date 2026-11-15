@@ -100,6 +100,12 @@ export interface BuildTunnelReply {
   pushes: DraftChanged[];
 }
 
+/** The turns and jobs running now. */
+export interface Busy {
+  /** How many turns and jobs run now. */
+  busy: number;
+}
+
 /** The permission a write or external tool's call ran under: the lane its tier puts it under (external for a tool of the external tier), the user's setting for that lane, and under Confirm the user's word on the call. */
 export interface CallPermission {
   lane: string;
@@ -2083,6 +2089,15 @@ export interface ApiRoutes {
 
 /** The server's own command line's routes, which answer on its socket in the data folder alone (`command` access), in the same form; on that socket the routes of `ApiRoutes` that a page calls answer too, as the owner's. */
 export interface CommandRoutes {
+  /** How many turns and jobs run now: what a later `rpe up` waits to be none before it restarts RPE's service. */
+  "GET /api/v1/command/busy": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: Busy;
+    paged: false;
+    joined: false;
+  };
   /** Makes a new key of a kind, which retires the one before it; shown this once. */
   "POST /api/v1/command/keys": {
     params: Record<string, never>;

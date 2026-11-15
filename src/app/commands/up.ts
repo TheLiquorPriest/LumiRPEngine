@@ -7,10 +7,11 @@ import { type AppConfig, type DataPaths, dataPaths, defaultDataFolder, loadConfi
 import { lineLog } from "../app";
 import type { CliIO, CliOptions } from "../cli";
 import type { LumiverseCall } from "../../adapter/lumiverse/install-calls";
-import { accountSystemctl, removeRpeService, rpeService, rpeServiceOf, rpeUnitText, serviceNameOf, startRpeService } from "../up";
+import { rpeService, rpeServiceOf, serviceNameOf, unitNameRefusal } from "../up";
 import { parseArgs, UsageError } from "./args";
 import { writeGlobalSetting } from "./global-setting";
 import { extensionLeft, sayLeft } from "./left";
+import { installCopy } from "../app-copy";
 import { lumiverseFolderOf } from "./lumiverse-folder";
 import { ownConnection } from "./own-connection";
 import { firstFreePort, portFree } from "./ports";
@@ -18,6 +19,7 @@ import { runLine } from "./run-line";
 import { answerAt, loopbackUrl } from "./running";
 import { keptSession, keptUsername, oneUser, signInTo } from "./sign-in";
 import { swapUp } from "./swap-up";
+import { installService, managerOf, unitFor, withoutSystemd, type Manager } from "./up-service";
 import { updateSettingsOf } from "./update-settings";
 import { webToken } from "./web-token";
 import { withWriter } from "./writer";
@@ -25,8 +27,6 @@ import { withWriter } from "./writer";
 /** The switches `rpe up` takes beside its flags, and its flags. */
 const UP_SWITCHES = ["systemd", "no-runtime", "allow-http"] as const;
 const UP_FLAGS = ["data", "url", "user", "username", "name", "lumiverse", "runtime", "runtime-config", "runtime-data", "identifier", "port", "listen", "bun", "database", "memory"] as const;
-/** A service's name, as it goes into its unit's name: as today's runtime's names are held (LumiAH `RUNTIME_NAME`). */
-const SERVICE_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
 /** Whether a Lumiverse address is plain http to another machine, where the password and then the session token would cross the network in clear. */
 function inClear(base: string): boolean {
@@ -74,7 +74,8 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   const swapping = flags.lumiverse !== undefined;
   if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined || flags.identifier !== undefined)) throw new UsageError("--runtime, --no-runtime, --runtime-config, --runtime-data and --identifier say where today's build is: they go with --lumiverse.");
   if (switches.has("no-runtime") && flags.runtime !== undefined) throw new UsageError("--runtime names a runtime to take and --no-runtime says there is none: give one of them.");
-  if (flags.name !== undefined && !SERVICE_NAME.test(flags.name)) throw new UsageError(`--name is "${flags.name}": use lowercase letters, digits, _ and -, up to 40.`);
+  const nameWhy = flags.name === undefined ? null : unitNameRefusal(flags.name);
+  if (nameWhy !== null) throw new UsageError(`--name is "${flags.name}": ${nameWhy}.`);
   const givenPort = portOf(flags.port);
   const memoryWhy = flags.memory === undefined ? null : memoryRefusal(flags.memory);
   if (memoryWhy !== null) throw new UsageError(`--memory is "${flags.memory}": ${memoryWhy}.`);
@@ -91,6 +92,9 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   }
   const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
   const config = await loadConfig(paths, io.env);
+  // Whether RPE can be a service here, decided before anything is asked or written.
+  const manager: Manager | null = switches.has("systemd") ? await managerOf(io, host, options.appFile, bun, paths) : null;
+  if (manager !== null && !manager.systemd) for (const line of withoutSystemd(manager.why, io, paths, options.appFile)) io.err(line);
 
   const address = flags.url ?? config.lumiverse.url ?? io.env.LUMIVERSE_URL?.trim() ?? (await io.ask("Lumiverse address (as you open it in a browser): "));
   if (address === null || address === undefined || address === "") throw new UsageError("rpe up needs Lumiverse's address: --url <address>, LUMIVERSE_URL, or the one RPE's config holds.");
@@ -118,8 +122,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
       port = next;
     }
   }
-  const runsAsService = switches.has("systemd");
-  if (blocked !== null && runsAsService) {
+  if (blocked !== null && manager?.systemd === true) {
     io.err(`${blocked} Nothing was changed.`);
     return 1;
   }
@@ -127,7 +130,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   const data = resolve(paths.root);
   const existing = await rpeServiceOf(data, io.env, io.home);
   const service = rpeService(flags.name ?? existing?.name ?? serviceNameOf(username), io.env, io.home);
-  if (service.unit !== existing?.unit && existsSync(service.file) && (switches.has("systemd") || swapping)) {
+  if (service.unit !== existing?.unit && existsSync(service.file) && (manager?.systemd === true || swapping)) {
     io.err(`${service.file} is a unit for something other than this RPE (another data folder's): give this RPE's service a name of its own with --name. Nothing was stopped or changed.`);
     return 1;
   }
@@ -158,17 +161,20 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   }
 
   const update = await updateSettingsOf(paths, lineLog(io.err, io.now));
-  const unitText = rpeUnitText({ name: service.name, bun, script: options.appFile ?? Bun.main, data, startLimit: { tries: update.startTries, windowMs: update.startWindowMs } });
-  if (swapping) return await swapUp({ flags, switches, paths, current, call, service, existing, unitText }, io, version);
+  const unitText = unitFor({ config: current, bun, service, update, data });
+  // The swap starts RPE's service on its own copy, made once the swap's checks have passed.
+  const prepare = async (): Promise<void> => {
+    if (options.appFile === undefined) throw new Error("This process runs from no single app file, so RPE's own copy cannot be made.");
+    await installCopy(data, options.appFile, io.now());
+  };
+  if (swapping) return await swapUp({ flags, switches, paths, current, call, service, existing, unitText, prepare }, io, version);
 
   const settled = await ownConnection(call, `${loopbackUrl(current.port)}/v1`, ctx, current);
   await webToken(ctx, current);
-  const runs = switches.has("systemd") || existing !== null;
+  const runs = manager?.systemd === true || existing !== null;
   if (runs) {
-    const systemctl = accountSystemctl(io.env, host.uid);
-    if (existing !== null && existing.unit !== service.unit) await removeRpeService(existing, systemctl);
-    await startRpeService(service, unitText, systemctl);
-    io.out(`Started ${service.unit}, RPE's service.`);
+    if (options.appFile === undefined) throw new Error("This process runs from no single app file, so RPE's own copy cannot be made.");
+    await installService({ ctx, config: current, host, bun, appFile: options.appFile, service, existing, update });
   }
   const left = await extensionLeft(call);
   if (runs) left.push(`See that RPE answers: ${runLine(io, paths, "status")} (its service's own log: journalctl --user -u ${service.unit}).`);

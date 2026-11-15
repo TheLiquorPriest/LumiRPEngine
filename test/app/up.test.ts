@@ -6,7 +6,12 @@
 
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { CliOptions } from "../../src/app/cli";
+import { serviceRoutes } from "../../src/app/service-routes";
+import { serviceNameOf, unitNameRefusal } from "../../src/app/up";
 import { secretHash } from "../../src/app/auth";
 import { runCli } from "../../src/app/cli";
 import { isRecord } from "../../src/shared/json";
@@ -125,14 +130,14 @@ describe("rpe up", () => {
     await bed.remove();
   });
 
-  /** `rpe up` as typed: `line` is what follows `rpe up`, `answers` the lines the user types when asked. It serves in the foreground, so it is told to stop before it starts. */
-  async function up(password: string | null = null, line: string[] = ["--url", lumiverse.url, "--user", ACCOUNT.username], answers: string[] = []): Promise<{ code: number; out: string; err: string; asked: number; asks: string[] }> {
+  /** `rpe up` as typed: `line` is what follows `rpe up`, `answers` the lines the user types when asked, `extra` the machine it runs on. It serves in the foreground, so it is told to stop before it starts. */
+  async function up(password: string | null = null, line: string[] = ["--url", lumiverse.url, "--user", ACCOUNT.username], answers: string[] = [], extra: { env?: Record<string, string>; options?: Partial<CliOptions> } = {}): Promise<{ code: number; out: string; err: string; asked: number; asks: string[] }> {
     const io = cliIo({ secret: password });
     io.stop();
     let asked = 0;
     const asks: string[] = [];
-    const counted = { ...io, secret: async (q: string) => (asked++, await io.secret(q)), ask: async (q: string) => (asks.push(q), answers[asks.length - 1] ?? null) };
-    const code = await runCli(["up", ...line, "--data", bed.paths.root], counted, { version: "1.0.0" });
+    const counted = { ...io, env: extra.env ?? io.env, secret: async (q: string) => (asked++, await io.secret(q)), ask: async (q: string) => (asks.push(q), answers[asks.length - 1] ?? null) };
+    const code = await runCli(["up", ...line, "--data", bed.paths.root], counted, { version: "1.0.0", ...extra.options });
     return { code, out: io.outs.join("\n"), err: io.errs.join("\n"), asked, asks };
   }
 
@@ -285,5 +290,126 @@ describe("rpe up", () => {
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("The connection is locked");
     expect(inForce()).toEqual(kept);
+  });
+
+  /** A machine with systemd, as far as `rpe up --systemd` can tell: programs on its PATH that write down what they were asked, the extension's folder in Lumiverse's data folder, and a Bun to run RPE with. */
+  async function machine(): Promise<{ extension: string; appFile: string; bun: string; calls: () => Promise<string>; env: Record<string, string>; unit: string; options: Partial<CliOptions>; remove(): Promise<void> }> {
+    const root = await mkdtemp(join(tmpdir(), "rpe-machine-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const log = join(root, "calls.log");
+    const program = async (name: string, body: string): Promise<void> => {
+      await writeFile(join(bin, name), `#!/bin/sh\n${body}\n`);
+      await chmod(join(bin, name), 0o755);
+    };
+    await program("systemctl", `echo "systemctl $*" >> "${log}"`);
+    await program("loginctl", `echo "loginctl $*" >> "${log}"\ncase "$1" in show-user) echo yes;; esac`);
+    await program("id", "echo tester");
+    await program("bun", "exit 0");
+    const bun = await realpath(join(bin, "bun"));
+    const extension = join(root, "lumiverse", "extensions", "lumi_rp_engine", "repo");
+    await mkdir(join(extension, "dist", "guidance"), { recursive: true });
+    await mkdir(join(extension, "dist", "guidance-harness"), { recursive: true });
+    await mkdir(join(extension, "dist", "ui"), { recursive: true });
+    await writeFile(join(extension, "dist", "rpe.js"), "// the app, as built\n");
+    await writeFile(join(extension, "dist", "guidance", "a.md"), "shipped");
+    await writeFile(join(extension, "dist", "ui", "index.html"), "<html></html>");
+    const config = join(root, "config");
+    return {
+      extension,
+      appFile: join(extension, "dist", "rpe.js"),
+      bun,
+      calls: async () => (await readFile(log, "utf8").catch(() => "")),
+      env: { PATH: bin, XDG_CONFIG_HOME: config },
+      unit: join(config, "systemd", "user", "rpe-reader.service"),
+      options: { appFile: join(extension, "dist", "rpe.js"), host: { platform: "linux", uid: process.getuid?.() ?? null, bun } },
+      remove: () => rm(root, { recursive: true, force: true }),
+    };
+  }
+
+  test("a first up --systemd installs RPE's own copy and a unit that runs it, records the file it ran from, and the extension's folder is not what the service runs; the unit carries the restart wait and the memory cap from their settings", async () => {
+    const m = await machine();
+    try {
+      const first = await up(ACCOUNT.password, ["--url", lumiverse.url, "--user", ACCOUNT.username, "--systemd", "--memory", "768M"], [], { env: m.env, options: m.options });
+      expect(first.err).toBe("");
+      expect(first.code).toBe(0);
+      const copy = join(bed.paths.root, "app", "current");
+      expect(await readFile(join(copy, "rpe.js"), "utf8")).toBe("// the app, as built\n");
+      expect(await readFile(join(copy, "guidance", "a.md"), "utf8")).toBe("shipped");
+      expect(await readFile(join(copy, "ui", "index.html"), "utf8")).toBe("<html></html>");
+      expect(JSON.parse(await readFile(join(bed.paths.root, "app", "source.json"), "utf8")).file).toBe(m.appFile);
+      const unit = await readFile(m.unit, "utf8");
+      expect(unit).toContain(`ExecStart=${m.bun} ${join(copy, "rpe.js")} serve --data ${bed.paths.root}`);
+      expect(unit).not.toContain(m.extension);
+      expect(unit).toContain(`ExecStartPre=${m.bun} ${join(bed.paths.root, "app", "before-start.mjs")} ${bed.paths.root} 5`);
+      expect(unit).toContain("RestartSec=2");
+      expect(unit).toContain("MemoryMax=768M");
+      expect(unit).toContain("StartLimitBurst=6");
+      expect(await readFile(bed.paths.globalConfig, "utf8")).toContain("memory: 768M");
+      const calls = await m.calls();
+      expect(calls).toContain("systemctl --user enable rpe-reader.service");
+      expect(calls).toContain("systemctl --user restart rpe-reader.service");
+      // Lingering was on already: nothing asked to turn it on.
+      expect(calls).not.toContain("enable-linger");
+      expect(first.out).toContain(`Installed RPE's own copy in ${copy}`);
+    } finally {
+      await m.remove();
+    }
+  });
+
+  test("as root up --systemd is refused with nothing changed; with no systemctl it says so and how to keep RPE running, then serves in the foreground", async () => {
+    const m = await machine();
+    try {
+      const root = await up(ACCOUNT.password, ["--url", lumiverse.url, "--user", ACCOUNT.username, "--systemd"], [], { env: m.env, options: { ...m.options, host: { platform: "linux", uid: 0, bun: m.bun } } });
+      expect(root.code).toBe(1);
+      expect(root.err).toContain("root's account has none");
+      expect(lumiverse.signIns).toBe(0);
+      const bare = await up(ACCOUNT.password, ["--url", lumiverse.url, "--user", ACCOUNT.username, "--systemd"], [], { env: { PATH: "" }, options: m.options });
+      expect(bare.code).toBe(0);
+      expect(bare.err).toContain("there is no systemctl on this machine's PATH, so none is installed here");
+      expect(bare.err).toContain("To keep RPE running here");
+      expect(bare.out).toContain("RPE serves in the foreground now");
+      expect(await Bun.file(join(bed.paths.root, "app", "current", "rpe.js")).exists()).toBe(false);
+    } finally {
+      await m.remove();
+    }
+  });
+
+  test("a later up waits for the turn under way to end before it restarts RPE's service, and restarts it at the end of service.drainWait all the same", async () => {
+    const m = await machine();
+    try {
+      const line = ["--url", lumiverse.url, "--user", ACCOUNT.username, "--systemd"];
+      expect((await up(ACCOUNT.password, line, [], { env: m.env, options: m.options })).code).toBe(0);
+      await writeFile(bed.paths.globalConfig, "service:\n  drainWait: 3\nupdate:\n  lookEvery: 1\n");
+      let running = 1;
+      const app = await bed.open({ config: { port, lumiverse: { url: lumiverse.url, user: ACCOUNT.id } }, areas: [{ name: "service", mount: (a) => a.routes.add("service", serviceRoutes({ builds: a.builds })) }] });
+      app.builds.counts(() => running);
+      await app.start();
+      // The turn ends a moment after: up waits for it, and does not wait the whole of drainWait.
+      setTimeout(() => (running = 0), 300);
+      const began = performance.now();
+      const waited = await up(null, line, [], { env: m.env, options: m.options });
+      expect(waited.code).toBe(0);
+      expect(waited.out).toContain("RPE has 1 turn(s) or job(s) under way: waiting up to 3 s");
+      expect(waited.out).not.toContain("all the same");
+      expect(performance.now() - began).toBeLessThan(2900);
+      // One that does not end is waited for as long as the setting says, and the service is restarted at its end all the same.
+      running = 1;
+      await writeFile(bed.paths.globalConfig, "service:\n  drainWait: 1\nupdate:\n  lookEvery: 1\n");
+      const held = await up(null, line, [], { env: m.env, options: m.options });
+      expect(held.out).toContain("1 still under way after 1 s: restarting RPE's service all the same.");
+      expect((await m.calls()).match(/systemctl --user restart rpe-reader.service/g)?.length).toBe(3);
+    } finally {
+      await m.remove();
+    }
+  });
+
+  test("a service name is held to systemd's rule for unit names and to no length of RPE's", async () => {
+    expect(unitNameRefusal("reader")).toBeNull();
+    expect(unitNameRefusal("a".repeat(100))).toBeNull();
+    expect(unitNameRefusal("a".repeat(244))).toContain("255");
+    expect(unitNameRefusal("two words")).toContain("ASCII letters");
+    expect(serviceNameOf("A".repeat(100))).toBe("a".repeat(100));
+    expect(unitNameRefusal(serviceNameOf("x".repeat(400)))).toBeNull();
   });
 });

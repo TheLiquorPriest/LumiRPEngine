@@ -82,6 +82,72 @@ Everything RPE keeps is in one folder: its database (`rpe.db`), the files the ag
 
 By default RPE listens on `127.0.0.1`, port `7871`.
 
+## The service
+
+`rpe up --systemd` installs RPE as a service of your account, on Linux with systemd. It does not run the file in the extension's folder, which an update of the extension replaces under a running service. It copies RPE (the app file and the folders it reads beside it: `guidance/`, `guidance-harness/` and `ui/`) into `app/current/` in RPE's data folder, records the file it ran from as the one source of updates, and writes a unit that runs the copy:
+
+- `rpe-<name>.service` in `~/.config/systemd/user/`, written whole in one step, enabled and started. Its name follows systemd's own rule for a unit's name; RPE sets no length of its own.
+- Its `MemoryMax` is the setting `service.memory` (1G, at least 256M; `--memory` sets it), its `RestartSec` the setting `service.restartWait` (2 seconds), and it is started no more than `update.startTries` times within `update.startWindow` seconds, besides one start that puts back the known-good copy (see [Updating](#updating)).
+- Lingering is turned on for your account, so the service starts at boot and keeps running when you log out. Where it cannot be turned on from here, `rpe up` says so and gives the line (`sudo loginctl enable-linger <account>`).
+- It is refused, with nothing changed, as root; for an RPE run from its sources (build first); and where the app file, the Bun, or a folder above them or above RPE's data folder is one another account could change: each is named, with the `chmod` that takes the write away.
+- A later `rpe up --systemd`, with the service running, waits for the turns and jobs under way to end, at most `service.drainWait` seconds (5 minutes), looking every `update.lookEvery` seconds, before it makes the copy again and restarts the service.
+
+`rpe status` names the file updates come from. Run from a copy that is not the extension's own folder in Lumiverse's data folder, `rpe up` says that updates will come only from that copy.
+
+### Keep it running on macOS, Windows and in a container
+
+Without systemd, `rpe up --systemd` says so and serves in the foreground; you keep RPE running with your system's own service manager, running this line, as your account: `bun <folder>/dist/rpe.js serve`. RPE does not restart itself onto an update there: stop it and start it again after you update the extension, and copy the new `dist/rpe.js` and its folders over the ones the service runs.
+
+**macOS (launchd).** First run `rpe up` once in the foreground, to sign in and write RPE's config; stop it with Ctrl-C. Copy RPE where an update of the extension will not change it:
+
+```sh
+mkdir -p ~/.local/share/rpe-program
+cp -R <folder>/dist/rpe.js <folder>/dist/guidance <folder>/dist/guidance-harness <folder>/dist/ui ~/.local/share/rpe-program/
+```
+
+Save this as `~/Library/LaunchAgents/rpe.plist`, with your own Bun and home folder written in full (launchd reads no `~`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>rpe</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string><bun></string>
+    <string><home>/.local/share/rpe-program/rpe.js</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string><home>/Library/Logs/rpe.log</string>
+</dict>
+</plist>
+```
+
+Load it, which starts it: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/rpe.plist`. Restart it with `launchctl kickstart -k gui/$(id -u)/rpe`; stop and unload it with `launchctl bootout gui/$(id -u)/rpe`.
+
+**Windows (Task Scheduler).** First run `rpe up` once in the foreground, in PowerShell; stop it with Ctrl+C. Then, with your own `<bun>` and `<folder>`:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.local\share\rpe-program" | Out-Null
+Copy-Item -Recurse "<folder>\dist\rpe.js", "<folder>\dist\guidance", "<folder>\dist\guidance-harness", "<folder>\dist\ui" "$HOME\.local\share\rpe-program"
+$action = New-ScheduledTaskAction -Execute "<bun>" -Argument "`"$HOME\.local\share\rpe-program\rpe.js`" serve"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName "rpe" -Action $action -Trigger $trigger -Settings $settings
+Start-ScheduledTask -TaskName "rpe"
+```
+
+Stop it with `Stop-ScheduledTask -TaskName "rpe"`, and remove it with `Unregister-ScheduledTask -TaskName "rpe" -Confirm:$false`. Task Scheduler keeps no log of its words: to read them, stop the task and run its line yourself.
+
+**In a container.** Lumiverse's 127.0.0.1 is the container's own: run RPE inside Lumiverse's container as a second process (`bun <folder>/dist/rpe.js up --url <address>`, then keep its `serve` line running), or as a compose service that shares Lumiverse's network (`network_mode: "service:lumiverse"`, `command: ["bun", "/path/rpe.js", "serve"]`, `restart: always`, a `mem_limit`), with RPE's data folder on a volume.
+
 ## RPE's connection in Lumiverse
 
 Lumiverse reaches RPE as an OpenAI-compatible provider. `rpe up` makes that connection in Lumiverse: it is called "RPE", points at RPE's `/v1` address, offers the model `rpe`, and holds a provider key that only it has. A chat plays on RPE when you choose that connection for it.

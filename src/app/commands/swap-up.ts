@@ -57,6 +57,8 @@ export interface SwapLine {
   service: RpeService;
   existing: RpeService | null;
   unitText: string;
+  /** Makes RPE's own copy, which the unit runs: called once the swap's checks have passed, before anything of today's is stopped. */
+  prepare(): Promise<void>;
 }
 
 /** The signals that end the process (Ctrl-C, a closed terminal, a kill): while the swap runs, each is told to it instead, so that it puts back what it did before it ends. */
@@ -137,6 +139,7 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
   const ownBefore = todays !== undefined && before !== null && before !== todays.id && !others.some((c) => c.id === before) ? before : null;
   if (todays !== undefined && ownBefore !== null) io.out(`The connection ${ownBefore} in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on "${todays.name}" (${todays.id}).`);
 
+  await line.prepare();
   if (!(await swapRun(plan, { service, text: line.unitText, installed: existing !== null, startMs: current.commandLine.startMs, waitMs: current.commandLine.waitMs, takeOver: () => takeOver({ paths, config: current, io, version, what: "rpe up" }, current, plan.took?.loopback ?? null, connection.id, todays !== undefined), todays: todays !== undefined }, swapIo))) return 1;
   const left = await extensionLeft(call);
   left.push(`RPE's service's own log, should you need it: journalctl --user -u ${service.unit}.`);
