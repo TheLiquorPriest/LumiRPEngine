@@ -3,7 +3,7 @@
 
 import { StandInDb } from "../../standin/db";
 import { PROCESS_CLOCK, type HostClock } from "../../standin/host";
-import { StandIn, type Connection, type Outcome, type Preset } from "../../standin/lumiverse";
+import { StandIn, type ChatMessage, type Connection, type GenerateInput, type Outcome, type Preset } from "../../standin/lumiverse";
 import { ScriptedProvider, type PlainReply } from "../../standin/provider";
 
 export const USER = "user-boat";
@@ -24,7 +24,7 @@ export interface Boat {
 }
 
 /** The boat's chat: Edda's, with one line of the player's; the preset a main block and the chat's history, as given beside them; each request answered by the next of `replies`. */
-export function boat(replies: PlainReply[], options: { preset?: Partial<Preset>; connection?: Partial<Connection>; clock?: HostClock; messages?: { id: string; role: "user" | "assistant"; content: string }[] } = {}): Boat {
+export function boat(replies: PlainReply[], options: { preset?: Partial<Preset>; connection?: Partial<Connection>; clock?: HostClock; messages?: ChatMessage[] } = {}): Boat {
   const lv = new StandIn();
   const clock = options.clock ?? PROCESS_CLOCK;
   lv.clock = clock;
@@ -49,7 +49,7 @@ export function boat(replies: PlainReply[], options: { preset?: Partial<Preset>;
 }
 
 /** A generation of the boat's chat, ended. */
-export function generate(b: Boat, input: { type?: "normal" | "swipe" | "regenerate" | "continue" | "impersonate"; parameters?: Record<string, unknown>; impersonateDraft?: boolean; dryRun?: boolean } = {}): Promise<Outcome> {
+export function generate(b: Boat, input: Partial<Omit<GenerateInput, "connection" | "preset">> = {}): Promise<Outcome> {
   return b.lv.generate({ chat: CHAT, connection: "conn-model", preset: "preset-boat", ...input });
 }
 

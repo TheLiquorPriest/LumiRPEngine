@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { streamedReply } from "../../../src/adapter/lumiverse/stream";
 import type { PromptMessageDTO } from "../../../src/ext/spindle";
+import type { Block } from "../../standin/assembly";
 import { StandIn, type ChatMessage, type GenerateInput, type Outcome, type Preset } from "../../standin/lumiverse";
 import { textOf } from "../../standin/steps";
 
@@ -457,5 +458,50 @@ describe("the last reply of the history, trimmed (`rtrimLastHistoryAssistant`, `
     // A prefill the preset wrote is no history: it keeps its trailing space.
     const spaced = await generate(quay(lines(), { assistantPrefill: "PREFILL Oona looks up and " }), "normal");
     expect(ending(spaced, 1)).toEqual([["assistant", "PREFILL Oona looks up and ", true]]);
+  });
+});
+
+describe("a block's text as Lumiverse sends it (`normalizePromptBlockText`, `services/prompt-assembly.service.ts:6999-7001`; `:3638-3663`, `:4305-4312`)", () => {
+  test("a block whose text is only whitespace is trimmed and left out, as is one whose only text is an empty pool; every block's text is trimmed and its runs of newlines folded", async () => {
+    const blocks: Block[] = [
+      { id: "b-main", name: "Main", role: "system", content: "  \n MAIN You narrate a quay at dusk.\n\n\n\n  Lamps are lit.  \n" },
+      { id: "b-blank", name: "Spacer", role: "system", content: "   \n " },
+      { id: "b-pool", name: "Pool", role: "system", content: "{{wi_marker}}" },
+      { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" },
+    ];
+    const out = await generate(quay(quayLines(true), { blocks }), "normal");
+    // The prompt before the history is the one block, trimmed and folded; the other two are not sent.
+    expect(out.prompt.filter((m) => m.__chatHistorySource !== true).map((m) => [m.role, textOf(m)])).toEqual([["system", "MAIN You narrate a quay at dusk.\n\n  Lamps are lit."]]);
+    // Nor do they stand in the breakdown stored beside the reply.
+    expect(out.stored!.entries.filter((e) => e.type === "block").map((e) => e.name)).toEqual(["Main"]);
+  });
+});
+
+describe("the names written into content (`services/prompt-assembly.service.ts:7186-7195`)", () => {
+  const NAMED: Partial<Preset> = { namesBehavior: 2 };
+  const historyTexts = (out: Outcome): string[] => out.prompt.filter((m) => m.__chatHistorySource === true).map((m) => textOf(m));
+
+  test("with names written into content, his lines carry his persona's name, and the character's an alternate name", async () => {
+    // With no persona and no alternate name: Lumiverse's own "User", and the character's name.
+    expect(historyTexts(await generate(quay(quayLines(true), NAMED), "normal"))).toEqual([
+      "Oona: GREET The lamps along the quay are lit.",
+      "User: USER-1 I walk to the end of the quay.",
+      "Oona: REPLY-1 Oona is coiling rope.",
+      "User: USER-2 I ask her about the boat.",
+    ]);
+    // The user's persona, and a card that gives the character another name.
+    const lv = quay(quayLines(true), { ...NAMED, emptySendNudge: "" });
+    lv.library.addPersona({ id: "persona-quill", user: USER, name: "Quill", is_default: true });
+    lv.library.addCharacter(USER, { id: "char-oona", name: "Oona", extensions: { alternate_character_name: "Oona the Wary" } });
+    const out = await generate(lv, "normal");
+    expect(historyTexts(out)).toEqual([
+      "Oona the Wary: GREET The lamps along the quay are lit.",
+      "Quill: USER-1 I walk to the end of the quay.",
+      "Oona the Wary: REPLY-1 Oona is coiling rope.",
+      "Quill: USER-2 I ask her about the boat.",
+    ]);
+    // His name is the one `{{user}}` stands for in the lines Lumiverse adds, too.
+    const impersonated = await generate(lv, "impersonate");
+    expect(textOf(impersonated.prompt.find((m) => textOf(m).includes("point of view of"))!)).toContain("point of view of Quill");
   });
 });

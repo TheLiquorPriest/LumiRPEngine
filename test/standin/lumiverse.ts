@@ -34,13 +34,19 @@ export interface Connection {
   name?: string;
   /** Its provider (`connection.provider`): a DeepSeek or Moonshot connection is sent the preset's reasoning prefill (`services/prompt-assembly.service.ts:4164-4181`). */
   provider?: string;
+  /** The user's default connection (`is_default`, `getDefaultConnection`, `services/connections.service.ts:336-339`): what a request that names none and has no selection falls to. */
+  isDefault?: boolean;
   /** Its own record: a "Start Reply With" bound to it stands in place of the user's, an empty one too (`services/prompt-assembly.service.ts:4130-4137`). */
   metadata?: { reasoningBindings?: { promptBias?: string } };
 }
 
 export interface GenerateInput {
   chat: string;
-  connection: string;
+  /**
+   * The connection the caller names (`connection_id`, `services/generate.service.ts:1731-1735`): the composer sends the user's selected one. Left out, what Lumiverse does
+   * with none: the user's selection, else the default connection, else the first of his. The chat's pin comes before either (`resolveChatGenerationConnection`).
+   */
+  connection?: string;
   preset: string;
   type?: GenerationType;
   dryRun?: boolean;
@@ -105,6 +111,8 @@ export interface Outcome {
 
 export class StandIn extends ChatRows {
   readonly connections = new Map<string, Connection>();
+  /** The connection the user has selected (the `activeProfileId` setting, `services/connections.service.ts:373-384`): what the composer sends as `connection_id` with each of his requests. */
+  activeConnection: string | undefined;
   /** The chunks and consolidations of the chats' memory, and the databanks and documents a `#mention` reads; set `db` before adding any (`memory.ts`). */
   readonly memory = new Memory(() => this.db, () => this.now());
   readonly databanks = new Databanks(() => this.db, () => this.now());
@@ -160,15 +168,56 @@ export class StandIn extends ChatRows {
     return true;
   }
 
+  /** A message by its id among the user's own, whichever chat holds it (`getMessage`, `services/chats.service.ts:2356-2360`). */
+  private holding(user: string, id: string): { chat: Chat; message: ChatMessage } | undefined {
+    for (const chat of this.chats.values()) {
+      if (chat.user !== user) continue;
+      const message = chat.messages.find((m) => m.id === id);
+      if (message !== undefined) return { chat, message };
+    }
+    return undefined;
+  }
+
+  /** The chat's last message that is not the user's, by its place, hidden ones and an extension's system messages included (`getLastAssistantMessage`, `services/chats.service.ts:2066-2072`: `is_user = 0`). */
+  private lastNonUser(chat: Chat): { chat: Chat; message: ChatMessage } | undefined {
+    const message = chat.messages.findLast((m) => m.role !== "user");
+    return message === undefined ? undefined : { chat, message };
+  }
+
+  /** The user's act of switching the composer's connection: his later requests name it, and a chat pinned to another connection keeps its pin. */
+  switchConnection(id: string): void {
+    if (!this.connections.has(id)) throw new Error("the stand-in has no such connection");
+    this.activeConnection = id;
+  }
+
+  /**
+   * `resolveChatGenerationConnection` (`services/generation/connection-resolution.ts:29-91`), for a request of the user's own: the chat's pin (`connection_profile_id`, with the model
+   * it pins, `connection_model`) while it names a connection that exists; else the connection the request names, or with none his selection or the default; else, with none named,
+   * his selection, the default or the first he has (`resolveActingConnectionId`, `services/connections.service.ts:405-409`). A model roulette and an Edit-and-Send request are not modelled.
+   */
+  private connectionFor(chat: Chat, requested: string | undefined): Connection {
+    const metadata = this.metadataOf(chat);
+    const asked = requested?.trim() || undefined;
+    const pin = typeof metadata.connection_profile_id === "string" ? metadata.connection_profile_id.trim() : "";
+    const pinned = pin !== "" ? this.connections.get(pin) : undefined;
+    const active = this.activeConnection !== undefined && this.connections.has(this.activeConnection) ? this.activeConnection : undefined;
+    const standing = [...this.connections.values()].find((c) => c.isDefault === true);
+    const named = (id: string | undefined): Connection | undefined => (id === undefined ? standing : this.connections.get(id));
+    const found = pinned ?? named(asked ?? active) ?? (asked !== undefined ? undefined : named(active ?? standing?.id ?? this.connections.keys().next().value));
+    if (found === undefined) throw new Error("No connection profile found. Configure a default connection or select one for this chat.");
+    const model = pinned !== undefined && typeof metadata.connection_model === "string" ? metadata.connection_model.trim() : "";
+    return model !== "" ? { ...found, model } : found;
+  }
+
   /**
    * One generation, or a dry run: as `startGeneration` (`services/generate.service.ts:1546-3073`) and `dryRunGeneration` (`:3080-3274`) order it. The prompt itself is
    * assembled the stand-in's own way (`assembly.ts`). A generation takes its chat before anything is staged (`takeChat`); a dry run takes none.
    */
   async generate(input: GenerateInput, started?: (generationId: string | null) => void): Promise<Outcome> {
     const chat = this.chats.get(input.chat);
-    const connection = this.connections.get(input.connection);
     const preset = this.presets.get(input.preset);
-    if (!chat || !connection || !preset) throw new Error("the stand-in has no such chat, connection or preset");
+    if (!chat || !preset) throw new Error("the stand-in has no such chat or preset");
+    const connection = this.connectionFor(chat, input.connection);
     // Every message the stand-in holds has its stored number from here on (`ChatRows.numbered`).
     this.numbered(chat);
     if (input.dryRun === true) return await this.run(input, chat, connection, preset, null, started);
@@ -194,7 +243,7 @@ export class StandIn extends ChatRows {
     const backgroundSwipe = input.backgroundSwipe === true;
     if (backgroundSwipe && type !== "swipe" && type !== "regenerate") throw new Error("background_swipe requires an assistant swipe target");
     if (backgroundSwipe) {
-      const target = input.message === undefined ? chat.messages.findLast((m) => m.role === "assistant") : chat.messages.find((m) => m.id === input.message);
+      const target = input.message === undefined ? chat.messages.findLast((m) => m.role !== "user") : chat.messages.find((m) => m.id === input.message);
       if (target === undefined || target.role === "user") throw new Error("Invalid background swipe target");
     }
     const running = this.registry.chatGeneration(chat.user, chat.id);
@@ -226,6 +275,8 @@ export class StandIn extends ChatRows {
     const frontendSessionId = this.activeFrontendSession(chat.user);
     const backgroundSwipe = !dryRun && input.backgroundSwipe === true;
     let target: { message: string | null; swipe: number | null } = { message: null, swipe: null };
+    /** The chat that holds the message a swipe, a regenerate or a continue goes on: the message named may be in another of the user's chats (`getMessage`, `services/chats.service.ts:2356-2360`). */
+    let home = chat;
     let excluded: string | null = null;
     let staged: string | null = null;
     /** A swipe or a regenerate: the swipe made for the reply. */
@@ -238,11 +289,12 @@ export class StandIn extends ChatRows {
     if (type === "continue") {
       // The message named, else the chat's last non-user message by its place, hidden ones included (`services/generate.service.ts:1809-1813`,
       // `services/chats.service.ts:2066-2072`); a generation never goes on a user's (`:1814`), where a dry run does not ask (`:3150-3155`). A
-      // message named from another of the user's chats, which Lumiverse would also find (`services/chats.service.ts:2130`), is not looked for.
+      // message named from another of the user's chats is found as well (`getMessage`), and continued in the chat that holds it, with nothing moved in this one's history.
       const last = chat.messages.at(-1);
       const named = input.message ?? (last !== undefined && last.role !== "user" ? last.id : undefined);
-      const found = named === undefined ? chat.messages.findLast((m) => m.role !== "user") : chat.messages.find((m) => m.id === named);
-      goesOn = found === undefined || (found.role === "user" && !dryRun) ? null : found;
+      const found = named === undefined ? this.lastNonUser(chat) : this.holding(chat.user, named);
+      goesOn = found === undefined || (found.message.role === "user" && !dryRun) ? null : found.message;
+      if (found !== undefined && goesOn !== null) home = found.chat;
       if (goesOn !== null) {
         original = goesOn.content;
         // The preset's postfix, none where it has none, and none where the text already ends with it (`:1969-1978`,
@@ -256,9 +308,10 @@ export class StandIn extends ChatRows {
     // character. Only a member of the group is named, and only in a group chat. A dry run asks no message.
     const groupMetadata = this.metadataOf(chat);
     const members = groupMetadata.group === true && Array.isArray(groupMetadata.character_ids) ? (groupMetadata.character_ids as string[]) : [];
-    const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
-    // The message a swipe or a regenerate is for: the one named, else the chat's last assistant message (`:1597-1599`, `:1700-1702`); never a user's.
-    const swipeTarget = input.message === undefined ? lastAssistant : chat.messages.find((m) => m.id === input.message && m.role !== "user");
+    // The message a swipe or a regenerate is for: the one named, found among the user's own whichever chat holds it, else this chat's last assistant message (`:1597-1599`, `:1700-1702`); never a user's.
+    const swipeFound = input.message === undefined ? this.lastNonUser(chat) : this.holding(chat.user, input.message);
+    const swipeTarget = swipeFound !== undefined && swipeFound.message.role !== "user" ? swipeFound.message : undefined;
+    if ((type === "swipe" || type === "regenerate") && swipeTarget !== undefined && swipeFound !== undefined) home = swipeFound.chat;
     const requested = input.targetCharacter !== undefined && members.includes(input.targetCharacter) ? input.targetCharacter : undefined;
     const spoke = dryRun ? undefined : type === "continue" ? goesOn?.characterId : type === "swipe" || type === "regenerate" ? swipeTarget?.characterId : undefined;
     const inferred = spoke !== undefined && members.includes(spoke) ? spoke : undefined;
@@ -283,7 +336,7 @@ export class StandIn extends ChatRows {
         const last = swipeTarget;
         if (last) {
           // A background swipe leaves the swipe the reader has selected (`:1716`, `:1936`; `chats.service.ts:3301-3344`).
-          swipeAt = this.addSwipeRow(chat, last.id, "", !backgroundSwipe) ?? (last.swipeId ?? 0) + 1;
+          swipeAt = this.addSwipeRow(home, last.id, "", !backgroundSwipe) ?? (last.swipeId ?? 0) + 1;
           if (!backgroundSwipe) last.swipeId = swipeAt;
           target = { message: last.id, swipe: swipeAt };
           excluded = last.id;
@@ -306,9 +359,10 @@ export class StandIn extends ChatRows {
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const messages = chat.messages.filter((m) => m.id !== excluded);
-    // The stand-in keeps no personas, so the name for the user's messages is Lumiverse's own when there is none
-    // (`services/prompt-assembly.service.ts:7186-7189`), as the stand-in's rows name them; the character's is the speaker's.
-    const names = { user: "User", character: speakerName };
+    // The persona the generation is made for, none for a temporary chat (`:1923-1937`); his name is the one `namesBehavior` writes for his lines and `{{user}}` stands for, else Lumiverse's own
+    // (`services/prompt-assembly.service.ts:7186-7189`); the character's is the speaker's, its alternate name where its card gives one (`:7192-7195`).
+    const persona = this.metadataOf(chat).temporary === true ? null : this.library.persona(chat.user, input.persona);
+    const names = { user: persona?.name ?? "User", character: speakerName };
     let sent: LlmMessage[] = [];
     let body: Record<string, unknown> | null = null;
     let worldInfo: Outcome["worldInfo"] = { ms: 0, entries: [], activated: [], stats: {} };
@@ -334,8 +388,6 @@ export class StandIn extends ChatRows {
       const wiStarted = this.clock.now();
       const metadata = this.metadataOf(chat);
       const speaker = speakerCard;
-      // A temporary chat has no persona (`:1923-1937`).
-      const persona = metadata.temporary === true ? null : this.library.persona(chat.user, input.persona);
       const globalBooks = (this.library.setting(chat.user, "globalWorldBooks") as string[] | undefined) ?? [];
       const chatBooks = (metadata.chat_world_book_ids as string[] | undefined) ?? [];
       const sources = collectWorldInfoSources(this.library, chat.user, speaker, persona, globalBooks, chatBooks, metadata);
@@ -488,10 +540,10 @@ export class StandIn extends ChatRows {
       const carrierOf = (thinking: string): Record<string, unknown> | undefined => (thinking === "" ? undefined : { type: "reasoning_content", content: thinking });
       if (reply === null) {
         // Stopped by the user or failed while the provider was called or read (`:4502-4579`): whatever came is kept, a staged message that got nothing removed (`persistPartialContent`, `:3565-3680`).
-        const kept = this.land(chat, landing, false, partialText({ content: seen.content, reasoning: seen.reasoning, prefill, streamed: streaming }, text), carrierOf(seen.reasoning.slice(reasoningPrefill.length)));
+        const kept = this.land(home, landing, false, partialText({ content: seen.content, reasoning: seen.reasoning, prefill, streamed: streaming }, text), carrierOf(seen.reasoning.slice(reasoningPrefill.length)));
         const how = seen.finishReason !== undefined ? { finish_reason: seen.finishReason } : null;
         const swipe = target.swipe ?? undefined;
-        if (kept.messageId !== undefined && type !== "impersonate") this.setSwipeScopedExtra(chat, kept.messageId, swipe, { generationOutcome: how });
+        if (kept.messageId !== undefined && type !== "impersonate") this.setSwipeScopedExtra(home, kept.messageId, swipe, { generationOutcome: how });
         const heard = { content: seen.content.slice(prefill.length), reasoning: seen.reasoning.slice(reasoningPrefill.length), finishReason: seen.finishReason ?? "", usage: null };
         if (failure === null) {
           frames.flush();
@@ -499,7 +551,7 @@ export class StandIn extends ChatRows {
           return { generationId, ...(kept.messageId !== undefined ? { messageId: kept.messageId } : {}), error: null, stopped: true, prompt: sent, body, reply: heard, parameters, stored: null, worldInfo, contextClipStats };
         }
         const failed = failureOf(failure, connection);
-        if (kept.messageId !== undefined) this.setSwipeScopedExtra(chat, kept.messageId, swipe, { generationOutcome: { ...(how ?? {}), error: failed.error } });
+        if (kept.messageId !== undefined) this.setSwipeScopedExtra(home, kept.messageId, swipe, { generationOutcome: { ...(how ?? {}), error: failed.error } });
         frames.flush();
         this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId: kept.messageId, content: kept.content, ...failed, ...(how ?? {}), usage: undefined, generationType: type, frontendSessionId }, chat.user);
         return { generationId, ...(kept.messageId !== undefined ? { messageId: kept.messageId } : {}), error: failed.error, stopped: false, prompt: sent, body, reply: null, parameters, stored: null, worldInfo, contextClipStats };
@@ -507,12 +559,12 @@ export class StandIn extends ChatRows {
       // A reply that ended well (`:4065-4310`): its text finished, saved where it goes, its macros resolved, what belongs to its swipe written, then told.
       const finished = finishedText({ content: prefill + reply.content, reasoning: reasoningPrefill + reply.reasoning, prefill, streamed: streaming }, text);
       const carrier = carrierOf(reply.reasoning);
-      const landed = this.land(chat, landing, true, finished, carrier);
+      const landed = this.land(home, landing, true, finished, carrier);
       const messageId = landed.messageId;
       let savedText = landed.content;
       if (messageId !== undefined) {
-        savedText = this.resolveSaved(chat, messageId, target.swipe ?? undefined, savedText, names);
-        this.setSwipeScopedExtra(chat, messageId, target.swipe ?? undefined, {
+        savedText = this.resolveSaved(home, messageId, target.swipe ?? undefined, savedText, names);
+        this.setSwipeScopedExtra(home, messageId, target.swipe ?? undefined, {
           generationOutcome: { finish_reason: reply.finishReason },
           ...(finished.reasoning !== "" ? { reasoning: finished.reasoning } : {}),
           ...(type !== "impersonate" && carrier !== undefined ? { reasoningCarrier: carrier } : {}),
@@ -535,7 +587,7 @@ export class StandIn extends ChatRows {
         const generationMetrics = { ...timingMetrics(timing, resolved.responseTokenCount, this.clock.now()), model: connection.model, provider: "custom", presetId: preset.id, presetName: preset.name };
         const metrics = { ...(resolved.messageTokenCount ? { tokenCount: resolved.messageTokenCount } : {}), generationMetrics };
         // The swipe the reply was made for, not the one on show (`:4400-4426`).
-        this.setSwipeScopedExtra(chat, messageId, target.swipe ?? undefined, metrics);
+        this.setSwipeScopedExtra(home, messageId, target.swipe ?? undefined, metrics);
         this.emit("GENERATION_METRICS_READY", { generationId, chatId: chat.id, messageId, swipeId: target.swipe ?? undefined, ...metrics }, chat.user);
       }
       if (messageId === undefined || this.tokenizerFails || whole.length === 0) return { generationId, ...(messageId !== undefined ? { messageId } : {}), error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo, contextClipStats };
@@ -734,7 +786,7 @@ export class StandIn extends ChatRows {
     const m: ChatMessage = { id: crypto.randomUUID(), role: impersonation ? "user" : "assistant", content: saved.content, ...(impersonation ? {} : { characterId: at.speakerId }) };
     chat.messages.push(m);
     const extra = { ...(impersonation && at.persona !== undefined ? { persona_id: at.persona } : {}), ...(done ? (saved.reasoning !== "" ? { reasoning: saved.reasoning } : {}) : thinking) };
-    this.createRow(chat, m, impersonation ? "User" : at.speakerName, normalizeStoredExtra(extra, 1, 0));
+    this.createRow(chat, m, impersonation ? at.names.user : at.speakerName, normalizeStoredExtra(extra, 1, 0));
     this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(m.id) ?? m }, chat.user);
     return { messageId: m.id, content: saved.content };
   }
