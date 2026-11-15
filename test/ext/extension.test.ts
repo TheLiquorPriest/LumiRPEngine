@@ -3,7 +3,7 @@
 // RPE was asked and handed.
 
 import { describe, expect, test } from "bun:test";
-import { textOf as textKey } from "../../src/backend/lore-secrets";
+import { textOf as textKey } from "../../src/secrecy/lore-secrets";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import { KeptOut } from "../../src/ext/fail-closed";
 import { Generations } from "../../src/ext/generations";

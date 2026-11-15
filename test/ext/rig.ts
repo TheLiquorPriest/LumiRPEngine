@@ -11,7 +11,7 @@ import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
 import { NEEDS } from "../../src/ext/permissions";
 import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
-import { textOf as textKey } from "../../src/backend/lore-secrets";
+import { textOf as textKey } from "../../src/secrecy/lore-secrets";
 import type { JsonObject } from "../../src/shared/json";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
 import type { Book } from "../standin/books";
