@@ -12,7 +12,8 @@ import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tarEntrySize, TAR_END_BYTES, TarWriter, walk } from "../app/archive";
 import { OWNER_ONLY_FILE, ownerOnlyFolder } from "../app/disk";
-import { readBytes, sha256 } from "./files";
+import { EXTENSION_WIDE } from "./classify";
+import { namedFiles, readBytes, sha256 } from "./files";
 import type { RuntimeFile } from "./runtime-folders";
 
 export const BACKUP_FORMAT = "rpe-migration-backup-v1";
@@ -52,11 +53,11 @@ export interface BackupResult {
   manifest: BackupManifest;
 }
 
-/** What the backup takes: the storage folders whole, and the runtime's files as the migration found them. */
+/** What the backup takes: the user's storage folder whole, the files of the extension's own storage that are the extension's as a whole (never another file there: it may be another user's), and the runtime's files as the migration found them. */
 export async function backupSources(folders: { user: string | null; extension: string | null }, runtime: readonly RuntimeFile[]): Promise<BackupSource[]> {
   const out: BackupSource[] = [];
   if (folders.user !== null) for (const f of await walk(folders.user)) if (!f.link) out.push({ name: `user/${f.path}`, disk: join(folders.user, f.path) });
-  if (folders.extension !== null && folders.extension !== folders.user) for (const f of await walk(folders.extension)) if (!f.link) out.push({ name: `extension/${f.path}`, disk: join(folders.extension, f.path) });
+  if (folders.extension !== null && folders.extension !== folders.user) for (const f of await namedFiles(folders.extension, EXTENSION_WIDE)) if (!f.link) out.push({ name: `extension/${f.path}`, disk: join(folders.extension, f.path) });
   for (const f of runtime) if (!f.link) out.push({ name: `runtime/${f.path}`, disk: f.disk });
   return out;
 }

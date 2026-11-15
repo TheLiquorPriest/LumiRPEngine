@@ -49,6 +49,16 @@ const DEPTH_GONE = "today's build has no depth engine, so nothing reads it now";
 const depth = (pattern: string, what: string): Rule => rule(pattern, "depth-engine", undefined, `${what}; ${DEPTH_GONE}`);
 
 /**
+ * What today's build keeps in the extension's own storage (`spindle.storage`), for the extension as a
+ * whole: the update notice (`agents.ts:51,251`), the backend's log (`spindle-host.ts:283,439`) and the
+ * depth engine's loopback registry (`loopback/store.ts:47`). That folder is shared by every user of
+ * the Lumiverse, so these are the only files of it the migration reads, keeps or counts: any other
+ * file there may be kept for another user, and is never opened, listed or backed up. Each has its
+ * rule below.
+ */
+export const EXTENSION_WIDE: readonly string[] = ["agents/build.json", "diagnostics/backend.log", "loopback/registry.json"];
+
+/**
  * The files of the user's storage, and of the extension's own storage (which sits in the same
  * folder when the extension is installed for one user). Each names the code that writes it.
  */
@@ -101,7 +111,7 @@ const STORAGE_RULES: readonly Rule[] = [
   rule(`harness/docs/recall/vectors(/${PART}){1,4}`, "derived"), // core/recall/meaning.ts:216
   rule("harness/docs/mirror\\.json", "chat-copy"), // link/contract.ts:112; runtime/store/index.ts:667
   rule(`harness/blobs/[0-9a-f]{2}/${HASH64}`, "sessions"), // extension/backend/reads.ts:14
-  // The extension's own storage (`spindle.storage`).
+  // The extension's own storage (`spindle.storage`; the paths of `EXTENSION_WIDE`).
   rule("agents/build\\.json", "mcp-clients"), // agents.ts:51,251: the update notice
   rule("diagnostics/backend\\.log", "logs"), // spindle-host.ts:283,439
   // The depth engine's files (see `DEPTH_GONE` for where these lines are).

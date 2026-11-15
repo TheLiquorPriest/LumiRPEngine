@@ -1,6 +1,8 @@
 // Lumiverse's database, read without changing it: one user's chats, their messages and their
 // metadata, and the few rows today's build made in Lumiverse itself (its books, entries, regex
-// scripts and preset blocks), which the report lists and the migration leaves as they are.
+// scripts and preset blocks), which the report lists and the migration leaves as they are. Every
+// read goes through the adapter's door (`src/adapter/lumiverse/migration-reads.ts`): scoped to the
+// one user, and checked against Lumiverse's declared schema first. Nothing here names a table.
 //
 // The database is in WAL mode while Lumiverse runs. It is opened read-only, through SQLite's own
 // locks, so a read sees what Lumiverse has committed, the log included; SQLite keeps those locks in
@@ -18,6 +20,7 @@ import { join } from "node:path";
 import { decodeMessage } from "./today/host-message";
 import type { HostMessage } from "../shared/host";
 import { isRecord, type JsonObject } from "../shared/json";
+import { migrationReads, type MigrationReads } from "../adapter/lumiverse/migration-reads";
 import { openQuiet } from "./quiet-db";
 
 /** The database's file in Lumiverse's data folder (`src/db/connection.ts`). */
@@ -74,71 +77,56 @@ export interface LumiverseMarks {
   outletReferences: number;
 }
 
-function parsed(text: unknown): unknown {
-  if (typeof text !== "string") return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function objectOf(text: unknown): JsonObject {
-  const value = parsed(text);
-  return isRecord(value) ? (value as JsonObject) : {};
-}
-
 export class LumiverseDb {
   private constructor(
-    private readonly db: Database,
+    private readonly reads: MigrationReads,
     /** How it was opened: through SQLite's locks, or as an unchanging file where no log exists. */
     readonly opened: "locked" | "immutable",
-    private readonly closer: () => void,
   ) {}
 
-  /** Opens Lumiverse's database in `dataDir` for reading only: under SQLite's locks while its log or their index is beside it, else as an unchanging file. */
-  static open(dataDir: string): LumiverseDb {
+  /**
+   * Opens Lumiverse's database in `dataDir` for reading only, and only `userId`'s rows: under SQLite's
+   * locks while its log or their index is beside it, else as an unchanging file. Every read goes
+   * through the adapter's door (`migration-reads.ts`), which checks the file's tables and columns
+   * against what Lumiverse declares before it reads.
+   */
+  static open(dataDir: string, userId: string): LumiverseDb {
     const path = join(dataDir, DATABASE_FILE);
     if (!existsSync(path)) throw new Error(`There is no Lumiverse database at ${path}.`);
     if (existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) {
       const db = new Database(path, { readonly: true });
-      return new LumiverseDb(db, "locked", () => db.close());
+      return new LumiverseDb(migrationReads({ db, close: () => db.close() }, userId), "locked");
     }
-    const quiet = openQuiet(path);
-    return new LumiverseDb(quiet.db, "immutable", quiet.close);
+    return new LumiverseDb(migrationReads(openQuiet(path), userId), "immutable");
   }
 
   close(): void {
-    this.closer();
+    this.reads.close();
   }
 
   /** The user's name, or null when there is no such user. */
-  username(userId: string): string | null {
-    const row = this.db.query<{ username: string | null }, [string]>(`SELECT username FROM "user" WHERE id = ?`).get(userId);
-    return row === null ? null : (row.username ?? null);
+  username(): string | null {
+    return this.reads.username();
   }
 
   /** How the extension is installed, from Lumiverse's own row of it; null when it isn't. */
   install(identifier: string): Install | null {
-    const row = this.db.query<{ install_scope: string | null; installed_by_user_id: string | null; branch: string | null; version: string | null }, [string]>("SELECT install_scope, installed_by_user_id, branch, version FROM extensions WHERE identifier = ?").get(identifier);
-    if (row === null) return null;
-    return { scope: row.install_scope === "user" ? "user" : "operator", owner: row.installed_by_user_id, branch: row.branch, version: row.version ?? "" };
+    return this.reads.install(identifier);
   }
 
   /** Every chat of the user's, the most recently updated first, as Spindle's chat list reads them (`chats.service.ts`). */
-  chats(userId: string): ChatRow[] {
-    const rows = this.db.query<{ id: string; name: string | null; character_id: string | null; metadata: string | null; updated_at: number | null }, [string]>("SELECT id, name, character_id, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, id ASC").all(userId);
-    return rows.map((r) => ({ id: r.id, name: r.name ?? "", character: typeof r.character_id === "string" && r.character_id !== "" ? r.character_id : null, metadata: objectOf(r.metadata), updatedAt: r.updated_at ?? 0 }));
+  chats(): ChatRow[] {
+    return this.reads.chats();
   }
 
   /** A character of the user's, by its id and name; null when the user has none of that id. */
-  character(characterId: string, userId: string): { id: string; name: string } | null {
-    return this.db.query<{ id: string; name: string }, [string, string]>("SELECT id, name FROM characters WHERE id = ? AND user_id = ?").get(characterId, userId);
+  character(characterId: string): { id: string; name: string } | null {
+    return this.reads.character(characterId);
   }
 
   /** How many messages a chat of the user's holds. */
-  messageCount(chatId: string, userId: string): number {
-    return this.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ?").get(chatId, userId)?.n ?? 0;
+  messageCount(chatId: string): number {
+    return this.reads.messageCount(chatId);
   }
 
   /**
@@ -149,41 +137,30 @@ export class LumiverseDb {
    * in `swipes` (of `content` for the showing one when `swipes` holds no text for it, as Lumiverse
    * falls back to it), and its date is `swipe_dates` at its place, a number or none.
    */
-  messages(chatId: string, userId: string): { messages: HostMessage[]; swipes: Map<string, SwipeFacts> } {
-    const rows = this.db
-      .query<{ id: string; chat_id: string; index_in_chat: number; is_user: number; name: string; content: string; swipe_id: number | null; swipes: string | null; swipe_dates: string | null; extra: string | null }, [string, string]>(
-        "SELECT m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.swipe_id, m.swipes, m.swipe_dates, m.extra FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC",
-      )
-      .all(chatId, userId);
+  messages(chatId: string): { messages: HostMessage[]; swipes: Map<string, SwipeFacts> } {
     const messages: HostMessage[] = [];
     const facts = new Map<string, SwipeFacts>();
-    for (const r of rows) {
-      const raw = parsed(r.swipes);
-      const swipes: unknown[] = Array.isArray(raw) ? raw : [r.content];
-      const extra = objectOf(r.extra);
-      const metadata = isRecord(extra.spindle_metadata) ? extra.spindle_metadata : undefined;
+    for (const r of this.reads.messages(chatId)) {
       const message = decodeMessage(
         {
           id: r.id,
-          chat_id: r.chat_id,
-          index_in_chat: r.index_in_chat,
-          is_user: r.is_user === 1,
-          role: r.is_user === 1 ? "user" : "assistant",
+          chat_id: r.chat,
+          index_in_chat: r.index,
+          is_user: r.isUser,
+          role: r.isUser ? "user" : "assistant",
           name: r.name,
           content: r.content,
-          swipe_id: r.swipe_id ?? 0,
-          swipes,
-          ...(metadata ? { metadata } : {}),
+          swipe_id: r.swipe,
+          swipes: r.swipes,
+          ...(r.metadata ? { metadata: r.metadata } : {}),
         },
         chatId,
       );
       if (message) messages.push(message);
-      const shown = r.swipe_id ?? 0;
-      const dates = parsed(r.swipe_dates);
       facts.set(r.id, {
-        hashes: swipes.map((s, i) => (typeof s === "string" ? textHash(s) : i === shown ? textHash(r.content) : null)),
-        dates: swipes.map((_, i) => {
-          const d = Array.isArray(dates) ? (dates[i] as unknown) : undefined;
+        hashes: r.swipes.map((s, i) => (typeof s === "string" ? textHash(s) : i === r.swipe ? textHash(r.content) : null)),
+        dates: r.swipes.map((_, i) => {
+          const d = r.dates[i];
           return typeof d === "number" && Number.isFinite(d) ? d : null;
         }),
       });
@@ -196,40 +173,33 @@ export class LumiverseDb {
    * continuation chunk `<identifier>:<i>`), with that metadata whole: where today's build keeps a
    * reply's records and a user message's panel request.
    */
-  engineMessages(userId: string, identifier: string): { id: string; chatId: string; isUser: boolean; metadata: JsonObject }[] {
-    const rows = this.db
-      .query<{ id: string; chat_id: string; is_user: number; meta: string | null }, [string, string]>("SELECT m.id, m.chat_id, m.is_user, json_extract(m.extra, '$.spindle_metadata') AS meta FROM messages m JOIN chats c ON c.id = m.chat_id WHERE c.user_id = ? AND instr(m.extra, ?) > 0 ORDER BY m.chat_id, m.index_in_chat")
-      .all(userId, `"${identifier}`);
-    return rows.flatMap((r) => {
-      const metadata = objectOf(r.meta);
-      return Object.keys(metadata).some((k) => k === identifier || k.startsWith(`${identifier}:`)) ? [{ id: r.id, chatId: r.chat_id, isUser: r.is_user === 1, metadata }] : [];
-    });
+  engineMessages(identifier: string): { id: string; chatId: string; isUser: boolean; metadata: JsonObject }[] {
+    return this.reads
+      .metadataMessages(`"${identifier}`)
+      .filter((m) => Object.keys(m.metadata).some((k) => k === identifier || k.startsWith(`${identifier}:`)))
+      .map((m) => ({ id: m.id, chatId: m.chat, isUser: m.isUser, metadata: m.metadata }));
   }
 
   /** What today's build put in Lumiverse for the user, counted. */
-  marks(userId: string, chats: readonly ChatRow[]): LumiverseMarks {
-    const books = this.db.query<{ id: string; metadata: string | null }, [string]>("SELECT id, metadata FROM world_books WHERE user_id = ?").all(userId);
-    const engineBookIds = new Set(books.filter((b) => objectOf(b.metadata).lumi_rp_engine === true).map((b) => b.id));
-    const entries = this.db.query<{ world_book_id: string; extensions: string | null }, [string]>("SELECT e.world_book_id, e.extensions FROM world_book_entries e JOIN world_books b ON b.id = e.world_book_id WHERE b.user_id = ?").all(userId);
+  marks(chats: readonly ChatRow[]): LumiverseMarks {
+    const engineBookIds = new Set(this.reads.books().filter((b) => b.metadata.lumi_rp_engine === true).map((b) => b.id));
     let engineEntries = 0;
     let markedEntries = 0;
-    for (const e of entries) {
-      if (engineBookIds.has(e.world_book_id)) engineEntries++;
-      else if (objectOf(e.extensions).lumi_rp_engine !== undefined) markedEntries++;
+    for (const e of this.reads.entryExtensions()) {
+      if (engineBookIds.has(e.book)) engineEntries++;
+      else if (e.extensions.lumi_rp_engine !== undefined) markedEntries++;
     }
     const chatsWithEngineBook = chats.filter((c) => Array.isArray(c.metadata.chat_world_book_ids) && c.metadata.chat_world_book_ids.some((id) => typeof id === "string" && engineBookIds.has(id))).length;
-    const regex = this.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM regex_scripts WHERE user_id = ? AND folder = 'LumiRPEngine'").get(userId)?.n ?? 0;
     let presetBlocks = 0;
     let outletReferences = 0;
     // A preset's blocks, in order, are its `prompt_order` (Lumiverse's `listPromptBlocks`).
-    for (const p of this.db.query<{ prompt_order: string | null }, [string]>("SELECT prompt_order FROM presets WHERE user_id = ?").all(userId)) {
-      const blocks = parsed(p.prompt_order);
+    for (const blocks of this.reads.promptOrders()) {
       for (const block of Array.isArray(blocks) ? blocks : []) {
         if (!isRecord(block)) continue;
         if (typeof block.name === "string" && (block.name === "RPEngine" || block.name.startsWith("RPEngine · "))) presetBlocks++;
         if (typeof block.content === "string" && block.content.includes("{{outlet::lre_")) outletReferences++;
       }
     }
-    return { engineBooks: engineBookIds.size, engineEntries, markedEntries, chatsWithEngineBook, regexScripts: regex, presetBlocks, outletReferences };
+    return { engineBooks: engineBookIds.size, engineEntries, markedEntries, chatsWithEngineBook, regexScripts: this.reads.regexScripts("LumiRPEngine"), presetBlocks, outletReferences };
   }
 }

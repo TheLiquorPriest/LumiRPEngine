@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { walk } from "../app/archive";
+import { walk, type FoundFile } from "../app/archive";
 import { agentMetaOf } from "./today/chat-agent-meta";
 import { decodeLedger } from "./today/ledger-io";
 import { readRun } from "./today/run";
@@ -20,8 +20,8 @@ import type { ChatId, UserId, WorldId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { backupSize, backupSources, makeBackup, type BackupChat, type BackupResult } from "./backup";
-import { classifyRuntime, classifyStorage, type Classified, type ClassifyContext } from "./classify";
-import { readBytes, sha256 } from "./files";
+import { classifyRuntime, classifyStorage, EXTENSION_WIDE, type Classified, type ClassifyContext } from "./classify";
+import { namedFiles, readBytes, sha256 } from "./files";
 import { areaFiles, areaHead, countLedgers, countLink, countSettings, countWorldDoc, INSIDE_UNIT, MIND_FILE, recordBlobs, Tally, type Unreadable } from "./inside";
 import type { ChatRow, LumiverseDb } from "./lumiverse-db";
 import { changesSince, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
@@ -135,11 +135,11 @@ function messageEntry(message: { id: string; chatId: string; isUser: boolean; me
   return itemOf("Lumiverse database", path, measured(value), null);
 }
 
-/** A storage folder's files as items, with what the runtime hasn't sent laid over it (`pending`). */
-async function storageItems(where: Where, root: string | null, pending: ReadonlyMap<string, string | null>, context: ClassifyContext, unreadable: Unreadable[]): Promise<Item[]> {
+/** A storage folder's files as items, with what the runtime hasn't sent laid over it (`pending`). `files` are the folder's files that are read: the user's whole, the extension's own folder's named few. */
+async function storageItems(where: Where, root: string | null, files: readonly FoundFile[], pending: ReadonlyMap<string, string | null>, context: ClassifyContext, unreadable: Unreadable[]): Promise<Item[]> {
   const out: Item[] = [];
   const onDisk = new Set<string>();
-  for (const f of root === null ? [] : await walk(root)) {
+  for (const f of files) {
     onDisk.add(f.path);
     if (f.link) {
       out.push(itemOf(where, f.path, { bytes: f.bytes, sha256: "" }, null, "a symbolic link, which the migration doesn't follow"));
@@ -182,16 +182,16 @@ async function freeAt(target: string): Promise<number> {
 }
 
 /** The chats with engine records, from Lumiverse's database alone: what the backup lists. */
-function engineChats(db: LumiverseDb, chats: readonly ChatRow[], userId: string, identifier: string): BackupChat[] {
+function engineChats(db: LumiverseDb, chats: readonly ChatRow[], identifier: string): BackupChat[] {
   const turns = new Map<string, number>();
-  for (const m of db.engineMessages(userId, identifier)) {
+  for (const m of db.engineMessages(identifier)) {
     const ledger = m.isUser ? null : decodeLedger(m.metadata);
     turns.set(m.chatId, (turns.get(m.chatId) ?? 0) + (ledger ? Object.keys(ledger.swipes).length : 0));
   }
   return chats.flatMap((c) => {
     if (!turns.has(c.id) && !isRecord(c.metadata[LEDGER_NAMESPACE]) && !isRecord(c.metadata[`lumiah_chat_${identifier}`])) return [];
     const run = readRun(c.metadata);
-    return [{ chatId: c.id, name: c.name, engine: run ? (chatKnowledgePrefsOf(c.metadata).engine ?? "classic") : null, worldId: run?.worldId ?? null, messages: db.messageCount(c.id, userId), turns: turns.get(c.id) ?? 0 }];
+    return [{ chatId: c.id, name: c.name, engine: run ? (chatKnowledgePrefsOf(c.metadata).engine ?? "classic") : null, worldId: run?.worldId ?? null, messages: db.messageCount(c.id), turns: turns.get(c.id) ?? 0 }];
   });
 }
 
@@ -207,7 +207,7 @@ export async function backup(sources: Sources, dest: string, now?: () => Date): 
 
 /** The backup of an open read of today's data: its storage folders, its runtime's files and the chats with engine records. */
 export async function backupOf(today: Today, dest: string, now?: () => Date): Promise<BackupResult> {
-  const chats = engineChats(today.db, today.chats, today.sources.userId, today.sources.identifier);
+  const chats = engineChats(today.db, today.chats, today.sources.identifier);
   const sources = await backupSources({ user: today.user, extension: today.extension }, today.runtime.files);
   return makeBackup({ dest, sources, chats, roots: { user: today.user, extension: today.extension, runtime: today.sources.runtime }, ...(now ? { now } : {}) });
 }
@@ -233,14 +233,15 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
 
     const unreadable: Unreadable[] = [];
     const items: Item[] = [];
-    items.push(...(await storageItems("user storage", found.user, pending, context, unreadable)));
-    if (found.extension !== null) items.push(...(await storageItems("extension storage", found.extension, new Map(), context, unreadable)));
+    items.push(...(await storageItems("user storage", found.user, found.user === null ? [] : await walk(found.user), pending, context, unreadable)));
+    // The extension's own folder is shared by every user of the Lumiverse: only the files kept there for the extension as a whole are read.
+    if (found.extension !== null) items.push(...(await storageItems("extension storage", found.extension, await namedFiles(found.extension, EXTENSION_WIDE), new Map(), context, unreadable)));
     for (const f of found.runtime.files) {
       const bytes = await readBytes(f.disk);
       items.push(itemOf("runtime", f.path, { bytes: bytes?.length ?? f.bytes, sha256: sha256(bytes ?? new Uint8Array()) }, f.link ? null : classifyRuntime(f.path), f.link ? "a symbolic link, which the migration doesn't follow" : undefined));
     }
     for (const chat of chatRows) items.push(...chatEntries(chat, sources.identifier));
-    for (const m of db.engineMessages(sources.userId, sources.identifier)) items.push(messageEntry(m, sources.identifier, unreadable));
+    for (const m of db.engineMessages(sources.identifier)) items.push(messageEntry(m, sources.identifier, unreadable));
 
     // Every chat the engine has anything of, read by today's readers.
     const engine = new Set<string>();
@@ -380,7 +381,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     });
     const notClassified = items.filter((i) => i.row === null);
     const backupFiles = (await backupSources({ user: found.user, extension: found.extension }, found.runtime.files)).map((s) => ({ name: s.name, bytes: Bun.file(s.disk).size }));
-    const chatList = engineChats(db, chatRows, sources.userId, sources.identifier);
+    const chatList = engineChats(db, chatRows, sources.identifier);
     const backupBytes = backupSize(backupFiles, chatList);
     const importBytes = items.filter((i) => places.get(i) === "lands").reduce((n, i) => n + i.bytes, 0);
     const disk = { backup: backupBytes, import: importBytes, total: backupBytes + importBytes, free: options.target === undefined ? null : await freeAt(options.target) };
@@ -400,7 +401,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       unsent: found.runtime.unsent.map((u) => ({ runtime: u.runtime, files: u.files.size, kept: u.kept, why: u.why })),
       runtime: { taken: found.runtime.runtimes.map(({ name, why, config }) => ({ name, why, unit: config.service?.unit ?? null, source: config.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone },
       standIn: { writes, logged },
-      lumiverse: db.marks(sources.userId, chatRows),
+      lumiverse: db.marks(chatRows),
       disk,
       underWay: chats.reduce((n, c) => n + c.underWay, 0),
       imports: null,

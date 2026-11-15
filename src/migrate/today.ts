@@ -6,6 +6,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { EXTENSION_WIDE } from "./classify";
 import { readText } from "./files";
 import { LumiverseDb, type ChatRow, type Install } from "./lumiverse-db";
 import { ChatReader } from "./chats";
@@ -59,9 +60,9 @@ export interface Today {
 
 /** Opens today's data for one read. Close it when done: it holds Lumiverse's database open, read-only. */
 export async function openToday(sources: Sources): Promise<Today> {
-  const db = LumiverseDb.open(sources.lumiverse);
+  const db = LumiverseDb.open(sources.lumiverse, sources.userId);
   try {
-    const username = db.username(sources.userId);
+    const username = db.username();
     const install = db.install(sources.identifier);
     const folders = storageFolders(sources);
     const user = existsSync(folders.user) ? folders.user : null;
@@ -76,7 +77,8 @@ export async function openToday(sources: Sources): Promise<Today> {
     const writes: AttemptedWrite[] = [];
     const userView = new StorageView("user storage", user, writes, pending);
     const oneFolder = install?.scope === "user" && install.owner === sources.userId;
-    const extensionView = oneFolder ? userView : new StorageView("extension storage", extension, writes);
+    // The extension's own folder is shared by every user of the Lumiverse: only the files it keeps there for the extension as a whole are read.
+    const extensionView = oneFolder ? userView : new StorageView("extension storage", extension, writes, new Map(), EXTENSION_WIDE);
     const standIn = new StandIn({ userId: sources.userId, user: userView, extension: extensionView, db }, writes);
     return {
       sources,
@@ -93,7 +95,7 @@ export async function openToday(sources: Sources): Promise<Today> {
       extensionView,
       standIn,
       reader: new ChatReader(standIn.host),
-      chats: db.chats(sources.userId),
+      chats: db.chats(),
       close: () => db.close(),
     };
   } catch (error) {

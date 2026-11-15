@@ -3,17 +3,17 @@
 // A database in write-ahead mode that is opened for reading the plain way gets its index file made
 // beside it, and the migration must write nothing into today's folders. SQLite reads such a file as
 // unchanging through a `file:` address with `immutable=1`. Bun's SQLite on Linux takes no `file:`
-// address at all ("unable to open database file"), so there a private copy is read instead and
-// removed at close: with no log beside it, the file alone is the whole database.
+// address at all ("unable to open database file"), so there the file's bytes are read into a copy in
+// memory, which is the whole database where no log is beside it. The copy lives in memory only: no
+// file of it is ever made, so no path out of a read, a failing caller's included, can leave one in a
+// temporary folder.
 
 import { Database } from "bun:sqlite";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 export interface QuietDb {
   db: Database;
-  /** Closes the database and removes the private copy, where one was made. */
+  /** Closes the database; a copy in memory goes with it. */
   close(): void;
 }
 
@@ -27,22 +27,17 @@ export function openQuiet(path: string): QuietDb {
   }
 }
 
-/** Reads a private copy of the database, in a folder of its own that only this account can read. The copy is opened for writing, since reading a write-ahead database needs its index file made beside it: beside the copy, that harms nothing. */
+/**
+ * Reads the database as a private copy in memory. The file header says write-ahead log (bytes 18 and
+ * 19 are 2), and a copy in memory can't keep a log, so the copy is read as an ordinary file: there is
+ * no log beside the original, so its pages are all there is.
+ */
 export function openCopy(path: string): QuietDb {
-  const folder = mkdtempSync(join(tmpdir(), "rpe-read-"));
-  try {
-    const copy = join(folder, "copy.db");
-    copyFileSync(path, copy);
-    const db = new Database(copy);
-    return {
-      db,
-      close: () => {
-        db.close();
-        rmSync(folder, { recursive: true, force: true });
-      },
-    };
-  } catch (error) {
-    rmSync(folder, { recursive: true, force: true });
-    throw error;
+  const bytes = new Uint8Array(readFileSync(path));
+  if (bytes.length > 19 && bytes[18] === 2 && bytes[19] === 2) {
+    bytes[18] = 1;
+    bytes[19] = 1;
   }
+  const db = Database.deserialize(bytes, true);
+  return { db, close: () => db.close() };
 }

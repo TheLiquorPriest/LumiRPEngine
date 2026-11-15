@@ -258,7 +258,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     const knows = doc === undefined ? [] : ((await history.areas.doc(doc))?.files ?? []);
     if (now.length === 0 && versions.size === 0 && knows.length === 0) continue;
     const row = today.chats.find((c) => c.id === id);
-    const character = row === undefined || row.character === null ? null : today.db.character(row.character, today.sources.userId);
+    const character = row === undefined || row.character === null ? null : today.db.character(row.character);
     const notes = `${await places.chat(id, { character, chat: { name: row?.name ?? "" } })}/${places.notes}/${IMPORTED}`;
     const mine = { chat: id, notes: 0, versions: 0, learned: 0 };
     for (const f of now) if (await put(id, notes, f.path, f.text)) mine.notes++;

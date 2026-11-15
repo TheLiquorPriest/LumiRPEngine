@@ -29,6 +29,7 @@ import { CONFIG_ENV, type Env } from "../../src/app/config";
 import { copyFolderOf } from "../../src/migrate/runtime-folders";
 import type { Sources } from "../../src/migrate/today";
 import { FakeHost } from "../support/fake-host";
+import { LUMIVERSE_DDL } from "../standin/db";
 
 export const IDENT = "lumi_rp_engine";
 export const USER = "user-fixture-01";
@@ -228,27 +229,25 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
   };
 }
 
-/** Lumiverse's tables the readers read, with Lumiverse's own column names (`src/db/baseline.sql`). */
-const SCHEMA = `
-CREATE TABLE "user" (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', email TEXT, username TEXT UNIQUE);
-CREATE TABLE extensions (id TEXT PRIMARY KEY, identifier TEXT UNIQUE NOT NULL, name TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, metadata TEXT NOT NULL DEFAULT '{}', install_scope TEXT NOT NULL DEFAULT 'operator', installed_by_user_id TEXT, branch TEXT);
-CREATE TABLE characters (id TEXT PRIMARY KEY, name TEXT NOT NULL, user_id TEXT);
-CREATE TABLE chats (id TEXT PRIMARY KEY, character_id TEXT, name TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER, updated_at INTEGER, user_id TEXT);
-CREATE TABLE messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, index_in_chat INTEGER NOT NULL, is_user INTEGER NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', send_date INTEGER, swipe_id INTEGER NOT NULL DEFAULT 0, swipes TEXT NOT NULL DEFAULT '[]', extra TEXT NOT NULL DEFAULT '{}', parent_message_id TEXT, branch_id TEXT, created_at INTEGER, swipe_dates TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 1);
-CREATE TABLE world_books (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER, updated_at INTEGER, user_id TEXT, folder TEXT NOT NULL DEFAULT '');
-CREATE TABLE world_book_entries (id TEXT PRIMARY KEY, world_book_id TEXT NOT NULL REFERENCES world_books(id) ON DELETE CASCADE, uid TEXT NOT NULL, key TEXT NOT NULL DEFAULT '[]', content TEXT NOT NULL DEFAULT '', disabled INTEGER NOT NULL DEFAULT 0, extensions TEXT NOT NULL DEFAULT '{}');
-CREATE TABLE regex_scripts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, find_regex TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'global', scope_id TEXT, metadata TEXT NOT NULL DEFAULT '{}', folder TEXT NOT NULL DEFAULT '');
-CREATE TABLE presets (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL DEFAULT '', parameters TEXT NOT NULL DEFAULT '{}', prompt_order TEXT NOT NULL DEFAULT '[]', metadata TEXT NOT NULL DEFAULT '{}', prompts TEXT NOT NULL DEFAULT '{}', user_id TEXT);
+/**
+ * Lumiverse's tables, made with the very statements of its `src/db/baseline.sql` (the stand-in's
+ * `LUMIVERSE_DDL` for the tables the adapter reads, and `extensions` `:323-337` and `regex_scripts`
+ * `:789-813` for the two the migration alone reads): the migration's door checks them before it reads.
+ */
+const EXTRA_DDL = `
+CREATE TABLE extensions (id TEXT PRIMARY KEY, identifier TEXT NOT NULL UNIQUE, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL, description TEXT DEFAULT '', github TEXT NOT NULL, homepage TEXT DEFAULT '', permissions TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, installed_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), metadata TEXT DEFAULT '{}', install_scope TEXT NOT NULL DEFAULT 'operator', installed_by_user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, branch TEXT DEFAULT NULL);
+CREATE TABLE regex_scripts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, find_regex TEXT NOT NULL, replace_string TEXT NOT NULL DEFAULT '', flags TEXT NOT NULL DEFAULT 'gi', placement TEXT NOT NULL DEFAULT '["ai_output"]', scope TEXT NOT NULL DEFAULT 'global', scope_id TEXT, target TEXT NOT NULL DEFAULT 'response', min_depth INTEGER, max_depth INTEGER, trim_strings TEXT NOT NULL DEFAULT '[]', run_on_edit INTEGER NOT NULL DEFAULT 0, substitute_macros TEXT NOT NULL DEFAULT 'none', disabled INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), folder TEXT NOT NULL DEFAULT '', script_id TEXT NOT NULL DEFAULT '', pack_id TEXT, preset_id TEXT, character_id TEXT, actions TEXT NOT NULL DEFAULT '[]', owner_extension_identifier TEXT);
 `;
 
 /** Writes Lumiverse's database: WAL mode, as Lumiverse runs it. */
 function writeDatabase(path: string, layout: "operator" | "user", data: FixtureChats): void {
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode=WAL");
-  db.exec(SCHEMA);
-  db.query(`INSERT INTO "user" (id, name, username) VALUES (?, ?, ?)`).run(USER, "Player", USERNAME);
-  db.query(`INSERT INTO "user" (id, name, username) VALUES (?, ?, ?)`).run(OTHER_USER, "Someone", "someone-else");
-  db.query("INSERT INTO extensions (id, identifier, name, version, install_scope, installed_by_user_id, branch) VALUES (?, ?, ?, ?, ?, ?, ?)").run("ext-1", IDENT, "LumiRPEngine", "0.0.1", layout, layout === "user" ? USER : null, "main");
+  db.exec(LUMIVERSE_DDL);
+  db.exec(EXTRA_DDL);
+  db.query(`INSERT INTO "user" (id, name, email, username) VALUES (?, ?, ?, ?)`).run(USER, "Player", "player@example.test", USERNAME);
+  db.query(`INSERT INTO "user" (id, name, email, username) VALUES (?, ?, ?, ?)`).run(OTHER_USER, "Someone", "someone@example.test", "someone-else");
+  db.query("INSERT INTO extensions (id, identifier, name, version, author, github, install_scope, installed_by_user_id, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run("ext-1", IDENT, "LumiRPEngine", "0.0.1", "nobody", "https://example.test/ext", layout, layout === "user" ? USER : null, "main");
   db.query("INSERT INTO characters (id, name, user_id) VALUES (?, ?, ?)").run(CHARACTER.id, CHARACTER.name, USER);
   let updated = 100;
   for (const c of data.chats) {
@@ -263,7 +262,7 @@ function writeDatabase(path: string, layout: "operator" | "user", data: FixtureC
   db.query("INSERT INTO world_books (id, name, metadata, user_id) VALUES (?, ?, ?, ?)").run("book-own", "My lore", "{}", USER);
   db.query("INSERT INTO world_book_entries (id, world_book_id, uid, content, extensions) VALUES (?, ?, ?, ?, ?)").run("entry-secret", "book-own", "2", "The well is dry.", JSON.stringify({ lumi_rp_engine: { lore: { secret: true } } }));
   db.query("INSERT INTO regex_scripts (id, user_id, name, find_regex, scope, scope_id, folder) VALUES (?, ?, ?, ?, ?, ?, ?)").run(`lre_jsonx_${CHAT.classic}`, USER, "Hide engine JSON", "<json>", "chat", CHAT.classic, "LumiRPEngine");
-  db.query("INSERT INTO presets (id, name, prompt_order, user_id) VALUES (?, ?, ?, ?)").run("preset-1", "Mine", JSON.stringify([{ id: "b1", name: "RPEngine", content: "" }, { id: "b2", name: "RPEngine · Scene", content: "" }, { id: "b3", name: "Story", content: "{{outlet::lre_scene}}" }]), USER);
+  db.query("INSERT INTO presets (id, name, provider, prompt_order, user_id) VALUES (?, ?, ?, ?, ?)").run("preset-1", "Mine", "openai", JSON.stringify([{ id: "b1", name: "RPEngine", content: "" }, { id: "b2", name: "RPEngine · Scene", content: "" }, { id: "b3", name: "Story", content: "{{outlet::lre_scene}}" }]), USER);
   db.close();
 }
 

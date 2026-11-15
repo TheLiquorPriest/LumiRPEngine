@@ -16,7 +16,7 @@ import { resolve, sep } from "node:path";
 import type { HostCapabilities, HostChat, HostMessage, HostPort } from "../shared/host";
 import type { ChatId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
-import { missing, readText } from "./files";
+import { missing, namedFiles, readText } from "./files";
 import type { LumiverseDb, SwipeFacts } from "./lumiverse-db";
 
 export type Store = "user storage" | "extension storage" | "Lumiverse" | "RPE's copy";
@@ -47,6 +47,8 @@ export class StorageView {
     private readonly root: string | null,
     private readonly log: AttemptedWrite[],
     private readonly pending: Layer = new Map(),
+    /** The only paths of the folder that are read from the disk: the folder is shared with other users, and today's build keeps nothing else in it for the extension. Null: any. */
+    private readonly only: readonly string[] | null = null,
   ) {}
 
   /** The file a storage path names in the folder; a path that climbs out of it is refused, as Lumiverse refuses it. */
@@ -66,7 +68,7 @@ export class StorageView {
     const key = StorageView.clean(path);
     if (this.written.has(key)) return this.written.get(key) ?? null;
     if (this.pending.has(key)) return this.pending.get(key) ?? null;
-    if (this.root === null) return null;
+    if (this.root === null || (this.only !== null && !this.only.includes(key))) return null;
     return readText(this.file(key));
   }
 
@@ -100,7 +102,9 @@ export class StorageView {
   async list(prefix: string): Promise<string[]> {
     const base = StorageView.clean(prefix);
     const found = new Set<string>();
-    if (this.root !== null) {
+    if (this.root !== null && this.only !== null) {
+      for (const f of await namedFiles(this.root, this.only)) if (base === "" || f.path.startsWith(`${base}/`)) found.add(f.path);
+    } else if (this.root !== null) {
       const visit = async (dir: string, at: string): Promise<void> => {
         let names: string[];
         try {
@@ -173,7 +177,7 @@ export class StandIn {
   private chatRead(chatId: ChatId): { messages: HostMessage[]; swipes: ReadonlyMap<string, SwipeFacts> } {
     let read = this.chats.get(chatId);
     if (!read) {
-      read = this.lumiverse("chat.messages").messages(chatId, this.sources.userId);
+      read = this.lumiverse("chat.messages").messages(chatId);
       this.chats.set(chatId, read);
     }
     return read;
@@ -189,7 +193,7 @@ export class StandIn {
   }
 
   private chatMeta(chatId: ChatId): JsonObject {
-    this.metadata ??= new Map(this.lumiverse("chat.metadata").chats(this.sources.userId).map((c) => [c.id as ChatId, c.metadata]));
+    this.metadata ??= new Map(this.lumiverse("chat.metadata").chats().map((c) => [c.id as ChatId, c.metadata]));
     return this.metadata.get(chatId) ?? {};
   }
 
@@ -239,7 +243,7 @@ export class StandIn {
         },
         list: async (userId): Promise<HostChat[]> => {
           this.userCheck(userId);
-          return this.lumiverse("chat.list").chats(this.sources.userId).map((c) => ({ id: c.id as ChatId, name: c.name, metadata: this.chatMeta(c.id as ChatId) }));
+          return this.lumiverse("chat.list").chats().map((c) => ({ id: c.id as ChatId, name: c.name, metadata: this.chatMeta(c.id as ChatId) }));
         },
         setSwipes: async (chatId, messageId, swipes, swipeId, userId) => {
           this.userCheck(userId);

@@ -1,6 +1,6 @@
 // A database nobody is writing is read without anything being left beside it, both ways the reader
-// has: as an unchanging file where the runtime's SQLite takes a `file:` address, and from a private
-// copy where it takes none (Bun's SQLite on Linux), which is the way a real migration run made again
+// has: as an unchanging file where the runtime's SQLite takes a `file:` address, and from a copy in
+// memory where it takes none (Bun's SQLite on Linux), which is the way a real migration run made again
 // on a server reads RPE's own database and Lumiverse's when it is stopped.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -42,13 +42,13 @@ describe("reading a quiet database", () => {
     expect(await readdir(folder)).toEqual(["story.db"]);
   });
 
-  test("from a private copy: the same rows, nothing beside the original, and the copy gone at close", async () => {
+  test("from a copy in memory: the same rows, nothing beside the original, and no file made in the temporary folder, even while it is open", async () => {
     const before = (await readdir(tmpdir())).filter((name) => name.startsWith("rpe-read-"));
     const opened = openCopy(file);
     expect(said(opened.db)).toBe("The lamp is lit.");
     expect(await readdir(folder)).toEqual(["story.db"]);
+    expect((await readdir(tmpdir())).filter((name) => name.startsWith("rpe-read-"))).toEqual(before);
     opened.close();
     expect(await readdir(folder)).toEqual(["story.db"]);
-    expect((await readdir(tmpdir())).filter((name) => name.startsWith("rpe-read-"))).toEqual(before);
   });
 });
