@@ -71,6 +71,12 @@ The reply already begins with these words. The chat application puts them in fro
 
 {{prompt_notices}}
 {{/prompt_notices}}
+{{#prompt_cut}}
+
+## The prompt as it arrived
+
+{{prompt_cut}}
+{{/prompt_cut}}
 {{#not_given}}
 
 ## Not given to you

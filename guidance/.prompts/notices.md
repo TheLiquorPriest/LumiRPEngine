@@ -29,3 +29,7 @@ pictures_text_only: Pictures in the prompt's system or assistant messages were l
 parts_not_carried: Parts of the prompt that can be given as neither text nor a picture (a picture by a web address, audio) were left out: {{count}}, in messages {{messages}}, counting the prompt's first message as 0.
 world_state_failed: The world state could not be put in this briefing: {{error}}
 on_stage_failed: The cast's views of those on stage could not be put in this briefing: {{error}}
+cut_unmatched: Messages the chat application listed were not found in the prompt as it was sent: {{missing}}. The prompt's parts are not told apart.
+cut_pictures: Pictures and other parts the chat application listed are not in the prompt it sent: {{dropped}}.
+cut_uncut: History messages before the start of the window are still in the prompt, where it could not be cut: {{history}}.
+cut_joining_unread: The chat application's joining settings could not be read ({{why}}), so how it joined the prompt's messages was found from the prompt.

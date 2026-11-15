@@ -16,7 +16,7 @@ const SHIPPED = shippedTexts();
 const ASKS = /\b(must|should|always|never|please|make sure|remember to)\b/i;
 
 /** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), and the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`). */
-const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path"];
+const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path"];
 
 /** The notices of `notices.md`, by name, and the fields a use of each fills. Each is a fact; none asks. */
 const NOTICES: Record<string, Record<string, unknown>> = {
@@ -47,6 +47,10 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   parts_not_carried: { count: 1, messages: "4" },
   world_state_failed: { error: "The fold broke." },
   on_stage_failed: { error: "The cast could not be read." },
+  cut_unmatched: { missing: 2 },
+  cut_pictures: { dropped: 1 },
+  cut_uncut: { history: 3 },
+  cut_joining_unread: { why: "the preset could not be read" },
 };
 
 let set: OpenSet;
@@ -117,6 +121,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
       on_stage: "STAGE",
       lore_map: "LORE",
       prompt_notices: "NOTICES",
+      prompt_cut: "PROMPT CUT",
       not_given: "NOT GIVEN",
       story_so_far: "SO FAR",
       story_brief: "BRIEF",
@@ -124,8 +129,10 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
       intent_path: "sessions/s-1/turns/t-1/scratch/intent.md",
     };
     const text = part.render({ ...full, reply_contract: "CONTRACT TEXT", facts: { lines: ["COUNT LINE"] } }).text;
-    for (const heading of ["Since the last turn", "Files changed since this session opened", "Added for this turn", "From your rules", "World state", "On stage", "Lore map", "The prompt", "Not given to you", "The story so far", "Story brief"]) expect(text).toContain(`## ${heading}`);
+    for (const heading of ["Since the last turn", "Files changed since this session opened", "Added for this turn", "From your rules", "World state", "On stage", "Lore map", "The prompt", "The prompt as it arrived", "Not given to you", "The story so far", "Story brief"]) expect(text).toContain(`## ${heading}`);
+    expect(text).toContain("## The prompt as it arrived\n\nPROMPT CUT");
     expect(text).toContain("## Not given to you\n\nNOT GIVEN");
+    expect(part.render({ ...full, prompt_cut: undefined }).text).not.toContain("as it arrived");
     expect(part.render({ ...full, not_given: undefined }).text).not.toContain("Not given to you");
     expect(text).toContain("The same material is on disk for agents you delegate to: sessions/s-1/turns/t-1/");
     expect(text).toContain("This turn's intent file: `sessions/s-1/turns/t-1/scratch/intent.md`");
