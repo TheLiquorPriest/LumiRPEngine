@@ -109,14 +109,14 @@ function passWords(deps: ProviderDeps, e: PassError): Promise<string> {
   return deps.passWords(`pass-${e.code}`, e.detail ? { detail: e.detail } : {});
 }
 
-/** `POST /v1/chat/completions` as a handler from a request to its response. */
-export function providerEndpoint(deps: ProviderDeps): (request: Request) => Promise<Response> {
-  return async (request) => {
+/** `POST /v1/chat/completions` as a handler from a request to its response; `json` is the body as the server parsed it (on a worker when large). */
+export function providerEndpoint(deps: ProviderDeps): (request: Request, json: () => Promise<unknown>) => Promise<Response> {
+  return async (request, json) => {
     if (request.method !== "POST") return error(405, "Chat completions are asked for with POST.");
     if (!(await deps.allowed(request))) return error(401, "This connection's key is not RPE's.");
     let body: unknown;
     try {
-      body = await request.json();
+      body = await json();
     } catch {
       return error(400, "The request is not JSON.");
     }

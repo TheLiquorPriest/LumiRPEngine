@@ -227,8 +227,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */
   interface Handlers {
     user: string;
-    provider(request: Request): Promise<Response>;
-    question(request: Request): Promise<Response>;
+    provider(request: Request, json: () => Promise<unknown>): Promise<Response>;
+    question(request: Request, json: () => Promise<unknown>): Promise<Response>;
   }
   let handlers: Handlers | null = null;
   const notSetUp = (): Response => json(503, { error: NOT_SET_UP });
@@ -236,12 +236,12 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   /** One of the extension's routes, for RPE's own user alone (the app has checked the key). */
   const forOwner =
     (handler: (body: unknown, user: string, parts: Lumiverse) => Promise<Response>) =>
-    async (request: Request): Promise<Response> => {
+    async (request: Request, call: { json: () => Promise<unknown> }): Promise<Response> => {
       if (handlers === null || parts === null) return notSetUp();
       if (request.headers.get(USER_HEADER) !== handlers.user) return json(403, { error: "This RPE belongs to another Lumiverse user." });
       let body: unknown;
       try {
-        body = await request.json();
+        body = await call.json();
       } catch {
         return json(400, { error: "The request is not JSON." });
       }
@@ -289,7 +289,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           group: "provider",
           does: "The provider endpoint: Lumiverse's chat completions, answered as the Lumiverse provider API's own (OpenAI's chat completions, streamed or whole); a reply tagged for a turn of RPE is played through the turn lane, any other is passed on.",
           answers: "an OpenAI chat completion, streamed or whole, as OpenAI answers",
-          raw: (request) => (handlers === null ? notSetUp() : handlers.provider(request)),
+          raw: (request, call) => (handlers === null ? notSetUp() : handlers.provider(request, call.json)),
         }),
         rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames }) }),
         route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", group: "service", does: "How RPE's extension in Lumiverse last said it stands with RPE.", reply: extensionStatusReply, handle: extension }),
@@ -301,7 +301,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           does: "The extension's question for a prompt it is about to send: which of its lore entries and messages RPE keeps, by its window and its secrecy rules.",
           answers: "JSON, the extension's own message (`src/adapter/lumiverse/wire.ts`)",
           maxBody: settings().questionBytes,
-          raw: (request) => (handlers === null ? notSetUp() : handlers.question(request)),
+          raw: (request, call) => (handlers === null ? notSetUp() : handlers.question(request, call.json)),
         }),
         rawRoute({
           method: "POST",

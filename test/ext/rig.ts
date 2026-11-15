@@ -240,9 +240,9 @@ export class Rig {
           this.lv.clock.setTimeout(slow.resolve, options.questionDelayMs);
           await slow.promise;
         }
-        return await question(request);
+        return await question(request, () => request.json());
       }
-      if (path === "/v1/chat/completions") return await provider(request);
+      if (path === "/v1/chat/completions") return await provider(request, () => request.json());
       if (path === CONFIRM_PATH) {
         // As RPE's own route: the key it made, for its own user, naming its relay socket and connection.
         if (request.headers.get("authorization") !== `Bearer ${EXTENSION_KEY}`) return Response.json({ error: "This needs the extension's registration with this RPE." }, { status: 401 });

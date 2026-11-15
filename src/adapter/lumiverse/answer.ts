@@ -181,14 +181,14 @@ function json(status: number, body: unknown): Response {
  * is the server's to say (`allowed`): the extension's registration. Secrets that cannot be worked out
  * are said in the log once for each chat while RPE runs, not at every generation.
  */
-export function questionRoute(deps: AnswerDeps & { allowed(request: Request): boolean | Promise<boolean> }): (request: Request) => Promise<Response> {
+export function questionRoute(deps: AnswerDeps & { allowed(request: Request): boolean | Promise<boolean> }): (request: Request, parsed: () => Promise<unknown>) => Promise<Response> {
   const told = new Set<string>();
-  return async (request) => {
+  return async (request, parsed) => {
     if (request.method !== "POST") return json(405, { error: "The question is asked with POST." });
     if (!(await deps.allowed(request))) return json(401, { error: "This extension is not registered with this RPE." });
     let body: unknown;
     try {
-      body = await request.json();
+      body = await parsed();
     } catch {
       return json(400, { error: "The question is not JSON." });
     }
