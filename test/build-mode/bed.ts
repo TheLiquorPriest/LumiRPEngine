@@ -47,7 +47,7 @@ export interface Bed {
 function run(db: Database, migrations: readonly Migration[]): void {
   for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
     if ("sql" in m) db.run(m.sql);
-    else m.up(db);
+    else m.up(db, USER);
   }
 }
 

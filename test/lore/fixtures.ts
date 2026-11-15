@@ -14,6 +14,7 @@ import { defaultTiers } from "../../src/shared/tiers";
 import { DEFAULT_CURRENCY, type LoreEntryDef, WORLD_FORMAT, type WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, defaultTables } from "../../src/packs/index";
 import { type ActivatedEntry, EntryNumbers, LORE_MIGRATIONS, type LoreBook, type LoreBookEntry, type LoreBooks, type LoreTurns, type LoreWorlds, type LoreWrites } from "../../src/lore/index";
+import { STORE_MIGRATIONS } from "../../src/store";
 
 export const USER = "user-coast";
 export const OTHER_USER = "user-inland";
@@ -187,10 +188,12 @@ export interface LoreDb {
   close(): Promise<void>;
 }
 
-/** RPE's database with the lore's tables, brought up by the application's own runner, every write through its queue. */
+/** RPE's database with the store's tables and the lore's, brought up by the application's own runner, every write through its queue. */
 export function loreDb(file: string, backups: string): LoreDb {
   const db = openDatabase(file, 2_000);
   const migrations = new Migrations();
+  // As on RPE's database, the store's turns are there: an overlay's write reads whether its turn was joined to another.
+  migrations.add("store", STORE_MIGRATIONS);
   migrations.add("lore", LORE_MIGRATIONS);
   migrate(db, migrations, { user: USER, version: "lore-test", backups, now: () => 0 });
   const queue = new WriteQueue(db, 50);
