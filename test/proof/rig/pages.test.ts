@@ -9,7 +9,7 @@ import { type Chrome, launchChrome } from "../../../scripts/proof/browser/chrome
 import { BrowserDriver } from "../../../scripts/proof/browser/driver";
 import { openRigBed, RIG_CHAT, RIG_CHAT_NAME, RIG_PRESET, RIG_RPE_CONNECTION, type RigBed } from "../../../scripts/proof/rig/bed";
 import { openWebPage, WEB_NAME_OF } from "../../../scripts/proof/browser/web-shell";
-import { builtUi } from "../../../scripts/proof/rig/ui";
+import { builtUi, releaseUi } from "../../../scripts/proof/rig/ui";
 
 let chrome: Chrome;
 let bed: RigBed;
@@ -27,6 +27,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await bed?.close();
   await chrome?.close();
+  await releaseUi();
 });
 
 async function driver(): Promise<BrowserDriver> {
