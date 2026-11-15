@@ -101,7 +101,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
     if (owner === null || owner === "") throw new Error(NO_OWNER);
 
     await prepareDataFolder(paths);
-    const backup = await backupOf(today, paths.backups, now);
+    const backup = await backupOf(today, paths.backups, config.database.pieceBytes, now);
     report.backup = { path: backup.path, bytes: backup.bytes, sha256: backup.sha256 };
 
     const db = openDatabase(paths.database, config.database.busyMs);

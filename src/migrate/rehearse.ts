@@ -199,21 +199,21 @@ function engineChats(db: LumiverseDb, chats: readonly ChatRow[], identifier: str
   });
 }
 
-/** Takes the backup of today's data into `dest`: a new archive each time. */
-export async function backup(sources: Sources, dest: string, now?: () => Date): Promise<BackupResult> {
+/** Takes the backup of today's data into `dest`, reading each file `pieceBytes` at a time: a new archive each time. */
+export async function backup(sources: Sources, dest: string, pieceBytes: number, now?: () => Date): Promise<BackupResult> {
   const today = await openToday(sources);
   try {
-    return await backupOf(today, dest, now);
+    return await backupOf(today, dest, pieceBytes, now);
   } finally {
     today.close();
   }
 }
 
 /** The backup of an open read of today's data: its storage folders, its runtime's files and the chats with engine records. */
-export async function backupOf(today: Today, dest: string, now?: () => Date): Promise<BackupResult> {
+export async function backupOf(today: Today, dest: string, pieceBytes: number, now?: () => Date): Promise<BackupResult> {
   const chats = engineChats(today.db, today.chats, today.sources.identifier);
   const sources = await backupSources({ user: today.user, extension: today.extension }, today.runtime.files);
-  return makeBackup({ dest, sources, chats, roots: { user: today.user, extension: today.extension, runtime: today.sources.runtime }, ...(now ? { now } : {}) });
+  return makeBackup({ dest, sources, chats, roots: { user: today.user, extension: today.extension, runtime: today.sources.runtime }, pieceBytes, ...(now ? { now } : {}) });
 }
 
 export async function rehearse(sources: Sources, options: RehearseOptions = {}): Promise<MigrationReport> {

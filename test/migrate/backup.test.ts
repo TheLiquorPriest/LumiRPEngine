@@ -9,6 +9,7 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { verifyBackup, type BackupResult } from "../../src/migrate/backup";
 import { sha256 } from "../../src/migrate/files";
+import { CONFIG_DEFAULTS } from "../../src/app/config";
 import { backup } from "../../src/migrate/rehearse";
 import { buildFixture, CHAT, treeSums, type Fixture } from "./fixture";
 
@@ -23,7 +24,7 @@ describe("the backup", () => {
     // As permissive a umask as an account may have: the backup must still be its owner's alone.
     const umask = process.umask(0o000);
     try {
-      made = await backup(fixture.sources, join(fixture.root, "backups"), () => new Date("2026-11-13T12:00:00.000Z"));
+      made = await backup(fixture.sources, join(fixture.root, "backups"), CONFIG_DEFAULTS.database.pieceBytes, () => new Date("2026-11-13T12:00:00.000Z"));
     } finally {
       process.umask(umask);
     }
@@ -42,7 +43,7 @@ describe("the backup", () => {
   test("is never written over a file already at its name, which stays as it was", async () => {
     const name = join(fixture.root, "backups", "rpe-migration-backup-2026-11-13T12-10-00-000Z.tar");
     await writeFile(name, "someone else's file");
-    await expect(backup(fixture.sources, join(fixture.root, "backups"), () => new Date("2026-11-13T12:10:00.000Z"))).rejects.toThrow("never writes over one");
+    await expect(backup(fixture.sources, join(fixture.root, "backups"), CONFIG_DEFAULTS.database.pieceBytes, () => new Date("2026-11-13T12:10:00.000Z"))).rejects.toThrow("never writes over one");
     expect(await readFile(name, "utf8")).toBe("someone else's file");
   });
 
@@ -70,11 +71,11 @@ describe("the backup", () => {
   });
 
   test("a second run makes a new archive and leaves the data as it was", async () => {
-    const again = await backup(fixture.sources, join(fixture.root, "backups"), () => new Date("2026-11-13T12:05:00.000Z"));
+    const again = await backup(fixture.sources, join(fixture.root, "backups"), CONFIG_DEFAULTS.database.pieceBytes, () => new Date("2026-11-13T12:05:00.000Z"));
     expect(again.path).not.toBe(made.path);
     expect(await verifyBackup(again.path, again.sha256)).toEqual([]);
     expect(await treeSums(join(fixture.root, "lumiverse", "users"))).toEqual(before);
-    await expect(backup(fixture.sources, join(fixture.root, "backups"), () => new Date("2026-11-13T12:05:00.000Z"))).rejects.toThrow("never writes over one");
+    await expect(backup(fixture.sources, join(fixture.root, "backups"), CONFIG_DEFAULTS.database.pieceBytes, () => new Date("2026-11-13T12:05:00.000Z"))).rejects.toThrow("never writes over one");
   });
 
   test("a file damaged inside the archive is caught by its checksum", async () => {
