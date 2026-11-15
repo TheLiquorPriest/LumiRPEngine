@@ -1,8 +1,10 @@
 // RPE's trace port (`TracePort` in `rp-harness/contract`): everything RPH does goes to the live hub, on
-// the chat the run is played in, and into the turn's folder (plan §5.3 `transcripts/`): one file of
-// JSON lines per agent, each record as RPH gave it. Streaming text goes to the live hub only; the
-// call's `call_ended` holds it whole. A piece of streaming text names only its run, by RPH's own id for
-// it: its chat is the one its run's records name, each run's first record coming before any piece of it.
+// the chat the run is played in, and is kept in the turn's folder (plan §5.3 `transcripts/`) in one file
+// of its own, `trace.jsonl`, each record as RPH gave it, for the Turn page and a live view that joins
+// late. Each agent's own transcript there, and each request kept beside it, has one writer, RPH: this
+// port writes none of them. Streaming text goes to the live hub only; the call's `call_ended` holds it
+// whole. A piece of streaming text names only its run, by RPH's own id for it: its chat is the one its
+// run's records name, each run's first record coming before any piece of it.
 
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,13 +14,11 @@ import { isRecord } from "../shared/json";
 import type { TreeFiles } from "../tree";
 import type { RunTimes } from "./spans";
 
-/** The turn folder's transcripts. */
+/** The turn folder's transcripts, where the trace is kept beside them. */
 export const TRANSCRIPTS = "transcripts";
 
-/** An agent's transcript file in the turn folder: its definition and its handle, as a file name. */
-export function transcriptName(agent: { id: string; definition: string }): string {
-  return `${`${agent.definition}-${agent.id}`.replace(/[^A-Za-z0-9_-]/g, "-")}.jsonl`;
-}
+/** The trace's file in `transcripts/`: no agent's transcript is named so (RPH names each `<definition>-<handle>`). */
+export const TRACE_FILE = "trace.jsonl";
 
 export interface TraceDeps {
   live: LiveHub;
@@ -64,7 +64,7 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     const done = (async () => {
       const folder = await folderOf(record.scope);
       if (folder === null) return;
-      const file = join(folder, TRANSCRIPTS, transcriptName(record.agent));
+      const file = join(folder, TRANSCRIPTS, TRACE_FILE);
       const before = tails.get(file) ?? Promise.resolve();
       const next = before.then(async () => {
         await mkdir(join(folder, TRANSCRIPTS), { recursive: true });
@@ -97,31 +97,22 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
       const folder = await folderOf(scope);
       if (folder === null) return [];
       const out: TraceRecord[] = [];
-      const glob = new Bun.Glob("*.jsonl");
-      const names: string[] = [];
-      try {
-        for await (const name of glob.scan({ cwd: join(folder, TRANSCRIPTS), onlyFiles: true })) names.push(name);
-      } catch {
-        // No record was kept yet: the run has not begun.
-        return [];
-      }
-      for (const name of names) {
-        const text = await Bun.file(join(folder, TRANSCRIPTS, name)).text();
-        // A line torn by a crash, or written over, costs that line: the rest of the trace is read.
-        let unreadable = 0;
-        for (const line of text.split("\n")) {
-          if (line.trim() === "") continue;
-          try {
-            // The harness writes its own transcript lines (`{ at, type, … }`: a message, a call, a result) in the same file: only
-            // the trace's records are the trace.
-            const record: unknown = JSON.parse(line);
-            if (isRecord(record) && typeof record.seq === "number" && isRecord(record.event)) out.push(record as unknown as TraceRecord);
-          } catch {
-            unreadable++;
-          }
+      const file = Bun.file(join(folder, TRANSCRIPTS, TRACE_FILE));
+      // No record was kept yet: the run has not begun.
+      if (!(await file.exists())) return [];
+      // A line torn by a crash, or written over, costs that line: the rest of the trace is read.
+      let unreadable = 0;
+      for (const line of (await file.text()).split("\n")) {
+        if (line.trim() === "") continue;
+        try {
+          const record: unknown = JSON.parse(line);
+          if (isRecord(record) && typeof record.seq === "number" && isRecord(record.event)) out.push(record as unknown as TraceRecord);
+          else unreadable++;
+        } catch {
+          unreadable++;
         }
-        if (unreadable > 0) deps.log.warn("Lines of a turn's transcript could not be read and were left out of its trace.", { file: join(TRANSCRIPTS, name), lines: unreadable });
       }
+      if (unreadable > 0) deps.log.warn("Lines of a turn's trace could not be read and were left out of it.", { file: join(TRANSCRIPTS, TRACE_FILE), lines: unreadable });
       return out.sort((a, b) => a.at - b.at || a.seq - b.seq);
     },
   };

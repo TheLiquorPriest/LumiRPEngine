@@ -13,5 +13,5 @@ export { passConnection, TURN_DEFAULTS, TURN_SETTINGS, type TurnSettings, turnSe
 export { namedStretches, type Stage, stageAt, stagesAt } from "./stage";
 export { type GenerationAt, type GenerationStart, generationStart } from "./start";
 export { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
-export { TRANSCRIPTS, transcriptName, type TurnTrace, turnTrace } from "./trace";
+export { TRACE_FILE, TRANSCRIPTS, type TurnTrace, turnTrace } from "./trace";
 export { BLOCKS, type MigratedSource, NO_SESSION, PARTS, TurnLane, type TurnLaneDeps } from "./turns";

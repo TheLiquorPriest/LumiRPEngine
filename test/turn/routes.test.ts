@@ -217,7 +217,7 @@ describe("a turn's runs, its folder, and the world", () => {
     expect((await b.page("GET", `/api/v1/chats/chat-elsewhere/turns/${turn}/files`)).status).toBe(404);
   });
 
-  test("a transcript line torn by a crash costs that line, not the turn's page: the page still shows every whole record", async () => {
+  test("a trace line torn by a crash costs that line, not the turn's page: the page still shows every whole record", async () => {
     const b = await openTurnBed({ answers: [replying("The lamp turns.")] });
     beds.push(b);
     const turn = await played(b, "I climb the stairs.");
@@ -228,9 +228,7 @@ describe("a turn's runs, its folder, and the world", () => {
     // A record cut off where the process ended, then a later record whole, as an append after a restart leaves them.
     const run = b.turns.runs.record(USER, turn)!;
     const disk = (await b.turns.files.turnDisk({ user: USER, chat: CHAT, session: run.session, turn }))!;
-    const glob = new Bun.Glob("transcripts/*.jsonl");
-    const [transcript] = await Array.fromAsync(glob.scan({ cwd: disk }));
-    const file = join(disk, transcript!);
+    const file = join(disk, "transcripts", "trace.jsonl");
     const kept = await Bun.file(file).text();
     const [first, ...rest] = kept.split("\n");
     await Bun.write(file, [first, `${JSON.stringify(whole[0]).slice(0, 40)}`, ...rest].join("\n"));
