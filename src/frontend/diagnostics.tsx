@@ -9,8 +9,7 @@
 // only once the player opens its curtain, and never keeps them in pushed state.
 
 import { useEffect, useState } from "preact/hooks";
-import { agentLabel } from "../shared/agent-settings";
-import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, isTurnPhase, phaseTimeText, TURN_PHASE_LABEL, turnTimeline, type Activity, type ActivityAgent, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField, type TimelineCall, type TurnTimeline } from "../shared/diagnostics";
+import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, isTurnPhase, TURN_PHASE_LABEL, turnTimeline, type Activity, type ActivityAgent, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField, type TimelineCall, type TurnTimeline } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { PHASE_CONTROL, speedRow } from "../shared/speed-presets";
@@ -18,6 +17,8 @@ import { type App, useApp } from "./app";
 import { Badge, Banner, Button, Empty, List, ListRow, NumberStepper, Section, Seg, useBusy } from "./components";
 import { Icon } from "../ui/icons";
 import { useSelect } from "../ui/store";
+import { agentLabel } from "./review-card";
+import { phaseTimeText } from "./build/jobs";
 
 /** Opens the drawer at Settings → Diagnostics (`setup` listens). */
 export const OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";

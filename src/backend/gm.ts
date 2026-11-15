@@ -13,7 +13,6 @@ import { effectiveMemory, knowledgeThreshold, type MindsSettings } from "../shar
 import type { HistorySource, KeepResult, MadeInPlay } from "../shared/thing-gm";
 import type { WorldDoc } from "../shared/world";
 import type { WorldState } from "../engine/state";
-import { finalEditsOf, type FinalEdit } from "../shared/final-review";
 import { buildGmRoster, buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmPick, type GmWorldPart } from "../engine/gm-view";
 import { buildMindsGm } from "../packs/minds/core/gm";
 import { hasOwn, isRecord } from "../shared/json";
@@ -28,6 +27,8 @@ import { gmThingExtras, gmThingsList, keepPlaces, keepThings, madePlaceViews, ma
 import { tidyFindings, tidyRun } from "../engine/thing-tidy";
 import { findThingIds, personThings, thingPage, thingPicks, thingsList, thingTypes } from "../engine/thing-view";
 import { appliedEvents, clockFixLine, fixChip } from "./view";
+import { finalEditsOf } from "../shared/ledger";
+import type { FinalEdit } from "../shared/ledger";
 
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;

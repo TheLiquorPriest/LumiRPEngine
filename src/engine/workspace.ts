@@ -9,7 +9,6 @@
 // whose knowledge might read one, still folds as it did into a readers index nothing reads, so a
 // recorded chat replays as it was. Pure.
 
-import { isAgentKnowledge } from "../shared/agent-tools";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
 import { isBlobHash, isWorkspacePath } from "../shared/stores";
@@ -24,6 +23,18 @@ const WS_KEY = "ws";
 const PINS_KEY = "wsPins";
 /** The engine's state-slice key an earlier build's file readers fold into (`engine.ws.readers`); nothing reads it. */
 const READERS_KEY = "wsReaders";
+
+/**
+ * A knowledge as stored data names it (a file's old readers, an old session message's or review
+ * item's knowledge): the player character's, everyone in the world's (secrets marked), or the GM's.
+ * Read and ignored by every agent since secrecy became guidance (DESIGN §7.1).
+ */
+export type AgentKnowledge = "pov" | "everyone" | "gm";
+export const AGENT_KNOWLEDGE: readonly AgentKnowledge[] = ["pov", "everyone", "gm"];
+
+export function isAgentKnowledge(v: unknown): v is AgentKnowledge {
+  return typeof v === "string" && (AGENT_KNOWLEDGE as readonly string[]).includes(v);
+}
 
 /** A file written (created or replaced) with the blob `hash` as its body. */
 export const WS_WRITE = "engine.ws.write";

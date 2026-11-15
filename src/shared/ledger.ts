@@ -8,7 +8,6 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { ClaimsPolicy } from "./claims";
-import type { FinalEdit } from "./final-review";
 import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef } from "./world";
 import type {
@@ -572,6 +571,33 @@ export interface RecStory {
   struck?: BeatStrike[];
   cast?: Cast[];
   drafts?: Draft[];
+}
+
+/**
+ * One edit the final review made (`Rec.finalEdits`): a line of a part rewritten or taken out, by
+ * where it stood (`at`, from 0 among the part's lines) and what it said (`line`), or text added at
+ * the part's end. Texts are as the narrator reads them, neutralized as every engine text is; one
+ * that holds several lines adds them all.
+ */
+export type FinalEdit =
+  | { op: "replace"; part: string; at: number; line: string; text: string }
+  | { op: "append"; part: string; text: string }
+  | { op: "drop"; part: string; at: number; line: string };
+
+const isAt = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+
+/** A turn's edits as stored: each well-formed one, in order; anything else (none, or written by another build) reads as none. */
+export function finalEditsOf(raw: unknown): FinalEdit[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((e): FinalEdit[] => {
+    if (typeof e !== "object" || e === null || Array.isArray(e)) return [];
+    const r = e as Record<string, unknown>;
+    if (typeof r.part !== "string") return [];
+    if (r.op === "append") return typeof r.text === "string" ? [{ op: "append", part: r.part, text: r.text }] : [];
+    if (!isAt(r.at) || typeof r.line !== "string") return [];
+    if (r.op === "drop") return [{ op: "drop", part: r.part, at: r.at, line: r.line }];
+    return r.op === "replace" && typeof r.text === "string" ? [{ op: "replace", part: r.part, at: r.at, line: r.line, text: r.text }] : [];
+  });
 }
 
 /** One swipe's turn record (DESIGN §4.3, `Rec`). */

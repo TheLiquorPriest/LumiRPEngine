@@ -10,9 +10,9 @@
 // Workspace lists under `transcripts/`. Each turn's plan (`plan`) says, once its pre phase knows it,
 // how each role stands: it runs, is kept, off, auto or none, with why (`shared/agent-pipeline.ts`).
 
-import { agentLabel } from "./agent-settings";
 import { PLAN_STATUS_WORDS, type PlanRow } from "./agent-pipeline";
 import type { JsonObject } from "./json";
+import { agentLabel } from "../frontend/review-card";
 
 /** What an agent's call spent: tokens sent (of which read from the provider's cache) and written (of which reasoning). */
 export interface LiveUsage {

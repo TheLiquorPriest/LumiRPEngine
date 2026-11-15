@@ -24,7 +24,6 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { AgentKnowledge } from "../../shared/agent-tools";
 import type { ChatId } from "../../shared/ids";
 import type { ResultBodies, SessionMessageView, SessionView, WorkspaceFileView } from "../../shared/protocol";
 import { GLOBAL_PREFIX, isFilePath, isGlobalPath, isKeptPath, isLearnedPath, isTranscriptPath, levelPath, PINS_PATH } from "../../shared/stores";
@@ -34,6 +33,7 @@ import { Icon } from "../../ui/icons";
 import type { GmSectionProps, RequestBody } from "../registry";
 import { GmPage, usePages } from "./ui";
 import { AREA_WORDS, type FileChip, fileChips, folderOf, systemWords, workspaceArea, workspaceGroups, type WorkspaceNode, writerWords } from "./workspace-tree";
+import type { AgentKnowledge } from "../../engine/workspace";
 
 /** A workspace request as the tab sends it (C8 `lre.workspace`). */
 export type WorkspaceBody = Extract<RequestBody, { type: "lre.workspace" }>;

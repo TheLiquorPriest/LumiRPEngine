@@ -16,7 +16,6 @@
 //    path with nothing failing applies without re-validation (validation is a function of state).
 // L1 holds when this equals referenceFold for every input; L42 checks snapshot-started folds.
 
-import { KEPT_FOLDS_DEFAULT } from "../../shared/agent-settings";
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, MarkerBody, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
@@ -26,6 +25,9 @@ import { initialState } from "../world-state";
 import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type MessageResult, type ResolvedFix } from "./chain";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, markersHash, recordHash, stepPath, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
+
+/** The messages kept worked out by default (`KeptSettings.folds`): room for the longest chats, each message's steps a few hundred bytes. */
+export const KEPT_FOLDS_DEFAULT = 65_536;
 
 interface Step {
   /** The state after this step: kept on few checkpoints and fold ends (`kept`), else null. */

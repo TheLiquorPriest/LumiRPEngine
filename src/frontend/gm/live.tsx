@@ -16,7 +16,6 @@
 // stopped. Once the turn ends, the view stays as that turn's record until the next one starts.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { agentLabel } from "../../shared/agent-settings";
 import { PLAN_STATUS_WORDS, type PlanStatus } from "../../shared/agent-pipeline";
 import type { ChatId } from "../../shared/ids";
 import { agentModel, DROP_WORDS, END_WORDS, followLive, groupSpent, type LiveAgentView, type LiveGroup, type LiveItem, liveItems, type LiveStatus, type LiveView, PHASE_WORDS, REVIEW_OUTCOME_WORDS, reviewEditWords, usageWords, WRITE_OUTCOME_WORDS } from "../../shared/live";
@@ -28,6 +27,7 @@ import type { GmSectionProps, RequestBody } from "../registry";
 import { scrollParent } from "../scroll";
 import { useSelect } from "../../ui/store";
 import { ToTopButton, useToTop } from "../to-top";
+import { agentLabel } from "../review-card";
 
 /** A live request as the tab sends it (`lre.live`). */
 export type LiveBody = Extract<RequestBody, { type: "lre.live" }>;

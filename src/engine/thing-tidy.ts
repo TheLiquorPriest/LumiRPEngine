@@ -21,11 +21,10 @@
 // and third kinds' findings (`tidyTurn`), each its own unit with Undo, as play can't have them. Pure.
 
 import { ownersIn } from "../shared/finance";
-import type { FinalEdit } from "../shared/final-review";
 import { hashParts } from "../shared/hash";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { LedgerEvent, Rec } from "../shared/ledger";
+import type { LedgerEvent, Rec, FinalEdit } from "../shared/ledger";
 import type { EditOp } from "../shared/protocol";
 import type { TidyFinding, TidyFix, TidyKind, TidyRun } from "../shared/thing-gm";
 import { TIDY_KINDS } from "../shared/thing-gm";

@@ -9,7 +9,8 @@
 import { describe, expect, test } from "bun:test";
 import { historyOf, isMainMessage, MAIN_BY, wholeText } from "../../src/backend/agents/compaction";
 import { isReviewTool, receiptHash, receiptOf, reviewCounts, reviewReceipt } from "../../src/backend/agents/receipts";
-import { type FinalEdit, partHash, type PromptPart, REVIEW_TOOLS } from "../../src/shared/final-review";
+import { partHash, type PromptPart, REVIEW_TOOLS } from "../../src/shared/final-review";
+import type { FinalEdit } from "../../src/shared/ledger";
 
 const TEXTS = {};
 

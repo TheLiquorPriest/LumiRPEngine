@@ -18,9 +18,9 @@ import type { QuietRequest, QuietToolCall } from "../../src/shared/host";
 import { cacheBreakpoints } from "../../src/backend/spindle-host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";
-import { applyFinalEdits, changedScope, type FinalEdit, finalPartsOf, partHash, partOf, partText, ReviewDraft, RULES_PART } from "../../src/shared/final-review";
+import { applyFinalEdits, changedScope, finalPartsOf, partHash, partOf, partText, ReviewDraft, RULES_PART } from "../../src/shared/final-review";
 import type { JsonObject } from "../../src/shared/json";
-import type { Rec } from "../../src/shared/ledger";
+import type { Rec, FinalEdit } from "../../src/shared/ledger";
 import type { QuietScript } from "../support/fake-host";
 import { Rig } from "../support/rig";
 

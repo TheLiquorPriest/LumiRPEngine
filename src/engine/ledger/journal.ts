@@ -4,7 +4,6 @@
 // persists `journal` after each call; `dirty()` lists the messages whose metadata mirror must be
 // written. Classification is a function of the chain-snapshot diff, never of event names (L4).
 
-import { finalEditsOf } from "../../shared/final-review";
 import { hashJson, hashParts } from "../../shared/hash";
 import type { GenerationId, MessageId, RevisionId } from "../../shared/ids";
 import type {
@@ -30,7 +29,7 @@ import type {
   RecStory,
   CarryDrop,
 } from "../../shared/ledger";
-import { REC_SESSION_PARTS, ROOT_PATH } from "../../shared/ledger";
+import { REC_SESSION_PARTS, ROOT_PATH, finalEditsOf } from "../../shared/ledger";
 import { isBlobHash } from "../../shared/stores";
 import type { WorldDoc } from "../../shared/world";
 import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBody } from "../events";

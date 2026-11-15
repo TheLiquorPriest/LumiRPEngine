@@ -257,14 +257,6 @@ export function turnTimeline(records: readonly DiagRecord[], turn?: string): Tur
   return { turn: id, start, ms: end - start, rows };
 }
 
-/** A part's time in words, as the timeline says it: "7 min 46 s", "14.2 s", "350 ms". */
-export function phaseTimeText(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const s = Math.round(ms / 1000);
-  return `${Math.floor(s / 60)} min ${s % 60} s`;
-}
-
 /** The in-flight line: what the engine is doing for the chat now, or what failed last. */
 export interface Activity {
   chatId: ChatId;

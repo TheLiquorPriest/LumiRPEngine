@@ -14,7 +14,6 @@ import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, MIND_LENGTH_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
 import { hashJson } from "../../src/shared/hash";
-import type { AgentKnowledge } from "../../src/shared/agent-tools";
 import { blobHash, isLearnedPath } from "../../src/shared/stores";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";
 import type { Holding, KnowledgeFact, MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmEvidence, MindsGmHolding, MindsGmView, WitnessEntry } from "../../src/shared/minds";
@@ -37,6 +36,7 @@ import { readPass } from "../../src/engine/read-pass";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
 import { NEED_DEFAULTS, NEED_IDS, NEED_WORDS } from "../../src/shared/needs";
+import type { AgentKnowledge } from "../../src/engine/workspace";
 
 /** The HUD's place ✎ as the backend sends it: every place of the preview world the POV may know, with its path, for the place sheet. */
 function placeFixFixture(): FieldFixTarget {

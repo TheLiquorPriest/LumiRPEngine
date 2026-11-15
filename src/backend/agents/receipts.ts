@@ -10,11 +10,12 @@
 // (`MainMessage.whole`), which `past_turn` reads and greps, and nothing a turn sends changes but
 // what its later turns read.
 
-import { type FinalEdit, partHash, type PromptPart, REVIEW_TOOLS } from "../../shared/final-review";
+import { partHash, type PromptPart, REVIEW_TOOLS } from "../../shared/final-review";
 import { hashParts } from "../../shared/hash";
 import { MAIN_TEXT } from "../../shared/main-agent-prompts";
 import type { PromptTexts } from "../../shared/prompts";
 import { renderPrompt } from "../prompts";
+import type { FinalEdit } from "../../shared/ledger";
 
 /** A text's short hash, as a receipt names it: the first 8 hex digits of its digest. */
 export function receiptHash(text: string): string {

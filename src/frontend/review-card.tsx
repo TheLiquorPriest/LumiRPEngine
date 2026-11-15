@@ -9,12 +9,36 @@
 // `lre.review.update`. `ReviewCard` and `reviewHandlers` are hook-free, so tests press them without a
 // DOM; chips.tsx's `ReviewChip` keeps the state. Styles: styles/chat.ts and styles/assistant.ts.
 
-import { agentLabel } from "../shared/agent-settings";
+import { hasOwn } from "../shared/json";
 import type { ChatId } from "../shared/ids";
 import type { GenerateAs, ResultBodies, ReviewCardView, ReviewItemView } from "../shared/protocol";
 import { Badge, Button, IdText } from "./components";
 import { humanize } from "./format";
 import { Icon, type IconName } from "../ui/icons";
+
+/**
+ * What each agent is called, by its role id, as Settings → Agents named them: a turn role's label, the GM
+ * assistant's and the main agent's. The names of an agent a carried turn's changes were staged by.
+ */
+const AGENT_LABEL: Readonly<Record<string, string>> = {
+  intent: "Intent",
+  scene: "Scene and lore",
+  minds: "Minds",
+  knowledge: "Knowledge",
+  director: "Director",
+  read: "Read",
+  curator: "Curator",
+  memory: "Memory",
+  skip: "Skip beats",
+  world: "World steps",
+  assistant: "GM assistant",
+  main: "Main agent",
+};
+
+/** An agent's name, by its role: a turn role's label, the GM assistant's or the main agent's; else the role's id. */
+export function agentLabel(role: string): string {
+  return hasOwn(AGENT_LABEL, role) ? (AGENT_LABEL[role] as string) : role;
+}
 
 /** A review request as the card sends it (C13 `lre.review`). */
 export type ReviewBody = { type: "lre.review"; chatId: ChatId } & ({ op: "apply"; turn: string; keys?: string[] } | { op: "reject"; turn: string });

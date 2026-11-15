@@ -52,6 +52,14 @@ const HOMES = homes(readFates()).flatMap(({ from, home, by }) => {
   return leaving === "backend" || (leaving === "frontend" && !home.endsWith("/")) ? [{ leaving, home }] : [];
 });
 
+/**
+ * What PlanSwap-15 moves out of the agents engine's shared files into a home the kept code owns (the
+ * pieces of fates.tsv by that package that name a file): until PlanSwap-10 and PlanSwap-9 remove today's
+ * layers, those take them back from the new home, which is another layer's: the shared files from the
+ * pure engine, the old backend and old pages from the review card.
+ */
+const MOVED_OUT = new Set(readFates().pieces.filter((piece) => piece.by === "PlanSwap-15" && !piece.home.endsWith("/")).map((piece) => piece.home.replace(/^src\//, "")));
+
 function zoneOf(file: string): Zone {
   const rel = relative(SRC, file).split("\\").join("/");
   if (rel.startsWith("..")) return { kind: "outside" };
@@ -200,7 +208,7 @@ function violationsOf(planted: ReadonlyMap<string, string> = new Map()): string[
         if (to.kind === "outside") {
           // The CLI bundles the docs, the schemas and its package version as text and data.
           if (!(from.kind === "cli" && CLI_BUNDLED.test(relative(ROOT, target).split("\\").join("/")))) violations.push(`${rel}: imports outside today's layers (${edge.spec})`);
-        } else if (!allowedLocal(from, to, edge.typeOnly, targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
+        } else if (!allowedLocal(from, to, edge.typeOnly, targetRel) && !MOVED_OUT.has(targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
       } else if (edge.spec.startsWith("node:") || edge.spec.startsWith("bun:")) {
         // The CLI's entry is the one file that touches the disk, the terminal and the process.
         const spec = rel.split("\\").join("/");
@@ -251,6 +259,14 @@ describe("module boundaries", () => {
       ["src/backend/planted.ts", 'import { worldsRoutes } from "../build/worlds-routes";'],
     ]);
     expect(violationsOf(planted)).toEqual(["backend/planted.ts: imports outside today's layers (../build/worlds-routes)"]);
+  });
+
+  test("today's layers take back what PlanSwap-15 moved out of the shared files from its new home, and nothing else of the engine", () => {
+    const planted = new Map([
+      ["src/shared/planted.ts", 'import { isAgentKnowledge } from "../engine/workspace";\nimport { createRng } from "../engine/rng";'],
+      ["src/backend/planted.ts", 'import { agentLabel } from "../frontend/review-card";\nimport { hud } from "../frontend/hud";'],
+    ]);
+    expect(violationsOf(planted)).toEqual(["shared/planted.ts (shared) → engine/rng.ts (engine)", "backend/planted.ts (backend) → frontend/hud.tsx (frontend)"]);
   });
 
   test("an import written with a .js name is read as the file it names", () => {

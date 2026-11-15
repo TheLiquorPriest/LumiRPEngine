@@ -11,7 +11,6 @@
 // a sticky bar while the review scrolls.
 
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
-import { phaseTimeText } from "../../shared/diagnostics";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { addToLoreIndex, loreIndexJson, loreSourceOf } from "../../shared/lore";
@@ -33,6 +32,14 @@ import { IssueRow } from "./check";
 import { COLLECTION_INFO, itemLabel } from "./chrome";
 import { draftSend } from "./draft";
 import { RoutineJobStart, RoutineProposalReview } from "./propose-routines";
+
+/** A part's time in words, as the timeline says it: "7 min 46 s", "14.2 s", "350 ms". */
+export function phaseTimeText(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)} min ${s % 60} s`;
+}
 
 export interface JobState {
   jobId: string;

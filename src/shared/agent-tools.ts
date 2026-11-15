@@ -13,6 +13,7 @@
 import { READ_TOOL_TEXTS } from "./agent-tools-read";
 import { WRITE_TOOL_GUIDES, WRITE_TOOL_NOTES, WRITE_TOOL_TEXTS } from "./agent-tools-write";
 import type { PromptVar } from "./prompts";
+import { AGENT_KNOWLEDGE, type AgentKnowledge } from "../engine/workspace";
 
 /**
  * What a tool may do: read; make the story's own changes to the world's fabric (`story`: a thing, a
@@ -40,14 +41,6 @@ export const TOOL_FAMILY_LABEL: Readonly<Record<ToolFamily, string>> = {
 };
 
 /**
- * A knowledge as stored data names it (a file's old readers, an old session message's or review
- * item's knowledge): the player character's, everyone in the world's (secrets marked), or the GM's.
- * Read and ignored by every agent since secrecy became guidance (DESIGN §7.1).
- */
-export type AgentKnowledge = "pov" | "everyone" | "gm";
-export const AGENT_KNOWLEDGE: readonly AgentKnowledge[] = ["pov", "everyone", "gm"];
-
-/**
  * How an agent's tools read the world (DESIGN §7.1). Neither leaves anything out: `everyone` reads
  * everything with each secret marked in the user's wording of a mark (the narrator's view); `gm`
  * reads everything, each restricted thing with its visibility: unmarked for the GM's own tools, and
@@ -59,10 +52,6 @@ export type ToolView = "everyone" | "gm";
 /** Whether what `k` reads is within what `of` reads: the player character's knowledge is within everyone's, and everyone's within the GM's. */
 export function knowledgeWithin(k: AgentKnowledge, of: AgentKnowledge): boolean {
   return AGENT_KNOWLEDGE.indexOf(k) <= AGENT_KNOWLEDGE.indexOf(of);
-}
-
-export function isAgentKnowledge(v: unknown): v is AgentKnowledge {
-  return typeof v === "string" && (AGENT_KNOWLEDGE as readonly string[]).includes(v);
 }
 
 /** One argument's description: `path` names its property, dotted through nested `properties` and `items` ("op.field"). */

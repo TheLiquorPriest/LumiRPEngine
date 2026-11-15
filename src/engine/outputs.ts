@@ -15,10 +15,10 @@
 // a setting (Settings → Agents → Recording), checked where the turn makes them, never here: a limit
 // never changes how a past turn folds. Pure.
 
-import { isAgentKnowledge } from "../shared/agent-tools";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent, PackEvent } from "../shared/ledger";
 import type { EventTypeDef } from "./registry";
+import { isAgentKnowledge } from "./workspace";
 
 export const OUT_LINES = "engine.out.lines";
 export const OUT_SCENE = "engine.out.scene";

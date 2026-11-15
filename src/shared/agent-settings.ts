@@ -9,8 +9,8 @@
 // `{source: "custom", effort: "auto"}`, and Anthropic's 4 cache breakpoints per request, which the
 // host adapter keeps (`backend/spindle-host.ts`).
 
-import type { AgentKnowledge, ToolFamily } from "./agent-tools";
-import { AGENT_KNOWLEDGE, TOOL_FAMILY_LABEL } from "./agent-tools";
+import type { ToolFamily } from "./agent-tools";
+import { TOOL_FAMILY_LABEL } from "./agent-tools";
 import { CURATOR_GATES, type CuratorGate, defaultStages, MAIN_STAGES, type MainStages, roleRunOf, STAGE_MODES } from "./agent-pipeline";
 import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleSettings } from "./agent-roles";
 import { type ContextSettings, contextSettingsOf, defaultContextSettings } from "./agent-context";
@@ -18,6 +18,8 @@ import { hasOwn, isRecord, safeKey } from "./json";
 import type { Limit } from "./minds";
 import { limitIn } from "./minds";
 import { HELPER_MAX_TOKENS, TIMELAPSE_REACH_MINUTES } from "./settings";
+import { type AgentKnowledge, AGENT_KNOWLEDGE } from "../engine/workspace";
+import { KEPT_FOLDS_DEFAULT } from "../engine/ledger/fold";
 
 /**
  * How hard an agent's model reasons (§8): off, an effort, `model` ("set by the model", for alias
@@ -285,9 +287,6 @@ export interface KeptSettings {
   chatMs: number;
 }
 
-/** The messages kept worked out by default (`KeptSettings.folds`): room for the longest chats, each message's steps a few hundred bytes. */
-export const KEPT_FOLDS_DEFAULT = 65_536;
-
 /** What the main session keeps of each past turn (Settings → Agents → Main agent → Session): receipts of its long messages and results (`receipts`), or its messages whole (`whole`). Either way the full messages stay with the turn, which `past_turn` reads. */
 export type SessionKeeps = "receipts" | "whole";
 export const SESSION_KEEPS: readonly SessionKeeps[] = ["receipts", "whole"];
@@ -482,11 +481,6 @@ export const AGENT_ROLES: readonly { id: string; label: string }[] = [
   { id: "assistant", label: "GM assistant" },
   { id: MAIN_AGENT_ROLE, label: "Main agent" },
 ];
-
-/** An agent's name, by its role, as Settings → Agents names it: a turn role's label, the GM assistant's or the main agent's; else the role's id. What the drawer's live trace shows of it. */
-export function agentLabel(role: string): string {
-  return hasOwn(ROLE_LABEL, role) ? ROLE_LABEL[role as RoleId] : (AGENT_ROLES.find((r) => r.id === role)?.label ?? role);
-}
 
 // ---------------------------------------------------------------- the page's words
 

@@ -10,7 +10,6 @@
 // agent turn runs, one row per agent at work with its role's label and its tokens so far (the live
 // trace), and nothing else, so it is safe on the player's surfaces.
 
-import { agentLabel } from "../shared/agent-settings";
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
@@ -25,6 +24,7 @@ import type { BlobStore } from "./agents/blobs";
 import type { HostPort } from "../shared/host";
 import { readStoredJson } from "../worlds/stored-json";
 import { type DiagAt, type DiagVerdict, messageOf } from "../migrate/today/diagnostics";
+import { agentLabel } from "../frontend/review-card";
 
 export type DiagHost = Pick<HostPort, "storage" | "log" | "frontend">;
 
