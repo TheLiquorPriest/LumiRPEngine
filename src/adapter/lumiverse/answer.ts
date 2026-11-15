@@ -18,13 +18,26 @@ export interface SecrecyAsk {
 /** What each secret reads as in this prompt, worked out at this point of the path, by today's rules (§9.6). */
 export type SecrecyRules = (ask: SecrecyAsk, signal: AbortSignal) => Promise<SecrecyVerdict>;
 
+/** A message of the chat as the window counts it: its id and place; whether it is the player's, since Lumiverse joins two of the player's messages next to each other into one (READINGS R-202); and whether the user hid it, where that is known. */
+export interface WindowStep {
+  id: string;
+  index: number;
+  user?: boolean;
+  hidden?: boolean;
+}
+
 /** What the history window is asked: the chat, and its messages along the path, oldest first. */
 export interface WindowAsk {
   user: string;
   chat: string;
   generation: GenerationFacts | null;
-  /** At the question: every message of the chat the prompt is built from. On receipt of a request the extension could not cut: the prompt's history messages, swipes unknown. */
-  path: readonly PathStep[];
+  /**
+   * The messages the window counts, oldest first, read only when the window is on, so a window that is off is never kept waiting on
+   * them nor refused for them. At the question: the path the extension sends. On receipt of a request the extension had no answer
+   * for: the chat's rows read then through RPE's own read, less the hidden ones and the reply being written, as far as the prompt's
+   * history reaches (`receipt.ts`). A path that cannot be read throws, and the window's answer with it.
+   */
+  path(): Promise<readonly WindowStep[]>;
 }
 
 /** The first history message to keep (the window, its step and its hold, §4.2); null keeps all. */
@@ -45,9 +58,9 @@ export interface AnswerDeps {
  * where the window says. `secretsFailed` hears why they failed.
  */
 export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal, secretsFailed: (error: unknown) => void): Promise<Answer> {
-  const ask = { user: q.user, chat: q.chat, generation: q.generation, path: q.path };
+  const at = { user: q.user, chat: q.chat, generation: q.generation };
   const cut = q.purpose === "prompt"
-    ? deps.window(ask, signal).then(
+    ? deps.window({ ...at, path: async () => q.path }, signal).then(
         (keep) => ({ keep }),
         (error: unknown) => {
           deps.log?.(`the history window for chat ${q.chat} was not worked out, so RPE cuts it when the request arrives: ${words(error)}`);
@@ -55,7 +68,7 @@ export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal,
         },
       )
     : Promise.resolve(null);
-  const secrecy = deps.secrecy({ ...ask, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
+  const secrecy = deps.secrecy({ ...at, path: q.path, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
     secretsFailed(error);
     return null;
   });

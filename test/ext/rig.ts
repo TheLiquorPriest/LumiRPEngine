@@ -3,7 +3,7 @@
 // question's route and the provider endpoint, given scripted secrecy rules, a scripted history window
 // and a scripted turn. Every name, chat and lore line is invented.
 
-import { questionRoute, type HistoryWindow, type SecrecyAsk } from "../../src/adapter/lumiverse/answer";
+import { questionRoute, type HistoryWindow, type SecrecyAsk, type WindowStep } from "../../src/adapter/lumiverse/answer";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
 import { CONFIRM_PATH, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
@@ -16,6 +16,7 @@ import type { JsonObject } from "../../src/shared/json";
 import { FakeClock } from "../standin/clock";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
 import type { Book } from "../standin/books";
+import { historyWindow, WINDOW_DEFAULTS } from "../../src/story/window";
 
 export const USER = "user-harbor";
 export const RPE = "http://127.0.0.1:7860";
@@ -90,6 +91,8 @@ export interface RigOptions {
   granted?: readonly string[];
   /** The history window: the latest this many visible messages. */
   window?: number;
+  /** The window's step (R-95): it holds `window` to `window + step` messages. */
+  step?: number;
   /** RPE takes this long to answer the question. */
   questionDelayMs?: number;
   /** RPE cannot work out the window when asked the question (it can on receipt). */
@@ -147,21 +150,23 @@ export class Rig {
     if (options.clock !== undefined) this.lv.clock = options.clock;
     const hidden = new Set(harborMessages().filter((m) => m.hidden).map((m) => m.id));
     const keep = options.window ?? 4;
-    const window: HistoryWindow = async (ask) => {
-      if (options.windowFailsAtQuestion && ask.path.some((s) => s.swipe !== null)) throw new Error("the story record was busy");
-      const visible = ask.path.filter((s) => !hidden.has(s.id));
-      const first = visible[visible.length - keep];
-      return visible.length <= keep || first === undefined ? null : { id: first.id, index: first.index };
+    // The window as RPE counts it, the latest `keep`. The question's path carries no hidden mark yet, so the fixture's hidden ids are
+    // marked here; on receipt RPE's own rows have left them out already.
+    const counted = (path: readonly WindowStep[]) => historyWindow(path.map((s) => (hidden.has(s.id) ? { ...s, hidden: true } : s)), { ...WINDOW_DEFAULTS, size: keep, step: options.step ?? null }, new Set()).first;
+    const atQuestion: HistoryWindow = async (ask) => {
+      if (options.windowFailsAtQuestion) throw new Error("the story record was busy");
+      return counted(await ask.path());
     };
+    const onReceipt: HistoryWindow = async (ask) => counted(await ask.path());
     const secrecy = async (ask: SecrecyAsk): Promise<SecrecyVerdict> => {
       if (options.secretsFail) throw new Error("RPE does not work out its lore's secrets yet");
       return harborSecrecy(ask);
     };
-    const question = questionRoute({ secrecy, window, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
+    const question = questionRoute({ secrecy, window: atQuestion, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
     const provider = providerEndpoint({
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
-      window,
+      window: onReceipt,
       // Lumiverse's rows as they stand when the request arrives: the stand-in's chat, each message at its stored number.
       rows: async (chat) => this.lv.rowsOf(chat),
       blocks: async (tag) => {

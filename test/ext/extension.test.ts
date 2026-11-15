@@ -57,7 +57,7 @@ describe("the question before lore activates", () => {
     const turn = rig.turns[0]!;
     expect(turn.tag).toMatchObject({ user: USER, chat: "chat-harbor", generation: out.generationId!, kind: "new", connection: "conn-rpe", preset: PRESET.id, target: { message: announced.targetMessageId, swipe: 0 }, speaker: { id: "char-ilsa", name: "Ilsa" } });
     expect(turn.tag.lore.map((l) => l.id).sort()).toEqual(["e-ferry", "e-public"]);
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
     expect(turn.layout.complete).toBe(true);
     // The player's last two lines, sent in a row, reach the interceptor as one message with the first one's id and number, the second
     // one's words inside it (`prompt-assembly.service.ts:3456-3461`, `:6754-6843`).
@@ -113,7 +113,7 @@ describe("the question before lore activates", () => {
 
     const turn = rig.turns[0]!;
     expect(turn.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: null, remembered: false, byRpe: 7 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: null, byRpe: 7 });
     expect(historyOf(turn)).toEqual(["m8", "m9", "m10"]);
     const played = promptText(turn.prompt);
     for (const i of LEFT_OUT) expect(played).not.toContain(label(i));
@@ -389,7 +389,7 @@ describe("RPE's secrets failing", () => {
     expect(out.error).toBeNull();
     const turn = rig.turns[0]!;
     expect(turn.tag.cut).toEqual({ answered: true, keep: { id: "m8", index: 8 }, removed: 7 });
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
     // What Lumiverse stores beside the reply holds only the window.
     const stored = out.stored!.messages.map((m) => m.content).join("\n");
     for (const i of WINDOW) expect(stored).toContain(label(i));
@@ -417,7 +417,7 @@ describe("RPE's secrets failing", () => {
     expect(out.error).toBeNull();
     expect(out.reply?.content).toBe("The tide turns.");
     const turn = rig.turns[0]!;
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
     expect(promptText(turn.prompt)).toContain(COUNCIL);
     for (const i of LEFT_OUT) expect(promptText(turn.prompt)).not.toContain(label(i));
   });

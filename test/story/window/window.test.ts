@@ -42,23 +42,40 @@ describe("the history window", () => {
     expect(historyWindow(messages, settings({ size: 3 }), NOTHING).first).toEqual({ id: "m7", index: 14 });
   });
 
-  test("with a step, holds X to X plus the step, cuts back to X on reaching it, and keeps the front still between cuts", () => {
+  test("with a window of 40 and a step of 20, 60 messages are kept whole, and the 61st cuts back to exactly 40", () => {
+    // READINGS R-95: the window holds 40 to 60, both ends; it changed from 40 to 59, the 60th cutting it back (rule 5: the test asserted that).
     const s = settings({ size: 40, step: 20 });
-    expect(kept(chat(59), s, NOTHING)).toBe(59);
-    expect(kept(chat(60), s, NOTHING)).toBe(40);
-    expect(kept(chat(79), s, NOTHING)).toBe(59);
-    expect(kept(chat(80), s, NOTHING)).toBe(40);
+    expect(kept(chat(60), s, NOTHING)).toBe(60);
+    expect(kept(chat(61), s, NOTHING)).toBe(40);
+    expect(kept(chat(62), s, NOTHING)).toBe(41);
+    expect(kept(chat(81), s, NOTHING)).toBe(60);
+    expect(kept(chat(82), s, NOTHING)).toBe(40);
     let front: string | null = null;
     for (let count = 40; count <= 300; count++) {
       const cut = historyWindow(chat(count), s, ids(0, count - 1));
       const size = kept(chat(count), s, NOTHING);
       expect(size).toBeGreaterThanOrEqual(40);
-      expect(size).toBeLessThan(60);
+      expect(size).toBeLessThanOrEqual(60);
       const first = cut.first?.id ?? null;
       // The front moves only when the window is cut back to exactly X.
       if (first !== front) expect(size).toBe(40);
       front = first;
     }
+  });
+
+  test("a cut inside a message Lumiverse joins keeps it whole and names its first row, a hidden message between them skipped", () => {
+    // m7, m8 and m9 are the player's three lines sent in a row: Lumiverse joins them into one message under m7 (READINGS R-202).
+    const queued = chat(10).map((m) => (m.index >= 7 ? { ...m, user: true } : m));
+    expect(historyWindow(queued, settings({ size: 2 }), NOTHING).first).toEqual({ id: "m7", index: 7 });
+    expect(historyWindow(queued, settings({ size: 1 }), NOTHING).first).toEqual({ id: "m7", index: 7 });
+    // The cut at the joined message's own first row moves nothing; a message of the narrator's before it is never joined.
+    expect(historyWindow(queued, settings({ size: 3 }), NOTHING).first).toEqual({ id: "m7", index: 7 });
+    expect(historyWindow(queued, settings({ size: 4 }), NOTHING).first).toEqual({ id: "m6", index: 6 });
+    // m8 hidden: m7 and m9 still reach the prompt as one.
+    const hidden = queued.map((m) => (m.id === "m8" ? { ...m, hidden: true } : m));
+    expect(historyWindow(hidden, settings({ size: 1 }), NOTHING).first).toEqual({ id: "m7", index: 7 });
+    // What is left out stops where the joined message begins.
+    expect(historyWindow(queued, settings({ size: 1 }), NOTHING).left).toEqual([{ from: { id: "m0", index: 0 }, to: { id: "m6", index: 6 }, count: 7, covered: false }]);
   });
 
   test("with the hold on, keeps uncovered messages up to its cap, and lets go of what is covered", () => {
@@ -80,7 +97,7 @@ describe("the history window", () => {
   });
 
   test("the hold works on top of a step", () => {
-    // 300 messages, X 40, step 20: the step alone keeps from 240. Uncovered 230–235 hold it back to 230.
+    // 300 messages, X 40, step 20: the step alone keeps from 252. Uncovered 230–235 hold it back to 230.
     const covered = new Set([...ids(0, 229), ...ids(236, 299)]);
     const s = settings({ size: 40, step: 20, hold: { on: true, cap: 40 } });
     expect(historyWindow(chat(300), s, covered).first).toEqual({ id: "m230", index: 230 });
@@ -107,8 +124,8 @@ describe("the history window", () => {
     // Hiding the message the window began at lets one older message in: the five it keeps are m2, m5, m6, m8 and m9.
     const later = historyWindow(messages.map((m) => (m.id === "m4" ? { ...m, hidden: true } : m)), settings({ size: 5 }), NOTHING);
     expect(later.first).toEqual({ id: "m2", index: 2 });
-    // With the step and the hold, the same: they count only what is not hidden (four of eight with a step of two: m5 on).
-    expect(historyWindow(messages, settings({ size: 4, step: 2 }), NOTHING).first).toEqual({ id: "m5", index: 5 });
+    // With the step and the hold, the same: they count only what is not hidden (five of eight with a step of two: m4 on).
+    expect(historyWindow(messages, settings({ size: 4, step: 2 }), NOTHING).first).toEqual({ id: "m4", index: 4 });
     expect(historyWindow(messages, settings({ size: 5, hold: { on: true, cap: 2 } }), new Set(["m4", "m5", "m6", "m8", "m9"])).first).toEqual({ id: "m1", index: 1 });
   });
 

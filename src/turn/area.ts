@@ -7,18 +7,16 @@
 // migration carried of a chat. The views an agent is given by name come from every area's `fills`,
 // through the app's hook (`App.hooks.views`), not from one area's alone.
 
-import { join } from "node:path";
 import type { Clock, CreateHarnessOptions } from "rp-harness";
-import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, storedKey, type App, type Area } from "../app";
-import { settingsRoutes, type LevelFile } from "../app/settings-routes";
+import { harnessSettings } from "../app/setting-list";
+import { settingsRoutes } from "../app/settings-routes";
 import type { LoreBooks } from "../lore";
 import type { Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
-import { treeLayers } from "../tree";
-import { levelBase } from "../tree/view";
+import { levelFiles } from "../tree";
 import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
 import { turnRoutes } from "./routes";
 import { passConnection, TURN_SETTINGS, turnSettings } from "./settings";
@@ -79,13 +77,16 @@ export function turnArea(takes: TurnTakes): TurnArea {
       { area: "prompt", migrations: PROMPT_MIGRATIONS },
       { area: "harness", migrations: HARNESS_MIGRATIONS },
     ],
-    settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS],
+    settings: [...harnessSettings(), ...TURN_SETTINGS],
     fills: {
       door: {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
         changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
-        // The history window on the chat's settings: the first history message the prompt keeps.
-        window: async (ask) => historyWindow(ask.path, (await chatSettings(ask.chat)).window, covered(ask.chat)).first,
+        // The history window on the chat's settings: the first history message the prompt keeps; with the window off the chat's path is never read.
+        window: async (ask) => {
+          const { window } = await chatSettings(ask.chat);
+          return window.size === null ? null : historyWindow(await ask.path(), window, covered(ask.chat)).first;
+        },
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
         ranges: async (chat) => namedStretches(made().store, owner(), chat),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
@@ -115,13 +116,9 @@ export function turnArea(takes: TurnTakes): TurnArea {
         settingsRoutes({
           settings: at.settings,
           // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
-          levels: async (chat): Promise<LevelFile[]> => {
+          levels: async (chat) => {
             const folders = chat === null ? null : chats.folders(owner(), chat);
-            const where = { files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null };
-            return treeLayers().flatMap((layer) => {
-              const base = levelBase(where, layer.level);
-              return layer.config === undefined || base === null ? [] : [{ level: layer.level, file: `${layer.mount}${layer.config}`, disk: join(where.files, ...base, layer.config) }];
-            });
+            return levelFiles({ files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null });
           },
           connections: async () => (await harness.models.list(owner())).connections.map((c) => ({ id: c.id, name: c.name })),
         }),

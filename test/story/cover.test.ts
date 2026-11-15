@@ -90,9 +90,10 @@ describe("what the story record covers", () => {
       "history.leaving.uncovered": { count: 0 },
       "history.unsummarized": { count: 1, fields: range(3, 3) },
     });
-    // With a step, nothing leaves until the window has grown to the size and the step: then the step's worth leaves at once.
-    expect((await factsAt(t, settings({ size: 6, step: 4 })))["history.leaving.uncovered"]).toEqual({ count: 0 });
-    expect((await factsAt(t, settings({ size: 7, step: 4 })))["history.leaving.uncovered"]).toEqual({ count: 3, fields: range(0, 2) });
+    // With a step, nothing leaves while the window holds the size and the step, both ends (R-95): twelve messages under 7 and a step
+    // of 5 stay whole; under 6 and a step of 5 the twelfth cuts it back to six, and six leave at once.
+    expect((await factsAt(t, settings({ size: 7, step: 5 })))["history.leaving.uncovered"]).toEqual({ count: 0 });
+    expect((await factsAt(t, settings({ size: 6, step: 5 })))["history.leaving.uncovered"]).toEqual({ count: 3, fields: range(0, 2) });
   });
 
   test("the window's hold keeps what the record does not cover, up to its cap, and what passes the cap is counted as leaving", async () => {
