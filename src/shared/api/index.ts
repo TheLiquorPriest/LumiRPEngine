@@ -267,7 +267,7 @@ export interface CheckStoppedShown {
 export interface CommandStatus {
   /** Each key in force: the provider key by its last four characters (null for one taken from today's connection, whose were never known), when it was made and, for the web token, when it ends; never a key's text. */
   keys: ({ kind: "provider" | "extension" | "web"; last4: string | null; made: number; ends: number | null; taken: boolean })[];
-  /** Every switch, each name's newest definition. */
+  /** Every user's own switches, each name's newest definition. */
   switches: SwitchEntry[];
   /** The builds that meet at RPE in a sentence or two; null where the server does not say. */
   builds: string | null;
@@ -1398,10 +1398,12 @@ export interface SuggestionsReply {
 /** Where an agent's suggestion stands: waiting on the user, accepted, or dismissed. */
 export type SuggestionStatus = "open" | "accepted" | "dismissed";
 
-/** Switch the named thing on or off. */
+/** Switch the named thing on or off, for the user it names. */
 export interface SwitchAsk {
   /** Which. */
   state: "on" | "off";
+  /** The user whose own it is; the user this RPE belongs to where left out. */
+  user?: string;
 }
 
 /** The switched entry, or null with what is listed when nothing of that name is. */
@@ -1414,6 +1416,8 @@ export interface Switched {
 
 /** A thing that runs a command or calls out, and where it stands. */
 export interface SwitchEntry {
+  /** The user whose own it is: what is on for one user is not on for another. */
+  user: string;
   /** Its name. */
   name: string;
   /** What sort of thing it is. */
@@ -1426,6 +1430,12 @@ export interface SwitchEntry {
   listed: number;
   /** When the command line last switched it; null if never. */
   changed: number | null;
+}
+
+/** The page user's own switches, each name's newest definition. */
+export interface SwitchesShown {
+  /** Each of the user's things and where it stands. */
+  switches: SwitchEntry[];
 }
 
 /** The hash of the provider key today's connection holds, which RPE takes over at the swap. */
@@ -2298,6 +2308,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: SuggestionDismissedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Every thing that runs a command or calls out that the page's own user has listed, and whether it waits, is on or is off, with what it runs or calls, or the address its connection's key would go to. Only rpe allow and rpe deny on the server switch one; no page can. */
+  "GET /api/v1/switches": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: SwitchesShown;
     paged: false;
     long: false;
     joined: false;

@@ -81,6 +81,12 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `service.restartWait` | `2` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Wait before the service starts RPE again: Seconds the service manager waits before it starts RPE again once it has stopped: the unit's RestartSec, written by rpe up --systemd. |
 | `service.drainWait` | `300` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | A later rpe up waits for turns to end: Seconds a later rpe up waits for the turns under way to end before it restarts RPE's service; it restarts it at the end of the wait all the same. |
 
+## Switches
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `switches.nameLength` | `200` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | The longest name a switch takes: Characters in the longest name of a hook, a command, an MCP server or a connection's place that RPE's registry of what is switched on takes; a longer name is refused. |
+
 ## Pages
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |

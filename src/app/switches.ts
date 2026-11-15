@@ -8,14 +8,23 @@
 // No API route can switch anything. The server's own connection is guarded so that it can only add
 // a definition as waiting, never switch one, change one or take one away; the command line opens a
 // connection of its own, which carries no guard.
+//
+// The registry is each user's own: a thing on for one user is not on for another of the same kind, name
+// and target. RPH asks it through its `switches` port (`Switches.state`) before anything runs a command
+// or calls out, and before a provider key goes to a connection whose place changed; a thing it has not
+// seen for that user is listed as waiting at that moment.
 
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
+import type { Switchable, SwitchesPort } from "rp-harness/contract";
+import { LIMIT_DEFAULTS } from "./config";
 import type { WriteQueue } from "./database";
 
 export type SwitchState = "waiting" | "on" | "off";
 
 export interface SwitchEntry {
+  /** The user whose own it is. */
+  user: string;
   name: string;
   /** What sort of thing it is, in the words of the area that lists it (a hook, an MCP server, …). */
   kind: string;
@@ -68,7 +77,14 @@ export function switchDigest(kind: string, what: string): string {
 /** Each name's newest definition listed for `user`, by name. */
 export function listSwitches(db: Database, user: string): SwitchEntry[] {
   const newest = new Map<string, SwitchEntry>();
-  for (const row of db.query<SwitchEntry, [string]>("SELECT name, kind, what, state, listed, changed FROM switch WHERE user = ? ORDER BY name, listed, rowid").all(user)) newest.set(row.name, row);
+  for (const row of db.query<SwitchEntry, [string]>("SELECT user, name, kind, what, state, listed, changed FROM switch WHERE user = ? ORDER BY name, listed, rowid").all(user)) newest.set(row.name, row);
+  return [...newest.values()];
+}
+
+/** Each user's own: every name's newest definition for each user the registry lists a thing for, by user and name. */
+export function listAllSwitches(db: Database): SwitchEntry[] {
+  const newest = new Map<string, SwitchEntry>();
+  for (const row of db.query<SwitchEntry, []>("SELECT user, name, kind, what, state, listed, changed FROM switch ORDER BY user, name, listed, rowid").all()) newest.set(JSON.stringify([row.user, row.name]), row);
   return [...newest.values()];
 }
 
@@ -78,37 +94,43 @@ export function listSwitches(db: Database, user: string): SwitchEntry[] {
  * connection: on the server's, the guard refuses it.
  */
 export function setSwitch(db: Database, user: string, name: string, state: "on" | "off", now: number): SwitchEntry | null {
-  const row = db.query<SwitchEntry & { id: number }, [string, string]>("SELECT rowid AS id, name, kind, what, state, listed, changed FROM switch WHERE user = ? AND name = ? ORDER BY listed DESC, rowid DESC LIMIT 1").get(user, name);
+  const row = db.query<SwitchEntry & { id: number }, [string, string]>("SELECT rowid AS id, user, name, kind, what, state, listed, changed FROM switch WHERE user = ? AND name = ? ORDER BY listed DESC, rowid DESC LIMIT 1").get(user, name);
   if (row === null) return null;
   db.run("UPDATE switch SET state = ?, changed = ? WHERE rowid = ?", [state, now, row.id]);
   const { id: _id, ...entry } = row;
   return { ...entry, state, changed: now };
 }
 
-/** The server's side, for the user this RPE belongs to: what is listed, and whether one definition may run now. */
-export class Switches {
+/**
+ * The server's side: RPH's `switches` port, backed by the registry, and what is listed for the user this
+ * RPE belongs to. `nameLength` is the longest name it takes (`switches.nameLength`).
+ */
+export class Switches implements SwitchesPort {
   constructor(
     private readonly db: Database,
     private readonly writes: WriteQueue,
     private readonly now: () => number,
     private readonly user: string,
+    private readonly nameLength: number = LIMIT_DEFAULTS.switches.nameLength,
   ) {}
 
+  /** What is listed for the user this RPE belongs to. */
   list(): SwitchEntry[] {
     return listSwitches(this.db, this.user);
   }
 
   /**
-   * Whether `name`, defined as `kind` running or calling `what`, may run now: on, off, or waiting
-   * for the user. A definition seen for the first time is listed as waiting, for `rpe allow`.
+   * Where `thing` stands for `user`: on, off, or waiting. A definition seen for the first time for that
+   * user is listed as waiting, for `rpe allow`; what is on for another user is not on for this one.
    */
-  async check(name: string, kind: string, what: string): Promise<SwitchState> {
-    if (name.trim() === "" || name.length > 200 || /[\u0000-\u001f]/.test(name)) throw new Error("A switch's name is one line of text of at most 200 characters.");
+  async state(user: string, thing: Switchable): Promise<SwitchState> {
+    const { name, kind, target: what } = thing;
+    if (name.trim() === "" || name.length > this.nameLength || /[\u0000-\u001f]/.test(name)) throw new Error(`A switch's name is one line of text of at most ${this.nameLength} characters (the setting switches.nameLength).`);
     if (kind.trim() === "") throw new Error(`Say what sort of thing ${name} is.`);
     const digest = switchDigest(kind, what);
-    const row = this.db.query<{ state: SwitchState }, [string, string, string]>("SELECT state FROM switch WHERE user = ? AND name = ? AND digest = ?").get(this.user, name, digest);
+    const row = this.db.query<{ state: SwitchState }, [string, string, string]>("SELECT state FROM switch WHERE user = ? AND name = ? AND digest = ?").get(user, name, digest);
     if (row !== null) return row.state;
-    await this.writes.run((db) => db.run("INSERT OR IGNORE INTO switch (user, name, digest, kind, what, state, listed) VALUES (?, ?, ?, ?, ?, 'waiting', ?)", [this.user, name, digest, kind, what, this.now()]), `listing ${name} as waiting`);
+    await this.writes.run((db) => db.run("INSERT OR IGNORE INTO switch (user, name, digest, kind, what, state, listed) VALUES (?, ?, ?, ?, ?, 'waiting', ?)", [user, name, digest, kind, what, this.now()]), `listing ${name} as waiting`);
     return "waiting";
   }
 }

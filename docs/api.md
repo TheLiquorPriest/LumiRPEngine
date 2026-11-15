@@ -1057,6 +1057,19 @@ Whose the page's credential is, and when it ends.
 | Body | none |
 | Reply | [`SessionReply`](#sessionreply) |
 
+### `GET /api/v1/switches`
+
+Every thing that runs a command or calls out that the page's own user has listed, and whether it waits, is on or is off, with what it runs or calls, or the address its connection's key would go to. Only rpe allow and rpe deny on the server switch one; no page can.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`SwitchesShown`](#switchesshown) |
+
 ### `POST /api/v1/update`
 
 "Update now": RPE restarts onto its new app file once no turn or job runs, whatever update.restart says, and answers where that stands.
@@ -1531,7 +1544,7 @@ How RPE stands as its own command line is told: the keys in force, the switches 
 export interface CommandStatus {
   /** Each key in force: the provider key by its last four characters (null for one taken from today's connection, whose were never known), when it was made and, for the web token, when it ends; never a key's text. */
   keys: ({ kind: "provider" | "extension" | "web"; last4: string | null; made: number; ends: number | null; taken: boolean })[];
-  /** Every switch, each name's newest definition. */
+  /** Every user's own switches, each name's newest definition. */
   switches: SwitchEntry[];
   /** The builds that meet at RPE in a sentence or two; null where the server does not say. */
   builds: string | null;
@@ -3280,12 +3293,14 @@ export type SuggestionStatus = "open" | "accepted" | "dismissed";
 
 ### `SwitchAsk`
 
-Switch the named thing on or off.
+Switch the named thing on or off, for the user it names.
 
 ```ts
 export interface SwitchAsk {
   /** Which. */
   state: "on" | "off";
+  /** The user whose own it is; the user this RPE belongs to where left out. */
+  user?: string;
 }
 ```
 
@@ -3308,6 +3323,8 @@ A thing that runs a command or calls out, and where it stands.
 
 ```ts
 export interface SwitchEntry {
+  /** The user whose own it is: what is on for one user is not on for another. */
+  user: string;
   /** Its name. */
   name: string;
   /** What sort of thing it is. */
@@ -3320,6 +3337,17 @@ export interface SwitchEntry {
   listed: number;
   /** When the command line last switched it; null if never. */
   changed: number | null;
+}
+```
+
+### `SwitchesShown`
+
+The page user's own switches, each name's newest definition.
+
+```ts
+export interface SwitchesShown {
+  /** Each of the user's things and where it stands. */
+  switches: SwitchEntry[];
 }
 ```
 

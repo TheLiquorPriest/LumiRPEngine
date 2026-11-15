@@ -14,7 +14,7 @@ import { lumiverseCommand } from "./commands/lumiverse";
 import { migrateCommand } from "./commands/migrate";
 import { serveCommand } from "./commands/serve";
 import { statusCommand } from "./commands/status";
-import { switchCommand } from "./commands/switch";
+import { listSwitchesCommand, switchCommand } from "./commands/switch";
 import { upCommand } from "./commands/up";
 import { versionCommand } from "./commands/version";
 import type { Env } from "./config";
@@ -94,8 +94,10 @@ export const USAGE = [
   "                     [--context-window <tokens>] [--max-tokens <tokens>]",
   "                                 add one; its key is asked for, never given on the line",
   "  rpe connection remove <name or id>",
-  "  rpe allow <name>               switch on something that runs a command or calls out",
-  "  rpe deny <name>                switch it off",
+  "  rpe allow [<name>] [--user <id>]  switch on something that runs a command or calls out, or a",
+  "                                 connection's key at the place its connection now goes to; with no name,",
+  "                                 list each user's own things and where each stands",
+  "  rpe deny <name> [--user <id>]  switch it off",
   "  rpe backup [--out <file>]      one archive of the database and the file tree",
   "  rpe migrate [--rehearse] --lumiverse <folder> --user <id> [...]",
   "                                 carry today's build's data into RPE; --rehearse writes nothing",
@@ -117,8 +119,8 @@ const FLAGS: Readonly<Record<string, readonly string[]>> = {
   status: ["data"],
   lumiverse: ["data", "url", "user", "database", "connection"],
   key: ["data"],
-  allow: ["data"],
-  deny: ["data"],
+  allow: ["data", "user"],
+  deny: ["data", "user"],
   backup: ["data", "out"],
   connection: ["data", "name", "provider", "auth", "model", "effort", "base-url", "context-window", "max-tokens"],
   check: ["data", "into", "within"],
@@ -168,8 +170,9 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
         return await connectionCommand(words, flags, paths, config, io);
       default: {
         const name = words[0];
+        if (command === "allow" && words.length === 0) return await listSwitchesCommand(flags.user, paths, config, io, options.version);
         if (words.length !== 1 || name === undefined) throw new UsageError(`rpe ${command} takes one name.`);
-        return await switchCommand(name, command === "allow" ? "on" : "off", paths, config, io, options.version);
+        return await switchCommand(name, command === "allow" ? "on" : "off", flags.user, paths, config, io, options.version);
       }
     }
   } catch (error) {

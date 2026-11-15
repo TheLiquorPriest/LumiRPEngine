@@ -222,7 +222,7 @@ describe("one writer, while RPE runs", () => {
     });
     // The server holds the data folder, so a command that wrote on its own would wait for it in vain: each of these has to be the server's write.
     expect((await lockHolder(bed.paths.root))?.what).toBe("rpe serve");
-    await app.switches.check("format", "hook", "fmt --write {file}");
+    await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" });
     queued.length = 0;
 
     const key = await rpe(["key"]);
@@ -234,9 +234,9 @@ describe("one writer, while RPE runs", () => {
     expect((await rpe(["key", "web"])).code).toBe(0);
     const allowed = await rpe(["allow", "format"]);
     expect(allowed.code).toBe(0);
-    expect(await app.switches.check("format", "hook", "fmt --write {file}")).toBe("on");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("on");
     expect((await rpe(["deny", "format"])).code).toBe(0);
-    expect(await app.switches.check("format", "hook", "fmt --write {file}")).toBe("off");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("off");
     expect(queued.filter((label) => label === "the command line's change")).toHaveLength(4);
 
     const signed = await rpe(["lumiverse", "--url", lumiverse.url, "--user", ACCOUNT.username], { secret: ACCOUNT.password });

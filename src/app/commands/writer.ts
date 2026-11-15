@@ -95,8 +95,8 @@ export function socketOps(call: SocketCall): CommandOps {
     async takeKey(hash) {
       await call("POST", COMMAND_PATHS.takenKeys, { hash });
     },
-    async setSwitch(name, state) {
-      return readAs(switched, await call("PUT", COMMAND_PATHS.switches.replace(":name", encodeURIComponent(name)), { state }), "the switch");
+    async setSwitch(name, state, user) {
+      return readAs(switched, await call("PUT", COMMAND_PATHS.switches.replace(":name", encodeURIComponent(name)), { state, ...(user === undefined ? {} : { user }) }), "the switch");
     },
     async saveLumiverse(save) {
       await call("PUT", COMMAND_PATHS.lumiverse, save);

@@ -14,7 +14,7 @@ import type { DataPaths } from "./config";
 import { updateConfigFile } from "./config";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
 import type { SecretsFile } from "./secrets";
-import { asCommand, listSwitches, setSwitch, type SwitchEntry } from "./switches";
+import { asCommand, listAllSwitches, listSwitches, setSwitch, type SwitchEntry } from "./switches";
 
 /** The part of the secrets file the adapter keeps its sign-in to Lumiverse in (src/adapter/lumiverse/mount.ts). */
 export const SIGN_IN_PART = "lumiverse";
@@ -53,11 +53,16 @@ export const keyMade = shape.named(
   }),
 );
 export const takenKeyAsk = shape.named("TakenKeyAsk", "The hash of the provider key today's connection holds, which RPE takes over at the swap.", shape.object({ hash: shape.field(shape.text({ blank: false }), "The key's SHA-256, in hex.") }));
-export const switchAsk = shape.named("SwitchAsk", "Switch the named thing on or off.", shape.object({ state: shape.field(shape.oneOf("on", "off"), "Which.") }));
+export const switchAsk = shape.named(
+  "SwitchAsk",
+  "Switch the named thing on or off, for the user it names.",
+  shape.object({ state: shape.field(shape.oneOf("on", "off"), "Which."), user: shape.optional(T, "The user whose own it is; the user this RPE belongs to where left out.") }),
+);
 export const switchEntry = shape.named(
   "SwitchEntry",
   "A thing that runs a command or calls out, and where it stands.",
   shape.object({
+    user: shape.field(T, "The user whose own it is: what is on for one user is not on for another."),
     name: shape.field(T, "Its name."),
     kind: shape.field(T, "What sort of thing it is."),
     what: shape.field(T, "Exactly what it runs or calls."),
@@ -89,7 +94,7 @@ export const commandStatus = shape.named(
       shape.list(shape.object({ kind: KIND, last4: shape.nullable(T), made: shape.number(), ends: shape.nullable(shape.number()), taken: shape.yesNo() })),
       "Each key in force: the provider key by its last four characters (null for one taken from today's connection, whose were never known), when it was made and, for the web token, when it ends; never a key's text.",
     ),
-    switches: shape.field(shape.list(switchEntry), "Every switch, each name's newest definition."),
+    switches: shape.field(shape.list(switchEntry), "Every user's own switches, each name's newest definition."),
     builds: shape.field(shape.nullable(T), "The builds that meet at RPE in a sentence or two; null where the server does not say."),
   }),
 );
@@ -121,7 +126,7 @@ export interface CommandSink {
 export interface CommandOps {
   makeKey(ask: KeyAsk): Promise<KeyMade>;
   takeKey(hash: string): Promise<void>;
-  setSwitch(name: string, state: "on" | "off"): Promise<Switched>;
+  setSwitch(name: string, state: "on" | "off", user?: string): Promise<Switched>;
   saveLumiverse(save: LumiverseSave): Promise<void>;
   status(): Promise<CommandStatus>;
 }
@@ -161,8 +166,8 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
       const user = ownerOf(sink);
       await sink.run((db) => takeKeyHash(db, user, hash, sink.now()));
     },
-    async setSwitch(name, state) {
-      const user = ownerOf(sink);
+    async setSwitch(name, state, whose) {
+      const user = whose ?? ownerOf(sink);
       return await sink.run((db) => {
         const entry = asCommand(db, () => setSwitch(db, user, name, state, sink.now()));
         return { entry, listed: listSwitches(db, user).map((s) => ({ name: s.name, state: s.state })) };
@@ -190,7 +195,7 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
     async status() {
       // Before the install names a user there is nothing of his to say.
       const user = sink.user;
-      return { keys: user === null ? [] : currentKeys(sink.db, user), switches: user === null ? [] : listSwitches(sink.db, user), builds: await builds() };
+      return { keys: user === null ? [] : currentKeys(sink.db, user), switches: user === null ? [] : listAllSwitches(sink.db), builds: await builds() };
     },
   };
 }
@@ -215,7 +220,7 @@ export function commandRoutes(sink: CommandSink, builds: () => Promise<string | 
   return [
     route({ method: "POST", path: COMMAND_PATHS.keys, access: "command", group: "service", does: "Makes a new key of a kind, which retires the one before it; shown this once.", body: keyAsk, reply: keyMade, handle: ({ body }) => asked(ops.makeKey(body)) }),
     route({ method: "POST", path: COMMAND_PATHS.takenKeys, access: "command", group: "service", does: "Takes over the provider key today's connection holds, by its hash alone.", body: takenKeyAsk, reply: shape.nothing(), handle: ({ body }) => asked(ops.takeKey(body.hash)) }),
-    route({ method: "PUT", path: COMMAND_PATHS.switches, access: "command", group: "service", does: "Switches a thing that runs a command or calls out on or off: the one road to it.", body: switchAsk, reply: switched, handle: ({ params, body }) => asked(ops.setSwitch(params.name, body.state)) }),
+    route({ method: "PUT", path: COMMAND_PATHS.switches, access: "command", group: "service", does: "Switches a thing that runs a command or calls out on or off: the one road to it.", body: switchAsk, reply: switched, handle: ({ params, body }) => asked(ops.setSwitch(params.name, body.state, body.user)) }),
     route({ method: "PUT", path: COMMAND_PATHS.lumiverse, access: "command", group: "service", does: "Keeps RPE's sign-in to Lumiverse and the config's Lumiverse block.", body: lumiverseSave, reply: shape.nothing(), handle: ({ body }) => asked(ops.saveLumiverse(body)) }),
     route({ method: "GET", path: COMMAND_PATHS.status, access: "command", group: "service", does: "The keys in force, the switches and the builds, for `rpe status`.", reply: commandStatus, handle: () => ops.status() }),
   ] as const;

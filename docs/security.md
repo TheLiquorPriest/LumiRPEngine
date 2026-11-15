@@ -47,7 +47,7 @@ The extension takes RPE's registration only at a bare address on this machine (a
 
 Your model providers' keys, sign-ins to providers, and RPE's sign-in to Lumiverse are in `secrets.json` in RPE's data folder, which only your account can read. They are never in the files agents see, never in a transcript or a turn's folder, and never sent to a page. Your Lumiverse password is asked for when RPE signs in, and is not kept.
 
-Each provider key, and each header value a connection sends, is kept with the place it was given for: the connection's provider and the server its address names (its scheme, host and port). When a connection is moved to another server, on the Connections page, by a setting or by hand while RPE was stopped, they are dropped rather than sent there, and you give them again. This holds across a restart too, and across a run of the migration: the run keeps that place beside each key RPE already holds, and a key it takes from the previous build goes only where the previous build sends it.
+Each provider key, and each header value a connection sends, is kept with the place it was given for: the connection's provider and the server its address names (its scheme, host and port). When a connection is moved to another server, on the Connections page, by a setting or by hand while RPE was stopped, they are held and sent nowhere: the connection's new place is listed as waiting, with the address it would go to, until you switch it on with `rpe allow <connection>` on the server (`rpe deny` keeps them held). No page session can do that, so a page cannot send a key to an address of its choosing. This holds across a restart too, and across a run of the migration: the run keeps that place beside each key RPE already holds, and a key it takes from the previous build goes only where the previous build sends it.
 
 ## What RPE reads and writes
 
@@ -64,13 +64,15 @@ Each provider key, and each header value a connection sends, is kept with the pl
 
 ## What RPE never does by itself
 
-RPE switches on nothing that runs a command or calls out on its own. A hook, a command a rule runs, a command tool, an MCP server started by a command, or the address an HTTP tool or an MCP server calls: written in a file or added in a page, each is only listed as waiting. It runs only once you switch it on from the server's own command line:
+RPE switches on nothing that runs a command or calls out on its own. A hook, a command a rule runs, a command tool, an MCP server started by a command, the address an HTTP tool or an MCP server calls, or a connection's key at the address its connection now goes to: written in a file or added in a page, each is only listed as waiting, the first time RPE is asked to run it or call it. It runs only once you switch it on from the server's own command line:
 
 ```sh
 rpe allow <name>
 rpe deny <name>
 ```
 
-No page session can do that, however it was opened, so a page that reaches RPE cannot plant code or point a tool at an address of its choosing. `rpe status` lists what is waiting. (This build has no tools that run a command or call out yet; see [the README](../README.md#what-this-build-does-not-have-yet).)
+What is switched on is each user's own: a thing on for one user is not on for another, even of the same kind, name and target (`--user <id>` names the user; without it, the user this RPE belongs to). A thing that changes, in its command or its address, waits again: the switch holds what you were shown.
+
+No page session can switch anything, however it was opened, so a page that reaches RPE cannot plant code or point a tool at an address of its choosing. A page can only read the list: the Rules and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls. `rpe allow` with no name lists each user's own things the same way, and `rpe status` lists what is waiting. The longest name a thing may have is the setting `switches.nameLength`. (This build has no tools that run a command or call out yet; see [the README](../README.md#what-this-build-does-not-have-yet).)
 
 Rules that only add text to what an agent reads need no such step. They can say anything to an agent, and can run nothing.

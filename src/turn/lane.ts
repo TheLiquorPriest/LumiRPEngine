@@ -13,8 +13,9 @@
 //                                                            a host's and the cast's given by name
 //   clock    the machine's                          log      the app's
 //
-// Left out, as the contract allows: `approvals` (every lane is Auto), `switches` (everything that runs a
-// command or calls out is off), and `stores` (RPE reaches no store but its own).
+// Left out, as the contract allows: `approvals` (every lane is Auto) and `stores` (RPE reaches no store but its
+// own). `switches` is the app's registry (`src/app/switches.ts`): RPH asks it, for the run's user, before
+// anything that runs a command or calls out, and before a provider key goes to a connection whose place changed.
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
@@ -302,6 +303,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     searchers: [],
     facts: { defs: () => facts.defs(), read: (scope, names) => facts.read(joined(scope), names) },
     models: app.models,
+    switches: app.switches,
     store: kvStore(app.db, app.writes),
     trace,
     events: {

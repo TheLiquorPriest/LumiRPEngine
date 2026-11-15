@@ -185,6 +185,10 @@ export interface AppConfig {
     /** How long a later `rpe up` waits for the turns under way to end before it restarts RPE's service, in milliseconds (`service.drainWait`). */
     drainWaitMs: number;
   };
+  switches: {
+    /** The longest name of a thing that runs a command or calls out the registry takes, in characters (`switches.nameLength`). */
+    nameLength: number;
+  };
   workers: {
     /** The most worker threads RPE runs heavy work on at once; null: the machine's cores less one, at least one. */
     threads: number | null;
@@ -196,7 +200,7 @@ export interface AppConfig {
 }
 
 /** The app's limits: everything of its config but the install's facts. */
-export type AppLimits = Pick<AppConfig, "address" | "origins" | "hosts" | "server" | "auth" | "live" | "database" | "commandLine" | "service" | "workers" | "index">;
+export type AppLimits = Pick<AppConfig, "address" | "origins" | "hosts" | "server" | "auth" | "live" | "database" | "commandLine" | "service" | "switches" | "workers" | "index">;
 
 /** Loopback, where RPE always listens and where its connection in Lumiverse reaches it. */
 export const LOOPBACK = "127.0.0.1";
@@ -214,6 +218,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   database: { busyMs: 5000, sliceMs: 10, copiesKept: 3, pieceBytes: 1024 * 1024 },
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000, askEveryMs: 250 },
   service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000 },
+  switches: { nameLength: 200 },
   workers: { threads: null },
   index: { batch: 500 },
 });
@@ -268,6 +273,7 @@ export const SERVER_SETTING_DEFS = {
   memory: { key: "service.memory", default: D.service.memory, takes: { type: "text" }, levels: GLOBAL, perConnection: false, name: "Memory RPE's service may hold", about: "The most memory RPE's service may hold, as systemd reads a size (768M, 2G) or infinity for none, at least 256M: the unit's MemoryMax. rpe up --memory sets it; the service holds to it from the next rpe up --systemd.", effect: "start" },
   restartWait: { key: "service.restartWait", default: D.service.restartWait, takes: whole(1, 3600), levels: GLOBAL, perConnection: false, name: "Wait before the service starts RPE again", about: "Seconds the service manager waits before it starts RPE again once it has stopped: the unit's RestartSec, written by rpe up --systemd.", effect: "start" },
   drainWait: { key: "service.drainWait", default: D.service.drainWaitMs / 1000, takes: whole(0, 86_400), levels: GLOBAL, perConnection: false, name: "A later rpe up waits for turns to end", about: "Seconds a later rpe up waits for the turns under way to end before it restarts RPE's service; it restarts it at the end of the wait all the same.", effect: "start" },
+  nameLength: { key: "switches.nameLength", default: D.switches.nameLength, takes: whole(1, 10_000), levels: GLOBAL, perConnection: false, name: "The longest name a switch takes", about: "Characters in the longest name of a hook, a command, an MCP server or a connection's place that RPE's registry of what is switched on takes; a longer name is refused.", effect: "start" },
   workerParseBytes: { key: "server.workerParseBytes", default: D.server.workerParseBytes, takes: whole(1024, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Parsed on a worker from", about: "Bytes from which a request's body is parsed on a worker thread, so that a long prompt's parse never holds up another request.", effect: "start" },
   threads: { key: "workers.threads", default: D.workers.threads, takes: { type: "whole", least: 1, most: 256 }, orNone: true, none: "the machine's cores less one, at least one", levels: GLOBAL, perConnection: false, name: "Worker threads", about: "The most worker threads RPE runs its heavy work on at once: parsing very large requests, searching.", effect: "start" },
   batch: { key: "index.batch", default: D.index.batch, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Index rows written at once", about: "Rows the index file's writer writes in one transaction.", effect: "start" },
@@ -410,6 +416,7 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs), copiesKept: n(s.copiesKept), pieceBytes: n(s.pieceBytes) },
     commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs), askEveryMs: n(s.askEveryMs) },
     service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000 },
+    switches: { nameLength: n(s.nameLength) },
     workers: { threads: read.value(s.threads) as number | null },
     index: { batch: n(s.batch) },
   };
@@ -427,7 +434,7 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
   const l = limits;
   if (isRecord(raw) && raw.v !== undefined && raw.v !== 1) throw new ConfigError(`${where} is of a format this RPE does not read (v ${String(raw.v)}).`);
   const { v: _v, ...rest } = isRecord(raw) ? raw : ({} as Record<string, unknown>);
-  const read = readGroup<Omit<AppConfig, "fromEnvironment" | "service" | "workers" | "index" | "auth"> & { auth: Pick<AppConfig["auth"], "pageTokenMinutes" | "commandLineSeconds" | "webKeyDays"> }>(isRecord(raw) ? rest : raw, where, {
+  const read = readGroup<Omit<AppConfig, "fromEnvironment" | "service" | "switches" | "workers" | "index" | "auth"> & { auth: Pick<AppConfig["auth"], "pageTokenMinutes" | "commandLineSeconds" | "webKeyDays"> }>(isRecord(raw) ? rest : raw, where, {
     address: [hostName, l.address],
     port: [wholeIn(0, 65535), D.port],
     lumiverse: [
@@ -511,7 +518,7 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
   });
   // The web sessions' own settings were never in config.json: they are the settings' alone.
   const { webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes } = l.auth;
-  const config: AppConfig = { ...read, auth: { ...read.auth, webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes }, service: structuredClone(l.service), workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
+  const config: AppConfig = { ...read, auth: { ...read.auth, webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes }, service: structuredClone(l.service), switches: { ...l.switches }, workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
   const set = (name: string): string | undefined => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;

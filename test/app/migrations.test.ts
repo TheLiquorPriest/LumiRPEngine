@@ -183,7 +183,7 @@ describe("migrations", () => {
     for (const table of ["migration", "meta", "provider_key", "switch", "tree_default"]) expect({ table, users: users(table) }).toEqual({ table, users: [OWNER] });
     // What they held before they hold still, as the install's user's: his key opens RPE, his switch is on.
     expect(app.auth.holds("provider", key)).toBe(true);
-    expect(await app.switches.check("format", "hook", "fmt {file}")).toBe("waiting");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt {file}" })).toBe("waiting");
     expect(app.switches.list().find((s) => s.what === "fmt {file}")?.state).toBe("waiting");
     expect(app.db.query("SELECT state FROM switch WHERE digest = 'd1'").get()).toEqual({ state: "on" });
     // The copy taken first holds the file as the build before left it, no user in it.

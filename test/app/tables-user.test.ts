@@ -5,7 +5,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { asCommand, setSwitch, Switches } from "../../src/app/switches";
+import { asCommand, listSwitches, setSwitch } from "../../src/app/switches";
 import { NO_OWNER } from "../../src/app/auth";
 import { compose } from "../../src/app/compose";
 import { migrate, Migrations } from "../../src/app/migrations";
@@ -97,12 +97,11 @@ describe("RPE opens for its user alone", () => {
 
   test("a switch turned on under one user is not on for another", async () => {
     const app = await bed.open();
-    expect(await app.switches.check("format", "hook", "fmt --write {file}")).toBe("waiting");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("waiting");
     await app.writes.run((db) => asCommand(db, () => setSwitch(db, OWNER, "format", "on", app.now())));
-    expect(await app.switches.check("format", "hook", "fmt --write {file}")).toBe("on");
-    const other = new Switches(app.db, app.writes, app.now, "user-other");
-    expect(other.list()).toEqual([]);
-    expect(await other.check("format", "hook", "fmt --write {file}")).toBe("waiting");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("on");
+    expect(listSwitches(app.db, "user-other")).toEqual([]);
+    expect(await app.switches.state("user-other", { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("waiting");
     await app.writes.run((db) => expect(asCommand(db, () => setSwitch(db, "user-other", "nothing-listed", "on", app.now()))).toBeNull());
     expect(app.switches.list().map((s) => [s.name, s.state])).toEqual([["format", "on"]]);
   });

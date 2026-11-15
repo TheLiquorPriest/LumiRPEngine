@@ -11,6 +11,7 @@ import { PAGE_SETTINGS } from "./page-settings";
 import { serviceRoutes } from "./service-routes";
 import { signinDeps, signinRoutes } from "./signin-routes";
 import { type SettingsDeps, settingsRoutes } from "./settings-routes";
+import { switchesRoutes } from "./switches-routes";
 import { UPDATE_SETTINGS } from "./update";
 
 /** What the app area takes from the composition. */
@@ -34,6 +35,7 @@ export function appArea(takes?: AppTakes): Area {
             takes.opened(at);
             at.routes.add("service", serviceRoutes({ builds: at.builds }));
             at.routes.add("backups", [backupsRoute(at.paths.backups)]);
+            at.routes.add("switches", switchesRoutes(at.db));
             at.routes.add("signin", signinRoutes(signinDeps(at, takes.accounts ?? null)));
           },
           // Once every area is mounted: the levels and connections come from the tree and the turn lane.

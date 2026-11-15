@@ -270,7 +270,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     routes,
     live,
     auth,
-    switches: new Switches(db, writes, now, user),
+    switches: new Switches(db, writes, now, user, config.switches.nameLength),
     secrets,
     models: modelsPort(paths, secrets, () => config.lumiverse.user),
     log,

@@ -42,7 +42,7 @@ describe("the command line's routes", () => {
     expect(server.commandSocket).toBe(commandSocketPath(bed.paths.root));
     // The socket is the owner's alone.
     expect((await stat(commandSocketPath(bed.paths.root))).mode & 0o077).toBe(0);
-    await app.switches.check("format", "hook", "fmt --write {file}");
+    await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" });
 
     for (const ask of asks) {
       const answered = await onSocket(ask.method, ask.path, ask.body);
@@ -84,10 +84,10 @@ describe("the command line's routes", () => {
   });
 
   test("a switch is switched on or off by the command line alone, and an unknown name says what is listed", async () => {
-    expect(await app.switches.check("format", "hook", "fmt --write {file}")).toBe("waiting");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("waiting");
     const on = await (await onSocket("PUT", switchPath("format"), { state: "on" })).json();
     expect(on).toMatchObject({ entry: { name: "format", kind: "hook", state: "on" }, listed: [{ name: "format", state: "on" }] });
-    expect(await app.switches.check("format", "hook", "fmt --write {file}")).toBe("on");
+    expect(await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" })).toBe("on");
     expect(await (await onSocket("PUT", switchPath("format"), { state: "off" })).json()).toMatchObject({ entry: { state: "off" } });
     expect(await (await onSocket("PUT", switchPath("nothing-of-the-kind"), { state: "on" })).json()).toEqual({ entry: null, listed: [{ name: "format", state: "off" }] });
     expect((await onSocket("PUT", switchPath("format"), { state: "maybe" })).status).toBe(400);
@@ -109,7 +109,7 @@ describe("the command line's routes", () => {
 
     await makeKey(app, "extension");
     await onSocket("POST", COMMAND_PATHS.keys, { kind: "web" });
-    await app.switches.check("format", "hook", "fmt --write {file}");
+    await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" });
     const status = await (await onSocket("GET", COMMAND_PATHS.status)).json();
     expect(status.keys.map((k: { kind: string }) => k.kind).sort()).toEqual(["extension", "web"]);
     expect(status.switches).toMatchObject([{ name: "format", state: "waiting" }]);

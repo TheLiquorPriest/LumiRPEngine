@@ -7,7 +7,7 @@ import { currentKeys } from "../auth";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { appliedMigrations } from "../migrations";
-import { listSwitches } from "../switches";
+import { listAllSwitches } from "../switches";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { atWords } from "./words";
@@ -51,10 +51,11 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
       });
     });
     io.out(`Keys: ${keyLines.join("; ")}`);
-    const switches = said !== null ? said.switches : listSwitches(db, user);
+    const switches = said !== null ? said.switches : listAllSwitches(db);
     const waiting = switches.filter((s) => s.state === "waiting");
     io.out(`Switches: ${waiting.length} waiting, ${switches.filter((s) => s.state === "on").length} on, ${switches.filter((s) => s.state === "off").length} off`);
-    for (const s of waiting) io.out(`  waiting: ${s.name} (${s.kind}) runs ${s.what}. Switch it on with: ${runLine(io, paths, "allow", s.name)}`);
+    // Each user's own: a thing of another user than this RPE's is said with whose it is.
+    for (const s of waiting) io.out(`  waiting${s.user === user ? "" : ` for user ${s.user}`}: ${s.name} (${s.kind}) runs or calls ${s.what}. Switch it on with: ${runLine(io, paths, "allow", s.name, ...(s.user === user ? [] : ["--user", s.user]))}`);
   } finally {
     db.close();
   }

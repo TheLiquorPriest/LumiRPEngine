@@ -132,13 +132,13 @@ describe("rpe", () => {
     expect((await rpe(["status"])).out).toContain("not answering");
     const { app } = await serving();
     await rpe(["key"]);
-    await app.switches.check("format", "hook", "fmt --write {file}");
+    await app.switches.state(app.auth.owner, { kind: "hook", name: "format", target: "fmt --write {file}" });
     const shown = await rpe(["status"]);
     expect(shown.code).toBe(0);
     expect(shown.out).toContain(`Listens on: http://127.0.0.1:${port}, answering (RPE 1.0.0)`);
     expect(shown.out).toContain(`for user ${OWNER}`);
     expect(shown.out).toMatch(/provider ends [0-9a-f]{4}/);
-    expect(shown.out).toContain("waiting: format (hook) runs fmt --write {file}. Switch it on with: rpe allow format");
+    expect(shown.out).toContain("waiting: format (hook) runs or calls fmt --write {file}. Switch it on with: rpe allow format");
   });
 
   test("connection adds, lists and removes through the running server, asking for the key and never showing it", async () => {
@@ -165,7 +165,7 @@ describe("rpe", () => {
     const flag = await rpe(["status", "--port", "1"]);
     expect(flag.code).toBe(2);
     expect(flag.err).toContain("does not take --port");
-    expect((await rpe(["allow"])).code).toBe(2);
+    expect((await rpe(["deny"])).code).toBe(2);
   });
 
   test("version prints the build's id alone, reading no data folder and asking nothing over the network", async () => {
