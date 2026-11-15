@@ -56,10 +56,10 @@ function harbor(b: DoorBed): void {
 describe("the door, mounted in the app", () => {
   test("RPE registers with the extension on loopback, with a key of its own and the build; the extension keeps just that, and tells RPE nothing is missing", async () => {
     const b = await bed();
-    expect(b.registration).toMatchObject({ v: 1, base: `http://127.0.0.1:${b.listening.port}`, connection: "conn-rpe", build: "build-7" });
+    expect(b.registration).toMatchObject({ v: 1, base: `http://127.0.0.1:${b.listening.port}`, connections: ["conn-rpe"], build: "build-7" });
     expect(b.registration.key.startsWith("rpx_")).toBe(true);
     expect(b.kept()).toEqual(b.registration);
-    expect(b.door.extension()).toEqual({ registered: true, why: null, missing: [] });
+    expect(b.door.extension()).toEqual({ registered: true, why: null, missing: [], stopped: null });
     await b.until("the event socket to open", () => b.door.lumiverse()?.events.open);
   });
 
@@ -81,7 +81,7 @@ describe("the door, mounted in the app", () => {
     const status = async (): Promise<unknown> => await (await fetch(`${b.listening.url}${EXTENSION_STATUS_PATH}`, { headers: page })).json();
     const untitled = { model: "rpe", messages: [{ role: "user", content: "Name this chat." }], stream: false };
     const untagged = (): Promise<Response> => fetch(`${b.listening.url}/v1/chat/completions`, { method: "POST", headers: bearer(b.providerKey), body: JSON.stringify(untitled) });
-    expect(await status()).toEqual({ registered: true, why: null, missing: [] });
+    expect(await status()).toEqual({ registered: true, why: null, missing: [], stopped: null });
 
     // The extension refuses one of RPE's registrations, as it does any it cannot confirm.
     b.installed.sendToFrontend({ rpe: "refused", why: "RPE did not confirm it.", missing: [] }, USER, { frontendSessionId: b.registration.relay });
@@ -89,7 +89,7 @@ describe("the door, mounted in the app", () => {
     // A title asked for meanwhile is passed through and answered: keeping an unplayed reply out is the extension's work.
     expect((await untagged()).status).toBe(200);
     expect(b.heard.passed).toHaveLength(1);
-    expect(await status()).toEqual({ registered: false, why: expect.stringContaining("RPE did not confirm it."), missing: [] });
+    expect(await status()).toEqual({ registered: false, why: expect.stringContaining("RPE did not confirm it."), missing: [], stopped: null });
     expect(b.logs.filter((line) => line.includes("RPE did not confirm it."))).toHaveLength(1);
 
     // RPE registers again; the extension holds that very registration, and takes it.
@@ -235,7 +235,7 @@ describe("who the extension takes a registration from", () => {
   test("a page of RPE's own user cannot register in RPE's place: RPE does not confirm a key it did not make, the page is told, and RPE's registration stays", async () => {
     const b = await bed();
     const page = socketOf(b, USER, PAGE);
-    page.send({ rpe: "register", registration: { v: 1, base: b.listening.loopback, key: "rpx_made-up", connection: "conn-other", relay: PAGE, build: "build-7", values: { questionMs: 3_000, logChars: 200 } } });
+    page.send({ rpe: "register", registration: { v: 1, base: b.listening.loopback, key: "rpx_made-up", connections: ["conn-other"], relay: PAGE, build: "build-7", values: { questionMs: 3_000, logChars: 200 } } });
     expect(await b.until("the page to be told", () => page.heard.find(said("refused")))).toMatchObject({ why: expect.stringContaining("did not confirm") });
     expect(b.kept()).toEqual(b.registration);
     harbor(b);
@@ -260,7 +260,7 @@ describe("who the extension takes a registration from", () => {
       return Response.json({ ok: true });
     });
     const page = socketOf(b, OTHER_USER, OTHER_PAGE);
-    page.send({ rpe: "register", registration: { v: 1, base: "http://127.0.0.1:11434", key: "anything", connection: null, relay: OTHER_PAGE, build: "x", values: { questionMs: 3_000, logChars: 200 } } });
+    page.send({ rpe: "register", registration: { v: 1, base: "http://127.0.0.1:11434", key: "anything", connections: [], relay: OTHER_PAGE, build: "x", values: { questionMs: 3_000, logChars: 200 } } });
     expect(await b.until("the page to be told", () => page.heard.find(said("refused")))).toMatchObject({ why: expect.stringContaining("not RPE") });
     page.send({ rpe: "request", id: "r2", method: "DELETE", path: "/api/v1/models/x", headers: {} });
     expect(await b.until("the page's answer", () => page.heard.find(said("response")))).toMatchObject({ id: "r2", status: 403 });
@@ -269,12 +269,12 @@ describe("who the extension takes a registration from", () => {
 
   test("without the proxy permission the extension cannot ask RPE to confirm: RPE says why and what is missing, Lumiverse shows the notice, and once it is granted RPE is registered by itself", async () => {
     const b = await bed({ granted: ALL.filter((p) => p !== "cors_proxy"), lumiverse: { relay: { retry: 0.1 } } });
-    expect(b.door.extension()).toEqual({ registered: false, why: expect.stringContaining("could not reach RPE"), missing: [{ permission: "cors_proxy", why: expect.any(String) }] });
+    expect(b.door.extension()).toEqual({ registered: false, why: expect.stringContaining("could not reach RPE"), missing: [{ permission: "cors_proxy", why: expect.any(String) }], stopped: null });
     expect(b.kept()).toBeNull();
     expect(b.installed.modals.has(`${USER}\u0000${NOTICE_ID}`)).toBe(true);
     b.grant("cors_proxy");
     await b.until("RPE to be registered", () => b.door.extension().registered);
-    expect(b.door.extension()).toEqual({ registered: true, why: null, missing: [] });
+    expect(b.door.extension()).toEqual({ registered: true, why: null, missing: [], stopped: null });
     expect(b.kept()).toEqual(b.registration);
     await b.until("the notice to close", () => !b.installed.modals.has(`${USER}\u0000${NOTICE_ID}`));
   });
@@ -285,13 +285,13 @@ describe("what the extension is missing, on RPE's own pages", () => {
     const b = await bed({ granted: ALL.filter((p) => p !== "ui_panels") });
     const page = bearer((await b.app.auth.mintPageToken(USER, "extension")).token);
     const status = async (): Promise<unknown> => await (await fetch(`${b.listening.url}${EXTENSION_STATUS_PATH}`, { headers: page })).json();
-    expect(await status()).toEqual({ registered: true, why: null, missing: [{ permission: "ui_panels", why: expect.stringContaining("panel") }] });
+    expect(await status()).toEqual({ registered: true, why: null, missing: [{ permission: "ui_panels", why: expect.stringContaining("panel") }], stopped: null });
     expect(b.logs.filter((line) => line.includes("missing permissions") && line.includes("ui_panels"))).toHaveLength(1);
     // Nothing else opens it.
     expect((await fetch(`${b.listening.url}${EXTENSION_STATUS_PATH}`)).status).toBe(401);
     b.grant("ui_panels");
     await b.until("RPE to hear the grant", () => b.door.extension().missing?.length === 0);
-    expect(await status()).toEqual({ registered: true, why: null, missing: [] });
+    expect(await status()).toEqual({ registered: true, why: null, missing: [], stopped: null });
   });
 
   test("while the extension says it lacks the interceptor permission, a request with no tag is still passed on", async () => {

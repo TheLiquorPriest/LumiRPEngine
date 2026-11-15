@@ -13,6 +13,7 @@
 // writes the metadata it read back, with RPE's one key of it added.
 
 import { isRecord } from "../../shared/json";
+import { RPE_MARK, RPE_MARK_KEY, rpeMarked } from "./pipe-wire";
 
 /** Lumiverse's id for an OpenAI-compatible connection (its `src/llm/providers/custom.ts`). */
 export const OPENAI_COMPATIBLE = "custom";
@@ -21,10 +22,6 @@ export const CONNECTION_NAME = "RPE";
 const CONNECTIONS = "/api/v1/connections";
 /** The model of the connection today's build made for its runtime: LumiAH's own, or one that starts with it (LumiAH `link/contract.ts`, `loopbackModel`). */
 export const TODAYS_MODEL = /^lumiah(-|$)/;
-
-/** The one key of a connection's metadata that is RPE's: its value says the connection is one RPE plays. */
-export const RPE_MARK_KEY = "rpe";
-export const RPE_MARK = Object.freeze({ v: 1 });
 
 /** The most connections Lumiverse answers in one page (`src/types/pagination.ts`: `MAX_LIMIT`; 50 where none is asked for). */
 const PAGE = 1000;
@@ -56,7 +53,7 @@ export interface SettledConnection {
 }
 
 /** Lumiverse's answer as JSON, or its refusal as an error in its own words. */
-async function answer(res: Response, what: string): Promise<unknown> {
+export async function answer(res: Response, what: string): Promise<unknown> {
   const text = await res.text();
   let body: unknown = null;
   try {
@@ -90,7 +87,7 @@ function profileOf(value: unknown, what: string): Profile {
 }
 
 /** Whether a connection carries RPE's mark. */
-const marked = (profile: Profile): boolean => isRecord(profile.metadata[RPE_MARK_KEY]);
+const marked = (profile: Profile): boolean => rpeMarked(profile.metadata);
 
 /** The metadata a connection is written with: what it had, and RPE's mark. */
 const withMark = (metadata: Record<string, unknown>): Record<string, unknown> => ({ ...metadata, [RPE_MARK_KEY]: RPE_MARK });

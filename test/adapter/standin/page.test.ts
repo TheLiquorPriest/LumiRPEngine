@@ -107,8 +107,11 @@ function rpeModule(use: (mount: ShellMount) => void = () => undefined): { module
   const setup = loader((mount) => {
     mounts.push(mount);
     use(mount);
-    return () => {
-      unmounted++;
+    return {
+      unmount: () => {
+        unmounted++;
+      },
+      open: () => undefined,
     };
   });
   return { module: { setup }, mounts, unmounted: () => unmounted };

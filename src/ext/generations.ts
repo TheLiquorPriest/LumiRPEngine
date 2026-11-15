@@ -6,9 +6,10 @@
 // `:2068`). One generation runs per chat at a time: a new one stops the one before
 // (`generate.service.ts:1601-1651`). So a chat's latest announced generation is the one its next prompt
 // belongs to, and the chat's next replaces it. The World Info interceptor and the prompt interceptor of
-// one generation run in this one worker, so RPE's cut, whose secrecy verdict was applied and the
-// question's time are handed from the first to the second. That is all the extension holds, and only
-// while the generation runs: taken, ended or stopped, it goes; nothing outlives a generation.
+// one generation run in this one worker, so RPE's cut, whose secrecy verdict was applied, the question's
+// time and, for a continue, the message the lore stage saw it would continue are handed from the first to
+// the second. That is all the extension holds, and only while the generation runs: taken, ended or
+// stopped, it goes; nothing outlives a generation.
 
 import { isRecord } from "../shared/json";
 import type { GenerationFacts, KeepPoint, TagSecrecy } from "../adapter/lumiverse/wire";
@@ -21,6 +22,12 @@ export interface Handoff {
   secrecy: TagSecrecy;
   /** The question's time, asked to answered or given up at its wait; null where none was asked. */
   question: { ms: number; answered: boolean } | null;
+  /**
+   * For a continue: the chat's last message not the player's, as the lore stage's context showed it (its
+   * id and shown text), which Lumiverse continues where its caller names none; null for any other kind,
+   * or where the context showed none.
+   */
+  continued: { id: string; text: string } | null;
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);

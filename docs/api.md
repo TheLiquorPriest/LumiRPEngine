@@ -806,6 +806,19 @@ Switches a thing that runs a command or calls out on or off: the one road to it.
 | Body | [`SwitchAsk`](#switchask) |
 | Reply | [`Switched`](#switched) |
 
+### `POST /api/v1/ext/arrived`
+
+The extension's word that a new app file has arrived, with the hash stated for it: RPE reads the source it was set up from, takes the build only when every file matches, starts it for real, and swaps onto it once no turn or job runs. A word with no stated hash is not taken.
+
+| | |
+|---|---|
+| Access | extension: the light extension (its registration key) |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ hash?: string }` |
+| Reply | [`Arrived`](#arrived) |
+
 ### `POST /api/v1/ext/confirm`
 
 The extension asks whether the registration it holds is the one this RPE made.
@@ -849,6 +862,17 @@ A page's start-up facts, asked for by the extension: a page token for the user t
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Answers | JSON: the page's start-up facts (`StartFacts`, `src/adapter/lumiverse/pipe-wire.ts`) |
+
+### `POST /api/v1/ext/stopped`
+
+The extension's record of a generation it stopped because it could not tell whose chat it was: neither RPE's registration nor the connection's own record could be read.
+
+| | |
+|---|---|
+| Access | extension: the light extension (its registration key) |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Answers | JSON: `{ kept: true }`, or 400 for a record the extension does not send |
 
 ### `GET /api/v1/status`
 
@@ -993,6 +1017,19 @@ export interface AgentRef {
   parent?: string;
   job?: string;
   plays?: string;
+}
+```
+
+### `Arrived`
+
+Whether RPE took the build, and where it stands, in words.
+
+```ts
+export interface Arrived {
+  /** Whether RPE took the build: every file matched, and it started. */
+  taken: boolean;
+  /** Where the builds stand, in a sentence or two, with why a build was not taken. */
+  words: string;
 }
 ```
 
@@ -1324,6 +1361,25 @@ export interface ChatStorageRow {
 }
 ```
 
+### `CheckStoppedShown`
+
+A generation RPE's extension stopped because it could not tell whose chat it was: neither RPE's registration nor the connection's own record could be read.
+
+```ts
+export interface CheckStoppedShown {
+  /** When, epoch milliseconds by the extension's clock. */
+  at: number;
+  chat: string;
+  /** The generation; null where Lumiverse had not announced it. */
+  generation: string | null;
+  connection: string;
+  /** How the read of RPE's registration from the extension's storage failed. */
+  registration: string;
+  /** How the read of the connection's own record in Lumiverse failed. */
+  mark: string;
+}
+```
+
 ### `CommandStatus`
 
 How RPE stands as its own command line is told: the keys in force, the switches and the builds in words.
@@ -1566,6 +1622,8 @@ export interface ExtensionStatusReply {
   why: string | null;
   /** The permissions it says it lacks, and why it needs each; null until it has said. */
   missing: MissingPermissionShown[] | null;
+  /** The generations it stopped because it could not tell whose chat they were: the latest, and how many since RPE started; null when none. */
+  stopped: { last: CheckStoppedShown; count: number } | null;
 }
 ```
 
@@ -2163,6 +2221,7 @@ export interface MigrationReportShown {
   unreadable: JsonValue;
   unsent: JsonValue;
   runtime?: JsonValue;
+  given?: JsonValue;
   standIn: JsonValue;
   lumiverse: JsonValue;
   disk: JsonValue;

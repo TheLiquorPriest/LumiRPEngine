@@ -61,6 +61,10 @@ export interface ExtSpindle {
   sendToFrontend(payload: unknown, userId?: string, options?: { frontendSessionId?: string }): void;
   /** A `SPINDLE_BACKEND_MSG` from any socket of a user: a page, or RPE's relay socket (`ws/handler.ts:440-467`). */
   onFrontendMessage(handler: (payload: unknown, userId: string, frontendSessionId?: string) => void): () => void;
+  /** A connection's own record, its `metadata` with it, or null where the user has none by that id (`worker-runtime.ts:2530-2534`); needs `generation` (`worker-host.ts:3718-3760`). */
+  connections: {
+    get(connectionId: string, userId?: string): Promise<{ id: string; metadata?: unknown } | null>;
+  };
   /** Each user's own storage of the extension (`worker-runtime.ts:2120-2224`): a missing or unreadable file reads as the fallback. */
   userStorage: {
     getJson<T>(path: string, options: { fallback: T; userId?: string }): Promise<T>;

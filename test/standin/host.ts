@@ -370,6 +370,13 @@ export class ExtensionHost {
         ext.frontend.add(handler);
         return () => ext.frontend.delete(handler);
       },
+      connections: {
+        // `connections_get` (`spindle/worker-host.ts:3718-3760`) needs `generation`; the stand-in keeps no connection record a worker reads, so none is found.
+        get: async () => {
+          if (!ext.granted.has("generation")) throw new Error("Permission denied: generation — Connection profile access requires the generation permission");
+          return null;
+        },
+      },
       scope: ext.scope,
       installedBy: ext.installedBy,
       storage: {

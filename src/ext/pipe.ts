@@ -6,7 +6,11 @@
 // - a page's start: RPE's start-up facts (its addresses, its build, a short-lived page token), asked of
 //   RPE's start route and handed to that page alone;
 // - a page's request: carried to RPE's API through Spindle's proxy (one request, one whole answer, 30 s,
-//   25 MB: `worker-host.ts:4647-4741`) and answered to that page alone;
+//   25 MB: `worker-host.ts:4647-4741`) and answered to that page alone; what the proxy refuses (an answer
+//   over its size, a path naming a JavaScript file, a JavaScript answer: `worker-host.ts:772`,
+//   `utils/safe-fetch.ts:448-450`, `:495-504`) is told to the page as such;
+// - a generation the extension stopped because it could not tell whose chat it was: its record, told to
+//   RPE on its road, or once RPE registers again where the road was not known;
 // - a page's follow of a chat: told to RPE's live route; RPE's live frames for that page come back on
 //   its relay socket and go to that page alone (`sendToFrontend` with its frontend session,
 //   `worker-host.ts:2129-2160`), never to every socket of the user, RPE's own among them;
@@ -15,7 +19,7 @@
 // Only the user RPE registered for is served: anyone else's page is told RPE does not belong to them.
 
 import { isRecord } from "../shared/json";
-import { LIVE_PATH, readFromPage, readFromRpe, readStartFacts, START_PATH, type MissingPermission, type PipeRequest, type ToPage, type ToRpe } from "../adapter/lumiverse/pipe-wire";
+import { LIVE_PATH, readFromPage, readFromRpe, readStartFacts, START_PATH, STOPPED_PATH, type CheckStopped, type MissingPermission, type PipeRequest, type ToPage, type ToRpe } from "../adapter/lumiverse/pipe-wire";
 import type { Registrations } from "./registration";
 import type { Road } from "./road";
 import type { ExtSpindle } from "./spindle";
@@ -42,10 +46,17 @@ export interface PipeDeps {
 export interface Pipe {
   /** Tells RPE and every page that started what the extension is missing now. */
   permissions(): void;
+  /** A generation stopped because whose chat it was could not be told: logged, and told to RPE. */
+  stopped(user: string, record: CheckStopped): void;
   stop(): void;
 }
 
 const words = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** A path Lumiverse's proxy refuses to carry, as it tells one (`utils/safe-fetch.ts:67-73`): one naming a JavaScript file. */
+const JAVASCRIPT_PATH = /\.(?:js|mjs|cjs|es)(?:[;/\\]|$)/i;
+/** How Lumiverse's proxy says an answer was too large for it (`worker-host.ts:4676-4679`, `:784-788`). */
+const TOO_LARGE = /CORS proxy response (too large|exceeded)/;
 
 export function startPipe(deps: PipeDeps): Pipe {
   const { spindle } = deps;
@@ -58,7 +69,7 @@ export function startPipe(deps: PipeDeps): Pipe {
   };
   const toPage = (user: string, page: string, message: ToPage): void => spindle.sendToFrontend(message, user, { frontendSessionId: page });
   const toRpe = async (user: string, message: ToRpe): Promise<void> => {
-    const r = await deps.registrations.of(user);
+    const r = await deps.registrations.of(user).catch(() => null);
     if (r !== null) spindle.sendToFrontend(message, user, { frontendSessionId: r.relay });
   };
 
@@ -102,6 +113,13 @@ export function startPipe(deps: PipeDeps): Pipe {
     }
     // A page reaches RPE's API, and not the routes only the extension may call.
     if (url.origin !== new URL(road.base).origin || !url.pathname.startsWith("/api/v1/") || url.pathname.startsWith("/api/v1/ext/")) return answer(400, JSON.stringify({ error: "That is not a path of RPE's API." }));
+    let decoded = url.pathname;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch {
+      // Not decodable: read as it stands.
+    }
+    if (JAVASCRIPT_PATH.test(decoded)) return answer(400, JSON.stringify({ error: "Lumiverse's proxy does not carry a path that names a JavaScript file; ask RPE directly." }));
     // The page's own credential (its page token) and nothing of the extension's: RPE answers it as the page.
     const headers: Record<string, string> = {};
     for (const name of PAGE_HEADERS) if (req.headers[name] !== undefined) headers[name] = req.headers[name];
@@ -111,6 +129,8 @@ export function startPipe(deps: PipeDeps): Pipe {
       for (const [k, v] of Object.entries(res.headers ?? {})) if (ANSWER_HEADERS.includes(k.toLowerCase())) back[k.toLowerCase()] = v;
       answer(res.status, res.body ?? "", back);
     } catch (error) {
+      // An answer too large for the proxy: the page asks for it another way (a job's id, R-4).
+      if (TOO_LARGE.test(words(error))) return answer(413, JSON.stringify({ error: `RPE's answer is larger than Lumiverse's proxy carries (${words(error)}).` }));
       answer(502, JSON.stringify({ error: `RPE was not reached through Lumiverse: ${words(error)}` }));
     }
   }
@@ -143,6 +163,8 @@ export function startPipe(deps: PipeDeps): Pipe {
           }
           await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
           deps.registered(user);
+          const record = untold.get(user);
+          if (record !== undefined) tell(user, record);
           return;
         }
         // A live frame is RPE's when it carries the registration's key, and goes to the one page it names.
@@ -169,6 +191,24 @@ export function startPipe(deps: PipeDeps): Pipe {
     })().catch((error: unknown) => deps.log(`RPE was not told a page closed: ${words(error)}`));
   });
 
+  /** By user: the latest stopped generation's record RPE has not been told (its road was not known, or the call failed); the ones before it are in the extension's log. */
+  const untold = new Map<string, CheckStopped>();
+  const tell = (user: string, record: CheckStopped): void => {
+    void (async () => {
+      const road = await deps.registrations.road(user);
+      if (road === null) {
+        untold.set(user, record);
+        return;
+      }
+      const answer = await call(road, STOPPED_PATH, record);
+      if (answer.status !== 200) throw new Error(`RPE answered ${answer.status}`);
+      if (untold.get(user) === record) untold.delete(user);
+    })().catch((error: unknown) => {
+      untold.set(user, record);
+      deps.log(`RPE was not told of the generation stopped in chat ${record.chat}: ${words(error)}`);
+    });
+  };
+
   return {
     permissions() {
       const missing = deps.missing();
@@ -176,6 +216,10 @@ export function startPipe(deps: PipeDeps): Pipe {
         void toRpe(user, { rpe: "permissions", missing });
         for (const page of pages.get(user) ?? []) toPage(user, page, { rpe: "permissions", missing });
       }
+    },
+    stopped(user, record) {
+      deps.log(`generation ${record.generation ?? "(not announced)"} of chat ${record.chat} on connection ${record.connection} was stopped: the extension could not tell whether it is RPE's. The registration's read: ${record.registration}. The connection's record: ${record.mark}.`);
+      tell(user, record);
     },
     stop() {
       offMessage();

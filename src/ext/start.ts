@@ -28,19 +28,39 @@ export interface RunningExtension {
   stop(): void;
 }
 
-/** The blocking notice's body: what is missing and why, and who grants it. */
-function noticeItems(lacking: readonly MissingPermission[]): ModalItem[] {
-  return [
-    { type: "text", content: "RPE cannot play your chats until its extension has these permissions in Lumiverse. A Lumiverse admin grants them on the Extensions page." },
-    { type: "divider" },
-    ...lacking.map((m): ModalItem => ({ type: "text", content: `${m.permission}: ${m.why}` })),
-  ];
+/** The blocking notice's body: what is missing and why, and who grants it; and where RPE's registration could not be read, that. */
+function noticeItems(lacking: readonly MissingPermission[], unread: string | undefined): ModalItem[] {
+  const items: ModalItem[] = [];
+  if (lacking.length > 0) {
+    items.push({ type: "text", content: "RPE cannot play your chats until its extension has these permissions in Lumiverse. A Lumiverse admin grants them on the Extensions page." }, { type: "divider" });
+    for (const m of lacking) items.push({ type: "text", content: `${m.permission}: ${m.why}` });
+  }
+  if (unread !== undefined) {
+    if (items.length > 0) items.push({ type: "divider" });
+    items.push({ type: "text", content: `RPE's extension could not read RPE's registration from its storage in Lumiverse (${unread}). Until it can, it tells RPE's chats by the mark on RPE's connections in Lumiverse.` });
+  }
+  return items;
 }
 
 export async function startExtension(spindle: ExtSpindle, options: ExtensionOptions = {}): Promise<RunningExtension> {
   const log = (message: string): void => spindle.log.warn(`[RPE] ${message}`);
   const generations = new Generations();
-  const registrations = new Registrations(spindle.userStorage, (url, init) => spindle.cors(url, init));
+  /** By user: why their stored registration could not be read, while it cannot (N-3): they are shown the notice. */
+  const unread = new Map<string, string>();
+  const registrations = new Registrations({
+    storage: spindle.userStorage,
+    proxy: (url, init) => spindle.cors(url, init),
+    connections: spindle.connections,
+    unread: (user, why) => {
+      if (why === null ? !unread.delete(user) : unread.get(user) === why) return;
+      if (why !== null) {
+        unread.set(user, why);
+        log(`the registration of user ${user} could not be read from the extension's storage: ${why}`);
+      }
+      notice();
+    },
+    log,
+  });
   let granted: readonly string[] = await spindle.permissions.getGranted();
   const lacking = (): MissingPermission[] => missing(granted);
   /**
@@ -68,22 +88,30 @@ export async function startExtension(spindle: ExtSpindle, options: ExtensionOpti
   const shown = new Map<string, string>();
   const notice = (): void => {
     const now = lacking();
-    const said = JSON.stringify(now);
-    for (const user of new Set([...registrations.users(), ...waiting])) {
+    for (const user of new Set([...registrations.users(), ...waiting, ...unread.keys()])) {
+      const why = unread.get(user);
+      const items = now.length > 0 || why !== undefined ? noticeItems(now, why) : [];
+      const said = JSON.stringify(items);
       if (shown.get(user) === said) continue;
       const was = shown.get(user);
       shown.set(user, said);
       void (async () => {
         if (was !== undefined && was !== "[]") await spindle.modal.close(NOTICE_ID, user);
         // A persistent modal stays up whatever the user clicks beside it (`worker-host-presentation-api.ts:524`).
-        if (now.length > 0) void spindle.modal.open({ title: "RPE needs permissions", items: noticeItems(now), persistent: true, modalRequestId: NOTICE_ID, userId: user });
-      })().catch((error: unknown) => log(`the permission notice was not shown: ${error instanceof Error ? error.message : String(error)}`));
+        if (items.length > 0) void spindle.modal.open({ title: now.length > 0 ? "RPE needs permissions" : "RPE's registration could not be read", items, persistent: true, modalRequestId: NOTICE_ID, userId: user });
+      })().catch((error: unknown) => log(`the notice was not shown: ${error instanceof Error ? error.message : String(error)}`));
     }
     pipe.permissions();
   };
 
   const question = worldInfoInterceptor({ road: (user) => registrations.road(user), proxy: (url, init) => spindle.cors(url, init), generations, log });
-  const prompt = promptInterceptor({ generations, isRpe: (connection, user) => registrations.isRpe(connection, user), granted: (permission) => spindle.permissions.has(permission), log });
+  const prompt = promptInterceptor({
+    generations,
+    whose: (connection, user) => registrations.whose(connection, user),
+    granted: (permission) => spindle.permissions.has(permission),
+    log,
+    stopped: (user, record) => pipe.stopped(user, record),
+  });
   let listening: (() => void)[] = [];
   let unregister: (() => void) | null = null;
   const open = (permission: string): void => {
@@ -92,7 +120,11 @@ export async function startExtension(spindle: ExtSpindle, options: ExtensionOpti
       // A subscription Lumiverse refused is not asked for again by adding a handler (`worker-runtime.ts:1747-1765`): it is dropped and made anew.
       for (const off of listening) off();
       listening = [
-        spindle.on("GENERATION_STARTED", (payload, user) => generations.started(payload, user)),
+        spindle.on("GENERATION_STARTED", (payload, user) => {
+          generations.started(payload, user);
+          // The user's registration is read from storage before their prompt is checked, as at the worker's start for them; a read that fails is shown by the notice.
+          if (user !== undefined) registrations.of(user).catch(() => undefined);
+        }),
         spindle.on("GENERATION_ENDED", (payload, user) => generations.over(payload, user)),
         spindle.on("GENERATION_STOPPED", (payload, user) => generations.over(payload, user)),
       ];

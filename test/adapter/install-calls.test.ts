@@ -7,7 +7,8 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CONNECTION_NAME, connectionsWhere, installedExtension, type LumiverseCall, markConnection, OPENAI_COMPATIBLE, RPE_MARK, RPE_MARK_KEY, settleConnection, type WantedConnection } from "../../src/adapter/lumiverse/install-calls";
+import { CONNECTION_NAME, connectionsWhere, installedExtension, type LumiverseCall, markConnection, OPENAI_COMPATIBLE, settleConnection, type WantedConnection } from "../../src/adapter/lumiverse/install-calls";
+import { RPE_MARK, RPE_MARK_KEY } from "../../src/adapter/lumiverse/pipe-wire";
 import { isRecord } from "../../src/shared/json";
 
 interface Stored {

@@ -25,7 +25,7 @@ const said = (m: unknown, rpe: string): boolean => typeof m === "object" && m !=
 describe("a registration the extension refuses", () => {
   test("is answered to the socket it came from, with why, and the registration the extension holds stays", async () => {
     const rig = await new Rig().start();
-    rig.ext.fromFrontend({ rpe: "register", registration: { v: 1, base: "http://192.0.2.7:7860", key: "rpx-elsewhere", connection: "conn-other", relay: RELAY_SESSION, build: "test", values: { questionMs: 3_000, logChars: 200 } } }, USER, RELAY_SESSION);
+    rig.ext.fromFrontend({ rpe: "register", registration: { v: 1, base: "http://192.0.2.7:7860", key: "rpx-elsewhere", connections: ["conn-other"], relay: RELAY_SESSION, build: "test", values: { questionMs: 3_000, logChars: 200 } } }, USER, RELAY_SESSION);
     const refused = await until("the refusal", () => rig.toRpe.find((m) => said(m, "refused")));
     expect(refused).toMatchObject({ rpe: "refused", why: expect.stringContaining("loopback"), missing: [] });
     // RPE's own registration still marks its replies: one on its connection is played by RPE.
@@ -42,7 +42,7 @@ describe("a registration the extension refuses", () => {
       return Response.json({});
     });
     const bases = ["http://127.0.0.1:11434/api/pull#", "http://127.0.0.1:11434?x=", "http://127.0.0.1:11434/#", "http://someone:pw@127.0.0.1:11434"];
-    for (const base of bases) rig.ext.fromFrontend({ rpe: "register", registration: { v: 1, base, key: "rpx-elsewhere", connection: "conn-other", relay: RELAY_SESSION, build: "test", values: { questionMs: 3_000, logChars: 200 } } }, USER, RELAY_SESSION);
+    for (const base of bases) rig.ext.fromFrontend({ rpe: "register", registration: { v: 1, base, key: "rpx-elsewhere", connections: ["conn-other"], relay: RELAY_SESSION, build: "test", values: { questionMs: 3_000, logChars: 200 } } }, USER, RELAY_SESSION);
     const refusals = await until("every refusal", () => {
       const got = rig.toRpe.filter((m) => said(m, "refused"));
       return got.length === bases.length ? got : null;

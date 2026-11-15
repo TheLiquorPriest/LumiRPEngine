@@ -250,7 +250,7 @@ export class Rig {
         if (request.headers.get("authorization") !== `Bearer ${EXTENSION_KEY}`) return Response.json({ error: "This needs the extension's registration with this RPE." }, { status: 401 });
         if (request.headers.get(USER_HEADER) !== USER) return Response.json({ error: "This RPE belongs to another Lumiverse user." }, { status: 403 });
         const asked = readConfirmAsk(await request.json());
-        if (asked?.relay !== RELAY_SESSION || asked.connection !== "conn-rpe") return Response.json({ error: "That is not the registration this RPE made." }, { status: 409 });
+        if (asked?.relay !== RELAY_SESSION || JSON.stringify(asked.connections) !== JSON.stringify(["conn-rpe"])) return Response.json({ error: "That is not the registration this RPE made." }, { status: 409 });
         return Response.json({ rpe: "confirmed", user: USER, relay: RELAY_SESSION });
       }
       return new Response("not found", { status: 404 });
@@ -314,7 +314,7 @@ export class Rig {
       if (typeof m.payload === "object" && m.payload !== null && "rpe" in m.payload && (m.payload.rpe === "registered" || m.payload.rpe === "refused")) answered.resolve();
       return true;
     };
-    const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connection: "conn-rpe", relay: RELAY_SESSION, build: "test", values: { questionMs: this.options.deadlineMs ?? QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS } };
+    const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connections: ["conn-rpe"], relay: RELAY_SESSION, build: "test", values: { questionMs: this.options.deadlineMs ?? QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS } };
     this.ext.fromFrontend({ rpe: "register", registration }, USER, RELAY_SESSION);
     // The worker's later task runs on the host's clock: where the test moves it, it runs now.
     await this.options.clock?.advance(0);

@@ -27,8 +27,19 @@ export const LIVE_PATH = "/api/v1/ext/live";
 export const CONFIRM_PATH = "/api/v1/ext/confirm";
 /** RPE's page route that says how its extension in Lumiverse stands with it (`ExtensionStatus`). */
 export const EXTENSION_STATUS_PATH = "/api/v1/status/extension";
+/** Where the extension tells RPE of a generation it stopped because it could not tell whose chat it was (`CheckStopped`). */
+export const STOPPED_PATH = "/api/v1/ext/stopped";
 /** Where the extension keeps the registration of the user RPE belongs to, in that user's storage: a folder today's build never used. */
 export const REGISTRATION_FILE = "rpe/registration.json";
+
+/** The key of RPE's mark in the `metadata` of each Lumiverse connection RPE takes (at install, and at the swap): what tells a chat as RPE's when the registration is not to hand. */
+export const RPE_MARK_KEY = "rpe";
+export const RPE_MARK = Object.freeze({ v: 1 });
+
+/** Whether a connection's `metadata`, as Lumiverse keeps it, carries RPE's mark. */
+export function rpeMarked(metadata: unknown): boolean {
+  return isRecord(metadata) && isRecord(metadata[RPE_MARK_KEY]);
+}
 
 /** What RPE tells the extension of itself each time its relay socket opens. */
 export interface Registration {
@@ -37,8 +48,8 @@ export interface Registration {
   base: string;
   /** What proves the extension to RPE: its bearer on RPE's routes for it. */
   key: string;
-  /** RPE's connection in Lumiverse: a reply on it is RPE's to play. Null before one is made. */
-  connection: string | null;
+  /** Every Lumiverse connection that is RPE's (R-109): a reply on any of them is RPE's to play. Empty before one is made. */
+  connections: string[];
   /** The frontend session of RPE's relay socket: what the extension addresses RPE by. */
   relay: string;
   /** RPE's build. */
@@ -47,10 +58,10 @@ export interface Registration {
   values: { questionMs: number; logChars: number };
 }
 
-/** What the extension asks RPE to confirm of a registration besides its key, which is the ask's bearer: the relay socket and the connection the extension would act on. */
+/** What the extension asks RPE to confirm of a registration besides its key, which is the ask's bearer: the relay socket and the connections the extension would act on. */
 export interface ConfirmAsk {
   relay: string;
-  connection: string | null;
+  connections: string[];
 }
 
 /** RPE's confirmation of a registration: the user and the relay socket it registered for. */
@@ -91,6 +102,25 @@ export interface ExtensionStatus {
   why: string | null;
   /** The permissions it says it is missing, and why it needs each; null until it has said. */
   missing: MissingPermission[] | null;
+  /** The generations the extension stopped because it could not tell whose chat they were: the latest, and how many since RPE started; null when none. */
+  stopped: { last: CheckStopped; count: number } | null;
+}
+
+/**
+ * A generation the extension stopped because neither RPE's registration nor the connection's own record
+ * could be read for it (N-3): with the chat, the generation and the connection, and how each read failed.
+ */
+export interface CheckStopped {
+  /** When, by the extension's clock. */
+  at: number;
+  chat: string;
+  /** Null where Lumiverse had not announced it. */
+  generation: string | null;
+  connection: string;
+  /** How the read of the registration from the extension's storage failed. */
+  registration: string;
+  /** How Lumiverse's record of the connection (`spindle.connections.get`) failed. */
+  mark: string;
 }
 
 /** A page's request carried to RPE: one request, one whole answer (Spindle's proxy: 30 s, 25 MB). */
@@ -159,14 +189,20 @@ function headersOf(v: unknown): Record<string, string> | null {
 
 /** A registration as RPE sends it and the extension keeps it, or null. */
 export function readRegistration(v: unknown): Registration | null {
-  if (!isRecord(v) || v.v !== 1 || !str(v.base) || !str(v.key) || !(v.connection === null || str(v.connection)) || !str(v.relay) || typeof v.build !== "string") return null;
+  if (!isRecord(v) || v.v !== 1 || !str(v.base) || !str(v.key) || !Array.isArray(v.connections) || !v.connections.every(str) || !str(v.relay) || typeof v.build !== "string") return null;
   if (!isRecord(v.values) || !count(v.values.questionMs) || !count(v.values.logChars)) return null;
-  return { v: 1, base: v.base, key: v.key, connection: v.connection, relay: v.relay, build: v.build, values: { questionMs: v.values.questionMs, logChars: v.values.logChars } };
+  return { v: 1, base: v.base, key: v.key, connections: [...v.connections], relay: v.relay, build: v.build, values: { questionMs: v.values.questionMs, logChars: v.values.logChars } };
 }
 
 /** What the extension asks RPE to confirm, or null. */
 export function readConfirmAsk(v: unknown): ConfirmAsk | null {
-  return isRecord(v) && str(v.relay) && (v.connection === null || str(v.connection)) ? { relay: v.relay, connection: v.connection } : null;
+  return isRecord(v) && str(v.relay) && Array.isArray(v.connections) && v.connections.every(str) ? { relay: v.relay, connections: [...v.connections] } : null;
+}
+
+/** A stopped generation's record as the extension sends it, or null. */
+export function readCheckStopped(v: unknown): CheckStopped | null {
+  if (!isRecord(v) || !count(v.at) || !str(v.chat) || !(v.generation === null || str(v.generation)) || !str(v.connection) || typeof v.registration !== "string" || typeof v.mark !== "string") return null;
+  return { at: v.at, chat: v.chat, generation: v.generation, connection: v.connection, registration: v.registration, mark: v.mark };
 }
 
 /** RPE's confirmation as its route answers it, or null when what answered is not RPE. */

@@ -26,7 +26,7 @@ import { followChanges, type ChatChanges } from "./events";
 import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
-import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
+import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
 import { Relay } from "./relay";
@@ -162,9 +162,14 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   /** The door's limits as the shared levels set them now. */
   const settings = (): LumiverseSettings => (deps.settings === undefined ? LUMIVERSE_DEFAULTS : lumiverseSettings(deps.settings.shared()));
   /** How the extension stands with RPE: until it answers, RPE is not registered. */
-  const status: ExtensionStatus = { registered: false, why: NOT_HEARD, missing: null };
+  const status: ExtensionStatus = { registered: false, why: NOT_HEARD, missing: null, stopped: null };
   /** The status as handed out: a copy, so nobody it is handed to changes RPE's. */
-  const extension = (): ExtensionStatus => ({ registered: status.registered, why: status.why, missing: status.missing === null ? null : status.missing.map((m) => ({ ...m })) });
+  const extension = (): ExtensionStatus => ({
+    registered: status.registered,
+    why: status.why,
+    missing: status.missing === null ? null : status.missing.map((m) => ({ ...m })),
+    stopped: status.stopped === null ? null : { last: { ...status.stopped.last }, count: status.stopped.count },
+  });
 
   /** Where a browser may reach RPE directly: this machine's loopback, RPE's own address, then every name RPE is published at. */
   const addresses = (): string[] => {
@@ -176,7 +181,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     const listening = app?.listening() ?? null;
     if (app === null || listening === null || key === null) return null;
     const { questionMs, logChars } = settings().extension;
-    return { v: 1, base: listening.loopback, key, connection: app.config.lumiverse.connection, relay: relaySession, build: app.version, values: { questionMs, logChars } };
+    const { connection } = app.config.lumiverse;
+    return { v: 1, base: listening.loopback, key, connections: connection === null ? [] : [connection], relay: relaySession, build: app.version, values: { questionMs, logChars } };
   };
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
@@ -313,13 +319,29 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           group: "service",
           does: "The extension asks whether the registration it holds is the one this RPE made.",
           answers: "JSON: `{ rpe: \"confirmed\", user, relay }`, or 409 for a registration this RPE did not make",
-          // The server has held the ask to the key in force and this to RPE's own user: what is left is that it names RPE's own relay socket and connection.
+          // The server has held the ask to the key in force and this to RPE's own user: what is left is that it names RPE's own relay socket and connections.
           raw: forOwner(async (body, owner) => {
             const asked = readConfirmAsk(body);
             const own = registration();
-            if (asked === null || own === null || asked.relay !== own.relay || asked.connection !== own.connection) return json(409, { error: "That is not the registration this RPE made." });
+            const same = (a: readonly string[], b: readonly string[]): boolean => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+            if (asked === null || own === null || asked.relay !== own.relay || !same(asked.connections, own.connections)) return json(409, { error: "That is not the registration this RPE made." });
             const confirmed: Confirmed = { rpe: "confirmed", user: owner, relay: own.relay };
             return json(200, confirmed);
+          }),
+        }),
+        rawRoute({
+          method: "POST",
+          path: STOPPED_PATH,
+          access: "extension",
+          group: "service",
+          does: "The extension's record of a generation it stopped because it could not tell whose chat it was: neither RPE's registration nor the connection's own record could be read.",
+          answers: "JSON: `{ kept: true }`, or 400 for a record the extension does not send",
+          raw: forOwner(async (body) => {
+            const stopped = readCheckStopped(body);
+            if (stopped === null) return json(400, { error: "That is not a stopped generation's record." });
+            status.stopped = { last: stopped, count: (status.stopped?.count ?? 0) + 1 };
+            log(`RPE's extension stopped generation ${stopped.generation ?? "(not announced)"} of chat ${stopped.chat} on connection ${stopped.connection}: it could not tell whose chat it was. The registration's read: ${stopped.registration}. The connection's record: ${stopped.mark}.`);
+            return json(200, { kept: true });
           }),
         }),
         rawRoute({

@@ -284,7 +284,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
         const road = { base: RPE, headers: { "x-rpe-extension": "rpe-extension-key" } };
         ext.registerWorldInfoInterceptor(worldInfoInterceptor({ road: async () => ({ ...road, waitMs: 3_000, logChars: 200 }), proxy: (url, init) => ext.cors(url, init), generations, log: () => undefined }), PRIORITY);
         ext.on("GENERATION_STARTED", (payload, user) => generations.started(payload, user));
-        ext.registerInterceptor(promptInterceptor({ generations, isRpe, granted: (p) => ext.permissions.has(p), log: () => undefined }), { priority: PRIORITY, required: true });
+        ext.registerInterceptor(promptInterceptor({ generations, whose: async (connection) => ({ rpe: isRpe(connection) }), granted: (p) => ext.permissions.has(p), log: () => undefined, stopped: () => undefined }), { priority: PRIORITY, required: true });
       },
     });
   }

@@ -13,20 +13,32 @@
 // It is registered as required, so a failure of its own stops the generation (`interceptor-
 // pipeline.ts:212`); it is called for every chat, so it holds its own faults: a prompt not on RPE's
 // connection goes back untouched whatever went wrong, and one on RPE's connection is stopped with a
-// line saying why rather than sent on untagged. What it cannot hold is its worker being stopped
-// mid-generation: Lumiverse then fails the pending call for any chat (`worker-host.ts:1572-1575`).
+// line saying why rather than sent on untagged. Where it cannot tell whose chat it is, neither RPE's
+// registration nor the connection's own record being readable (N-3), that generation alone is stopped
+// and what failed is recorded. What it cannot hold is its worker being stopped mid-generation: Lumiverse
+// then fails the pending call for any chat (`worker-host.ts:1572-1575`).
+//
+// A continue's target is a first word, checked (R-192): Lumiverse moves the message it continues to the
+// prompt's end, no longer history and with no source (`prompt-assembly.service.ts:742-768`), so the tag
+// names the message the lore stage noted only where the moved message's text begins with that message's
+// shown text; else the target is not known, with the swipe Lumiverse announced. The tie is always the
+// message Lumiverse names when the generation ends.
 
 import { isRecord } from "../shared/json";
+import type { CheckStopped } from "../adapter/lumiverse/pipe-wire";
 import { historyCut, replyKindOf, TAG_FIELD, textHash, type Role, type Tag, type TagMessage } from "../adapter/lumiverse/wire";
-import type { Generations } from "./generations";
+import type { Generations, Handoff } from "./generations";
+import type { Whose } from "./registration";
 import type { InterceptorReturn, PromptMessageDTO } from "./spindle";
 
 export interface PromptDeps {
   generations: Generations;
-  /** Whether this user's connection is RPE's. */
-  isRpe(connection: string, user: string): boolean | Promise<boolean>;
+  /** Whose chat a reply on this user's connection is. */
+  whose(connection: string, user: string): Promise<Whose>;
   granted(permission: string): boolean;
   log(message: string): void;
+  /** A generation stopped because whose chat it was could not be told: its record. */
+  stopped(user: string, record: CheckStopped): void;
 }
 
 /** A failure whose words the user is shown as they are. */
@@ -61,22 +73,38 @@ function contextOf(raw: unknown): PromptContext | null {
   };
 }
 
+/** A message's text as Lumiverse reads it: a string, or its text parts run together (`llm/types.ts:109-115`); and the length of each text part, and how many other parts. */
+function textOfContent(content: unknown): { text: string; parts?: number[]; media: number } {
+  if (typeof content === "string") return { text: content, media: 0 };
+  if (!Array.isArray(content)) return { text: "", media: 0 };
+  const texts: string[] = [];
+  let media = 0;
+  for (const part of content) {
+    if (isRecord(part) && part.type === "text" && typeof part.text === "string") texts.push(part.text);
+    else media++;
+  }
+  return { text: texts.join(""), parts: texts.map((t) => t.length), media };
+}
+
+/**
+ * The message a continue continues, checked: the last one not history and Lumiverse's assistant's (the
+ * one it moved to the end, its postfix after it), whose text begins with the shown text the lore stage
+ * noted; null where nothing was noted or moved, or the two do not agree.
+ */
+function continuedTarget(messages: readonly PromptMessageDTO[], noted: Handoff["continued"]): string | null {
+  if (noted === null || noted.text === "") return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role !== "assistant" || m.__isChatHistory === true) continue;
+    return textOfContent(m.content).text.startsWith(noted.text) ? noted.id : null;
+  }
+  return null;
+}
+
 /** A message as the tag lists it: its text is its content's text parts run together, as Lumiverse reads it (`llm/types.ts:109-115`). */
 export function listedMessage(m: PromptMessageDTO): TagMessage {
   const role: Role = m.role === "system" || m.role === "assistant" ? m.role : "user";
-  let text = "";
-  let parts: number[] | undefined;
-  let media = 0;
-  if (typeof m.content === "string") text = m.content;
-  else if (Array.isArray(m.content)) {
-    const texts: string[] = [];
-    for (const part of m.content) {
-      if (isRecord(part) && part.type === "text" && typeof part.text === "string") texts.push(part.text);
-      else media++;
-    }
-    text = texts.join("");
-    parts = texts.map((t) => t.length);
-  }
+  const { text, parts, media } = textOfContent(m.content);
   return {
     role,
     length: text.length,
@@ -101,7 +129,12 @@ export function promptInterceptor(deps: PromptDeps): (messages: PromptMessageDTO
       if (ctx === null || ctx.dryRun || ctx.connection === null) return messages;
       const kind = replyKindOf(ctx.type);
       if (kind === null || ctx.type === null) return messages;
-      ours = await deps.isRpe(ctx.connection, ctx.user);
+      const whose = await deps.whose(ctx.connection, ctx.user);
+      if ("unknown" in whose) {
+        deps.stopped(ctx.user, { at: Date.now(), chat: ctx.chat, generation: deps.generations.pending(ctx.user, ctx.chat)?.id ?? null, connection: ctx.connection, registration: whose.unknown.registration, mark: whose.unknown.mark });
+        throw new Stop("RPE stopped this reply: its extension could not tell whether this chat is one RPE plays, because neither RPE's registration nor this connection's record in Lumiverse could be read. Send it again; RPE's log says what failed.");
+      }
+      ours = whose.rpe;
       if (!ours) return messages;
       // Without it Lumiverse takes the tag off and only says so in its own log (`worker-host.ts:1922-1931`).
       if (!deps.granted("generation_parameters")) throw new Stop("RPE stopped this reply rather than send it without RPE: its extension may not add to a reply's request. Grant RPE's extension the “generation_parameters” permission in Lumiverse.");
@@ -118,7 +151,7 @@ export function promptInterceptor(deps: PromptDeps): (messages: PromptMessageDTO
         chat: ctx.chat,
         generation: generation.id,
         kind,
-        target: generation.target,
+        target: kind === "continue" ? { message: continuedTarget(messages, handoff?.continued ?? null), swipe: generation.target.swipe } : generation.target,
         speaker: generation.speaker,
         connection: ctx.connection,
         preset: ctx.preset,
@@ -130,11 +163,11 @@ export function promptInterceptor(deps: PromptDeps): (messages: PromptMessageDTO
       };
       return { messages: kept, parameters: { [TAG_FIELD]: tag } };
     } catch (error) {
+      if (error instanceof Stop) throw error;
       if (!ours) {
         deps.log(`a prompt not on RPE's connection went on untouched after the extension failed: ${error instanceof Error ? error.message : String(error)}`);
         return messages;
       }
-      if (error instanceof Stop) throw error;
       throw new Error(`RPE stopped this reply before it was sent, because its extension failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };

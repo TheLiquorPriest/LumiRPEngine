@@ -4,7 +4,8 @@
 // the chain only when no interceptor is registered). It sends RPE the chat, the path as the context
 // gives it (each message's id, place, swipe, whether it is the player's and its shown text's hash) and
 // what RPE needs of each candidate entry; applies RPE's verdict on the secrets; and hands RPE's cut,
-// whose verdict it applied and the question's time to the prompt interceptor of the same generation.
+// whose verdict it applied and the question's time to the prompt interceptor of the same generation, and
+// for a continue the chat's last message not the player's with its shown text, which only this context shows.
 // With no answer within RPE's wait (sent with its registration) it applies the fail-closed verdict
 // (`fail-closed.ts`) and cuts nothing, and RPE cuts on receipt; when RPE answers that it could not work
 // the secrets out, it applies the same verdict and hands on RPE's cut. It remembers nothing from one
@@ -16,7 +17,7 @@
 
 import type { WorldInfoCandidate } from "../shared/host";
 import { textOf } from "../secrecy/lore-secrets";
-import { textHash, type PathStep, type Question, type QuestionEntry } from "../adapter/lumiverse/wire";
+import { replyKindOf, textHash, type PathStep, type Question, type QuestionEntry } from "../adapter/lumiverse/wire";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { hasSecretMarks, unreadableMarks } from "../shared/secret-marks";
@@ -39,16 +40,21 @@ interface WorldInfoContext {
   purpose: "prompt" | "query";
   path: PathStep[];
   candidates: WorldInfoCandidate[];
+  /** The chat's last message not the player's, by its place, with its shown text; null where the context shows none. */
+  lastReply: { id: string; text: string } | null;
 }
 
 /** The interceptor's context (`world-info-interceptor.ts:71-80`, filled at `prompt-assembly.service.ts:2284-2313`), read; null when it names no user or chat. */
 function contextOf(raw: unknown): WorldInfoContext | null {
   if (!isRecord(raw) || typeof raw.userId !== "string" || raw.userId === "" || typeof raw.chatId !== "string") return null;
   const path: PathStep[] = [];
+  let lastReply: { id: string; index: number; text: string } | null = null;
   for (const m of Array.isArray(raw.messages) ? raw.messages : []) {
     if (!isRecord(m) || typeof m.id !== "string" || typeof m.index_in_chat !== "number") continue;
+    const text = typeof m.content === "string" ? m.content : "";
     // Whether it is the player's, and the hash of its shown text, as the tag's list hashes a text (§9.6 l.1121).
-    path.push({ id: m.id, index: m.index_in_chat, swipe: typeof m.swipe_id === "number" ? m.swipe_id : null, user: m.is_user === true, hash: textHash(typeof m.content === "string" ? m.content : "") });
+    path.push({ id: m.id, index: m.index_in_chat, swipe: typeof m.swipe_id === "number" ? m.swipe_id : null, user: m.is_user === true, hash: textHash(text) });
+    if (m.is_user !== true && (lastReply === null || m.index_in_chat > lastReply.index)) lastReply = { id: m.id, index: m.index_in_chat, text };
   }
   // As today's build reads them (`backend/spindle-host.ts:596`).
   const candidates: WorldInfoCandidate[] = [];
@@ -56,7 +62,7 @@ function contextOf(raw: unknown): WorldInfoContext | null {
     if (!isRecord(e) || typeof e.id !== "string") continue;
     candidates.push({ id: e.id, bookId: typeof e.world_book_id === "string" ? e.world_book_id : "", disabled: e.disabled === true, extensions: isRecord(e.extensions) ? (e.extensions as JsonObject) : {}, comment: typeof e.comment === "string" ? e.comment : "", content: typeof e.content === "string" ? e.content : "" });
   }
-  return { user: raw.userId, chat: raw.chatId, purpose: raw.purpose === "query" ? "query" : "prompt", path, candidates };
+  return { user: raw.userId, chat: raw.chatId, purpose: raw.purpose === "query" ? "query" : "prompt", path, candidates, lastReply: lastReply === null ? null : { id: lastReply.id, text: lastReply.text } };
 }
 
 /** A candidate as RPE is told of it (§9.6): its id and text key always; its text, title and RPE's fields only where it carries marks or RPE's fields. */
@@ -78,9 +84,11 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
     const ctx = contextOf(raw);
     if (ctx === null) return {};
     const generation = ctx.purpose === "prompt" ? deps.generations.pending(ctx.user, ctx.chat) : null;
+    // A continue's message, as this context shows it, for the prompt interceptor to check against the message Lumiverse moves (only this context carries who said what).
+    const continued = generation !== null && replyKindOf(generation.type) === "continue" ? ctx.lastReply : null;
     /** What the prompt interceptor of this generation is handed, where a prompt is being built for one. */
-    const handOn = (handoff: Handoff): void => {
-      if (generation !== null) deps.generations.hold(ctx.user, ctx.chat, generation.id, handoff);
+    const handOn = (handoff: Omit<Handoff, "continued">): void => {
+      if (generation !== null) deps.generations.hold(ctx.user, ctx.chat, generation.id, { ...handoff, continued });
     };
     const fallBack = (why: string, question: Handoff["question"]): WorldInfoReturn => {
       deps.log(`chat ${ctx.chat}: ${why}, so its secrets stay out of this prompt`);
