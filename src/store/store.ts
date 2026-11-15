@@ -47,7 +47,9 @@ import {
   type Source,
   type Standing,
   type StoreState,
+  type TurnPoint,
   type TurnRow,
+  type TurnStart,
   type TurnStatus,
 } from "./types";
 
@@ -223,6 +225,16 @@ function changeOf(r: ChangeDb): ChangeRow {
 
 function chatOf(r: ChatDb): ChatRow {
   return { id: r.id, world: r.world as WorldId | null, revision: r.revision as RevisionId | null, sourceChat: r.source_chat, sourceMessage: r.source_message, head: r.head, created: r.created, deleted: r.deleted };
+}
+
+/**
+ * A chat's path as stored. A path stored before the store kept hidden marks holds none: its messages
+ * read as not hidden until the next comparison takes the marks as the chat shows them.
+ */
+function pathOf(json: string): PathEntry[] {
+  const path = JSON.parse(json) as (Omit<PathEntry, "hidden"> & { hidden?: boolean })[];
+  for (const e of path) e.hidden ??= false;
+  return path as PathEntry[];
 }
 
 /** Opens a store over a database: a path it opens and brings up itself, or a database whose owner made its tables. */
@@ -584,7 +596,7 @@ export class UserStore {
     let on: string | null = chat.head;
     if (input.on !== undefined) on = input.on;
     else if (input.target) {
-      const path = JSON.parse(chat.path) as PathEntry[];
+      const path = pathOf(chat.path);
       const at = path.findIndex((e) => e.message === input.target);
       if (at >= 0) on = path.slice(0, at).findLast((e) => e.node !== null)?.node ?? null;
     }
@@ -627,19 +639,21 @@ export class UserStore {
    * after the turn its message holds, which takes that turn's place there with its own node, so the path still runs through that
    * turn. Inside a write.
    */
-  private joinPath(t: TurnRow, entry: PathEntry): void {
+  private joinPath(t: TurnRow, entry: Omit<PathEntry, "hidden">): void {
     const chat = this.chatOrThrow(t.chat);
-    const path = JSON.parse(chat.path) as PathEntry[];
+    const path = pathOf(chat.path);
     const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
     const at = path.findIndex((e) => e.message === entry.message);
     if (at < 0) {
       if (prev !== chat.head) return;
-      path.push(entry);
+      // A reply new to the chat comes with no hidden mark.
+      path.push({ ...entry, hidden: false });
     } else {
       const before = path.slice(0, at).findLast((e) => e.node !== null)?.node ?? null;
       const goesOn = path[at]?.turn === t.parent && path[at]?.node === prev;
       if ((before !== prev && !goesOn) || path.slice(at + 1).some((e) => e.turn !== null)) return;
-      path[at] = entry;
+      // The hidden mark is the message's: a new swipe of it keeps it.
+      path[at] = { ...entry, hidden: path[at]?.hidden ?? false };
     }
     this.db.run("UPDATE chat SET path = ?, head = ? WHERE user = ? AND id = ?", [JSON.stringify(path), t.node, this.id, t.chat]);
   }
@@ -707,7 +721,7 @@ export class UserStore {
   // ------------------------------------------------------------ the path
 
   path(chat: string): PathEntry[] {
-    return JSON.parse(this.chatOrThrow(chat).path) as PathEntry[];
+    return pathOf(this.chatOrThrow(chat).path);
   }
 
   /**
@@ -743,13 +757,13 @@ export class UserStore {
   /**
    * Compares the chat as shown with the turn tree, by ids and hashes only, and takes the shown path
    * as the chat's path (plan §6.3): messages gone leave it, the swipe showing on each reply is the
-   * turn there, and turns after an earlier reply's flipped swipe stand rebased, their changes
-   * applied again on the swipe now showing. The report says what it found, with what no longer
-   * applies on the new path.
+   * turn there, each message's hidden mark is the one shown, and turns after an earlier reply's
+   * flipped swipe stand rebased, their changes applied again on the swipe now showing. The report
+   * says what it found, with what no longer applies on the new path.
    */
   sync(chat: string, shown: readonly ShownMessage[]): PathReport {
     const row = this.chatOrThrow(chat);
-    const before = JSON.parse(row.path) as PathEntry[];
+    const before = pathOf(row.path);
     const was = new Map(before.map((e) => [e.message, e]));
     const date = (m: ShownMessage): number | null => m.date ?? null;
     // A reply shown as it was last time keeps its turn; any other is matched again.
@@ -768,7 +782,7 @@ export class UserStore {
     const after: PathEntry[] = [];
     for (const m of shown) {
       if (m.user) {
-        after.push({ message: m.id, user: true, turn: null, node: null, own: null, hash: m.hash, date: date(m) });
+        after.push({ message: m.id, user: true, turn: null, node: null, own: null, hash: m.hash, date: date(m), hidden: m.hidden === true });
         continue;
       }
       let turn: string | null = was.get(m.id)?.turn ?? null;
@@ -780,7 +794,7 @@ export class UserStore {
           flags.push([match.turn.id, m.hash]);
         } else if (match.turn && !match.edited && match.turn.edited !== null) flags.push([match.turn.id, null]);
       }
-      after.push({ message: m.id, user: false, turn, node: null, own: null, hash: m.hash, date: date(m) });
+      after.push({ message: m.id, user: false, turn, node: null, own: null, hash: m.hash, date: date(m), hidden: m.hidden === true });
     }
     // Path nodes: the same as last time as long as the turns before them are; new ones after that. A turn begun after the turn its
     // own message holds (a branch's continue of a reply it shares) has a new node chained after one for that turn, which stays on the
@@ -972,6 +986,23 @@ export class UserStore {
     const t = this.turnOrThrow(turnId);
     const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
     return prev === null ? this.initial(this.chatOrThrow(t.chat).revision) : this.foldNode(prev).folded;
+  }
+
+  /**
+   * Where a turn not yet begun will start (plan §4.2, §9.6, R-5): the state at that point of the chat's path, with the path's
+   * messages before it and their hidden marks. The extension's question is answered from it before lore activates, so it reads RPE's
+   * own store only: the path as last compared, and the state held in memory, else folded from the nearest snapshot on the path. It
+   * asks neither the chat application nor a model, and writes nothing. The state stays held, so the turn that follows starts from it.
+   * A message the path does not hold yet, one sent since the last comparison, stands after the path's last.
+   */
+  turnStart(chat: string, point: TurnPoint): TurnStart {
+    const row = this.chatOrThrow(chat);
+    const path = pathOf(row.path);
+    const at = path.findIndex((e) => e.message === (point.follows ?? point.replaces));
+    // The message followed is the newest of the turn's history; the reply replaced is not in it.
+    const messages = at < 0 ? path : path.slice(0, point.follows !== undefined ? at + 1 : at);
+    const node = messages.findLast((e) => e.node !== null)?.node ?? null;
+    return { ...(node === null ? this.initial(row.revision) : this.foldNode(node).folded), messages };
   }
 
   /** State at the end of the chat's path: rebased turns' changes applied again where they now stand. */
@@ -1270,7 +1301,7 @@ export class UserStore {
    */
   private undoPlan(c: ChangeRow, turn: TurnRow, own: readonly ChangeRow[]): { plan: UndoPlan; on: string | null } {
     const chat = this.chatOrThrow(turn.chat);
-    const onPath = (JSON.parse(chat.path) as PathEntry[]).some((e) => e.turn === turn.id);
+    const onPath = pathOf(chat.path).some((e) => e.turn === turn.id);
     const head = chat.head === null ? null : (this.db.query<{ turn: string }, [string, string]>("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, chat.head)?.turn ?? null);
     if (!onPath || head === null) return { plan: { inputs: [], left: [{ code: "not_on_path", values: { change: c.id, op: c.op } }] }, on: null };
     // The change with the rest of its unit: the changes of its turn that share its group.

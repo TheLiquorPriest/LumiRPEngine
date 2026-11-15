@@ -1,16 +1,169 @@
 // The turn tree (plan §6.3): swipes are siblings, the path is the chain of showing swipes, a swipe is
 // known by its date and saved hash and never by its position, messages gone take their turns off the
-// path, and a branch shares its source's turns through the chat application's old-to-new id map.
+// path, a branch shares its source's turns through the chat application's old-to-new id map, and the
+// path keeps each message's hidden mark. The extension's question (plan §4.2, §9.6, R-5, R-21) is
+// answered from RPE's own store: the state where the coming turn will start, and the path's marks.
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { castAt } from "../../src/cast/path";
+import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
-import type { UserStore } from "../../src/store/store";
-import { StoreInputError } from "../../src/store/types";
+import { openStore, type Store, type UserStore } from "../../src/store/store";
+import { StoreInputError, type ShownMessage } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
-import { carried, engine, goTo, hashOf, make, play, POV, shown, testStore, tick } from "./fixtures";
+import { carried, engine, goTo, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
+import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
 
 const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state.world.entities[POV]?.fields.place;
+
+/** Another store over the same database: nothing held in memory, as after a restart. */
+function reopened(ts: TestStore): Store {
+  return openStore({ db: ts.store.db, registry: registry(), worlds: (r) => ts.worlds.get(r) });
+}
+
+describe("hidden marks", () => {
+  let bed: TurnBed | null = null;
+  afterEach(async () => {
+    await bed?.close();
+    bed = null;
+  });
+
+  test("the path keeps each message's hidden mark, and a mark changed since is taken at the next comparison", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "They meet.", 1, engine(tick(10)));
+    play(s, "c", "m2", "She goes down to the cellar.", 2, engine(goTo(POV, "cellar")));
+    const chat = shown(["u1", "hello"], ["m1", "They meet.", 1], ["u2", "an aside"], ["m2", "She goes down to the cellar.", 2]);
+    // The player hides messages from the prompt: Lumiverse sets each one's `extra.hidden` (`bulkSetHidden`,
+    // `src/services/chats.service.ts:3087-3110`), and prompt assembly skips it (`prompt-assembly.service.ts:3252`).
+    const showing = (...hidden: string[]): ShownMessage[] => chat.map((m) => ({ ...m, hidden: hidden.includes(m.id) }));
+    const marks = (u: UserStore) => u.path("c").map((e) => [e.message, e.hidden]);
+    s.sync("c", showing("u2", "m2"));
+    expect(marks(s)).toEqual([
+      ["u1", false],
+      ["m1", false],
+      ["u2", true],
+      ["m2", true],
+    ]);
+    // Kept with the chat: a store opened again on its database, as after a restart, holds the same marks.
+    expect(marks(reopened(ts).user(USER))).toEqual(marks(s));
+
+    // The aside's reply shown again and the greeting hidden: the next comparison takes the marks as shown. A mark is no edit and
+    // no swipe: the turns and the state stand.
+    const report = s.sync("c", showing("u1", "u2"));
+    expect(marks(s)).toEqual([
+      ["u1", true],
+      ["m1", false],
+      ["u2", true],
+      ["m2", false],
+    ]);
+    expect(report).toMatchObject({ gone: [], swiped: null, flipped: [], rebased: null, edited: [], unplayed: [] });
+    expect(placeOf(s, "c")).toBe("cellar");
+
+    // A swipe RPE plays of a hidden reply keeps the message's mark: Lumiverse keeps a message's `extra` when it adds a swipe
+    // (`chats.service.ts:274`, `:3311-3318`). A reply new to the chat comes with none: its message is made with no hidden mark
+    // (`generate.service.ts:1988-2003`).
+    s.sync("c", showing("m2"));
+    const swipe = play(s, "c", "m2", "She steps out to the market.", 3, engine(goTo(POV, "market_square")), { target: "m2" });
+    play(s, "c", "m3", "The market is loud.", 4, []);
+    expect(s.path("c").map((e) => [e.message, e.turn === swipe.id, e.hidden])).toEqual([
+      ["u1", false, false],
+      ["m1", false, false],
+      ["u2", false, false],
+      ["m2", true, true],
+      ["m3", false, false],
+    ]);
+    // Ids, hashes and marks only: no message's text is kept on the path.
+    const stored = ts.store.db.query<{ path: string }, [string]>("SELECT path FROM chat WHERE id = ?").get("c")?.path ?? "";
+    for (const text of ["hello", "They meet.", "an aside", "She goes down to the cellar.", "She steps out to the market.", "The market is loud."]) expect(stored).not.toContain(text);
+  });
+
+  test("a turn's comparison takes each message's hidden mark from the chat as Lumiverse shows it", async () => {
+    // A message the player hid has `extra.hidden` in its row (`chats.service.ts:3106`); the stand-in writes it so, and RPE reads the
+    // chat's path from those rows when a turn starts.
+    const b = (bed = await openTurnBed({
+      answers: [replying("The stair creaks under you.")],
+      messages: [
+        { id: "m-greeting", role: "assistant", content: GREETING },
+        { id: "u-aside", role: "user", content: "(Marlow mutters to himself about the weather.)", hidden: true },
+      ],
+    }));
+    const said = b.host.send(CHAT, "I climb the stairs.");
+    const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "normal" });
+    expect(out.error).toBeNull();
+    const reply = (await settledTurn(b, out.generationId ?? "")).message;
+    if (reply === null) throw new Error("the turn was not tied to a reply");
+    expect(b.turns.store.user(BED_USER).path(CHAT).map((e) => [e.message, e.hidden])).toEqual([
+      ["m-greeting", false],
+      ["u-aside", true],
+      [said, false],
+      [reply, false],
+    ]);
+  });
+});
+
+describe("the question's call", () => {
+  test("after a restart the question's call answers from RPE's own snapshot, for the head and for a swipe's point, and holds the state", () => {
+    let clock = 0;
+    const ts = testStore({ snapshotEvery: 4, now: () => ++clock });
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    // Ten played turns, each passing time and moving Wren on; a snapshot is kept at every fourth along the path.
+    const places = ["cellar", "market_square", "far_road", "common_room"];
+    const turns = Array.from({ length: 10 }, (_, i) => play(s, "c", `m${i + 1}`, `Reply ${i + 1}.`, i + 1, engine(tick(i + 1), goTo(POV, places[i % places.length] ?? "cellar"))));
+    const [seventh, eighth, ninth, tenth] = turns.slice(6);
+    if (!seventh || !eighth || !ninth || !tenth) throw new Error("ten turns were not played");
+    // The chat as the last turn's comparison saw it: the player's lines between the replies, an aside and its answer hidden.
+    const chat: ShownMessage[] = turns.flatMap((_, i) => [
+      { id: `u${i + 1}`, user: true, hash: hashOf(`Line ${i + 1}.`), hidden: i === 4 },
+      { id: `m${i + 1}`, user: false, hash: hashOf(`Reply ${i + 1}.`), date: i + 1, hidden: i === 4 },
+    ]);
+    s.sync("c", chat);
+    const warm = { head: hashJson(s.headState("c").state), swipe: hashJson(s.stateAt(ninth.id).state), deleted: hashJson(s.stateAt(seventh.id).state) };
+    // While RPE runs, the answer is the state it holds.
+    expect(s.turnStart("c", { follows: "u11" }).state).toBe(s.headState("c").state);
+
+    // RPE starts again: nothing is held, and the store is all it has. It reads no chat application and calls no model.
+    const cold = reopened(ts).user(USER);
+    const written = (): number | undefined => ts.store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()?.n;
+    const before = written();
+    // A new reply follows the player's newest line, which the path does not hold yet: it was sent after the last comparison.
+    const atHead = cold.turnStart("c", { follows: "u11" });
+    // A swipe of the newest reply starts where that reply's turn started.
+    const atSwipe = cold.turnStart("c", { replaces: "m10" });
+    // After the player deleted everything after their eighth line, a new reply follows that line: it starts after the seventh turn,
+    // not at the head RPE last held.
+    const atDeleted = cold.turnStart("c", { follows: "u8" });
+    expect(written()).toBe(before);
+    expect([atHead.node, hashJson(atHead.state)]).toEqual([tenth.node, warm.head]);
+    expect([atSwipe.node, hashJson(atSwipe.state)]).toEqual([ninth.node, warm.swipe]);
+    expect([atDeleted.node, hashJson(atDeleted.state)]).toEqual([seventh.node, warm.deleted]);
+    expect([atHead, atSwipe, atDeleted].map((a) => a.state.world.entities[POV]?.fields.place)).toEqual(["market_square", "cellar", "far_road"]);
+    // The path's messages before each point, each with its mark, so the window counts no hidden message (R-21).
+    expect(atHead.messages.map((e) => e.message)).toEqual(chat.map((m) => m.id));
+    expect(atSwipe.messages.map((e) => e.message)).toEqual(chat.slice(0, -1).map((m) => m.id));
+    expect(atDeleted.messages.map((e) => e.message)).toEqual(chat.slice(0, 15).map((m) => m.id));
+    expect(atHead.messages.filter((e) => e.hidden).map((e) => e.message)).toEqual(["u5", "m5"]);
+    expect([atHead, atSwipe, atDeleted].map((a) => a.messages.filter((e) => !e.hidden).length)).toEqual([18, 17, 13]);
+
+    // Held after: the turns that follow start from the very states the question was answered from, with nothing folded again.
+    const next = cold.beginTurn({ chat: "c", kind: "normal" });
+    expect(cold.startOf(next.id).state).toBe(atHead.state);
+    const swipe = cold.beginTurn({ chat: "c", kind: "swipe", target: "m10" });
+    expect(cold.startOf(swipe.id).state).toBe(atSwipe.state);
+
+    // What a cold answer builds on is RPE's own snapshot: a state stored at the eighth turn is what both answers continue from.
+    const at8 = ts.store.db.query<{ state: string }, [string]>("SELECT state FROM snapshot WHERE node = ?").get(eighth.node);
+    if (!at8) throw new Error("no snapshot at the eighth turn");
+    const doc = JSON.parse(at8.state) as { state: { world: { clock: number } } };
+    doc.state.world.clock += 1000;
+    ts.store.db.run("UPDATE snapshot SET state = ? WHERE node = ?", [JSON.stringify(doc), eighth.node]);
+    const again = reopened(ts).user(USER);
+    expect(again.turnStart("c", { follows: "u11" }).state.world.clock - atHead.state.world.clock).toBe(1000);
+    expect(again.turnStart("c", { replaces: "m10" }).state.world.clock - atSwipe.state.world.clock).toBe(1000);
+  });
+});
 
 describe("the turn tree", () => {
   test("swipes of a reply are siblings under one parent, and the path follows the swipe showing", () => {

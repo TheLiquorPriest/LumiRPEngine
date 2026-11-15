@@ -137,15 +137,19 @@ export interface TurnRow {
   created: number;
 }
 
-/** One message of the chat as the chat application shows it: the showing swipe's text hash and date. */
+/**
+ * One message of the chat as the chat application shows it: the showing swipe's text hash and date,
+ * and whether the player hid it from the prompt (absent: not hidden).
+ */
 export interface ShownMessage {
   id: string;
   user: boolean;
   hash: string;
   date?: number | null;
+  hidden?: boolean;
 }
 
-/** One message of a chat's path as last compared. */
+/** One message of a chat's path as last compared. Ids, hashes and marks only: never its text. */
 export interface PathEntry {
   message: string;
   user: boolean;
@@ -157,6 +161,11 @@ export interface PathEntry {
   own: boolean | null;
   hash: string;
   date: number | null;
+  /**
+   * Whether the player hid it from the prompt, as the last comparison was shown it. The mark is the
+   * message's: a swipe tied to it since keeps it, and a reply new to the path has none.
+   */
+  hidden: boolean;
 }
 
 /** A change that applied when it was recorded and does not apply on the path folded now, with the reports that say why. */
@@ -258,6 +267,22 @@ export interface Folded {
   state: StoreState;
   notApplied: NotApplied[];
   rebased: string[];
+}
+
+/**
+ * Where on a chat's path a turn not yet begun will start (plan §4.2, §9.6): after the message its
+ * generation follows (a new reply, a continue, an impersonation), or in place of the reply a swipe
+ * or a regenerate replaces.
+ */
+export type TurnPoint = { follows: string; replaces?: never } | { replaces: string; follows?: never };
+
+/**
+ * What the extension's question is answered from (plan §4.2, §9.6, R-5): the state where a turn not
+ * yet begun will start (`node` is the path node it will stand after, null at the chat's start), and
+ * the chat's path before that point, oldest first, each message with its hidden mark (R-21).
+ */
+export interface TurnStart extends Folded {
+  messages: PathEntry[];
 }
 
 /** Input the store refuses because it cannot be read: an unknown lane, a malformed value, a turn that is not there. */

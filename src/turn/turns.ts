@@ -858,7 +858,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const before = replaced === null ? undefined : was.find((e) => e.message === replaced);
     const shown: ShownMessage[] = steps
       .filter((s) => s.id !== writing)
-      .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
+      .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date, hidden: s.hidden } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date, hidden: s.hidden }));
     const report = await this.#d.writes.run((db) => {
       const compared = store.sync(chat, shown);
       const head = store.path(chat).findLast((e) => e.turn !== null)?.turn ?? null;
