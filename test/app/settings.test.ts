@@ -166,7 +166,9 @@ test("a value of the wrong kind, a key RPE does not read, ~ where it is not take
 });
 
 test("the files switched off at a level are listed under it, and a write switches one on again", async () => {
-  const b = await playedBed("off:\n  - rules/turn-unrecorded\n  - WORLD\n");
+  const b = await playedBed("");
+  // His own file, with one `off:` list (the bed's own line replaced).
+  await writeFile(b.app.paths.globalConfig, "off:\n  - rules/turn-unrecorded\n  - WORLD\n");
   await writeFile(chatFile(b), "off: [SIMULATION]\n");
   const listed = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "off");
   // Every level's list, each under its level; together, what is off.
@@ -289,4 +291,64 @@ test("config.json's facts are listed, and no route writes config.json", async ()
   // A limit written from the page lands in RPE-global.yml alone.
   expect((await settings(b, "PUT", "", { level: "global", key: "server.address", value: "0.0.0.0" })).status).toBe(200);
   expect(await readFile(b.app.paths.config, "utf8")).toBe(configBefore);
+});
+
+/** The Files page's switch of a file at a level, as the page calls it: its status. */
+async function switchOff(b: TurnBed, path: string, body: unknown): Promise<number> {
+  const token = (await b.app.auth.mintPageToken(USER, "extension")).token;
+  const res = await fetch(`${b.listening.url}/api/v1/files-off/${path}`, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+  return res.status;
+}
+
+test("a setting written while the Files page switches a file off: both changes are in the file", async () => {
+  const b = await openTurnBed({ answers: [] });
+  beds.push(b);
+  await writeFile(b.app.paths.globalConfig, "# Mine.\nhistory:\n  window: 30\n");
+  for (const [round, file] of ["consent", "perceptions-owed", "unsourced"].entries()) {
+    const [setting, switched] = await Promise.all([settings(b, "PUT", "", { level: "global", key: "history.window", value: 20 + round }), switchOff(b, `@shipped/.rules/${file}.md`, { level: "global", off: true })]);
+    expect({ round, setting: setting.status, switched }).toEqual({ round, setting: 200, switched: 200 });
+    const text = await readFile(b.app.paths.globalConfig, "utf8");
+    expect({ round, comment: text.startsWith("# Mine.\n") }).toEqual({ round, comment: true });
+    expect({ round, doc: Bun.YAML.parse(text) }).toMatchObject({ round, doc: { history: { window: 20 + round }, off: expect.arrayContaining([`rules/${file}`]) } });
+  }
+});
+
+test("a file whose layout the splice cannot follow is left as it was, and the answer names the line", async () => {
+  const b = await openTurnBed({ answers: [] });
+  beds.push(b);
+  const mine = "# Mine.\nhistory: { hold: true,\n  step: 10 }\n";
+  await writeFile(b.app.paths.globalConfig, mine);
+  const refused = await settings<{ error: string }>(b, "PUT", "", { level: "global", key: "history.window", value: 25 });
+  expect(refused.status).toBe(409);
+  expect(refused.body.error).toContain('line 2 ("history: { hold: true,")');
+  expect(refused.body.error).toContain("without losing your comments");
+  expect(await readFile(b.app.paths.globalConfig, "utf8")).toBe(mine);
+  // The Files page's switch writes the same file under the same rule.
+  expect(await switchOff(b, "@shipped/.rules/consent.md", { level: "global", off: true })).toBe(200);
+  expect((await readFile(b.app.paths.globalConfig, "utf8")).startsWith(mine.trimEnd())).toBe(true);
+});
+
+test("PUT at the chat level for a chat RPE has never played writes its RPE.yml, and its first turn plays under it", async () => {
+  const b = await openTurnBed({ answers: [replying("The lamp catches.")] });
+  beds.push(b);
+  expect(b.turns.chats.folders(USER, CHAT)).toBeNull();
+  const set = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "history.window", value: 5 });
+  expect(set.status).toBe(200);
+  expect(setting(set.body, "history.window")).toMatchObject({ value: 5, from: "chat", file: "RPE.yml" });
+  const file = chatFile(b);
+  expect(Bun.YAML.parse(await readFile(file, "utf8"))).toEqual({ history: { window: 5 } });
+  expect(await windowAtNextTurn(b)).toBe(5);
+
+  // Its first turn finds the chat placed where the write put it, and plays under the chat's own level.
+  b.host.send(CHAT, "I light the lamp.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+  expect(out.error).toBeNull();
+  await settledTurn(b, out.generationId!);
+  expect(chatFile(b)).toBe(file);
+  expect(await windowAtNextTurn(b)).toBe(5);
+
+  // A chat Lumiverse does not have is no folder made.
+  const unknown = await settings<{ error: string }>(b, "PUT", "", { level: "chat", chat: "chat-nowhere", key: "history.window", value: 5 });
+  expect(unknown).toEqual({ status: 404, body: { error: "Lumiverse has no chat chat-nowhere of yours." } });
+  expect(b.turns.chats.folders(USER, "chat-nowhere")).toBeNull();
 });

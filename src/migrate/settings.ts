@@ -17,10 +17,10 @@ import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { hashJson } from "../shared/hash";
 import { isRecord, type JsonValue } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { readText, writeWhole } from "../app/disk";
+import { oneFileAtATime, readText, writeWhole } from "../app/disk";
 import { takenValue } from "../app/setting-list";
 import { UPDATE_SETTINGS } from "../app/update";
-import { withKeyAt, yamlMapping } from "../app/yaml";
+import { LayoutRefused, withKeyAt, yamlMapping } from "../app/yaml";
 import type { PutPrints } from "./connections";
 import { readText as readFile } from "./files";
 import type { Item } from "./report";
@@ -214,38 +214,49 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     if (runtime.autoUpdate !== undefined) puts.push({ from: [`runtime ${name}: autoUpdate`], to: "update.restart", value: runtime.autoUpdate as JsonValue });
   }
 
-  // Each value into RPE-global.yml where RPE's setting takes it: where RPE has no value and no run put one, or RPE's is still the one a run put there.
-  const before = (await readText(globalConfig)) ?? "";
-  const config = yamlMapping(before, globalConfig);
-  let text = before;
-  for (const p of puts) {
-    // Where the app declares the setting, the value as it takes it; and none, for a setting none holds where nothing sets it and no file may set `~` for: nothing is written, and RPE's own none holds.
-    const def = RPE_SETTINGS.find((d) => d.key === p.to);
-    let value: JsonValue | undefined = p.value;
-    if (def !== undefined && p.value === null && def.default === null && def.orNone !== true) value = undefined;
-    else if (def !== undefined) {
-      const taken = takenValue(def, p.value, p.to, true);
-      if (!taken.ok) {
-        for (const from of p.from) notCarried.push({ from, to: p.to, why: taken.why });
-        continue;
+  // Each value into RPE-global.yml where RPE's setting takes it: where RPE has no value and no run put one, or RPE's is still the one a run put there. The file's one lock is held, as every writer of it holds it.
+  await oneFileAtATime(globalConfig, async () => {
+    const before = (await readText(globalConfig)) ?? "";
+    const config = yamlMapping(before, globalConfig);
+    let text = before;
+    for (const p of puts) {
+      // Where the app declares the setting, the value as it takes it; and none, for a setting none holds where nothing sets it and no file may set `~` for: nothing is written, and RPE's own none holds.
+      const def = RPE_SETTINGS.find((d) => d.key === p.to);
+      let value: JsonValue | undefined = p.value;
+      if (def !== undefined && p.value === null && def.default === null && def.orNone !== true) value = undefined;
+      else if (def !== undefined) {
+        const taken = takenValue(def, p.value, p.to, true);
+        if (!taken.ok) {
+          for (const from of p.from) notCarried.push({ from, to: p.to, why: taken.why });
+          continue;
+        }
+        value = taken.value;
       }
-      value = taken.value;
+      const path = p.to.split(".");
+      let ours: unknown = config;
+      for (const part of path) ours = isRecord(ours) ? ours[part] : undefined;
+      const what = `setting ${p.to}`;
+      const was = earlier.get(what);
+      // An unset key prints apart from `~`: where RPE's default is not none, the two read differently.
+      const print = value === undefined ? "" : hashJson(value);
+      const held = ours === undefined ? "" : hashJson(ours);
+      const to = `RPE-global.yml: ${p.to}`;
+      if (held === print || (was === undefined ? ours === undefined : held === was)) {
+        if (held !== print) {
+          try {
+            text = withKeyAt(text, path, value, globalConfig);
+          } catch (error) {
+            // A layout of his file the splice does not follow: the value is not carried, and his comments stay.
+            if (!(error instanceof LayoutRefused)) throw error;
+            for (const from of p.from) notCarried.push({ from, to: p.to, why: error.message });
+            continue;
+          }
+        }
+        put.set(what, print);
+        for (const from of p.from) out.carried.push({ from, to });
+      } else for (const from of p.from) keptInRpe.push({ from, to });
     }
-    const path = p.to.split(".");
-    let ours: unknown = config;
-    for (const part of path) ours = isRecord(ours) ? ours[part] : undefined;
-    const what = `setting ${p.to}`;
-    const was = earlier.get(what);
-    // An unset key prints apart from `~`: where RPE's default is not none, the two read differently.
-    const print = value === undefined ? "" : hashJson(value);
-    const held = ours === undefined ? "" : hashJson(ours);
-    const to = `RPE-global.yml: ${p.to}`;
-    if (held === print || (was === undefined ? ours === undefined : held === was)) {
-      if (held !== print) text = withKeyAt(text, path, value, globalConfig);
-      put.set(what, print);
-      for (const from of p.from) out.carried.push({ from, to });
-    } else for (const from of p.from) keptInRpe.push({ from, to });
-  }
-  if (text !== before) await writeWhole(globalConfig, text);
+    if (text !== before) await writeWhole(globalConfig, text);
+  });
   return { carried: out, put };
 }

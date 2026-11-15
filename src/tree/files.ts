@@ -9,7 +9,7 @@ import { appendFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Places, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "rp-harness/contract";
-import { writeWhole } from "../app/disk";
+import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { MOUNTS } from "./layout";
 import { treeSettingsOf } from "./settings";
@@ -152,29 +152,6 @@ async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ resu
     before: old === null ? null : sha256(old),
   };
   return { result, old, after };
-}
-
-/** Changes to one file run one at a time, so two changes to it both land. */
-class Serial {
-  private readonly tails = new Map<string, Promise<unknown>>();
-
-  run<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const next = (this.tails.get(key) ?? Promise.resolve()).then(task, task);
-    const tail = next.catch(() => undefined);
-    this.tails.set(key, tail);
-    void tail.then(() => {
-      if (this.tails.get(key) === tail) this.tails.delete(key);
-    });
-    return next;
-  }
-}
-
-/** One queue for every writer of a file, by its place on disk: an agent's write, the user's, and the notes put back for a turn. */
-const SERIAL = new Serial();
-
-/** Runs `task`, a change to the file at `disk`, after every change to it asked for before. */
-export function oneFileAtATime<T>(disk: string, task: () => Promise<T>): Promise<T> {
-  return SERIAL.run(disk, task);
 }
 
 export function treeFiles(deps: TreeFilesDeps): TreeFiles {

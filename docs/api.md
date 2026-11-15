@@ -16,6 +16,7 @@ A route that pages takes `limit` and `cursor` in its query and answers `{ items,
 - [State](#state)
 - [Cast](#cast)
 - [Story](#story)
+- [Lore](#lore)
 - [Files](#files)
 - [Jobs](#jobs)
 - [Connections](#connections)
@@ -294,6 +295,22 @@ Strikes an item of the story record, or takes its strike back, as the player's o
 | Query | none |
 | Body | [`StoryStrikeAsk`](#storystrikeask) |
 | Reply | [`StoryStrikeReply`](#storystrikereply) |
+
+## Lore
+
+### `GET /api/v1/chats/:chat/turns/:turn/lore`
+
+The lore Lumiverse activated for a turn's prompt, in the tag's order: each entry's lore map id, its id and book in Lumiverse, its title and how it activated where the tag says; none for a turn RPE holds no tag for, or one of another chat.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`TurnLoreReply`](#turnlorereply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ## Files
 
@@ -1935,6 +1952,14 @@ export interface LiveMissed {
 }
 ```
 
+### `LoreActivation`
+
+How Lumiverse activated an entry: always on, by one of its keys, by meaning, or still in force from an earlier turn.
+
+```ts
+export type LoreActivation = "constant" | "keyword" | "vector" | "sticky";
+```
+
 ### `LumiverseSave`
 
 What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block.
@@ -3103,6 +3128,35 @@ What a generation asks for.
 
 ```ts
 export type TurnKind = "new" | "swipe" | "regenerate" | "continue" | "impersonate";
+```
+
+### `TurnLoreReply`
+
+The lore Lumiverse activated for a turn's prompt, in the order the turn's tag lists it; none for a turn RPE holds no tag for.
+
+```ts
+export interface TurnLoreReply {
+  entries: TurnLoreRow[];
+}
+```
+
+### `TurnLoreRow`
+
+An entry Lumiverse activated for a turn's prompt: its lore map id, its id and its book's id in Lumiverse, its title, and how it activated where the turn's tag says.
+
+```ts
+export interface TurnLoreRow {
+  /** The id the Author's lore map gives the entry: `e-` and its number. */
+  id: string;
+  /** Lumiverse's id of the entry. */
+  entry: string;
+  /** Lumiverse's id of its book; empty where the tag does not say. */
+  book: string;
+  /** Its title as Lumiverse gave it. */
+  title: string;
+  /** How it activated; null where the tag does not say. */
+  how: LoreActivation | null;
+}
 ```
 
 ### `TurnMoments`

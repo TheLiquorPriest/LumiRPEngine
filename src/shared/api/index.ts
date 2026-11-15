@@ -656,6 +656,9 @@ export interface LiveMissed {
   to: number;
 }
 
+/** How Lumiverse activated an entry: always on, by one of its keys, by meaning, or still in force from an earlier turn. */
+export type LoreActivation = "constant" | "keyword" | "vector" | "sticky";
+
 /** What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block. */
 export interface LumiverseSave {
   /** The sign-in to keep; null forgets the one kept; left out, it is not touched. */
@@ -1421,6 +1424,25 @@ export type TurnId = string;
 /** What a generation asks for. */
 export type TurnKind = "new" | "swipe" | "regenerate" | "continue" | "impersonate";
 
+/** The lore Lumiverse activated for a turn's prompt, in the order the turn's tag lists it; none for a turn RPE holds no tag for. */
+export interface TurnLoreReply {
+  entries: TurnLoreRow[];
+}
+
+/** An entry Lumiverse activated for a turn's prompt: its lore map id, its id and its book's id in Lumiverse, its title, and how it activated where the turn's tag says. */
+export interface TurnLoreRow {
+  /** The id the Author's lore map gives the entry: `e-` and its number. */
+  id: string;
+  /** Lumiverse's id of the entry. */
+  entry: string;
+  /** Lumiverse's id of its book; empty where the tag does not say. */
+  book: string;
+  /** Its title as Lumiverse gave it. */
+  title: string;
+  /** How it activated; null where the tag does not say. */
+  how: LoreActivation | null;
+}
+
 /** When a turn's moments happened, in milliseconds since 1970; null for one that has not happened. */
 export interface TurnMoments {
   /** The request reached RPE. */
@@ -1713,6 +1735,15 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: FileReply;
+    paged: false;
+    joined: true;
+  };
+  /** The lore Lumiverse activated for a turn's prompt, in the tag's order: each entry's lore map id, its id and book in Lumiverse, its title and how it activated where the tag says; none for a turn RPE holds no tag for, or one of another chat. */
+  "GET /api/v1/chats/:chat/turns/:turn/lore": {
+    params: { chat: string; turn: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: TurnLoreReply;
     paged: false;
     joined: true;
   };

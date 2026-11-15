@@ -23,10 +23,10 @@ import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, L
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { DataPaths } from "./config";
-import { OneAtATime, readText, writeWhole } from "./disk";
+import { OneAtATime, oneFileAtATime, readText, writeWhole } from "./disk";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
 import type { SecretsFile } from "./secrets";
-import { configWrites, withTopLevelKey, yamlMapping } from "./yaml";
+import { withTopLevelKey, yamlMapping } from "./yaml";
 
 /** The key of `RPE-global.yml` the connections documents are kept under, each under its user. */
 export const MODELS_KEY = "models";
@@ -85,7 +85,7 @@ function connectionsIn(text: string | null, paths: DataPaths, owner: string | nu
 export async function ownModels(paths: DataPaths, secrets: SecretsFile, owner: string | null, log: Log): Promise<void> {
   if (owner === null || owner === "") return;
   try {
-    await configWrites(paths.globalConfig).run(async () => {
+    await oneFileAtATime(paths.globalConfig, async () => {
       const text = await readText(paths.globalConfig);
       const held = text === null ? undefined : (yamlMapping(text, paths.globalConfig)[MODELS_KEY] as JsonValue | undefined);
       if (text === null || held === undefined || held === null || mappingsOnly(held)) return;
@@ -119,8 +119,8 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile, owner: () => 
     async saveConnections(scope, doc) {
       const user = userOf(scope);
       await writes.run(() =>
-        // The Settings routes write the same file.
-        configWrites(paths.globalConfig).run(async () => {
+        // The Settings routes and the Files page write the same file, under its one lock.
+        oneFileAtATime(paths.globalConfig, async () => {
           const text = (await readText(paths.globalConfig)) ?? "";
           const held = connectionsIn(text, paths, owner());
           await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, { ...held, [user]: doc }, paths.globalConfig));

@@ -39,6 +39,7 @@ import { guidanceTexts } from "../turn/texts";
 import { appArea } from "./area";
 import type { App, Area } from "./app";
 import type { SettingsReader } from "./config-read";
+import { RouteError } from "./routes";
 
 export interface ComposeOptions {
   /** Lumiverse's network as the door reaches it: the machine's when absent. */
@@ -99,10 +100,21 @@ export function compose(options: ComposeOptions = {}): Composition {
       },
       settings: (at) => {
         const owner = at.config.lumiverse.user ?? "";
+        // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
+        const placed = async (chat: string) => {
+          const known = made().chats.folders(owner, chat);
+          if (known !== null) return known;
+          const reads = door.lumiverse()?.reads;
+          if (reads === undefined) throw new RouteError(503, "RPE is not connected to Lumiverse, so it cannot make that chat's folder yet: try again once it is.");
+          const lv = await reads.chat(chat);
+          if (lv === null) throw new RouteError(404, `Lumiverse has no chat ${chat} of yours.`);
+          const character = lv.character === null ? null : await reads.character(lv.character);
+          return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
+        };
         return {
-          // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
-          levels: async (chat) => {
-            const folders = chat === null ? null : made().chats.folders(owner, chat);
+          // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder, or made for a write.
+          levels: async (chat, make = false) => {
+            const folders = chat === null ? null : make ? await placed(chat) : made().chats.folders(owner, chat);
             return levelFiles({ files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null });
           },
           connections: async () => (await made().harness.models.list(owner)).connections.map((c) => ({ id: c.id, name: c.name })),
@@ -110,7 +122,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       },
     }),
     storeArea(),
-    loreArea(),
+    loreArea(() => ({ store: made().store, turns: made().prompts.lore })),
     ifaceArea(),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
     // The tree lays the shipped files before the areas after it read them.

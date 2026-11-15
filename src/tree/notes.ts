@@ -16,9 +16,9 @@
 import type { Database } from "bun:sqlite";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { readText, writeWhole } from "../app/disk";
+import { oneFileAtATime, readText, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
-import { oneFileAtATime, sha256, walk } from "./files";
+import { sha256, walk } from "./files";
 import { NOTES_FOLDER } from "./layout";
 import { type ChatLocation, locate } from "./view";
 

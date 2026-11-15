@@ -1,20 +1,8 @@
 // A key of a YAML file the user also edits (`RPE-global.yml`, a chat's `RPE.yml`), changed without
 // touching the rest of the file: the user's comments, order and layout elsewhere stay as they wrote them.
+// Every writer of such a file holds its one lock (`oneFileAtATime`, `disk.ts`) while it reads and writes it.
 
 import { YAML } from "bun";
-import { OneAtATime } from "./disk";
-
-const WRITERS = new Map<string, OneAtATime>();
-
-/** One change at a time to the config file at `path`, whichever part of RPE makes it, so that none is lost under another. */
-export function configWrites(path: string): OneAtATime {
-  let writes = WRITERS.get(path);
-  if (writes === undefined) {
-    writes = new OneAtATime();
-    WRITERS.set(path, writes);
-  }
-  return writes;
-}
 
 /** `value` as JSON with every object's keys sorted, so two values compare equal whatever their key order. */
 function canonical(value: unknown): string {
@@ -41,11 +29,35 @@ export function yamlMapping(text: string, where: string): Record<string, unknown
 }
 
 /**
+ * A change RPE does not make to a file the user edits: the lines at `line` (from 1) are in a layout
+ * the splice does not follow, and writing the file whole instead would lose his comments. Nothing is
+ * written; the words name the line.
+ */
+export class LayoutRefused extends Error {
+  override name = "LayoutRefused";
+
+  constructor(
+    readonly where: string,
+    readonly key: string,
+    readonly line: number,
+    text: string,
+  ) {
+    super(`${where}: RPE cannot change ${key} without losing your comments, as it does not follow the layout of line ${line} (${JSON.stringify(text.trim())}). Change it there by hand, or write that part with each key on a line of its own, then try again.`);
+  }
+}
+
+/** The line a change was made at, from 1, as a refusal names it: the entry's own, or the file's last where the key was added at its end. */
+function refusedAt(where: string, key: string, lines: readonly string[], at: number | undefined): LayoutRefused {
+  const line = at ?? Math.max(0, lines.findLastIndex((l) => l.trim() !== ""));
+  return new LayoutRefused(where, key, line + 1, lines[line] ?? "");
+}
+
+/**
  * `text` with its top-level `key` set to `value`. The key's own block (its line, and the indented
  * and blank lines under it) is replaced, or added at the end; every other line is kept as it was.
  * When that would not read back as the same document with only `key` changed (a layout this does
- * not follow, such as a flow-style block running over lines at the margin), the document is written
- * whole instead, which keeps every value but not the comments.
+ * not follow, such as a flow-style block running over lines at the margin), nothing is written: it
+ * throws `LayoutRefused`, naming the line.
  */
 export function withTopLevelKey(text: string, key: string, value: unknown, where: string): string {
   const before = yamlMapping(text, where);
@@ -72,7 +84,7 @@ export function withTopLevelKey(text: string, key: string, value: unknown, where
     // Read below as a mismatch.
   }
   if (canonical(reread ?? {}) === canonical(wanted)) return spliced;
-  return YAML.stringify(wanted, null, 2).replace(/:[ ]+$/gm, ":");
+  throw refusedAt(where, key, lines, at === -1 ? undefined : at);
 }
 
 type Doc = Record<string, unknown>;
@@ -204,12 +216,13 @@ function blockOf(key: string, value: unknown, indent: number): string[] {
  * `text` with the key at `path` set to `value`, or taken away where `value` is undefined, a mapping
  * that leaves empty with it. Only the lines of the deepest entry the change reaches are written: the
  * key's own, or those of the mapping it is added to. When that would not read back as the same
- * document with only that key changed (a layout this does not follow), the document is written whole
- * instead, which keeps every value but not the comments.
+ * document with only that key changed (a layout this does not follow), nothing is written: it throws
+ * `LayoutRefused`, naming the line.
  */
 export function withKeyAt(text: string, path: readonly string[], value: unknown, where: string): string {
   const wanted = changed(yamlMapping(text, where), path, value);
-  let lines = text.replace(/\n+$/, "").split("\n");
+  const original = text.replace(/\n+$/, "").split("\n");
+  let lines = [...original];
   if (lines.length === 1 && lines[0] === "") lines = [];
   const entries = entriesOf(lines, path);
   const deepest = entries.at(-1);
@@ -240,5 +253,5 @@ export function withKeyAt(text: string, path: readonly string[], value: unknown,
     // Read below as a mismatch.
   }
   if (canonical(reread ?? {}) === canonical(wanted)) return spliced;
-  return Object.keys(wanted).length === 0 ? "" : YAML.stringify(wanted, null, 2).replace(/:[ ]+$/gm, ":");
+  throw refusedAt(where, path.join("."), original, deepest?.at);
 }

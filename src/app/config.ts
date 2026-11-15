@@ -27,9 +27,9 @@ import type { JsonValue, Log } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import { type ConfigRead, diskTexts, readConfig } from "./config-read";
 import { takeFolderLock } from "./data-folder";
-import { isMissing, OWNER_ONLY_FILE, ownerOnlyFolder, readText, writeWhole } from "./disk";
+import { isMissing, oneFileAtATime, OWNER_ONLY_FILE, ownerOnlyFolder, readText, writeWhole } from "./disk";
 import type { Setting } from "./setting-list";
-import { configWrites, withKeyAt } from "./yaml";
+import { withKeyAt } from "./yaml";
 
 export const CONFIG_FILE = "config.json";
 export const SECRETS_FILE = "secrets.json";
@@ -509,7 +509,7 @@ export async function moveLimits(paths: DataPaths, log: Log): Promise<string[]> 
     configOf(raw, {}, paths.config);
     const moving = held.filter((h) => !(h.def === SERVER_SETTING_DEFS.address && typeof h.value === "string" && isLoopback(h.value)));
     if (moving.length > 0) {
-      await configWrites(paths.globalConfig).run(async () => {
+      await oneFileAtATime(paths.globalConfig, async () => {
         let text = (await readText(paths.globalConfig)) ?? "";
         for (const h of moving) text = withKeyAt(text, h.def.key.split("."), h.value, paths.globalConfig);
         await mkdir(paths.files, { recursive: true });

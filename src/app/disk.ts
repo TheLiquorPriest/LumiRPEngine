@@ -6,6 +6,7 @@
 
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { resolve } from "node:path";
 
 export const OWNER_ONLY_FILE = 0o600;
 export const OWNER_ONLY_FOLDER = 0o700;
@@ -64,4 +65,24 @@ export class OneAtATime {
     this.tail = next.catch(() => undefined);
     return next;
   }
+}
+
+/** The changes asked for each file, by its place on disk, the last one first. */
+const FILE_TAILS = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `task`, a change to the file at `path`, after every change to it asked for before, whichever
+ * part of RPE asks: a setting written from the Settings page, the model layer's connections, the Files
+ * page's switch or a file it writes whole, an agent's note, the notes put back for a turn. One lock
+ * per file, so two changes to it both land. A task never asks for the lock of its own file again.
+ */
+export function oneFileAtATime<T>(path: string, task: () => Promise<T>): Promise<T> {
+  const key = resolve(path);
+  const next = (FILE_TAILS.get(key) ?? Promise.resolve()).then(task, task);
+  const tail = next.catch(() => undefined);
+  FILE_TAILS.set(key, tail);
+  void tail.then(() => {
+    if (FILE_TAILS.get(key) === tail) FILE_TAILS.delete(key);
+  });
+  return next;
 }

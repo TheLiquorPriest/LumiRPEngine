@@ -16,18 +16,21 @@ import { mkdir } from "node:fs/promises";
 import type { JsonValue, LayerLevel } from "rp-harness/contract";
 import type { InstallFact } from "./config";
 import { diskTexts, type LevelFile, readConfig } from "./config-read";
-import { readText, writeWhole } from "./disk";
+import { oneFileAtATime, readText, writeWhole } from "./disk";
 import { type Exactly, type Holds, type Infer, type Mutually, route, RouteError, shape } from "./routes";
 import { type Effect, EFFECT_WORDS, isMapping, keyFor, type Mapping, pathOf, type Setting, settingOfKey, type Takes, takenValue, takesWords, valueAt } from "./setting-list";
-import { configWrites, withKeyAt, yamlMapping } from "./yaml";
+import { LayoutRefused, withKeyAt, yamlMapping } from "./yaml";
 
 export const SETTINGS_PATH = "/api/v1/settings";
 
 export interface SettingsDeps {
   /** The registry: every setting RPH and RPE read. */
   settings: readonly Setting[];
-  /** The config files of a chat's levels, farthest first; for no chat, those every chat shares. A level the chat has no folder for yet is left out. */
-  levels(chat: string | null): Promise<LevelFile[]>;
+  /**
+   * The config files of a chat's levels, farthest first; for no chat, those every chat shares. A level the chat has no folder for yet is
+   * left out, unless `make` asks for it: a write at a chat's level makes the chat's folder as its first turn would, so that turn reads it.
+   */
+  levels(chat: string | null, make?: boolean): Promise<LevelFile[]>;
   /** The model layer's connections, for the settings set per connection. */
   connections(): Promise<{ id: string; name: string }[]>;
   /** The install's facts, as config.json and the environment give them: listed, never written here. */
@@ -187,9 +190,9 @@ export async function writeSetting(deps: Pick<SettingsDeps, "settings" | "levels
     if (!taken.ok) throw new RouteError(400, taken.why);
     value = taken.value;
   }
-  const target = (await deps.levels(body.chat)).find((l) => l.level === body.level);
-  if (target === undefined) throw new RouteError(409, body.level === "chat" ? "That chat has no folder in RPE yet: it gets one at its first turn on RPE." : `The ${body.level} level has no config file.`);
-  await configWrites(target.disk).run(async () => {
+  const target = (await deps.levels(body.chat, body.level === "chat")).find((l) => l.level === body.level);
+  if (target === undefined) throw new RouteError(409, `The ${body.level} level has no config file.`);
+  await oneFileAtATime(target.disk, async () => {
     const text = (await readText(target.disk)) ?? "";
     let doc: Record<string, unknown>;
     try {
@@ -212,8 +215,16 @@ export async function writeSetting(deps: Pick<SettingsDeps, "settings" | "levels
         written = { [pathOf(short).at(-1) ?? ""]: above, ...(value === undefined ? {} : { [full.at(-1) ?? ""]: value }) };
       }
     }
+    let spliced: string;
+    try {
+      spliced = withKeyAt(text, path, written, target.file);
+    } catch (error) {
+      // His file in a layout the splice does not follow: nothing is written, and the answer names the line.
+      if (error instanceof LayoutRefused) throw new RouteError(409, error.message);
+      throw error;
+    }
     await mkdir(dirname(target.disk), { recursive: true });
-    await writeWhole(target.disk, withKeyAt(text, path, written, target.file));
+    await writeWhole(target.disk, spliced);
   });
 }
 

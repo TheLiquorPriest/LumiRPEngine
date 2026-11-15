@@ -21,12 +21,11 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Layer, LayerLevel, StackPart } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
-import { readText, writeWhole } from "../app/disk";
-import { withTopLevelKey, yamlMapping } from "../app/yaml";
+import { oneFileAtATime, readText, writeWhole } from "../app/disk";
+import { LayoutRefused, withTopLevelKey, yamlMapping } from "../app/yaml";
 import { kindAt, nameList, OFF_KEY, type TreeFileEntry, treeListing, userMayWrite, writtenItem } from "./catalog";
 import type { TreeChats } from "./chats";
 import { defaultChanges, lineDiff } from "./defaults";
-import { oneFileAtATime } from "./files";
 import { pruneChat } from "./retention";
 import { treeSettingsOf } from "./settings";
 import { noteFiles, treeStorage } from "./storage";
@@ -371,8 +370,16 @@ export function treeRoutes(deps: TreeRoutesDeps) {
           const kept = names.filter((n) => writtenItem(n, layers) !== item);
           const next = off ? [...kept, item] : kept;
           if (next.length === names.length && next.every((n, i) => n === names[i])) return;
+          let spliced: string;
+          try {
+            spliced = withTopLevelKey(text, OFF_KEY, next, config.path);
+          } catch (error) {
+            // His file in a layout the splice does not follow: nothing is written, and the answer names the line.
+            if (error instanceof LayoutRefused) throw new RouteError(409, error.message);
+            throw error;
+          }
           await mkdir(dirname(config.disk), { recursive: true });
-          await writeWhole(config.disk, withTopLevelKey(text, OFF_KEY, next, config.path));
+          await writeWhole(config.disk, spliced);
         });
         return { file: await entryOf(user, loc, listed.path) };
       },
