@@ -176,10 +176,11 @@ export async function markConnection(call: LumiverseCall, id: string, mark: bool
 /**
  * The user's connections in Lumiverse that `is` takes for today's loopback, newest first, read as
  * today's runtime reads them (LumiAH `connectionProfiles`, `loopbackProfile`): Lumiverse's
- * OpenAI-compatible ones, every one there is.
+ * OpenAI-compatible ones, every one there is, each with the model name it names, under which RPE
+ * answers it once it is RPE's (R-109).
  */
-export async function connectionsWhere(call: LumiverseCall, is: (connection: { model: string; url: string }) => boolean): Promise<{ id: string; name: string }[]> {
-  return (await everyConnection(call)).flatMap((p) => (p.provider === OPENAI_COMPATIBLE && is({ model: p.model, url: p.api_url }) ? [{ id: p.id, name: p.name }] : []));
+export async function connectionsWhere(call: LumiverseCall, is: (connection: { model: string; url: string }) => boolean): Promise<{ id: string; name: string; model: string }[]> {
+  return (await everyConnection(call)).flatMap((p) => (p.provider === OPENAI_COMPATIBLE && is({ model: p.model, url: p.api_url }) ? [{ id: p.id, name: p.name, model: p.model }] : []));
 }
 
 /**

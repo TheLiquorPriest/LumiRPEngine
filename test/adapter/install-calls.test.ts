@@ -133,7 +133,7 @@ describe("the install's calls into Lumiverse", () => {
     for (let n = 3000; n < 3100; n++) lumi.connections.push(other(n));
 
     // Pages as large as Lumiverse allows, not the default of 50.
-    expect(await connectionsWhere(lumi.call, ({ model }) => /^lumiah/.test(model))).toEqual([{ id: "loop", name: "Connection 2000" }]);
+    expect(await connectionsWhere(lumi.call, ({ model }) => /^lumiah/.test(model))).toEqual([{ id: "loop", name: "Connection 2000", model: "lumiah-x" }]);
     expect(lumi.asked.filter((line) => line.startsWith("GET /api/v1/connections?"))).toEqual(["GET /api/v1/connections?limit=1000&offset=0", "GET /api/v1/connections?limit=1000&offset=1000"]);
 
     lumi.asked.length = 0;

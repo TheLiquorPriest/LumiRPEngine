@@ -1,11 +1,14 @@
-// The provider endpoint Lumiverse calls on RPE's connection (STANDALONE-PLAN §4.2, §4.4): `POST
-// /v1/chat/completions` and `GET /v1/models`, behind RPE's provider key. A request with no tag (a title,
-// a summary, a quiet call, another extension's) is passed on as it came, at every moment, to the model
-// set for such requests, through RPH's model layer: RPE never calls a model itself, and adds, cuts and
-// changes nothing in it (READINGS R-100); keeping an unplayed chat reply out is the extension's work. A
-// tagged chat reply is read, its history window checked or made, its prompt laid out, and handed to the
-// turn lane, which writes the reply to the response as the turn goes, streamed or whole as the request
-// asked; a reply asked for whole is given the hold, so its turn ends before Lumiverse's ten minutes.
+// The provider endpoint Lumiverse calls on RPE's connections (STANDALONE-PLAN §4.2, §4.4): `POST
+// /v1/chat/completions` and `GET /v1/models`. Every connection in Lumiverse that is RPE's is answered,
+// each under its own model name and with its own key (§15.2 l.1625, READINGS R-109): a request with
+// the key of any of them is let in, the model list names every one's model, and each answer names the
+// model its request named. A request with no tag (a title, a summary, a quiet call, another
+// extension's) is passed on as it came, at every moment, to the model set for such requests, through
+// RPH's model layer: RPE never calls a model itself, and adds, cuts and changes nothing in it (READINGS
+// R-100); keeping an unplayed chat reply out is the extension's work. A tagged chat reply is read, its
+// history window checked or made, its prompt laid out, and handed to the turn lane, which writes the
+// reply to the response as the turn goes, streamed or whole as the request asked; a reply asked for
+// whole is given the hold, so its turn ends before Lumiverse's ten minutes.
 
 import type { Clock, PassError, PassRequest, PassSink, PromptRole, Usage as PassUsage } from "rp-harness/contract";
 import { isRecord, type JsonObject } from "../../shared/json";
@@ -60,7 +63,7 @@ export interface OwnerPass {
 export interface ProviderDeps {
   /** The Lumiverse user this RPE plays for. */
   user: string;
-  /** Whether the request carries RPE's provider key. */
+  /** Whether the request carries the key of a connection that is RPE's: RPE's own provider key, or one taken with a connection at the swap (R-109). */
   allowed(request: Request): boolean | Promise<boolean>;
   window: HistoryWindow;
   /** What the receipt reads of Lumiverse when the request arrives, by RPE's own reads (`receipt.ts`): the chat's rows the window counts when RPE makes the cut itself and that tell Lumiverse's own clipping, and the settings that say how Lumiverse joined the prompt. */
@@ -81,7 +84,7 @@ export interface ProviderDeps {
   heard: Pick<HeardGenerations, "tagged" | "untagged">;
   /** `lumiverse.untagged.whileAwaited`, read at each untagged request. */
   untaggedWhileAwaited(): "pass" | "fail";
-  /** The model names `GET /v1/models` lists: those RPE's connection in Lumiverse may name. */
+  /** The model names `GET /v1/models` lists: every one RPE's connections in Lumiverse name, each answered under its own (R-109). */
   modelNames(): string[];
   turns: TurnPlayer;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
@@ -204,7 +207,7 @@ function passThrough(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, 
   return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, turn: false, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) }) : wholeReply(run, meta, signal);
 }
 
-/** `GET /v1/models`: the names RPE's connection may name, as an OpenAI-compatible list (Lumiverse reads `data[].id`, `openai-compatible.ts:324-334`). */
+/** `GET /v1/models`: the model names of every connection that is RPE's, as an OpenAI-compatible list (Lumiverse reads `data[].id`, `openai-compatible.ts:324-334`). */
 export function modelsEndpoint(deps: Pick<ProviderDeps, "allowed" | "modelNames">): (request: Request) => Promise<Response> {
   return async (request) => {
     if (request.method !== "GET") return error(405, "The model list is asked for with GET.");

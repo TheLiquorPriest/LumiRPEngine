@@ -152,9 +152,11 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   const relaySession = newFrontendSession();
   const answers = new KeptAnswers();
   const log = (message: string): void => app?.log.warn(`[lumiverse] ${message}`);
-  /** The generations the event socket hears: their activated lore, and the ones on RPE's connection whose tagged request never came. */
+  /** Every model name RPE's connections in Lumiverse name (`lumiverse.models`, which the swap fills with each connection it takes, R-109), read at each use. */
+  const rpeModels = (): string[] => app?.config.lumiverse.models ?? [];
+  /** The generations the event socket hears: their activated lore, and the ones on RPE's connections whose tagged request never came. */
   const heard = new HeardGenerations({
-    rpeModel: (model) => app?.config.lumiverse.models.includes(model) === true,
+    rpeModel: (model) => rpeModels().includes(model),
     asked: (chat, generation) => answers.answered(chat, generation),
     untaggedEnd: ({ chat, generation, untagged, stopped }) =>
       log(`generation ${generation} of chat ${chat} on RPE's connection ${stopped ? "was stopped" : "ended"} with no tagged request; ${untagged} request${untagged === 1 ? "" : "s"} with no tag came on RPE's connection meanwhile.`),
@@ -267,8 +269,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     liveKinds: [EXTENSION_KIND],
     async mount(at) {
       app = at;
+      // Every connection that is RPE's is let in by its own key (RPE's own, or one taken at the swap) and answered under its own model name (R-109).
       const providerKey = (request: Request): boolean => at.auth.holds("provider", bearerOf(request));
-      const modelNames = (): string[] => at.config.lumiverse.models;
       const { url, user } = at.config.lumiverse;
       if (url !== null && user !== null) {
         const p = build(at, user, url, storedSignIn(await at.secrets.read("lumiverse")));
@@ -288,7 +290,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             holdMs: () => settings().wholeHoldMs,
             heard,
             untaggedWhileAwaited: () => settings().untaggedWhileAwaited,
-            modelNames,
+            modelNames: rpeModels,
             turns: lanes.turns,
             clock: deps.clock,
             commentMs: () => settings().commentMs,
@@ -307,7 +309,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           answers: "an OpenAI chat completion, streamed or whole, as OpenAI answers",
           raw: (request, call) => (handlers === null ? notSetUp() : handlers.provider(request, call)),
         }),
-        rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames }) }),
+        rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames: rpeModels }) }),
         route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", group: "service", does: "How RPE's extension in Lumiverse last said it stands with RPE.", reply: extensionStatusReply, handle: extension }),
         rawRoute({
           method: "POST",
