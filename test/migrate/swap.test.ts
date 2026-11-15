@@ -141,6 +141,8 @@ describe("the swap, and going back", () => {
   let answers: { turns: number; requests: number }[] = [];
   let data: string;
   let log: string;
+  /** The backups the real run made before the swap left in RPE's data folder: the swap goes ahead only after a real run of his data has passed (§15.3 step 10). */
+  let backupsBefore = 0;
   let home: string;
   let unitFolder: string;
   let flags: { today: string; todayOn: string; rpe: string };
@@ -180,7 +182,7 @@ describe("the swap, and going back", () => {
       // Nothing listens at today's address while neither service runs there: a call to it can't connect.
       fetch: (url, init) => (url.startsWith(`http://127.0.0.1:${place.port}/`) && !existsSync(flags.today) && !existsSync(flags.rpe) ? Promise.reject(new TypeError(`Unable to connect to ${url}`)) : fetch(url, init)),
     };
-    const code = await runCli(line, io, { version: BUILD });
+    const code = await runCli(line, io, { version: BUILD, appFile: join(fixture.root, "build", "rpe.js") });
     return { code, out: lines.join("\n") };
   }
   const up = (more: Record<string, string> = {}, line: string[] = []): Promise<{ code: number; out: string }> => rpe(["up", "--url", lumiverse.url, "--user", USERNAME, "--lumiverse", fixture.sources.lumiverse, "--data", data, ...line], more);
@@ -229,11 +231,20 @@ describe("the swap, and going back", () => {
     const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) });
     ownPort = probe.port ?? 0;
     void probe.stop(true);
-    await writeFile(join(data, "config.json"), JSON.stringify({ port: ownPort, commandLine: { waitMs: 200, startMs: 1000 }, lumiverse: { connection: TODAYS_CONNECTION } }));
+    await writeFile(join(data, "config.json"), JSON.stringify({ port: ownPort, commandLine: { waitMs: 200, startMs: 1000 }, lumiverse: { connection: TODAYS_CONNECTION, user: USER } }));
     // The extension's backend where Lumiverse loads it from, switched to this build.
     const repo = join(fixture.sources.lumiverse, "extensions", IDENT, "repo");
     await mkdir(join(repo, "dist"), { recursive: true });
     await writeFile(join(repo, "dist", "backend.js"), backendOf(BUILD));
+    // The app file this rpe runs from, with the folders it reads beside it: the swap starts RPE's service on a copy of it (PlanOps-3).
+    await mkdir(join(fixture.root, "build", "guidance"), { recursive: true });
+    await mkdir(join(fixture.root, "build", "guidance-harness"), { recursive: true });
+    await writeFile(join(fixture.root, "build", "rpe.js"), "// the app, as built\n");
+    await writeFile(join(fixture.root, "build", "guidance", "a.md"), "shipped");
+    // A real run of his own data has passed here: `rpe migrate` makes it, and the swap's own run comes after it.
+    const proven = await rpe(["migrate", "--lumiverse", fixture.sources.lumiverse, "--user", USER, "--data", data]);
+    if (proven.code !== 0) throw new Error(`the real run before the swap stopped: ${proven.out}`);
+    backupsBefore = (await treeSums(join(data, "backups"))).size;
   });
 
   afterAll(async () => {
@@ -251,7 +262,7 @@ describe("the swap, and going back", () => {
       expect(out).toContain(`Lumiverse still has today's build of the extension (${IDENT}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`);
       // Not even today's runtime was asked whether it is busy.
       expect(await asked()).toEqual([]);
-      expect(existsSync(join(data, "backups")) ? (await treeSums(join(data, "backups"))).size : 0).toBe(0);
+      expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
       expect(await todays()).toEqual(before);
       expect(lumiverse.changes).toEqual([]);
     } finally {
@@ -267,9 +278,12 @@ describe("the swap, and going back", () => {
       const before = await todays();
       const { code, out } = await up();
       expect(code).toBe(1);
-      expect(out).toContain(`The extension Lumiverse has installed (${IDENT}) is another build than this rpe (${BUILD}): its backend, ${backend}, does not carry build ${BUILD}. Switch the installed extension to the new build's branch in Lumiverse, or put the new build's files in its folder (${join(fixture.sources.lumiverse, "extensions", IDENT, "repo")}) and switch the extension off and on in Lumiverse so that it runs them, then run rpe up again. Nothing was stopped or changed.`);
+      expect(out).toContain(`The extension Lumiverse has installed (${IDENT}) is another build than this rpe (${BUILD}): its backend, ${backend}, does not carry build ${BUILD}. Switch the installed extension to the new build's branch in Lumiverse, or put the new build's files in its folder (${join(fixture.sources.lumiverse, "extensions", IDENT, "repo")}) and switch the extension off and on in Lumiverse so that it runs them, then run rpe up again.`);
+      // Lumiverse runs the light extension by now: what has changed and the way back are said.
+      expect(out).toContain(`What has changed: Lumiverse runs the light extension (${IDENT}) now`);
+      expect(out).toContain(PREVIOUS_PERMISSIONS.join(", "));
       expect(await asked()).toEqual([]);
-      expect(existsSync(join(data, "backups")) ? (await treeSums(join(data, "backups"))).size : 0).toBe(0);
+      expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
       expect(await todays()).toEqual(before);
       expect(lumiverse.changes).toEqual([]);
     } finally {
@@ -283,9 +297,10 @@ describe("the swap, and going back", () => {
       const before = await todays();
       const { code, out } = await up({}, ["--no-runtime"]);
       expect(code).toBe(1);
-      expect(out).toContain(`Something other than RPE answers at http://127.0.0.1:${ownPort}, where RPE's config has it answer: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again. Nothing was stopped or changed.`);
+      expect(out).toContain(`Something other than RPE answers at http://127.0.0.1:${ownPort}, where RPE's config has it answer: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again.`);
+      expect(out).toContain(`What has changed: Lumiverse runs the light extension (${IDENT}) now`);
       expect(await asked()).toEqual([]);
-      expect(existsSync(join(data, "backups")) ? (await treeSums(join(data, "backups"))).size : 0).toBe(0);
+      expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
       expect(await todays()).toEqual(before);
       expect(lumiverse.changes).toEqual([]);
     } finally {
@@ -298,10 +313,11 @@ describe("the swap, and going back", () => {
     const before = await todays();
     const { code, out } = await up();
     expect(code).toBe(1);
-    expect(out).toContain(`Today's runtime ${RUNTIME} still has 1 turn(s) and 1 request(s) under way after 2 seconds: nothing was stopped or changed.`);
+    expect(out).toContain(`Today's runtime ${RUNTIME} still has 1 turn(s) and 1 request(s) under way after 2 seconds, and the swap stops nothing while it is busy. Run rpe up again once it is idle.`);
+    expect(out).toContain(`What has changed: Lumiverse runs the light extension (${IDENT}) now`);
     expect((await asked()).filter((line) => line.startsWith("systemctl"))).toEqual([]);
     expect(existsSync(join(unitFolder, "lumiah-home.service"))).toBe(true);
-    expect(existsSync(join(data, "backups")) ? (await treeSums(join(data, "backups"))).size : 0).toBe(0);
+    expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
     expect(await todays()).toEqual(before);
     // Today's connection is the one RPE will take over as it is: nothing is made beside it, and it is never changed.
     expect(lumiverse.changes).toEqual([]);

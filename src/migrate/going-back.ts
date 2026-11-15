@@ -12,6 +12,16 @@
  */
 export const PREVIOUS_PERMISSIONS = ["generation", "context_handler", "chats", "chat_mutation", "world_books", "presets", "regex_scripts", "decisions", "ui_panels", "mcp_servers", "interceptor", "embeddings", "memories", "databanks", "web_search", "generation_parameters", "cors_proxy"] as const;
 
+/**
+ * The permissions the light build asks for, as its manifest names them (`spindle.json`). The swap
+ * goes on only once Lumiverse has granted each of them; the previous build's other twelve are
+ * withdrawn when the extension is switched to the light build (PlanSwap-1).
+ */
+export const LIGHT_PERMISSIONS = ["interceptor", "generation_parameters", "generation", "cors_proxy", "ui_panels"] as const;
+
+/** The branch of the new build, which the installed extension is switched to in Lumiverse until it is `main` (§15.3 l.1677). */
+export const NEW_BUILD_BRANCH = "standalone";
+
 export interface GoingBackFacts {
   /** The extension's identifier in Lumiverse. */
   identifier: string;
@@ -26,6 +36,14 @@ export function shellWord(word: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
 }
 
+/** The branch switch and the permissions approved again (§15.6's steps 2 and 3), numbered from `first`: all that going back needs where today's service was never stopped. */
+function switchBack(identifier: string, first: number): [branch: string, approve: string] {
+  return [
+    `  ${first}. In Lumiverse, switch the installed extension (${identifier}) to the branch the previous build is kept on: switching keeps its storage. Do not remove the extension and install it again: removing an extension deletes its storage (the migration's backup holds a copy).`,
+    `  ${first + 1}. In Lumiverse's extension settings, approve the permissions the previous build asks for, then switch the extension off and on again, so that it starts with them in hand: ${PREVIOUS_PERMISSIONS.join(", ")}.`,
+  ];
+}
+
 /** The steps of going back, as lines; the first is what `rpe down` has just done, or, where it has not been run (`facts.downRun` false), what it does. */
 export function goingBack(facts: GoingBackFacts & { downRun?: boolean }): string[] {
   const name = facts.runtime === null ? "<its name>" : shellWord(facts.runtime.name);
@@ -35,9 +53,40 @@ export function goingBack(facts: GoingBackFacts & { downRun?: boolean }): string
   return [
     "To go back to the previous build: today's data was never changed, and neither was its connection in Lumiverse.",
     facts.downRun === false ? `  1. Run rpe down: ${down}` : `  1. rpe down: done. ${down}`,
-    `  2. In Lumiverse, switch the installed extension (${facts.identifier}) to the branch the previous build is kept on: switching keeps its storage. Do not remove the extension and install it again: removing an extension deletes its storage (the migration's backup holds a copy).`,
-    `  3. In Lumiverse's extension settings, approve the permissions the previous build asks for, then switch the extension off and on again, so that it starts with them in hand: ${PREVIOUS_PERMISSIONS.join(", ")}.`,
+    ...switchBack(facts.identifier, 2),
     `  4. Run the previous build's own install line, the one you use when you update it: bun ${script} up --name ${name} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the swap only switched off, with the memory cap it holds: all as the swap left them.`,
     ...(facts.own ? [`  5. In Lumiverse, give every chat you moved to RPE's connection ${facts.own} the connection it had before: RPE no longer answers there.`] : []),
+  ];
+}
+
+/**
+ * What a stop of the swap says, once the installed extension was switched to the new build (every stop
+ * the swap makes after its first guard, which proved that): why it stopped; what has changed (Lumiverse
+ * runs the light extension, and the permissions it does not ask for were withdrawn); what has not
+ * (today's service runs, and today's data is as it was); and the way back, §15.6's steps 2 and 3 with
+ * the previous build's permissions by name. Today's service was never stopped, so no more is needed.
+ */
+export function stopAfterSwitch(facts: Pick<GoingBackFacts, "identifier">, why: string): string[] {
+  const withdrawn = PREVIOUS_PERMISSIONS.filter((p) => !(LIGHT_PERMISSIONS as readonly string[]).includes(p));
+  return [
+    why,
+    `What has changed: Lumiverse runs the light extension (${facts.identifier}) now, and the ${withdrawn.length} permissions it does not ask for were withdrawn (${withdrawn.join(", ")}). What has not: today's service runs, and today's data is as it was.`,
+    "To go back to the previous build now:",
+    ...switchBack(facts.identifier, 1),
+  ];
+}
+
+/**
+ * The steps before the swap, as he is shown them (§15.3 step 10; R-80, R-82, R-83): the report of the
+ * rehearsal and the real run prints them, the Migration page shows them, and `rpe up` prints them
+ * where it finds the extension not yet switched. `up` is the line that runs the swap, as the caller
+ * writes it (`rpe up` where it has none).
+ */
+export function swapSteps(facts: Pick<GoingBackFacts, "identifier"> & { up?: string }): string[] {
+  return [
+    `  1. In Lumiverse, switch the installed extension (${facts.identifier}) to the new build's branch, ${NEW_BUILD_BRANCH} until it is main, with Lumiverse's branch switch: switching keeps its storage. Do not remove the extension and install it again: removing an extension deletes its storage.`,
+    `  2. In Lumiverse's extension settings, approve its five permissions: ${LIGHT_PERMISSIONS.join(", ")}.`,
+    "  3. Let any reply being written finish: the swap waits for today's runtime to be idle before it stops it, and stops nothing while a reply is under way.",
+    `  4. Run ${facts.up ?? "rpe up"}.`,
   ];
 }
