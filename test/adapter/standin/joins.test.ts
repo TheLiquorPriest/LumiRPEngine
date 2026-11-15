@@ -26,12 +26,15 @@ function marshLines(queued: readonly string[]): ChatMessage[] {
   return lines;
 }
 
+/** The block that places the chat's history: Lumiverse sends none without one (`services/prompt-assembly.service.ts:3161`). */
+const HISTORY_BLOCK = { id: "b-history", name: "Chat History", role: "system" as const, content: "", marker: "chat_history" as const };
+
 /** A stand-in Lumiverse with the marsh's chat, its book's entries (the character's own book), on a model that answers every request with one line. */
 function marsh(messages: ChatMessage[], preset: Partial<Preset> = {}, books: Entry[] = []): StandIn {
   const lv = new StandIn();
   lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she poles on."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
-  lv.presets.set("preset-marsh", { id: "preset-marsh", name: "Marsh", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a ferry crossing a marsh." }], ...preset });
+  lv.presets.set("preset-marsh", { id: "preset-marsh", name: "Marsh", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a ferry crossing a marsh." }, HISTORY_BLOCK], ...preset });
   lv.library.addBook({ id: "book-marsh", name: "Marsh lore", user: USER, entries: books });
   lv.addChat({ id: CHAT, user: USER, character: { id: "char-tamsin", name: "Tamsin", extensions: { world_book_ids: ["book-marsh"] } }, messages });
   return lv;
@@ -115,6 +118,7 @@ describe("the preset's completion settings, inside the assembly (`services/promp
       { id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a ferry crossing a marsh." },
       { id: "b-style", name: "Style", role: "system", content: "STYLE Keep replies short." },
       { id: "b-depth", name: "Fog", role: "system", content: "DEPTH-NOTE The fog thickens.", depth: 1 },
+      HISTORY_BLOCK,
     ],
     assistantPrefill: "PREFILL Tamsin",
   };
@@ -239,12 +243,12 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
     expect(stored.totalTokens).toBe(stored.chatHistoryTokens + stored.entries.reduce((n, e) => n + e.tokens, 0));
 
     // No markers: "before" just before the history, "after" just after it.
-    const unmarked = await placed({ blocks: [MAIN, POST] }, book());
+    const unmarked = await placed({ blocks: [MAIN, POST, HISTORY_BLOCK] }, book());
     expect(unmarked.handed).toEqual([["MAIN", false], ["POST", false], ["FERRY-LORE", true], ...HISTORY, ["REEDS-LORE", true]]);
     expect(unmarked.out.stored!.entries.filter((e) => e.type === "world_info").map((e) => e.name)).toEqual(["World Info Before (auto): The ferry", "World Info After (auto): Reeds", "WI At Marker: Mist", "WI At Marker: bell"]);
 
     // An "after" marker placed in the history: its lore spliced one history message from the end, still flagged.
-    const inHistory = await placed({ blocks: [MAIN, { id: "b-wia", name: "World Info (after)", role: "system", content: "", marker: "world_info_after", depth: 1 }] }, book());
+    const inHistory = await placed({ blocks: [MAIN, { id: "b-wia", name: "World Info (after)", role: "system", content: "", marker: "world_info_after", depth: 1 }, HISTORY_BLOCK] }, book());
     expect(inHistory.handed).toEqual([["MAIN", false], ["FERRY-LORE", true], ["GREET", false], ["USER-1", false], ["REEDS-LORE", true], ["REPLY-1", false]]);
     expect(inHistory.out.stored!.entries.filter((e) => e.type === "world_info").map((e) => [e.name, e.blockId ?? null])).toContainEqual(["World Info After: Reeds", null]);
   });
@@ -253,7 +257,7 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
     // An entry that is nothing but a mark, activated by a word the player wrote: Lumiverse's scan reads the chat's raw text.
     const wreck: Entry = { id: "e-wreck", book: "book-marsh", keys: ["wreck"], content: "{{// Secret: WRECK-SECRET The wreck holds the mayor's letters.}}" };
     const lines = marshLines(["USER-2 I point at the wreck."]);
-    for (const preset of [MARKED, { blocks: [MAIN, { id: "b-wia", name: "World Info (after)", role: "system" as const, content: "", marker: "world_info_after" as const, depth: 1 }] }]) {
+    for (const preset of [MARKED, { blocks: [MAIN, { id: "b-wia", name: "World Info (after)", role: "system" as const, content: "", marker: "world_info_after" as const, depth: 1 }, HISTORY_BLOCK] }]) {
       const lv = marsh(structuredClone(lines), preset, [...book(true), wreck]);
       const contexts: unknown[] = [];
       const seen: PromptMessageDTO[][] = [];

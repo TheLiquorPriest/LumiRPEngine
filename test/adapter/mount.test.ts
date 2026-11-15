@@ -41,8 +41,8 @@ async function refusalWords(res: Response): Promise<string> {
 /** A chat of RPE's user on RPE's connection, which Lumiverse reaches at RPE's address. */
 function harbor(b: DoorBed): void {
   b.host.connections.set("conn-rpe", { id: "conn-rpe", base: `${b.listening.url}/v1`, key: b.providerKey, model: "rpe" });
-  b.host.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a harbor town." }] });
-  b.host.chats.set("chat-harbor", {
+  b.host.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a harbor town." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
+  b.host.addChat({
     id: "chat-harbor",
     user: USER,
     character: { id: "char-ilsa", name: "Ilsa" },
@@ -187,8 +187,8 @@ describe("the door, mounted in the app", () => {
       return promise;
     });
     b.host.connections.set("conn-slow", { id: "conn-slow", base: `${SLOW}/v1`, key: "slow-key", model: "slow" });
-    b.host.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a harbor town." }] });
-    for (const chat of ["chat-harbor", "chat-cove"]) b.host.chats.set(chat, { id: chat, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages: [{ id: `${chat}-m0`, role: "user", content: "I wait for the ferry." }] });
+    b.host.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a harbor town." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
+    for (const chat of ["chat-harbor", "chat-cove"]) b.host.addChat({ id: chat, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages: [{ id: `${chat}-m0`, role: "user", content: "I wait for the ferry." }] });
     const start = async (chat: string): Promise<{ id: string; outcome: Promise<Outcome> }> => {
       const from = b.host.events.length;
       const outcome = b.host.generate({ chat, connection: "conn-slow", preset: "preset-coast" });

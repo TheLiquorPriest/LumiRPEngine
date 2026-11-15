@@ -86,7 +86,7 @@ export async function weirChat(closing: (() => void)[], messages: ChatMessage[],
     return streamedReply(async (out) => out.content("NEW-TEXT the eel slips under the weir."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null });
   });
   bed.host.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
-  bed.host.presets.set("preset-weir", { id: "preset-weir", name: "Weir", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a night at the weir." }], ...preset });
+  bed.host.presets.set("preset-weir", { id: "preset-weir", name: "Weir", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a night at the weir." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }], ...preset });
   bed.host.addChat({ id: CHAT, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages });
   return { ...bed, asked: () => asked };
 }

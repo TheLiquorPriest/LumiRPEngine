@@ -48,7 +48,7 @@ function fen(messages: ChatMessage[], books: Entry[]): { lv: StandIn; calls: () 
     return streamedReply(async (out) => out.content("NEW-TEXT Wynn nods."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null });
   });
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
-  lv.presets.set("preset-fen", { id: "preset-fen", name: "Fen", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a fen at dusk." }] });
+  lv.presets.set("preset-fen", { id: "preset-fen", name: "Fen", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a fen at dusk." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
   for (const id of new Set(books.map((e) => e.book))) lv.library.addBook({ id, name: BOOK_NAMES[id] ?? id, user: USER, entries: books.filter((e) => e.book === id) });
   if (books.some((e) => e.book === "book-common")) lv.library.setSetting(USER, "globalWorldBooks", ["book-common"]);
   if (books.some((e) => e.book === "book-peer")) lv.peerBooks.add("book-peer");

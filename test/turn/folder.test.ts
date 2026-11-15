@@ -34,7 +34,7 @@ function presetWithCard(b: TurnBed): void {
     { id: "b-card", name: "Wren's card", role: "system" as const, content: CARD, marker: "char_description" },
     { id: "b-persona", name: "Who you are", role: "system" as const, content: PERSONA, marker: "persona_description" },
   ];
-  b.host.presets.set(PRESET, { id: PRESET, name: "Lamp", blocks: blocks.map(({ marker: _, ...block }) => block) });
+  b.host.presets.set(PRESET, { id: PRESET, name: "Lamp", blocks: [...blocks.map(({ marker: _, ...block }) => block), { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
   b.db.run("INSERT INTO presets (id, name, provider, prompt_order, user_id) VALUES (?, ?, ?, ?, ?)", PRESET, "Lamp", "custom", JSON.stringify(blocks), USER);
 }
 

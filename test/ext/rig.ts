@@ -80,6 +80,7 @@ export const PRESET: Preset = {
     { id: "b-style", name: "Style", role: "system", content: "STYLE-BLOCK Write in the present tense." },
     { id: "b-blank", name: "Spacer", role: "system", content: "   " },
     { id: "b-depth", name: "Depth note", role: "system", content: "DEPTH-NOTE Keep the scene brief.", depth: 2 },
+    { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" },
   ],
   parameters: { temperature: 0.8 },
 };

@@ -7,14 +7,25 @@
 // Lumiverse's `src/`. It resolves no macro but `{{wi_marker}}`, `{{outlet::name}}` and a secret mark in lore.
 
 import type { WI_MARKERS } from "./db";
+import { buildHistoryPlan, clipToContextBudget, selectHistoryMessages, type ContextClipStats, type CortexConfig, type MemoryOfChat, type MessageLimit } from "./history";
 import type { Entry, Placement } from "./lore";
 import { indexInChat, type ChatMessage } from "./rows";
 import { stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role } from "./steps";
 
+/**
+ * A preset block's role (`PromptBlock.role`): the two "append" roles put the block's text inside a history message instead of making one
+ * (`isAppendRole`, `services/prompt-assembly.service.ts:1331-1333`).
+ */
+export type BlockRole = Role | "user_append" | "assistant_append";
+
 export interface Block {
   id: string;
   name: string;
-  role: Role;
+  /**
+   * "user_append" and "assistant_append": the block's text goes, after a newline, at the end of the history message of that role `depth` messages
+   * of that role from the end, kept whitespace and all, in no message of its own (`:3620-3633`, `applyAppendGroup` `:6684-6740`).
+   */
+  role: BlockRole;
   content: string;
   /** Spliced into the chat history this many messages from its end, not as history: a block placed "in history". */
   depth?: number;
@@ -22,8 +33,8 @@ export interface Block {
    * The marker it is, where it is one (`PromptBlock.marker`): `chat_history` places the chat's history, `world_info_before` and
    * `world_info_after` the lore of their position (`services/prompt-assembly.service.ts:3161`, `:3491-3561`), their content not sent. Any other
    * of the twelve (`VALID_WI_MARKERS`, `services/world-books.service.ts:177-190`) is a block that sends its content as it is and that a
-   * position-7 entry pinned to it by `wi_marker` stands beside. A stand-in preset that marks no block `chat_history` has its history
-   * after its last block.
+   * position-7 entry pinned to it by `wi_marker` stands beside. A preset that marks no block `chat_history` sends no history: the history
+   * is the one block that places it (`:3161`).
    */
   marker?: (typeof WI_MARKERS)[number];
 }
@@ -82,6 +93,18 @@ export interface Ending {
    * the chat's history, by entry, and the extension whose `outputOrder: "insertion"` it carries, by entry.
    */
   world?: { placements: ReadonlyMap<string, Placement>; insertionOrder: ReadonlyMap<string, string> };
+  /**
+   * What shapes the history before the prompt is sent (`services/prompt-assembly.service.ts:2796-2826`): the message the user set as the context
+   * anchor, by its stored number (`context_history_anchor_message_id`, `:1904-1917`), a hard start of the history; the Summary tab's message limit;
+   * and, where Memory may replace what it consolidated and the chat has not opted out, its config and the chat's chunks and consolidations.
+   */
+  anchorIndex?: number | null;
+  messageLimit?: MessageLimit;
+  memory?: { config: CortexConfig; of: MemoryOfChat };
+  /** The text of the databank documents the last user message mentions, put at the end of that history message (`:2905-2985`, `:3420-3452`). */
+  mention?: string;
+  /** How many of the newest generated pictures reach the model (`resolveGeneratedImageContextPolicy`, `:1032-1059`): none where the user does not recycle them. */
+  recycledImageLimit?: number;
 }
 
 /** One entry of the assembly's breakdown (`AssemblyBreakdownEntry`). */
@@ -105,6 +128,8 @@ export interface BreakdownEntry {
 export interface Assembled {
   prompt: LlmMessage[];
   breakdown: BreakdownEntry[];
+  /** What the clipping to the preset's context size did (`contextClipStats`, `:4351-4358`). */
+  contextClipStats: ContextClipStats;
 }
 
 /** `appendTextToMessage` (`services/prompt-assembly.service.ts:720-735`): the text after the last text part, or as a part of its own. */
@@ -123,10 +148,10 @@ function withText(message: LlmMessage, text: string): LlmMessage {
 
 /**
  * `mergeConsecutiveUserMessages` (`services/prompt-assembly.service.ts:6754-6843`), in place over the `count` messages from
- * `start`: two user messages in a row (sends queued while a reply was written) become one, their texts joined by a blank line
- * and their pictures after the text, history if either was, with the first source either names (its id and its number). The
- * second message's id never reaches an interceptor. Gives how many messages the stretch holds now. (The stand-in makes none
- * of Lumiverse's memory summaries, which this leaves alone.)
+ * `start`: two user messages in a row (sends queued while a reply was written) become one, their texts joined by a blank line (a message with
+ * a picture and no text has no text part, and reads as an empty text) and their pictures after the text, history if either was, with the first
+ * source either names (its id, its number and the extension metadata on it). The second message's id never reaches an interceptor. A memory
+ * summary is never joined, nor joined to. Gives how many messages the stretch holds now.
  */
 export function mergeQueuedUserMessages(result: LlmMessage[], start: number, count: number): number {
   let remaining = count;
@@ -134,7 +159,7 @@ export function mergeQueuedUserMessages(result: LlmMessage[], start: number, cou
   while (i < start + remaining - 1) {
     const a = result[i]!;
     const b = result[i + 1]!;
-    if (a.role !== "user" || b.role !== "user") {
+    if (a.role !== "user" || b.role !== "user" || a.__cortexHistorySummary === true || b.__cortexHistorySummary === true) {
       i++;
       continue;
     }
@@ -148,6 +173,7 @@ export function mergeQueuedUserMessages(result: LlmMessage[], start: number, cou
       if (source !== undefined) {
         merged.__sourceMessageId = source.__sourceMessageId;
         merged.__sourceIndexInChat = source.__sourceIndexInChat;
+        merged.__sourceMessageMetadata = normalizedMetadata(source.__sourceMessageMetadata);
       }
     }
     if (a.__worldInfoSource === true || b.__worldInfoSource === true) merged.__worldInfoSource = true;
@@ -421,10 +447,10 @@ function pushPinned(prompt: LlmMessage[], breakdown: BreakdownEntry[], entries: 
 }
 
 /**
- * `insertRuntimeWorldInfoIntoTaggedHistory` (`services/prompt-assembly.service.ts:425-487`), in place: each entry in turn counted from the start or
+ * `placeRuntimeWorldInfoIntoTaggedHistory` (`services/prompt-assembly.service.ts:425-487`), in place: each entry in turn counted from the start or
  * the end of the history messages as they stand (the ones placed before it among them), and spliced in; with no history, at `fallbackIndex`.
  */
-function insertRuntime(prompt: LlmMessage[], entries: readonly RuntimeLore[], fallbackIndex: number): void {
+function placeRuntime(prompt: LlmMessage[], entries: readonly RuntimeLore[], messages: ReadonlyMap<string, LlmMessage>, fallbackIndex: number): void {
   const history = new Set<LlmMessage>(prompt.filter((m) => m.__chatHistorySource === true));
   const fallback = Math.max(0, Math.min(Math.trunc(fallbackIndex), prompt.length));
   for (const entry of entries) {
@@ -437,10 +463,41 @@ function insertRuntime(prompt: LlmMessage[], entries: readonly RuntimeLore[], fa
     // `Array.splice` takes a negative start as an offset from the end.
     const boundary = start < 0 ? Math.max(span + start, 0) : Math.min(start, span);
     const at = span === 0 ? fallback : boundary === span ? places[span - 1]! + 1 : places[boundary]!;
-    const message: LlmMessage = { role: entry.placement.role, content: entry.content, __worldInfoSource: true, __runtimeWorldInfoPlacementId: entry.id };
+    const message = messages.get(entry.id);
+    if (message === undefined) continue;
     prompt.splice(at, 0, message);
     history.add(message);
   }
+}
+
+/** `insertRuntimeWorldInfoIntoTaggedHistory` (`:489-507`): a message for each entry, flagged and carrying the entry's id, then placed. */
+function insertRuntime(prompt: LlmMessage[], entries: readonly RuntimeLore[], fallbackIndex: number): void {
+  placeRuntime(prompt, entries, new Map(entries.map((e): [string, LlmMessage] => [e.id, { role: e.placement.role, content: e.content, __worldInfoSource: true, __runtimeWorldInfoPlacementId: e.id }])), fallbackIndex);
+}
+
+/**
+ * `repositionRuntimeWorldInfoInTaggedHistory` (`:513-545`), in place, after the clipping has cut the history: the messages the entries placed taken out,
+ * and placed again among the history that is left, the first one's old place the fallback where none is left.
+ */
+function repositionRuntime(prompt: LlmMessage[], entries: readonly RuntimeLore[]): void {
+  if (entries.length === 0) return;
+  const ids = new Set(entries.map((e) => e.id));
+  const found = new Map<string, LlmMessage>();
+  let fallbackIndex = prompt.length;
+  let write = 0;
+  for (let read = 0; read < prompt.length; read++) {
+    const message = prompt[read]!;
+    const id = message.__runtimeWorldInfoPlacementId;
+    if (typeof id === "string" && ids.has(id)) {
+      if (found.size === 0) fallbackIndex = write;
+      found.set(id, message);
+      continue;
+    }
+    prompt[write++] = message;
+  }
+  if (found.size === 0) return;
+  prompt.length = write;
+  placeRuntime(prompt, entries, found, fallbackIndex);
 }
 
 /**
@@ -460,17 +517,119 @@ function insertIntoHistory(messages: LlmMessage[], blocks: readonly InHistory[])
   for (const { block, at } of placements) messages.splice(at, 0, { role: block.role, content: block.content, ...(block.worldInfo ? { __worldInfoSource: true } : {}) });
 }
 
+/** `normalizeMetadata` (`spindle/source-message-metadata.ts:14-18`): an object as it is, anything else none. */
+function normalizedMetadata(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * `markAsChatHistory` (`services/prompt-assembly.service.ts:220-234`): the message is chat history, held to the context anchor where it follows it, and
+ * says which message it came from, by id and stored number, with the extension metadata on that message (an empty object where there is none).
+ */
+function markHistory(message: LlmMessage, source: { id: string; index: number; metadata?: Record<string, unknown> }, anchored: boolean): LlmMessage {
+  message.__chatHistorySource = true;
+  if (anchored) message.__contextAnchorProtected = true;
+  message.__sourceMessageId = source.id;
+  message.__sourceIndexInChat = source.index;
+  message.__sourceMessageMetadata = normalizedMetadata(source.metadata);
+  return message;
+}
+
+/**
+ * Text added to a message's first text part, at the end of a string (`:3420-3452`, `:6700-6730`): a message of parts with none gets a text part of its own at
+ * the front, holding `text` alone. `lead` goes between the text that was there and the new text.
+ */
+function appendToFirstText(message: LlmMessage, text: string, lead = ""): LlmMessage {
+  if (typeof message.content === "string") return { ...message, content: message.content + lead + text };
+  const parts = [...message.content];
+  const at = parts.findIndex((p) => p.type === "text");
+  const found = parts[at];
+  if (found?.type === "text") parts[at] = { type: "text", text: found.text + lead + text };
+  else parts.unshift({ type: "text", text });
+  return { ...message, content: parts };
+}
+
+/** An "append" block waiting for the history to be in place (`PendingAppend`, `:1742-1750`). */
+interface Append {
+  baseRole: "user" | "assistant";
+  depth: number;
+  content: string;
+  tokenCountContent?: string;
+  attributesWorldInfoMarkerTokens: boolean;
+  blockName: string;
+  blockId: string;
+}
+
+/**
+ * `applyAppendGroup` (`:6684-6740`): the appends that share a role and a depth go together, their texts joined with nothing between, after a newline into
+ * the history message of that role `depth` messages of that role from the end; none where there is no such message.
+ */
+function applyAppendGroup(prompt: LlmMessage[], breakdown: BreakdownEntry[], group: readonly Append[]): void {
+  const { baseRole, depth } = group[0]!;
+  const combined = group.map((a) => a.content).join("");
+  let roleCount = 0;
+  for (let i = prompt.length - 1; i >= 0; i--) {
+    const message = prompt[i]!;
+    if (message.role !== baseRole || message.__chatHistorySource !== true) continue;
+    if (roleCount === depth) {
+      prompt[i] = { ...appendToFirstText(message, combined, "\n"), __preserveDisplayReasoningDelimiters: true };
+      for (const a of group) breakdown.push({ type: "append", name: `${a.blockName} → ${baseRole}@${depth}`, role: baseRole, content: a.content, ...(a.attributesWorldInfoMarkerTokens ? { tokenCountContent: a.tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: a.blockId });
+      return;
+    }
+    roleCount++;
+  }
+}
+
+/**
+ * The chat's history as the prompt holds it (`services/prompt-assembly.service.ts:3236-3418`): from the messages the Summary tab's limit leaves, hidden ones
+ * left out and each range Memory summarized put as one message at its last message, each message flagged with its id, its number and its metadata, held
+ * to the context anchor where it follows it; a message the image generator made with no text and no picture is left out, and one with a picture and no
+ * text has no text part. Text is not run through macros.
+ */
+function buildHistory(messages: readonly ChatMessage[], ending: Ending): LlmMessage[] {
+  const anchor = ending.anchorIndex ?? null;
+  const effective = selectHistoryMessages(messages, ending.messageLimit, anchor);
+  const plan = ending.memory === undefined ? undefined : buildHistoryPlan(ending.memory.of, effective, ending.memory.config, anchor, ending.continueMessageId);
+  // The newest generated pictures the user lets through, picture by picture from the newest message (`:1032-1059`).
+  const recycled = new Set<object>();
+  const allowed = ending.recycledImageLimit ?? 0;
+  for (let i = effective.length - 1; i >= 0 && recycled.size < allowed; i--) {
+    const m = effective[i]!;
+    if (m.hidden === true || m.imageGen !== true) continue;
+    const pictures = m.images ?? [];
+    for (let j = pictures.length - 1; j >= 0 && recycled.size < allowed; j--) recycled.add(pictures[j]!);
+  }
+  const history: LlmMessage[] = [];
+  for (const m of effective) {
+    if (m.hidden === true) continue;
+    const replacement = plan?.replacements.get(m.id);
+    if (replacement !== undefined) {
+      history.push(markHistory({ role: m.role, content: replacement.content, __cortexHistorySummary: true }, { id: m.id, index: indexInChat(m) }, false));
+      continue;
+    }
+    if (plan?.replacedMessageIds.has(m.id) === true) continue;
+    const pictures = (m.images ?? []).filter((p) => m.imageGen !== true || recycled.has(p));
+    if (m.imageGen === true && m.content.trim() === "" && pictures.length === 0) continue;
+    const parts: LlmPart[] = [...(m.content.trim() === "" ? [] : [{ type: "text" as const, text: m.content }]), ...pictures.map((p) => ({ type: "image" as const, ...p }))];
+    history.push(markHistory({ role: m.role, content: pictures.length > 0 ? parts : m.content }, { id: m.id, index: indexInChat(m), metadata: m.metadata }, anchor !== null && indexInChat(m) >= anchor));
+  }
+  return history;
+}
+
 /** The prompt for these messages, each history message carrying the number Lumiverse stored for it (`:229-231`, `:3361`, `:3398`). */
 export function assemble(preset: Preset, active: readonly Entry[], messages: readonly ChatMessage[], ending: Ending): Assembled {
   const breakdown: BreakdownEntry[] = [];
   const prompt: LlmMessage[] = [];
   const lore = placedLore(active, ending.world);
   const pending: InHistory[] = [];
+  const appends: Append[] = [];
   let firstChatIdx = -1;
   let chatHistoryCount = 0;
   let hasWiBefore = false;
   let hasWiAfter = false;
-  const blocks = preset.blocks.some((b) => b.marker === "chat_history") ? preset.blocks : [...preset.blocks, { id: "", name: "Chat History", role: "system" as const, content: "", marker: "chat_history" as const }];
+  // Lumiverse sends the history only at a block marked `chat_history` (`:3161`): a preset with none sends none, and the lore that goes around the history
+  // goes to the start and the end of the prompt (`:3732-3756`).
+  const blocks = preset.blocks;
   // Lore pinned beside a marker block, by the marker's id and the side (`pinnedByMarker`, `:3092-3106`). The "after" ones of a block are put in
   // at the top of the next turn of the loop, so they follow all that the block put in, and the last block's after the loop.
   const pinnedBy = (marker: string, side: "before" | "after"): PinnedLore[] => lore.pinned.filter((p) => p.marker === marker && p.side === side);
@@ -491,18 +650,22 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
       if (after.length > 0) pendingPinnedAfter = after;
     }
     if (block.marker === "chat_history") {
-      // The chat's history (`:3236-3463`): its visible messages, each flagged with its id and number, then queued sends joined before
-      // anything is spliced into it. Its breakdown entry is pushed with the count before the join, and read again at the end.
+      // The chat's history (`:3236-3463`): its visible messages, each flagged with its id and number, then the databank mention put at the end of the last
+      // user message and queued sends joined, before anything is spliced into it. Its breakdown entry is pushed with the count before the join, and read
+      // again at the end.
       firstChatIdx = prompt.length;
-      let count = 0;
-      for (const m of messages) {
-        if (m.hidden) continue;
-        const content: string | LlmPart[] = m.images ? [{ type: "text", text: m.content }, ...m.images.map((i) => ({ type: "image" as const, ...i }))] : m.content;
-        prompt.push({ role: m.role, content, __chatHistorySource: true, __sourceMessageId: m.id, __sourceIndexInChat: indexInChat(m) });
-        count++;
+      const history = buildHistory(messages, ending);
+      prompt.push(...history);
+      breakdown.push({ type: "chat_history", name: "Chat History", messageCount: history.length, firstMessageIndex: firstChatIdx });
+      if (ending.mention !== undefined && ending.mention !== "") {
+        for (let i = prompt.length - 1; i >= firstChatIdx; i--) {
+          if (prompt[i]!.role !== "user") continue;
+          prompt[i] = appendToFirstText(prompt[i]!, ending.mention);
+          breakdown.push({ type: "databank_mention", name: "Databank Reference", role: "user", content: ending.mention });
+          break;
+        }
       }
-      breakdown.push({ type: "chat_history", name: "Chat History", messageCount: count, firstMessageIndex: firstChatIdx });
-      chatHistoryCount = mergeQueuedUserMessages(prompt, firstChatIdx, count);
+      chatHistoryCount = mergeQueuedUserMessages(prompt, firstChatIdx, history.length);
       continue;
     }
     if (block.marker === "world_info_before" || block.marker === "world_info_after") {
@@ -511,12 +674,13 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
       const before = block.marker === "world_info_before";
       if (before) hasWiBefore = true;
       else hasWiAfter = true;
+      const role = block.role as Role;
       for (const entry of before ? lore.before : lore.after) {
         const name = `${before ? "World Info Before" : "World Info After"}: ${entry.label}`;
-        if (block.depth !== undefined) pending.push({ role: block.role, depth: Math.max(0, block.depth), content: entry.content, name, blockId: block.id, worldInfo: true });
+        if (block.depth !== undefined) pending.push({ role, depth: Math.max(0, block.depth), content: entry.content, name, blockId: block.id, worldInfo: true });
         else {
-          prompt.push({ role: block.role, content: entry.content, __worldInfoSource: true });
-          breakdown.push({ type: "world_info", name, role: block.role, content: entry.content });
+          prompt.push({ role, content: entry.content, __worldInfoSource: true });
+          breakdown.push({ type: "world_info", name, role, content: entry.content });
         }
       }
       continue;
@@ -524,32 +688,45 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
     // A block's own text (`:3600-3663`): its `{{wi_marker}}` taking the "at marker" lore and its `{{outlet::name}}` an outlet's text (`:3034-3041`),
     // lore inside the block's text with no flag of its own; runs of blank lines folded and the ends trimmed, and a block left with no text not sent
     // (`:3638-3663`). One that expands the pool counts only its wrapper, the text with an empty pool (`evaluatePromptBlockTokenCountContent`, `:1500-1515`).
+    const usesPool = WI_MARKER_USED.test(block.content);
+    if (block.role === "user_append" || block.role === "assistant_append") {
+      // An append keeps its text as it is, whitespace-only ones too, and waits for the history (`:3620-3633`); its depth counts messages of its role.
+      const raw = expandMacros(block.content, lore.outlets, pool);
+      if (raw !== "") appends.push({ baseRole: block.role === "user_append" ? "user" : "assistant", depth: block.depth || 0, content: raw, ...(usesPool ? { tokenCountContent: expandMacros(block.content, lore.outlets, "") } : {}), attributesWorldInfoMarkerTokens: usesPool, blockName: block.name, blockId: block.id });
+      continue;
+    }
+    const role: Role = block.role;
     const content = normalizeBlockText(expandMacros(block.content, lore.outlets, pool));
     if (content === "") continue;
-    const usesPool = WI_MARKER_USED.test(block.content);
     const tokenCountContent = usesPool ? normalizeBlockText(expandMacros(block.content, lore.outlets, "")) : undefined;
-    if (block.depth !== undefined) pending.push({ role: block.role, depth: Math.max(0, block.depth), content, ...(usesPool ? { tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), name: block.name, blockId: block.id, worldInfo: false });
+    if (block.depth !== undefined) pending.push({ role, depth: Math.max(0, block.depth), content, ...(usesPool ? { tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), name: block.name, blockId: block.id, worldInfo: false });
     else {
-      prompt.push({ role: block.role, content });
-      breakdown.push({ type: "block", name: block.name, role: block.role, content, ...(usesPool ? { tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: block.id });
+      prompt.push({ role, content });
+      breakdown.push({ type: "block", name: block.name, role, content, ...(usesPool ? { tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: block.id });
     }
   }
   // The final block's lore pinned after it.
   if (pendingPinnedAfter !== null) pushPinned(prompt, breakdown, pendingPinnedAfter);
   // Lore of a position with no marker in the preset (`:3728-3756`): "before" just before the history, "after" just after it, 2 and 3 and 5 and 6 around
   // its first message, 4 at its depth from the end, then what an interceptor placed in the history (`:3759-3836`), each named by the position and its label.
-  // Each position reads the history's first place as the ones before it left it: only "before" and the "AN before" entries move it.
-  if (!hasWiBefore && lore.before.length > 0) firstChatIdx += injectLoreAt(prompt, breakdown, lore.before, firstChatIdx, "World Info Before (auto)");
-  if (!hasWiAfter && lore.after.length > 0) injectLoreAt(prompt, breakdown, lore.after, firstChatIdx + chatHistoryCount, "World Info After (auto)");
-  if (lore.anBefore.length > 0) firstChatIdx += injectLoreAt(prompt, breakdown, lore.anBefore, firstChatIdx, "WI AN Before");
-  if (lore.anAfter.length > 0) injectLoreAt(prompt, breakdown, lore.anAfter, firstChatIdx + 1, "WI AN After");
-  if (lore.emBefore.length > 0) injectLoreAt(prompt, breakdown, lore.emBefore, firstChatIdx, "WI EM Before");
-  if (lore.emAfter.length > 0) injectLoreAt(prompt, breakdown, lore.emAfter, firstChatIdx + 1, "WI EM After");
+  // With no history in the prompt, "before" goes to the start and "after" to the end of the prompt, and the positions around the history's first message
+  // go nowhere. Each position reads the history's first place as the ones before it left it: only "before" and the "AN before" entries move it.
+  if (!hasWiBefore && lore.before.length > 0) {
+    const inserted = injectLoreAt(prompt, breakdown, lore.before, firstChatIdx >= 0 ? firstChatIdx : 0, "World Info Before (auto)");
+    if (firstChatIdx >= 0) firstChatIdx += inserted;
+  }
+  if (!hasWiAfter && lore.after.length > 0) injectLoreAt(prompt, breakdown, lore.after, firstChatIdx >= 0 ? firstChatIdx + chatHistoryCount : prompt.length, "World Info After (auto)");
+  if (firstChatIdx >= 0) {
+    if (lore.anBefore.length > 0) firstChatIdx += injectLoreAt(prompt, breakdown, lore.anBefore, firstChatIdx, "WI AN Before");
+    if (lore.anAfter.length > 0) injectLoreAt(prompt, breakdown, lore.anAfter, firstChatIdx + 1, "WI AN After");
+    if (lore.emBefore.length > 0) injectLoreAt(prompt, breakdown, lore.emBefore, firstChatIdx, "WI EM Before");
+    if (lore.emAfter.length > 0) injectLoreAt(prompt, breakdown, lore.emAfter, firstChatIdx + 1, "WI EM After");
+  }
   for (const e of lore.depth) {
     prompt.splice(Math.max(0, prompt.length - e.depth), 0, { role: e.role, content: e.content, __worldInfoSource: true });
     breakdown.push({ type: "world_info", name: `WI Depth ${e.depth}: ${e.label}`, role: e.role, content: e.content });
   }
-  insertRuntime(prompt, lore.runtime, firstChatIdx);
+  insertRuntime(prompt, lore.runtime, firstChatIdx >= 0 ? firstChatIdx : prompt.length);
   for (const e of lore.runtime) breakdown.push({ type: "world_info", name: `WI Chat Depth ${e.placement.direction} ${e.placement.depth}: ${e.label}`, role: e.placement.role, content: e.content });
   // The "at marker" lore, named in the breakdown, its tokens counted in the block that holds it (`:3838-3847`).
   for (const e of lore.atMarker) breakdown.push({ type: "world_info", name: `WI At Marker: ${e.label}`, role: e.role, content: e.content, marker: "wi_marker", excludeFromTotal: true });
@@ -559,9 +736,6 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
     if (p.worldInfo) breakdown.push({ type: "world_info", name: p.name, role: p.role, content: p.content });
     else breakdown.push({ type: "block", name: p.name, role: p.role, content: p.content, ...(p.attributesWorldInfoMarkerTokens === true ? { tokenCountContent: p.tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: p.blockId });
   }
-  // A block that expanded the pool counts only its wrapper, so the pool's rows count (`attributeExpandedMarkerWorldInfoTokens`, `:1522-1533`); the
-  // exclusion stays where the macro was in no block that was sent.
-  if (breakdown.some((e) => e.attributesWorldInfoMarkerTokens === true)) for (const e of breakdown) if (e.type === "world_info" && e.marker === "wi_marker") delete e.excludeFromTotal;
   // A continue's nudge, without "Continue prefill" (`services/prompt-assembly.service.ts:3987-4008`): marked, so that it is moved to stand
   // after the continued message below.
   if (ending.type === "continue" && preset.continuePrefill !== true) {
@@ -587,6 +761,13 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
   }
   // The preset's completion settings, over the whole prompt before any interceptor sees it (`:4210`).
   applyCompletionSettings(prompt, preset, ending.names);
+  // The appends, once the history is as it will be sent: those of one role and depth together, in the preset's order (`:4218-4234`).
+  const groups = new Map<string, Append[]>();
+  for (const a of appends) groups.set(`${a.baseRole}:${a.depth}`, [...(groups.get(`${a.baseRole}:${a.depth}`) ?? []), a]);
+  for (const group of groups.values()) applyAppendGroup(prompt, breakdown, group);
+  // A block that expanded the pool counts only its wrapper, so the pool's rows count (`attributeExpandedMarkerWorldInfoTokens`, `:1522-1533`, called
+  // after the appends, `:4240`); the exclusion stays where the macro was in no block that was sent.
+  if (breakdown.some((e) => e.attributesWorldInfoMarkerTokens === true)) for (const e of breakdown) if (e.type === "world_info" && e.marker === "wi_marker") delete e.excludeFromTotal;
   // `finalizeContinuePrompt` (`:742-775`, called at `:4314-4338`): the continued message, the newest assistant history message with the
   // continued message's id (or the newest of all, where Lumiverse found none), leaves the history: the postfix is appended, it is a
   // partial reply with "Continue prefill" on, it loses its history mark and keeps its other keys, its source among them, and it goes
@@ -611,6 +792,10 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
       breakdown.push({ type: "utility", name: "Continue Target", role: "assistant", content: textOf(moved) });
     }
   }
+  // The clipping to the preset's context size, over everything else in the prompt (`:4350-4358`): the oldest history cut first, a context anchor a hard start;
+  // what an interceptor placed in the history is put again among what is left (`:4359-4362`).
+  const contextClipStats = clipToContextBudget(prompt, preset.parameters?.max_context_length, preset.parameters?.max_tokens);
+  repositionRuntime(prompt, lore.runtime);
   // The chat history's bounds read again from where its messages ended up (`:4415-4442`).
   const historyEntry = breakdown.find((e) => e.type === "chat_history");
   if (historyEntry !== undefined) {
@@ -618,5 +803,5 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
     historyEntry.firstMessageIndex = first >= 0 ? first : undefined;
     historyEntry.messageCount = prompt.filter((m) => m.__chatHistorySource === true).length;
   }
-  return { prompt, breakdown };
+  return { prompt, breakdown, contextClipStats };
 }

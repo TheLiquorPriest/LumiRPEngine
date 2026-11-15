@@ -7,10 +7,12 @@
 // the World Info chain and activation (`lore.ts`); the prompt's assembly (`assembly.ts`). This file is
 // the generation that runs through them all, and the chat connections and presets it reads.
 
-import { assemble, type BreakdownEntry, type GenerationType, type Preset } from "./assembly";
-import { collectWorldInfoSources } from "./books";
+import { assemble, type BreakdownEntry, type Ending, type GenerationType, type Preset } from "./assembly";
+import { collectWorldInfoSources, type Character } from "./books";
+import { cortexConfigOf, cortexEnabledForChat, type ContextClipStats, type MessageLimit } from "./history";
 import { activateLore, DEFAULT_EMBEDDING_SETTINGS, normalizeWorldInfoSettings, worldInfoChain, worldInfoContext, type ActivatedWorldInfoEntry, type Activation, type EmbeddingSettings, type Entry, type VectorSearch, type WiState, type WorldInfoSettings } from "./lore";
-import { ChatRows, type Chat, type ChatMessage, type Stored } from "./rows";
+import { Databanks, Memory } from "./memory";
+import { ChatRows, indexInChat, type Chat, type ChatMessage, type Stored } from "./rows";
 import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, textOf, type LlmMessage, type StreamSeen, type StreamedReply } from "./steps";
 
 export type { Chat, ChatMessage } from "./rows";
@@ -42,6 +44,11 @@ export interface GenerateInput {
    * what Lumiverse's own page names: the chat's last message when that is not the user's (`frontend/src/components/chat/InputArea.tsx:2238-2250`).
    */
   message?: string;
+  /**
+   * The character a group chat's generation is for (`target_character_id`, `services/generate.service.ts:1830-1836`): taken only where the chat is a group and the
+   * character one of its members. A regenerate, a swipe or a continue is for the one who spoke its message before this.
+   */
+  targetCharacter?: string;
 }
 
 export interface Outcome {
@@ -70,10 +77,15 @@ export interface Outcome {
    * interceptors add none. Absent for a generation, whose breakdown is the one Lumiverse stores beside the reply (`stored`).
    */
   breakdown?: BreakdownEntry[];
+  /** What the clipping to the preset's context size and the context anchor did (`contextClipStats`, `services/prompt-assembly.service.ts:4351-4358`); a dry run reports it too. Absent where the prompt was never assembled. */
+  contextClipStats?: ContextClipStats;
 }
 
 export class StandIn extends ChatRows {
   readonly connections = new Map<string, Connection>();
+  /** The chunks and consolidations of the chats' memory, and the databanks and documents a `#mention` reads; set `db` before adding any (`memory.ts`). */
+  readonly memory = new Memory(() => this.db, () => this.now());
+  readonly databanks = new Databanks(() => this.db, () => this.now());
   readonly presets = new Map<string, Preset>();
   /** What each generation's stream has shown the player so far, its reply and its thinking, by generation (the streaming bubble). */
   readonly streams = new Map<string, StreamSeen>();
@@ -162,18 +174,30 @@ export class StandIn extends ChatRows {
         postfix = configured === "" || original.endsWith(configured) ? "" : configured;
       }
     }
+    // The speaker (`services/generate.service.ts:1795-1860`; a dry run `:3100-3112`): a group chat's generation names the member it is for; a regenerate, a swipe or a
+    // continue is for the one who spoke the message it is on, else the one named; any other, the one named, else the one of the message; none of them, the chat's own
+    // character. Only a member of the group is named, and only in a group chat. A dry run asks no message.
+    const groupMetadata = this.metadataOf(chat);
+    const members = groupMetadata.group === true && Array.isArray(groupMetadata.character_ids) ? (groupMetadata.character_ids as string[]) : [];
+    const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
+    const requested = input.targetCharacter !== undefined && members.includes(input.targetCharacter) ? input.targetCharacter : undefined;
+    const spoke = dryRun ? undefined : type === "continue" ? goesOn?.characterId : type === "swipe" || type === "regenerate" ? lastAssistant?.characterId : undefined;
+    const inferred = spoke !== undefined && members.includes(spoke) ? spoke : undefined;
+    const speakerId = (type === "swipe" || type === "regenerate" || type === "continue" ? inferred || requested : requested || inferred) || chat.character.id;
+    const speakerCard = this.library.charactersByIds(chat.user, [speakerId]).get(speakerId);
+    const speakerName = speakerCard === undefined ? "Assistant" : effectiveName(speakerCard);
     if (!dryRun) {
       if (type === "normal") {
         // A new reply's message is made empty before the prompt, and left out of it (`:1988-2006`).
         staged = crypto.randomUUID();
-        const m: ChatMessage = { id: staged, role: "assistant", content: "" };
+        const m: ChatMessage = { id: staged, role: "assistant", content: "", characterId: speakerId };
         chat.messages.push(m);
-        this.createRow(chat, m, chat.character.name, { character_id: chat.character.id });
+        this.createRow(chat, m, speakerName);
         target = { message: staged, swipe: 0 };
         excluded = staged;
       } else if (type === "swipe" || type === "regenerate") {
         // The reply being replaced gets a new empty swipe, shown, and is left out of the prompt (`:1699-1720`, `prompt-assembly.service.ts:1900-1904`).
-        const last = [...chat.messages].reverse().find((m) => m.role === "assistant");
+        const last = lastAssistant;
         if (last) {
           swipeAt = this.addSwipeRow(chat, last.id, "") ?? (last.swipeId ?? 0) + 1;
           last.swipeId = swipeAt;
@@ -187,17 +211,18 @@ export class StandIn extends ChatRows {
       // Announced before the prompt is assembled (`:2036-2055`), and the assembly starts on a later task (`:2068-2073`, `:1059`). A continue
       // names the swipe it goes on, the one its message shows, and no message (`:1962-1968`): only a swipe, a regenerate and a new reply's
       // staged message set `targetMessageId` (`:1928-1938`, `:1988-2006`). What none set, an impersonation's both, is left unset.
-      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe: false, characterId: chat.character.id, characterName: chat.character.name, generationType: type, frontendSessionId: undefined }, chat.user);
+      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe: false, characterId: speakerId, characterName: speakerName, generationType: type, frontendSessionId: undefined }, chat.user);
     }
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const messages = chat.messages.filter((m) => m.id !== excluded);
     // The stand-in keeps no personas, so the name for the user's messages is Lumiverse's own when there is none
-    // (`services/prompt-assembly.service.ts:7186-7189`), as the stand-in's rows name them.
-    const names = { user: "User", character: chat.character.name };
+    // (`services/prompt-assembly.service.ts:7186-7189`), as the stand-in's rows name them; the character's is the speaker's.
+    const names = { user: "User", character: speakerName };
     let sent: LlmMessage[] = [];
     let body: Record<string, unknown> | null = null;
     let worldInfo: Outcome["worldInfo"] = { ms: 0, entries: [], activated: [], stats: {} };
+    let contextClipStats: ContextClipStats | undefined;
     try {
       // ---- the extensions' context handlers, first in the pipeline (`generate.service.ts:1063-1083`): what they give back is the
       // context, the frontend session put back; one that asks to cancel stops the generation.
@@ -207,6 +232,8 @@ export class StandIn extends ChatRows {
         if (handled) context = { ...(handled as Record<string, unknown>), frontendSessionId: undefined };
         if (context.cancelGeneration === true) throw new CancelledByExtension();
       }
+      // The speaker's card is read when the assembly starts (`:1922-1932`), once the context handlers are through.
+      if (speakerCard === undefined) throw new Error("Character not found");
 
       // ---- lore (`prompt-assembly.service.ts:2242-2597`): the books the chat reads, from their places and as their rows stand now
       // (`:2243-2271`); the chain before activation, over entries of every one (`:2282-2326`); then activation over the chat's own counts
@@ -214,7 +241,7 @@ export class StandIn extends ChatRows {
       // entries as they stood before the chain (`:2327-2561`).
       const wiStarted = performance.now();
       const metadata = this.metadataOf(chat);
-      const speaker = this.library.charactersByIds(chat.user, [chat.character.id]).get(chat.character.id) ?? chat.character;
+      const speaker = speakerCard;
       // A temporary chat has no persona (`:1923-1937`).
       const persona = metadata.temporary === true ? null : this.library.persona(chat.user, input.persona);
       const globalBooks = (this.library.setting(chat.user, "globalWorldBooks") as string[] | undefined) ?? [];
@@ -230,7 +257,7 @@ export class StandIn extends ChatRows {
       }
       const configured = (this.library.setting(chat.user, "worldInfoSettings") as Partial<WorldInfoSettings> | undefined) ?? this.worldInfoSettings;
       const normalized = normalizeWorldInfoSettings(configured);
-      const chain = await worldInfoChain(this.worldInfo, wiEntries, worldInfoContext(chat, messages, { userId: chat.user, metadata, activationSettings: { globalScanDepth: normalized.globalScanDepth, maxRecursionPasses: normalized.maxRecursionPasses } }), chat.user, sources.bookSourceMap, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
+      const chain = await worldInfoChain(this.worldInfo, wiEntries, worldInfoContext(chat, messages, { userId: chat.user, metadata, characterId: speaker.id, activationSettings: { globalScanDepth: normalized.globalScanDepth, maxRecursionPasses: normalized.maxRecursionPasses } }), chat.user, sources.bookSourceMap, { timeoutMs: this.worldInfoTimeoutMs, log: this.log });
       for (const [book, source] of chain.additionalBookSources) sources.bookSourceMap.set(book, source);
       const wiMs = performance.now() - wiStarted;
       const activation = { ...normalized, maxRecursionPasses: chain.activationOverrides.disableRecursion === true ? 0 : normalized.maxRecursionPasses };
@@ -248,9 +275,12 @@ export class StandIn extends ChatRows {
       }
       worldInfo = { ms: wiMs, entries: chain.entries, activated: lore.activated, stats: lore.stats };
 
-      // ---- the prompt (`assembly.ts`)
+      // ---- the prompt (`assembly.ts`), over the history as the user's settings, the context anchor, Memory and the databank mentions shape it
       const bound = connection.metadata?.reasoningBindings?.promptBias;
-      const { prompt, breakdown } = assemble(preset, lore.entries, messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, world: { placements: chain.placementByEntryId, insertionOrder: chain.insertionOrderByEntryId }, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
+      const shaped = this.shapeHistory(chat, metadata, speaker, messages);
+      const assembled = assemble(preset, lore.entries, shaped.messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, world: { placements: chain.placementByEntryId, insertionOrder: chain.insertionOrderByEntryId }, ...shaped.ending, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
+      const { prompt, breakdown } = assembled;
+      contextClipStats = assembled.contextClipStats;
       sent = prompt;
       // The chat history as Lumiverse counts it beside the reply: the prompt's history messages before the interceptors, blank ones left out
       // (`services/generate.service.ts:1211-1215`, `:1424-1426`).
@@ -272,7 +302,9 @@ export class StandIn extends ChatRows {
       sent = dropBlank(sent);
       if (preset.collapse === true) collapse(sent);
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
-      if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
+      if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, contextClipStats, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
+      // A context anchor's tail that cannot fit ends the generation before the provider is called (`:2814-2826`); a dry run only reports it.
+      if (contextClipStats.anchorOverflow === true) throw new Error(`Protected context anchor needs ${(contextClipStats.protectedHistoryTokens ?? 0).toLocaleString()} tokens, but only ${Math.max(0, contextClipStats.remainingHistoryBudget).toLocaleString()} fit after prompt overhead. Increase Context Size or lower Max Response.`);
       // The counts saved into the chat's metadata, then the lore told, before the provider is called (`:2827-2879`); a dry run saves none,
       // and with no lore activated no event is sent (`:2869`).
       this.mergeChatMetadata(chat, { wi_state: wiState });
@@ -296,7 +328,7 @@ export class StandIn extends ChatRows {
         const savedText = this.saveStopped(chat, { staged, swipeAt, original, postfix, target: target.message, swipe: target.swipe }, seen);
         this.going.delete(generationId!);
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: savedText }, chat.user);
-        return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo };
+        return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo, contextClipStats };
       }
       this.going.delete(generationId!);
       let messageId: string | undefined;
@@ -324,14 +356,14 @@ export class StandIn extends ChatRows {
         messageId = staged;
       } else if (!(type === "impersonate" && input.impersonateDraft === true)) {
         // Anything else saves a new message: an impersonation as the user's (`:4172-4194`). A draft saves none (`:4167-4171`).
-        const m: ChatMessage = { id: crypto.randomUUID(), role: type === "impersonate" ? "user" : "assistant", content: reply.content };
+        const m: ChatMessage = { id: crypto.randomUUID(), role: type === "impersonate" ? "user" : "assistant", content: reply.content, ...(type === "impersonate" ? {} : { characterId: speakerId }) };
         chat.messages.push(m);
-        this.createRow(chat, m, type === "impersonate" ? "User" : chat.character.name);
+        this.createRow(chat, m, type === "impersonate" ? "User" : speakerName);
         this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(m.id) ?? m }, chat.user);
         messageId = m.id;
       }
       this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: savedText, usage: reply.usage, generationType: type, ...(input.impersonateDraft === true && type === "impersonate" ? { impersonateDraft: true } : {}) }, chat.user);
-      if (messageId === undefined) return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo };
+      if (messageId === undefined) return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo, contextClipStats };
       // Stored after the generation ends, beside the reply (`:4432-4476`; `services/breakdown.service.ts:3-12`); token counts are the stand-in's own.
       const tokens = (text: string): number => Math.ceil(text.length / 4);
       const historyTokens = history.reduce((n, m) => n + tokens(textOf(m)), 0);
@@ -351,22 +383,87 @@ export class StandIn extends ChatRows {
         presetId: preset.id,
       };
       this.storeBreakdown(chat, messageId, stored);
-      return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo };
+      return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo, contextClipStats };
     } catch (error) {
       if (error instanceof CancelledByExtension && generationId !== null) {
         // A context handler's cancel ends it as a stop does, its empty message removed and nothing saved (`:3003-3022`).
         this.going.delete(generationId);
         if (staged !== null) this.deleteMessage(chat.id, staged);
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: "" }, chat.user);
-        return { generationId, error: null, stopped: true, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo };
+        return { generationId, error: null, stopped: true, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
       }
       // A failed setup or call ends the generation with its error, its empty message removed (`:2987-3048`).
       const message = error instanceof Error ? error.message : String(error);
       if (generationId !== null) this.going.delete(generationId);
       if (staged !== null) this.deleteMessage(chat.id, staged);
       if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, error: message, generationType: type }, chat.user);
-      return { generationId, error: message, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo };
+      return { generationId, error: message, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
     }
+  }
+
+  /**
+   * What shapes the history before the prompt is sent, and the databank mentions in it (`services/prompt-assembly.service.ts:2796-2826`, `:2905-2985`): the context
+   * anchor (`context_history_anchor_message_id`, `:1904-1917`, a hidden message is none), the Summary tab's message limit (`summarization`), Memory's replacements where
+   * its config and the chat allow them, the user's image settings, and each valid `#mention` in the player's lines taken out of them and the mentioned documents'
+   * text put at the end of the last of them. The messages given back are copies; the chat's own are not touched.
+   */
+  private shapeHistory(chat: Chat, metadata: Record<string, unknown>, speaker: Character, messages: readonly ChatMessage[]): { messages: ChatMessage[]; ending: Pick<Ending, "anchorIndex" | "messageLimit" | "memory" | "mention" | "recycledImageLimit"> } {
+    const user = chat.user;
+    const anchorId = typeof metadata.context_history_anchor_message_id === "string" ? metadata.context_history_anchor_message_id : null;
+    const anchor = anchorId === null ? undefined : chat.messages.find((m) => m.id === anchorId && m.hidden !== true);
+    const config = cortexConfigOf(this.library.setting(user, "memoryCortexConfig"));
+    const replaces = cortexEnabledForChat(config, metadata) && (config.replaceConsolidatedMessagesInContext || config.replaceArcSummariesInContext);
+    const images = this.library.setting(user, "imageGeneration") as { recycleGeneratedImages?: unknown; recycledImageLimit?: unknown } | undefined;
+    const rawLimit = Number(images?.recycledImageLimit ?? 1);
+    const copies = messages.map((m) => ({ ...m }));
+    const mention = this.mentionsIn(chat, metadata, speaker, copies);
+    return {
+      messages: copies,
+      ending: {
+        anchorIndex: anchor === undefined ? null : indexInChat(anchor),
+        messageLimit: this.library.setting(user, "summarization") as MessageLimit | undefined,
+        ...(replaces ? { memory: { config, of: { consolidations: this.memory.consolidations(chat.id), chunks: this.memory.chunks(chat.id) } } } : {}),
+        mention,
+        recycledImageLimit: images?.recycleGeneratedImages === true ? Math.max(1, Math.min(20, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 1)) : 0,
+      },
+    };
+  }
+
+  /**
+   * The mentions of databank documents in the player's lines (`services/databank/mention-resolver.service.ts:21-60`, `:67-95`, `:171-212`; `services/prompt-assembly.service.ts:2905-2985`):
+   * a `#slug` after whitespace or at a line's start, in a user message, names a ready document of the user's in a databank active for the chat (global, the chat's, the speaker's
+   * unless the chat is isolated from memory, or in the user's `globalDatabanks`); every one that does is taken out of every user message it is in, in `copies`, and the text of the
+   * documents the last user message names, in the order it names them, is given back as the appendix Lumiverse puts at its end (`formatMentionsAsAppendix`, `:217-238`).
+   */
+  private mentionsIn(chat: Chat, metadata: Record<string, unknown>, speaker: Character, copies: ChatMessage[]): string {
+    const perMessage = copies.map((m): Set<string> | null => {
+      if (m.role !== "user" || !m.content.includes("#")) return null;
+      const slugs = new Set([...m.content.matchAll(/(?:^|\s)#([a-z0-9][a-z0-9-]*)/gi)].map((found) => found[1]!.toLowerCase()));
+      return slugs.size === 0 ? null : slugs;
+    });
+    const all = new Set(perMessage.flatMap((s) => (s === null ? [] : [...s])));
+    if (all.size === 0) return "";
+    const global = this.library.setting(chat.user, "globalDatabanks");
+    const active = new Set(this.databanks.activeBanks(chat.user, chat.id, metadata.memory_isolation === true ? [] : [speaker.id], { global: Array.isArray(global) ? (global as string[]) : [], character: [], chat: [] }));
+    const documents = new Map<string, { id: string; name: string }>();
+    for (const slug of all) {
+      const found = this.databanks.documentBySlug(chat.user, slug);
+      if (found !== null && active.has(found.databank)) documents.set(slug, found);
+    }
+    if (documents.size === 0) return "";
+    copies.forEach((m, i) => {
+      if (perMessage[i] === null) return;
+      let out = m.content;
+      for (const slug of documents.keys()) out = out.replace(new RegExp(`(^|\\s)#${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), "$1");
+      copies[i] = { ...m, content: out.replace(/\s{2,}/g, " ").trim() };
+    });
+    const named = perMessage[copies.findLastIndex((m) => m.role === "user")];
+    if (named === null || named === undefined) return "";
+    const resolved = [...named].filter((slug) => documents.has(slug)).flatMap((slug) => {
+      const text = this.databanks.fullText(chat.user, documents.get(slug)!.id);
+      return text === null || text === "" ? [] : [`## ${documents.get(slug)!.name}\n${text}`];
+    });
+    return resolved.length === 0 ? "" : ["", "---", "", "# Additional Context", "The user has attached the following reference material for you to consider when responding.", "", resolved.join("\n\n---\n\n")].join("\n");
   }
 
   /** The chat's metadata as its row holds it now; the chat held in memory where there is no database. */
@@ -416,6 +513,12 @@ export class StandIn extends ChatRows {
     }
     return seen.content;
   }
+}
+
+/** `getEffectiveCharacterName` (`types/character.ts:86-88`): the alternate name the card gives, trimmed, else its name. */
+function effectiveName(character: Character): string {
+  const alternate = character.extensions?.alternate_character_name;
+  return (typeof alternate === "string" ? alternate.trim() : "") || character.name;
 }
 
 /** `GenerationCancelledByExtensionError` (`services/generate.service.ts:525-530`). */

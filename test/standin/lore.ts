@@ -87,13 +87,14 @@ export type BookSource = "character" | "persona" | "chat" | "global" | "peer";
  * the chat's messages the prompt is built from, hidden ones included with no mark of it, each with its text,
  * the number Lumiverse stored for it (`index_in_chat`, `:2304`: a delete leaves a gap) and the swipe it shows,
  * a greeting marked as one (`:2289-2305`), the chat's metadata as its row holds it, and the user's own
- * `activationSettings`, normalized (`:2279-2312`). The entries are added by the chain, one handler at a time.
+ * `activationSettings`, normalized (`:2279-2312`), and the character the prompt is assembled for (`characterId`, `:2287`: the speaker). The
+ * entries are added by the chain, one handler at a time.
  */
-export function worldInfoContext(chat: Chat, messages: readonly ChatMessage[], now: { userId: string; metadata: Record<string, unknown>; activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } }): Record<string, unknown> & { activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } } {
+export function worldInfoContext(chat: Chat, messages: readonly ChatMessage[], now: { userId: string; metadata: Record<string, unknown>; characterId?: string; activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } }): Record<string, unknown> & { activationSettings: { globalScanDepth: number | null; maxRecursionPasses: number } } {
   return {
     purpose: "prompt",
     chatId: chat.id,
-    characterId: chat.character.id,
+    characterId: now.characterId ?? chat.character.id,
     userId: now.userId,
     messages: messages.map((m) => ({ id: m.id, role: m.role, content: m.content, is_user: m.role === "user", is_greeting: m.greeting !== undefined, ...(m.greeting !== undefined ? { greeting_index: m.greeting } : {}), swipe_id: m.swipeId ?? 0, index_in_chat: indexInChat(m) })),
     chatTurn: messages.length,

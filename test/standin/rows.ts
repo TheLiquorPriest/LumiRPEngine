@@ -27,6 +27,12 @@ export interface ChatMessage {
    * a new message is, in the chat's order, when the stand-in first holds it.
    */
   index?: number;
+  /** The character who spoke it, in a group chat (`extra.character_id`, `services/generate.service.ts:1990`, `:4178`): what a regenerate, a swipe or a continue of it speaks as. */
+  characterId?: string;
+  /** The extensions' metadata on it (`extra.spindle_metadata`), which stays with the history message it becomes (`services/prompt-assembly.service.ts:3329`, `:3351`). */
+  metadata?: Record<string, unknown>;
+  /** A message the image generator made (`extra.image_gen`): its pictures reach the model only as the user's image settings recycle them (`attachmentsForContext`, `services/prompt-assembly.service.ts:1061-1074`), and one left with no text and no picture is not sent (`:3315-3317`). */
+  imageGen?: boolean;
 }
 
 export interface Chat {
@@ -115,7 +121,7 @@ export class ChatRows extends ExtensionHost {
     this.numbered(chat);
     if (this.db === null) return;
     const now = Math.floor(this.now() / 1000);
-    const marks = { ...extra, ...(m.hidden ? { hidden: true } : {}), ...(m.greeting !== undefined ? { greeting: true, greeting_character_id: chat.character.id, greeting_index: m.greeting } : {}) };
+    const marks = { ...extra, ...(m.characterId !== undefined ? { character_id: m.characterId } : {}), ...(m.hidden ? { hidden: true } : {}), ...(m.imageGen ? { image_gen: true } : {}), ...(m.metadata !== undefined ? { spindle_metadata: m.metadata } : {}), ...(m.greeting !== undefined ? { greeting: true, greeting_character_id: chat.character.id, greeting_index: m.greeting } : {}) };
     this.db.run(
       "INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, send_date, swipe_id, swipes, swipe_dates, extra, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
       m.id,
@@ -184,7 +190,8 @@ export class ChatRows extends ExtensionHost {
     this.library.addCharacter(chat.user, chat.character);
     if (this.db === null) return;
     this.db.run("INSERT INTO chats (id, character_id, name, metadata, user_id) VALUES (?, ?, ?, ?, ?)", chat.id, chat.character.id, chat.name ?? "", JSON.stringify(chat.metadata ?? {}), chat.user);
-    for (const m of chat.messages) this.createRow(chat, m, m.role === "user" ? "User" : chat.character.name);
+    // A group's reply is named for the character who spoke it, where the library holds that character (a member is added before the chat).
+    for (const m of chat.messages) this.createRow(chat, m, m.role === "user" ? "User" : ((m.characterId === undefined ? undefined : this.library.charactersByIds(chat.user, [m.characterId]).get(m.characterId)?.name) ?? chat.character.name));
   }
 
   /** The user sends a message (`POST /api/v1/chats/:id/messages`, `createMessage`): saved, then told (`MESSAGE_SENT`, `chats.service.ts:2675-2678`). Gives its id. */

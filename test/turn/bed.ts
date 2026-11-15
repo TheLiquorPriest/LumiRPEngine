@@ -197,7 +197,7 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     let rpe = await startRpe();
 
     // Lumiverse's side: a preset, and the chat as the character's greeting leaves it.
-    host.presets.set(PRESET, { id: PRESET, name: "Lamp", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a lighthouse on Gannet Rock, one scene at a time." }] });
+    host.presets.set(PRESET, { id: PRESET, name: "Lamp", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a lighthouse on Gannet Rock, one scene at a time." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
     host.addChat({ id: CHAT, user: USER, name: "The lighthouse", character: CHARACTER, messages: options.messages ?? [{ id: "m-greeting", role: "assistant", content: GREETING }] });
 
     const page = async <T>(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; body: T }> => {

@@ -335,20 +335,21 @@ export class ExtensionHost {
   protected async interceptorPipeline(messages: LlmMessage[], context: Record<string, unknown>): Promise<{ messages: LlmMessage[]; parameters: Record<string, unknown> | undefined }> {
     let result = messages;
     // `collectSourceMessageMetadata` (`spindle/source-message-metadata.ts:59-75`).
-    const sources = new Map<string, number>();
-    for (const m of messages) if (m.__chatHistorySource === true && typeof m.__sourceMessageId === "string" && typeof m.__sourceIndexInChat === "number") sources.set(m.__sourceMessageId, m.__sourceIndexInChat);
+    const sources = new Map<string, { index: number; metadata: unknown }>();
+    for (const m of messages) if (m.__chatHistorySource === true && typeof m.__sourceMessageId === "string" && typeof m.__sourceIndexInChat === "number") sources.set(m.__sourceMessageId, { index: m.__sourceIndexInChat, metadata: m.__sourceMessageMetadata ?? {} });
     let merged: Record<string, unknown> | undefined;
     for (const registration of this.interceptors) {
       // `restoreSourceMessageMetadata` (`spindle/source-message-metadata.ts:77-106`), before each.
       for (const m of result) {
         const isHistory = m.__chatHistorySource === true || m.__isChatHistory === true;
         const id = typeof m.sourceMessageId === "string" ? m.sourceMessageId : typeof m.__sourceMessageId === "string" ? m.__sourceMessageId : undefined;
-        for (const key of ["__chatHistorySource", "__sourceMessageId", "__sourceIndexInChat", "__isChatHistory", "sourceMessageId", "sourceIndexInChat"]) delete m[key];
-        const index = isHistory && id !== undefined ? sources.get(id) : undefined;
-        if (index === undefined) continue;
+        for (const key of ["__chatHistorySource", "__sourceMessageId", "__sourceIndexInChat", "__sourceMessageMetadata", "__isChatHistory", "sourceMessageId", "sourceIndexInChat"]) delete m[key];
+        const identity = isHistory && id !== undefined ? sources.get(id) : undefined;
+        if (identity === undefined) continue;
         m.__chatHistorySource = true;
         m.__sourceMessageId = id;
-        m.__sourceIndexInChat = index;
+        m.__sourceIndexInChat = identity.index;
+        m.__sourceMessageMetadata = identity.metadata;
       }
       const dto = result.map((m) => {
         const isHistory = m.__chatHistorySource === true;

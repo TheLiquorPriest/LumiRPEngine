@@ -30,7 +30,7 @@ function quay(messages: ChatMessage[], preset: Partial<Preset> = {}): StandIn {
   const lv = new StandIn();
   lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she says."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
-  lv.presets.set("preset-quay", { id: "preset-quay", name: "Quay", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a quay at dusk." }], ...preset });
+  lv.presets.set("preset-quay", { id: "preset-quay", name: "Quay", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a quay at dusk." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }], ...preset });
   lv.addChat({ id: CHAT, user: USER, character: { id: "char-oona", name: "Oona" }, messages });
   return lv;
 }
