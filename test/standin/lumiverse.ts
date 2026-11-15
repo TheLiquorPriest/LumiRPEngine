@@ -138,7 +138,7 @@ export class StandIn extends ChatRows {
    * `dryRunGeneration` (`:3080-3274`) order it. The prompt itself is assembled the stand-in's own way
    * (`assembly.ts`).
    */
-  async generate(input: GenerateInput): Promise<Outcome> {
+  async generate(input: GenerateInput, started?: (generationId: string | null) => void): Promise<Outcome> {
     const chat = this.chats.get(input.chat);
     const connection = this.connections.get(input.connection);
     const preset = this.presets.get(input.preset);
@@ -213,6 +213,7 @@ export class StandIn extends ChatRows {
       // staged message set `targetMessageId` (`:1928-1938`, `:1988-2006`). What none set, an impersonation's both, is left unset.
       this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe: false, characterId: speakerId, characterName: speakerName, generationType: type, frontendSessionId: undefined }, chat.user);
     }
+    started?.(generationId);
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const messages = chat.messages.filter((m) => m.id !== excluded);
@@ -402,6 +403,17 @@ export class StandIn extends ChatRows {
   }
 
   /**
+   * `POST /api/v1/generate` (`routes/generate.routes.ts`): the answer comes as soon as the generation has begun (its id, once `GENERATION_STARTED` has been told; none for a dry run),
+   * and `done` is the generation's end, which is what `generate` gives. A generation that fails before it has begun fails here.
+   */
+  async start(input: GenerateInput): Promise<{ generationId: string | null; done: Promise<Outcome> }> {
+    const begun = Promise.withResolvers<string | null>();
+    const done = this.generate(input, begun.resolve);
+    done.then(undefined, begun.reject);
+    return { generationId: await begun.promise, done };
+  }
+
+  /**
    * What shapes the history before the prompt is sent, and the databank mentions in it (`services/prompt-assembly.service.ts:2796-2826`, `:2905-2985`): the context
    * anchor (`context_history_anchor_message_id`, `:1904-1917`, a hidden message is none), the Summary tab's message limit (`summarization`), Memory's replacements where
    * its config and the chat allow them, the user's image settings, and each valid `#mention` in the player's lines taken out of them and the mentioned documents'
@@ -474,15 +486,16 @@ export class StandIn extends ChatRows {
 
   /**
    * `mergeChatMetadataAsync` (`services/chats.service.ts:5241-5244`; `db/chat-operations.ts:22-33`, `:57-80`): each key given replaces
-   * the chat's own, the row's stamp is raised, and the change is told as `CHAT_CHANGED` with the keys that differ
+   * the chat's own, a key given as undefined is removed (`:68`), the row's stamp is raised, and the change is told as `CHAT_CHANGED` with the keys that differ
    * (`services/chats.service.ts:1466-1500`, `:5198-5204`).
    */
-  private mergeChatMetadata(chat: Chat, partial: Record<string, unknown>): void {
+  mergeChatMetadata(chat: Chat, partial: Record<string, unknown>): void {
     const before = this.metadataOf(chat);
     const metadata = { ...before, ...partial };
-    chat.metadata = metadata;
-    const changedFields = Object.keys(partial).filter((key) => !(key in before) || JSON.stringify(before[key]) !== JSON.stringify(partial[key])).map((key) => `metadata.${key}`);
+    for (const [key, value] of Object.entries(partial)) if (value === undefined) delete metadata[key];
+    const changedFields = Object.keys(partial).filter((key) => (partial[key] === undefined ? key in before : !(key in before) || JSON.stringify(before[key]) !== JSON.stringify(partial[key]))).map((key) => `metadata.${key}`);
     this.db?.run("UPDATE chats SET metadata = ?, updated_at = ? WHERE id = ? AND user_id = ?", JSON.stringify(metadata), Math.floor(this.now() / 1000), chat.id, chat.user);
+    chat.metadata = metadata;
     const row = this.db?.rows("SELECT * FROM chats WHERE id = ? AND user_id = ?", chat.id, chat.user)[0];
     const shown = row === undefined ? { id: chat.id, user_id: chat.user, character_id: chat.character.id, name: chat.name ?? "", metadata } : { ...row, metadata };
     this.emit("CHAT_CHANGED", { chat: shown, changedFields }, chat.user);

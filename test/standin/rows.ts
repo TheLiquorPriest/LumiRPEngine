@@ -194,26 +194,28 @@ export class ChatRows extends ExtensionHost {
     for (const m of chat.messages) this.createRow(chat, m, m.role === "user" ? "User" : ((m.characterId === undefined ? undefined : this.library.charactersByIds(chat.user, [m.characterId]).get(m.characterId)?.name) ?? chat.character.name));
   }
 
-  /** The user sends a message (`POST /api/v1/chats/:id/messages`, `createMessage`): saved, then told (`MESSAGE_SENT`, `chats.service.ts:2675-2678`). Gives its id. */
-  send(chatId: string, text: string): string {
+  /**
+   * `createMessage` (`services/chats.service.ts:2638-2683`) as `POST /api/v1/chats/:id/messages` calls it: the message is saved under the name given (the user's, or the chat's character's, where none), then told
+   * (`MESSAGE_SENT`, `:2675-2678`). `extra` is what the caller's own body carries beside the text. Gives its id.
+   */
+  createMessage(chatId: string, input: { role: "user" | "assistant"; content: string; name?: string; characterId?: string; hidden?: boolean; metadata?: Record<string, unknown>; extra?: Record<string, unknown> }): string {
     const chat = this.chats.get(chatId);
     if (!chat) throw new Error("the stand-in has no such chat");
-    const m: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
+    const m: ChatMessage = { id: crypto.randomUUID(), role: input.role, content: input.content, ...(input.characterId === undefined ? {} : { characterId: input.characterId }), ...(input.hidden ? { hidden: true } : {}), ...(input.metadata === undefined ? {} : { metadata: input.metadata }) };
     chat.messages.push(m);
-    this.createRow(chat, m, "User");
+    this.createRow(chat, m, input.name ?? (input.role === "user" ? "User" : chat.character.name), input.extra);
     this.emit("MESSAGE_SENT", { chatId, message: this.messageRow(m.id) ?? m }, chat.user);
     return m.id;
   }
 
+  /** The user sends a message (`createMessage` with `is_user`): saved, then told. Gives its id. */
+  send(chatId: string, text: string): string {
+    return this.createMessage(chatId, { role: "user", content: text });
+  }
+
   /** A reply saved in the chat with no generation (`createMessage` with `is_user` false), as the user's own hand or another app writes one: saved, then told. Gives its id. */
   reply(chatId: string, text: string): string {
-    const chat = this.chats.get(chatId);
-    if (!chat) throw new Error("the stand-in has no such chat");
-    const m: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: text };
-    chat.messages.push(m);
-    this.createRow(chat, m, chat.character.name);
-    this.emit("MESSAGE_SENT", { chatId, message: this.messageRow(m.id) ?? m }, chat.user);
-    return m.id;
+    return this.createMessage(chatId, { role: "assistant", content: text });
   }
 
   /** `deleteMessage` (`services/chats.service.ts:3230-3270`): the row and its breakdown gone, then told (`MESSAGE_DELETED`); no other message is numbered again. */
