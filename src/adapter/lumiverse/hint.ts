@@ -5,7 +5,8 @@
 // :20-43`; its answer carries the breakdown, `generate.service.ts:424-486`). A dry run builds the whole
 // prompt again, so it is given a deadline, and a reply goes on without names when it passes.
 
-import { readBlocksHint, type BlocksHint } from "./layout";
+import { isRecord } from "../../shared/json";
+import { presetMarkers, readBlocksHint, type BlocksHint } from "./layout";
 import type { LumiverseReads } from "./reads";
 import type { LumiverseSession } from "./session";
 import type { Tag } from "./wire";
@@ -21,11 +22,19 @@ export interface HintDeps {
   dryRunMs?: () => number;
 }
 
-/** The hint for a tagged reply's prompt; null when Lumiverse has stored none and the dry run gave none in time. */
+/**
+ * The hint for a tagged reply's prompt; null when Lumiverse has stored none and the dry run gave none in time. A stored breakdown's
+ * entries may not carry their blocks' markers, so its preset's blocks are read for them (a dry run's carry their own).
+ */
 export function blocksHint(deps: HintDeps): (tag: Tag, signal: AbortSignal) => Promise<BlocksHint | null> {
   return async (tag, signal) => {
-    const stored = readBlocksHint(await deps.reads.breakdown(tag.chat), "breakdown");
-    if (stored !== null) return stored;
+    const breakdown = await deps.reads.breakdown(tag.chat);
+    if (breakdown !== null) {
+      const preset = isRecord(breakdown) && typeof breakdown.presetId === "string" ? breakdown.presetId : tag.preset;
+      const markers = preset === null ? new Map<string, string | null>() : presetMarkers((await deps.reads.preset(preset))?.promptOrder);
+      const stored = readBlocksHint(breakdown, "breakdown", markers);
+      if (stored !== null) return stored;
+    }
     const stop = AbortSignal.any([signal, AbortSignal.timeout(deps.dryRunMs?.() ?? DRY_RUN_MS)]);
     try {
       const body = { chat_id: tag.chat, connection_id: tag.connection, ...(tag.preset !== null ? { preset_id: tag.preset } : {}), ...(tag.persona !== null ? { persona_id: tag.persona } : {}) };
