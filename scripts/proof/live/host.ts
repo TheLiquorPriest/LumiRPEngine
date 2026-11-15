@@ -18,11 +18,13 @@ import { pinSettingsFromEnv } from "../route/pin";
 import { CHAT_NAME, fileRecord, RECORD_FILE } from "../../testbed/floor-fixture";
 import { LIMITS, type PageTimes } from "../../testbed/floor-measure";
 import { Lumiverse, savedToken } from "../../testbed/lib/lumiverse";
+import { RunLog } from "../../testbed/lib/record";
 import { readLiveEnv, type LiveEnv } from "./env";
 import { agentFacts, commitsOf, guidanceOf, lumiverseVersion, runningBuild } from "./facts";
 import { Instance, InstanceLumiverse } from "./instance";
 import { LIVE_NAME_OF, LUMIVERSE_CHAT, openLivePage, type Shared } from "./pages";
 import { ChatSteps } from "./steps";
+import { commandShell, shellWords, Terminal, WithTerminal, type Ran } from "./terminal";
 
 /** The acts a form on the bed plays with: the floor's, and the page's own. */
 export interface LiveActs extends FloorActs {
@@ -30,6 +32,10 @@ export interface LiveActs extends FloorActs {
   openChat(chat: string): Promise<void>;
   /** The chat the pages are on now, or null. */
   readonly chatNow: string | null;
+  /** A terminal on the bed's server (`LRE_BED_SHELL`): a command typed as the owner would, kept as the screen he would see (a form reads it as the page "terminal"). */
+  terminal: { run(command: string): Promise<Ran> };
+  /** A fresh chat on the instance's own card, recorded as the instance's, which the pages are then on. Every play of a scenario begins on one. */
+  freshChat(name: string): Promise<string>;
 }
 
 /** How long a wait on what a page shows lasts, as the suite's runner sets it for a test, else the proof's own. */
@@ -100,6 +106,8 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
       };
       const browser = await BrowserDriver.create({ chrome, pages, limitMs: LIMIT_MS });
       const steps = new ChatSteps(browser);
+      const terminal = new Terminal({ run: (command) => commandShell(shellWords()).run(command) }, env.bed.neverTouch);
+      const look = new WithTerminal(browser, terminal);
       const settled = new Set<string>();
 
       const names = async (path: string, id: string): Promise<string> => {
@@ -114,6 +122,14 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
         connections: { plain: plain.id, rpe: rpeConnection.id },
         get chatNow() {
           return chatNow;
+        },
+        terminal,
+        async freshChat(name: string): Promise<string> {
+          const card = new RunLog(env.bed.instanceDir).get<string>("cardId");
+          if (typeof card !== "string" || card === "") throw new Error("the instance's record names no card of its own (cardId in state.json), so a fresh chat cannot be made on it");
+          const made = await lumiverse.createChat(card, name);
+          chatNow = made.id;
+          return made.id;
         },
         async openChat(chat: string): Promise<void> {
           // Before any step: the address, the user and the chat are the instance's, or the run stops.
@@ -148,10 +164,16 @@ export async function openHost(options: HostOptions): Promise<Host<LiveActs>> {
       };
 
       const guidance = async (): Promise<GuidanceFacts | null> => (commit === null ? null : await guidanceOf(reader, chatNow ?? "", repo, commit));
-      void start;
+      // Every play of a scenario begins on a fresh chat of the instance's own, made for it and recorded as the instance's, so a repeat never plays on what an earlier play left.
+      if (start.form.kind === "scenario") {
+        await acts.freshChat(`Proof ${start.form.id} play ${start.play} of ${start.plays}`).catch(async (error: unknown) => {
+          await browser.close();
+          throw error;
+        });
+      }
       return {
         acts,
-        browser,
+        browser: look,
         guidance,
         async close(): Promise<void> {
           await browser.close();
