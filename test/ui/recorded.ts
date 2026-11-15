@@ -245,7 +245,7 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
   const spent = records.flatMap((r) => (r.event.kind === "call_ended" ? [r.event.usage] : []));
   const sum = spent.reduce<Usage>((a, b) => ({ calls: a.calls + b.calls, input: a.input + b.input, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite, output: a.output + b.output, reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }), { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 });
   const status = outcome?.status ?? "running";
-  const timings = { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended") };
+  const timings = { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended"), intent: null, thinking: [] };
   const trace = records.filter((r) => r.seq >= (options.from ?? 1));
   const run: TurnRun = {
     id: `${options.run}.1`,
@@ -290,9 +290,9 @@ export function summaryOf(detail: TurnDetail): TurnSummary {
 
 /** The chat's earlier turns: a swipe that stands, the attempt it replaced (off the path now), and one stopped by the player. */
 export const EARLIER: readonly TurnSummary[] = [
-  { id: "turn-30", kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700 }, usage: usage(3, 24_100, 19_456, 512, 88) },
-  { id: "turn-29", kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800 }, usage: usage(4, 30_870, 22_528, 640, 120) },
-  { id: "turn-28", kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000 }, usage: usage(2, 11_920, 8_192, 301, 64) },
+  { id: "turn-30", kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, intent: null, thinking: [] }, usage: usage(3, 24_100, 19_456, 512, 88) },
+  { id: "turn-29", kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, intent: null, thinking: [] }, usage: usage(4, 30_870, 22_528, 640, 120) },
+  { id: "turn-28", kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, intent: null, thinking: [] }, usage: usage(2, 11_920, 8_192, 301, 64) },
 ];
 
 const EARLIER_WORDS: Readonly<Record<string, { intent: string; reply: string }>> = {

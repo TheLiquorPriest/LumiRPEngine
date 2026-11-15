@@ -6,7 +6,7 @@
 // connections', the live socket's messages and constants, and the types RPH's trace is made of.
 
 import type { FileKind, JsonObject, ReplyError, RunStatus, StackPart } from "rp-harness/contract";
-import type { AgentRef, ApiRoutes, JobView, LayerLevel, TraceRecord, TurnKind, Usage } from "../shared/api";
+import type { AgentRef, ApiRoutes, JobView, LayerLevel, Span, TraceRecord, TurnKind, Usage } from "../shared/api";
 import type { ChipRequest, DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 
@@ -71,6 +71,10 @@ export interface TurnTimings {
   released: number | null;
   /** The lead's run ended; it can go on after the release (plan §10.9). */
   ended: number | null;
+  /** The intent record's own time, its first token to its last; null when none began; to null when it began and did not end. */
+  intent: Span | null;
+  /** Each span of thinking before a model call's first output on the reply's path, in call order; none when no call thought. */
+  thinking: Span[];
 }
 
 /** A turn as a chat's list shows it. */
