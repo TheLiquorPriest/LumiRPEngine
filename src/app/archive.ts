@@ -31,7 +31,8 @@ export interface FoundFile {
 /**
  * Every file under `root`, at any depth, sorted by path; none when there is no such folder. A
  * folder's entries that cannot be listed throw: a walk that cannot see a folder must not report it
- * as empty.
+ * as empty. A socket (the command line's, while RPE runs) or any other special file holds nothing to
+ * read or keep, and is passed over.
  */
 export async function walk(root: string): Promise<FoundFile[]> {
   const out: FoundFile[] = [];
@@ -48,7 +49,7 @@ export async function walk(root: string): Promise<FoundFile[]> {
       const path = prefix === "" ? name : `${prefix}/${name}`;
       const info = await lstat(full);
       if (info.isDirectory()) await visit(full, path);
-      else out.push({ path, bytes: info.size, mode: info.mode, mtimeMs: info.mtimeMs, link: info.isSymbolicLink() });
+      else if (info.isFile() || info.isSymbolicLink()) out.push({ path, bytes: info.size, mode: info.mode, mtimeMs: info.mtimeMs, link: info.isSymbolicLink() });
     }
   };
   await visit(root, "");
