@@ -17,6 +17,8 @@ import type { ExtSpindle, ModalItem } from "./spindle";
 export interface ExtensionOptions {
   /** The extension's build, said to RPE at its registration: the one the build stamps when absent. */
   build?: string;
+  /** The hash the build stated for the app file in the extension's folder: the one the build stamps when absent; null where there is none. */
+  statedHash?: string | null;
 }
 
 /** Last in Lumiverse's order, lowest first (`interceptor-pipeline.ts:87-90`, `world-info-interceptor.ts:192-194`): the prompt as it will be sent, and the last word on lore. */
@@ -75,6 +77,8 @@ export async function startExtension(spindle: ExtSpindle, options: ExtensionOpti
     missing: lacking,
     // The build stamps its id here (scripts/build.ts), as in the application's; run from source, it is the development build.
     build: options.build ?? process.env.LRE_BUILD_ID ?? "dev",
+    // The build stamps the hash it stated for the app file beside the extension (scripts/build.ts); run from source there is none.
+    statedHash: options.statedHash !== undefined ? options.statedHash : (process.env.RPE_STATED_HASH ?? null),
     log,
     registered: () => notice(),
     refused: (user) => {

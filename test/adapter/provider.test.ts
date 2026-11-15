@@ -63,7 +63,7 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     clock,
   };
   const handle = providerEndpoint(deps);
-  return (request) => handle(request, () => request.json());
+  return (request) => handle(request, { json: () => request.json(), untimed: () => undefined });
 }
 
 const request = (body: Record<string, unknown>): Request => new Request("http://rpe/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer rpe_key" }, body: JSON.stringify(body) });

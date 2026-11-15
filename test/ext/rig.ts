@@ -244,7 +244,7 @@ export class Rig {
         }
         return await question(request, () => request.json());
       }
-      if (path === "/v1/chat/completions") return await provider(request, () => request.json());
+      if (path === "/v1/chat/completions") return await provider(request, { json: () => request.json(), untimed: () => undefined });
       if (path === CONFIRM_PATH) {
         // As RPE's own route: the key it made, for its own user, naming its relay socket and connection.
         if (request.headers.get("authorization") !== `Bearer ${EXTENSION_KEY}`) return Response.json({ error: "This needs the extension's registration with this RPE." }, { status: 401 });

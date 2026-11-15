@@ -14,7 +14,7 @@
 // missing) is logged once each time it changes, and kept for RPE's pages.
 
 import type { Clock, HistoryRange } from "rp-harness/contract";
-import { AuthRefused, bearerOf, rawRoute, route, type App, type Area } from "../../app";
+import { AuthRefused, bearerOf, LIVE_USER, rawRoute, route, type App, type Area } from "../../app";
 import type { SettingsReader } from "../../app/config-read";
 import { PAGE_SETTINGS } from "../../app/page-settings";
 import { isRecord } from "../../shared/json";
@@ -27,13 +27,13 @@ import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
-import { modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
+import { type EndpointCall, modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
 import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
 import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from "./settings";
-import { extensionStatusReply } from "./shapes";
+import { EXTENSION_KIND, extensionStatusReply } from "./shapes";
 import { QUESTION_PATH } from "./wire";
 
 /** What other lanes answer for the adapter. */
@@ -170,6 +170,10 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     missing: status.missing === null ? null : status.missing.map((m) => ({ ...m })),
     stopped: status.stopped === null ? null : { last: { ...status.stopped.last }, count: status.stopped.count },
   });
+  /** Tells the user's pages the extension's status, as the status route answers it, at each change. */
+  const publish = (): void => {
+    if (app !== null) EXTENSION_KIND.publish(app.live, LIVE_USER, extension());
+  };
 
   /** Where a browser may reach RPE directly: this machine's loopback, RPE's own address, then every name RPE is published at. */
   const addresses = (): string[] => {
@@ -211,6 +215,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
         const was = status.why;
         status.registered = why === null;
         status.why = why;
+        if (why !== was) publish();
         if (why !== null && why !== was) log(why);
         // After a refusal the log said, it says the end of it too.
         else if (why === null && was !== null && was !== NOT_HEARD) at.log.info("[lumiverse] RPE's extension in Lumiverse took its registration again.");
@@ -218,9 +223,10 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       permissions: (missing) => {
         const was = status.missing;
         status.missing = missing;
+        if (JSON.stringify(missing) !== JSON.stringify(was)) publish();
         if (missing.length > 0 && JSON.stringify(missing) !== JSON.stringify(was)) at.log.warn("RPE's extension in Lumiverse is missing permissions it needs.", { missing: missing.map((m) => m.permission) });
       },
-      // An update of the extension brings a new app file with it: RPE reads its own file again when the extension is another build.
+      // The extension's build, which the builds route shows; an app file run from its own source is read again when the extension is another build (an installed copy takes a build only on the extension's word, `ARRIVED_PATH`).
       extensionBuild: (build) => at.builds.registered(build),
       settings: () => settings().relay,
     });
@@ -235,7 +241,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */
   interface Handlers {
     user: string;
-    provider(request: Request, json: () => Promise<unknown>): Promise<Response>;
+    provider(request: Request, call: EndpointCall): Promise<Response>;
     question(request: Request, json: () => Promise<unknown>): Promise<Response>;
   }
   let handlers: Handlers | null = null;
@@ -258,6 +264,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
 
   const area: Area = {
     name: "lumiverse",
+    liveKinds: [EXTENSION_KIND],
     async mount(at) {
       app = at;
       const providerKey = (request: Request): boolean => at.auth.holds("provider", bearerOf(request));
@@ -298,7 +305,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           group: "provider",
           does: "The provider endpoint: Lumiverse's chat completions, answered as the Lumiverse provider API's own (OpenAI's chat completions, streamed or whole); a reply tagged for a turn of RPE is played through the turn lane, any other is passed on.",
           answers: "an OpenAI chat completion, streamed or whole, as OpenAI answers",
-          raw: (request, call) => (handlers === null ? notSetUp() : handlers.provider(request, call.json)),
+          raw: (request, call) => (handlers === null ? notSetUp() : handlers.provider(request, call)),
         }),
         rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames }) }),
         route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", group: "service", does: "How RPE's extension in Lumiverse last said it stands with RPE.", reply: extensionStatusReply, handle: extension }),
@@ -340,6 +347,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             const stopped = readCheckStopped(body);
             if (stopped === null) return json(400, { error: "That is not a stopped generation's record." });
             status.stopped = { last: stopped, count: (status.stopped?.count ?? 0) + 1 };
+            publish();
             log(`RPE's extension stopped generation ${stopped.generation ?? "(not announced)"} of chat ${stopped.chat} on connection ${stopped.connection}: it could not tell whose chat it was. The registration's read: ${stopped.registration}. The connection's record: ${stopped.mark}.`);
             return json(200, { kept: true });
           }),

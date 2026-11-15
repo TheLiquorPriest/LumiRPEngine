@@ -19,7 +19,7 @@
 // Only the user RPE registered for is served: anyone else's page is told RPE does not belong to them.
 
 import { isRecord } from "../shared/json";
-import { LIVE_PATH, readFromPage, readFromRpe, readStartFacts, START_PATH, STOPPED_PATH, type CheckStopped, type MissingPermission, type PipeRequest, type ToPage, type ToRpe } from "../adapter/lumiverse/pipe-wire";
+import { ARRIVED_PATH, LIVE_PATH, readFromPage, readFromRpe, readStartFacts, START_PATH, STOPPED_PATH, type CheckStopped, type MissingPermission, type PipeRequest, type ToPage, type ToRpe } from "../adapter/lumiverse/pipe-wire";
 import type { Registrations } from "./registration";
 import type { Road } from "./road";
 import type { ExtSpindle } from "./spindle";
@@ -34,8 +34,10 @@ export interface PipeDeps {
   registrations: Registrations;
   /** What the extension is missing now. */
   missing(): MissingPermission[];
-  /** The extension's own build, said to RPE when it takes RPE's registration: an update of the extension brings RPE's new app file. */
+  /** The extension's own build, said to RPE when it takes RPE's registration. */
   build: string;
+  /** The hash the build stated for the app file in the extension's folder (R-12), told to RPE once RPE is first registered in this worker's life; null run from source, with no app file. */
+  statedHash: string | null;
   log(message: string): void;
   /** RPE registered for this user. */
   registered(user: string): void;
@@ -165,6 +167,10 @@ export function startPipe(deps: PipeDeps): Pipe {
           deps.registered(user);
           const record = untold.get(user);
           if (record !== undefined) tell(user, record);
+          if (deps.statedHash !== null && !arrivedTold.has(user)) {
+            arrivedTold.add(user);
+            arrived(user, deps.statedHash);
+          }
           return;
         }
         // A live frame is RPE's when it carries the registration's key, and goes to the one page it names.
@@ -190,6 +196,22 @@ export function startPipe(deps: PipeDeps): Pipe {
       if (road !== null) await call(road, LIVE_PATH, { page, gone: true });
     })().catch((error: unknown) => deps.log(`RPE was not told a page closed: ${words(error)}`));
   });
+
+  /** The users RPE was told, in this worker's life, which app file the extension carries. */
+  const arrivedTold = new Set<string>();
+  /** The update's word on the extension's road (§4.3 l.288): the app file in its folder, by the hash the build stated for it; RPE's update does the rest. */
+  const arrived = (user: string, hash: string): void => {
+    void (async () => {
+      const road = await deps.registrations.road(user);
+      if (road === null) return;
+      const answer = await call(road, ARRIVED_PATH, { hash });
+      const said = isRecord(answer.body) && typeof answer.body.words === "string" ? answer.body.words : `RPE answered ${answer.status}.`;
+      deps.log(`RPE was told the app file this extension carries${isRecord(answer.body) && answer.body.taken === true ? ", and took it" : ""}: ${said}`);
+    })().catch((error: unknown) => {
+      arrivedTold.delete(user);
+      deps.log(`RPE was not told the app file this extension carries: ${words(error)}`);
+    });
+  };
 
   /** By user: the latest stopped generation's record RPE has not been told (its road was not known, or the call failed); the ones before it are in the extension's log. */
   const untold = new Map<string, CheckStopped>();

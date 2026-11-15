@@ -29,6 +29,8 @@ export const CONFIRM_PATH = "/api/v1/ext/confirm";
 export const EXTENSION_STATUS_PATH = "/api/v1/status/extension";
 /** Where the extension tells RPE of a generation it stopped because it could not tell whose chat it was (`CheckStopped`). */
 export const STOPPED_PATH = "/api/v1/ext/stopped";
+/** Where the extension tells RPE, at its start, that it carries an app file, with the hash the build stated for it (R-12): `{ hash }`, answered `{ taken, words }`. */
+export const ARRIVED_PATH = "/api/v1/ext/arrived";
 /** Where the extension keeps the registration of the user RPE belongs to, in that user's storage: a folder today's build never used. */
 export const REGISTRATION_FILE = "rpe/registration.json";
 

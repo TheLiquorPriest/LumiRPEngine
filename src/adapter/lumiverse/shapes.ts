@@ -2,7 +2,7 @@
 // door keeps it in (`ExtensionStatus`, `./pipe-wire.ts`), so that the pages' types and the API reference say
 // how RPE's extension in Lumiverse stands.
 
-import { type Exactly, type Holds, type Infer, shape } from "../../app";
+import { type Exactly, type Holds, type Infer, liveKind, shape } from "../../app";
 import type { ExtensionStatus } from "./pipe-wire";
 
 const T = shape.text();
@@ -32,6 +32,9 @@ export const extensionStatusReply = shape.named(
     stopped: shape.field(shape.nullable(shape.object({ last: checkStopped, count: shape.number() })), "The generations it stopped because it could not tell whose chat they were: the latest, and how many since RPE started; null when none."),
   }),
 );
+
+/** The door's own live kind: the extension's status changed, published to the user's own channel (`LIVE_USER`) at each change, as the status route answers it. */
+export const EXTENSION_KIND = liveKind("extension", { data: extensionStatusReply, does: "The extension's status changed: as GET /api/v1/status/extension answers it." });
 type StatusMirrored = Holds<Exactly<Infer<typeof extensionStatusReply>, ExtensionStatus>>;
 /** The check above holds, and is read by no one. */
 export type Mirrors = [StatusMirrored];

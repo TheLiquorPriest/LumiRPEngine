@@ -111,18 +111,25 @@ function passWords(deps: ProviderDeps, e: PassError): Promise<string> {
   return deps.passWords(`pass-${e.code}`, e.detail ? { detail: e.detail } : {});
 }
 
-/** `POST /v1/chat/completions` as a handler from a request to its response; `json` is the body as the server parsed it (on a worker when large). */
-export function providerEndpoint(deps: ProviderDeps): (request: Request, json: () => Promise<unknown>) => Promise<Response> {
-  return async (request, json) => {
+/** What the server gives the endpoint of a request: its body as parsed (on a worker when large), and the lift of its idle bound for an answer that sends nothing until it is done. */
+export interface EndpointCall {
+  json(): Promise<unknown>;
+  untimed(): void;
+}
+
+/** `POST /v1/chat/completions` as a handler from a request to its response. A reply asked for whole sends nothing until it ends, so it lifts the server's idle bound; a streamed one keeps the request open by its comment lines. */
+export function providerEndpoint(deps: ProviderDeps): (request: Request, call: EndpointCall) => Promise<Response> {
+  return async (request, call) => {
     if (request.method !== "POST") return error(405, "Chat completions are asked for with POST.");
     if (!(await deps.allowed(request))) return error(401, "This connection's key is not RPE's.");
     let body: unknown;
     try {
-      body = await json();
+      body = await call.json();
     } catch {
       return error(400, "The request is not JSON.");
     }
     if (!isRecord(body)) return error(400, "The request is not a chat completion.");
+    if (body.stream !== true) call.untimed();
     const now = deps.clock.now();
     const read = readTag(body);
     if ("absent" in read) {
