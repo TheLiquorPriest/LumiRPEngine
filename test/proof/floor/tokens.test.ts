@@ -11,7 +11,7 @@ describe("the Author's tools", () => {
     const row = measuredRows(recordedRun({ form: "two-step", toolTokens: 6400 })).tools;
     expect(row.verdict).toBe("pass");
     expect(row.measured).toContain("the largest 6,400 tokens");
-    expect(row.measured).toContain("over 20 call(s)");
+    expect(row.stands).toBe("20 call(s) of the Author over 10 RPE turn(s) read");
   });
 
   test("a call at 8,000 fails: the row asks under", () => {
@@ -32,7 +32,7 @@ describe("the Author's tools", () => {
   test("calls without RPH's count leave the row not judged", () => {
     const row = measuredRows(recordedRun({ form: "tag", toolTokens: null })).tools;
     expect(row.verdict).toBe("not judged");
-    expect(row.notes.join(" ")).toContain("carry no toolTokens");
+    expect(row.why.join(" ")).toContain("carry no toolTokens");
   });
 });
 

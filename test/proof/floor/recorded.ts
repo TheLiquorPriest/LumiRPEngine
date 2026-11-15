@@ -1,9 +1,9 @@
 // Recorded floor runs for the floor's tests: invented data in the shapes a run records (R-19), never a
 // recording of a real instance. Each pair is a plain turn and an RPE turn with the page's moments (the
-// page's clock), Lumiverse's socket support, and RPE's side as its routes give it: the turn route's
-// timings with `intent` and `thinking` (PlanTurn-3 item 4, as the lead ruled their shape), the trace
-// (RPH's events at the pin, with C7's `began` on tool calls), and the live socket's pieces (RPE's clock,
-// set far from the page's on purpose: the floor never mixes the two clocks).
+// page's clock), Lumiverse's socket support and its count of the shown reply, and RPE's side as its
+// routes give it: the turn route's timings with `intent` and `thinking` (PlanTurn-3 item 4, as the lead
+// ruled their shape), the trace (RPH's events at the pin, with C7's `began` on tool calls), and the live
+// socket's pieces (RPE's clock, set far from the page's on purpose: the floor never mixes the two clocks).
 //
 // The defaults are a sound run: the tag form takes the record from the first piece of the lead's text
 // (600 ms) and releases at 1.7 s; the two-step form writes the record as a `file_write` begun at 1.0 s and
@@ -15,11 +15,16 @@ import type { RecordTimes } from "../../../scripts/proof/lib/turn";
 
 export const LEAD = { id: "lead", definition: "author" } as const;
 const SCOPE = { user: "u-floor", chat: "chat-floor", session: "s-floor" };
-const MODEL = "deepseek-v4-flash";
+export const MODEL = "deepseek-v4-flash";
 
 export interface Shape {
   form: Form;
+  /** Every RPE turn streamed (its first word left RPE before its release, in the two-step form), and run.json says the Author's connection streams. */
   streamed?: boolean;
+  /** What run.json says of the Author's streaming, where it differs from `streamed`. */
+  streams?: boolean;
+  /** The pairs whose two-step turn streamed, where they differ from `streamed`. */
+  streamedPairs?: (pair: number) => boolean;
   pairs?: number;
   /** The Author's `agent_started.effort`; null for a record naming none. */
   effort?: Effort | null;
@@ -35,10 +40,14 @@ export interface Shape {
   slower?: (pair: number) => number;
   /** The trace's record time differs from the route's by this much (ms), by pair. */
   traceSkew?: (pair: number) => number;
-  /** Lumiverse's token count of each reply, by arm. */
+  /** Lumiverse's count of each shown reply, by arm (its tokenizer for the model): what time per token divides by. */
+  visible?: { plain: number; rpe: number };
+  /** The provider's completion count Lumiverse's metrics event gives, by arm: support only. */
   tokens?: { plain: number; rpe: number };
   /** Plain's last word on the page after its send (ms). */
   plainLast?: number;
+  /** The RPE connection the Author ran on, as its trace names it. Default "rpe-floor". */
+  connection?: string;
 }
 
 const PAGE0 = 5_000_000;
@@ -52,7 +61,9 @@ function plainTurn(pair: number, shape: Shape): FloorTurn {
     arm: "plain",
     line: `an invented line ${pair}a`,
     page: { sent, firstThinking: sent + 300, firstWord: sent + 1100, lastWord: sent + last, ended: sent + last + 50, resolution: 20 },
-    socket: { started: null, firstReasoning: null, firstToken: null, lastToken: null, ended: null, tokens: shape.tokens?.plain ?? 120, messageId: `m-${pair}a`, error: null },
+    socket: { started: null, firstReasoning: null, firstToken: null, lastToken: null, ended: null, tokens: shape.tokens?.plain ?? 120, messageId: `m-${pair}a`, error: null, lore: [] },
+    visible: shape.visible?.plain ?? 120,
+    visibleWhy: null,
     rpe: null,
     error: null,
   };
@@ -69,13 +80,14 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
   const usage = (output: number) => ({ calls: 1, input: 9000, cacheRead: 8000, cacheWrite: 0, output });
   const tokens = { toolTokens: shape.toolTokens === undefined ? 6400 : shape.toolTokens, openingTokens: shape.openingTokens === undefined ? 5800 : shape.openingTokens };
   const callStarted = (at: number, call: number) =>
-    push(at, { kind: "call_started", call, connection: "rpe-floor", model: MODEL, messages: 12, tools: 30, ...(call === 1 ? { request: "transcripts/author-lead.call-1.json" } : {}), ...(tokens.toolTokens === null ? {} : { toolTokens: tokens.toolTokens }), ...(tokens.openingTokens === null ? {} : { openingTokens: tokens.openingTokens }) });
+    push(at, { kind: "call_started", call, connection: shape.connection ?? "rpe-floor", model: MODEL, messages: 12, tools: 30, ...(call === 1 ? { request: "transcripts/author-lead.call-1.json" } : {}), ...(tokens.toolTokens === null ? {} : { toolTokens: tokens.toolTokens }), ...(tokens.openingTokens === null ? {} : { openingTokens: tokens.openingTokens }) });
   const span = shape.intent ? shape.intent(pair) : { from: 1000, to: 1600 };
   const skew = shape.traceSkew?.(pair) ?? 0;
   const extra = shape.extraCalls?.(pair) ?? 0;
   const slower = shape.slower?.(pair) ?? 0;
+  const streamed = shape.streamedPairs?.(pair) ?? shape.streamed ?? false;
   push(r + 50, { kind: "run_started", run: "turn", turn: "new", lead: "author" });
-  push(r + 55, { kind: "agent_started", definition: "author", connection: "rpe-floor", model: MODEL, ...(shape.effort === null ? {} : { effort: shape.effort ?? "low" }), session: "s-floor", given: [] });
+  push(r + 55, { kind: "agent_started", definition: "author", connection: shape.connection ?? "rpe-floor", model: MODEL, ...(shape.effort === null ? {} : { effort: shape.effort ?? "low" }), session: "s-floor", given: [] });
   callStarted(r + 60, 1);
   for (const at of [300, 600, 900]) deltas.push({ run: turn, agent: LEAD.id, call: 1, thinking: "…", at: r + at });
   const recordTo = span === null || span === "not served" ? 1600 : (span.to ?? 1600);
@@ -103,7 +115,7 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
     for (const at of [1800, 2000, 2200]) deltas.push({ run: turn, agent: LEAD.id, call, thinking: "…", at: r + at });
     for (let at = 2300; at <= 3500 + slower; at += 100) deltas.push({ run: turn, agent: LEAD.id, call, text: " word", at: r + at });
     released = r + 3500 + slower;
-    firstWord = shape.streamed ? r + 2300 : released;
+    firstWord = streamed ? r + 2300 : released;
     push(released, { kind: "released", release: { by: { ...LEAD }, form: "message", length: 400 } });
     push(released, { kind: "call_ended", call, model: MODEL, text: "…", toolCalls: [], stop: "stop", usage: usage(130), ms: 1800 + slower });
   }
@@ -118,8 +130,24 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
     line: `an invented line ${pair}b`,
     // The tag form's reply streams to the page until its call ends; the two-step form's shows whole at the release.
     page: { sent, firstThinking: null, firstWord: toPage(firstWord), lastWord: toPage(two ? released : r + 4000 + slower), ended: toPage(two ? released : r + 4000 + slower) + 30, resolution: 20 },
-    socket: { started: null, firstReasoning: null, firstToken: null, lastToken: null, ended: null, tokens: shape.tokens?.rpe ?? 150, messageId: `m-${pair}b`, error: null },
-    rpe: { turn, status: "done", timings: { received: r, started: r + 50, firstWord, released, ended }, record, trace: records, deltas, deltasMissed: false, request: null, stored: null, rows: null, history: { keep: null, step: null, hold: null, framing: null }, lore: { activated: [], map: [], entries: [] }, problems: [] },
+    socket: { started: null, firstReasoning: null, firstToken: null, lastToken: null, ended: null, tokens: shape.tokens?.rpe ?? 150, messageId: `m-${pair}b`, error: null, lore: [] },
+    visible: shape.visible?.rpe ?? 150,
+    visibleWhy: null,
+    rpe: {
+      turn,
+      status: "done",
+      timings: { received: r, started: r + 50, firstWord, released, ended },
+      record,
+      trace: records,
+      deltas,
+      deltasMissed: false,
+      request: null,
+      stored: null,
+      rows: null,
+      history: { keep: null, step: null, hold: null, framing: null, framingNote: null, framingWhy: null },
+      lore: { map: [], entries: [] },
+      missing: {},
+    },
     error: null,
   };
 }
@@ -131,10 +159,15 @@ export function recordedRun(shape: Shape): FloorRun {
   for (let p = 1; p <= pairs; p++) turns.push(plainTurn(p, shape), rpeTurn(p, shape));
   return {
     form: shape.form,
-    streamed: shape.streamed ?? false,
+    formWhy: null,
+    streams: shape.streams ?? shape.streamed ?? false,
     plain: { connection: "conn-plain-floor", preset: "preset-floor", source: "connection", apiReasoning: true, effort: "low", customBody: null, model: MODEL, ...shape.plain },
+    arms: { plain: { connection: "conn-plain-floor", provider: "deepseek", model: MODEL }, rpe: { connection: shape.connection ?? "rpe-floor", provider: null, model: MODEL } },
+    option: null,
     previousRun: 20,
     book: null,
+    trials: [],
+    stopped: null,
     turns,
   };
 }

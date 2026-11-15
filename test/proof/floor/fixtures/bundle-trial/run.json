@@ -8,6 +8,16 @@
   "unplayed": [],
   "known": { "scenarios": [], "gates": ["floor"] },
   "repeats": 10,
+  "standing": {
+    "is": "trial",
+    "why": ["RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61"],
+    "from": {
+      "served": "b4c7d06aab966e6952a9b4b1f83c27b0593034791041b34610ce61c3abe2a738",
+      "build": "b4c7d06aab966e6952a9b4b1f83c27b0593034791041b34610ce61c3abe2a738",
+      "changed": [],
+      "layers": [{ "level": "global", "hash": "d3e59f87ef35cdce03e6ad1eca3744124fea813270bff3d1800b803c4f89a334", "guidance": [] }]
+    }
+  },
   "rpe": { "commit": "4f1c2a9e7b3d5a61", "dirty": true },
   "rph": { "commit": "9a8b7c6d5e4f3a21", "pin": "9a8b7c6d5e4f3a21", "pinned": true },
   "lumiverse": { "version": "a70f4ed2" },

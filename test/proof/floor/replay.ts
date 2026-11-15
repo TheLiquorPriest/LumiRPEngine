@@ -1,0 +1,182 @@
+// The floor's gate played by the proof runner itself over a recorded run (PlanGates-42 item 2,
+// PlanGates-4-fix1 items 2 and 4): the runner's own `main`, a gate whose parts and words are the floor's
+// own (`scripts/proof/floor/gate.ts`), and a form that is the floor's own play (`playWith`) over a
+// recorded run's turns instead of the bed's routes and sockets. A host made up here gives the acts (each
+// `send` counted and answered with the recorded page) and a browser that reads the chat page and the
+// Files page as text (the route's tests' own `FakeBrowser`). What the runner writes, its report, its
+// results and notes, and the floor's kept table, are read back from the bundle it made.
+
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { CHAT_PAGE, FILES_PAGE, playWith, type FloorActs, type FloorReader, type Ground } from "../../../scripts/proof/floor/play";
+import type { Play } from "../../../scripts/proof/route/form";
+import type { Host, RunFacts } from "../../../scripts/proof/route/host";
+import { guidanceOf, sha256, shippedOf, treeChanges, treeHash, type TreeFile } from "../../../scripts/proof/lib/record";
+import { runRecord, type RunRecord } from "../../../scripts/proof/route/evidence";
+import { main } from "../../../scripts/proof/run";
+import type { FloorRun, PageTimes } from "../../../scripts/testbed/floor-measure";
+import { FakeBrowser } from "../route/fake";
+import { MODEL } from "./recorded";
+
+const REPO = resolve(import.meta.dir, "../../..");
+
+/** The build's shipped folders a replayed run stands on (invented texts), and the tree RPE serves laid from them by RPE's one rule. */
+export const BUILD: { rph: TreeFile[]; rpe: TreeFile[] } = {
+  rph: [{ path: ".prompts/reply-contract.md", sha256: sha256("Write the reply between the tags.") }],
+  rpe: [{ path: "chat-defaults/TURN.md", sha256: sha256("Weigh intent first.") }],
+};
+export const SERVED = shippedOf(BUILD.rph, BUILD.rpe);
+
+/** What a test gives a replay: the recorded run, and what the floor's chat stood on before the first pair. */
+export interface Replay {
+  run: FloorRun;
+  ground?: Partial<Ground>;
+  /** The run's facts as the host gives them; by default a clean run on the build, the Author in the run's form. */
+  facts?: RunFacts;
+}
+
+/** Each line the play sent, in order: the connection and the line. */
+export interface Sent {
+  connection: string;
+  line: string;
+}
+
+let current: { acts: FloorActs; reader: FloorReader } | null = null;
+
+/** The form the replayed gate plays: the floor's own play over the current replay. */
+export async function replayed(play: Play): Promise<void> {
+  if (current === null) throw new Error("no replay is set");
+  await playWith(play, current.acts, current.reader, null, null);
+}
+
+/** The facts of a clean run on the build, the Author in the form the run says. */
+export function factsOf(run: FloorRun, edit?: (facts: RunFacts) => void): RunFacts {
+  const facts: RunFacts = {
+    rpe: { commit: "4f1c2a9e7b3d5a61", dirty: false },
+    rph: { commit: "9a8b7c6d5e4f3a21", pin: "9a8b7c6d5e4f3a21" },
+    lumiverse: { version: "0.0.0-invented" },
+    browser: { name: "fake", version: "1" },
+    agents: [{ agent: "author", connection: "rpe-floor", model: MODEL, replyForm: run.form === "two-step" ? "two-step" : "tags", effort: "low", streams: run.streams }],
+    settings: { chat: null, files: [], settings: [] },
+    guidance: { served: SERVED, build: BUILD, layers: [] },
+  };
+  edit?.(facts);
+  return facts;
+}
+
+/** run.json as the runner writes it for these facts: its standing worked out from the guidance they give, as the runner works it out. */
+export function recordOf(facts: RunFacts): RunRecord {
+  const given = facts.guidance;
+  const from = given ? { served: treeHash(given.served), build: treeHash(shippedOf(given.build.rph, given.build.rpe)), changed: treeChanges(given.served, shippedOf(given.build.rph, given.build.rpe)), layers: given.layers.map((l) => ({ level: l.level, hash: treeHash(l.files), guidance: guidanceOf(l) })) } : null;
+  return runRecord(facts, { run: "rig-invented", mode: "rig", by: "a test", started: "2026-11-20T10:15:00.000Z", ended: null, asked: ["floor"], unplayed: [], known: { scenarios: [], gates: ["floor"] }, repeats: 10 }, from);
+}
+
+/** What the chat holds of a turn: its reply's text, invented. */
+const replyText = (t: { pair: number; arm: "plain" | "rpe" }): string => `The invented reply of ${t.arm === "plain" ? "plain generation" : "RPE"} to line ${t.pair}${t.arm === "plain" ? "a" : "b"}, written whole.`;
+
+/** The acts and reader of a recorded run: `send` answers with the next turn's page, `turn` with the rest of it; `played` is the turns sent so far. */
+function replayOf(replay: Replay, sent: Sent[]): { acts: FloorActs; reader: FloorReader; played: () => FloorRun["turns"] } {
+  const turns = replay.run.turns;
+  let at = 0;
+  const acts: FloorActs = {
+    lumiverse: { base: "http://lumiverse.invalid", token: "invented" },
+    rpe: { base: "http://rpe.invalid", token: "invented" },
+    connections: { plain: replay.run.arms.plain.connection, rpe: "rpe-floor" },
+    chat: async () => "chat-floor",
+    send: async (_chat, connection, line): Promise<PageTimes> => {
+      sent.push({ connection, line });
+      const page = turns[at]?.page;
+      if (page === undefined || page === null) throw new Error(`the recorded run has no page for its turn ${at + 1}`);
+      return page;
+    },
+  };
+  const ground: Ground = {
+    observed: { plain: replay.run.plain, shipped: SERVED, layers: [], off: [] },
+    plain: replay.run.arms.plain,
+    history: { keep: null, step: null, hold: null, framing: null, framingNote: null, framingWhy: null },
+    previousRun: replay.run.previousRun,
+    ...replay.ground,
+  };
+  const reader: FloorReader = {
+    fixture: async () => ({ preset: { id: "preset-floor" }, persona: { id: "persona-floor" }, card: { id: "card-floor" }, book: replay.run.book ?? { id: "book-floor", name: "Floor test lore (invented)", entries: [], vectorBlockers: [] } }),
+    ground: async () => ground,
+    turn: async (_chat, _arm, send) => {
+      await send();
+      const turn = turns[at++];
+      if (turn === undefined) throw new Error("the recorded run has no more turns");
+      return { page: turn.page, socket: turn.socket, visible: turn.visible, visibleWhy: turn.visibleWhy, rpe: turn.rpe, error: turn.error };
+    },
+    messages: async () => turns.slice(0, at).flatMap((t) => (t.socket.messageId === null ? [] : [{ id: t.socket.messageId, content: replyText(t) }])),
+    close: () => undefined,
+  };
+  return { acts, reader, played: () => turns.slice(0, at) };
+}
+
+/** What the runner made of a replayed floor: its report, the gate's results and notes, the floor's kept table, and each line sent. */
+export interface Played {
+  report: string;
+  code: number;
+  result: { parts: { id: string; instances: { outcome: string; why: string }[] }[] };
+  notes: string;
+  table: string;
+  sent: Sent[];
+}
+
+/** Plays the floor gate through the runner's own `main` over a recorded run, in a scratch folder removed afterwards. */
+export async function playReplay(replay: Replay): Promise<Played> {
+  const scratch = mkdtempSync(join(tmpdir(), "floor-replay-"));
+  try {
+    const root = join(scratch, "proof");
+    mkdirSync(join(root, "scenarios"), { recursive: true });
+    mkdirSync(join(root, "floor"), { recursive: true });
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ repeats: 10 }));
+    writeFileSync(
+      join(root, "floor", "gate.ts"),
+      `import { gate } from ${JSON.stringify(join(REPO, "scripts/proof/route/form.ts"))};
+import floor from ${JSON.stringify(join(REPO, "scripts/proof/floor/gate.ts"))};
+import { replayed } from ${JSON.stringify(join(REPO, "test/proof/floor/replay.ts"))};
+export default gate({ ...floor, rig: replayed, live: replayed });
+`,
+    );
+    const sent: Sent[] = [];
+    const replay_ = replayOf(replay, sent);
+    current = replay_;
+    // The chat page shows the chat as far as it was played, read when the check reads it.
+    const pages = {
+      get [CHAT_PAGE]() {
+        return ["Lumiverse chat", ...replay_.played().map(replyText), "Type a message"].join("\n");
+      },
+      [FILES_PAGE]: "Files\nAgent\nAn agent's stack\nauthor: the reply contract, in the opening block",
+    };
+    const host: Host = {
+      mode: "rig",
+      facts: async () => replay.facts ?? factsOf(replay.run),
+      begin: async () => ({ acts: current?.acts, browser: new FakeBrowser({ pages }), close: async () => undefined }),
+      close: async () => undefined,
+    };
+    const out = join(scratch, "out");
+    const printed: string[] = [];
+    const code = await main(["rig", "floor", "--root", root, "--out", out, "--by", "a test"], { out: (text) => printed.push(text), openHost: async () => host });
+    const [name] = existsSync(out) ? readdirSync(out).filter((n) => existsSync(join(out, n, "run.json"))) : [];
+    if (name === undefined) throw new Error(`the runner made no bundle: ${printed.join("")}`);
+    const dir = join(out, name, "floor");
+    const kept = join(dir, "internal", "play-01", "table.txt");
+    return {
+      report: printed.join(""),
+      code,
+      result: JSON.parse(readFileSync(join(dir, "result.json"), "utf8")) as Played["result"],
+      notes: readFileSync(join(dir, "notes.md"), "utf8"),
+      table: existsSync(kept) ? readFileSync(kept, "utf8") : "",
+      sent,
+    };
+  } finally {
+    current = null;
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** The instances the runner recorded for a part, as outcome and why. */
+export function partOf(played: Played, id: string): { outcome: string; why: string }[] {
+  return (played.result.parts.find((p) => p.id === id)?.instances ?? []).map(({ outcome, why }) => ({ outcome, why }));
+}

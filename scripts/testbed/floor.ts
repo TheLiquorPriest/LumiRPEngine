@@ -1,33 +1,39 @@
 // The floor test's command line (STANDALONE-PLAN §17.1). The floor itself is a gate the proof runner
 // plays (`scripts/proof/floor/gate.ts`: `bun scripts/proof/run.ts live floor`, or in the rig); this file
-// sets its fixture up, takes it away, prints a played run's table from its bundle with the run's standing
-// first, and counts runs that give a verdict apart from trials.
+// sets its fixture up, takes it away, prints a played run's table from its bundle with the runner's
+// standing first (read from `run.json`, never worked out again: PlanGates-42), and counts runs that give
+// a verdict apart from trials. Where `run.json` gives no account of the guidance, the record lays the
+// build's shipped tree from RPE's repository at the run's commit and RPH's installed folder, which is no
+// git repository (R-196), and says whether the floor's chat was served it.
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { authorEffort, removeFixture, setupFixture } from "./floor-fixture";
-import { floorTable, intentCrossCheck, tableText, type FloorRun } from "./floor-measure";
+import { authorEffort, fileRecord, removeFixture, setupFixture } from "./floor-fixture";
+import { floorHead, floorTable, intentCrossCheck, tableText, type FloorRun } from "./floor-measure";
 import { readEnv } from "./lib/env";
 import { Lumiverse, savedToken } from "./lib/lumiverse";
 import { RpeReader } from "../proof/lib/read";
-import { buildFromRepos, countApart, readRecord, readRun, standingLines, writeRecord } from "../proof/lib/record";
+import { standingOfRun } from "../proof/route/evidence";
+import { additionLines, buildFrom, countApart, installedRph, readRun, standingLines, writeRecord } from "../proof/lib/record";
 
 const USAGE = `usage:
   floor.ts setup
-      make the floor's invented card, persona, preset and book (what is missing of them), and set plain
-      generation's reasoning to the effort the shipped Author definition names, as RPE serves it
+      make the floor's invented card, persona, preset and book (what is missing of them), list each by id in
+      the fixture's record, and set plain generation's reasoning to the effort the shipped Author definition
+      names, as RPE serves it
   floor.ts remove
-      delete the floor chats, the card, the persona, the preset and the book that setup made
-  floor.ts table <bundle> [--rph <RPH checkout>]
+      delete what the fixture's record lists: its chats, card, persona, preset and book
+  floor.ts table <bundle> [--rph <RPH's installed shipped folder>]
       write the floor's record beside the bundle's run.json (scripts/proof/lib/record.ts) and print the
-      §17.1 table, the run's standing first; a trial prints its figures and no verdict
+      §17.1 table, the runner's standing first; a trial prints its figures and no verdict
   floor.ts runs <folder>
       the floor runs under a folder of bundles, those that give a verdict counted apart from trials
 
 environment, besides what scripts/testbed/README.md lists for every script (setup and remove):
   FLOOR_PLAIN_CONNECTION  the Lumiverse connection that calls the model directly, by name
   FLOOR_RPE_URL           RPE's address, as its server listens (rpe status prints it)
-  FLOOR_RPE_TOKEN         a token RPE's pages are let in with (rpe key web)`;
+  FLOOR_RPE_TOKEN         a token RPE's pages are let in with (rpe key web)
+the fixture's record is kept in LRE_INSTANCE_DIR as floor-fixture.json`;
 
 const GATE = "floor";
 const RPE_ROOT = resolve(import.meta.dir, "..", "..");
@@ -37,6 +43,9 @@ function need(name: string): string {
   if (!value) throw new Error(`set ${name}`);
   return value;
 }
+
+/** The fixture's record of an instance: in the scripts' own folder for it. */
+const recordFile = (instanceDir: string): string => join(instanceDir, "floor-fixture.json");
 
 async function setup(): Promise<void> {
   const env = readEnv();
@@ -48,8 +57,10 @@ async function setup(): Promise<void> {
   if (effort === null) throw new Error("the shipped Author definition names no effort, so the floor has none to set plain generation to");
   const name = need("FLOOR_PLAIN_CONNECTION");
   const found = (await host.connections()).filter((c) => c.name === name);
-  if (found.length !== 1) throw new Error(`${found.length} connections are named "${name}"; the floor needs exactly one`);
-  await setupFixture(host, effort, (found[0] as { id: string }).id);
+  const [connection] = found;
+  if (found.length !== 1 || connection === undefined) throw new Error(`${found.length} connections are named "${name}"; the floor needs exactly one`);
+  const made = await setupFixture(host, effort, connection.id, fileRecord(recordFile(env.instanceDir)));
+  console.log(made.lines.join("\n"));
 }
 
 /** The run kept in the bundle by the floor's form. */
@@ -59,37 +70,40 @@ function keptRun(bundle: string): FloorRun {
   return JSON.parse(readFileSync(file, "utf8")) as FloorRun;
 }
 
-function table(bundle: string, rph: string | null): void {
-  const repos = { rpe: RPE_ROOT, rph: rph ?? realpathSync(join(RPE_ROOT, "node_modules", "rp-harness")) };
-  const addition = writeRecord(bundle, GATE, buildFromRepos(repos));
-  const run = keptRun(bundle);
-  process.stdout.write(tableText(floorTable(run), standingLines(readRun(bundle), addition), addition.standing === "trial", intentCrossCheck(run)));
+/** The floor's table of a bundle, its record written beside run.json: the runner's standing, what the record adds, the floor's own trial and stop, then the rows. */
+export function table(bundle: string, rph: string = installedRph(RPE_ROOT)): string {
+  const addition = writeRecord(bundle, GATE, buildFrom(RPE_ROOT, rph));
+  const run = readRun(bundle);
+  const floor = keptRun(bundle);
+  const trial = standingOfRun(run).is === "trial" || floor.trials.length > 0;
+  return tableText(floorTable(floor), [...standingLines(run), ...additionLines(addition), ...floorHead(floor)], trial, intentCrossCheck(floor));
 }
 
-function runs(folder: string): void {
+/** The floor runs under a folder, counted apart by the runner's standing. */
+export function runs(folder: string): string {
   const bundles = readdirSync(folder, { withFileTypes: true })
     .filter((e) => e.isDirectory() && existsSync(join(folder, e.name, "run.json")) && existsSync(join(folder, e.name, GATE)))
-    .map((e) => ({ run: e.name, addition: readRecord(join(folder, e.name), GATE) }));
+    .map((e) => readRun(join(folder, e.name)));
   const counted = countApart(bundles);
-  console.log(`Floor runs under ${folder}: ${counted.verdicts.length} give a verdict, ${counted.trials.length} are trials.`);
-  for (const run of counted.verdicts) console.log(`  verdict  ${run}`);
-  for (const t of counted.trials) console.log(`  trial    ${t.run}: ${t.why}`);
+  return [`Floor runs under ${folder}: ${counted.verdicts.length} give a verdict, ${counted.trials.length} are trials.`, ...counted.verdicts.map((run) => `  verdict  ${run}`), ...counted.trials.map((t) => `  trial    ${t.run}: ${t.why}`)].join("\n");
 }
 
-const [command, ...rest] = process.argv.slice(2);
-try {
-  if (command === undefined || command === "help" || command === "--help" || command === "-h") console.log(USAGE);
-  else if (command === "setup" && rest.length === 0) await setup();
-  else if (command === "remove" && rest.length === 0) {
-    const env = readEnv();
-    await removeFixture(new Lumiverse(env.hostUrl, savedToken(env)), env);
-  } else if (command === "table" && (rest.length === 1 || (rest.length === 3 && rest[1] === "--rph"))) table(rest[0] as string, rest[2] ?? null);
-  else if (command === "runs" && rest.length === 1) runs(rest[0] as string);
-  else {
-    console.error(`floor.ts: not a command: ${[command, ...rest].join(" ")}\n\n${USAGE}`);
-    process.exit(2);
+if (import.meta.main) {
+  const [command, ...rest] = process.argv.slice(2);
+  try {
+    if (command === undefined || command === "help" || command === "--help" || command === "-h") console.log(USAGE);
+    else if (command === "setup" && rest.length === 0) await setup();
+    else if (command === "remove" && rest.length === 0) {
+      const env = readEnv();
+      console.log((await removeFixture(new Lumiverse(env.hostUrl, savedToken(env)), env, fileRecord(recordFile(env.instanceDir)))).join("\n"));
+    } else if (command === "table" && (rest.length === 1 || (rest.length === 3 && rest[1] === "--rph"))) process.stdout.write(table(rest[0] as string, rest[2]));
+    else if (command === "runs" && rest.length === 1) console.log(runs(rest[0] as string));
+    else {
+      console.error(`floor.ts: not a command: ${[command, ...rest].join(" ")}\n\n${USAGE}`);
+      process.exit(2);
+    }
+  } catch (error) {
+    console.error(`floor.ts: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
   }
-} catch (error) {
-  console.error(`floor.ts: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
 }

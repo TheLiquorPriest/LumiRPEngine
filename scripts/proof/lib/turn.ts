@@ -15,7 +15,9 @@
 // - `call_ended.toolCalls[].began`, when the model began writing each tool call (pi's `toolcall_start`):
 //   PlanHarnessCore-1 item 9, contract change C7, as its lane writes it in RPH `src/contract/trace.ts`
 //   (`ToolCallView.began?: number`, the host's clock). Read where present; absent before it lands.
-// - The kept request file: RPH `src/harness/requests.ts` at the pin, `{"messages":[{"role","text"}]}`.
+// - The kept request file: RPH `src/harness/requests.ts` at the pin, `{"messages":[{"role","text"}]}`;
+//   a message's `block`, RPH's name for its own block (the session's carry, the briefing), is read where
+//   the file gives one (PlanGates-4-fix1 item 8). RPH at the pin names none.
 
 import type { ReleaseForm, TraceDelta, TraceRecord, Usage } from "rp-harness/contract";
 import { isRecord } from "../../../src/shared/json";
@@ -63,8 +65,8 @@ export interface Call {
   /** The kept request's file in the turn's folder, where the user's setting keeps it. */
   request: string | null;
   usage: Usage | null;
-  /** Each tool call the model made, with when it began to be written where the trace says (C7). */
-  toolCalls: { name: string; began: number | null }[];
+  /** Each tool call the model made: its name, the path its arguments name where they name one, and when it began to be written where the trace says (C7). */
+  toolCalls: { name: string; path: string | null; began: number | null }[];
 }
 
 export function callsOf(trace: readonly TraceRecord[]): Call[] {
@@ -87,7 +89,7 @@ export function callsOf(trace: readonly TraceRecord[]): Call[] {
         openingTokens: r.event.openingTokens ?? null,
         request: r.event.request ?? null,
         usage: ended?.usage ?? null,
-        toolCalls: (ended?.toolCalls ?? []).map((t) => ({ name: t.name, began: "began" in t && typeof t.began === "number" ? t.began : null })),
+        toolCalls: (ended?.toolCalls ?? []).map((t) => ({ name: t.name, path: isRecord(t.args) && typeof t.args.path === "string" ? t.args.path : null, began: "began" in t && typeof t.began === "number" ? t.began : null })),
       },
     ];
   });
@@ -128,9 +130,9 @@ export function callsBefore(calls: readonly Call[], moment: number): number {
   return calls.filter((c) => c.startedAt < moment).length;
 }
 
-/** The kept request of a call: its messages in order, and the tools it names where the file gives them. */
+/** The kept request of a call: its messages in order, each with the RPH block the file names it as, and the tools it names where the file gives them. */
 export interface KeptRequest {
-  messages: { role: string; text: string }[];
+  messages: { role: string; text: string; block: string | null }[];
   tools: string[] | null;
 }
 
@@ -139,30 +141,39 @@ export function keptRequest(text: string): KeptRequest {
   if (!isRecord(raw) || !Array.isArray(raw.messages)) throw new Error("the kept request file holds no list of messages");
   const messages = raw.messages.map((m, i) => {
     if (!isRecord(m) || typeof m.role !== "string" || typeof m.text !== "string") throw new Error(`message ${i + 1} of the kept request is not a role and a text`);
-    return { role: m.role, text: m.text };
+    return { role: m.role, text: m.text, block: typeof m.block === "string" && m.block !== "" ? m.block : null };
   });
   // PlanHarnessTools-5 item 3 names each declared tool in the kept request; an older file names none.
   const tools = Array.isArray(raw.tools) ? raw.tools.flatMap((t) => (typeof t === "string" ? [t] : isRecord(t) && typeof t.name === "string" ? [t.name] : [])) : null;
   return { messages, tools };
 }
 
+/** The intent record's file, as the two-step form's record call writes it in the turn's scratch folder (plan §10.7). */
+export const INTENT_FILE = "scratch/intent.md";
+
+/** Whether a tool call writes the intent record: `file_write` of `scratch/intent.md`, by that path or one ending in it. */
+export function writesIntent(tool: { name: string; path: string | null }): boolean {
+  return tool.name === "file_write" && tool.path !== null && (tool.path === INTENT_FILE || tool.path.endsWith(`/${INTENT_FILE}`));
+}
+
 /**
  * The trace's own measure of the intent record's time, the cross-check of `timings.intent` (PlanGates-4
- * item 3): in the tag form from the first piece of the lead's text in the call that wrote the record to
- * the `intent` event; in the two-step form from when the model began writing the record's tool call
- * (C7's `began`) to the `intent` event. Null where the trace cannot say.
+ * item 3, PlanGates-4-fix1 item 11): in the tag form from the first piece of the lead's text in the call
+ * that wrote the record to the `intent` event; in the two-step form from when the model began writing
+ * the `file_write` of `scratch/intent.md` (C7's `began`) to the `intent` event, never from another tool
+ * call of that model call. Null where the trace cannot say.
  */
 export function traceIntentMs(form: "tag" | "two-step", trace: readonly TraceRecord[], deltas: readonly TraceDelta[], run: string): number | null {
   const at = intentAt(trace);
   const lead = leadOf(trace);
   if (at === null || lead === null) return null;
   const calls = callsOf(trace).filter((c) => c.agent === lead.id && c.startedAt <= at);
-  const call = calls.at(-1);
-  if (call === undefined) return null;
   if (form === "tag") {
+    const call = calls.at(-1);
+    if (call === undefined) return null;
     const first = deltas.find((d) => d.run === run && d.agent === lead.id && d.call === call.call && (d.text ?? "") !== "");
     return first === undefined ? null : at - first.at;
   }
-  const began = call.toolCalls.map((t) => t.began).find((b): b is number => b !== null && b <= at);
-  return began === undefined ? null : at - began;
+  const write = calls.flatMap((c) => c.toolCalls).filter((t) => writesIntent(t) && t.began !== null && t.began <= at).at(-1);
+  return write?.began == null ? null : at - write.began;
 }

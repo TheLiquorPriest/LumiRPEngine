@@ -8,7 +8,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../../src/shared/json";
-import { authorEffort, CARD, cardBooks, detachBooks, embeddingBlockers, entriesToMake, entryBody, LINES, LORE, MARK, markedCard, readBook, thinkingMetadata, type EntryBody } from "../../../scripts/testbed/floor-fixture";
+import { authorEffort, CARD, cardBooks, designedLines, detachBooks, embeddingBlockers, entriesToMake, entryBody, LINES, LORE, MARK, markedCard, readBook, removeFixture, setupFixture, thinkingMetadata, type EntryBody, type FixtureHost, type FixtureRecord, type RecordStore } from "../../../scripts/testbed/floor-fixture";
+import type { TestbedEnv } from "../../../scripts/testbed/lib/env";
+import { HttpError } from "../../../scripts/testbed/lib/lumiverse";
 
 type Came = "constant" | "keyword" | "sticky";
 
@@ -116,6 +118,13 @@ describe("the floor's book on the floor's lines", () => {
     const lamp = entryBody(LORE.find((d) => d.kind === "vector") as (typeof LORE)[number]);
     expect(lamp.key).toEqual([]);
     expect(lamp.vectorized).toBe(true);
+  });
+
+  test("the lines each entry is made to activate on, as the lore row holds Lumiverse to them, are the lines Lumiverse's own rules activate it on", () => {
+    for (const d of LORE) {
+      const modelled = seen.flatMap((got, i) => (got.has(d.title) ? [i + 1] : []));
+      expect(designedLines(d)).toEqual(modelled);
+    }
   });
 });
 
@@ -228,5 +237,111 @@ describe("the Author's effort, read from its definition", () => {
     expect(authorEffort(definition("effort: turbo\n"))).toBeNull();
     expect(authorEffort("You are the Author.\neffort: high\n")).toBeNull();
     expect(authorEffort("---\neffort: high\nYou are the Author, and the header never closes.\n")).toBeNull();
+  });
+});
+
+/** A stand-in for Lumiverse's routes the fixture calls, holding rows in memory: a missing row is a 404, as Lumiverse answers. */
+class Stand {
+  rows: Record<"presets" | "personas" | "characters" | "world-books" | "chats" | "connections", { id: string; [key: string]: unknown }[]> = { presets: [], personas: [], characters: [], "world-books": [], chats: [], connections: [{ id: "conn-plain", name: "Plain", metadata: {} }] };
+  entries = new Map<string, { id: string; [key: string]: unknown }[]>();
+  private next = 0;
+  private id(kind: string): string {
+    return `${kind}-${++this.next}`;
+  }
+  private kind(segment: string | undefined): keyof Stand["rows"] {
+    if (segment === undefined || !(segment in this.rows)) throw new Error(`the stand-in has no route ${segment}`);
+    return segment as keyof Stand["rows"];
+  }
+  readonly host: FixtureHost = {
+    call: async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+      const [route, query] = path.split("?");
+      const [, , , segment, id] = (route ?? "").split("/");
+      if (segment === "embeddings") return { enabled: false, has_api_key: false, dimensions: null, vectorize_world_books: false } as T;
+      if (segment === "settings") throw new HttpError(404, "not found", `${method} ${path}`);
+      const kind = this.kind(segment);
+      const list = this.rows[kind];
+      if (id === undefined && method === "GET") {
+        const character = new URLSearchParams(query).get("characterId");
+        const data = character === null ? list : list.filter((r) => r.character_id === character);
+        return { data, total: data.length } as T;
+      }
+      if (id === undefined && method === "POST") {
+        const row = { id: this.id(kind), ...(body as object) };
+        list.push(row);
+        return row as T;
+      }
+      const row = list.find((r) => r.id === id);
+      if (row === undefined) throw new HttpError(404, "not found", `${method} ${path}`);
+      if (method === "PUT") Object.assign(row, body);
+      if (method === "DELETE") list.splice(list.indexOf(row), 1);
+      return row as T;
+    },
+    bookEntries: async (book) => this.entries.get(book) ?? [],
+    createEntry: async (book, entry) => {
+      const row = { id: this.id("entry"), ...entry, vector_index_status: "not_enabled" };
+      this.entries.set(book, [...(this.entries.get(book) ?? []), row]);
+      return row;
+    },
+    createChat: async (character, name) => {
+      const row = { id: this.id("chat"), name, character_id: character };
+      this.rows.chats.push(row);
+      return row;
+    },
+    deleteChat: async (chat) => {
+      this.rows.chats = this.rows.chats.filter((c) => c.id !== chat);
+    },
+  };
+}
+
+/** The fixture's record, in memory. */
+function memoryRecord(): RecordStore & { held: FixtureRecord } {
+  const store = {
+    held: { presets: [], personas: [], books: [], cards: [], chats: [] } as FixtureRecord,
+    read: () => structuredClone(store.held),
+    write: (record: FixtureRecord) => {
+      store.held = structuredClone(record);
+    },
+  };
+  return store;
+}
+
+describe("the fixture removes only what it made, and says only what it does", () => {
+  // `guard` reads only the never-touch list of the bed's settings.
+  const env = { neverTouch: [] } as unknown as TestbedEnv;
+
+  test("with an unmarked card named Marta Venn already there, setup makes its own and remove leaves the other", async () => {
+    const stand = new Stand();
+    stand.rows.characters.push({ id: "card-users-own", name: CARD.name, extensions: { talkativeness: "0.5" } });
+    stand.rows.chats.push({ id: "chat-users-own", name: "My own chat", character_id: "card-users-own" });
+    const record = memoryRecord();
+    const made = await setupFixture(stand.host, "low", "conn-plain", record);
+    expect(made.fixture.card.id).not.toBe("card-users-own");
+    expect(record.held.cards).toEqual([made.fixture.card.id]);
+    expect(record.held.chats).toEqual([made.chat]);
+    expect(stand.rows.characters.find((c) => c.id === "card-users-own")?.extensions).toEqual({ talkativeness: "0.5" });
+    // Setup's lines say how the floor sends, and name no forced preset.
+    const said = made.lines.join("\n");
+    expect(said).toContain("The floor sends each line through Lumiverse's chat page, by the host's send");
+    expect(said).not.toMatch(/forc/i);
+
+    const removed = await removeFixture(stand.host, env, record);
+    expect(stand.rows.characters.map((c) => c.id)).toEqual(["card-users-own"]);
+    expect(stand.rows.chats.map((c) => c.id)).toEqual(["chat-users-own"]);
+    expect([stand.rows.presets, stand.rows.personas, stand.rows["world-books"]].map((l) => l.length)).toEqual([0, 0, 0]);
+    expect(removed).toContain(`deleted card ${made.fixture.card.id} "${CARD.name}"`);
+    expect(record.held).toEqual({ presets: [], personas: [], books: [], cards: [], chats: [] });
+  });
+
+  test("a marked card the record does not list is left and named, never deleted; a listed card another chat uses is kept, its book taken off", async () => {
+    const stand = new Stand();
+    const record = memoryRecord();
+    const made = await setupFixture(stand.host, "low", "conn-plain", record);
+    stand.rows.chats.push({ id: "chat-later", name: "A chat of the user's on the floor's card", character_id: made.fixture.card.id });
+    stand.rows.characters.push({ id: "card-marked-elsewhere", name: "Another card", extensions: { [MARK]: true } });
+    const removed = await removeFixture(stand.host, env, record);
+    expect(stand.rows.characters.map((c) => c.id).sort()).toEqual(["card-marked-elsewhere", made.fixture.card.id].sort());
+    expect(cardBooks(stand.rows.characters.find((c) => c.id === made.fixture.card.id)?.extensions)).toEqual([]);
+    expect(removed).toContain(`left card-marked-elsewhere "Another card": it carries the floor's mark, and the fixture's record does not list it`);
+    expect(record.held.cards).toEqual([made.fixture.card.id]);
   });
 });

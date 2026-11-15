@@ -1,18 +1,25 @@
-// The run's record in one home (PlanGates-4 item 1): the addition beside `run.json` holds only what
-// `run.json` lacks, and a run on a changed tree is a trial that prints no verdict.
+// The run's record in one home (PlanGates-42 item 1; PlanGates-4-fix1 item 3): the floor's table prints
+// the runner's standing from `run.json` first and works none out again; the addition beside `run.json`
+// holds only what it lacks; the build's shipped tree is laid by RPE's one rule over an RPE repository
+// holding `guidance/chat-defaults/`, with RPH's installed folder read without git.
 
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { additionOf, countApart, gitTree, plainReasoning, readRecord, readRun, recordPath, repeated, sha256, shippedOf, standingLines, writeRecord, type Observed, type TreeFile } from "../../../scripts/proof/lib/record";
+import { join, resolve } from "node:path";
+import { standingOf, type RunRecord } from "../../../scripts/proof/route/evidence";
+import { buildFrom, buildTree, countApart, floorTrials, folderTree, gitTree, plainReasoning, readRun, recordPath, repeated, sha256, shippedOf, standingLines, treeChanges, treeHash, writeRecord, type Observed, type TreeFile } from "../../../scripts/proof/lib/record";
+import { table } from "../../../scripts/testbed/floor";
+import { recordedRun } from "./recorded";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "bundle-trial");
+const REPO = resolve(import.meta.dir, "../../..");
 
-/** A copy of the recorded bundle, so writing the addition never changes the fixture; `edit` changes its run.json first. */
+/** A copy of the recorded bundle with a recorded floor run kept in it, so writing the addition never changes the fixture; `edit` changes its run.json first. */
 function bundle(edit?: (run: Record<string, unknown>) => void): string {
   const dir = mkdtempSync(join(tmpdir(), "floor-record-"));
   cpSync(FIXTURE, dir, { recursive: true });
+  writeFileSync(join(dir, "floor", "internal", "play-01", "turns.json"), JSON.stringify(recordedRun({ form: "two-step" })));
   if (edit) {
     const run = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
     edit(run);
@@ -23,118 +30,171 @@ function bundle(edit?: (run: Record<string, unknown>) => void): string {
 
 const observed = (dir: string): Observed => JSON.parse(readFileSync(join(dir, "floor", "internal", "play-01", "observed.json"), "utf8")) as Observed;
 
-describe("the record's addition", () => {
-  test("a recorded run from a changed tree is a trial, and what is printed of it gives no verdict", () => {
+/** run.json's standing as the runner works it out for a clean run on the bundle's own trees. */
+function clean(run: Record<string, unknown>): void {
+  run.rpe = { commit: "4f1c2a9e7b3d5a61", dirty: false };
+  const record = run as unknown as RunRecord;
+  record.standing = standingOf(record.rpe, record.rph, record.standing?.from ?? null);
+}
+
+describe("the standing read from run.json, never worked out again", () => {
+  test("a bundle whose run.json says trial prints the trial first and no verdict on any row", () => {
     const dir = bundle();
     try {
-      const addition = writeRecord(dir, "floor", () => observed(dir).shipped);
-      expect(addition.standing).toBe("trial");
-      expect(addition.why.join(" ")).toContain("rpe.dirty");
-      const printed = standingLines(readRun(dir), readRecord(dir, "floor")).join("\n");
-      expect(printed).toContain("TRIAL: no verdict");
+      const printed = table(dir);
+      expect(printed).toContain("TRIAL: no verdict. RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61.");
+      expect(printed.indexOf("TRIAL")).toBeLessThan(printed.indexOf("First words on screen"));
+      expect(printed).not.toMatch(/: (PASS|FAIL|REPORTED|NOT JUDGED)$/m);
+      expect(printed).toContain("First words on screen: no verdict (trial)");
       expect(printed).not.toContain("gives a verdict");
-      expect(JSON.parse(readFileSync(recordPath(dir, "floor"), "utf8")).standing).toBe("trial");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("the same run on a clean tree, the shipped tree the build's and only settings of the user's own, gives a verdict", () => {
-    const dir = bundle((run) => (run.rpe = { commit: "4f1c2a9e7b3d5a61", dirty: false }));
+  test("the standing is run.json's: the same trees on a clean tree, as the runner wrote it, give a verdict and the rows theirs", () => {
+    const dir = bundle(clean);
     try {
-      const addition = writeRecord(dir, "floor", () => observed(dir).shipped);
-      expect(addition.why).toEqual([]);
-      expect(addition.standing).toBe("verdict");
-      expect(standingLines(readRun(dir), addition).join("\n")).toContain("This run gives a verdict.");
+      const printed = table(dir);
+      expect(printed).toContain("this run gives a verdict");
+      expect(printed).toContain("First words on screen: PASS");
+      // run.json saying trial is believed only as the runner would work it out again from what it stood on.
+      expect(standingLines(readRun(dir)).join("\n")).not.toContain("TRIAL");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("a shipped tree other than the build's, RPH off its pin, or guidance in a layer of the user's own each make a trial, named", () => {
-    const dir = bundle((run) => {
-      run.rpe = { commit: "4f1c2a9e7b3d5a61", dirty: false };
-      run.rph = { commit: "1234567890ab", pin: "9a8b7c6d5e4f3a21", pinned: false };
-    });
+  test("the addition holds only what run.json lacks, repeats nothing it holds, and the check names any copy", () => {
+    const dir = bundle();
     try {
       const run = readRun(dir);
+      const addition = writeRecord(dir, "floor", null);
+      // The global layer's hash is run.json's own, so only plain generation's reasoning is added.
+      expect(addition).toEqual({ gate: "floor", plain: observed(dir).plain, layers: [], shipped: null });
+      expect(repeated(run, addition)).toEqual([]);
+      expect(JSON.parse(readFileSync(recordPath(dir, "floor"), "utf8"))).toEqual(addition);
+      const copying = { ...addition, rpe: run.rpe, layers: [{ level: "global" as const, hash: run.standing?.from?.layers[0]?.hash ?? "", guidance: [] }], plain: { ...addition.plain, connection: run.rph.commit } } as unknown as typeof addition;
+      expect(repeated(run, copying)).toEqual(["rpe", "rpe.commit", "rph.commit", "rph.pin", "standing.from.layers (global)"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a chat layer the floor's chat stood on that run.json does not carry is added, with the guidance in it", () => {
+    const dir = bundle();
+    try {
       const seen = observed(dir);
       seen.layers.push({ level: "chat", files: [{ path: "rules/no-weather.md", sha256: sha256("invented rule") }, { path: "RPE.yml", sha256: sha256("history:\n  window: 40\n") }] });
-      const build = seen.shipped.map((f) => (f.path === "TURN.md" ? { ...f, sha256: sha256("the build's TURN.md") } : f));
-      const addition = additionOf("floor", run, seen, build);
-      expect(addition.standing).toBe("trial");
-      expect(addition.shipped.changed).toEqual(["TURN.md"]);
-      expect(addition.why.some((w) => w.includes("not the commit RPE pins"))).toBe(true);
-      expect(addition.why.some((w) => w.includes("TURN.md"))).toBe(true);
-      expect(addition.layers.find((l) => l.level === "chat")?.guidance).toEqual(["rules/no-weather.md"]);
+      writeFileSync(join(dir, "floor", "internal", "play-01", "observed.json"), JSON.stringify(seen));
+      const addition = writeRecord(dir, "floor", null);
+      expect(addition.layers.map((l) => [l.level, l.guidance])).toEqual([["chat", ["rules/no-weather.md"]]]);
+      expect(repeated(readRun(dir), addition)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("the addition repeats none of run.json's fields, and the check names any it would", () => {
+  test("runs are counted apart by the runner's standing, each by name", () => {
     const dir = bundle();
+    const verdict = bundle(clean);
     try {
-      const run = readRun(dir);
-      const addition = writeRecord(dir, "floor", () => observed(dir).shipped);
-      expect(repeated(run, addition)).toEqual([]);
-      const copying = { ...addition, rpe: run.rpe, plain: { ...addition.plain, connection: run.rph.commit } } as unknown as typeof addition;
-      // The copied `rpe` holds RPE's commit; the plain arm's field holds RPH's, which is also the pin.
-      expect(repeated(run, copying)).toEqual(["rpe", "rpe.commit", "rph.commit", "rph.pin"]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("trials and runs that give a verdict are counted apart, each by name", () => {
-    const dir = bundle();
-    try {
-      const trial = writeRecord(dir, "floor", () => observed(dir).shipped);
-      const counted = countApart([
-        { run: "live-a", addition: trial },
-        { run: "live-b", addition: { ...trial, standing: "verdict", why: [] } },
-        { run: "live-c", addition: null },
-      ]);
+      const counted = countApart([{ ...readRun(dir), run: "live-a" }, { ...readRun(verdict), run: "live-b" }, { ...readRun(dir), run: "live-c", standing: undefined }]);
       expect(counted.verdicts).toEqual(["live-b"]);
-      expect(counted.trials.map((t) => t.run)).toEqual(["live-a", "live-c"]);
+      expect(counted.trials).toEqual([
+        { run: "live-a", why: "RPE's tree held changes beyond its commit 4f1c2a9e7b3d5a61" },
+        { run: "live-c", why: "run.json does not give the run's standing, so it gives no verdict" },
+      ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      rmSync(verdict, { recursive: true, force: true });
     }
   });
 });
 
-describe("the build's shipped tree", () => {
-  test("RPE's guidance over RPH's, read from each repository at its commit", () => {
-    const root = mkdtempSync(join(tmpdir(), "floor-git-"));
-    const git = (repo: string, ...args: string[]) => {
-      const done = Bun.spawnSync(["git", "-C", repo, "-c", "user.name=Floor Test", "-c", "user.email=floor@example.invalid", ...args], { stdout: "pipe", stderr: "pipe" });
-      if (done.exitCode !== 0) throw new Error(new TextDecoder().decode(done.stderr));
-      return new TextDecoder().decode(done.stdout).trim();
-    };
-    const repo = (name: string, files: Record<string, string>): { dir: string; commit: string } => {
-      const dir = join(root, name);
-      mkdirSync(dir, { recursive: true });
-      git(dir, "init", "-q");
-      for (const [path, text] of Object.entries(files)) {
-        mkdirSync(join(dir, path, ".."), { recursive: true });
-        writeFileSync(join(dir, path), text);
-      }
-      git(dir, "add", "-A");
-      git(dir, "commit", "-q", "-m", "invented");
-      return { dir, commit: git(dir, "rev-parse", "HEAD") };
-    };
+describe("the build's shipped tree, laid by RPE's one rule", () => {
+  const git = (repo: string, ...args: string[]) => {
+    const done = Bun.spawnSync(["git", "-C", repo, "-c", "user.name=Floor Test", "-c", "user.email=floor@example.invalid", ...args], { stdout: "pipe", stderr: "pipe" });
+    if (done.exitCode !== 0) throw new Error(new TextDecoder().decode(done.stderr));
+    return new TextDecoder().decode(done.stdout).trim();
+  };
+  const write = (dir: string, files: Record<string, string>) => {
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+  };
+  /** An invented RPE repository holding `guidance/chat-defaults/TURN.md`, and an installed RPH shipped folder that is no git repository. */
+  function trees(root: string): { repo: string; commit: string; rph: string } {
+    const repo = join(root, "rpe");
+    mkdirSync(repo, { recursive: true });
+    git(repo, "init", "-q");
+    write(repo, { "guidance/chat-defaults/TURN.md": "rpe's turn", "guidance/.agents/author.md": "---\neffort: low\n---\n", "guidance/.prompts/prompt-frame.md": "rpe's frame" });
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "invented");
+    const rph = join(root, "installed", "guidance");
+    write(rph, { ".tools/write_reply.md": "rph's tool guide", "TURN.md": "rph's turn", ".prompts/prompt-frame.md": "rph's frame" });
+    return { repo, commit: git(repo, "rev-parse", "HEAD"), rph };
+  }
+
+  test("RPE's chat-defaults/TURN.md lands at the root over RPH's, read from the repository at its commit and RPH's folder without git", () => {
+    const root = mkdtempSync(join(tmpdir(), "floor-build-"));
     try {
-      const rph = repo("rph", { "guidance/.tools/write_reply.md": "rph's tool guide", "guidance/TURN.md": "rph's turn", "src/x.ts": "not guidance" });
-      const rpe = repo("rpe", { "guidance/TURN.md": "rpe's turn", "guidance/.agents/author.md": "---\neffort: low\n---\n" });
-      const shipped = shippedOf(gitTree(rph.dir, rph.commit, "guidance"), gitTree(rpe.dir, rpe.commit, "guidance"));
+      const input = trees(root);
+      expect(() => git(input.rph, "rev-parse", "HEAD")).toThrow();
       const expected: TreeFile[] = [
         { path: ".agents/author.md", sha256: sha256("---\neffort: low\n---\n") },
+        { path: ".prompts/prompt-frame.md", sha256: sha256("rpe's frame") },
         { path: ".tools/write_reply.md", sha256: sha256("rph's tool guide") },
         { path: "TURN.md", sha256: sha256("rpe's turn") },
       ];
-      expect(shipped).toEqual(expected);
+      expect(buildTree(input)).toEqual(expected);
+      expect(shippedOf(folderTree(input.rph), gitTree(input.repo, input.commit, "guidance"))).toEqual(expected);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a run on the unchanged build gives a verdict, and one changed file makes a trial, by the runner's way and the floor's", () => {
+    const root = mkdtempSync(join(tmpdir(), "floor-build-"));
+    try {
+      const input = trees(root);
+      const build = { rph: folderTree(input.rph), rpe: gitTree(input.repo, input.commit, "guidance") };
+      const laid = shippedOf(build.rph, build.rpe);
+      const fromOf = (served: TreeFile[]) => ({ served: treeHash(served), build: treeHash(laid), changed: treeChanges(served, laid), layers: [] });
+      const rpe = { commit: input.commit, dirty: false };
+      const rph = { commit: "9a8b7c6d5e4f3a21", pin: "9a8b7c6d5e4f3a21", pinned: true };
+      expect(standingOf(rpe, rph, fromOf(laid)).is).toBe("verdict");
+      const changed = laid.map((f) => (f.path === "TURN.md" ? { ...f, sha256: sha256("a turn changed on the server") } : f));
+      expect(standingOf(rpe, rph, fromOf(changed))).toMatchObject({ is: "trial", why: ["the shipped tree the server ran is not the build's: 1 path differs (TURN.md)"] });
+      // Where run.json gives no account of the guidance, the floor lays the build itself and finds the same.
+      const run = { ...JSON.parse(readFileSync(join(FIXTURE, "run.json"), "utf8")), rpe, standing: undefined } as RunRecord;
+      const reader = buildFrom(input.repo, input.rph);
+      expect(floorTrials(run, { shipped: laid, layers: [], off: [] }, reader)).toEqual([]);
+      expect(floorTrials(run, { shipped: changed, layers: [], off: [] }, reader)).toEqual(["the shipped tree RPE serves the floor's chat is not the build's: 1 path differs (TURN.md)"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("table over an installed RPH folder that is no git repository reads it, where run.json gives no account of the guidance", () => {
+    const root = mkdtempSync(join(tmpdir(), "floor-build-"));
+    const dir = bundle();
+    try {
+      const rph = join(root, "installed", "guidance");
+      write(rph, { ".tools/write_reply.md": "rph's tool guide", ".prompts/system-note.md": "System note:\n{{text}}\n" });
+      const head = git(REPO, "rev-parse", "HEAD");
+      const served = buildTree({ repo: REPO, commit: head, rph });
+      const runFile = join(dir, "run.json");
+      const run = JSON.parse(readFileSync(runFile, "utf8")) as Record<string, unknown>;
+      writeFileSync(runFile, JSON.stringify({ ...run, rpe: { commit: head, dirty: false }, standing: undefined }));
+      writeFileSync(join(dir, "floor", "internal", "play-01", "observed.json"), JSON.stringify({ ...observed(dir), shipped: served }));
+      const printed = table(dir, rph);
+      expect(printed).toContain("TRIAL: no verdict. run.json does not give the run's standing, so it gives no verdict.");
+      expect(printed).toContain(`The shipped tree the floor's chat was served (${treeHash(served).slice(0, 12)}) is the build's, laid from RPE's repository and RPH's installed folder`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

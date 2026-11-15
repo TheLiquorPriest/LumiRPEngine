@@ -10,7 +10,7 @@ describe("the thinking effort of both arms", () => {
   test("a recorded run with RPE's thinking off while plain generation thinks is not judged", () => {
     const rows = measuredRows(recordedRun({ form: "two-step", effort: "off" }));
     expect(rows["first-words"].verdict).toBe("not judged");
-    expect(rows["first-words"].notes.join(" ")).toContain("RPE's thinking is off while plain generation's is on (at low)");
+    expect(rows["first-words"].why.join(" ")).toContain("RPE's thinking is off while plain generation's is on (at low)");
     expect(rows["per-token"].verdict).toBe("reported");
     const tag = measuredRows(recordedRun({ form: "tag", effort: "off" }));
     expect(tag["per-token"].verdict).toBe("not judged");

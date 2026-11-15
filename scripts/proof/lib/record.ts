@@ -1,23 +1,32 @@
-// The record of a proof run, in one home (PlanGates-4 item 1; the lead's ruling). The runner's
-// `run.json` (PlanScenarios-1, `scripts/proof/route/evidence.ts`) holds what a run stood on: RPE's
-// commit and whether its tree was changed, RPH's commit and the pin, Lumiverse's version, the browser,
-// every agent's connection, model, reply form, effort and streaming, the settings as given, who started
-// it and when. This file reads it and writes beside it, in the gate's part of the bundle, only what it
-// lacks: the hash of the shipped tree the server runs (and of the build's, to hold it against), the
-// hash of each layer of the user's own the run stood on, plain generation's reasoning setting as
-// Lumiverse holds it, and whether the run is a trial or gives a verdict. It never copies a build or a
-// setting: `repeated` is the check.
+// The record of a proof run, in one home (PlanGates-4 item 1, PlanGates-42 item 1; the lead's ruling).
+// The runner's `run.json` (`scripts/proof/route/evidence.ts`) holds what a run stood on: RPE's commit and
+// whether its tree was changed, RPH's commit and the pin, Lumiverse's version, the browser, every agent's
+// connection, model, reply form, effort and streaming, the settings as given, who started it and when,
+// and the run's standing (PlanScenarios-8 item 4): verdict or trial, with why, worked out once from the
+// shipped tree the server ran against the build's and from every layer of the user's own, each by hash.
+// This file reads that standing (`standingLines`, `countApart`, by the runner's own `standingOfRun`),
+// never works it out a second time, and writes beside `run.json`, in the gate's part of the bundle, only
+// what `run.json` still lacks: plain generation's reasoning setting as Lumiverse holds it; the layers
+// of the floor's own chat whose hash `run.json` does not carry (the chat is made after the runner took
+// the run's facts); and, where `run.json` gives no account of the guidance at all, the hash of the
+// shipped tree the floor's chat was served against the build's. `repeated` holds the addition to that.
 //
-// What counts (plan §17.1 l.1757, "under the shipped guidance"; PlanGates §3 "What counts"): a verdict
-// comes only from a run on a clean build whose agents ran under the shipped tree. A changed tree, RPH
-// other than the commit RPE pins, a shipped tree other than the build's, or a layer of the user's own
-// holding guidance makes the run a trial: printed as one, with why, and never judged.
+// The runner works the standing out with the helpers below (`shippedOf`, `treeHash`, `treeChanges`,
+// `guidanceOf`). The build's shipped tree is laid by RPE's own rule, `shippedPlaces` (`src/tree/shipped.ts`),
+// the function `layShipped` copies by, called here on the two folders' file lists, never a second copy.
+// Where this file lays the build's tree itself (what `run.json` lacks), RPH's shipped files are read
+// from the installed `rp-harness` folder, a real copy of the pinned commit (READINGS R-196), with no
+// git; RPE's at the commit `run.json` names, from RPE's own repository.
+//
+// The floor's own reasons for a trial (PlanGates-4-fix1 item 4), found before its first pair:
+// `floorTrials`, from the floor chat's view of the tree as RPE serves it.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { shippedPlaces } from "../../../src/tree/shipped";
 import { isRecord } from "../../../src/shared/json";
-import { readBundle, type RunRecord } from "../route/evidence";
+import { readBundle, standingOfRun, type RunRecord } from "../route/evidence";
 
 /** One file of a tree: its path below the tree's root and the SHA-256 of its bytes. */
 export interface TreeFile {
@@ -45,13 +54,39 @@ export function treeChanges(a: readonly TreeFile[], b: readonly TreeFile[]): str
 }
 
 /**
- * The build's shipped tree, as RPE lays its shipped level out: RPH's shipped folder, then RPE's over
- * it (`src/tree/defaults.ts:18`, "RPH's, then RPE's over it"). Paths are below each folder.
+ * The build's shipped tree, as RPE lays its shipped level out: RPH's shipped folder, then RPE's over it,
+ * RPE's `chat-defaults/` at the level's root, each file where RPE's own `shippedPlaces` puts it. Paths
+ * are below each folder.
  */
 export function shippedOf(rph: readonly TreeFile[], rpe: readonly TreeFile[]): TreeFile[] {
-  const out = new Map(rph.map((f) => [f.path, f]));
-  for (const f of rpe) out.set(f.path, f);
-  return [...out.values()].sort(byPath);
+  const from = { rph: new Map(rph.map((f) => [f.path, f.sha256])), rpe: new Map(rpe.map((f) => [f.path, f.sha256])) };
+  return shippedPlaces(
+    rph.map((f) => f.path),
+    rpe.map((f) => f.path),
+  ).map((place) => ({ path: place.path, sha256: from[place.from].get(place.source) as string }));
+}
+
+/** Every file below a folder on disk, read without git: RPH's installed shipped folder (R-196). Refused for a folder that is not there. */
+export function folderTree(folder: string): TreeFile[] {
+  if (!existsSync(folder)) throw new Error(`there is no folder at ${folder}`);
+  const root = realpathSync(folder);
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((d) => d.isFile())
+    .map((d) => {
+      const at = join(d.parentPath, d.name);
+      return { path: relative(root, at).split(sep).join("/"), sha256: sha256(readFileSync(at)) };
+    })
+    .sort(byPath);
+}
+
+/** Where the floor reads RPH's shipped files from: the installed `rp-harness` package's `guidance/`, below RPE's repository. */
+export function installedRph(repo: string): string {
+  return join(repo, "node_modules", "rp-harness", "guidance");
+}
+
+/** The build's shipped tree for a run: RPE's `guidance/` at `commit` in its repository laid over RPH's installed shipped folder. */
+export function buildTree(input: { repo: string; commit: string; rph: string }): TreeFile[] {
+  return shippedOf(folderTree(input.rph), gitTree(input.repo, input.commit, "guidance"));
 }
 
 /** A folder of a repository at a commit, every file below it, read with git (the commits are the ones `run.json` names). */
@@ -155,63 +190,118 @@ function customBodyOf(body: unknown, from: "reasoning" | "preset"): PlainReasoni
   return { from, reasoningKeys: Object.keys(parsed).filter((k) => REASONING_KEYS.includes(k)) };
 }
 
-/** What a gate's form saw while it played, which `run.json` cannot hold: kept in its `internal/` as `observed.json`. */
+/** A shipped file switched off by an `off:` list, and the levels whose list switches it off (RPE's files route: `TreeFileEntry.off`, `offIn`). */
+export interface OffFile {
+  path: string;
+  offIn: string[];
+}
+
+/**
+ * What the floor's form saw of its own chat before its first pair, which `run.json` cannot hold (the
+ * chat is made after the runner took the run's facts): kept in its `internal/` as `observed.json`. The
+ * shipped level as RPE serves it to the chat, by path below the level; each layer of the user's own in
+ * the chat's view; each shipped file switched off at any level; plain generation's reasoning.
+ */
 export interface Observed {
-  /** The shipped level as RPE served it to the run's chat, by path below the level. */
+  plain: PlainReasoning | null;
   shipped: TreeFile[];
   layers: Layer[];
-  plain: PlainReasoning | null;
+  off: OffFile[];
 }
 
 /** The record's addition, `<bundle>/<gate>/internal/record.json`: only what `run.json` lacks. */
 export interface Addition {
   gate: string;
-  shipped: { served: string; build: string; changed: string[] };
-  layers: { level: OwnLevel; hash: string; files: string[]; guidance: string[] }[];
   plain: PlainReasoning | null;
-  standing: "verdict" | "trial";
-  /** Why the run is a trial; empty for a verdict. */
-  why: string[];
+  /** The layers of the gate's chat whose hash `run.json`'s standing does not carry, each with the guidance in it. */
+  layers: { level: OwnLevel; hash: string; guidance: string[] }[];
+  /** Only where `run.json` gives no account of the guidance: the shipped tree the gate's chat was served against the build's, laid by `shippedOf`. */
+  shipped: { served: string; build: string; changed: string[] } | null;
 }
 
-/** How many changed paths a trial's reason names before it counts the rest. */
-const NAMED = 8;
+/** The build's shipped tree, read for a run where `run.json` lacks it. */
+export type BuildReader = (run: RunRecord) => TreeFile[];
 
-const named = (paths: readonly string[]): string => (paths.length <= NAMED ? paths.join(", ") : `${paths.slice(0, NAMED).join(", ")} and ${paths.length - NAMED} more`);
-
-/** The addition, from `run.json`, what the gate saw, and the build's shipped tree. */
-export function additionOf(gate: string, run: RunRecord, observed: Observed, build: readonly TreeFile[]): Addition {
-  const why: string[] = [];
-  if (run.rpe.dirty) why.push(`RPE's tree held changes beyond its commit ${run.rpe.commit} (run.json: rpe.dirty)`);
-  if (!run.rph.pinned) why.push(`RPH as installed (${run.rph.commit}) is not the commit RPE pins (${run.rph.pin ?? "none"})`);
-  const changed = treeChanges(observed.shipped, build);
-  if (changed.length > 0) why.push(`the shipped tree the server runs is not the build's: ${named(changed)}`);
-  const layers = observed.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files), files: layer.files.map((f) => f.path).sort(), guidance: guidanceOf(layer) }));
-  for (const layer of layers) if (layer.guidance.length > 0) why.push(`the ${layer.level} layer holds guidance of its own, so the agents did not run under the shipped guidance: ${named(layer.guidance)}`);
-  return { gate, shipped: { served: treeHash(observed.shipped), build: treeHash(build), changed }, layers, plain: observed.plain, standing: why.length === 0 ? "verdict" : "trial", why };
+/** The build of a run from RPE's repository at the run's commit, laid over RPH's installed shipped folder (no git: R-196). */
+export function buildFrom(repo: string, rph: string): BuildReader {
+  return (run) => buildTree({ repo, commit: run.rpe.commit, rph });
 }
 
-/** The names of `run.json`'s fields the addition repeats: by key at its top, or by holding one of its builds or the settings it gave. Empty when it repeats none. */
+/** The addition from `run.json` and what the gate saw: the build is read only where `run.json` gives no account of the guidance. */
+export function additionOf(gate: string, run: RunRecord, observed: Observed, build: BuildReader | null): Addition {
+  const from = run.standing?.from ?? null;
+  const carried = new Set((from?.layers ?? []).map((l) => l.hash));
+  const layers = observed.layers.map((layer) => ({ level: layer.level, hash: treeHash(layer.files), guidance: guidanceOf(layer) })).filter((l) => !carried.has(l.hash));
+  let shipped: Addition["shipped"] = null;
+  if (from === null) {
+    if (build === null) throw new Error("run.json gives no account of the guidance the run stood on, and the record was given no build to hold the served tree against");
+    const tree = build(run);
+    shipped = { served: treeHash(observed.shipped), build: treeHash(tree), changed: treeChanges(observed.shipped, tree) };
+  }
+  return { gate, plain: observed.plain, layers, shipped };
+}
+
+/**
+ * The floor's own reasons for a trial, found before its first pair (PlanGates-4-fix1 item 4): guidance
+ * in a layer of the user's own; a shipped file switched off at any level by an `off:` list; a shipped
+ * tree served to the floor's chat that is not the build's (held to the build's hash in `run.json`, or,
+ * where `run.json` lacks it, to the build `build` lays). Empty when there is none.
+ */
+export function floorTrials(run: RunRecord, observed: Pick<Observed, "shipped" | "layers" | "off">, build: BuildReader | null): string[] {
+  const out: string[] = [];
+  const guidance = observed.layers.flatMap(guidanceOf);
+  if (guidance.length > 0) out.push(`a layer of the user's own holds guidance: ${guidance.join(", ")}`);
+  if (observed.off.length > 0) out.push(`shipped guidance is switched off by an off: list: ${observed.off.map((f) => `${f.path} (off in ${f.offIn.length > 0 ? f.offIn.join(", ") : "a level the route does not name"})`).join(", ")}`);
+  const served = treeHash(observed.shipped);
+  const from = run.standing?.from ?? null;
+  if (from !== null) {
+    if (served !== from.build) out.push(`the shipped tree RPE serves the floor's chat (${served.slice(0, 12)}) is not the build's (${from.build.slice(0, 12)}, run.json)`);
+    return out;
+  }
+  if (build === null) {
+    out.push("run.json gives no account of the build's shipped tree, so the tree RPE serves the floor's chat cannot be held to it");
+    return out;
+  }
+  let tree: TreeFile[];
+  try {
+    tree = build(run);
+  } catch (error) {
+    out.push(`the build's shipped tree could not be read, so the tree RPE serves the floor's chat cannot be held to it: ${error instanceof Error ? error.message : String(error)}`);
+    return out;
+  }
+  const changed = treeChanges(observed.shipped, tree);
+  if (changed.length > 0) out.push(`the shipped tree RPE serves the floor's chat is not the build's: ${changed.length} ${changed.length === 1 ? "path differs" : "paths differ"} (${changed.join(", ")})`);
+  return out;
+}
+
+/**
+ * The names of what in `run.json` the addition repeats: a key at its top, or one of its builds, the
+ * settings it gave, or the hashes its standing was worked out from. Empty when it repeats none.
+ */
 export function repeated(run: RunRecord, addition: Addition): string[] {
   const out = new Set<string>();
   const runKeys = Object.keys(run);
   for (const key of Object.keys(addition)) if (runKeys.includes(key)) out.add(key);
-  const builds: [string, string][] = [
+  const held: [string, string][] = [
     ["rpe.commit", run.rpe.commit],
     ["rph.commit", run.rph.commit],
     ["lumiverse.version", run.lumiverse.version],
     ["browser.version", run.browser.version],
   ];
-  if (run.rph.pin !== null) builds.push(["rph.pin", run.rph.pin]);
+  if (run.rph.pin !== null) held.push(["rph.pin", run.rph.pin]);
+  const from = run.standing?.from;
+  if (from) {
+    held.push(["standing.from.served", from.served], ["standing.from.build", from.build]);
+    for (const layer of from.layers) held.push([`standing.from.layers (${layer.level})`, layer.hash]);
+  }
   const texts: string[] = [];
   const walk = (value: unknown): void => {
     if (typeof value === "string") texts.push(value);
     else if (Array.isArray(value)) value.forEach(walk);
     else if (isRecord(value)) Object.values(value).forEach(walk);
   };
-  // `why` names commits on purpose, to say why a run is a trial; it is words, not a record of them.
-  walk({ ...addition, why: [] });
-  for (const [name, value] of builds) if (value.length >= 7 && texts.some((t) => t === value || t.includes(value))) out.add(name);
+  walk(addition);
+  for (const [name, value] of held) if (value.length >= 7 && texts.some((t) => t.includes(value))) out.add(name);
   if (texts.some((t) => t.includes('"settings"'))) out.add("settings");
   return [...out].sort();
 }
@@ -225,26 +315,17 @@ export function observedPath(bundle: string, gate: string, play = 1): string {
   return join(bundle, gate, "internal", `play-${String(play).padStart(2, "0")}`, "observed.json");
 }
 
-/** The build's shipped tree, read for the commits a run names. */
-export type BuildReader = (run: RunRecord) => TreeFile[];
-
-/** From the repositories on disk: RPE's `guidance/` at the run's RPE commit, over RPH's at its RPH commit. */
-export function buildFromRepos(repos: { rpe: string; rph: string }): BuildReader {
-  return (run) => shippedOf(gitTree(repos.rph, run.rph.commit, "guidance"), gitTree(repos.rpe, run.rpe.commit, "guidance"));
-}
-
 /** A bundle's run, read by the runner's own reader: a bundle without a whole `run.json` is refused there. */
 export function readRun(bundle: string): RunRecord {
   return readBundle(bundle).run;
 }
 
-/** Writes the gate's addition beside `run.json`, from what its form saw, and returns it. A gate that saw nothing has no addition. */
-export function writeRecord(bundle: string, gate: string, build: BuildReader): Addition {
+/** Writes the gate's addition beside `run.json`, from what its form saw, and returns it; refused when it would repeat anything `run.json` holds. */
+export function writeRecord(bundle: string, gate: string, build: BuildReader | null): Addition {
   const run = readRun(bundle);
   const file = observedPath(bundle, gate);
-  if (!existsSync(file)) throw new Error(`${gate} kept nothing of what it saw (${file} is missing), so nothing ties its figures to a shipped tree`);
-  const observed = JSON.parse(readFileSync(file, "utf8")) as Observed;
-  const addition = additionOf(gate, run, observed, build(run));
+  if (!existsSync(file)) throw new Error(`${gate} kept nothing of what it saw (${file} is missing), so plain generation's reasoning setting is unknown`);
+  const addition = additionOf(gate, run, JSON.parse(readFileSync(file, "utf8")) as Observed, build);
   const twice = repeated(run, addition);
   if (twice.length > 0) throw new Error(`the record's addition would repeat run.json's ${twice.join(", ")}`);
   mkdirSync(join(bundle, gate, "internal"), { recursive: true });
@@ -252,27 +333,35 @@ export function writeRecord(bundle: string, gate: string, build: BuildReader): A
   return addition;
 }
 
-/** A gate's addition as written, or null before it is. */
-export function readRecord(bundle: string, gate: string): Addition | null {
-  const file = recordPath(bundle, gate);
-  return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Addition) : null;
+/** The addition's lines for a printed result: what it adds to `run.json`'s account of the run. */
+export function additionLines(addition: Addition): string[] {
+  const out: string[] = [];
+  for (const layer of addition.layers) out.push(`The floor's chat stood on a ${layer.level} layer of the user's own run.json does not carry (${layer.hash.slice(0, 12)})${layer.guidance.length > 0 ? `, holding guidance: ${layer.guidance.join(", ")}` : ", holding settings only"}.`);
+  if (addition.shipped !== null) out.push(addition.shipped.changed.length === 0 ? `The shipped tree the floor's chat was served (${addition.shipped.served.slice(0, 12)}) is the build's, laid from RPE's repository and RPH's installed folder; run.json gives no account of it, so the run's standing stays the runner's.` : `The shipped tree the floor's chat was served is not the build's: ${addition.shipped.changed.join(", ")}.`);
+  return out;
 }
 
-/** The first lines any printed result of a run starts with: what it stood on, by `run.json` and the addition, and whether it gives a verdict. */
-export function standingLines(run: RunRecord, addition: Addition | null): string[] {
+/**
+ * The first lines any printed result of a run starts with: what it stood on, and the runner's standing,
+ * worked out again from what `run.json` says the run stood on by the runner's own reader
+ * (`standingOfRun`), never taken on the record's word.
+ */
+export function standingLines(run: RunRecord): string[] {
   const head = `Run ${run.run} (${run.mode === "rig" ? "the rig" : "the test bed"}), started ${run.started} by ${run.by}: RPE ${run.rpe.commit}${run.rpe.dirty ? " with changes" : ""}, RPH ${run.rph.commit}${run.rph.pinned ? " (the pin)" : ` (the pin is ${run.rph.pin ?? "none"})`}, Lumiverse ${run.lumiverse.version}.`;
-  if (addition === null) return [head, "TRIAL: no verdict. The record's addition is missing, so the shipped tree the run stood on is unknown."];
-  if (addition.standing === "trial") return [head, `TRIAL: no verdict. ${addition.why.join("; ")}.`];
-  return [head, `Shipped tree ${addition.shipped.served.slice(0, 12)}, the build's own; no layer of the user's holds guidance. This run gives a verdict.`];
+  const standing = standingOfRun(run);
+  if (standing.is === "trial") return [head, `TRIAL: no verdict. ${standing.why.join("; ")}.`];
+  const served = run.standing?.from?.served ?? "";
+  return [head, `The shipped tree the server ran (${served.slice(0, 12)}) is the build's own and no layer of the user's holds guidance: this run gives a verdict.`];
 }
 
-/** Runs counted apart: those that give a verdict and the trials, each by name (plan §17.1 l.1757; AuProof-12). */
-export function countApart(runs: readonly { run: string; addition: Addition | null }[]): { verdicts: string[]; trials: { run: string; why: string }[] } {
+/** Runs counted apart by the runner's standing: those that give a verdict and the trials, each by name (plan §17.1 l.1757; AuProof-12). */
+export function countApart(runs: readonly RunRecord[]): { verdicts: string[]; trials: { run: string; why: string }[] } {
   const verdicts: string[] = [];
   const trials: { run: string; why: string }[] = [];
-  for (const r of runs) {
-    if (r.addition?.standing === "verdict") verdicts.push(r.run);
-    else trials.push({ run: r.run, why: r.addition === null ? "no addition was written" : r.addition.why.join("; ") });
+  for (const run of runs) {
+    const standing = standingOfRun(run);
+    if (standing.is === "verdict") verdicts.push(run.run);
+    else trials.push({ run: run.run, why: standing.why.join("; ") });
   }
   return { verdicts, trials };
 }
