@@ -246,15 +246,16 @@ describe("world_query, world_search and roll", () => {
 });
 
 describe("the tools' files", () => {
-  // `.tools/` holds every lane's tool files (the story's, the cast's, the maps'): an engine tool's file
-  // says its family in its header, and only the files of the engine's families are held to its tools.
-  test("every engine tool has its file in its family, and every file of an engine family names an engine tool", async () => {
+  // `.tools/` holds every lane's tool files (the story's, the cast's, the maps'). A tool's family is the
+  // tool's own, from code (a file's header holds no `family:`: nothing read it), so what a file is held
+  // to is that each engine tool has one, and that no header names a family.
+  test("every engine tool has its file, and no tool file's header names a family", async () => {
     const dir = join(SHIPPED_GUIDANCE, ".tools");
-    const familyOf = new Map<string, unknown>();
-    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) familyOf.set(file.slice(0, -3), splitFile(await Bun.file(join(dir, file)).text(), file).header.family);
-    expect(ENGINE_TOOLS.filter((t) => familyOf.get(t.name) !== t.family).map((t) => t.name)).toEqual([]);
-    const families = new Set<unknown>(ENGINE_TOOLS.map((t) => t.family));
-    const names = new Set(ENGINE_TOOLS.map((t) => t.name));
-    expect([...familyOf].filter(([name, family]) => families.has(family) && !names.has(name)).map(([name]) => name)).toEqual([]);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+    const names = new Set(files.map((f) => f.slice(0, -3)));
+    expect(ENGINE_TOOLS.filter((t) => !names.has(t.name)).map((t) => t.name)).toEqual([]);
+    const named: string[] = [];
+    for (const file of files) if ("family" in splitFile(await Bun.file(join(dir, file)).text(), file).header) named.push(file);
+    expect(named).toEqual([]);
   });
 });
