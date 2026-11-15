@@ -2,7 +2,7 @@
 // kinds, relations, effects and formulas. Pure and deterministic: the same template and packs give
 // the same bytes. What the engine has no home for yet is listed in DEFERRED.
 
-import { REALISM_PRESETS } from "../../src/migrate/today/settings-store";
+import { REALISM_PRESETS } from "../../src/engine/realism";
 import { calendarOf, clockOfLocal } from "../../src/engine/calendar";
 import type { Calendar } from "../../src/engine/calendar";
 import { compile } from "../../src/engine/expr";

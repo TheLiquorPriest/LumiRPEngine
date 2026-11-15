@@ -24,7 +24,7 @@ import { planTurn, postTurn, timelapseIntent } from "../../src/engine/turn";
 import { Dispatcher } from "../../src/backend/dispatch";
 import { ChatSnapshots } from "../../src/migrate/today/ledger-io";
 import { JobRunner } from "../../src/backend/jobs";
-import { REALISM_PRESETS } from "../../src/migrate/today/settings-store";
+import { REALISM_PRESETS } from "../../src/engine/realism";
 import { Runtime } from "../../src/backend/runtime";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../../test/packs/riverton";

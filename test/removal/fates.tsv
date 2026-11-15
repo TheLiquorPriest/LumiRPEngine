@@ -7,7 +7,8 @@
 # its path and never by its name. A package that adds a file under those folders adds its line; one
 # that moves or removes a file keeps its line, so the list ends as the report of which went (R-50).
 # Every test under test/backend has a line too: removed when what it tests goes, moved to a home
-# under test/ when what it tests is kept.
+# under test/ when what it tests is kept. Every file of scripts/ and dev/ has one as well, with an owner
+# (the package that removes it, or for a kept file the one that holds it: the fourth field), at the end.
 #
 # Made on 15 Nov from the exact import graph and Bun's metafile of the shipped entries, and settled
 # again by the landing review's fix. A kept file may still import a removed one: then the fence's
@@ -886,6 +887,7 @@ src/shared/org-motions.ts	kept	under
 src/shared/org-ops.ts	kept	under
 src/shared/org-view.ts	kept	under
 src/shared/org.ts	kept	under
+src/shared/page-proof.ts	kept	under		how a page tells RPE from anything else that answers at an address, before it sends its token (plan §16)
 src/shared/page-settings.ts	kept	under		the pages' own settings (the waits and counts a page keeps), declared once; src/app/page-settings.ts lists them in the registry and the web app reads them
 src/shared/party.ts	kept	under
 src/shared/prepare-live.ts	removed	PlanSwap-10	gate	today's harness engine's; only src/shared/protocol.ts reaches it, until PlanSwap-10 removes both
@@ -1249,3 +1251,189 @@ test/frontend/workspace-ui.test.ts	removed	PlanSwap-9	ui	a test of removed UI (P
 test/packs/minds/intent.test.ts	removed	PlanSwap-10	classic	a test of a file nothing kept reaches
 test/shared/role-routes.test.ts	removed	PlanSwap-10	settings	a test of a removed shared file
 test/shared/speed-presets.test.ts	removed	PlanSwap-10	settings	a test of a removed shared file
+
+# The scripts and the preview (PlanSwap-14 item 2): every file of scripts/ and dev/ has one fate and an
+# owner, settled by reach as for src/. A removed file's owner is the package that removes it; a kept
+# file's, the fourth field, is the package that holds it. What the fence still lists of their imports
+# names the package that ends each.
+dev/preview/character-fixture.ts	kept	tools	PlanSwap-9	the character pickers' data, which test/frontend reads
+dev/preview/combat-fixture.ts	kept	tools	PlanSwap-7	a fixture of a kept view, read by mock-backend.ts
+dev/preview/fixtures.ts	kept	tools	PlanSwap-7	the preview of kept UI; PlanSwap-7 puts it on kept code
+dev/preview/harness-fixture.ts	removed	PlanSwap-7	gate	previews today's harness pages; imports LumiAH and the texts registry, and goes with its entry in main.ts
+dev/preview/index.html	kept	tools	PlanScenarios-2	the preview's fake Lumiverse page
+dev/preview/live-fixture.ts	removed	PlanSwap-9	ui	the old half of the preview: a fixture of a removed view
+dev/preview/main.ts	kept	tools	PlanSwap-7	the preview of kept UI; PlanSwap-7 puts it on kept code
+dev/preview/mock-backend.ts	kept	tools	PlanSwap-7	the preview of kept UI; PlanSwap-7 puts it on kept code
+dev/preview/mock-host.ts	kept	tools	PlanScenarios-2	the preview's fake Lumiverse page
+dev/preview/pickers.tsx	removed	PlanSwap-9	ui	the old half of the preview: a fixture of a removed view
+dev/preview/profile-fixture.ts	kept	tools	PlanSwap-7	a fixture of a kept view, read by mock-backend.ts
+dev/preview/routines-fixture.ts	kept	tools	PlanSwap-7	a fixture of a kept view, read by mock-backend.ts
+dev/preview/routines-player-fixture.ts	removed	PlanSwap-9	ui	the old half of the preview: a fixture of a removed view
+dev/preview/serve.ts	kept	tools	PlanPages-2	serves and types the preview
+dev/preview/story-fixture.ts	removed	PlanSwap-9	ui	the old half of the preview: a fixture of a removed view
+dev/preview/themes.ts	kept	tools	PlanScenarios-2	the preview's fake Lumiverse page
+dev/preview/tsconfig.json	kept	tools	PlanPages-2	serves and types the preview
+dev/preview/ui/drawer-main.ts	kept	tools	PlanPages-2	the new pages' preview
+dev/preview/ui/mock-build.ts	kept	tools	PlanPages-2	the new pages' preview
+dev/preview/ui/mock-migration.ts	kept	tools	PlanPages-2	the new pages' preview
+dev/preview/ui/mock-play.ts	kept	tools	PlanChatUI-P5	the Play page's preview routes
+dev/preview/ui/mock-records.ts	kept	tools	PlanPages-2	the new pages' preview
+dev/preview/ui/mock-rpe.ts	kept	tools	PlanApp-2	the stand-in RPE of the new pages' preview
+dev/preview/ui/mock-settings.ts	kept	tools	PlanPages-2	the new pages' preview
+dev/preview/ui/mock-tree.ts	kept	tools	PlanPages-2	the new pages' preview
+dev/preview/ui/pipe.ts	kept	tools	PlanPages-2	the new pages' preview
+scripts/api/generate.ts	kept	tools	PlanApp-2	generates the API reference
+scripts/api/render.ts	kept	tools	PlanApp-2	generates the API reference
+scripts/build.ts	kept	tools	PlanApp-5	builds what RPE ships
+scripts/host/host.ts	kept	tools	PlanSwap-8	controls a dev host; reaches nothing that goes
+scripts/host/lib.ts	kept	tools	PlanSwap-8	controls a dev host; reaches nothing that goes
+scripts/host/measure-extract.ts	removed	PlanSwap-8	classic	measures the classic pipeline's extract on a dev host
+scripts/install-scan.ts	kept	tools	PlanApp-5	builds what RPE ships
+scripts/migrate/shipped-texts.ts	kept	tools	PlanSwap-15	makes the table of shipped texts the migration reads
+scripts/operations.ts	kept	tools	PlanIface-8	the operations list's generator
+scripts/perf/agent-chat.ts	removed	PlanSwap-8	agents	measures the agents engine's chat sessions
+scripts/perf/assembly.ts	removed	PlanSwap-8	halves	the previous extension's prompt assembly cost on a dev host
+scripts/perf/chat-reads.ts	removed	PlanSwap-8	halves	measures the old backend's chat reads
+scripts/perf/engine-state.ts	removed	PlanSwap-8	halves	measures the old backend's and engines' state in memory
+scripts/perf/fixture.ts	removed	PlanSwap-8	halves	the old backend's measurement fixture
+scripts/perf/heap-retainers.ts	removed	PlanSwap-8	halves	used by engine-state.ts alone
+scripts/perf/large-world.ts	removed	PlanSwap-8	halves	used by engine-state.ts alone
+scripts/perf/performance.ts	kept	tools	PlanSwap-7	keeps its measures of kept systems; PlanSwap-7 drops those of the old engine run and the dispatcher
+scripts/proof/bed/checkout.sh	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/bed/feed.sh	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/browser/cdp.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/browser/chrome.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/browser/driver.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/browser/moments.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/browser/page.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/browser/text.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/browser/web-shell.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/checkpoint/checkpoint.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/checkpoint/counts.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/checkpoint/wave.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/floor/gate.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/floor/play.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/g0/forms.ts	kept	tools	PlanGates-17	the first gate's pairs
+scripts/proof/g0/gate.ts	kept	tools	PlanGates-17	the first gate's pairs
+scripts/proof/g0/notice.ts	kept	tools	PlanGates-17	the first gate's pairs
+scripts/proof/g0/report.ts	kept	tools	PlanGates-17	the first gate's pairs
+scripts/proof/g0/run.ts	kept	tools	PlanGates-17	the first gate's pairs
+scripts/proof/g0/verdict.ts	kept	tools	PlanGates-17	the first gate's pairs
+scripts/proof/gate/brief.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/gate/cheap.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/gate/guard.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/gate/pin.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/gate/record.ts	kept	tools	PlanScenarios-5	the proof's gate, checkpoint and bed
+scripts/proof/history-facts/facts.ts	kept	tools	PlanGates-20	the proof's facts of the chat's history
+scripts/proof/history-facts/reader.ts	kept	tools	PlanGates-20	the proof's facts of the chat's history
+scripts/proof/lib/count.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/frame.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/loop.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/lore.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/phase0.ts	kept	tools	PlanGates-21	phase 0's recorded spikes
+scripts/proof/lib/pi.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/read.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/record.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/sent.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/lib/turn.ts	kept	tools	PlanGates-4	the proof's shared library and the floor
+scripts/proof/live/env.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/facts.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/golden.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/host.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/instance.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/pages.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/prefs.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/socket-g0.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/steps.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/live/terminal.ts	kept	tools	PlanScenarios-3	the proof's live runs
+scripts/proof/phase0-0.2-tags/gate.ts	kept	tools	PlanGates-21	phase 0's recorded spikes
+scripts/proof/phase0-0.2-tags/play.ts	kept	tools	PlanGates-21	phase 0's recorded spikes
+scripts/proof/phase0-0.2-two-step/gate.ts	kept	tools	PlanGates-21	phase 0's recorded spikes
+scripts/proof/phase0-0.2-two-step/play.ts	kept	tools	PlanGates-21	phase 0's recorded spikes
+scripts/proof/rig/bed.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/chat-page.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/door.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/fixtures.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/floor.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/host.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/scripts.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/rig/ui.ts	kept	tools	PlanScenarios-2	the proof's rig and browser
+scripts/proof/route/check.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/evidence.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/form.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/host.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/list.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/pin.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/report.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/results.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/route/runner.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/run.ts	kept	tools	PlanScenarios-1	the proof's runner
+scripts/proof/scenarios/.gitkeep	kept	tools	PlanScenarios-20	where the scenarios go
+scripts/proof/settings.json	kept	tools	PlanScenarios-1	the proof's runner
+scripts/reference/build.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/settings/generate.ts	kept	tools	PlanApp-4	generates the settings reference
+scripts/tables/build.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/tables/index-history.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/tables/issues.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/tables/mappings.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/tables/rows.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/tables/source.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/tables/validate.ts	kept	tools	PlanSwap-10	kept as it is (PlanSwap-10 item 6)
+scripts/templates/build.ts	kept	starters	PlanSwap-14	makes the three starter worlds
+scripts/templates/convert.ts	kept	starters	PlanSwap-14	makes the three starter worlds
+scripts/templates/format.ts	kept	starters	PlanSwap-14	makes the three starter worlds
+scripts/templates/template.ts	kept	starters	PlanSwap-14	makes the three starter worlds
+scripts/test-all.ts	kept	tools	PlanGates-1	the test runner
+scripts/test/run.ts	kept	tools	PlanGates-1	the test runner
+scripts/test/select.ts	kept	tools	PlanGates-1	the test runner
+scripts/testbed/README.md	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/compare.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/floor-fixture.ts	kept	tools	PlanGates-4	the floor's measure on the bed
+scripts/testbed/floor-measure.ts	kept	tools	PlanGates-4	the floor's measure on the bed
+scripts/testbed/floor.ts	kept	tools	PlanGates-4	the floor's measure on the bed
+scripts/testbed/golden.sh	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/cli.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/context.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/env.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/claims.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/compare-core.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/context.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/env.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/json.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/other.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/planted-harness.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/planted.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/readback.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/report-doc.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/rows.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/setup-lumiverse.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/setup-runtime.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/setup.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/stores.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/instance/world-check.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/lumiverse.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/play.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/record.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/rpe.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lib/socket.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/lv.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/make-instance.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/recheck.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/report.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/rpe-bed.sh	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/agents.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/assistant.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/book.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/chats.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/checkin.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/classic.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/harness.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/leftovers.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/own.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/pause.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/review.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/revision.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/settings.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/world-parts.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/testbed/steps/world.ts	kept	tools	PlanScenarios-4	the bed's scripts
+scripts/ui/pages.ts	kept	tools	PlanPages-2	writes the list of the new pages' entries the shells offer

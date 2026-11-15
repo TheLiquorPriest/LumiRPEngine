@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { REALISM_PRESETS } from "../../../src/migrate/today/settings-store";
+import { REALISM_PRESETS } from "../../../src/engine/realism";
 import { isWorldDoc, lintWorld } from "../../../src/engine/authoring";
 import { compile, runProgram } from "../../../src/engine/expr";
 import { materializeAll } from "../../../src/engine/materialize";

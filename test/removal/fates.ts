@@ -9,6 +9,7 @@
 //
 // Lines of `fates.tsv`, tab-separated, `#` starting a comment:
 //   <path>  kept     <Kept item>  <note>
+//   <script or preview path>  kept  <Kept item>  <owner>  <note>   (the owner is the package that holds the file)
 //   <path>  removed  <package>    <row>    <note>
 //   <path>  moved    <package>    <home>   <note>
 //   <path>  piece    <package>    <home>   <what moves>  [<names>  <for>]   (beside a removed or moved file's line)
@@ -52,12 +53,15 @@ export const KEPT = {
   starters: "the three starter worlds",
   secrecy: "the secrecy half of the World Info gate (§9.6)",
   under: "what the kept items import, reached from them and never through a removed file",
+  tools: "the repository's own scripts and its preview: what builds, measures and previews what is kept (PlanSwap-14)",
 } as const;
 export type KeptItem = keyof typeof KEPT;
 
 /** The folders of today's build whose every file has a fate, and the three files at the top of `src/`. */
 export const OLD_FOLDERS = ["backend", "frontend", "shared", "engine", "packs", "cli", "worker"] as const;
 export const OLD_FILES = ["src/backend.ts", "src/frontend.ts", "src/spindle-augment.ts"] as const;
+/** The folders outside `src/` whose every file has a fate and an owner too: the scripts and the preview. */
+export const TOOL_FOLDERS = ["scripts", "dev"] as const;
 
 /** The standalone application's own folders under `src/`, the homes made for what moves out of today's build among them. */
 export const NEW_ZONES = ["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree", "build", "play", "worlds", "secrecy"] as const;
@@ -68,7 +72,7 @@ export const PACKAGE = /^Plan[A-Z][A-Za-z]*-[A-Z]?\d+$/;
 export const NO_PACKAGE = "no package yet";
 
 export type Fate =
-  | { path: string; fate: "kept"; item: KeptItem; note: string; line: number }
+  | { path: string; fate: "kept"; item: KeptItem; owner?: string; note: string; line: number }
   | { path: string; fate: "removed"; by: string; row: Row; note: string; line: number }
   | { path: string; fate: "moved"; by: string; home: string; note: string; line: number };
 
@@ -114,8 +118,8 @@ export function readFates(text: string = readFileSync(LIST, "utf8")): Fates {
     const [path = "", fate = "", a = "", b = "", note = "", names = "", forList = "", ...extra] = raw.split("\t");
     const at = `fates.tsv:${line} (${path})`;
     if (extra.length > 0 || (fate !== "piece" && (names !== "" || forList !== ""))) problems.push(`${at}: more fields than a ${fate === "piece" ? "piece" : "fate"} has`);
-    if (!/^(src|test)\//.test(path)) {
-      problems.push(`${at}: a path from the repository's root, under src/ or test/`);
+    if (!/^(src|test|scripts|dev)\//.test(path)) {
+      problems.push(`${at}: a path from the repository's root, under src/, test/, scripts/ or dev/`);
       continue;
     }
     const test = path.startsWith("test/");
@@ -139,8 +143,10 @@ export function readFates(text: string = readFileSync(LIST, "utf8")): Fates {
     }
     if (fate === "kept") {
       if (!(a in KEPT)) problems.push(`${at}: "${a}" is not an item of §15.4's Kept line`);
-      if (b !== "") problems.push(`${at}: a kept file has no fourth field`);
-      files.set(path, { path, fate, item: a as KeptItem, note, line });
+      // A script's or preview file's line names the package that holds it; no other kept file has a fourth field.
+      const tool = (TOOL_FOLDERS as readonly string[]).includes(path.split("/")[0] ?? "");
+      if (tool ? !PACKAGE.test(b) : b !== "") problems.push(`${at}: ${tool ? "a script's or preview file's owner is the package that holds it" : "a kept file has no fourth field"}`);
+      files.set(path, tool ? { path, fate, item: a as KeptItem, owner: b, note, line } : { path, fate, item: a as KeptItem, note, line });
     } else if (fate === "removed") {
       if (!PACKAGE.test(a)) problems.push(`${at}: the package that removes it is not named`);
       if (!(b in ROWS)) problems.push(`${at}: "${b}" is not a row of §15.4's table`);
@@ -172,11 +178,11 @@ function walk(dir: string): string[] {
   return out;
 }
 
-/** Every file of today's build under `root`, by its path from there, with any `planted` path of today's folders among them. */
+/** Every file of today's build under `root`, by its path from there, with any `planted` path of today's folders among them: `src/`'s old folders and files, and every file of the scripts and the preview. */
 export function oldFiles(root: string = ROOT, planted: Iterable<string> = []): string[] {
-  const found = new Set(OLD_FOLDERS.flatMap((folder) => walk(join(root, "src", folder))).map((file) => relative(root, file).split("\\").join("/")));
+  const found = new Set([...OLD_FOLDERS.flatMap((folder) => walk(join(root, "src", folder))), ...TOOL_FOLDERS.flatMap((folder) => walk(join(root, folder)))].map((file) => relative(root, file).split("\\").join("/")));
   for (const file of OLD_FILES) if (existsSync(join(root, file))) found.add(file);
-  for (const path of planted) if (OLD_FOLDERS.some((folder) => path.startsWith(`src/${folder}/`)) || (OLD_FILES as readonly string[]).includes(path)) found.add(path);
+  for (const path of planted) if (OLD_FOLDERS.some((folder) => path.startsWith(`src/${folder}/`)) || TOOL_FOLDERS.some((folder) => path.startsWith(`${folder}/`)) || (OLD_FILES as readonly string[]).includes(path)) found.add(path);
   return [...found].sort();
 }
 
