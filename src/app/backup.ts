@@ -11,7 +11,7 @@ import { open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { TarWriter, walk } from "./archive";
 import type { DataPaths } from "./config";
-import { DATABASE_FILE, FILES_FOLDER } from "./config";
+import { DATABASE_FILE, FILES_FOLDER, settingsLimits } from "./config";
 import { OWNER_ONLY_FILE, ownerOnlyFolder } from "./disk";
 
 export interface BackupMade {
@@ -46,7 +46,7 @@ export async function makeBackup(paths: DataPaths, now: number, out?: string): P
     } finally {
       db.close();
     }
-    tar = TarWriter.open(path);
+    tar = TarWriter.open(path, (await settingsLimits(paths)).database.pieceBytes);
     await tar.addFile(DATABASE_FILE, copy);
     let files = 0;
     const skipped: string[] = [];

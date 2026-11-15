@@ -42,6 +42,7 @@ const SECTIONS: Readonly<Record<string, string>> = {
   service: "The service",
   workers: "The server",
   index: "The server",
+  backup: "The server",
   pages: "Pages",
   switches: "Switches",
   store: "The store",
