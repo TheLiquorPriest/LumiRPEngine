@@ -25,9 +25,9 @@ import { defaultMindsSettings, isMindPurpose, KNOWLEDGE_DEFAULTS, migrateMindRea
 import { defaultTimeouts, migrateTimeouts, TIMEOUTS, timeoutsOf } from "../../shared/timeouts";
 import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, STORY_DEFAULTS, storySettingsOf, SWIPE_DEFAULTS } from "../../shared/settings";
 import { NARRATION_DEFAULTS, narrationSettingsOf, storyPresetSettingsOf } from "../../shared/settings";
-import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../../shared/agent-settings";
-import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../../shared/prompts";
-import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../../shared/diagnostics";
+import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "./agent-settings";
+import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, type PromptTextSort, promptSettingsOf, promptsWritten, sortPromptTexts, SWIPE_TEXTS } from "./prompt-texts";
+import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "./diagnostics";
 import { RETENTION_DEFAULTS, retentionOf } from "../../shared/stores";
 import { OFFSTAGE_DEFAULTS, offstageSettingsOf } from "../../shared/offstage";
 import type { HostPort } from "../../shared/host";
@@ -962,6 +962,18 @@ export class SettingsStore {
    */
   latest(userId: UserId): UserSettings | undefined {
     return this.settings.get(userId);
+  }
+
+  /**
+   * The user's own prompt texts as the settings file stores them, each sorted by its id's row of the
+   * table of shipped texts (`sortPromptTexts`): his edits, the texts today's reader let vanish with
+   * why, and the shipped text word for word. Read from the file itself, an older file's mark wording
+   * moved into it as the settings read it (`migrateMarkWording`), so nothing stored is left out.
+   */
+  async promptTexts(userId: UserId): Promise<PromptTextSort> {
+    const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
+    const moved = migrateMarkWording(raw ?? null);
+    return sortPromptTexts(isRecord(moved) && isRecord(moved.prompts) ? moved.prompts.texts : undefined);
   }
 
   async learningOf(userId: UserId): Promise<ExtractionLearning> {

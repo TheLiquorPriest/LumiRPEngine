@@ -34,9 +34,8 @@ import { giveWay } from "./give-way";
 import type { ContextHandlerInput, ContextVerdict, GenerationEndedEvent, GenerationStartedEvent, GenerationStoppedEvent, HostGenerationType, HostMessage, HostPort } from "../../shared/host";
 import { setAside } from "../../worlds/stored-json";
 import type { LedgerDiagnostics } from "./diagnostics";
-import { messageOf } from "./diagnostics";
+import { CANNOT_STOP, FRAME_UNREAD, messageOf, NOT_LAST_REPLY, STEP_LABEL, type TurnPhaseName } from "./diagnostics";
 import { inTurn, outsideTurns, type TurnFrame } from "./turn-frame";
-import { CANNOT_STOP, FRAME_UNREAD, NOT_LAST_REPLY, STEP_LABEL, type TurnPhaseName } from "../../shared/diagnostics";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
 export type EnvResolver = (chatId: ChatId, userId: UserId) => Promise<LedgerEnv | null>;

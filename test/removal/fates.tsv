@@ -827,7 +827,7 @@ src/shared/agent-roles.ts	removed	PlanSwap-10	settings	the agents' roles (§15.4
 src/shared/agent-settings.ts	removed	PlanSwap-10	settings	Settings → Agents, what the agents engine runs under (§15.4: the agents engine, its settings pages)
 src/shared/agent-settings.ts	piece	PlanSwap-15	src/engine/ledger/fold.ts	KEPT_FOLDS_DEFAULT, the kept folds' default the engine's fold reads (fold.ts:19)
 src/shared/agent-settings.ts	piece	PlanSwap-15	src/frontend/review-card.tsx	agentLabel, which the kept review card shows (review-card.tsx:12)
-src/shared/agent-settings.ts	piece	PlanSwap-15	src/migrate/today/	what today's settings store reads of the agents' settings, carried without texts	AcceptanceConnection, agentSettingsOf, defaultAgentSettings	src/migrate/today/
+src/shared/agent-settings.ts	piece	PlanSwap-15	src/migrate/today/	what today's settings store reads of the agents' settings, carried without texts (agent-settings.ts, agent-roles.ts, agent-context.ts, agent-pipeline.ts)
 src/shared/agent-tools-read.ts	removed	PlanSwap-10	texts	the read tools' texts (§15.4: their prompt texts)
 src/shared/agent-tools-write.ts	removed	PlanSwap-10	texts	the write tools' texts (§15.4: their prompt texts)
 src/shared/agent-tools.ts	removed	PlanSwap-10	texts	the tool layer's registry and every text a tool shows a model (§15.4: their prompt texts)
@@ -841,7 +841,7 @@ src/shared/classes.ts	kept	under
 src/shared/decide.ts	kept	under		the shapes of a typed decision, moved out of src/engine/decide.ts by PlanSwap-5 (the lead's ruling): data src/shared/host.ts carries too
 src/shared/diagnostics.ts	removed	PlanSwap-10	ui	the old engines' per-turn diagnostics records and activity line (DESIGN §6.9; §15.4: their UI)
 src/shared/diagnostics.ts	piece	PlanSwap-15	src/frontend/build/jobs.tsx	phaseTimeText, which Build's jobs page shows (jobs.tsx:14)
-src/shared/diagnostics.ts	piece	PlanSwap-15	src/migrate/today/	what today's ledger and settings store read of it, carried without texts	CANNOT_STOP, DIAGNOSTICS_DEFAULTS, DiagPhase, diagnosticsSettingsOf, FRAME_UNREAD, NOT_LAST_REPLY, STEP_LABEL, TurnPhaseName	src/migrate/today/
+src/shared/diagnostics.ts	piece	PlanSwap-15	src/migrate/today/	what today's ledger and settings store read of it, carried without texts (diagnostics.ts)
 src/shared/final-review.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
 src/shared/final-review.ts	piece	PlanSwap-15	src/shared/ledger.ts	FinalEdit and finalEditsOf, which the kept ledger reads of a record (src/engine/ledger/journal.ts:7, :828; src/engine/thing-tidy.ts:24; src/shared/ledger.ts:11)
 src/shared/finance.ts	kept	under
@@ -886,6 +886,7 @@ src/shared/org-motions.ts	kept	under
 src/shared/org-ops.ts	kept	under
 src/shared/org-view.ts	kept	under
 src/shared/org.ts	kept	under
+src/shared/page-settings.ts	kept	under		the pages' own settings (the waits and counts a page keeps), declared once; src/app/page-settings.ts lists them in the registry and the web app reads them
 src/shared/party.ts	kept	under
 src/shared/prepare-live.ts	removed	PlanSwap-10	gate	today's harness engine's; only src/shared/protocol.ts reaches it, until PlanSwap-10 removes both
 src/shared/profiles/classic.ts	kept	under
@@ -897,7 +898,7 @@ src/shared/profiles/parts.ts	kept	under
 src/shared/profiles/types.ts	kept	under
 src/shared/projects.ts	kept	under
 src/shared/prompts.ts	removed	PlanSwap-10	texts	the texts registry (§4.3 l.295); PromptVar has no piece, since only removed files take it
-src/shared/prompts.ts	piece	PlanSwap-15	src/migrate/today/	what today's settings store reads of the stored prompt edits, carried without texts	MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS	src/migrate/today/
+src/shared/prompts.ts	piece	PlanSwap-15	src/migrate/today/	what today's settings store reads of the stored prompt edits, carried without texts, against the table of shipped texts (prompt-texts.ts, shipped-texts.ts)
 src/shared/protocol.ts	moved	PlanSwap-13	src/ui/kept/protocol.ts	moved in part by PlanSwap-13 (wave 4, after PlanSwap-9); what is left, the old wire (FrontendToBackend, BackendToFrontend, ResultMessage, ErrorMessage, ErrorCode, ResultBodies, DraftChanged, PROTOCOL_VERSION, AGENT_API, ENGINE_EXTENSION, FIX_THINGS_MAX, EDIT_OPS_MAX), only today's importers import, each ended by its own package (PlanSwap-13 item 4); PlanSwap-10 removes it
 src/shared/protocol.ts	piece	PlanSwap-13	src/ui/kept/protocol.ts	the kept UI's request and answer types (PlanSwap-13 item 1)	ChipRequest, GmThingsRead, JobResult, LoreBookEntryView, LoreBookView, LoreIndexView, LoreMarkChange, LoreMarkView, LorePinView, LorePinsView, ReviewCardView, ReviewItemView, RoutineJobInput, SecrecyBookPlan, SecrecyBookView, SecrecyEntryView, ThingsRead, UpgradeChange, UpgradePreview	src/frontend/, src/packs/calendar/ui/, src/packs/castlife/ui/, src/packs/combat/ui/, src/packs/economy/ui/, src/packs/gear/ui/, src/packs/minds/ui/, src/packs/orgs/ui/, src/packs/sheets/ui/, src/packs/space/ui/, src/packs/story/ui/, src/packs/vehicles/ui/, src/ui/kept/, test/frontend/, test/ui/
 src/shared/protocol.ts	piece	PlanSwap-13	src/shared/	the shapes kept code reads as data, each to a home of its own (PlanSwap-13 item 2)	ChatExport, EditOp, EditorRequest, GenerateAs, JobKind, JobProposal, JobSummary, JsonPatchOp, LintFix, LintIssue, MarkerPreview, TableNames, TableRowChanges, TableUpdate, TemplateInfo, WorldCollection, WorldPart	src/, test/
