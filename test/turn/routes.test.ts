@@ -62,7 +62,7 @@ describe("the Turn page's routes", () => {
     const detail = await b.page<TurnDetail>("GET", `/api/v1/chats/${CHAT}/turns/${played[0]}`);
     expect(replyProblems(b.app, "GET /api/v1/chats/:chat/turns/:turn", detail.body)).toEqual([]);
     expect(fields(detail.body)).toEqual(fields(DETAIL_FIELDS));
-    expect(fields(detail.body.timings)).toEqual(["ended", "firstWord", "received", "released", "started"]);
+    expect(fields(detail.body.timings)).toEqual(["ended", "firstWord", "intent", "received", "released", "started", "thinking"]);
     expect(fields(detail.body.reply)).toEqual(["progress", "text"]);
     const seqs = detail.body.trace.map((r) => r.seq);
     expect(seqs.length).toBeGreaterThan(2);
