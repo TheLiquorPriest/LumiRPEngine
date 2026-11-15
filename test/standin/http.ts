@@ -182,6 +182,7 @@ export class LumiverseServer {
     if (options.host) {
       const host = options.host;
       host.clock = this.clock;
+      host.firstUser ??= options.accounts[0]?.id ?? null;
       // A worker's later task, a socket's delivery and the rows' stamps all run on the test's clock; the host's events reach the user's sockets.
       host.later = (run) => void this.clock.setTimeout(run, 0);
       host.now = () => this.clock.now();

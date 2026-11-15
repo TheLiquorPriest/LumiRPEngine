@@ -122,7 +122,7 @@ interface Record_ {
 
 /** What the manager needs of the host it starts workers in. */
 export interface SpindleHost {
-  install(granted: readonly string[], identifier?: string, options?: { id?: string; scope?: "user" | "operator"; installedBy?: string | null }): Installed;
+  install(granted: readonly string[], identifier?: string, options?: { id?: string; scope?: "user" | "operator"; installedBy?: string | null; interceptorTimeoutMs?: number }): Installed;
   notifyPermissionChanged(id: string, permission: string, granted: boolean, allGranted: readonly string[]): void;
   emit(event: string, payload: unknown, userId?: string): void;
 }
@@ -288,7 +288,7 @@ export class SpindleManager {
   // ---------------------------------------------------------------- enable, disable, restart
 
   private async start(r: Record_): Promise<void> {
-    const worker = this.host.install([...r.granted], r.manifest.identifier, { id: r.id, scope: r.scope, installedBy: r.installedBy });
+    const worker = this.host.install([...r.granted], r.manifest.identifier, { id: r.id, scope: r.scope, installedBy: r.installedBy, interceptorTimeoutMs: r.manifest.interceptorTimeoutMs });
     r.worker = worker;
     try {
       const code = this.code.get(r.manifest.identifier);

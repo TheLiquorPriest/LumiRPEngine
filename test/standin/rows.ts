@@ -84,6 +84,11 @@ export class ChatRows extends ExtensionHost {
   /** Spindle's manager (`spindle.ts`): installs from a remote's branch, enables, grants as an admin does, and starts each extension's worker in this host. */
   readonly spindle = new SpindleManager(this, () => this.now());
 
+  /** A user's setting as the library keeps it: what the extensions' limits read of the Spindle settings (`services/spindle-settings.service.ts:46-47`). */
+  protected override userSetting(user: string, key: string): unknown {
+    return this.library.setting(user, key);
+  }
+
   /**
    * `eventBus.emit` (`ws/bus.ts:502-544`): a frame to each of the user's sockets at once, through the
    * server where one serves this host, and the event to the extensions' workers.

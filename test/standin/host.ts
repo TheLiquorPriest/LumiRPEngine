@@ -48,6 +48,11 @@ export interface Installed extends ExtSpindle {
    * extension's handler, given each generation's context first and giving back the context the generation goes on with.
    */
   registerContextHandler(handler: ContextHandler, priority?: number, opts?: { timeoutMs?: number; required?: boolean }): void;
+  /**
+   * `spindle.registerInterceptor` (`spindle/worker-runtime.ts:1813-1836`): the priority is the number given, else the options'; the filter `match` and `required` are the options' (the third
+   * argument's where a number is given). One per extension, a second replacing the first; needs `interceptor`. The host checks `match` against the generation's context before it calls the extension.
+   */
+  registerInterceptor(handler: PromptHandler, priorityOrOptions?: number | InterceptorOptions, options?: InterceptorOptions): () => void;
 }
 
 export interface Ext {
@@ -65,6 +70,12 @@ export interface Ext {
   forwarded: Set<string>;
   frontend: Set<(payload: unknown, userId: string, session?: string) => void>;
   logs: string[];
+  /** The manifest's own limit for its prompt interceptor (`manifest.interceptorTimeoutMs`, `spindle/worker-host.ts:3159-3163`); it wins over the user's Spindle setting. */
+  interceptorTimeoutMs: number | undefined;
+  /** The calls the host has posted to the worker and not had an answer to, each rejected where the worker stops (`spindle/worker-host.ts:1572-1576`). */
+  pending: Set<(error: Error) => void>;
+  /** Its prompt interceptor now: a result for any other registration is ignored (`spindle/worker-host.ts:1913-1917`). */
+  interceptor: InterceptorRegistration | null;
 }
 
 export interface Registration<H> {
@@ -72,6 +83,25 @@ export interface Registration<H> {
   priority: number;
   handler: H;
   required: boolean;
+}
+
+/** `InterceptorMatchDTO` (`lumiverse-spindle-types` `api.ts:78-96`): the filter a prompt interceptor is registered with. */
+export interface InterceptorMatch {
+  generationTypes?: string[];
+  isDryRun?: boolean;
+  presetField?: { path: string[]; exists?: boolean; oneOf?: unknown[]; notIn?: unknown[] };
+}
+
+export interface InterceptorOptions {
+  priority?: number;
+  match?: InterceptorMatch;
+  required?: boolean;
+}
+
+/** A prompt interceptor as the pipeline holds it (`spindle/interceptor-pipeline.ts:25-48`): for the user it is installed for alone, or for every user (`userId` null), behind its filter. */
+export interface InterceptorRegistration extends Registration<PromptHandler> {
+  match: InterceptorMatch | undefined;
+  userId: string | null;
 }
 
 export type WorldInfoHandler = (ctx: unknown) => Promise<WorldInfoResult | void>;
@@ -123,10 +153,32 @@ export class ExtensionHost {
   clock: HostClock = PROCESS_CLOCK;
   /** How a later task is run: on the host's clock, so a test that moves time runs the worker's tasks too. */
   later: (run: () => void) => void = (run) => void this.clock.setTimeout(run, 0);
-  /** `DEFAULT_INTERCEPTOR_TIMEOUT_MS` (`services/spindle-settings.service.ts:6`). */
-  interceptorTimeoutMs = 10_000;
+  /**
+   * The oldest account, whose Spindle settings hold an operator's extension (`getFirstUserId`, `auth/seed.ts:34-52`): the stand-in server gives it the first account it was made with; null, and the
+   * extension's limit is the default.
+   */
+  firstUser: string | null = null;
+
+  /** A user's setting by its key (`getSetting`): the host that keeps the user's settings answers it (`rows.ts`); this one keeps none. */
+  protected userSetting(_user: string, _key: string): unknown {
+    return undefined;
+  }
+
+  /**
+   * The wall-clock limit of an extension's prompt interceptor, worked out at each call (`resolveInterceptorTimeout`, `services/spindle-settings.service.ts:6-8`, `:22-28`, `:38-62`; `spindle/worker-host.ts:3159-3163`): the
+   * manifest's `interceptorTimeoutMs` where it has one, else the Spindle setting of the user it is installed for (an operator's: the oldest account's), 10 seconds where neither is set; held between 1 and 300 seconds.
+   */
+  protected interceptorTimeout(ext: Ext): number {
+    const clamp = (raw: unknown): number => Math.min(300_000, Math.max(1_000, Math.floor(typeof raw === "number" && Number.isFinite(raw) ? raw : 10_000)));
+    if (typeof ext.interceptorTimeoutMs === "number" && Number.isFinite(ext.interceptorTimeoutMs)) return clamp(ext.interceptorTimeoutMs);
+    const scoped = ext.scope === "user" ? ext.installedBy : null;
+    const user = scoped !== null && scoped.length > 0 ? scoped : this.firstUser;
+    if (user === null) return clamp(undefined);
+    const settings = this.userSetting(user, "spindleSettings");
+    return clamp(typeof settings === "object" && settings !== null ? (settings as Record<string, unknown>).interceptorTimeoutMs : undefined);
+  }
   protected worldInfo: Registration<WorldInfoHandler>[] = [];
-  protected interceptors: Registration<PromptHandler>[] = [];
+  protected interceptors: InterceptorRegistration[] = [];
   /** The context handlers (`spindle/context-handler.ts`), each with its wall-clock budget. */
   protected contextHandlers: (Registration<ContextHandler> & { timeoutMs: number })[] = [];
 
@@ -159,10 +211,10 @@ export class ExtensionHost {
    * Starts an extension's worker with these permissions granted, and gives its view of Spindle. The id and the install scope are the manager's own where it
    * makes the worker (`spindle.ts`); a test that starts one by hand gets the next id, an operator's scope and its manifest `identifier` as its id.
    */
-  install(granted: readonly string[], identifier?: string, options: { id?: string; scope?: "user" | "operator"; installedBy?: string | null } = {}): Installed {
+  install(granted: readonly string[], identifier?: string, options: { id?: string; scope?: "user" | "operator"; installedBy?: string | null; interceptorTimeoutMs?: number } = {}): Installed {
     const id = options.id ?? `ext-${this.nextId++}`;
     const scope = options.scope ?? "operator";
-    const ext: Ext = { id, identifier: identifier ?? id, scope, installedBy: options.installedBy ?? null, stopped: false, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [] };
+    const ext: Ext = { id, identifier: identifier ?? id, scope, installedBy: options.installedBy ?? null, stopped: false, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [], interceptorTimeoutMs: options.interceptorTimeoutMs, pending: new Set(), interceptor: null };
     const modals = new Map<string, { title: string; items: unknown[] }>();
     const host = this;
     const change = (permission: string, granted: boolean): void => {
@@ -252,8 +304,14 @@ export class ExtensionHost {
         ext.stopped = true;
         host.installed.splice(0, host.installed.length, ...host.installed.filter((e) => e !== ext));
         host.worldInfo = host.worldInfo.filter((r) => r.ext !== ext);
+        // A new list, as `unregisterByExtension` makes one (`spindle/interceptor-pipeline.ts:97-101`): a run that holds the list it began with still reaches this extension's registration.
         host.interceptors = host.interceptors.filter((r) => r.ext !== ext);
         host.contextHandlers = host.contextHandlers.filter((r) => r.ext !== ext);
+        ext.interceptor = null;
+        // Every call awaiting the worker is rejected (`spindle/worker-host.ts:1572-1576`).
+        const waiting = [...ext.pending];
+        ext.pending.clear();
+        for (const reject of waiting) reject(new Error("Extension worker stopped"));
         ext.handlers.clear();
         ext.forwarded.clear();
         ext.changed.clear();
@@ -267,16 +325,26 @@ export class ExtensionHost {
         }
         host.worldInfo = place(host.worldInfo, { ext, priority: priority ?? 100, handler, required: false });
       },
-      registerInterceptor(handler, options) {
-        // `spindle/worker-host.ts:3137-3233`: needs `interceptor`; one per extension.
+      registerInterceptor(handler, priorityOrOptions, options) {
+        // `spindle/worker-host.ts:3137-3233`: needs `interceptor`; one per extension, the one before dropped in place, the list kept by priority (`:3165-3167`; `spindle/interceptor-pipeline.ts:87-95`).
         if (!ext.granted.has("interceptor")) {
           ext.logs.push("permission_denied: interceptor (registerInterceptor)");
           return () => undefined;
         }
-        const registration: Registration<PromptHandler> = { ext, priority: options.priority ?? 100, handler, required: options.required === true };
-        host.interceptors = place(host.interceptors, registration);
+        const numbered = typeof priorityOrOptions === "number";
+        const given = numbered ? options : priorityOrOptions;
+        const registration: InterceptorRegistration = { ext, priority: (numbered ? priorityOrOptions : priorityOrOptions?.priority) ?? 100, handler, required: given?.required === true, match: given?.match, userId: ext.scope === "user" ? ext.installedBy : null };
+        const before = host.interceptors.findIndex((r) => r.ext === ext);
+        if (before !== -1) host.interceptors.splice(before, 1);
+        host.interceptors.push(registration);
+        host.interceptors.sort((a, b) => a.priority - b.priority);
+        ext.interceptor = registration;
         return () => {
-          host.interceptors = host.interceptors.filter((r) => r !== registration);
+          // The worker disposes only the registration it still holds (`spindle/worker-runtime.ts:1830-1836`).
+          if (ext.interceptor !== registration) return;
+          ext.interceptor = null;
+          const at = host.interceptors.indexOf(registration);
+          if (at !== -1) host.interceptors.splice(at, 1);
         };
       },
       registerContextHandler(handler, priority, opts) {
@@ -426,6 +494,8 @@ export class ExtensionHost {
     for (const registration of this.contextHandlers) {
       const controller = new AbortController();
       const timeout = Promise.withResolvers<never>();
+      // A call posted to the worker is rejected where the worker stops (`spindle/worker-host.ts:1572-1576`).
+      if (!registration.ext.stopped) registration.ext.pending.add(timeout.reject);
       const timer = this.clock.setTimeout(() => {
         const error = new Error(`Context handler from ${registration.ext.id} timed out (${Math.round(registration.timeoutMs / 1000)}s)`);
         controller.abort(error);
@@ -433,6 +503,8 @@ export class ExtensionHost {
       }, registration.timeoutMs);
       try {
         const call = (async () => {
+          // A worker that is gone is posted the request and answers none (`:1602-1609`): the budget ends the wait, for a run that holds the list it began with.
+          if (registration.ext.stopped) return await new Promise<never>(() => undefined);
           try {
             // Across the worker's boundary both ways, so a copy each way (`spindle/worker-runtime.ts:4891-4896`).
             return structuredClone(await registration.handler(structuredClone(result), controller.signal));
@@ -450,6 +522,7 @@ export class ExtensionHost {
         if (registration.required) throw error;
       } finally {
         this.clock.clearTimeout(timer);
+        registration.ext.pending.delete(timeout.reject);
       }
     }
     return result;
@@ -458,19 +531,25 @@ export class ExtensionHost {
   // ---------------------------------------------------------------- the interceptor pipeline
 
   /**
-   * The interceptor pipeline (`spindle/interceptor-pipeline.ts:103-227`), each handler behind its
-   * worker call: the messages it is given carry the history and lore flags (`spindle/worker-host.ts:
-   * 3184-3198`); a throw comes back as an error (`spindle/worker-runtime.ts:4813-4826`,
-   * `spindle/worker-host.ts:1918-1921`); parameters are dropped without `generation_parameters`
-   * (`spindle/worker-host.ts:1922-1931`).
+   * The interceptor pipeline (`spindle/interceptor-pipeline.ts:103-227`), each handler behind its worker call (`spindle/worker-host.ts:3137-3233`): for each registration of the list it holds
+   * (`:97-101`: a stopped extension's registration is still reached by a run that began before it stopped), in priority order, skipped for another user's generation (`:116-118`) and where its filter
+   * does not match the context (`:119-121`; `isDryRun` is never set on the context, which names `dryRun`, so a filter on it never matches), and a generation that has been stopped ends it (`:122-124`). Its limit is
+   * worked out at each call (`:125-136`) and runs until the answer: the answer, the limit, the generation's stop and the worker's stop each end the wait, whichever comes first (`:150-171`); the messages it is
+   * given carry the history and lore flags (`spindle/worker-host.ts:3184-3198`); a throw comes back as an error (`spindle/worker-runtime.ts:4813-4826`, `spindle/worker-host.ts:1918-1921`); parameters are dropped
+   * without `generation_parameters` (`:1922-1931`); an answer for a registration the worker no longer holds is ignored (`:1913-1917`). A fault ends the generation only where the registration is required (`:187-212`),
+   * and a stop of the generation always does (`:188-198`).
    */
-  protected async interceptorPipeline(messages: LlmMessage[], context: Record<string, unknown>): Promise<{ messages: LlmMessage[]; parameters: Record<string, unknown> | undefined }> {
+  protected async interceptorPipeline(messages: LlmMessage[], context: Record<string, unknown>, userId: string | null, signal?: AbortSignal): Promise<{ messages: LlmMessage[]; parameters: Record<string, unknown> | undefined }> {
     let result = messages;
     // `collectSourceMessageMetadata` (`spindle/source-message-metadata.ts:59-75`).
     const sources = new Map<string, { index: number; metadata: unknown }>();
     for (const m of messages) if (m.__chatHistorySource === true && typeof m.__sourceMessageId === "string" && typeof m.__sourceIndexInChat === "number") sources.set(m.__sourceMessageId, { index: m.__sourceIndexInChat, metadata: m.__sourceMessageMetadata ?? {} });
     let merged: Record<string, unknown> | undefined;
     for (const registration of this.interceptors) {
+      if (registration.userId && registration.userId !== userId) continue;
+      if (!matchesInterceptor(registration.match, context, registration.ext.identifier)) continue;
+      if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+      const timeoutMs = this.interceptorTimeout(registration.ext);
       // `restoreSourceMessageMetadata` (`spindle/source-message-metadata.ts:77-106`), before each.
       for (const m of result) {
         const isHistory = m.__chatHistorySource === true || m.__isChatHistory === true;
@@ -490,20 +569,35 @@ export class ExtensionHost {
         return { ...m, ...(isHistory ? { __isChatHistory: true } : {}), ...(isLore ? { __isWorldInfoEntry: true } : {}), ...(typeof m.__sourceMessageId === "string" ? { sourceMessageId: m.__sourceMessageId } : {}), ...(typeof m.__sourceIndexInChat === "number" ? { sourceIndexInChat: m.__sourceIndexInChat } : {}) };
       });
       const controller = new AbortController();
-      const timeout = Promise.withResolvers<never>();
+      const ended = Promise.withResolvers<never>();
       const timer = this.clock.setTimeout(() => {
-        const error = new Error(`Interceptor from extension timed out (${Math.round(this.interceptorTimeoutMs / 1000)}s)`);
+        const error = new Error(`Interceptor from ${registration.ext.id} timed out (${Math.round(timeoutMs / 1000)}s)`);
         controller.abort(error);
-        timeout.reject(error);
-      }, this.interceptorTimeoutMs);
+        ended.reject(error);
+      }, timeoutMs);
+      const onAbort = (): void => {
+        const error = signal?.reason ?? new DOMException("Aborted", "AbortError");
+        controller.abort(error);
+        ended.reject(error);
+      };
+      if (signal !== undefined) {
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      }
+      // The request is posted to the worker, which rejects it where it stops; one posted to a worker that is gone is answered by nothing (`:1602-1609`).
+      const posted = !registration.ext.stopped;
+      if (posted) registration.ext.pending.add(ended.reject);
       try {
         const call = (async () => {
+          if (!posted) return await new Promise<never>(() => undefined);
           let returned: InterceptorReturn;
           try {
             returned = await registration.handler(structuredClone(dto) as PromptMessageDTO[], { ...projectedContext(context, registration.ext), signal: controller.signal });
           } catch (error) {
             throw new Error(error instanceof Error ? error.message : String(error));
           }
+          // A result for a registration the worker no longer holds, or for a worker that has stopped, is ignored (`:1913-1917`), so no answer comes and the limit ends the wait.
+          if (registration.ext.interceptor !== registration || registration.ext.stopped) return await new Promise<never>(() => undefined);
           const normalized = Array.isArray(returned) ? { messages: returned } : returned;
           let parameters = normalized.parameters;
           if (parameters && Object.keys(parameters).length > 0 && !registration.ext.granted.has("generation_parameters")) {
@@ -512,18 +606,57 @@ export class ExtensionHost {
           }
           return { messages: structuredClone(normalized.messages) as LlmMessage[], parameters };
         })();
-        const output = await Promise.race([call, timeout.promise]);
+        // An answer that comes after the wait has ended fails no one.
+        call.catch(() => undefined);
+        const output = await Promise.race([call, ended.promise]);
         result = output.messages;
         if (output.parameters && Object.keys(output.parameters).length > 0) merged = { ...merged, ...output.parameters };
       } catch (error) {
-        this.log.push(`[Spindle] Interceptor error: ${error instanceof Error ? error.message : String(error)}`);
+        if (signal?.aborted) throw error;
+        this.log.push(`[Spindle] Interceptor error from ${registration.ext.id}: ${error instanceof Error ? error.message : String(error)}`);
         if (registration.required) throw error;
       } finally {
         this.clock.clearTimeout(timer);
+        registration.ext.pending.delete(ended.reject);
+        signal?.removeEventListener("abort", onAbort);
       }
     }
     return { messages: result, parameters: merged };
   }
+}
+
+/**
+ * `matchesInterceptorContext` (`spindle/interceptor-pipeline.ts:56-82`): no filter matches every generation; a filter on the generation's type needs one the context names, and one on `isDryRun` the
+ * context's own `isDryRun`, which Lumiverse never sets (it names `dryRun`), so it never matches a value; a filter on a field of the extension's own preset metadata reads it by its path.
+ */
+function matchesInterceptor(match: InterceptorMatch | undefined, context: Record<string, unknown>, identifier: string): boolean {
+  if (match === undefined) return true;
+  if (match.generationTypes !== undefined && match.generationTypes.length > 0) {
+    if (typeof context.generationType !== "string" || !match.generationTypes.includes(context.generationType)) return false;
+  }
+  if (match.isDryRun !== undefined && context.isDryRun !== match.isDryRun) return false;
+  const presetField = match.presetField;
+  if (presetField === undefined) return true;
+  let field: unknown = ownPresetMetadata(context, identifier);
+  for (const key of presetField.path) {
+    if (typeof field !== "object" || field === null || Array.isArray(field)) {
+      field = undefined;
+      break;
+    }
+    field = (field as Record<string, unknown>)[key];
+  }
+  if (presetField.exists !== undefined && (field !== undefined) !== presetField.exists) return false;
+  if (presetField.oneOf !== undefined && !presetField.oneOf.some((candidate) => Object.is(candidate, field))) return false;
+  if (presetField.notIn?.some((candidate) => Object.is(candidate, field))) return false;
+  return true;
+}
+
+/** `readOwnPresetMetadata` (`spindle/preset-metadata-context.ts:30-44`): the extension's own namespace of the preset's metadata on the context, uncloned; an identifier Lumiverse's preset editor owns names none. */
+function ownPresetMetadata(context: Record<string, unknown>, identifier: string): unknown {
+  if (identifier === "" || LOOM_OWNED_PRESET_METADATA_KEYS.has(identifier) || identifier.startsWith("_lumiverse_")) return undefined;
+  const metadata = context.__spindlePresetMetadata;
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return undefined;
+  return Object.hasOwn(metadata, identifier) ? (metadata as Record<string, unknown>)[identifier] : undefined;
 }
 
 /** `toCaptureDTO` (`spindle/world-info-capture.ts:17-29`): an activated entry as an extension is told it, a peer's book told as a persona's. */
@@ -544,12 +677,9 @@ function toldEntry(entry: Record<string, unknown>): Record<string, unknown> {
  */
 function projectedContext(context: Record<string, unknown>, ext: Ext): Record<string, unknown> {
   const projected = structuredClone(context);
-  const metadata = projected.__spindlePresetMetadata;
+  const metadata = ownPresetMetadata(projected, ext.identifier);
   delete projected.__spindlePresetMetadata;
-  // An identifier Lumiverse's preset editor owns names no namespace of an extension's (`:14-27`).
-  const owned = LOOM_OWNED_PRESET_METADATA_KEYS.has(ext.identifier) || ext.identifier.startsWith("_lumiverse_");
-  const own = !owned && typeof metadata === "object" && metadata !== null && !Array.isArray(metadata) && Object.hasOwn(metadata, ext.identifier) ? (metadata as Record<string, unknown>)[ext.identifier] : undefined;
-  projected.presetMetadata = own === undefined ? undefined : structuredClone(own);
+  projected.presetMetadata = metadata === undefined ? undefined : structuredClone(metadata);
   const captures = projected.__spindleWorldInfoCaptures;
   delete projected.__spindleWorldInfoCaptures;
   delete projected.capturedWorldInfo;
