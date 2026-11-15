@@ -196,7 +196,7 @@ test.each(["swipe", "regenerate"] as const)("a %s in a branch of the reply it sh
   branchAtLastReply(b);
   // The branch's path is compared once before, as any earlier request of the branch compares it (here a Settle now, refused): it
   // holds the shared turn at the branch's copy of the reply.
-  expect((await b.page("POST", `/api/v1/chats/${BRANCH}/settle`, {})).status).toBe(409);
+  expect((await b.page("POST", `/api/v1/chats/${BRANCH}/settle`)).status).toBe(409);
   expect(store.path(BRANCH).find((e) => e.message === "m-again-2")?.turn).toBe(shared.id);
   const made = await settledInBranch(b, (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET, type: kind })).generationId!);
   // A turn of the branch's own, beside the shared one, at the branch's copy of the reply.
@@ -220,7 +220,7 @@ test("Settle now in a branch whose newest turn is the one it shares with the cha
   expect(recorded).toHaveLength(1);
 
   branchAtLastReply(b);
-  expect(await b.page("POST", `/api/v1/chats/${BRANCH}/settle`, {})).toEqual({
+  expect(await b.page("POST", `/api/v1/chats/${BRANCH}/settle`)).toEqual({
     status: 409,
     body: { error: "The newest turn on this chat's path is the one it shares with the chat it was branched from, so what Settle now records would go into that chat's history too. Play a turn in this chat first, then settle it." },
   });

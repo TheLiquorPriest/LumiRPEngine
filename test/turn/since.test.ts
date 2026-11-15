@@ -78,7 +78,7 @@ describe("the turn before, told and kept", () => {
     const cut = await settledTurn(b, (await generating).generationId!);
     expect(cut.status).toBe("cut");
 
-    expect((await b.page("POST", `/api/v1/chats/${CHAT}/settle`, {})).status).toBe(200);
+    expect((await b.page("POST", `/api/v1/chats/${CHAT}/settle`)).status).toBe(200);
     await b.until("the Settle now run to end", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
     expect(sent(b, 1)).toContain(`The reply in message ${cut.message} was stopped before it was finished.`);
     await settledTurn(b, await play(b, "normal", "I wait in the dark."));

@@ -12,7 +12,7 @@
 //
 // The run: RPH answers, its reply streamed to Lumiverse as it is written, the turn's folder (`folder.ts`)
 // written alongside once the Author's first model call has gone out; the run may go on after the reply
-// is released, and Lumiverse stopping before the release stops it. A run that ends with no reply ends
+// is out whole, and Lumiverse stopping before then stops it. A run that ends with no reply ends
 // the reply with a plain line from a file.
 //
 // Commit: when Lumiverse says the generation ended, the saved message is read back and the turn tied
@@ -446,6 +446,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         started: null,
         firstWord: null,
         released: null,
+        finished: null,
         ended: null,
         intent: null,
         thinking: [],
@@ -612,7 +613,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   async stop(user: string, turn: string): Promise<boolean> {
     const run = this.#d.runs.running(user, turn);
     if (run === undefined) return false;
-    if (run.released === null && run.generation !== null) {
+    if (run.finished === null && run.generation !== null) {
       const generation = run.generation;
       await this.#d.stopGeneration(generation).catch((error: unknown) => this.#d.log.warn("Lumiverse could not be told to stop this turn's generation; the turn is stopped on RPE's side.", { turn, generation, error: words(error) }));
     }
@@ -679,6 +680,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         started: null,
         firstWord: null,
         released: null,
+        finished: null,
         ended: null,
         intent: null,
         thinking: [],
@@ -1278,7 +1280,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     let answered = false;
     // Lumiverse stopping before the reply is out stops the turn; after it, the run goes on (plan §10.9).
     const onAbort = (): void => {
-      if (run.released === null) run.stop.abort(signal.reason);
+      if (run.finished === null) run.stop.abort(signal.reason);
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
@@ -1310,6 +1312,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       },
       finish: (usage) => {
         released();
+        run.finished = clock.now();
         answered = true;
         // What went out is kept before Lumiverse is told the reply ended: should RPE stop before the run does, the next intake ties it.
         void this.#d.runs.save(run, "keeping a released reply").catch((error: unknown) => this.#d.log.error("A released reply could not be kept.", { turn: run.turn, error: words(error) }));
@@ -1322,6 +1325,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         if (e.code === "limit" && e.limit !== undefined) run.stoppedBy ??= { limit: e.limit };
         // Stopped where it stood, at a limit or at the hold: what the Author had written of the reply goes out as the whole reply.
         if (run.stoppedBy !== null && run.reply !== "") {
+          run.finished = clock.now();
           out.finish({ reason: "stop" });
           replied.resolve();
           return;
@@ -1330,6 +1334,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         if (ending.lastText && e.text !== undefined) {
           run.lastText = true;
           sink.content(e.text);
+          run.finished = clock.now();
           out.finish({ reason: "stop" });
           replied.resolve();
           return;
@@ -1368,7 +1373,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         (error: unknown) => {
           run.status = "failed";
           const failed: ReplyError = { code: "failed", detail: words(error) };
-          if (run.released === null && run.error === null) sink.error(failed);
+          if (run.finished === null && run.error === null) sink.error(failed);
           run.error = failed;
         },
       )
@@ -1442,7 +1447,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#d.writes.run((db) => this.#d.runs.put(db, record), "recording a generation's end");
       return;
     }
-    const cut = change.stopped === true || run.released === null;
+    const cut = change.stopped === true || run.finished === null;
     const message = run.kind === "impersonate" ? null : (change.message ?? (cut ? run.target : null));
     const reads = this.#d.reads();
     const saved = message === null || reads === null ? undefined : (await reads.messagesById(change.chat, [message]))[0];

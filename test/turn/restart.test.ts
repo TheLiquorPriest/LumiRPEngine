@@ -94,7 +94,7 @@ describe("RPE restarted mid-turn", () => {
     const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([[run.turn, "failed", true]]);
     expect(b.turns.store.user(USER).turn(run.turn)).toMatchObject({ status: "done", hash: textHash("The lamp turns.") });
-    const settling = await b.page<{ turn: string; run: string }>("POST", `/api/v1/chats/${CHAT}/settle`, {});
+    const settling = await b.page<{ turn: string; run: string }>("POST", `/api/v1/chats/${CHAT}/settle`);
     expect(settling).toEqual({ status: 200, body: { turn: run.turn, run: expect.any(String) } });
   });
 

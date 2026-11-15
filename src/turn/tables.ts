@@ -269,4 +269,12 @@ ALTER TABLE turn_run ADD COLUMN stopped_by TEXT;
 ALTER TABLE turn_run ADD COLUMN last_text INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 12,
+    name: "when each run's reply went out whole",
+    // `runs.ts` `finished`. A run kept before has none, and reads as one whose reply did not go out whole.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN finished INTEGER;
+`,
+  },
 ];

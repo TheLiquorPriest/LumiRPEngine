@@ -76,6 +76,11 @@ export interface RunRecord {
   firstWord: number | null;
   /** When its reply began to go out: its first text reached RPE's sink, or the harness released it, whichever came first. */
   released: number | null;
+  /**
+   * When its reply went out whole: the sink's finish, or what a stopped run had written sent as the whole reply. Lumiverse stopping
+   * before it stops the run, and the Turn page's Stop tells Lumiverse first; after it, the run goes on (plan §10.9).
+   */
+  finished: number | null;
   ended: number | null;
   /** The intent record's own time, from its first token to its last (R-185), kept as it arrives; null while no record began. */
   intent: Span | null;
@@ -150,6 +155,7 @@ interface RunRow {
   started: number | null;
   first_word: number | null;
   released: number | null;
+  finished: number | null;
   ended: number | null;
   intent_time: string | null;
   thinking: string | null;
@@ -188,6 +194,7 @@ function recordOf(user: string, r: RunRow): RunRecord {
     started: r.started,
     firstWord: r.first_word,
     released: r.released,
+    finished: r.finished,
     ended: r.ended,
     intent: r.intent_time === null ? null : (JSON.parse(r.intent_time) as Span),
     thinking: r.thinking === null ? [] : (JSON.parse(r.thinking) as Span[]),
@@ -224,10 +231,10 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, stopped_by, last_text, base, saved, settled, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, stopped_by, last_text, base, saved, settled, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
-         status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
+         status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
          intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
          usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, base = excluded.base, saved = excluded.saved,
          settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
@@ -247,6 +254,7 @@ export class Runs {
         r.started,
         r.firstWord,
         r.released,
+        r.finished,
         r.ended,
         r.intent === null ? null : JSON.stringify(r.intent),
         JSON.stringify(r.thinking),

@@ -11,15 +11,15 @@ import { openSet, type OpenSet, shippedTexts } from "../guidance/set";
 
 const AUTHOR: AgentRef = { id: "author-1", definition: "author" };
 
-let open: OpenSet | null = null;
+const opened: OpenSet[] = [];
 afterEach(async () => {
-  await open?.close();
-  open = null;
+  for (const set of opened.splice(0)) await set.close();
 });
 
 /** What the Author is reminded of at the start of a turn, when two messages are about to leave the prompt uncovered; `config` is the user's own global file. */
 async function remindedOf(config: string): Promise<string[]> {
-  const set = (open = await openSet(shippedTexts(), { defs: STORY_FACT_DEFS }));
+  const set = await openSet(shippedTexts(), { defs: STORY_FACT_DEFS });
+  opened.push(set);
   if (config !== "") set.put("global", "config.yml", config);
   const uncovered: FactValue = { count: 2, fields: { range: { ".": [1, 2], from: 1, to: 2 } } };
   set.facts({ "history.leaving.uncovered": uncovered });
