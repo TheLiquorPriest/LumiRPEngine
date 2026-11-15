@@ -10,6 +10,7 @@ import type { LiveEvent } from "../../src/shared/api";
 import type { ExtensionStatus } from "../../src/ui/api";
 import { type ClientState, createClient, extensionConnector, isJoined, KEY_LET_GO, type LiveListener, pathOf, replyOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
+import { createUiSettings } from "../../src/ui/ui-settings";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
 import { CHAT, RECORDED, turnListAt } from "./recorded";
 import { expand, textOf } from "./vnodes";
@@ -60,7 +61,7 @@ class Channel implements RelayChannel {
 
   constructor(
     private readonly answer: (sent: Sent) => { status: number; body: unknown },
-    private readonly facts: (start: number) => StartAnswer = (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+    private readonly facts: (start: number) => StartAnswer = (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [ADDRESS], build: "b-1", pageSettings: {} }, missing: [] }),
   ) {}
 
   async start(): Promise<StartAnswer> {
@@ -310,7 +311,7 @@ describe("which road the drawer's client takes", () => {
 
   test("a page token is renewed before it runs out", async () => {
     const timers = new ManualTimers();
-    const channel = new Channel(() => ({ status: 200, body: turnListAt() }), (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [], build: "b-1" }, missing: [] }));
+    const channel = new Channel(() => ({ status: 200, body: turnListAt() }), (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [], build: "b-1", pageSettings: {} }, missing: [] }));
     const client = track(createClient(extensionConnector(channel, browser(refused, "open", timers).deps)));
     await client.call("GET /api/v1/chats", {});
     timers.advance(28 * 60_000);
@@ -326,7 +327,7 @@ describe("which road the drawer's client takes", () => {
     const timers = new ManualTimers();
     // RPE's clock is two hours behind the browser's: by the browser's clock, the time RPE names has long passed.
     const rpeNow = timers.now() - 2 * 3_600_000;
-    const backend = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: rpeNow + 30 * 60_000, expiresInMs: 30 * 60_000, addresses: [], build: "b-1" }));
+    const backend = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: rpeNow + 30 * 60_000, expiresInMs: 30 * 60_000, addresses: [], build: "b-1", pageSettings: {} }));
     try {
       const client = track(createClient(extensionConnector(backend.road, browser(refused, "open", timers).deps)));
       await client.call("GET /api/v1/chats", {});
@@ -371,7 +372,7 @@ describe("a chat's live updates", () => {
 
   test("through the extension's own page road: the start, a request, and a live list in two parts all reach the page", async () => {
     const timers = new ManualTimers();
-    const { road, deliver, asked } = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: timers.now() + 1_800_000, expiresInMs: 1_800_000, addresses: [ADDRESS], build: "b-1" }));
+    const { road, deliver, asked } = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: timers.now() + 1_800_000, expiresInMs: 1_800_000, addresses: [ADDRESS], build: "b-1", pageSettings: {} }));
     try {
       const client = track(createClient(extensionConnector(road, browser(refused, "open", timers).deps)));
       const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });
@@ -467,7 +468,7 @@ describe("the page token, renewed while the drawer stays open", () => {
       (n) => {
         if (ext.away) return { facts: null, error: AWAY, missing: [] };
         minted.set(`rpp_page${n}`, timers.now());
-        return { facts: { token: `rpp_page${n}`, expiresInMs: LIFE, addresses: [ADDRESS], build: "b-1" }, missing: [] };
+        return { facts: { token: `rpp_page${n}`, expiresInMs: LIFE, addresses: [ADDRESS], build: "b-1", pageSettings: {} }, missing: [] };
       },
     );
     const takes = (protocols: readonly string[]): boolean => {
@@ -547,7 +548,7 @@ describe("the page token, renewed while the drawer stays open", () => {
     const SHORT = 2 * 60_000;
     const channel = new Channel(
       () => ({ status: 200, body: {} }),
-      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: SHORT, addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: SHORT, addresses: [ADDRESS], build: "b-1", pageSettings: {} }, missing: [] }),
     );
     const { live, opened, nextSocket, mine } = await following(timers, channel, "open");
     const batch = (...seqs: number[]): string => JSON.stringify({ type: "events", chat: CHAT, events: seqs.map((seq) => ({ ...RECORDED[0], chat: CHAT, seq })) });
@@ -585,7 +586,7 @@ describe("the page token, renewed while the drawer stays open", () => {
     const timers = new ManualTimers();
     const channel = new Channel(
       () => ({ status: 200, body: {} }),
-      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 2 * 60_000, addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 2 * 60_000, addresses: [ADDRESS], build: "b-1", pageSettings: {} }, missing: [] }),
     );
     const { live, opened, nextSocket, mine } = await following(timers, channel, "open");
     const coming = nextSocket();
@@ -697,5 +698,51 @@ describe("a call's path", () => {
   test("the rest of a path goes in segment by segment, each encoded, its slashes kept", () => {
     expect(pathOf("/api/v1/chats/:chat/turns/:turn/files/*", { chat: "c1", turn: "t1", "*": "transcripts/author a1.call-1.json" })).toBe("/api/v1/chats/c1/turns/t1/files/transcripts/author%20a1.call-1.json");
     expect(() => pathOf("/api/v1/chats/:chat/turns/:turn/files/*", { chat: "c1", turn: "t1" })).toThrow("needs its *");
+  });
+});
+
+describe("the page's settings in the drawer's client", () => {
+  test("a probe wait set to 7 s waits 7 s for an address, and a start wait RPE gave is kept in the browser for the next start", async () => {
+    const timers = new ManualTimers();
+    const kept = new Map<string, string>();
+    const storage = { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value) };
+    const settings = createUiSettings(storage);
+    const channel = new Channel(
+      () => ({ status: 200, body: {} }),
+      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [ADDRESS], build: "b-1", pageSettings: { "pages.probeMs": 7000, "pages.startMs": 50_000 } }, missing: [] }),
+    );
+    // An address that never answers; the page's own request is let go when it gives up.
+    const silent = browser((_url, init) => new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted")))), "open", timers);
+    const client = track(createClient(extensionConnector(channel, silent.deps, settings)));
+    client.connect();
+    await settle();
+    timers.advance(6900);
+    await settle();
+    expect(client.state.get().phase).toBe("connecting");
+    timers.advance(200);
+    const state = await settled(client);
+    expect(state.phase === "relay" ? state.why : "").toContain("no answer within 7 s");
+    expect(createUiSettings(storage).values.get().startMs).toBe(50_000);
+    expect(createUiSettings(null).values.get().startMs).toBe(35_000);
+  });
+
+  test("a request RPE took in hand and answered with an id is asked for every second until its answer is ready", async () => {
+    const timers = new ManualTimers();
+    let polls = 0;
+    const channel = new Channel((sent) => {
+      if (sent.method === "POST") return { status: 202, body: { answer: "a1" } };
+      polls++;
+      return polls < 3 ? { status: 202, body: { answer: "a1" } } : { status: 200, body: { ok: true } };
+    });
+    const client = track(createClient(extensionConnector(channel, browser(refused, "open", timers).deps)));
+    let result: unknown = null;
+    void client.call("POST /api/v1/chats", {}).then((answer) => (result = answer));
+    for (let i = 0; i < 4; i++) {
+      await settle();
+      timers.advance(1000);
+    }
+    await settle();
+    expect(result).toEqual({ ok: true });
+    expect(channel.requests.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /api/v1/chats", "GET /api/v1/answers/a1", "GET /api/v1/answers/a1", "GET /api/v1/answers/a1"]);
   });
 });

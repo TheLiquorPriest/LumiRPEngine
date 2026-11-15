@@ -14,6 +14,7 @@ import { createGate } from "./gate";
 import { type LumiverseContext, lumiverseHost } from "./kept/host";
 import { browserDeps, type RelayChannel, type RoadDeps } from "./roads";
 import { UI_CSS } from "./styles";
+import { createUiSettings, siteStorage, UiSettingsContext } from "./ui-settings";
 
 /** Spindle's frontend context, as far as the pages use it. */
 export interface DrawerContext {
@@ -51,7 +52,9 @@ function DrawerShell(props: { active: Readable<string | null> }) {
 export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): () => void {
   const { root, ctx } = shell;
   const removeStyle = ctx.dom.addStyle(UI_CSS);
-  const client = createClient(extensionConnector(shell.road, deps));
+  const settings = createUiSettings(siteStorage(() => globalThis.localStorage));
+  const client = createClient(extensionConnector(shell.road, deps, settings));
+  const stopSettings = settings.follow(client);
   // At once, not when a page first asks: with no chat open no page asks, and the drawer should still say how RPE stands.
   client.connect();
   const gate = createGate();
@@ -71,14 +74,17 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): () => 
   else for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"]) offs.push(ctx.events.on(event, () => place(ctx.getActiveChat().chatId)));
   const app: UiApp = { shell: "drawer", client, gate, route, timers: deps.timers, keptHost: () => lumiverseHost(ctx), go: (next) => route.set(next) };
   render(
-    <AppContext.Provider value={app}>
-      <DrawerShell active={active} />
-    </AppContext.Provider>,
+    <UiSettingsContext.Provider value={settings}>
+      <AppContext.Provider value={app}>
+        <DrawerShell active={active} />
+      </AppContext.Provider>
+    </UiSettingsContext.Provider>,
     root,
   );
   return () => {
     render(null, root);
     for (const off of offs) off();
+    stopSettings();
     client.close();
     removeStyle();
   };

@@ -17,6 +17,7 @@ import { webHost } from "./kept/host";
 import { createGate } from "./gate";
 import { browserDeps, type RoadDeps } from "./roads";
 import { UI_CSS } from "./styles";
+import { createUiSettings, UiSettingsContext } from "./ui-settings";
 
 /** Where this browser keeps the web UI's token. */
 export const TOKEN_KEY = "rpe:web-token";
@@ -46,15 +47,6 @@ export function hashOf(route: Route): string {
   const at = `#/chats/${encodeURIComponent(route.chat)}`;
   if (route.page === "turn") return `${at}/turns/${encodeURIComponent(route.turn)}`;
   return `${at}/${route.page}`;
-}
-
-/** The browser's storage for this site, read through `open`; null where the browser refuses it (one that blocks site data throws on the very read). */
-export function siteStorage(open: () => Storage): Storage | null {
-  try {
-    return open();
-  } catch {
-    return null;
-  }
 }
 
 /** The token kept in `storage`; in memory alone where the browser keeps nothing (a private window may refuse). */
@@ -196,7 +188,9 @@ export interface WebOptions {
 export function startWeb(root: HTMLElement, options: WebOptions): () => void {
   const deps = options.deps ?? browserDeps();
   const tokens = storedTokens(options.storage);
-  const client = createClient(webConnector(options.base, tokens, deps));
+  const settings = createUiSettings(options.storage);
+  const client = createClient(webConnector(options.base, tokens, deps, settings));
+  const stopSettings = settings.follow(client);
   client.connect();
   const gate = createGate();
   const route = createStore<Route>(routeOfHash(location.hash));
@@ -224,14 +218,17 @@ export function startWeb(root: HTMLElement, options: WebOptions): () => void {
   style.textContent = UI_CSS;
   document.head.append(style);
   render(
-    <AppContext.Provider value={app}>
-      <WebShell tokens={tokens} />
-    </AppContext.Provider>,
+    <UiSettingsContext.Provider value={settings}>
+      <AppContext.Provider value={app}>
+        <WebShell tokens={tokens} />
+      </AppContext.Provider>
+    </UiSettingsContext.Provider>,
     root,
   );
   return () => {
     render(null, root);
     window.removeEventListener("hashchange", onHash);
+    stopSettings();
     client.close();
     style.remove();
   };

@@ -9,11 +9,18 @@
 // why.
 
 import { createStore, type Readable } from "./store";
-import { type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent } from "../shared/api";
+import { type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent, type MissingPermissionShown } from "../shared/api";
 import { isRecord } from "../shared/json";
-import { type MissingPermission, type RouteKey, SESSION_PATH } from "./api";
-import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
+import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, SESSION_PATH, type StartFacts, type Timers } from "./roads";
+import { createUiSettings, type UiSettings } from "./ui-settings";
 import { errorWords } from "./words";
+
+/** Every route the pages call, by method and path pattern, as the route table writes them (the generated types); `*` stands for the rest of the path. */
+export type RouteKey = keyof ApiRoutes & string;
+
+/** The status a route that may outlast the relay's 30 s answers at once with: its body is `{ answer: <id> }`, and the answer is read from `ANSWERS_PATH/:id` until it is ready. */
+const ANSWER_STATUS = 202;
+const ANSWERS_PATH = "/api/v1/answers";
 
 /** RPE refused a call, in its own words; `status` 0 when RPE was not reached at all. */
 export class RpeError extends Error {
@@ -93,7 +100,7 @@ export interface LiveListener {
 export interface RpeClient {
   readonly state: Readable<ClientState>;
   /** What the extension says it lacks, in its own word (the drawer); null where the page has none (the web shell: RPE's status route says it). */
-  readonly missing: Readable<readonly MissingPermission[] | null>;
+  readonly missing: Readable<readonly MissingPermissionShown[] | null>;
   call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<Answer<K>>;
   /** Follows a chat's live events; the returned function stops. */
   follow(chat: string, listener: LiveListener): () => void;
@@ -128,7 +135,10 @@ export interface Connector {
   connect(): Promise<Connection>;
   /** Another road may answer when the direct one stops answering (the drawer: the relay). */
   readonly canSwitch: boolean;
-  readonly missing: Readable<readonly MissingPermission[] | null>;
+  readonly missing: Readable<readonly MissingPermissionShown[] | null>;
+  /** The page's settings, which the client reads when it waits (how often it asks after a long request). */
+  readonly settings: UiSettings;
+  readonly timers: Timers;
   close(): void;
 }
 
@@ -177,6 +187,17 @@ function readAnswer(answer: RoadAnswer): unknown {
     return JSON.parse(answer.text);
   } catch {
     throw new RpeError(answer.status, "RPE's answer was not JSON.");
+  }
+}
+
+/** The id of the answer RPE says it will give, for a route that took the request in hand and answered at once (status 202, a body of the one key `answer`); null for any other answer. */
+function answerIdOf(answer: RoadAnswer): string | null {
+  if (answer.status !== ANSWER_STATUS) return null;
+  try {
+    const body: unknown = JSON.parse(answer.text);
+    return isRecord(body) && typeof body.answer === "string" && Object.keys(body).length === 1 ? body.answer : null;
+  } catch {
+    return null;
   }
 }
 
@@ -294,6 +315,28 @@ export function createClient(connector: Connector): RpeClient {
     }
   }
 
+  /** One request as RPE answers it: a road found if need be, found again once when the direct road stopped answering under the page, and a refused credential renewed. */
+  async function exchange(method: string, path: string, body: string | undefined): Promise<RoadAnswer> {
+    let connection = await connect();
+    let answer: RoadAnswer;
+    try {
+      answer = await send(connection, method, path, body);
+    } catch (error) {
+      if (!(connector.canSwitch && connection.road.kind === "direct")) throw error;
+      // The direct road stopped answering under the page: find a road again, once (unless another call already has).
+      if (road === connection.road) client.reconnect();
+      connection = await connect();
+      answer = await send(connection, method, path, body);
+    }
+    if (answer.status === 401 && (await connection.credential.renew().catch(() => false))) answer = await send(connection, method, path, body);
+    if (answer.status === 401 && !connector.canSwitch) {
+      const refused = new RpeError(401, `${refusalOf(answer).message} ${KEY_LET_GO}`);
+      signOut(refused);
+      throw refused;
+    }
+    return answer;
+  }
+
   const client: RpeClient = {
     state,
     missing: connector.missing,
@@ -302,22 +345,14 @@ export function createClient(connector: Connector): RpeClient {
       const method = key.slice(0, space);
       const path = pathOf(key.slice(space + 1), params as Readonly<Record<string, string>>, options.query);
       const body = options.body === undefined ? undefined : JSON.stringify(options.body);
-      let connection = await connect();
-      let answer: RoadAnswer;
-      try {
-        answer = await send(connection, method, path, body);
-      } catch (error) {
-        if (!(connector.canSwitch && connection.road.kind === "direct")) throw error;
-        // The direct road stopped answering under the page: find a road again, once (unless another call already has).
-        if (road === connection.road) client.reconnect();
-        connection = await connect();
-        answer = await send(connection, method, path, body);
-      }
-      if (answer.status === 401 && (await connection.credential.renew().catch(() => false))) answer = await send(connection, method, path, body);
-      if (answer.status === 401 && !connector.canSwitch) {
-        const refused = new RpeError(401, `${refusalOf(answer).message} ${KEY_LET_GO}`);
-        signOut(refused);
-        throw refused;
+      let answer = await exchange(method, path, body);
+      // A route that may outlast the relay's 30 s answers at once with the id of its answer, which is asked for until it is ready.
+      for (let id = answerIdOf(answer); id !== null; id = answerIdOf(answer)) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        connector.timers.setTimeout(resolve, connector.settings.values.get().jobPollMs);
+        await promise;
+        if (closed) throw new RpeError(0, "The page closed.");
+        answer = await exchange("GET", pathOf(`${ANSWERS_PATH}/:id`, { id }), undefined);
       }
       return readAnswer(answer) as Answer<typeof key>;
     },
@@ -363,18 +398,6 @@ export function createClient(connector: Connector): RpeClient {
 
 // ---------------------------------------------------------------- the shells' connectors
 
-export interface ConnectSettings extends SocketSettings {
-  /** How long the page waits for each of RPE's addresses to answer it directly. */
-  probeMs: number;
-  /** How long the page waits for the extension's start-up facts. */
-  startMs: number;
-  /** How long before a page token runs out the client asks for a new one (at most half its life). */
-  renewAheadMs: number;
-}
-
-/** Fixed defaults: a loopback address answers well inside 3 s; the start waits past Spindle's proxy's 30 s; a token is renewed a minute before it runs out. */
-export const CONNECT_DEFAULTS: ConnectSettings = { probeMs: 3000, startMs: 35_000, renewAheadMs: 60_000, reconnectMs: 1000, reconnectMaxMs: 30_000 };
-
 /** Where the web shell keeps the web UI's token. */
 export interface TokenStore {
   get(): string | null;
@@ -390,7 +413,7 @@ export const KEY_LET_GO = "This browser has let go of the key it kept: a key sto
  * is let go, and there is no other to take its place. A session route that does not answer is RPE not
  * running (a restart, say): that says nothing of the key, so the socket is simply tried again.
  */
-export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, settings: ConnectSettings = CONNECT_DEFAULTS): Connector {
+export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, settings: UiSettings = createUiSettings(null)): Connector {
   const credential: Credential = {
     token: () => tokens.get() ?? "",
     async renew() {
@@ -404,10 +427,12 @@ export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, s
   };
   return {
     canSwitch: false,
-    missing: createStore<readonly MissingPermission[] | null>(null),
+    missing: createStore<readonly MissingPermissionShown[] | null>(null),
+    settings,
+    timers: deps.timers,
     async connect() {
       if (tokens.get() === null) throw new ConnectFailure({ phase: "signed-out", error: null });
-      return { road: directRoad(base, credential, deps, settings), credential, state: { phase: "direct", address: base } };
+      return { road: directRoad(base, credential, deps, settings.values), credential, state: { phase: "direct", address: base } };
     },
     close: () => undefined,
   };
@@ -419,8 +444,8 @@ export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, s
  * before it runs out, asked for again until it comes when the extension cannot give it, and renewed
  * again when RPE refuses it.
  */
-export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settings: ConnectSettings = CONNECT_DEFAULTS): Connector {
-  const missing = createStore<readonly MissingPermission[] | null>(null);
+export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settings: UiSettings = createUiSettings(null)): Connector {
+  const missing = createStore<readonly MissingPermissionShown[] | null>(null);
   let facts: StartFacts | null = null;
   let timer: unknown = null;
   let closed = false;
@@ -428,7 +453,8 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
 
   async function start(): Promise<StartFacts> {
     const { promise, resolve, reject } = Promise.withResolvers<StartFacts>();
-    const wait = deps.timers.setTimeout(() => reject(new ConnectFailure({ phase: "failed", error: `The extension gave this page no answer within ${Math.round(settings.startMs / 1000)} s.` })), settings.startMs);
+    const startMs = settings.values.get().startMs;
+    const wait = deps.timers.setTimeout(() => reject(new ConnectFailure({ phase: "failed", error: `The extension gave this page no answer within ${Math.round(startMs / 1000)} s.` })), startMs);
     channel.start().then(
       (answer) => {
         deps.timers.clearTimeout(wait);
@@ -442,6 +468,7 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
       },
     );
     const got = await promise;
+    settings.take(got.pageSettings);
     facts = got;
     schedule(got);
     return got;
@@ -449,8 +476,9 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
 
   /** Renews the token before its life runs out, counted from now, when its facts reached the page: never from a time RPE's clock named. */
   function schedule(got: StartFacts): void {
+    const { renewAheadMs, reconnectMs } = settings.values.get();
     const life = got.expiresInMs;
-    renewIn(Math.max(0, Math.max(life / 2, life - settings.renewAheadMs)), settings.reconnectMs);
+    renewIn(Math.max(0, Math.max(life / 2, life - renewAheadMs)), reconnectMs);
   }
 
   /** Hears each token renewed ahead of the old one's end: the live socket opens its next one with it before the old one is closed. */
@@ -469,7 +497,7 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
         },
         () => {
           // Another renewal may have come in meanwhile and set the next one.
-          if (timer === null) renewIn(retryMs, Math.min(retryMs * 2, settings.reconnectMaxMs));
+          if (timer === null) renewIn(retryMs, Math.min(retryMs * 2, settings.values.get().reconnectMaxMs));
         },
       );
     }, ms);
@@ -487,12 +515,14 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
   return {
     canSwitch: true,
     missing,
+    settings,
+    timers: deps.timers,
     async connect() {
       const got = await start();
       const tried: string[] = [];
       for (const address of got.addresses) {
-        const probe = await probeDirect(address, got.token, deps, settings.probeMs);
-        if (probe.ok) return { road: directRoad(address, credential, deps, settings), credential, state: { phase: "direct", address } };
+        const probe = await probeDirect(address, got.token, deps, settings.values.get().probeMs);
+        if (probe.ok) return { road: directRoad(address, credential, deps, settings.values), credential, state: { phase: "direct", address } };
         tried.push(`${address}: ${probe.why}`);
       }
       const why = tried.length === 0 ? "RPE gave no address this page could try directly." : `This page could not reach RPE directly (${tried.join("; ")}).`;

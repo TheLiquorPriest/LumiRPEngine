@@ -5,10 +5,20 @@
 // (client.ts) and the page says which.
 
 import type { Clock } from "rp-harness/contract";
-import { type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, TOKEN_PROTOCOL_PREFIX } from "../shared/api";
+import { type ApiRoutes, type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, type MissingPermissionShown, TOKEN_PROTOCOL_PREFIX } from "../shared/api";
 import { isRecord } from "../shared/json";
-import { type MissingPermission, STATUS_PATH } from "./api";
+import type { PageSettings } from "../shared/page-settings";
+import type { Readable } from "./store";
 import { errorWords } from "./words";
+
+/** A route's path as the route table writes it: named by its key, so a route renamed or removed fails the build here. */
+function pathOfRoute(key: keyof ApiRoutes & string): string {
+  return key.slice(key.indexOf(" ") + 1);
+}
+
+/** Where RPE says that it answers, and where it says whose the page's credential is. */
+export const STATUS_PATH = pathOfRoute("GET /api/v1/status");
+export const SESSION_PATH = pathOfRoute("GET /api/v1/status/session");
 
 /** What a road hands on from RPE's live hub: a chat's events, a loss the page must read past, RPE's refusal (or why the live updates stopped), or the end of the credential the page holds, with none to take its place. */
 export type LiveUpdate =
@@ -76,11 +86,8 @@ export interface Credential {
   onFresh?(listener: () => void): () => void;
 }
 
-export interface SocketSettings {
-  /** How long the page waits before it tries again: the live socket after it closed, a page token that could not be had. The wait doubles each time, up to `reconnectMaxMs`. */
-  reconnectMs: number;
-  reconnectMaxMs: number;
-}
+/** What a road reads of the page's settings, each time it needs it: how long the page waits before it tries again (the live socket after it closed, a page token that could not be had; the wait doubles each time, up to `reconnectMaxMs`). */
+export type SocketSettings = Readable<Pick<PageSettings, "reconnectMs" | "reconnectMaxMs">>;
 
 /** The browser's own fetch, socket and timers. */
 export function browserDeps(): RoadDeps {
@@ -214,7 +221,7 @@ export function directRoad(base: string, credential: Credential, deps: RoadDeps,
   let retry: unknown = null;
   /** A fresh credential is being asked for: the socket is tried again once it is in. */
   let renewing = false;
-  let delay = settings.reconnectMs;
+  let delay = settings.get().reconnectMs;
   let closed = false;
 
   const emit = (update: LiveUpdate): void => {
@@ -298,7 +305,7 @@ export function directRoad(base: string, credential: Credential, deps: RoadDeps,
     const old = socket;
     socket = fresh;
     next = null;
-    delay = settings.reconnectMs;
+    delay = settings.get().reconnectMs;
     confirmed.clear();
     for (const chat of followed) {
       const from = fresh.from.get(chat);
@@ -348,7 +355,7 @@ export function directRoad(base: string, credential: Credential, deps: RoadDeps,
       retry = null;
       connect();
     }, delay);
-    delay = Math.min(delay * 2, settings.reconnectMaxMs);
+    delay = Math.min(delay * 2, settings.get().reconnectMaxMs);
   }
 
   function closedUnder(from: LiveSocket | null, code?: number): void {
@@ -400,7 +407,7 @@ export function directRoad(base: string, credential: Credential, deps: RoadDeps,
         open: () => {
           if (socket !== mine) return;
           mine.open = true;
-          delay = settings.reconnectMs;
+          delay = settings.get().reconnectMs;
           for (const chat of followed) sendOn(mine, { op: "follow", chat });
         },
         message: (text) => receive(mine, text),
@@ -483,13 +490,15 @@ export interface StartFacts {
   expiresInMs: number;
   addresses: string[];
   build: string;
+  /** The page's own settings group as RPE holds it, keyed by each setting's key (`src/shared/page-settings.ts`); the page checks each value and takes the default for one it cannot read. */
+  pageSettings: Readonly<Record<string, number>>;
 }
 
 export interface StartAnswer {
   facts: StartFacts | null;
   /** Why there are no facts, in words the page shows. */
   error?: string;
-  missing: MissingPermission[];
+  missing: MissingPermissionShown[];
 }
 
 /**
@@ -503,7 +512,7 @@ export interface RelayChannel {
   follow(chat: string): Promise<void>;
   unfollow(chat: string): Promise<void>;
   onUpdates(handler: (updates: unknown[], reset: boolean) => void): () => void;
-  onPermissions(handler: (missing: MissingPermission[]) => void): () => void;
+  onPermissions(handler: (missing: MissingPermissionShown[]) => void): () => void;
 }
 
 /** The relay road over the extension's pipe. The pipe itself is the loader's: closing the road leaves it running. */
