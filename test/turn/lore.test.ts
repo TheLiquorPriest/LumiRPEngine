@@ -108,7 +108,8 @@ test("a character's agent started with the cast's id for its character reads the
   const [orrin, tobin] = await b.app.writes.run((db) => [addCharacter(db, USER, CHAT, "Orrin Pell", 1).id, addCharacter(db, USER, CHAT, "Tobin Reed", 2).id]);
   const scope = { user: USER, chat: CHAT, session: "none" };
   const reader = (plays: string): AgentRef => ({ id: "character-1", definition: "character", plays });
-  const crown = ["w-drowned_crown"];
+  // A world entry's id is given the first time RPE sees it: the lead reads every entry, so its search finds it.
+  const crown = [(await b.turns.env.lore!.search(scope, { text: "crown" }, { id: "lead-1", definition: "lead" })).find((h) => h.title === "The drowned crown")?.id ?? ""];
   // Through the lore RPH reads for an agent: its `lore:` attachment and its lore tools.
   expect((await b.turns.env.lore!.read(scope, crown, reader(orrin))).map((e) => e.id)).toEqual(crown);
   expect((await b.turns.env.lore!.search(scope, { text: "crown" }, reader(orrin))).map((e) => e.id)).toEqual(crown);
