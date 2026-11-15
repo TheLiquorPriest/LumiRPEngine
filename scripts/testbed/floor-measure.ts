@@ -212,6 +212,8 @@ export interface Row {
   why: string[];
   /** The rule applied, and turns named for the lead. */
   notes: string[];
+  /** The numbers the row's words are made of, by name (milliseconds; a fraction for `over`), for a test or a report that reads a figure and not the sentence; none where a row has none. */
+  figures?: Readonly<Record<string, number | null>>;
 }
 
 export function median(values: readonly number[]): number | null {
@@ -429,6 +431,7 @@ function firstWordsRow(run: FloorRun, refusal: string | null): Row {
     stands: `${adjusted.length} RPE turn(s) and ${plainTimes.length} plain turn(s), of ${count.measured.length} pair(s) measured`,
     why: why.length === 0 && over === null ? ["no figure on one arm"] : why,
     notes: [twoStep ? "two-step form: Send to the moment the reply's message ended and was shown whole, less exactly timings.intent, against plain's Send to its last word" : "tag form: Send to the reply's first word on the page, less exactly timings.intent, against plain's Send to its first word", ...(noRecord.length > 0 ? [`${NO_RECORD}: ${noRecord.join(", ")}`] : [])],
+    figures: { rpe: rpeMedian, rpeUnadjusted: median(unadjusted), plain: plainMedian, over, intent: median(own), thinkingRpe: median(thinkingRpe.filter((v): v is number => typeof v === "number")), thinkingPlain: median(known(plain.map(plainThinking))) },
   };
 }
 
@@ -527,6 +530,7 @@ function perTokenRow(run: FloorRun, refusal: string | null): Row {
       stands,
       why,
       notes: ["which call wrote the reply is read from the released event", counted],
+      figures: { rpe, plain, over: null },
     };
   }
   const over = rpe === null || plain === null ? null : rpe / plain - 1;
@@ -540,6 +544,7 @@ function perTokenRow(run: FloorRun, refusal: string | null): Row {
     stands,
     why,
     notes: [`tag form: first word to last word on the page over the shown reply's tokens less one; ${counted}`],
+    figures: { rpe, plain, over },
   };
 }
 
