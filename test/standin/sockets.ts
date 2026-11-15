@@ -7,7 +7,11 @@
 // - a sender's backlog past 8 MiB closes the socket (`ws/transport.ts:5`, `:12-13`; `ws/bus.ts:84-97`);
 // - a socket that has sent nothing for 120 s is closed by the sweep every 60 s, 1001 "Timeout"
 //   (`ws/bus.ts:17-18`, `:457-466`);
-// - frames over 1 MiB, or 4 MiB for an extension's message, are dropped (`ws/handler.ts:262-281`).
+// - frames over 1 MiB, or 4 MiB for an extension's message, are dropped (`ws/handler.ts:262-281`);
+// - the receive queue runs nothing until the socket is let in, and takes a frame as a control frame (run at once) only once it is, and only at 64 KiB
+//   or less (`ws/receive-queue.ts:124`, `:140`, `:150-152`); a binary frame closes it, 1003 "Expected a text message" (`:131-133`); one not let in within
+//   10 s is closed, 1013 "WebSocket authentication timed out" (`:111-112`);
+// - a socket whose page says it is hidden is let be 30 minutes, not 120 s (`ws/bus.ts:23`, `:461-463`, `:558`).
 // Its own: frames a client sends in one instant arrive in one read; a handler of an extension's message
 // takes `handlerMs`; a page reads what it is sent at `readBytesPerSecond`.
 
@@ -18,6 +22,10 @@ const CONTROL_TYPES: Record<string, true> = { ping: true, visibility: true, stre
 export const BACKPRESSURE_LIMIT = 8 * 1024 * 1024;
 export const CLIENT_TIMEOUT_MS = 120_000;
 export const SWEEP_MS = 60_000;
+/** `HIDDEN_CLIENT_TIMEOUT_MS` (`ws/bus.ts:23`). */
+export const HIDDEN_CLIENT_TIMEOUT_MS = 30 * 60_000;
+/** The largest frame taken as a control frame (`ws/receive-queue.ts:140`). */
+const CONTROL_SIZE_MAX = 64 * 1024;
 const SIZE_LIMIT = 1024 * 1024;
 const SIZE_LIMIT_BACKEND_MSG = 4 * 1024 * 1024;
 
@@ -52,6 +60,10 @@ export interface SocketStats {
 export class ServerSocket {
   readonly stats: SocketStats = { mostPending: 0, mostBuffered: 0, pauses: 0, framesIn: 0, framesOut: 0, dropped: 0 };
   closed: { code: number; reason: string } | null = null;
+  /** Let in (`ws/receive-queue.ts:104-109`): until it is, its frames are counted and kept, and none is run. A socket made for a page is let in at once. */
+  admitted = true;
+  /** Its page's own word (`visibility`, `ws/handler.ts:299-304`): hidden pages are let be 30 minutes (`ws/bus.ts:461-463`). */
+  visible = true;
   /** When the client last sent anything (`ws/handler.ts:257`). */
   lastInbound: number;
   private pending = 0;
@@ -85,6 +97,24 @@ export class ServerSocket {
 
   get session(): string | undefined {
     return this.options.session;
+  }
+
+  /** How long it may be silent before the sweep closes it (`ws/bus.ts:461-463`): 120 s, or 30 minutes where its page said it is hidden. */
+  get timeoutMs(): number {
+    return this.visible ? CLIENT_TIMEOUT_MS : HIDDEN_CLIENT_TIMEOUT_MS;
+  }
+
+  /** Let in once its ticket is taken (`ws/receive-queue.ts:104-109`): it is whose it is, and what its queue kept is run. */
+  admit(user: string, session?: string): void {
+    this.options.user = user;
+    if (session !== undefined) this.options.session = session;
+    this.admitted = true;
+    void this.pump();
+  }
+
+  /** The client sends a binary frame: the application's protocol is JSON text, and Lumiverse closes the socket at once (`ws/receive-queue.ts:131-133`). */
+  fromClientBinary(): void {
+    this.close(1003, "Expected a text message");
   }
 
   /** The client sends a frame: it arrives with the others it sent in the same instant. */
@@ -136,7 +166,7 @@ export class ServerSocket {
     }
     this.pressure();
     const item = { text, size, frame };
-    if (frame !== null && Object.hasOwn(CONTROL_TYPES, String(frame.type))) void this.run(item);
+    if (frame !== null && this.admitted && size <= CONTROL_SIZE_MAX && Object.hasOwn(CONTROL_TYPES, String(frame.type))) void this.run(item);
     else {
       this.queue.push(item);
       void this.pump();
@@ -170,7 +200,7 @@ export class ServerSocket {
   }
 
   private async pump(): Promise<void> {
-    if (this.running) return;
+    if (this.running || !this.admitted) return;
     this.running = true;
     try {
       while (this.closed === null && this.queue.length > 0) await this.run(this.queue.shift()!);

@@ -87,8 +87,9 @@ describe("the event socket", () => {
     server.drop(USER);
     await clock.advance(0);
     server.openDelayMs = null;
-    await clock.advance(1_000 + 20_000);
-    expect(socket.state()).toMatchObject({ state: "waiting", why: "Lumiverse did not let the socket in", retryAt: clock.now() + 2_000 });
+    // Lumiverse closes a socket it has not let in within ten seconds (`ws/receive-queue.ts:111-112`), before RPE's own twenty.
+    await clock.advance(1_000 + 10_000);
+    expect(socket.state()).toMatchObject({ state: "waiting", why: "Lumiverse closed the socket (1013 WebSocket authentication timed out)", retryAt: clock.now() + 2_000 });
     server.openDelayMs = 0;
     await clock.advance(2_000);
     expect(socket.state().state).toBe("open");
@@ -108,6 +109,28 @@ describe("the event socket", () => {
     server.answerPings = true;
     await clock.advance(1_000);
     expect(socket.state().state).toBe("open");
+  });
+
+  test("a binary frame and a late admission close the socket as Lumiverse closes them", async () => {
+    const { clock, server, socket } = await bed();
+    socket.start();
+    await clock.advance(0);
+    server.socketsOf(USER)[0]!.fromClientBinary();
+    await clock.advance(0);
+    expect(socket.state()).toMatchObject({ state: "waiting", why: "Lumiverse closed the socket (1003 Expected a text message)" });
+    await clock.advance(1_000);
+    expect(socket.state().state).toBe("open");
+    // Let in at nine seconds it stays; let in at ten it is too late.
+    server.drop(USER);
+    await clock.advance(0);
+    server.openDelayMs = 9_000;
+    await clock.advance(1_000 + 9_000);
+    expect(socket.state().state).toBe("open");
+    server.drop(USER);
+    await clock.advance(0);
+    server.openDelayMs = 10_000;
+    await clock.advance(1_000 + 10_000);
+    expect(socket.state()).toMatchObject({ state: "waiting", why: "Lumiverse closed the socket (1013 WebSocket authentication timed out)" });
   });
 
   test("an authentication error stops it with plain words, it does not try again by itself, and a new sign-in opens it", async () => {

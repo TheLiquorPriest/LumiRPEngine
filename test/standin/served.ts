@@ -403,7 +403,7 @@ export function dryRunResult(source: DryRunSource): Record<string, unknown> {
   delete parameters.max_context_length;
   delete parameters._include_usage;
   const prefill = breakdown.find((e) => e.type === "utility" && e.name === "Assistant Prefill")?.content;
-  const stats = outcome.worldInfo as Outcome["worldInfo"] & { stats?: Record<string, unknown> };
+  const stats = outcome.worldInfo.stats;
   return {
     ...(source.includeRequestMessages ? { request_messages: outcome.prompt } : {}),
     messages: dryRunDisplayMessages(outcome.prompt, source.sourceMessages, source.reasoningSettings?.keepInHistory ?? -1),
@@ -419,6 +419,6 @@ export function dryRunResult(source: DryRunSource): Record<string, unknown> {
       tokenizer_name: "approximate",
     },
     chatHistoryTokens,
-    ...(stats.stats !== undefined ? { worldInfoStats: stats.stats } : {}),
+    ...(Object.keys(stats).length > 0 ? { worldInfoStats: stats } : {}),
   };
 }

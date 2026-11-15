@@ -20,7 +20,7 @@ import type { StandInDb } from "./db";
 import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
 import type { Installed, StandIn } from "./lumiverse";
 import { dryRunResult, pageOf, parsePagination, parsed, rowMetadata, rowToBook, rowToCharacter, rowToEntry, rowToMessage, rowToMessageLight, rowToPersona, rowToPreset, rowToSetting, type Pagination } from "./served";
-import { CLIENT_TIMEOUT_MS, ServerSocket, SWEEP_MS } from "./sockets";
+import { RECEIVE_LIMITS, ServerSocket, SWEEP_MS } from "./sockets";
 
 type Timers = Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
 
@@ -180,7 +180,7 @@ export class LumiverseServer {
     const sweep = (): void => {
       this.sweep = this.clock.setTimeout(sweep, SWEEP_MS);
       const now = this.clock.now();
-      for (const s of [...this.sockets]) if (now - s.lastInbound > CLIENT_TIMEOUT_MS) s.close(1001, "Timeout");
+      for (const s of [...this.sockets]) if (now - s.lastInbound > s.timeoutMs) s.close(1001, "Timeout");
     };
     this.sweep = this.clock.setTimeout(sweep, SWEEP_MS);
   }
@@ -716,24 +716,34 @@ export class LumiverseServer {
     return t === undefined || this.clock.now() > t.expires ? null : t.user;
   }
 
-  /** A socket the server keeps: Lumiverse's receive queue in front of its handler (`ws/handler.ts:254-467`). */
-  private serve(user: string, session: string | undefined, client: SocketEvents, readBytesPerSecond?: number): ServerSocket {
-    const socket = new ServerSocket(
+  /** A socket of the server's own, not yet kept: Lumiverse's receive queue in front of its handler (`ws/handler.ts:254-467`). */
+  private create(user: string, session: string | undefined, client: SocketEvents, readBytesPerSecond?: number): ServerSocket {
+    return new ServerSocket(
       { user, ...(session !== undefined ? { session } : {}), handlerMs: this.options.handlerMs ?? 0, ...(readBytesPerSecond !== undefined ? { readBytesPerSecond } : {}) },
       this.clock,
       client,
       (s, frame) => this.handle(s, frame),
       (s) => this.closed(s),
     );
+  }
+
+  /** The socket kept for its user, and its frontend session where it has one. */
+  private register(socket: ServerSocket): void {
     this.sockets.add(socket);
+    const session = socket.session;
     if (session !== undefined) {
       // A session opened again replaces the one before, which is closed (`spindle/frontend-session.ts:14-21`; `ws/handler.ts:202`).
-      const byId = this.frontends.get(user) ?? new Map<string, ServerSocket>();
+      const byId = this.frontends.get(socket.user) ?? new Map<string, ServerSocket>();
       const before = byId.get(session);
       byId.set(session, socket);
-      this.frontends.set(user, byId);
+      this.frontends.set(socket.user, byId);
       before?.close(1000, "Frontend session reconnected");
     }
+  }
+
+  private serve(user: string, session: string | undefined, client: SocketEvents, readBytesPerSecond?: number): ServerSocket {
+    const socket = this.create(user, session, client, readBytesPerSecond);
+    this.register(socket);
     return socket;
   }
 
@@ -749,6 +759,11 @@ export class LumiverseServer {
   }
 
   private async handle(socket: ServerSocket, frame: Record<string, unknown>): Promise<void> {
+    if (frame.type === "visibility") {
+      // `ws/handler.ts:299-304`: the page says whether it is shown; a hidden one is let be 30 minutes (`ws/bus.ts:461-463`).
+      socket.visible = !!frame.visible;
+      return;
+    }
     if (frame.type === "ping") {
       // `ws/handler.ts:284-292`.
       if (this.answerPings) socket.send(JSON.stringify({ type: "pong", timestamp: this.clock.now(), ...(typeof frame.id === "string" ? { id: frame.id } : {}) }));
@@ -781,42 +796,48 @@ export class LumiverseServer {
   /**
    * RPE's way in (`socket.ts`'s `OpenSocket`): `/api/ws?ticket=…`, answered on a later task, as
    * Lumiverse's `onOpen` runs (`ws/handler.ts:122-248`): `AUTH_ERROR` and a close with 1008 for a ticket
-   * it does not take, else `CONNECTED`.
+   * it does not take, else `CONNECTED`. The socket exists from the upgrade: what the client sends before it is let in is counted and kept (`ws/receive-queue.ts:
+   * 104-109`), and one not let in within 10 s is closed, 1013 "WebSocket authentication timed out" (`:111-112`).
    */
   open: OpenSocket = (url: string, events: SocketEvents): Socket => {
     const u = new URL(url);
-    let served: ServerSocket | null = null;
     let gone = false;
-    const early: string[] = [];
     const later = (ms: number, run: () => void): void => void this.clock.setTimeout(run, ms);
+    const served = this.create("", undefined, events);
+    served.admitted = false;
+    const admission = this.clock.setTimeout(() => served.close(1013, "WebSocket authentication timed out"), RECEIVE_LIMITS.maxPauseMs);
+    const refuse = (code: number, reason: string): void => {
+      this.clock.clearTimeout(admission);
+      served.clientClosed(code, reason);
+      later(0, () => events.close(code, reason));
+    };
     const handshake = (): void => {
-      if (gone) return;
+      if (gone || served.closed !== null) return;
       const user = u.pathname === "/api/ws" ? this.consume(u.searchParams.get("ticket")) : null;
       if (user === null || this.refuseTickets) {
         events.message(JSON.stringify({ event: "AUTH_ERROR", payload: { message: "Invalid or expired ticket" }, timestamp: this.clock.now() }));
-        later(0, () => events.close(1008, "Invalid or expired ticket"));
+        refuse(1008, "Invalid or expired ticket");
         return;
       }
       const session = u.searchParams.get("frontend_session") ?? undefined;
       // `readFrontendSessionId` (`spindle/frontend-session.ts:1-5`; `ws/handler.ts:206-209`).
       if (session !== undefined && !/^[0-9a-f]{32}$/.test(session)) {
-        later(0, () => events.close(1008, "Invalid frontend session"));
+        refuse(1008, "Invalid frontend session");
         return;
       }
-      served = this.serve(user, session, events);
+      this.clock.clearTimeout(admission);
+      served.admit(user, session);
+      this.register(served);
       served.send(JSON.stringify({ event: "CONNECTED", payload: { message: "Connected to Lumiverse event bus", userId: user, role: "user", extensionCommands: [] }, timestamp: this.clock.now() }));
-      for (const text of early.splice(0)) served.fromClient(text);
     };
     if (this.openDelayMs !== null) later(this.openDelayMs, handshake);
     return {
-      send: (text) => {
-        if (served === null) early.push(text);
-        else served.fromClient(text);
-      },
+      send: (text) => served.fromClient(text),
       close: (code = 1000, reason = "") => {
-        if (gone) return;
+        if (gone || served.closed !== null) return;
         gone = true;
-        served?.clientClosed(code, reason);
+        this.clock.clearTimeout(admission);
+        served.clientClosed(code, reason);
         // The client's own close event comes after its close frame is answered.
         later(0, () => events.close(code, reason));
       },
