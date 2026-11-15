@@ -1,0 +1,54 @@
+// The page's own settings (plan §4.3, §14 "every limit can be edited here", Appendix D.1): how long a
+// page waits for RPE's addresses and the extension's start-up facts, when it renews its token, how it
+// tries a closed socket again, and how it follows a request the relay could not answer in one go. They
+// are settings of RPE's own, declared once here and listed in the registry (`src/app/page-settings.ts`);
+// the page reads them from RPE: the extension hands the whole group with its start-up facts (the page
+// cannot call RPE before it has found a road), and the settings route lists them for the web shell.
+// Until the page has them it uses the defaults below, and for the start wait, which governs the wait
+// for the very facts that carry the group, the value RPE last gave it, kept by the browser (ui-settings).
+
+/** One of the page's settings: its key as a config file writes it, its default and bounds (milliseconds, or a count where its words say so), and its words. */
+export interface PageSettingDef {
+  readonly key: string;
+  readonly default: number;
+  readonly least: number;
+  readonly most: number;
+  readonly name: string;
+  readonly about: string;
+}
+
+export const PAGE_SETTING_DEFS = {
+  probeMs: { key: "pages.probeMs", default: 3000, least: 100, most: 60_000, name: "Page waits for a direct address", about: "Milliseconds a page in Lumiverse waits for each of RPE's addresses to answer it directly, before it takes the road through the extension." },
+  startMs: { key: "pages.startMs", default: 35_000, least: 1000, most: 600_000, name: "Page waits for the extension's start-up facts", about: "Milliseconds a page in Lumiverse waits for the extension's start-up facts. The page keeps the last value RPE gave it in the browser, and holds it from its next start." },
+  renewAheadMs: { key: "pages.renewAheadMs", default: 60_000, least: 1000, most: 3_600_000, name: "Page token renewed ahead", about: "Milliseconds before a page token runs out that the page asks for a new one (never later than half the token's life)." },
+  reconnectMs: { key: "pages.reconnectMs", default: 1000, least: 100, most: 60_000, name: "Page's first reconnect wait", about: "Milliseconds a page waits before it opens the live socket again after it closed, or asks again for a page token it could not have; each failure doubles the wait." },
+  reconnectMaxMs: { key: "pages.reconnectMaxMs", default: 30_000, least: 1000, most: 600_000, name: "Page's longest reconnect wait", about: "Milliseconds at most a page waits between tries at the live socket or at a new page token." },
+  jobPollMs: { key: "pages.jobPollMs", default: 1000, least: 100, most: 60_000, name: "Page asks after a long request", about: "Milliseconds between a page's asks for the answer of a request that RPE took in hand and answered by an id, such as a connection test the relay could not wait for." },
+  tickMs: { key: "pages.tickMs", default: 1000, least: 100, most: 60_000, name: "Page's running clocks tick", about: "Milliseconds between the redraws of a running timer on a page." },
+  redrawMs: { key: "pages.redrawMs", default: 100, least: 10, most: 10_000, name: "Live and Turn pages redraw at most every", about: "Milliseconds at most between redraws of a watched turn on the Live and Turn pages while it streams; what a read of it gives shows at once." },
+  keepRuns: { key: "pages.keepRuns", default: 4, least: 1, most: 100, name: "Runs the Live page keeps", about: "Runs of a chat the Live page holds at once; once more have ended than this, the oldest ended is let go, named with a link to its Turn page." },
+  turnsAtATime: { key: "pages.turnsAtATime", default: 30, least: 1, most: 500, name: "Turns read at a time", about: "Turns the Turns list and the World page's turn picker read from RPE at a time (RPE gives at most 500)." },
+} as const satisfies Record<string, PageSettingDef>;
+
+/** The page's settings by the name the page reads each under; every value is a whole number: milliseconds, or a count where the setting's words say so. */
+export type PageSettings = { readonly [K in keyof typeof PAGE_SETTING_DEFS]: number };
+
+export const PAGE_DEFAULTS: PageSettings = Object.freeze(Object.fromEntries(Object.entries(PAGE_SETTING_DEFS).map(([name, def]) => [name, def.default])) as { [K in keyof typeof PAGE_SETTING_DEFS]: number });
+
+/** The group's keys as the settings route and the start-up facts hold them. */
+export const PAGE_KEY_PREFIX = "pages.";
+
+/**
+ * The page's settings from what RPE gave: a mapping from each setting's key to its value (the start-up
+ * facts' group, or the settings route's entries made into one). A key that is missing, or whose value is
+ * not a whole number within its bounds, is the default: the page never waits on a value it cannot read.
+ */
+export function pageSettingsOf(given: unknown): PageSettings {
+  const from = typeof given === "object" && given !== null ? (given as Record<string, unknown>) : {};
+  const out: Record<string, number> = {};
+  for (const [name, def] of Object.entries(PAGE_SETTING_DEFS)) {
+    const value = from[def.key];
+    out[name] = typeof value === "number" && Number.isSafeInteger(value) && value >= def.least && value <= def.most ? value : def.default;
+  }
+  return out as { [K in keyof typeof PAGE_SETTING_DEFS]: number };
+}
