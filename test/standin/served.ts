@@ -420,5 +420,6 @@ export function dryRunResult(source: DryRunSource): Record<string, unknown> {
     },
     chatHistoryTokens,
     ...(Object.keys(stats).length > 0 ? { worldInfoStats: stats } : {}),
+    ...(outcome.contextClipStats !== undefined ? { contextClipStats: outcome.contextClipStats } : {}),
   };
 }
