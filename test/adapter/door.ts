@@ -8,7 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Clock, PassRequest } from "rp-harness/contract";
-import { dataPaths, lineLog, openApp, SecretsFile, type App, type RunningServer } from "../../src/app";
+import { type Area, dataPaths, lineLog, openApp, SecretsFile, type App, type RunningServer } from "../../src/app";
 import { configOf, prepareDataFolder } from "../../src/app/config";
 import type { SecrecyAsk, WindowAsk } from "../../src/adapter/lumiverse/answer";
 import { lumiverseDoor, type AdapterLanes, type LumiverseDoor } from "../../src/adapter/lumiverse/mount";
@@ -60,6 +60,8 @@ export interface DoorOptions {
   clock: BedClock;
   handlerMs?: number;
   relay?: Partial<RelaySettings>;
+  /** Areas the test adds after the door's own. */
+  areas?: readonly Area[];
   /** RPE's config over the bed's own. */
   config?: Record<string, unknown>;
   /** What the extension is granted; all it asks for unless said. */
@@ -125,7 +127,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
     const door = lumiverseDoor(lanes, { fetch: server.fetch, open: server.open, clock, sleep: (ms) => Bun.sleep(ms), ...(options.relay ? { relay: options.relay } : {}) });
     const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: "conn-rpe" }, ...options.config }, {}, "the test's config");
     const logs: string[] = [];
-    const app = await openApp({ paths, config, version: "build-7", areas: [door.area], now: () => clock.now(), log: lineLog((line) => logs.push(line), () => clock.now()) });
+    const app = await openApp({ paths, config, version: "build-7", areas: [door.area, ...(options.areas ?? [])], now: () => clock.now(), log: lineLog((line) => logs.push(line), () => clock.now()) });
     cleanups.push(() => app.close());
     const providerKey = (await app.auth.makeKey("provider")).key;
 
