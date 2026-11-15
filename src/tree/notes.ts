@@ -97,9 +97,9 @@ export class TreeNotes {
     const standing = new Set(at.turns);
     const rows = this.#d.db
       .query<WriteRow, [string, string, string]>(
-        `SELECT ${COLUMNS}, 1 AS stands FROM tree_applied a JOIN tree_write w ON w.id = a.write_id WHERE a.user = ?1 AND a.chat = ?2
+        `SELECT ${COLUMNS}, 1 AS stands FROM tree_applied a JOIN note_version w ON w.id = a.write_id WHERE a.user = ?1 AND a.chat = ?2
          UNION ALL
-         SELECT ${COLUMNS}, 0 AS stands FROM tree_write w WHERE w.user = ?1 AND w.dropped = 0 AND w.turn IN (SELECT value FROM json_each(?3))
+         SELECT ${COLUMNS}, 0 AS stands FROM note_version w WHERE w.user = ?1 AND w.dropped = 0 AND w.turn IN (SELECT value FROM json_each(?3))
            AND NOT EXISTS (SELECT 1 FROM tree_applied a WHERE a.user = ?1 AND a.chat = ?2 AND a.write_id = w.id)`,
       )
       .all(user, chat, JSON.stringify(at.turns));
@@ -115,19 +115,19 @@ export class TreeNotes {
   async drop(user: string, chat: string, turn: string, agent: string): Promise<NotesMoved> {
     const moved: NotesMoved = { undone: 0, redone: 0, kept: [], started: 0 };
     const marked = await this.#d.writes.run(
-      (db) => db.query<{ id: number }, [string, string, string]>("UPDATE tree_write SET dropped = 1 WHERE user = ? AND turn = ? AND dropped = 0 AND json_extract(agent, '$.id') = ? RETURNING id").all(user, turn, agent).length,
+      (db) => db.query<{ id: number }, [string, string, string]>("UPDATE note_version SET dropped = 1 WHERE user = ? AND turn = ? AND dropped = 0 AND json_extract(agent, '$.id') = ? RETURNING id").all(user, turn, agent).length,
       "dropping an agent's notes",
     );
     const loc = this.#location(user, chat);
     if (marked === 0 || loc === null) return moved;
-    const rows = this.#d.db.query<WriteRow, [string, string]>(`SELECT ${COLUMNS}, 1 AS stands FROM tree_applied a JOIN tree_write w ON w.id = a.write_id WHERE a.user = ? AND a.chat = ?`).all(user, chat);
+    const rows = this.#d.db.query<WriteRow, [string, string]>(`SELECT ${COLUMNS}, 1 AS stands FROM tree_applied a JOIN note_version w ON w.id = a.write_id WHERE a.user = ? AND a.chat = ?`).all(user, chat);
     await this.#move(user, chat, loc, rows, (w) => w.dropped === 0, moved);
     return moved;
   }
 
   /** What a write found and what it left. */
   #texts(id: number): { before: string | null; text: string | null } {
-    return this.#d.db.query<{ before: string | null; text: string | null }, [number]>("SELECT before, text FROM tree_write WHERE id = ?").get(id) ?? { before: null, text: null };
+    return this.#d.db.query<{ before: string | null; text: string | null }, [number]>("SELECT before, text FROM note_version WHERE id = ?").get(id) ?? { before: null, text: null };
   }
 
   /** Puts each file the rows name as the writes `stays` keeps would leave it, the user's changes kept, and records which writes stand. */

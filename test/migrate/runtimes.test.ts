@@ -40,7 +40,7 @@ describe("several runtimes under one account", () => {
   test("the run carries only the runtime this user registered with this Lumiverse, and no file it writes holds another's keys", async () => {
     const data = join(fixture.root, "rpe-data");
     const before = await todays(fixture);
-    const { report, ran } = await migrate(fixture.sources, { data, tree: TREE });
+    const { report, ran } = await migrate(fixture.sources, { data, env: fixture.named, tree: TREE });
     expect(report.refusals).toEqual([]);
     expect(ran).toBe(true);
     expect(report.runtime?.taken).toMatchObject({ name: RUNTIME, unit: "lumiah-home.service" });

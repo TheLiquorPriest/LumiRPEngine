@@ -31,7 +31,7 @@ async function withFixture(run: (fixture: Fixture, data: string) => Promise<void
 }
 
 async function migrated(fixture: Fixture, data: string, hour: number): Promise<MigrationReport> {
-  const run = await migrate(fixture.sources, { data, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
+  const run = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
   expect(run.ran).toBe(true);
   return run.report;
 }
@@ -42,7 +42,7 @@ const landed = (report: MigrationReport, row: string): string => `  ${report.row
 describe("the report's table", () => {
   test("every row the rehearsal and the real run print balances as printed: found = carried + attached + archived + kept in the backup only, every column there, zero where nothing was", async () => {
     await withFixture(async (fixture, data) => {
-      const rehearsal = await migrate(fixture.sources, { data, tree, rehearse: true, now: () => new Date("2026-11-14T08:00:00.000Z") });
+      const rehearsal = await migrate(fixture.sources, { data, env: fixture.named, tree, rehearse: true, now: () => new Date("2026-11-14T08:00:00.000Z") });
       const real = await migrated(fixture, data, 9);
       // Things this build has no place for yet are there to count: the fourth column is not always zero.
       expect(real.rows.some((r) => r.count.backup > 0)).toBe(true);

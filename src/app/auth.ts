@@ -2,9 +2,9 @@
 // as its SHA-256: the provider key Lumiverse sends on RPE's connection, the light extension's
 // registration, and the web UI's token. A new key of a kind retires the one before it. Page tokens
 // are short-lived; they are minted through the extension for a page of the Lumiverse user this RPE
-// belongs to and for no other user, and one holds only while that user is still the one this RPE
-// belongs to. Nothing here can switch on anything that runs a command: only the command line can
-// (switches.ts).
+// belongs to and for no other user. Every key and token is kept under the user it was made for, and
+// one opens RPE only while that user is still the one this RPE belongs to. Nothing here can switch on
+// anything that runs a command: only the command line can (switches.ts).
 
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
@@ -40,7 +40,8 @@ export interface PageToken {
 /** Who asked for a page token: the extension for a page, or the command line for its own call to the running server. */
 export type TokenMaker = "extension" | "command line";
 
-export const NO_OWNER = "This RPE belongs to no Lumiverse user yet: set lumiverse.user in its config.json.";
+/** Why RPE does not open its database, or does anything that writes there, before the install has named its user (R-179). */
+export const NO_OWNER = "RPE belongs to no Lumiverse user yet, so nothing was written: `rpe up` names the user it belongs to.";
 
 export class AuthRefused extends Error {
   override name = "AuthRefused";
@@ -64,38 +65,38 @@ export function newKeyText(kind: KeyKind): string {
 }
 
 /**
- * Puts a key of `kind` in force (a new one unless `key` is given, made by `newKeyText` for a key that had to be handed out first) and retires the one before it.
+ * Puts a key of `kind` for `user` in force (a new one unless `key` is given, made by `newKeyText` for a key that had to be handed out first) and retires his one before it.
  * A key taken from today's connection (`takeKeyHash`, its last four unknown) stays: going back needs that connection as it is (plan §15.6).
  * Runs inside a transaction: the server's write queue's, or the command line's own.
  */
-export function insertKey(db: Database, kind: KeyKind, now: number, key: string = newKeyText(kind)): MadeKey {
-  db.run("UPDATE app_key SET retired = ? WHERE kind = ? AND retired IS NULL AND last4 <> ''", [now, kind]);
-  db.run("INSERT INTO app_key (hash, kind, last4, made) VALUES (?, ?, ?, ?)", [secretHash(key), kind, key.slice(-4), now]);
+export function insertKey(db: Database, user: string, kind: KeyKind, now: number, key: string = newKeyText(kind)): MadeKey {
+  db.run("UPDATE app_key SET retired = ? WHERE user = ? AND kind = ? AND retired IS NULL AND last4 <> ''", [now, user, kind]);
+  db.run("INSERT INTO app_key (user, hash, kind, last4, made) VALUES (?, ?, ?, ?, ?)", [user, secretHash(key), kind, key.slice(-4), now]);
   return { kind, key, last4: key.slice(-4), made: now };
 }
 
 /**
- * Puts in force, beside the key of `kind` in force, a key RPE holds only as its SHA-256: the key
- * today's build gave its connection in Lumiverse, which RPE takes at the swap (plan §15.2) so that
- * connection goes on working as it is. Its last four characters were never known, which is how it is
- * told from RPE's own: a new key of the kind leaves it in force. Runs inside a transaction.
+ * Puts in force for `user`, beside his key of `kind` in force, a key RPE holds only as its SHA-256:
+ * the key today's build gave its connection in Lumiverse, which RPE takes at the swap (plan §15.2) so
+ * that connection goes on working as it is. Its last four characters were never known, which is how
+ * it is told from RPE's own: a new key of the kind leaves it in force. Runs inside a transaction.
  */
-export function takeKeyHash(db: Database, kind: KeyKind, hash: string, now: number): void {
-  db.run("INSERT OR IGNORE INTO app_key (hash, kind, last4, made) VALUES (?, ?, ?, ?)", [hash, kind, "", now]);
+export function takeKeyHash(db: Database, user: string, kind: KeyKind, hash: string, now: number): void {
+  db.run("INSERT OR IGNORE INTO app_key (user, hash, kind, last4, made) VALUES (?, ?, ?, ?, ?)", [user, hash, kind, "", now]);
 }
 
 /**
- * Retires the key of `kind` taken from today's connection (`takeKeyHash`), which a new key leaves in
- * force: that connection in Lumiverse then needs a key of RPE's own. Says how many it retired. Runs
+ * Retires `user`'s key of `kind` taken from today's connection (`takeKeyHash`), which a new key leaves
+ * in force: that connection in Lumiverse then needs a key of RPE's own. Says how many it retired. Runs
  * inside a transaction.
  */
-export function retireTakenKeys(db: Database, kind: KeyKind, now: number): number {
-  return db.run("UPDATE app_key SET retired = ? WHERE kind = ? AND retired IS NULL AND last4 = ''", [now, kind]).changes;
+export function retireTakenKeys(db: Database, user: string, kind: KeyKind, now: number): number {
+  return db.run("UPDATE app_key SET retired = ? WHERE user = ? AND kind = ? AND retired IS NULL AND last4 = ''", [now, user, kind]).changes;
 }
 
-/** The key of each kind in force. */
-export function currentKeys(db: Database): KeyFacts[] {
-  return db.query<KeyFacts, []>("SELECT kind, last4, made FROM app_key WHERE retired IS NULL ORDER BY kind").all();
+/** `user`'s key of each kind in force. */
+export function currentKeys(db: Database, user: string): KeyFacts[] {
+  return db.query<KeyFacts, [string]>("SELECT kind, last4, made FROM app_key WHERE user = ? AND retired IS NULL ORDER BY kind").all(user);
 }
 
 /** A page token for `user`, holding for `ttlMs`; tokens past their time are let go in the same write. Runs inside a transaction. */
@@ -114,8 +115,8 @@ export function bearerOf(request: Request): string | null {
 export interface AuthDeps {
   db: Database;
   writes: WriteQueue;
-  /** The Lumiverse user this RPE belongs to; null before one is set. */
-  owner: string | null;
+  /** The Lumiverse user this RPE belongs to: RPE opens for no one before the install names him. */
+  owner: string;
   now: () => number;
   pageTokenMs: number;
   /** How long the web UI's key holds after it is made (`auth.webKeyDays`); null: it has no end. */
@@ -137,14 +138,14 @@ export interface PageHold {
 export class Auth {
   constructor(private readonly deps: AuthDeps) {}
 
-  get owner(): string | null {
+  get owner(): string {
     return this.deps.owner;
   }
 
-  /** Whether `presented` is the key of `kind` in force. */
+  /** Whether `presented` is the key of `kind` in force, made for the user this RPE belongs to. */
   holds(kind: KeyKind, presented: string | null): boolean {
     if (presented === null || presented === "") return false;
-    const row = this.deps.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM app_key WHERE hash = ? AND kind = ? AND retired IS NULL").get(secretHash(presented), kind);
+    const row = this.deps.db.query<{ n: number }, [string, string, string]>("SELECT count(*) AS n FROM app_key WHERE user = ? AND hash = ? AND kind = ? AND retired IS NULL").get(this.deps.owner, secretHash(presented), kind);
     return (row?.n ?? 0) > 0;
   }
 
@@ -154,20 +155,18 @@ export class Auth {
    * sees one. The key is in the result alone; only its hash is kept.
    */
   makeKey(kind: KeyKind): Promise<MadeKey> {
-    return this.deps.writes.run((db) => insertKey(db, kind, this.deps.now()), `a new ${kind} key`);
+    return this.deps.writes.run((db) => insertKey(db, this.deps.owner, kind, this.deps.now()), `a new ${kind} key`);
   }
 
   /** A page token for `user`, refused unless `user` is the one this RPE belongs to. */
   async mintPageToken(user: string, by: TokenMaker): Promise<PageToken> {
-    const owner = this.deps.owner;
-    if (owner === null) throw new AuthRefused(503, NO_OWNER);
-    if (user !== owner) throw new AuthRefused(403, "Page tokens are made only for the Lumiverse user this RPE belongs to.");
+    if (user !== this.deps.owner) throw new AuthRefused(403, "Page tokens are made only for the Lumiverse user this RPE belongs to.");
     return await this.deps.writes.run((db) => insertPageToken(db, user, by, this.deps.pageTokenMs, this.deps.now()), "a page token");
   }
 
   /**
    * The user a page's credential stands for: a page token made for that user and still in time, or
-   * the web UI's key in force and in time. Null for anything else, and while this RPE belongs to no user.
+   * his web UI's key in force and in time. Null for anything else.
    */
   pageUser(presented: string | null): string | null {
     return this.pageHold(presented)?.user ?? null;
@@ -176,12 +175,12 @@ export class Auth {
   /** `pageUser`, with when the credential runs out: a socket opened with it closes then. */
   pageHold(presented: string | null): PageHold | null {
     const owner = this.deps.owner;
-    if (owner === null || presented === null || presented === "") return null;
+    if (presented === null || presented === "") return null;
     const now = this.deps.now();
     const hash = secretHash(presented);
     const token = this.deps.db.query<{ user: string; expires: number }, [string]>("SELECT user, expires FROM page_token WHERE hash = ?").get(hash);
     if (token !== null) return token.user === owner && token.expires > now ? { user: owner, until: token.expires } : null;
-    const web = this.deps.db.query<{ made: number }, [string]>("SELECT made FROM app_key WHERE hash = ? AND kind = 'web' AND retired IS NULL").get(hash);
+    const web = this.deps.db.query<{ made: number }, [string, string]>("SELECT made FROM app_key WHERE user = ? AND hash = ? AND kind = 'web' AND retired IS NULL").get(owner, hash);
     if (web === null) return null;
     const until = keyEnds("web", web.made, this.deps.webKeyMs);
     return until === null || until > now ? { user: owner, until } : null;

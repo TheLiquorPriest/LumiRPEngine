@@ -55,7 +55,7 @@ describe("migrate", () => {
 
   test("the real run takes the backup, imports every chat, keeps its report, and leaves today's data as it was", async () => {
     const before = await todays(fixture);
-    const { report, ran } = await migrate(fixture.sources, { data, tree: TREE, now: () => new Date("2026-11-14T09:00:00.000Z") });
+    const { report, ran } = await migrate(fixture.sources, { data, env: fixture.named, tree: TREE, now: () => new Date("2026-11-14T09:00:00.000Z") });
     first = report;
     expect(ran).toBe(true);
     expect(await todays(fixture)).toEqual(before);
@@ -81,7 +81,7 @@ describe("migrate", () => {
   test("the next run replaces what the last imported, and says what changed since", async () => {
     const draft = join(fixture.userFolder, `worlds/${fixture.worldId}/draft.json`);
     await writeFile(draft, (await readFile(draft, "utf8")).replace("Harbour, draft", "Harbour, edited in Build"));
-    const { report, ran } = await migrate(fixture.sources, { data, tree: TREE, now: () => new Date("2026-11-14T10:00:00.000Z") });
+    const { report, ran } = await migrate(fixture.sources, { data, env: fixture.named, tree: TREE, now: () => new Date("2026-11-14T10:00:00.000Z") });
     expect(ran).toBe(true);
     expect(report.changes?.since).toBe(first.at);
     expect(report.changes?.changed).toEqual([`user storage: worlds/${fixture.worldId}/draft.json`]);
@@ -94,7 +94,7 @@ describe("migrate", () => {
     const io: CliIO = {
       out: (t) => out.push(t),
       err: (t) => out.push(t),
-      env: {},
+      env: fixture.named,
       home: fixture.root,
       now: () => Date.parse("2026-11-14T11:00:00.000Z"),
       secret: async () => null,
@@ -164,7 +164,7 @@ describe("what the gate refuses before anything is written", () => {
 
   test("a run for a user other than an earlier run's is refused before anything is written", async () => {
     const data = join(fixture.root, "shared");
-    expect((await migrate(fixture.sources, { data, tree: TREE })).ran).toBe(true);
+    expect((await migrate(fixture.sources, { data, env: fixture.named, tree: TREE })).ran).toBe(true);
     // SQLite's shared-memory index of RPE's database aside, which every reader of it writes its locks into.
     const before = lockIndex(await treeSums(data));
     const { report, ran } = await migrate({ ...fixture.sources, userId: OTHER_USER }, { data, tree: TREE });

@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, RunningServer } from "../../src/app";
-import { AuthRefused, rawRoute, route, shape } from "../../src/app";
+import { Auth, AuthRefused, rawRoute, route, shape } from "../../src/app";
 import { isRecord } from "../../src/shared/json";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "./helpers";
 
@@ -90,10 +90,10 @@ describe("auth", () => {
 
   test("a page token made for one user is refused once this RPE belongs to another", async () => {
     const { token } = await app.auth.mintPageToken(OWNER, "extension");
-    await app.close();
-    const again = await bed.open({ areas: [probe], config: { lumiverse: { user: "user-next" } } });
-    const restarted = await again.start();
-    expect((await fetch(`${restarted.url}/api/v1/probe/me`, { headers: bearer(token) })).status).toBe(401);
+    // The same database, as an RPE that belongs to another user sees it: such an RPE opens no other user's database at all.
+    const next = new Auth({ db: app.db, writes: app.writes, owner: "user-next", now: app.now, pageTokenMs: 60_000, webKeyMs: null });
+    expect(next.pageUser(token)).toBeNull();
+    expect(app.auth.pageUser(token)).toBe(OWNER);
   });
 
   test("the web UI's token stands for the user this RPE belongs to; nothing else opens a page route", async () => {
@@ -126,14 +126,16 @@ describe("auth", () => {
     expect(refused.status).toBe(401);
   });
 
-  test("with no user to belong to, no page route opens and no page token is made", async () => {
-    await app.close();
-    const unowned = await bed.open({ areas: [probe], config: { lumiverse: { user: null } } });
-    const running = await unowned.start();
-    const web = await makeKey(unowned, "web");
-    const page = await fetch(`${running.url}/api/v1/probe/me`, { headers: bearer(web) });
-    expect(page.status).toBe(503);
-    expect(await page.json()).toMatchObject({ error: expect.stringContaining("lumiverse.user") });
-    await expect(unowned.auth.mintPageToken(OWNER, "extension")).rejects.toMatchObject({ status: 503 });
+  test("a key made under one user does not open RPE once it belongs to another", async () => {
+    const provider = await makeKey(app, "provider");
+    const web = await makeKey(app, "web");
+    expect(app.auth.holds("provider", provider)).toBe(true);
+    expect(app.auth.pageUser(web)).toBe(OWNER);
+    // The same database, as an RPE that belongs to another user sees it.
+    const other = new Auth({ db: app.db, writes: app.writes, owner: "user-other", now: app.now, pageTokenMs: 60_000, webKeyMs: null });
+    expect(other.holds("provider", provider)).toBe(false);
+    expect(other.pageUser(web)).toBeNull();
+    const rows = app.db.query<{ user: string }, []>("SELECT user FROM app_key").all();
+    expect(rows.map((r) => r.user)).toEqual([OWNER, OWNER]);
   });
 });

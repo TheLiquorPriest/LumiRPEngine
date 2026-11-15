@@ -38,7 +38,7 @@ describe("what today's build recorded beside each turn", () => {
     fixture = await buildFixture("operator");
     await rm(join(fixture.userFolder, STRAY));
     data = join(fixture.root, "rpe-data");
-    const first = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
+    const first = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
     expect(first.ran).toBe(true);
     report = first.report;
     parts = await shippedParts(["story-brief", "story-so-far"]);
@@ -162,7 +162,7 @@ describe("what today's build recorded beside each turn", () => {
       notes: await notes(),
     });
     const before = await snapshot();
-    const second = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
+    const second = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
     expect(second.ran).toBe(true);
     expect(second.report.imports?.find((c) => c.chatId === CHAT.harness)?.outcome).toBe("replaced");
     expect(second.report.carried?.ownFiles).toMatchObject({ removed: 0, changed: 0 });

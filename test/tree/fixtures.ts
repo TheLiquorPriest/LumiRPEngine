@@ -60,7 +60,7 @@ export async function layTree(seed: KitSeed, place: string, options: { rpe?: rea
   const db = openDatabase(join(place, "rpe.db"), 2_000);
   const migrations = new Migrations();
   migrations.add("files", TREE_MIGRATIONS);
-  migrate(db, migrations, { version: "tree-test", backups: join(place, "backups"), now: () => 0 });
+  migrate(db, migrations, { user: seed.scope.user, version: "tree-test", backups: join(place, "backups"), now: () => 0 });
   const writes = new WriteQueue(db, 50);
 
   await layShipped(files, scratch, sources);

@@ -47,7 +47,7 @@ async function changeToday(fixture: Fixture, own: readonly { path: string[]; val
 }
 
 async function run(fixture: Fixture, data: string, hour: number): Promise<MigrationReport> {
-  const done = await migrate(fixture.sources, { data, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
+  const done = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
   expect(done.ran).toBe(true);
   return done.report;
 }

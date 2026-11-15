@@ -55,7 +55,7 @@ export async function makeBed(): Promise<Bed> {
 
 /** Makes a key of `kind` through the app's own write queue, as the command line would on its connection. */
 export async function makeKey(app: App, kind: KeyKind): Promise<string> {
-  return (await app.writes.run((db) => insertKey(db, kind, app.now()))).key;
+  return (await app.writes.run((db) => insertKey(db, app.auth.owner, kind, app.now()))).key;
 }
 
 export function bearer(token: string): Record<string, string> {

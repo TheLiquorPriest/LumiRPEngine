@@ -25,6 +25,7 @@ import type { WorldDoc } from "../../src/shared/world";
 import { blobHash } from "../../src/shared/stores";
 import { readBytes, sha256 as sha } from "../../src/migrate/files";
 import { walk } from "../../src/app/archive";
+import { CONFIG_ENV, type Env } from "../../src/app/config";
 import { copyFolderOf } from "../../src/migrate/runtime-folders";
 import type { Sources } from "../../src/migrate/today";
 import { FakeHost } from "../support/fake-host";
@@ -94,6 +95,8 @@ export interface Fixture {
   unsentRemoval: string;
   /** A blob a record names that today's clean-up removed. */
   missingBlob: string;
+  /** The environment of an RPE whose install has named its user (`rpe up` does): a real run writes nothing for one that belongs to no user (R-179). */
+  named: Env;
   remove(): Promise<void>;
 }
 
@@ -510,6 +513,7 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     unsentDoc: `harness/docs/${unsentPath}`,
     unsentRemoval: "harness/docs/sides/side-old.json",
     missingBlob,
+    named: { [CONFIG_ENV.lumiverseUser]: USER },
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }

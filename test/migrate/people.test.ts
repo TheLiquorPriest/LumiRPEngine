@@ -42,7 +42,7 @@ async function withFixture(run: (fixture: Fixture, data: string) => Promise<void
 }
 
 const migrated = async (fixture: Fixture, data: string, hour: number): Promise<void> => {
-  expect((await migrate(fixture.sources, { data, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) })).ran).toBe(true);
+  expect((await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) })).ran).toBe(true);
 };
 
 describe("today's people as the cast's characters", () => {

@@ -117,11 +117,11 @@ export function treeRoutes(deps: TreeRoutesDeps) {
     return { ...lookup.at, disk: lookup.at.disk };
   };
 
-  /** The listing of a chat's view, with what updates changed of the shipped files. */
-  const listingOf = (loc: ChatLocation): Promise<TreeFileEntry[]> => treeListing(loc, defaultChanges(deps.db));
+  /** The listing of a chat's view, with what updates changed of the shipped files, as kept for `user`. */
+  const listingOf = (user: string, loc: ChatLocation): Promise<TreeFileEntry[]> => treeListing(loc, defaultChanges(deps.db, user));
 
   /** The listing's entry of one path, as it stands. */
-  const entryOf = async (loc: ChatLocation, path: string): Promise<TreeFileEntry | null> => (await listingOf(loc)).find((f) => f.path === path) ?? null;
+  const entryOf = async (user: string, loc: ChatLocation, path: string): Promise<TreeFileEntry | null> => (await listingOf(user, loc)).find((f) => f.path === path) ?? null;
 
   /** Writes `text` as the user at `level`, for the file at `path`: there itself, or the user's own file of its name at that level. The path written. */
   const writeAsUser = async (loc: ChatLocation, path: string, level: LayerLevel, text: string): Promise<string> => {
@@ -236,7 +236,7 @@ export function treeRoutes(deps: TreeRoutesDeps) {
           await deps.suggestions.reopen(user, s.id);
           throw error;
         }
-        return { suggestion: deps.suggestions.one(user, s.id), file: await entryOf(loc, written) };
+        return { suggestion: deps.suggestions.one(user, s.id), file: await entryOf(user, loc, written) };
       },
     }),
     route({
@@ -260,7 +260,7 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       does: "Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own.",
       query: { chat: chatQuery },
       reply: treeListingReply,
-      handle: async ({ user, query }) => ({ files: await listingOf(locationOf(user, chatOf(query.chat))) }),
+      handle: async ({ user, query }) => ({ files: await listingOf(user, locationOf(user, chatOf(query.chat))) }),
     }),
     route({
       method: "GET",
@@ -273,11 +273,11 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       handle: async ({ user, params, query }) => {
         const loc = locationOf(user, chatOf(query.chat));
         const at = await found(loc, viewPathOf(params["*"]));
-        const entry = await entryOf(loc, at.path);
+        const entry = await entryOf(user, loc, at.path);
         const text = entry === null ? null : await readText(at.disk);
         if (entry === null || text === null) throw new RouteError(404, `The tree has no file ${at.path}.`);
         const shipped = entry.shipped === null ? null : await readText((await found(loc, entry.shipped)).disk);
-        const change = entry.shipped === null || entry.defaultChanged === null ? undefined : defaultChanges(deps.db).get(entry.shipped);
+        const change = entry.shipped === null || entry.defaultChanged === null ? undefined : defaultChanges(deps.db, user).get(entry.shipped);
         const { diffCells } = await treeSettingsOf(loc);
         const diff: TreeFileDiff = {
           path: entry.path,
@@ -317,7 +317,7 @@ export function treeRoutes(deps: TreeRoutesDeps) {
         const chat = chatOf(body.chat);
         const loc = locationOf(user, chat);
         const written = await writeAsUser(loc, viewPathOf(params["*"]), levelOf(body.level, LEVELS, chat), body.text);
-        return { file: await entryOf(loc, written) };
+        return { file: await entryOf(user, loc, written) };
       },
     }),
     route({
@@ -351,7 +351,7 @@ export function treeRoutes(deps: TreeRoutesDeps) {
         const level = levelOf(body.level, OFF_LEVELS, chat);
         const loc = locationOf(user, chat);
         const path = viewPathOf(params["*"]);
-        const listed = await entryOf(loc, (await found(loc, path)).path);
+        const listed = await entryOf(user, loc, (await found(loc, path)).path);
         if (listed === null) throw new RouteError(404, `The tree has no file ${path}.`);
         if (listed.item === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
         const item = listed.item;
@@ -374,7 +374,7 @@ export function treeRoutes(deps: TreeRoutesDeps) {
           await mkdir(dirname(config.disk), { recursive: true });
           await writeWhole(config.disk, withTopLevelKey(text, OFF_KEY, next, config.path));
         });
-        return { file: await entryOf(loc, listed.path) };
+        return { file: await entryOf(user, loc, listed.path) };
       },
     }),
   ] as const;

@@ -18,6 +18,8 @@ export interface DefaultsDeps {
   /** The shipped folders the level is laid out from: RPH's, then RPE's over it. */
   sources: { rph: string; rpe: string };
   writes: TreeWrites;
+  /** The user this RPE belongs to, whose record of what an update changed this is. */
+  user: string;
   now(): number;
 }
 
@@ -39,15 +41,15 @@ export async function layDefaults(deps: DefaultsDeps): Promise<ShippedChange[]> 
   if (changes.length > 0) {
     const at = deps.now();
     await deps.writes.run((db) => {
-      for (const c of changes) db.run("INSERT INTO tree_default (path, before, at) VALUES (?, ?, ?) ON CONFLICT (path) DO UPDATE SET before = excluded.before, at = excluded.at", [c.path, c.before, at]);
+      for (const c of changes) db.run("INSERT INTO tree_default (user, path, before, at) VALUES (?, ?, ?, ?) ON CONFLICT (user, path) DO UPDATE SET before = excluded.before, at = excluded.at", [deps.user, c.path, c.before, at]);
     }, "keeping what an update changed of the shipped files");
   }
   return changes;
 }
 
-/** Every shipped default an update changed, by its path in the view (`@shipped/…`). */
-export function defaultChanges(db: Database): Map<string, DefaultChange> {
-  return new Map(db.query<{ path: string; before: string; at: number }, []>("SELECT path, before, at FROM tree_default").all().map((r) => [`${MOUNTS.shipped}${r.path}`, { before: r.before, at: r.at }]));
+/** Every shipped default an update changed, as kept for `user`, by its path in the view (`@shipped/…`). */
+export function defaultChanges(db: Database, user: string): Map<string, DefaultChange> {
+  return new Map(db.query<{ path: string; before: string; at: number }, [string]>("SELECT path, before, at FROM tree_default WHERE user = ?").all(user).map((r) => [`${MOUNTS.shipped}${r.path}`, { before: r.before, at: r.at }]));
 }
 
 function linesOf(text: string): string[] {

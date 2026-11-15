@@ -70,7 +70,7 @@ export class TreeSuggestions {
     return await this.#d.writes.run(
       (db) =>
         Number(
-          db.run("INSERT INTO tree_suggestion (user, chat, turn, agent, path, text, reason, at, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')", [scope.user, scope.chat, scope.turn ?? null, JSON.stringify(agent), path, suggestion.text, suggestion.reason, this.#d.now()]).lastInsertRowid,
+          db.run("INSERT INTO suggestion (user, chat, turn, agent, path, text, reason, at, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')", [scope.user, scope.chat, scope.turn ?? null, JSON.stringify(agent), path, suggestion.text, suggestion.reason, this.#d.now()]).lastInsertRowid,
         ),
       "keeping an agent's suggestion",
     );
@@ -79,23 +79,23 @@ export class TreeSuggestions {
   /** A chat's suggestions (every chat's when none is named), newest first; only those in `state` when it is given. */
   list(user: string, chat: string | null, state?: SuggestionState): TreeSuggestion[] {
     return this.#d.db
-      .query<SuggestionRow, [string, string | null, string | null]>("SELECT id, chat, turn, agent, path, text, reason, at, state, decided FROM tree_suggestion WHERE user = ?1 AND (?2 IS NULL OR chat = ?2) AND (?3 IS NULL OR state = ?3) ORDER BY id DESC")
+      .query<SuggestionRow, [string, string | null, string | null]>("SELECT id, chat, turn, agent, path, text, reason, at, state, decided FROM suggestion WHERE user = ?1 AND (?2 IS NULL OR chat = ?2) AND (?3 IS NULL OR state = ?3) ORDER BY id DESC")
       .all(user, chat, state ?? null)
       .map(suggestionOf);
   }
 
   one(user: string, id: number): TreeSuggestion | null {
-    const row = this.#d.db.query<SuggestionRow, [string, number]>("SELECT id, chat, turn, agent, path, text, reason, at, state, decided FROM tree_suggestion WHERE user = ? AND id = ?").get(user, id);
+    const row = this.#d.db.query<SuggestionRow, [string, number]>("SELECT id, chat, turn, agent, path, text, reason, at, state, decided FROM suggestion WHERE user = ? AND id = ?").get(user, id);
     return row === null ? null : suggestionOf(row);
   }
 
   /** Decides an open suggestion; false when it is not open (decided already, or none). */
   async decide(user: string, id: number, state: Exclude<SuggestionState, "open">): Promise<boolean> {
-    return await this.#d.writes.run((db) => db.run("UPDATE tree_suggestion SET state = ?, decided = ? WHERE user = ? AND id = ? AND state = 'open'", [state, this.#d.now(), user, id]).changes === 1, "deciding a suggestion");
+    return await this.#d.writes.run((db) => db.run("UPDATE suggestion SET state = ?, decided = ? WHERE user = ? AND id = ? AND state = 'open'", [state, this.#d.now(), user, id]).changes === 1, "deciding a suggestion");
   }
 
   /** Opens a suggestion again: its acceptance could not be written. */
   async reopen(user: string, id: number): Promise<void> {
-    await this.#d.writes.run((db) => db.run("UPDATE tree_suggestion SET state = 'open', decided = NULL WHERE user = ? AND id = ?", [user, id]), "opening a suggestion again");
+    await this.#d.writes.run((db) => db.run("UPDATE suggestion SET state = 'open', decided = NULL WHERE user = ? AND id = ?", [user, id]), "opening a suggestion again");
   }
 }

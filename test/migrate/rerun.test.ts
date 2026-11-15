@@ -53,7 +53,7 @@ describe("a run made again", () => {
     const migrations = new Migrations();
     migrations.add("store", STORE_MIGRATIONS);
     migrations.add("migrate", MIGRATE_TABLES);
-    migrate(db, migrations, { version: "test", backups: "/nonexistent", now: () => 0 });
+    migrate(db, migrations, { user: USER, version: "test", backups: "/nonexistent", now: () => 0 });
     store = openStore({ db, registry, worlds: (r) => worlds.get(r) });
     s = store.user(USER);
     await run();

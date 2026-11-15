@@ -5,7 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort, SettingDef } from "rp-harness/contract";
-import { Auth } from "./auth";
+import { Auth, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
 import { commandRoutes } from "./command-routes";
@@ -197,6 +197,9 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const hooks = gatherHooks(areas);
   const now = options.now ?? Date.now;
   const log = options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now);
+  // No row is written without its user (R-179): with none named, the data folder is left as it was.
+  const user = config.lumiverse.user;
+  if (user === null || user === "") throw new Error(NO_OWNER);
   await prepareDataFolder(paths);
   const migrations = new Migrations();
   migrations.add("app", APP_MIGRATIONS);
@@ -204,7 +207,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const db = openDatabase(paths.database, config.database.busyMs);
   let migrated: MigrationOutcome;
   try {
-    migrated = migrate(db, migrations, { version, backups: paths.backups, now });
+    migrated = migrate(db, migrations, { user, version, backups: paths.backups, now });
     guardSwitches(db);
   } catch (error) {
     db.close();
@@ -213,17 +216,17 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   if (migrated.backup !== null) log.info("the database was copied before this version's first migration", { copy: migrated.backup });
   for (const step of migrated.applied) log.info("migrated", { area: step.area, version: step.version });
   const writes = new WriteQueue(db, config.database.sliceMs);
-  const auth = new Auth({ db, writes, owner: config.lumiverse.user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
+  const auth = new Auth({ db, writes, owner: user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now });
   const secrets = new SecretsFile(paths.secrets);
   // The model layer's documents written before they were kept by user are the install's user's, moved under him before anything reads them.
-  await ownModels(paths, secrets, config.lumiverse.user, log);
+  await ownModels(paths, secrets, user, log);
   const builds = new Builds({ version, file: options.appFile ?? null, log });
   await builds.start();
   routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui, builds));
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
-  routes.add("command", commandRoutes({ paths, secrets, db, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
+  routes.add("command", commandRoutes({ paths, secrets, db, user, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
   let running: RunningServer | null = null;
   let starting: Promise<RunningServer> | null = null;
   let closing: Promise<void> | null = null;
@@ -245,7 +248,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     routes,
     live,
     auth,
-    switches: new Switches(db, writes, now),
+    switches: new Switches(db, writes, now, user),
     secrets,
     models: modelsPort(paths, secrets, () => config.lumiverse.user),
     log,

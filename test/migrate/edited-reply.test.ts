@@ -59,7 +59,7 @@ test("a reply edited after its turn, before the run, is found edited at the carr
       add.run("m-fog-a", 3, 0, "Narrator", "The lamp gutters in the fog.", JSON.stringify(["The lamp gutters in the fog."]));
     });
     editReply(fixture, "m-c2", 1, "The harbour is quiet, but for the gulls.");
-    const run = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
+    const run = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
     expect(run.ran).toBe(true);
     const branch = run.report.imports?.find((c) => c.chatId === "c-fog");
     expect({ outcome: branch?.outcome, shares: branch?.shares, turns: branch?.turns }).toEqual({ outcome: "imported", shares: { chat: CHAT.harness, messages: 2 }, turns: 1 });

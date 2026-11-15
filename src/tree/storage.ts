@@ -93,7 +93,7 @@ export async function noteFiles(deps: StorageDeps, loc: ChatLocation, user: stri
   const sizes = new Map<string, number>();
   const notes = await locate(loc, NOTES_FOLDER);
   if (notes.ok) for await (const f of sized(loc, notes.at)) sizes.set(f.rest.join("/"), f.bytes);
-  const counts = new Map(deps.db.query<{ path: string; writes: number }, [string, string]>("SELECT path, count(*) AS writes FROM tree_write WHERE user = ? AND chat = ? GROUP BY path").all(user, chat).map((r) => [r.path, r.writes]));
+  const counts = new Map(deps.db.query<{ path: string; writes: number }, [string, string]>("SELECT path, count(*) AS writes FROM note_version WHERE user = ? AND chat = ? GROUP BY path").all(user, chat).map((r) => [r.path, r.writes]));
   const largest = [...sizes]
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
     .slice(0, limit)

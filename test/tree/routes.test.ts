@@ -13,6 +13,7 @@ import { YAML } from "bun";
 import { loadGuidance } from "rp-harness";
 import type { App, RunningServer } from "../../src/app";
 import { CHATS_FOLDER, type DefaultsDeps, layDefaults, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
+import { answeredProblems } from "../app/call";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "../app/helpers";
 
 const CHAT = "chat-bell";
@@ -59,7 +60,10 @@ describe("the Files page's routes", () => {
 
   const call = async <T>(method: string, path: string, body?: unknown, headers: Record<string, string> = page): Promise<{ status: number; body: T }> => {
     const res = await fetch(`${server.url}${path}`, { method, headers: { ...headers, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    return { status: res.status, body: (await res.json()) as T };
+    const answered = { status: res.status, body: (await res.json()) as T };
+    // A reply is held to its route's declaration at run time, as RPE sends it.
+    if (res.status === 200) expect({ method, path, problems: answeredProblems(app, method, path, answered.body) }).toEqual({ method, path, problems: [] });
+    return answered;
   };
   const listing = async (): Promise<Map<string, TreeFileEntry>> => new Map((await call<{ files: TreeFileEntry[] }>("GET", `/api/v1/files?chat=${CHAT}`)).body.files.map((f) => [f.path, f]));
 
@@ -75,7 +79,7 @@ describe("the Files page's routes", () => {
           name: "tree",
           tables: [{ area: "files", migrations: TREE_MIGRATIONS }],
           async mount(a) {
-            defaults = { files: a.paths.files, scratch: a.paths.root, sources, writes: a.writes, now: () => Date.now() };
+            defaults = { files: a.paths.files, scratch: a.paths.root, sources, writes: a.writes, user: OWNER, now: () => Date.now() };
             await layDefaults(defaults);
             suggestions = new TreeSuggestions({ db: a.db, writes: a.writes, now: a.now });
             const chats = new TreeChats(a.db, a.writes, a.paths.files);

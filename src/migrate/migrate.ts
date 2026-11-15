@@ -12,6 +12,7 @@
 
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
+import { NO_OWNER } from "../app/auth";
 import { dataPaths, type Env, loadConfig, prepareDataFolder } from "../app/config";
 import { openDatabase } from "../app/database";
 import { migrate as migrateTables, Migrations } from "../app/migrations";
@@ -87,6 +88,9 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
   try {
     const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, ...(previous ? { previous } : {}) });
     if (options.rehearse || report.refusals.length > 0) return { report, ran: false };
+    // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.
+    const owner = config.lumiverse.user;
+    if (owner === null || owner === "") throw new Error(NO_OWNER);
 
     await prepareDataFolder(paths);
     const backup = await backupOf(today, paths.backups, now);
@@ -105,7 +109,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       migrations.add("build", BUILD_MIGRATIONS);
       // A chat's folders are chosen once and kept in the tree's tables, which the server reads as well.
       if (options.tree) migrations.add(options.tree.tables.area, options.tree.tables.migrations);
-      migrateTables(db, migrations, { version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
+      migrateTables(db, migrations, { user: owner, version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
       const registry = createRegistry(ALL_PACKS);
       const { chats, notOpened } = await chatsToImport(today);
       const worlds = new Map<string, WorldDoc>();

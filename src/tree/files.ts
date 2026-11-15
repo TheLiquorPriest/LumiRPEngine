@@ -1,7 +1,7 @@
 // RPE's file port (plan §5, §5.1; `FilesPort` in `rp-harness/contract`): reads and finds over a chat's
 // view of the tree, and writes held to where each writer may write. Every note an agent writes in a
-// turn is recorded against that turn (`tree_write`), with what the file held before and after, so a
-// swipe, a delete or a branch can put the notes back (`notes.ts`).
+// turn is recorded against that turn as a version of the note (`note_version`), with what the file
+// held before and after, so a swipe, a delete or a branch can put the notes back (`notes.ts`).
 
 import { appendFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -301,7 +301,7 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         if (result.status === "written" && result.kind === "notes" && by !== "harness" && scope.turn !== undefined) {
           const turn = scope.turn;
           await deps.writes.run((db) => {
-            const row = db.run("INSERT INTO tree_write (user, chat, turn, agent, path, before, after, text, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [scope.user, scope.chat, turn, JSON.stringify(by), result.path, old, result.hash, after, deps.now()]);
+            const row = db.run("INSERT INTO note_version (user, chat, turn, agent, path, before, after, text, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [scope.user, scope.chat, turn, JSON.stringify(by), result.path, old, result.hash, after, deps.now()]);
             db.run("INSERT INTO tree_applied (user, chat, write_id) VALUES (?, ?, ?)", [scope.user, scope.chat, Number(row.lastInsertRowid)]);
           }, "recording an agent's note");
         }

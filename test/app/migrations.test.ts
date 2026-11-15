@@ -1,17 +1,24 @@
 // The database's migrations: each runs once, area by area in the stated order and by version within
 // an area; one that fails leaves the database as it was before it and runs nothing after it; a copy
 // of the file is taken before a new version's first migration; and a database a newer build brought
-// further is refused. The store's own migrations plug in as they are. Each test starts the server
-// in-process on a free loopback port.
+// further is refused. The store's own migrations plug in as they are. The runner's own rows name the
+// user the database belongs to, and an older database's rows take him in the step that adds the
+// column. Each test starts the server in-process on a free loopback port.
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { App, Area, Migration } from "../../src/app";
 import { MigrationError } from "../../src/app";
+import { secretHash } from "../../src/app/auth";
+import { APP_MIGRATIONS } from "../../src/app/schema";
 import { STORE_MIGRATIONS } from "../../src/store";
-import { type Bed, makeBed } from "./helpers";
+import { TREE_MIGRATIONS } from "../../src/tree";
+import { type Bed, makeBed, OWNER } from "./helpers";
+
+/** The app area's own steps, as the runner records them: they run first. */
+const APP_STEPS = APP_MIGRATIONS.map((m) => `app ${m.version}`);
 
 /** A migration that notes that it ran, in a table the store's first migration makes. */
 function noting(area: string, version: number): Migration {
@@ -60,13 +67,13 @@ describe("migrations", () => {
 
   test("run once each, area by area in the stated order, by version within an area", async () => {
     const first = await run("1.0.0", areas([STORE_1, STORE_2], [CAST_1]));
-    expect(first.migrated.applied.map((m) => `${m.area} ${m.version}`)).toEqual(["app 1", "store 1", "store 2", "cast 1"]);
+    expect(first.migrated.applied.map((m) => `${m.area} ${m.version}`)).toEqual([...APP_STEPS, "store 1", "store 2", "cast 1"]);
     const second = await run("1.0.0", areas([STORE_1, STORE_2], [CAST_1]));
     expect(second.migrated.applied).toEqual([]);
     const db = new Database(bed.paths.database);
     try {
       expect(steps(db)).toEqual(["store 1", "store 2", "cast 1"]);
-      expect(recorded(db)).toEqual(["app 1", "store 1", "store 2", "cast 1"]);
+      expect(recorded(db)).toEqual([...APP_STEPS, "store 1", "store 2", "cast 1"]);
     } finally {
       db.close();
     }
@@ -82,7 +89,7 @@ describe("migrations", () => {
     try {
       expect(db.query("SELECT name FROM sqlite_master WHERE name = 'extra'").all()).toEqual([]);
       expect(steps(db)).toEqual(["store 1", "store 2", "cast 1"]);
-      expect(recorded(db)).toEqual(["app 1", "store 1", "store 2", "cast 1"]);
+      expect(recorded(db)).toEqual([...APP_STEPS, "store 1", "store 2", "cast 1"]);
     } finally {
       db.close();
     }
@@ -97,7 +104,7 @@ describe("migrations", () => {
     expect(copies[0]).toStartWith("rpe-before-1.1.0-");
     const copy = new Database(join(bed.paths.backups, copies[0] ?? ""), { readonly: true });
     try {
-      expect(recorded(copy)).toEqual(["app 1", "store 1", "cast 1"]);
+      expect(recorded(copy)).toEqual([...APP_STEPS, "store 1", "cast 1"]);
       expect(steps(copy)).toEqual(["store 1", "cast 1"]);
     } finally {
       copy.close();
@@ -125,9 +132,68 @@ describe("migrations", () => {
     try {
       const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
       for (const table of ["chat", "turn", "change", "snapshot", "session", "path_node", "message_link", "world_revision"]) expect(tables).toContain(table);
-      expect(recorded(db)).toEqual(["app 1", ...STORE_MIGRATIONS.map((m) => `store ${m.version}`)]);
+      expect(recorded(db)).toEqual([...APP_STEPS, ...STORE_MIGRATIONS.map((m) => `store ${m.version}`)]);
     } finally {
       db.close();
+    }
+  });
+
+  test("the runner's rows name the user the database belongs to", async () => {
+    await run("1.0.0", areas([STORE_1], [CAST_1]));
+    const db = new Database(bed.paths.database);
+    try {
+      expect(db.query<{ user: string }, []>("SELECT DISTINCT user FROM migration").all()).toEqual([{ user: OWNER }]);
+      expect(db.query<{ user: string; key: string }, []>("SELECT user, key FROM meta ORDER BY key").all()).toEqual([{ user: OWNER, key: "version" }]);
+    } finally {
+      db.close();
+    }
+    // An RPE that belongs to another user is not this database's: it is refused, and nothing is written.
+    const before = await Bun.file(bed.paths.database).bytes();
+    await expect(bed.open({ config: { lumiverse: { url: null, user: "user-other" } }, areas: areas([STORE_1], [CAST_1]) })).rejects.toThrow(`This database was brought up for the Lumiverse user ${OWNER}, and this RPE belongs to user-other`);
+    expect(await Bun.file(bed.paths.database).bytes()).toEqual(before);
+  });
+
+  test("an older database's rows hold the install's user as soon as the step that adds the column has run", async () => {
+    // A database as the build before this one left it: the app's first step and the files area's first five, no user on
+    // the runner's two tables, a key, a switch and a shipped default's record.
+    await mkdir(bed.paths.root, { recursive: true });
+    const older = new Database(bed.paths.database);
+    const key = `rpe_${"7".repeat(64)}`;
+    try {
+      older.run("CREATE TABLE migration (area TEXT NOT NULL, version INTEGER NOT NULL, name TEXT, build TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (area, version)); CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
+      const first = APP_MIGRATIONS[0];
+      if (first === undefined || !("sql" in first)) throw new Error("the app's first step is SQL");
+      older.run(first.sql);
+      older.run("INSERT INTO migration (area, version, build, at) VALUES ('app', 1, '0.9.0', 1)");
+      for (const step of TREE_MIGRATIONS.slice(0, 5)) {
+        if (!("sql" in step)) throw new Error("the files area's first five steps are SQL");
+        older.run(step.sql);
+        older.run("INSERT INTO migration (area, version, build, at) VALUES ('files', ?, '0.9.0', 1)", [step.version]);
+      }
+      older.run("INSERT INTO meta (key, value) VALUES ('version', '0.9.0')");
+      older.run("INSERT INTO app_key (hash, kind, last4, made) VALUES (?, 'provider', ?, 1)", [secretHash(key), key.slice(-4)]);
+      older.run("INSERT INTO switch (name, digest, kind, what, state, listed, changed) VALUES ('format', 'd1', 'hook', 'fmt {file}', 'on', 1, 2)");
+      older.run("INSERT INTO tree_default (path, before, at) VALUES ('.agents/gm.md', 'The old GM.', 1)");
+    } finally {
+      older.close();
+    }
+    const app = await bed.open({ version: "1.0.0", areas: [{ name: "tree", tables: [{ area: "files", migrations: TREE_MIGRATIONS }] }] });
+    expect(app.migrated.applied.map((m) => `${m.area} ${m.version}`)).toEqual([...APP_STEPS.slice(1), ...TREE_MIGRATIONS.slice(5).map((m) => `files ${m.version}`)]);
+    const users = (table: string): string[] => app.db.query<{ user: string }, []>(`SELECT DISTINCT user FROM ${table}`).all().map((r) => r.user);
+    for (const table of ["migration", "meta", "app_key", "switch", "tree_default"]) expect({ table, users: users(table) }).toEqual({ table, users: [OWNER] });
+    // What they held before they hold still, as the install's user's: his key opens RPE, his switch is on.
+    expect(app.auth.holds("provider", key)).toBe(true);
+    expect(await app.switches.check("format", "hook", "fmt {file}")).toBe("waiting");
+    expect(app.switches.list().find((s) => s.what === "fmt {file}")?.state).toBe("waiting");
+    expect(app.db.query("SELECT state FROM switch WHERE digest = 'd1'").get()).toEqual({ state: "on" });
+    // The copy taken first holds the file as the build before left it, no user in it.
+    const copies = await readdir(bed.paths.backups);
+    expect(copies).toHaveLength(1);
+    const copy = new Database(join(bed.paths.backups, copies[0] ?? ""), { readonly: true });
+    try {
+      expect(copy.query<{ name: string }, []>("SELECT name FROM pragma_table_info('migration')").all().map((c) => c.name)).not.toContain("user");
+    } finally {
+      copy.close();
     }
   });
 });

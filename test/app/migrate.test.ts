@@ -38,8 +38,9 @@ describe("rpe migrate", () => {
     await fixture.remove();
   });
 
-  async function rpe(argv: string[]): Promise<{ code: number; out: string; err: string }> {
-    const io = { ...cliIo(), env: { RPE_DATA: data, RPE_PORT: String(port) } };
+  /** `rpe` run on that folder, with the install's user named unless `named` is false. */
+  async function rpe(argv: string[], named = true): Promise<{ code: number; out: string; err: string }> {
+    const io = { ...cliIo(), env: { RPE_DATA: data, RPE_PORT: String(port), ...(named ? fixture.named : {}) } };
     const code = await runCli(argv, io, { version: "1.0.0" });
     return { code, out: io.outs.join("\n"), err: io.errs.join("\n") };
   }
@@ -66,6 +67,16 @@ describe("rpe migrate", () => {
     } finally {
       await running.stop(true);
     }
+  });
+
+  test("`rpe migrate` with no user named writes nothing, no backup included, and says what is missing", async () => {
+    const before = await todays(fixture);
+    const refused = await rpe(["migrate", ...today], false);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("RPE belongs to no Lumiverse user yet, so nothing was written: `rpe up` names the user it belongs to.");
+    // Not the data folder, its config, its backups or its database.
+    expect(existsSync(data)).toBe(false);
+    expect(await todays(fixture)).toEqual(before);
   });
 
   test("the real run writes into RPE's data folder, the one every command finds when --data is not given", async () => {

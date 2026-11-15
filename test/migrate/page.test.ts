@@ -32,7 +32,7 @@ describe("the Migration page's data", () => {
     fixture = await buildFixture("operator");
     await rm(join(fixture.userFolder, STRAY));
     data = join(fixture.root, "rpe-data");
-    const run = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
+    const run = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
     expect(run.ran).toBe(true);
     report = run.report;
   });

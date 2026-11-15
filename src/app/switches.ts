@@ -65,36 +65,37 @@ export function switchDigest(kind: string, what: string): string {
   return createHash("sha256").update(`${kind}\n${what}`).digest("hex");
 }
 
-/** Each name's newest definition, by name. */
-export function listSwitches(db: Database): SwitchEntry[] {
+/** Each name's newest definition listed for `user`, by name. */
+export function listSwitches(db: Database, user: string): SwitchEntry[] {
   const newest = new Map<string, SwitchEntry>();
-  for (const row of db.query<SwitchEntry, []>("SELECT name, kind, what, state, listed, changed FROM switch ORDER BY name, listed, rowid").all()) newest.set(row.name, row);
+  for (const row of db.query<SwitchEntry, [string]>("SELECT name, kind, what, state, listed, changed FROM switch WHERE user = ? ORDER BY name, listed, rowid").all(user)) newest.set(row.name, row);
   return [...newest.values()];
 }
 
 /**
- * The command line's switch: sets the newest definition listed under `name` on or off and returns
- * it; null when nothing of that name is listed. For the command line's own connection: on the
- * server's, the guard refuses it.
+ * The command line's switch: sets the newest definition listed for `user` under `name` on or off and
+ * returns it; null when nothing of that name is listed for him. For the command line's own
+ * connection: on the server's, the guard refuses it.
  */
-export function setSwitch(db: Database, name: string, state: "on" | "off", now: number): SwitchEntry | null {
-  const row = db.query<SwitchEntry & { id: number }, [string]>("SELECT rowid AS id, name, kind, what, state, listed, changed FROM switch WHERE name = ? ORDER BY listed DESC, rowid DESC LIMIT 1").get(name);
+export function setSwitch(db: Database, user: string, name: string, state: "on" | "off", now: number): SwitchEntry | null {
+  const row = db.query<SwitchEntry & { id: number }, [string, string]>("SELECT rowid AS id, name, kind, what, state, listed, changed FROM switch WHERE user = ? AND name = ? ORDER BY listed DESC, rowid DESC LIMIT 1").get(user, name);
   if (row === null) return null;
   db.run("UPDATE switch SET state = ?, changed = ? WHERE rowid = ?", [state, now, row.id]);
   const { id: _id, ...entry } = row;
   return { ...entry, state, changed: now };
 }
 
-/** The server's side: what is listed, and whether one definition may run now. */
+/** The server's side, for the user this RPE belongs to: what is listed, and whether one definition may run now. */
 export class Switches {
   constructor(
     private readonly db: Database,
     private readonly writes: WriteQueue,
     private readonly now: () => number,
+    private readonly user: string,
   ) {}
 
   list(): SwitchEntry[] {
-    return listSwitches(this.db);
+    return listSwitches(this.db, this.user);
   }
 
   /**
@@ -105,9 +106,9 @@ export class Switches {
     if (name.trim() === "" || name.length > 200 || /[\u0000-\u001f]/.test(name)) throw new Error("A switch's name is one line of text of at most 200 characters.");
     if (kind.trim() === "") throw new Error(`Say what sort of thing ${name} is.`);
     const digest = switchDigest(kind, what);
-    const row = this.db.query<{ state: SwitchState }, [string, string]>("SELECT state FROM switch WHERE name = ? AND digest = ?").get(name, digest);
+    const row = this.db.query<{ state: SwitchState }, [string, string, string]>("SELECT state FROM switch WHERE user = ? AND name = ? AND digest = ?").get(this.user, name, digest);
     if (row !== null) return row.state;
-    await this.writes.run((db) => db.run("INSERT OR IGNORE INTO switch (name, digest, kind, what, state, listed) VALUES (?, ?, ?, ?, 'waiting', ?)", [name, digest, kind, what, this.now()]), `listing ${name} as waiting`);
+    await this.writes.run((db) => db.run("INSERT OR IGNORE INTO switch (user, name, digest, kind, what, state, listed) VALUES (?, ?, ?, ?, ?, 'waiting', ?)", [this.user, name, digest, kind, what, this.now()]), `listing ${name} as waiting`);
     return "waiting";
   }
 }

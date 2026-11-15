@@ -1,12 +1,14 @@
 // Which folders a chat's levels are (plan §5): chosen once, the first time RPE meets the chat, from its
 // character's name and its own, and kept in RPE's database, so a rename in Lumiverse moves nothing.
-// And the tree's tables (the application's migration area `files`): those folders; every write an agent
-// made to the notes in a turn, with what the file held before and after; which of those writes stand in
-// each chat's notes folder; and the turn each chat's notes were last put at (plan §5.1, `notes.ts`).
+// And the tree's tables (the application's migration area `files`): those folders; every version of a
+// note an agent wrote in a turn (`note_version`, Appendix B), with what the file held before and after;
+// which of those versions stand in each chat's notes folder; the turn each chat's notes were last put at
+// (plan §5.1, `notes.ts`); the shipped defaults an update changed; and agents' suggestions.
 
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { Migration } from "../app/migrations";
 import { CHATS_FOLDER, folderFor } from "./layout";
 
 /** How RPE's database takes a write: the application's write queue. */
@@ -14,7 +16,7 @@ export interface TreeWrites {
   run<T>(write: (db: Database) => T, label?: string): Promise<T>;
 }
 
-export const TREE_MIGRATIONS: readonly { readonly version: number; readonly name: string; readonly sql: string }[] = [
+export const TREE_MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "chat folders and agents' writes",
@@ -105,6 +107,37 @@ CREATE TABLE tree_suggestion (
   decided INTEGER
 );
 CREATE INDEX tree_suggestion_chat ON tree_suggestion (user, chat, state);
+`,
+  },
+  {
+    version: 6,
+    name: "shipped defaults an update changed carry the user",
+    // The rows already there are the install's user's, given him in this same step (R-179).
+    up: (db, user) => {
+      db.run(`
+CREATE TABLE tree_default_user (
+  user TEXT NOT NULL,
+  path TEXT NOT NULL,
+  before TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (user, path)
+);`);
+      db.run("INSERT INTO tree_default_user (user, path, before, at) SELECT ?, path, before, at FROM tree_default", [user]);
+      db.run("DROP TABLE tree_default; ALTER TABLE tree_default_user RENAME TO tree_default;");
+    },
+  },
+  {
+    version: 7,
+    name: "Appendix B's names: note_version and suggestion",
+    sql: `
+ALTER TABLE tree_write RENAME TO note_version;
+DROP INDEX tree_write_turn;
+DROP INDEX tree_write_path;
+CREATE INDEX note_version_turn ON note_version (user, turn);
+CREATE INDEX note_version_path ON note_version (user, path);
+ALTER TABLE tree_suggestion RENAME TO suggestion;
+DROP INDEX tree_suggestion_chat;
+CREATE INDEX suggestion_chat ON suggestion (user, chat, state);
 `,
   },
 ];

@@ -73,7 +73,7 @@ describe("what the real run carries besides the chats", () => {
     fixture = await buildFixture("operator");
     await rm(join(fixture.userFolder, STRAY));
     data = join(fixture.root, "rpe-data");
-    const first = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
+    const first = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
     expect(first.ran).toBe(true);
     report = first.report;
   });
@@ -198,7 +198,7 @@ describe("what the real run carries besides the chats", () => {
     await writeFile(draft, (await readFile(draft, "utf8")).replace("Harbour, draft", "Harbour, edited in Build"));
     const lumiah = join(fixture.userFolder, "harness/settings.json");
     await writeFile(lumiah, (await readFile(lumiah, "utf8")).replace('"include"', '"leave_out"'));
-    const second = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
+    const second = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
     expect(second.ran).toBe(true);
     // The revisions the store keeps already are kept once: a draft edited in Build is no new revision.
     expect(second.report.worldsInStore).toEqual({ added: 0, held: 2, unreadable: 0 });
@@ -227,7 +227,7 @@ describe("what the real run carries besides the chats", () => {
       db.close();
     }
     await writeFile(notebook, "Ada trusts the guard now.");
-    const third = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T11:00:00.000Z") });
+    const third = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T11:00:00.000Z") });
     expect(third.ran).toBe(true);
     expect(third.report.imports?.find((c) => c.chatId === CHAT.harness)?.outcome).toBe("played on RPE: left alone");
     expect(await readFile(notebook, "utf8")).toBe("Ada trusts the guard now.");
@@ -241,7 +241,7 @@ describe("what the real run carries besides the chats", () => {
     const had = (await port.loadSecrets({ user: USER })) as Record<string, unknown>;
     const refreshed = { type: "oauth", access: "access-refreshed-in-rpe", refresh: "refresh-refreshed-in-rpe", expires: 2_000_000_000_000 };
     await port.saveSecrets({ user: USER }, { ...(had as object), v: 1, keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } } as Parameters<typeof port.saveSecrets>[1]);
-    const fourth = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T12:00:00.000Z") });
+    const fourth = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T12:00:00.000Z") });
     expect(fourth.ran).toBe(true);
     expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } });
     expect(fourth.report.carried?.connections).toMatchObject({ keys: 0, signins: 0, kept: 2 });

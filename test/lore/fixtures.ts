@@ -192,7 +192,7 @@ export function loreDb(file: string, backups: string): LoreDb {
   const db = openDatabase(file, 2_000);
   const migrations = new Migrations();
   migrations.add("lore", LORE_MIGRATIONS);
-  migrate(db, migrations, { version: "lore-test", backups, now: () => 0 });
+  migrate(db, migrations, { user: USER, version: "lore-test", backups, now: () => 0 });
   const queue = new WriteQueue(db, 50);
   return {
     db,

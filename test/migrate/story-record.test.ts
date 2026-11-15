@@ -31,7 +31,7 @@ async function migrated(change: (fixture: Fixture) => void, check: (data: string
     await rm(join(fixture.userFolder, STRAY));
     change(fixture);
     const data = join(fixture.root, "rpe-data");
-    expect((await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T09:00:00.000Z") })).ran).toBe(true);
+    expect((await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T09:00:00.000Z") })).ran).toBe(true);
     check(data);
   } finally {
     await fixture.remove();

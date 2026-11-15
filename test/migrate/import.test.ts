@@ -57,7 +57,7 @@ function target(chats: readonly ChatToImport[]): { db: Database; store: Store; s
   const migrations = new Migrations();
   migrations.add("store", STORE_MIGRATIONS);
   migrations.add("migrate", MIGRATE_TABLES);
-  migrate(db, migrations, { version: "test", backups: "/nonexistent", now: () => 0 });
+  migrate(db, migrations, { user: USER, version: "test", backups: "/nonexistent", now: () => 0 });
   const worlds = new Map<string, WorldDoc>();
   for (const c of chats) for (const r of c.revisions) {
     const w = c.input.worlds(r);

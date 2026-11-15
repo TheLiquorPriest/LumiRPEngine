@@ -38,7 +38,7 @@ describe("the worlds a run carried, in Build's own table", () => {
   };
 
   test("the first run copies each carried world in, and a run made again leaves them as they are", async () => {
-    const first = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
+    const first = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T09:00:00.000Z") });
     expect(first.ran).toBe(true);
     const seeded = first.report.worldsInBuild;
     expect(seeded).toBeDefined();
@@ -47,7 +47,7 @@ describe("the worlds a run carried, in Build's own table", () => {
     expect(seeded?.kept).toEqual([]);
     expect(worldsHeld().sort()).toEqual([...(seeded?.copied ?? [])].sort());
 
-    const again = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
+    const again = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
     expect(again.ran).toBe(true);
     expect(again.report.worldsInBuild?.copied).toEqual([]);
     expect(again.report.worldsInBuild?.kept).toEqual([]);
@@ -69,7 +69,7 @@ describe("the worlds a run carried, in Build's own table", () => {
     const todays = join(fixture.userFolder, draft);
     await writeFile(todays, (await readFile(todays, "utf8")).replace("Harbour, draft", "Harbour, edited today"));
 
-    const third = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T11:00:00.000Z") });
+    const third = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T11:00:00.000Z") });
     expect(third.ran).toBe(true);
     expect(third.report.worldsInBuild).toMatchObject({ kept: [fixture.worldId], newer: [fixture.worldId], names: { [fixture.worldId]: "Harbour, rebuilt" } });
     const text = reportText(third.report);

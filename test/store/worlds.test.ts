@@ -46,7 +46,7 @@ describe("world documents by revision", () => {
     const db = storeDb();
     for (const m of [...MIGRATE_TABLES].sort((a, b) => a.version - b.version)) {
       if ("sql" in m) db.run(m.sql);
-      else m.up(db);
+      else m.up(db, USER);
     }
     const bytes = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value));
     const put = db.query("INSERT INTO world_file (user, world, file, bytes, sha256, run) VALUES (?, ?, ?, ?, 'x', 'run-1')");

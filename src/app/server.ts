@@ -19,7 +19,7 @@ import { chmodSync, lstatSync, rmSync } from "node:fs";
 import type { Log } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { Auth } from "./auth";
-import { AuthRefused, bearerOf, NO_OWNER } from "./auth";
+import { AuthRefused, bearerOf } from "./auth";
 import type { AppConfig } from "./config";
 import { OWNER_ONLY_FILE } from "./disk";
 import type { LiveHub, LiveSocketData } from "./live";
@@ -319,14 +319,11 @@ export function startServer(parts: ServerParts): RunningServer {
     const placed = byMethod.get((request.method === "HEAD" ? "GET" : request.method) as Method);
     if (placed === undefined) return withCors(refusal(path, 405, `${path} takes ${methods.join(", ")}.`, { allow: methods.join(", ") }), origin);
     const route = placed.route;
-    let user: string | null = auth.owner;
+    // Every call is the user's this RPE belongs to: it opens for no one before the install names him.
+    const user = auth.owner;
     if (route.access === "page") {
-      if (auth.owner === null) return withCors(refusal(path, 503, NO_OWNER), origin);
       // On the owner's socket a page route is the owner's own call: only his account can open it.
-      if (on === "tcp") {
-        user = auth.pageUser(credentialOf(request));
-        if (user === null) return withCors(refusal(path, 401, ACCESS_WORDS.page), origin);
-      }
+      if (on === "tcp" && auth.pageUser(credentialOf(request)) === null) return withCors(refusal(path, 401, ACCESS_WORDS.page), origin);
     } else if (route.access !== "public" && route.access !== "command" && !auth.holds(route.access, credentialOf(request))) {
       return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "provider" | "extension"]), origin);
     }
