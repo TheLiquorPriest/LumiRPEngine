@@ -263,6 +263,8 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
     stoppedBy: null,
     lastText: false,
     notGiven: [],
+    target: null,
+    held: null,
     trace,
     requests: records.flatMap((r) => (r.event.kind === "call_started" ? [{ agent: r.agent.id, definition: r.agent.definition, call: r.event.call, file: requestFile(r.agent, r.event.call) }] : [])),
   };
@@ -315,7 +317,7 @@ export function earlierTurn(id: string, chat = CHAT): TurnReply | null {
   const error = summary.status === "stopped" ? { code: "stopped" as const } : null;
   const reply = { text: words.reply, progress: [] };
   // The recording names a run by its turn, as RPH did before each run had an id of its own.
-  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
+  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], target: null, held: null, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
   return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run] };
 }
 

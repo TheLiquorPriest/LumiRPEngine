@@ -328,7 +328,7 @@ export const NO_FOLDER: FolderShown = { files: null, problem: null, open: null }
  * for one opened before it is let go, and so is all that comes back once `stop()` is called (the page has
  * left the turn, or shut the spoiler gate).
  */
-export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): { open(name: string): void; openRequest(name: string): void; close(): void; stop(): void } {
+export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): { open(name: string): void; openRequest(name: string, held: string | null): void; close(): void; stop(): void } {
   let shown = NO_FOLDER;
   let alive = true;
   const show = (next: FolderShown): void => {
@@ -353,9 +353,10 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
   };
   return {
     open: (name) => begin(name, async () => ({ text: replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn/files/*", { chat, turn, "*": name })).text, request: null })),
-    openRequest: (name) =>
+    // A continue's own turn holds its files: its requests are read under that turn.
+    openRequest: (name, held) =>
       begin(name, async () => {
-        const { same, messages, tools } = replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn/requests/*", { chat, turn, "*": name }));
+        const { same, messages, tools } = replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn/requests/*", { chat, turn: held ?? turn, "*": name }));
         return { text: null, request: { same, messages, tools } };
       }),
     close() {
@@ -378,7 +379,7 @@ export interface TurnParts {
   /** The notices file's words, for the records of a run's trace that are notices. */
   notices?: NoticeLines;
   onOpenFile(name: string): void;
-  onOpenRequest(name: string): void;
+  onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;
 }
 
@@ -504,7 +505,7 @@ function Given(props: { run: RunNode }) {
 }
 
 /** What each agent of a run was sent on its first model call, where the harness kept it: its request rebuilt exactly as sent, opened on demand. */
-function FirstCalls(props: { view: RunShown | undefined; onOpenRequest(name: string): void }) {
+function FirstCalls(props: { view: RunShown | undefined; onOpenRequest(name: string, held: string | null): void }) {
   const first = new Map<string, RunShown["requests"][number]>();
   for (const request of props.view?.requests ?? []) {
     const held = first.get(request.agent);
@@ -516,7 +517,7 @@ function FirstCalls(props: { view: RunShown | undefined; onOpenRequest(name: str
       <span class="rpe-caption">What each agent was sent first</span>
       <div class="rpe-files">
         {[...first.values()].map((r) => (
-          <Button key={r.agent} small kind="ghost" onClick={() => props.onOpenRequest(r.file)}>
+          <Button key={r.agent} small kind="ghost" onClick={() => props.onOpenRequest(r.file, props.view?.held ?? null)}>
             {`${r.definition} (${r.agent}), call ${r.call}`}
           </Button>
         ))}
@@ -707,7 +708,7 @@ export interface TurnViewProps {
   onOpenFile(name: string): void;
   /** The notices file's words, for the records of a run's trace that are notices. */
   notices?: NoticeLines;
-  onOpenRequest(name: string): void;
+  onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
   /** Settle now, where this turn is the newest on the chat's path: what came of the last press, and whether a run of the chat goes on. */
@@ -775,7 +776,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
   const [reads, setReads] = useState(0);
   const [folder, setFolder] = useState<FolderShown>(NO_FOLDER);
-  const reader = useRef<{ open(name: string): void; openRequest(name: string): void; close(): void } | null>(null);
+  const reader = useRef<{ open(name: string): void; openRequest(name: string, held: string | null): void; close(): void } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
   const [newest, setNewest] = useState<TurnRow | null>(null);
   const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
@@ -852,7 +853,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
       onLive={() => app.go({ page: "live", chat })}
       onRead={() => setReads((n) => n + 1)}
       onOpenFile={(name) => reader.current?.open(name)}
-      onOpenRequest={(name) => reader.current?.openRequest(name)}
+      onOpenRequest={(name, held) => reader.current?.openRequest(name, held)}
       onCloseFile={() => reader.current?.close()}
       settle={
         newest?.id !== turn
