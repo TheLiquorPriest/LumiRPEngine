@@ -25,8 +25,8 @@ const CAST_1 = noting("cast", 1);
 /** The areas, given in the opposite of the order they run in. */
 function areas(store: Migration[], cast: Migration[]): Area[] {
   return [
-    { name: "cast", tables: { area: "cast", migrations: cast } },
-    { name: "store", tables: { area: "store", migrations: store } },
+    { name: "cast", tables: [{ area: "cast", migrations: cast }] },
+    { name: "store", tables: [{ area: "store", migrations: store }] },
   ];
 }
 
@@ -120,7 +120,7 @@ describe("migrations", () => {
   });
 
   test("the store's own migrations plug in as they are", async () => {
-    await run("1.0.0", [{ name: "store", tables: { area: "store", migrations: STORE_MIGRATIONS } }]);
+    await run("1.0.0", [{ name: "store", tables: [{ area: "store", migrations: STORE_MIGRATIONS }] }]);
     const db = new Database(bed.paths.database);
     try {
       const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);

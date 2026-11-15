@@ -79,7 +79,7 @@ beforeEach(async () => {
     paths: dataPaths(join(root, "data")),
     config: configOf({ port: 0, lumiverse: { url: "http://127.0.0.1:7860", user: "owner" } }, {}, "the test's config"),
     version: "1.0.0",
-    areas: [{ name: "store", tables: { area: "store", migrations: STORE_MIGRATIONS } }],
+    areas: [{ name: "store", tables: [{ area: "store", migrations: STORE_MIGRATIONS }] }],
     log: lineLog(() => undefined),
   });
 });

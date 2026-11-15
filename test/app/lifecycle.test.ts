@@ -59,7 +59,7 @@ describe("an area's moments", () => {
   test("stopping runs first at close, in reverse order, while the server answers and writes land; one that throws is logged, and the app still closes", async () => {
     const writer: Area = {
       name: "writer",
-      tables: { area: "harness", migrations: [{ version: 1, sql: "CREATE TABLE seen (n INTEGER PRIMARY KEY, what TEXT NOT NULL)" }] },
+      tables: [{ area: "harness", migrations: [{ version: 1, sql: "CREATE TABLE seen (n INTEGER PRIMARY KEY, what TEXT NOT NULL)" }] }],
       async stopping(app) {
         await app.writes.run((db) => db.run("INSERT INTO seen (what) VALUES ('written while stopping')"));
         seen.push("writer stopping");

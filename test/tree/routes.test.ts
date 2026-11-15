@@ -73,7 +73,7 @@ describe("the Files page's routes", () => {
       areas: [
         {
           name: "tree",
-          tables: { area: "files", migrations: TREE_MIGRATIONS },
+          tables: [{ area: "files", migrations: TREE_MIGRATIONS }],
           async mount(a) {
             defaults = { files: a.paths.files, scratch: a.paths.root, sources, writes: a.writes, now: () => Date.now() };
             await layDefaults(defaults);

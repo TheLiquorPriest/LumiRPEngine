@@ -10,7 +10,7 @@ import { bearer, type Bed, makeBed, makeKey } from "./helpers";
 /** A table to write to, and a page route that writes one row through the queue. */
 const probe: Area = {
   name: "probe",
-  tables: { area: "harness", migrations: [{ version: 1, sql: "CREATE TABLE probe (id INTEGER PRIMARY KEY, n INTEGER NOT NULL, by TEXT NOT NULL)" }] },
+  tables: [{ area: "harness", migrations: [{ version: 1, sql: "CREATE TABLE probe (id INTEGER PRIMARY KEY, n INTEGER NOT NULL, by TEXT NOT NULL)" }] }],
   mount(app) {
     app.routes.add("probe", [
       route({
