@@ -14,6 +14,7 @@ import { LumiverseSocket } from "../../src/adapter/lumiverse/socket";
 import { FakeClock } from "../standin/clock";
 import { StandInDb } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
+import { StandIn } from "../standin/lumiverse";
 
 const USER = "user-tamsin";
 const CHAT = "chat-coast";
@@ -50,7 +51,11 @@ async function bed() {
     settings: [],
     message_breakdowns: [],
   });
-  const server = new LumiverseServer({ clock, db, accounts: [{ id: USER, username: "tamsin", password: "salt and lantern" }] });
+  // The stand-in Lumiverse holds the chat beside its rows, and a branch is made by it, as the player makes one; its events go out on this server's sockets.
+  const host = new StandIn();
+  host.db = db;
+  host.chats.set(CHAT, { id: CHAT, user: USER, character: { id: "char-wren", name: "Wren" }, name: "The coast", metadata: {}, messages: lines().map((m, i) => ({ id: m.id, role: m.user ? ("user" as const) : ("assistant" as const), content: m.text, index: i })) });
+  const server = new LumiverseServer({ clock, db, host, accounts: [{ id: USER, username: "tamsin", password: "salt and lantern" }] });
   const session = new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => USER, clock, log: () => undefined });
   await session.signIn("tamsin", "salt and lantern");
   const socket = new LumiverseSocket({ session, open: server.open, clock, log: () => undefined });
@@ -107,18 +112,15 @@ async function bed() {
       if (send.saved) server.emit("MESSAGE_EDITED", { chatId: CHAT, message: message(id) }, USER);
       if (send.ended) server.emit("GENERATION_ENDED", { generationId: generation, chatId: CHAT, messageId: id, content: text, usage: null, generationType: "normal" }, USER);
     },
-    // `branchChat` (`chats.service.ts:3525-3576`, `:3598-3616`): a new chat, every message up to the one forked at copied with its place and a new id.
-    fork(at: string, made: string, send = true): Record<string, string> {
-      const atIndex = Number(db.rows("SELECT index_in_chat FROM messages WHERE id = ?", at)[0]!.index_in_chat);
-      db.run("INSERT INTO chats (id, character_id, user_id, name, metadata) VALUES (?, 'char-wren', ?, 'The coast (branch)', ?)", made, USER, json({ branched_from: CHAT, branch_at_message: at }));
-      const ids: Record<string, string> = {};
-      for (const row of db.rows("SELECT id FROM messages WHERE chat_id = ? AND index_in_chat <= ? ORDER BY index_in_chat", CHAT, atIndex)) {
-        const copy = `${made}-${String(row.id)}`;
-        ids[String(row.id)] = copy;
-        db.run("INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, send_date, swipe_id, swipes, swipe_dates, extra) SELECT ?, ?, index_in_chat, is_user, name, content, send_date, swipe_id, swipes, swipe_dates, extra FROM messages WHERE id = ?", copy, made, String(row.id));
-      }
-      if (send) server.emit("CHAT_FORKED", { sourceChatId: CHAT, forkedChatId: made, branchId: null, forkedAtMessageId: at, forkedAtMessageIndex: atIndex, messageIdMap: ids }, USER);
-      return ids;
+    // `branchChat` (`chats.service.ts:3506-3635`), made by the stand-in as the player makes it: a new chat, every message up to the one forked at copied with its place and a new id, then
+    // `CHAT_FORKED` with the map; `send: false` drops the event, as when RPE's socket was closed or RPE was down.
+    fork(at: string, send = true): { chat: string; ids: Record<string, string> } {
+      const sockets = host.sockets;
+      if (!send) host.sockets = null;
+      const chat = host.branch(CHAT, at);
+      host.sockets = sockets;
+      const told = host.events.findLast((e) => e.event === "CHAT_FORKED")!.payload as { messageIdMap: Record<string, string> };
+      return { chat: chat!, ids: told.messageIdMap };
     },
   };
 
@@ -157,10 +159,11 @@ describe("Lumiverse's changes to a chat", () => {
   test("each reaches the turn lane in its shape: a generation's end with its message, an edit, a hidden mark, a delete, a swipe, a fork with its id map", async () => {
     const b = await bed();
     await play(b, null);
-    const ids = b.lumiverse.fork("m2", "chat-branch");
+    const { chat, ids } = b.lumiverse.fork("m2");
     await b.clock.advance(0);
-    expect(b.heard).toEqual([...all(b), { kind: "chat-forked", from: CHAT, chat: "chat-branch", ids }]);
-    expect(ids).toEqual({ m0: "chat-branch-m0", m1: "chat-branch-m1", m2: "chat-branch-m2" });
+    expect(b.heard).toEqual([...all(b), { kind: "chat-forked", from: CHAT, chat, ids }]);
+    expect(Object.keys(ids)).toEqual(["m0", "m1", "m2"]);
+    expect(new Set(Object.values(ids)).size).toBe(3);
   });
 
   test("a hide heard on the event socket hands the lane the hidden flag, an unhide hands false, his edit of the showing swipe is marked updated, and a generation's start is told", async () => {
@@ -202,10 +205,10 @@ describe("Lumiverse's changes to a chat", () => {
 
   test("with the fork's event missed, the forked chat is found from its rows with the same id map", async () => {
     const b = await bed();
-    const ids = b.lumiverse.fork("m3", "chat-branch", false);
+    const { chat, ids } = b.lumiverse.fork("m3", false);
     await b.clock.advance(0);
     expect(b.heard).toEqual([]);
-    expect(await forkOf(b.reads, "chat-branch")).toEqual({ kind: "chat-forked", from: CHAT, chat: "chat-branch", ids });
+    expect(await forkOf(b.reads, chat)).toEqual({ kind: "chat-forked", from: CHAT, chat, ids });
     expect(await forkOf(b.reads, CHAT)).toBeNull();
   });
 
