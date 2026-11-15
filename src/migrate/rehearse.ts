@@ -26,7 +26,9 @@ import { areaFiles, areaHead, countLedgers, countLink, countSettings, countWorld
 import type { ChatRow, LumiverseDb } from "./lumiverse-db";
 import { changesSince, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
 import { placesOf, type Place } from "./carry";
-import { NO_PLACE_YET, ROWS } from "./rows";
+import { NO_PLACE_YET, ROW, ROWS, type RowId } from "./rows";
+import type { OwnerRow } from "./setting-list";
+import { runtimeOrigins } from "./today/lumiah/runtime/lumiverse";
 import { openToday, type Sources, type Today } from "./today";
 
 export interface RehearseOptions {
@@ -37,6 +39,8 @@ export interface RehearseOptions {
   target?: string;
   /** Whose RPE the real run would write into: the Lumiverse user its config names, and the users earlier runs carried into its data folder. Absent: not asked. */
   rpe?: { owner: string | null; earlier: readonly string[] };
+  /** The rows he gave to what no row names (`migration.rows`). */
+  given?: readonly OwnerRow[];
   /** Whether the real run is given the file tree's places, where the user's own files go (`rpe migrate` always gives them). */
   tree?: boolean;
   now?: () => Date;
@@ -238,7 +242,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     if (found.extension !== null) items.push(...(await storageItems("extension storage", found.extension, await namedFiles(found.extension, EXTENSION_WIDE), new Map(), context, unreadable)));
     for (const f of found.runtime.files) {
       const bytes = await readBytes(f.disk);
-      items.push(itemOf("runtime", f.path, { bytes: bytes?.length ?? f.bytes, sha256: sha256(bytes ?? new Uint8Array()) }, f.link ? null : classifyRuntime(f.path), f.link ? "a symbolic link, which the migration doesn't follow" : undefined));
+      items.push(itemOf("runtime", f.path, { bytes: bytes?.length ?? f.bytes, sha256: sha256(bytes ?? new Uint8Array()) }, f.link ? null : f.working !== undefined ? { row: "working-copy", fate: "archived", note: f.working } : classifyRuntime(f.path), f.link ? "a symbolic link, which the migration doesn't follow" : undefined));
     }
     for (const chat of chatRows) items.push(...chatEntries(chat, sources.identifier));
     for (const m of db.engineMessages(sources.identifier)) items.push(messageEntry(m, sources.identifier, unreadable));
@@ -253,6 +257,11 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     await reader.userSettings(userId);
     const tally = new Tally();
     const chats: ChatReport[] = [];
+    const named = new Map<string, { row: RowId; why: string }>();
+    const fromRecords: string[] = [];
+    const nameBlob = (path: string, row: RowId, why: string): void => {
+      if (!named.has(path)) named.set(path, { row, why });
+    };
     const blobs = new Set(items.filter((i) => i.where === "user storage" && (i.path.startsWith("agents/blobs/") || i.path.startsWith("harness/blobs/")) && i.fate !== null).map((i) => i.path));
     const missingBlob = (path: string, why: string): void => {
       if (!blobs.has(path)) unreadable.push({ path: `user storage: ${path}`, why });
@@ -266,14 +275,22 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       for (const ledger of read.ledgers) {
         for (const rec of Object.values(ledger?.swipes ?? {})) {
           const refs = recordBlobs(rec);
-          for (const h of refs.agents) missingBlob(`agents/blobs/${h}`, `a session text a record on chat ${chat.id} names; today's clean-up had removed it`);
-          for (const h of refs.harness) missingBlob(`harness/blobs/${h.slice(0, 2)}/${h}`, `a harness text a record on chat ${chat.id} names; today's clean-up had removed it`);
+          for (const h of refs.agents) {
+            missingBlob(`agents/blobs/${h}`, `a session text a record on chat ${chat.id} names; today's clean-up had removed it`);
+            fromRecords.push(`agents/blobs/${h}`);
+          }
+          for (const h of refs.harness) {
+            missingBlob(`harness/blobs/${h.slice(0, 2)}/${h}`, `a harness text a record on chat ${chat.id} names; today's clean-up had removed it`);
+            fromRecords.push(`harness/blobs/${h.slice(0, 2)}/${h}`);
+          }
         }
       }
       const meta = agentMetaOf(chat.metadata);
       tally.add("agents-workspace", Object.keys(meta.learned).length);
       tally.add("assistant-threads", meta.assistant.messages.length + Object.keys(meta.assistant.proposals).length);
       for (const h of [...Object.values(meta.learned).map((f) => f.hash), ...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) missingBlob(`agents/blobs/${h}`, `a file chat ${chat.id}'s agents kept; today's clean-up had removed it`);
+      for (const f of Object.values(meta.learned)) nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", `a file of chat ${chat.id}'s learned area`);
+      for (const h of [...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) nameBlob(`agents/blobs/${h}`, "assistant-threads", `a message or proposal of chat ${chat.id}'s assistant thread`);
       unreadable.push(...read.unreadable);
       chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, turns: (tally.counts.get("ledger") ?? 0) - before, story: (tally.counts.get("story-record") ?? 0) - stories, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting });
     }
@@ -282,7 +299,11 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     const global = json(await userView.read("agents/global.json"));
     if (isRecord(global) && isRecord(global.files)) {
       tally.add("agents-workspace", Object.keys(global.files).length);
-      for (const f of Object.values(global.files)) if (isRecord(f) && typeof f.hash === "string") missingBlob(`agents/blobs/${f.hash}`, "a file of the global workspace; today's clean-up had removed it");
+      for (const f of Object.values(global.files)) {
+        if (!isRecord(f) || typeof f.hash !== "string") continue;
+        missingBlob(`agents/blobs/${f.hash}`, "a file of the global workspace; today's clean-up had removed it");
+        nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", "a file of the global workspace");
+      }
     }
 
     // The worlds, through today's world store: every revision its index lists must read.
@@ -326,6 +347,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       }
       if (head === null) continue;
       const indexPath = `harness/blobs/${head.slice(0, 2)}/${head}`;
+      nameBlob(indexPath, item.row ?? "learned-and-home", `the index of the area ${item.path} names`);
       const files = areaFiles(await userView.read(indexPath));
       if (files === null) {
         unreadable.push({ path: `user storage: ${indexPath}`, why: `the index ${item.path} names; today's clean-up had removed it, or it doesn't read` });
@@ -333,12 +355,17 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       }
       const chat = area[2] ?? "";
       for (const f of files) {
-        missingBlob(`harness/blobs/${f.hash.slice(0, 2)}/${f.hash}`, `the text of ${f.path} in ${item.path}; today's clean-up had removed it`);
+        const blob = `harness/blobs/${f.hash.slice(0, 2)}/${f.hash}`;
+        missingBlob(blob, `the text of ${f.path} in ${item.path}; today's clean-up had removed it`);
         const key = `${chat}\u0000${f.path}\u0000${f.hash}`;
-        if (area[3]?.startsWith("area/")) (MIND_FILE.test(f.path) ? versions.mind : versions.notes).add(key);
-        else {
+        if (area[3]?.startsWith("area/")) {
+          (MIND_FILE.test(f.path) ? versions.mind : versions.notes).add(key);
+          nameBlob(blob, MIND_FILE.test(f.path) ? "mind-files" : "author-notes", `the text of ${MIND_FILE.test(f.path) ? "a mind file" : "a note"} in a chat's area (${f.path})`);
+        } else {
           versions.home.add(key);
-          if (area[1] === "workspace/user.json" && f.path.split("/").pop() === "GUIDANCE.md") versions.guidance.add(key);
+          const guidance = area[1] === "workspace/user.json" && f.path.split("/").pop() === "GUIDANCE.md";
+          if (guidance) versions.guidance.add(key);
+          nameBlob(blob, guidance ? "guidance" : "learned-and-home", `the text of ${f.path} in ${item.path}`);
         }
       }
     }
@@ -347,11 +374,46 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     tally.add("learned-and-home", versions.home.size);
     tally.add("guidance", versions.guidance.size);
 
-    countSettings(json(await userView.read("settings.json")), json(await userView.read("harness/settings.json")), tally);
+    const settingsDoc = json(await userView.read("settings.json"));
+    countSettings(settingsDoc, json(await userView.read("harness/settings.json")), tally);
     countLink(found.runtime.runtimes.length, json(await userView.read("harness/registry.json")), tally);
+    // Where today's build keeps two copies of the acceptance connections, the file of the acceptance runs is the authority (today's guard reads its list first, `agents/provider.ts:711`), and the settings' copy is counted as attached.
+    const guarded = json(await userView.read("agent-acceptance.json"));
+    const copy = isRecord(settingsDoc) && isRecord(settingsDoc.agents) && isRecord(settingsDoc.agents.acceptance) && Array.isArray(settingsDoc.agents.acceptance.connections) ? settingsDoc.agents.acceptance.connections.length : 0;
+    if (isRecord(guarded) && Array.isArray(guarded.connections)) {
+      tally.add("second-copies", copy);
+      const file = items.find((i) => i.where === "user storage" && i.path === "agent-acceptance.json");
+      if (file !== undefined) file.note = "the authority for the connections acceptance runs guard, which today's guard reads first: settings.json's copy of that list is counted as attached";
+    }
 
     // A damaged file today's readers set aside, as the stand-in kept it.
     for (const w of writes) if (w.op === "move" && w.to !== undefined && /\.corrupt-\d+$/.test(w.to)) unreadable.push({ path: `${w.store}: ${w.path}`, why: "damaged: today's reader sets it aside and starts afresh" });
+
+    // The blobs a thing names count where that thing goes (a mind file's text with the mind files, a note's with the notes), and the sessions row holds the session, summary and transcript texts: the row of what names each blob is its row, and a blob nothing names stays with the sessions, where both blob stores are kept whole.
+    for (const p of fromRecords) nameBlob(p, "sessions", "a session, summary or transcript text a record names");
+    for (const item of items) {
+      if (item.where !== "user storage" || item.row !== "sessions" || item.fate !== "attached") continue;
+      const by = named.get(item.path);
+      if (by !== undefined) {
+        item.row = by.row;
+        item.fate = ROW[by.row].fate;
+        item.note = by.why;
+      } else if (/^(agents\/blobs\/[0-9a-f]{32}|harness\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64})$/.test(item.path)) item.note = "no record, area or file names it; today's clean-up removes a text nothing names after a week, so it is kept whole here";
+    }
+
+    // The rows he gave to what no row names (`migration.rows`): a path as the report names it, or a folder (a path ending in `/`).
+    const given = options.given ?? [];
+    const gave = given.map(() => 0);
+    for (const item of items) {
+      if (item.row !== null) continue;
+      const at = given.findIndex((g) => g.path === item.path || g.path === `${item.where}: ${item.path}` || (g.path.endsWith("/") && (item.path.startsWith(g.path) || `${item.where}: ${item.path}`.startsWith(g.path))));
+      const g = given[at];
+      if (g === undefined) continue;
+      gave[at] = (gave[at] ?? 0) + 1;
+      item.row = "owner-rows";
+      item.fate = g.fate;
+      item.note = `yours: ${g.line}`;
+    }
 
     // Where each thing carried or attached goes in this run, decided before anything is written.
     const placeOf = await placesOf(today, items, options.tree ?? false);
@@ -399,9 +461,10 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       chats,
       unreadable,
       unsent: found.runtime.unsent.map((u) => ({ runtime: u.runtime, files: u.files.size, kept: u.kept, why: u.why })),
-      runtime: { taken: found.runtime.runtimes.map(({ name, why, config }) => ({ name, why, unit: config.service?.unit ?? null, source: config.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone },
+      runtime: { taken: found.runtime.runtimes.map(({ name, why, config }) => ({ name, why, unit: config.service?.unit ?? null, source: config.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone, archived: found.runtime.archived },
+      ...(given.length > 0 ? { given: given.map((g, i) => ({ ...g, found: gave[i] ?? 0 })) } : {}),
       standIn: { writes, logged },
-      lumiverse: db.marks(chatRows),
+      lumiverse: db.marks(chatRows, sources.identifier, found.runtime.runtimes.flatMap((r) => runtimeOrigins(r.config.listen, r.config.port))),
       disk,
       underWay: chats.reduce((n, c) => n + c.underWay, 0),
       imports: null,

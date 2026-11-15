@@ -147,7 +147,7 @@ describe("what today's build recorded beside each turn", () => {
     expect(kept).toEqual(versions);
     expect(report.carried?.ownFiles?.versions).toBe(versions.size);
     expect(report.rows.find((r) => r.row === "author-notes")?.inside?.count).toBe(versions.size);
-    expect(report.rows.find((r) => r.row === "author-notes")?.count).toMatchObject({ found: 4, carried: 4, backup: 0 });
+    expect(report.rows.find((r) => r.row === "author-notes")?.count).toMatchObject({ found: 12, carried: 12, backup: 0 });
   });
 
   test("a second run over the same data duplicates nothing: each character once, the same rows read the same, the same notes, the migration's own tables the same", async () => {

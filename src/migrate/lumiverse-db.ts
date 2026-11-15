@@ -75,6 +75,13 @@ export interface LumiverseMarks {
   presetBlocks: number;
   /** Preset blocks whose text names an outlet of the engine's (`{{outlet::lre_…}}`). */
   outletReferences: number;
+  /** Messages the panels put in the user's chats: their own messages, each carrying the request a panel made. They are the user's chat and stay. */
+  panelMessages: number;
+  /** Chats pinned to the engine's connection: those today's switch marked, with a connection in their metadata; and how many of them pin a model too. */
+  chatsPinned: number;
+  chatsPinnedToModel: number;
+  /** The scheduler's exclusions in the user's setting: how many origins it excludes, and how many of those are the runtime's address; null where Lumiverse holds no scheduler setting for the user. */
+  schedulerExclusions: { listed: number; engine: number } | null;
 }
 
 export class LumiverseDb {
@@ -180,8 +187,13 @@ export class LumiverseDb {
       .map((m) => ({ id: m.id, chatId: m.chat, isUser: m.isUser, metadata: m.metadata }));
   }
 
-  /** What today's build put in Lumiverse for the user, counted. */
-  marks(chats: readonly ChatRow[]): LumiverseMarks {
+  /**
+   * What today's build put in Lumiverse for the user, counted: besides the books, entries, scripts and
+   * preset blocks, the messages the panels put in the chat, each chat's pin to the engine's connection
+   * (the chats today's switch marked, and the connection and model its metadata pins them to), and the
+   * engine's address (`engineOrigins`, those of the runtime the run took) among the scheduler's exclusions.
+   */
+  marks(chats: readonly ChatRow[], identifier: string, engineOrigins: readonly string[]): LumiverseMarks {
     const engineBookIds = new Set(this.reads.books().filter((b) => b.metadata.lumi_rp_engine === true).map((b) => b.id));
     let engineEntries = 0;
     let markedEntries = 0;
@@ -200,6 +212,28 @@ export class LumiverseDb {
         if (typeof block.content === "string" && block.content.includes("{{outlet::lre_")) outletReferences++;
       }
     }
-    return { engineBooks: engineBookIds.size, engineEntries, markedEntries, chatsWithEngineBook, regexScripts: this.reads.regexScripts("LumiRPEngine"), presetBlocks, outletReferences };
+    // A panel's message is a user's own message carrying the request the panel made (`spindle_metadata.<identifier>.action`).
+    const panelMessages = this.engineMessages(identifier).filter((m) => m.isUser && isRecord(m.metadata[identifier]) && typeof m.metadata[identifier].action === "string").length;
+    // Lumiverse's own per-chat pin (`connection_profile_id`, `connection_model`) on the chats today's switch marked (`lumiah_chat_<identifier>`).
+    const pinned = chats.filter((c) => isRecord(c.metadata[`lumiah_chat_${identifier}`]) && typeof c.metadata.connection_profile_id === "string");
+    // The scheduler's exclusions are the user's own setting in Lumiverse (`inferenceSchedulerConfig.excludedOrigins`).
+    let schedulerExclusions: LumiverseMarks["schedulerExclusions"] = null;
+    const scheduler = this.scheduler();
+    if (scheduler !== null) {
+      const listed = Array.isArray(scheduler.excludedOrigins) ? scheduler.excludedOrigins.filter((o): o is string => typeof o === "string") : [];
+      const ours = new Set(engineOrigins.map((o) => o.toLowerCase()));
+      schedulerExclusions = { listed: listed.length, engine: listed.filter((o) => ours.has(o.toLowerCase())).length };
+    }
+    return { engineBooks: engineBookIds.size, engineEntries, markedEntries, chatsWithEngineBook, regexScripts: this.reads.regexScripts("LumiRPEngine"), presetBlocks, outletReferences, panelMessages, chatsPinned: pinned.length, chatsPinnedToModel: pinned.filter((c) => typeof c.metadata.connection_model === "string").length, schedulerExclusions };
+  }
+
+  /** The user's inference scheduler config in Lumiverse (`inferenceSchedulerConfig`); null where they have none, or it is not JSON. */
+  private scheduler(): JsonObject | null {
+    try {
+      const setting = this.reads.setting("inferenceSchedulerConfig");
+      return setting !== null && isRecord(setting.value) ? (setting.value as JsonObject) : null;
+    } catch {
+      return null;
+    }
   }
 }

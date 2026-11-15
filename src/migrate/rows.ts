@@ -71,6 +71,10 @@ export const ROWS = [
   { id: "logs", what: "Logs, diagnostics and small working files", fate: "archived", found: "own" },
   { id: "working-copy", what: "The runtime's working copy and its temporary folder; the installed copy of today's runtime", fate: "archived", found: "own" },
   { id: "deleted-chats", what: "Run data of chats since deleted in Lumiverse", fate: "archived", found: "own" },
+  // Not in the plan's table either: where today's build keeps two copies of one thing (§15.2 l.1641), the copy that is not the authority, counted from inside the file it rides in, which is carried whole.
+  { id: "second-copies", what: "Where today's build keeps two copies of one thing: the copy that is not the authority, left in the file it is in", fate: "attached", found: "inside" },
+  // Not in the plan's table either: what he gives a row to (the setting `migration.rows`, §22 l.2117): a file nothing names, kept in the backup as he says, with his own line.
+  { id: "owner-rows", what: "Files you gave a row to: each kept as you said, with your line saying what it is", fate: "archived", found: "own" },
 ] as const satisfies readonly { id: string; what: string; fate: Fate; found: Found; why?: string }[];
 
 export type RowId = (typeof ROWS)[number]["id"];
@@ -94,4 +98,5 @@ export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "approvals-jobs": "the jobs lane",
   sessions: "the pages lane: beside the turns they belong to",
   "runtime-settings": "the jobs lane: RPE's config has no setting for the runtime's tuning or memory limit yet (its update choice is carried as a setting)",
+  "owner-rows": "nothing reads a file he names (§22): an attached one stays in the backup, with his line, until a reader of it is built",
 };

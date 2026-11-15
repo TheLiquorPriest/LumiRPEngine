@@ -20,6 +20,8 @@ export interface Sources {
   userId: string;
   runtime: RuntimeFolders | null;
   runtimeName?: string;
+  /** What the user said of runtime folders no config names, by folder name: this user's (`mine`) or not (`theirs`). */
+  runtimeFolders?: Readonly<Record<string, "mine" | "theirs">>;
 }
 
 /**
@@ -31,7 +33,7 @@ export function storageFolders(sources: Pick<Sources, "lumiverse" | "identifier"
   return { user: join(sources.lumiverse, "users", sources.userId, "extensions", sources.identifier), extension: join(sources.lumiverse, "extensions", sources.identifier, "storage") };
 }
 
-const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], undecided: null };
+const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], archived: [], undecided: null };
 
 export interface Today {
   sources: Sources;
@@ -70,7 +72,7 @@ export async function openToday(sources: Sources): Promise<Today> {
     const mark = user === null ? null : await readText(join(user, "harness", "docs", "mirror.json"));
     // Today's extension keeps each user's runtimes' registrations in that user's own storage (LumiAH `extension/backend/registry.ts`, under `harness/`).
     const registry = user === null ? null : await readText(join(user, "harness", "registry.json"));
-    const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, { username, registry, named: sources.runtimeName ?? null }, mark);
+    const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, { username, registry, named: sources.runtimeName ?? null, ...(sources.runtimeFolders ? { told: sources.runtimeFolders } : {}) }, mark);
     const pending = new Map<string, string | null>();
     for (const u of runtime.unsent) if (u.kept) for (const [path, text] of u.files) pending.set(path, text);
     // Today's own readers run over the stand-in: what they write stays in memory, listed in `writes`.

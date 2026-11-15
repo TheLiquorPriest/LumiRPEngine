@@ -58,7 +58,8 @@ describe("the rehearsal, extension installed for everyone", () => {
 
   test("finds and counts every store of the plan's table", () => {
     for (const row of report.rows) {
-      if (row.found === "not read") continue;
+      // The rows he gives to what no row names are not a store of today's build: none is given here.
+      if (row.found === "not read" || row.row === "owner-rows") continue;
       const counted = row.found === "own" ? row.count.found : (row.inside?.count ?? 0);
       expect({ row: row.row, counted: counted > 0 }).toEqual({ row: row.row, counted: true });
     }
@@ -81,7 +82,8 @@ describe("the rehearsal, extension installed for everyone", () => {
   test("counts each row's things where the real run puts them: each chat's area at every turn carried as notes, the rows with no place yet kept in the backup only, never called carried", () => {
     const count = (row: string) => report.rows.find((r) => r.row === row)?.count;
     // The harness chat's area lands as notes at every turn: the latest as it stands, the ones before it as versions.
-    expect(count("author-notes")).toEqual({ found: 4, carried: 4, attached: 0, archived: 0, backup: 0 });
+    // Its texts count with it: the index of each head and the body of each note it names are the row's too.
+    expect(count("author-notes")).toEqual({ found: 12, carried: 12, attached: 0, archived: 0, backup: 0 });
     expect(count("chat-switch")).toMatchObject({ carried: 0, attached: 0 });
     expect(count("chat-switch")?.backup).toBeGreaterThan(0);
     expect(count("worlds")).toMatchObject({ backup: 0 });
@@ -162,7 +164,7 @@ describe("the rehearsal, extension installed for everyone", () => {
   });
 
   test("lists what today's build put in Lumiverse itself, and the disk the real run takes", () => {
-    expect(report.lumiverse).toEqual({ engineBooks: 1, engineEntries: 1, markedEntries: 1, chatsWithEngineBook: 1, regexScripts: 1, presetBlocks: 2, outletReferences: 1 });
+    expect(report.lumiverse).toEqual({ engineBooks: 1, engineEntries: 1, markedEntries: 1, chatsWithEngineBook: 1, regexScripts: 1, presetBlocks: 2, outletReferences: 1, panelMessages: 1, chatsPinned: 1, chatsPinnedToModel: 1, schedulerExclusions: { listed: 2, engine: 1 } });
     expect(report.disk.backup).toBeGreaterThan(0);
     expect(report.disk.total).toBe(report.disk.backup + report.disk.import);
     expect(report.disk.free).toBeGreaterThan(0);

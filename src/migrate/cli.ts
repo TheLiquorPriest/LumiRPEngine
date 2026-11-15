@@ -13,7 +13,7 @@ import { reportText } from "./report";
 const USAGE = [
   "rpe migrate [--rehearse] --lumiverse <folder> --user <id> [--data <folder>]",
   "            [--runtime-config <folder> --runtime-data <folder>] [--runtime <name> | --no-runtime]",
-  "            [--identifier <id>] [--json]",
+  "            [--mine <folder>] [--theirs <folder>] [--identifier <id>] [--json]",
   "",
   "  --rehearse          read everything, write nothing, print the report",
   "  --lumiverse         Lumiverse's data folder (the one holding lumiverse.db)",
@@ -24,6 +24,8 @@ const USAGE = [
   "  --runtime           the runtime of today's build that is this user's (default: the one they registered",
   "                      with this Lumiverse); every other runtime there is left alone",
   "  --no-runtime        the server runs no runtime of today's build for this user",
+  "  --mine <name>       a runtime folder no config names holds this user's working copy (give it again for each folder)",
+  "  --theirs <name>     a runtime folder no config names is not this user's: it is left alone",
   "  --identifier        the extension's identifier in Lumiverse (default: lumi_rp_engine)",
   "  --json              print the report as JSON instead of words",
 ].join("\n");
@@ -31,7 +33,7 @@ const USAGE = [
 /** The extension's identifier as its manifest names it (`spindle.json`). */
 const IDENTIFIER = "lumi_rp_engine";
 
-const VALUED = ["lumiverse", "user", "data", "runtime-config", "runtime-data", "runtime", "identifier"] as const;
+const VALUED = ["lumiverse", "user", "data", "runtime-config", "runtime-data", "runtime", "identifier", "mine", "theirs"] as const;
 const SWITCHES = ["rehearse", "no-runtime", "json"] as const;
 
 export interface CliIo {
@@ -47,6 +49,7 @@ export interface CliIo {
  */
 export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout): Promise<number> {
   const values: Record<string, string> = {};
+  const folders: Record<string, "mine" | "theirs"> = {};
   const switches = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
@@ -54,8 +57,16 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
     const next = argv[i + 1];
     if ((SWITCHES as readonly string[]).includes(name)) switches.add(name);
     // A value never starts with `--`: `--data --rehearse` is a folder left out, never a real run into a folder named `--rehearse`.
-    else if ((VALUED as readonly string[]).includes(name) && next !== undefined && !next.startsWith("--")) values[name] = argv[++i] ?? "";
-    else {
+    else if ((VALUED as readonly string[]).includes(name) && next !== undefined && !next.startsWith("--")) {
+      const value = argv[++i] ?? "";
+      if (name === "mine" || name === "theirs") {
+        if (folders[value] !== undefined && folders[value] !== name) {
+          io.err(`--mine ${value} and --theirs ${value} say opposite things: give one of them.\n\n${USAGE}`);
+          return 2;
+        }
+        folders[value] = name;
+      } else values[name] = value;
+    } else {
       io.err(`${(VALUED as readonly string[]).includes(name) ? `--${name} needs a value${next === undefined ? "" : `, and ${next} is an option`}.` : `Not understood: ${arg}`}\n\n${USAGE}`);
       return 2;
     }
@@ -72,7 +83,7 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
   const found = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
   try {
-    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree });
+    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
     return switches.has("rehearse") || ran ? 0 : 1;
   } catch (error) {

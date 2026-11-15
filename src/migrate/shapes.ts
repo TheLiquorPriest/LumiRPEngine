@@ -91,6 +91,7 @@ const report = shape.named(
     unreadable: json,
     unsent: json,
     runtime: opt(json),
+    given: opt(json),
     standIn: json,
     lumiverse: json,
     disk: json,

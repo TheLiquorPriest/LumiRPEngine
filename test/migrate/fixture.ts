@@ -208,7 +208,7 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
       { id: CHAT.classic, user: USER, name: "Harbour (classic)", meta: run("seed-classic", { prefs: { knowledge: true, narrator: "player" } }) },
       // Its engine came from the user's New chats start on, as a build with the depth engine marked it at the chat's first turn.
       { id: CHAT.agents, user: USER, name: "Gate (agents)", meta: run("seed-agents", { prefs: { engine: "agents", engineFrom: "default" }, agents: { learned: { "learned/notes.md": { hash: blobs.agents[1] ?? "" } }, assistant: { messages: [blobs.agents[2] ?? ""], proposals: {} }, rollback: { base: blobs.agents[0] ?? "", archived: blobs.agents[1] ?? "" } } }) },
-      { id: CHAT.harness, user: USER, name: "Fog (harness)", character: CHARACTER.id, meta: { ...run("seed-harness", { prefs: { engine: "harness" } }), [`lumiah_chat_${IDENT}`]: { v: 1, chat: CHAT.harness, name: "LumiRPEngine", since: 1 }, chat_world_book_ids: ["book-engine"] } },
+      { id: CHAT.harness, user: USER, name: "Fog (harness)", character: CHARACTER.id, meta: { ...run("seed-harness", { prefs: { engine: "harness" } }), [`lumiah_chat_${IDENT}`]: { v: 1, chat: CHAT.harness, name: "LumiRPEngine", since: 1 }, connection_profile_id: "conn-today", connection_model: "lumiah-lumi_rp_engine", chat_world_book_ids: ["book-engine"] } },
       { id: CHAT.branch, user: USER, name: "Harbour (branch)", meta: { ...run("seed-classic", { prefs: { knowledge: true } }), branched_from: CHAT.classic } },
       { id: CHAT.fresh, user: USER, name: "Lighthouse (no journal yet)", meta: run("seed-fresh") },
       { id: CHAT.plain, user: USER, name: "No engine here", meta: {} },
@@ -263,6 +263,8 @@ function writeDatabase(path: string, layout: "operator" | "user", data: FixtureC
   db.query("INSERT INTO world_book_entries (id, world_book_id, uid, content, extensions) VALUES (?, ?, ?, ?, ?)").run("entry-secret", "book-own", "2", "The well is dry.", JSON.stringify({ lumi_rp_engine: { lore: { secret: true } } }));
   db.query("INSERT INTO regex_scripts (id, user_id, name, find_regex, scope, scope_id, folder) VALUES (?, ?, ?, ?, ?, ?, ?)").run(`lre_jsonx_${CHAT.classic}`, USER, "Hide engine JSON", "<json>", "chat", CHAT.classic, "LumiRPEngine");
   db.query("INSERT INTO presets (id, name, provider, prompt_order, user_id) VALUES (?, ?, ?, ?, ?)").run("preset-1", "Mine", "openai", JSON.stringify([{ id: "b1", name: "RPEngine", content: "" }, { id: "b2", name: "RPEngine · Scene", content: "" }, { id: "b3", name: "Story", content: "{{outlet::lre_scene}}" }]), USER);
+  // The user's scheduler config, with the engine's address (the runtime's, port 7861) among the exclusions.
+  db.query("INSERT INTO settings (key, value, user_id) VALUES (?, ?, ?)").run("inferenceSchedulerConfig", JSON.stringify({ enabled: true, excludedOrigins: ["http://127.0.0.1:7861", "http://127.0.0.1:9000"] }), USER);
   db.close();
 }
 
@@ -323,7 +325,9 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   const people: WorldDoc["entities"] = Object.fromEntries(Object.values(PEOPLE).map((p) => [p.entity, { id: p.entity, kind: "person", name: p.name, tier: "principal", fields: {}, relations: [] }]));
   const made = await store.create("Harbour", { ...blank, entities: { ...blank.entities, ...people } }, USER as UserId);
   const worldId = made.world.id;
-  const second = { ...made.world, name: "Harbour, rebuilt", lorePins: { characters: { "e-ada": [{ lore: "lore-harbour" }] }, places: {}, steps: {} } };
+  // A world lore entry that copies a book entry's text: the book entry (`entry-secret`, in the user's own book) is the authority.
+  const bookCopy = { id: "lore-harbour", title: "The well", content: "The well is dry.", keys: [], links: [], source: { kind: "book", bookId: "book-own", entryId: "entry-secret", hash: "0".repeat(32) } };
+  const second = { ...made.world, name: "Harbour, rebuilt", lore: { ...made.world.lore, "lore-harbour": bookCopy }, lorePins: { characters: { "e-ada": [{ lore: "lore-harbour" }] }, places: {}, steps: {} } };
   const rev2 = hashJson(second);
   for (const [key, text] of fake.files) await user(key.slice(USER.length + 1), text);
   await user(`worlds/${worldId}/rev/${rev2}.json`, JSON.stringify(second));
@@ -401,10 +405,11 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   await user("harness/story.json", JSON.stringify({ v: 1, jobs: {} }));
 
   // The engine's own files at the root of the user's storage.
-  await user("settings.json", JSON.stringify({ v: 1, defaults: 11, helper: { connectionId: "conn-helper", model: null }, agents: { main: { connectionId: "conn-main" }, acceptance: { connections: [] } }, story: { models: { standing: { connectionId: "conn-story" } } }, prompts: { texts: { "classic.narrator": "Be terse." }, maxChars: 20_000 } }));
+  await user("settings.json", JSON.stringify({ v: 1, defaults: 11, helper: { connectionId: "conn-helper", model: null }, agents: { main: { connectionId: "conn-main" }, acceptance: { connections: [{ id: "conn-main", only: true }] } }, story: { models: { standing: { connectionId: "conn-story" } } }, prompts: { texts: { "classic.narrator": "Be terse." }, maxChars: 20_000 } }));
   await user("extraction-learning.json", JSON.stringify({ v: 1, connections: {} }));
   await user("agents.json", JSON.stringify({ v: 1, clients: { "client-1": { name: "outside-harness", version: "1.0", host: "laptop", harness: "cli", core: null, kit: null, follows: true, why: null, seen: 1 } }, toasted: null, dismissed: null, processes: {} }));
-  await user("agent-acceptance.json", JSON.stringify({ v: 1, run: null, last: null }));
+  // The acceptance runs' file holds the list of connections they guard (the authority), and the settings file the copy it began from.
+  await user("agent-acceptance.json", JSON.stringify({ v: 1, run: null, last: null, connections: [{ id: "conn-main", only: true }] }));
   await user("jobs.json", JSON.stringify({ v: 1, jobs: [] }));
   await user("lore-ids.json", JSON.stringify({ v: 1, next: 1, ids: {}, own: {} }));
   await user("lore-tools.json", JSON.stringify({ v: 1, refused: {} }));

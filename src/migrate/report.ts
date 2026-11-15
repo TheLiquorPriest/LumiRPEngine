@@ -186,7 +186,9 @@ export interface MigrationReport {
    * that runs it and the file it was set up from; and every other runtime here, left alone, with why.
    * Absent from a report kept before runs told runtimes apart.
    */
-  runtime?: { taken: { name: string; why: string; unit: string | null; source: string | null } | null; leftAlone: { name: string; why: string }[] };
+  runtime?: { taken: { name: string; why: string; unit: string | null; source: string | null } | null; leftAlone: { name: string; why: string }[]; archived?: { name: string; why: string }[] };
+  /** The rows he gave (`migration.rows`) to what no row names: each with what was found under it. Absent where he gave none. */
+  given?: { path: string; fate: "archived" | "attached"; line: string; found: number }[];
   /** What today's readers tried to write, kept in memory by the stand-in; and their log lines, counted by level. */
   standIn: { writes: AttemptedWrite[]; logged: Record<"debug" | "info" | "warn" | "error", number> };
   /** What today's build put in Lumiverse itself, which stays as it is. */
@@ -346,15 +348,20 @@ export function reportText(report: MigrationReport): string {
     lines.push("", "Not yet sent by the runtime:");
     for (const u of report.unsent) lines.push(`  ${u.runtime}: ${u.files} file(s), ${u.kept ? "taken" : "not taken"}: ${u.why}`);
   }
-  if (report.runtime !== undefined && (report.runtime.taken !== null || report.runtime.leftAlone.length > 0)) {
+  if (report.runtime !== undefined && (report.runtime.taken !== null || report.runtime.leftAlone.length > 0 || (report.runtime.archived ?? []).length > 0)) {
     const { taken, leftAlone } = report.runtime;
     lines.push("", taken === null ? "Today's runtime: none of this user's taken." : `Today's runtime: took ${taken.name}, ${taken.why}.`);
     for (const r of leftAlone) lines.push(`  Left alone: ${r.name}, ${r.why}.`);
+    for (const r of report.runtime.archived ?? []) lines.push(`  Runtime folder ${r.name}: ${r.why}; its files are counted under the working copy and archived in the backup.`);
+  }
+  if ((report.given ?? []).length > 0) {
+    lines.push("", "Rows you gave to what no row names (migration.rows):");
+    for (const g of report.given ?? []) lines.push(`  ${g.path}: ${g.fate}, ${g.line} (${g.found} thing(s) found${g.found === 0 ? ": nothing found under that path" : ""})`);
   }
   lines.push("", `Today's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
   for (const w of report.standIn.writes) lines.push(`  ${w.store}: ${w.op} ${w.path}${w.to ? ` to ${w.to}` : ""}`);
   const m = report.lumiverse;
-  lines.push("", `In Lumiverse, left as they are: ${m.engineBooks} engine book(s) with ${m.engineEntries} entries, attached to ${m.chatsWithEngineBook} chat(s); ${m.markedEntries} entries of your own books with engine fields; ${m.regexScripts} regex script(s); ${m.presetBlocks} preset block(s) and ${m.outletReferences} outlet reference(s).`);
+  lines.push("", `In Lumiverse, left as they are: ${m.engineBooks} engine book(s) with ${m.engineEntries} entries, attached to ${m.chatsWithEngineBook} chat(s); ${m.markedEntries} entries of your own books with engine fields; ${m.regexScripts} regex script(s); ${m.presetBlocks} preset block(s) and ${m.outletReferences} outlet reference(s); ${m.panelMessages} message(s) the panels put in your chats; ${m.chatsPinned} chat(s) pinned to the engine's connection, ${m.chatsPinnedToModel} of them to a model too; ${m.schedulerExclusions === null ? "no scheduler exclusions set" : `${m.schedulerExclusions.listed} origin(s) on the scheduler's exclusions, ${m.schedulerExclusions.engine} of them the engine's address`}.`);
   lines.push("", `Disk: the backup takes ${report.disk.backup} bytes and the import ${report.disk.import}, ${report.disk.total} in all${report.disk.free === null ? "" : `; ${report.disk.free} are free`}.`);
   if (report.backup) lines.push(`Backup taken: ${report.backup.path} (${report.backup.bytes} bytes, sha256 ${report.backup.sha256}).`);
   if (report.landed) {

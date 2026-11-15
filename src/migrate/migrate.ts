@@ -13,9 +13,10 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { NO_OWNER } from "../app/auth";
-import { dataPaths, type Env, loadConfig, prepareDataFolder } from "../app/config";
+import { type DataPaths, dataPaths, type Env, loadConfig, prepareDataFolder } from "../app/config";
 import { openDatabase } from "../app/database";
 import { migrate as migrateTables, Migrations } from "../app/migrations";
+import { diskTexts, readConfig } from "../app/config-read";
 import { BUILD_MIGRATIONS } from "../build/schema";
 import { seedCarriedWorlds } from "../build/seed";
 import { CAST_MIGRATIONS } from "../cast";
@@ -32,6 +33,7 @@ import { type ChatNames, IMPORTED, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, type MigrationReport } from "./report";
+import { MIGRATE_SETTINGS, type OwnerRow, ownerRowsOf } from "./setting-list";
 import { NO_PLACE_YET } from "./rows";
 import { importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
 import { openToday, type Sources } from "./today";
@@ -78,6 +80,12 @@ export function earlierRuns(file: string, user: string): { previous: MigrationRe
   }
 }
 
+/** The rows he gave (`migration.rows` in his `RPE-global.yml`), read without changing anything; none where there is no file or none given. */
+async function rowsGiven(paths: DataPaths): Promise<OwnerRow[]> {
+  const read = readConfig(await diskTexts([{ level: "global", file: paths.globalConfig, disk: paths.globalConfig }]), null, MIGRATE_SETTINGS);
+  return MIGRATE_SETTINGS.flatMap((def) => ownerRowsOf(read.read(def).value));
+}
+
 export async function migrate(sources: Sources, options: MigrateOptions): Promise<MigrateResult> {
   const now = options.now ?? (() => new Date());
   const paths = dataPaths(options.data);
@@ -86,7 +94,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
   const { previous, users } = earlierRuns(paths.database, sources.userId);
   const today = await openToday(sources);
   try {
-    const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, ...(previous ? { previous } : {}) });
+    const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
     if (options.rehearse || report.refusals.length > 0) return { report, ran: false };
     // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.
     const owner = config.lumiverse.user;

@@ -11,6 +11,7 @@ import type { RowId } from "./rows";
 
 /** What each row's inside count counts. */
 export const INSIDE_UNIT: Partial<Record<RowId, string>> = {
+  "second-copies": "copies a file holds of something kept elsewhere: the acceptance connections in settings.json (the runs' own file is the authority) and the lore entries of a world's current revision that copy a book entry's text (the book entry is the authority)",
   ledger: "turns: replies and swipes that hold a record",
   "pack-state": "events folded into pack state",
   "secret-holdings": "knowledge events: facts recorded, learned, forgotten, kept from others, settled",
@@ -104,6 +105,9 @@ export function countWorldDoc(doc: unknown, current: boolean, tally: Tally): voi
   let n = sizeOf(pins.generators) + sizeOf(pins.tables);
   for (const group of [lore.characters, lore.places, lore.steps]) if (isRecord(group)) for (const list of Object.values(group)) n += sizeOf(list);
   tally.add("pins", n);
+  // A lore entry whose source is a book entry holds an indexed copy of that entry's text: the book entry, in Lumiverse, is the authority (§15.2 l.1641), and this copy is counted as attached.
+  const entries = isRecord(doc.lore) ? Object.values(doc.lore) : [];
+  tally.add("second-copies", entries.filter((e) => isRecord(e) && isRecord(e.source) && e.source.kind === "book").length);
 }
 
 /** An area's index as LumiAH keeps it in a blob (`AreaIndex`, `H/core/workspace.ts:41-45`): each file's path and the hash of its body. */

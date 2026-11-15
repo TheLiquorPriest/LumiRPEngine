@@ -762,6 +762,7 @@ export interface MigrationReportShown {
   unreadable: JsonValue;
   unsent: JsonValue;
   runtime?: JsonValue;
+  given?: JsonValue;
   standIn: JsonValue;
   lumiverse: JsonValue;
   disk: JsonValue;
