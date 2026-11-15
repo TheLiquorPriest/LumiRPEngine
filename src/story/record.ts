@@ -10,7 +10,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { JoinedTurnError, type Store, StoreInputError } from "../store";
+import { joinable, refuseJoined, type Store, StoreInputError } from "../store";
 import type { StoryAt } from "./path";
 
 /** The parts of the record, as the plan names them (§8.1). */
@@ -212,9 +212,11 @@ export function keyedItemId(part: "premise" | "arc" | "record", key: string): st
 /**
  * Records `writes` on the writer's turn, in order, inside the caller's queued write: the rows as
  * stored, a new item's id given from its first row. Each takes the place after the turn's last write,
- * the lore's overlays among them (`storyMark`).
+ * the lore's overlays among them (`storyMark`). A turn joined to another is refused first, with the
+ * typed error naming the turn it joined (`refuseJoined`).
  */
 export function writeStory(db: Database, writer: StoryWriter, writes: readonly StoryWrite[]): StoryRow[] {
+  refuseJoined(db, writer.user, writer.turn);
   let ord = storyMark(db, writer.user, writer.turn) + 1;
   const put = db.query<unknown, [string, string, number, string, string, string, string | null, string | null, string | null, number]>(
     "INSERT INTO story_entry (user, turn, ord, part, item, value, by, agent, job, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -236,9 +238,9 @@ export function writeStory(db: Database, writer: StoryWriter, writes: readonly S
  * joined to another turn with the typed error naming the turn it joined.
  */
 export function dropStoryStaged(store: Store, user: string, turn: string, agent?: string): number {
+  refuseJoined(store.db, user, turn);
   const row = store.user(user).turn(turn);
   if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
-  if (row.joined !== null) throw new JoinedTurnError(turn, row.joined);
   if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged story rows can be taken back`);
   let gone = 0;
   for (const table of ["story_entry", "lore_overlay"]) gone += (agent === undefined ? store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ?`, [user, turn]) : store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND agent = ?`, [user, turn, agent])).changes;
@@ -257,9 +259,11 @@ export function storyMark(db: Database, user: string, turn: string): number {
 /**
  * Takes back a turn's story rows and overlays written after `after` (a `storyMark`), tied or not,
  * inside the caller's queued write, beside the store's `takeBack`: what a continue recorded when it
- * saved nothing. A job's are the job's and stay, as the store keeps a job's changes. How many went.
+ * saved nothing. A job's are the job's and stay, as the store keeps a job's changes. How many went. A
+ * turn joined to another is refused first, naming the turn it joined.
  */
 export function takeBackStory(db: Database, user: string, turn: string, after: number): number {
+  refuseJoined(db, user, turn);
   let gone = 0;
   for (const table of ["story_entry", "lore_overlay"]) gone += db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`, [user, turn, after]).changes;
   return gone;
@@ -271,20 +275,11 @@ export function takeBackStory(db: Database, user: string, turn: string, after: n
  * the held turn joined: every row of the held turn, a job's included, takes `into`, after that turn's own writes, in the order
  * they were made (their places, `storyMark`, the overlays among the story's rows), each as it was written (its id, value, writer,
  * agent, job and time), nothing worked out again. A job's rows keep their job: a job is recorded with the turn that started it
- * (§10.9), and after the end that is the turn the continue extended. Refused as the store refuses the join: a held turn that is
- * not open, a turn that is not tied, turns of different chats, a turn joined already. How many moved.
+ * (§10.9), and after the end that is the turn the continue extended. What may be joined is the store's one check (`joinable`),
+ * refused as the store refuses the join. How many moved.
  */
 export function joinStory(store: Store, user: string, held: string, into: string): number {
-  const u = store.user(user);
-  const from = u.turn(held);
-  const to = u.turn(into);
-  if (from === null) throw new StoreInputError(`turn ${held} is not there`);
-  if (to === null) throw new StoreInputError(`turn ${into} is not there`);
-  if (from.joined !== null) throw new JoinedTurnError(held, from.joined);
-  if (to.joined !== null) throw new JoinedTurnError(into, to.joined);
-  if (from.status !== "open") throw new StoreInputError(`turn ${held} is ${from.status}: only a continue's open turn's story rows join another turn`);
-  if (to.status !== "done" && to.status !== "cut") throw new StoreInputError(`turn ${into} is ${to.status}: a continue's story rows join the turn tied to the message it extended`);
-  if (from.chat !== to.chat) throw new StoreInputError(`turn ${held} is chat ${from.chat}'s and turn ${into} is chat ${to.chat}'s: a continue extends a turn of its own chat`);
+  joinable(store.db, user, held, into);
   const next = storyMark(store.db, user, into) + 1;
   // The overlays share the story rows' places on a turn, so both tables are taken in one order.
   const rows = store.db

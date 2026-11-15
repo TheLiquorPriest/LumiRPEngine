@@ -16,6 +16,7 @@ import type { JsonObject } from "rp-harness/contract";
 import { hasOwn } from "../shared/json";
 import { loreRefOf, worldEntryId } from "./ids";
 import { foldName } from "./keys";
+import { refuseJoined } from "../store";
 import type { LoreWorlds } from "./sources";
 
 /** One overlay to write, as the story's operation hands it over. */
@@ -45,10 +46,12 @@ export type OverlayWrite = (db: Database, input: OverlayInput) => { written: Jso
 /**
  * The overlay write for the story's `overlay` operation. An entry is known when it is a book entry RPE
  * has numbered for the user (it has been shown to an agent), or an entry of the chat's world where the
- * turn stands.
+ * turn stands. A turn joined to another is refused first, with the typed error naming the turn it
+ * joined (`refuseJoined`).
  */
 export function overlayWrite(worlds: LoreWorlds, now: () => number = Date.now): OverlayWrite {
   return (db, input) => {
+    refuseJoined(db, input.user, input.turn);
     const ref = loreRefOf(input.entry);
     const world = ref?.kind === "book" ? null : worlds.at(input.user, input.chat, input.turn);
     const known =

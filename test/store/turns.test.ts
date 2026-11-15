@@ -8,12 +8,18 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { castAt } from "../../src/cast/path";
+import { CAST_MIGRATIONS, dropCastStaged, joinCast, takeBackCast } from "../../src/cast/index";
+import { writeCast } from "../../src/cast/record";
+import { LORE_MIGRATIONS } from "../../src/lore/schema";
+import { overlayWrite } from "../../src/lore/overlays";
+import type { LoreWorlds } from "../../src/lore/sources";
 import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
 import { migrateStore, STORE_MIGRATIONS } from "../../src/store/schema";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
 import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage, type TurnRow } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
+import { dropStoryStaged, joinStory, STORY_MIGRATIONS, takeBackStory, writeStory } from "../../src/story/index";
 import { carried, engine, goTo, hand, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
 
@@ -1034,6 +1040,7 @@ describe("a continue's held turn", () => {
       ["its path", () => s.extendPath(t1.node, held.id)],
       ["where it started", () => s.startOf(held.id)],
       ["the jobs before it", () => s.jobsBefore(held.id)],
+      ["its review card", () => s.reviewCard(held.id)],
       ["joining it again", () => s.joinTurn(held.id, t2.id)],
     ];
     for (const [what, call] of calls) {
@@ -1224,6 +1231,91 @@ describe("a continue's held turn", () => {
       expect(placeOf(store, "c")).toBe("cellar");
       expect(placeOf(store, "b")).toBe("cellar");
     }
+  });
+});
+
+describe("one home for what a joined turn refuses", () => {
+  /** A store on a database that holds the cast's, the story's and the lore's tables too, as RPE's does, with a chat of two replies. */
+  function whole() {
+    const db = new Database(":memory:");
+    migrateStore(db);
+    for (const m of [...CAST_MIGRATIONS, ...STORY_MIGRATIONS, ...LORE_MIGRATIONS]) if ("sql" in m) db.run(m.sql);
+    let clock = 0;
+    const ts = testStore({ db, now: () => ++clock });
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const t2 = play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV)));
+    return { ...ts, t1, t2 };
+  }
+
+  /** What a call was refused with: the error's kind, its words, and for a joined turn the turn and the turn it joined; null when it was not refused. */
+  function refusal(call: () => unknown): unknown {
+    try {
+      call();
+      return null;
+    } catch (error) {
+      if (!(error instanceof Error)) return error;
+      return [error.name, error.message, error instanceof JoinedTurnError ? [error.turn, error.joined] : null];
+    }
+  }
+
+  test("joinTurn, joinCast and joinStory refuse the same cases with the same errors, from one check", () => {
+    const ts = whole();
+    const { s, store, revision, t1, t2 } = ts;
+    s.createChat({ id: "d", revision });
+    const open = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    const joined = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    s.joinTurn(joined.id, t2.id);
+    const untied = s.beginTurn({ chat: "c", kind: "normal" });
+    const elsewhere = s.beginTurn({ chat: "d", kind: "continue" });
+    const cases: [string, string, string][] = [
+      ["a held turn that is not there", "turn-nowhere", t2.id],
+      ["a turn to join that is not there", open.id, "turn-nowhere"],
+      ["a held turn joined already", joined.id, t2.id],
+      ["a turn to join that was joined itself", open.id, joined.id],
+      ["a held turn that is not open", t1.id, t2.id],
+      ["a turn that is not tied", open.id, untied.id],
+      ["turns of different chats", elsewhere.id, t2.id],
+    ];
+    const before = written(ts);
+    for (const [what, held, into] of cases) {
+      const byStore = refusal(() => s.joinTurn(held, into));
+      expect([what, byStore === null]).toEqual([what, false]);
+      expect([what, refusal(() => joinCast(store, USER, held, into))]).toEqual([what, byStore]);
+      expect([what, refusal(() => joinStory(store, USER, held, into))]).toEqual([what, byStore]);
+    }
+    expect(written(ts)).toBe(before);
+    expect(s.turn(open.id)?.status).toBe("open");
+  });
+
+  test("a write to a joined turn is refused by every write call of the store, the cast and the story, naming the turn it joined", () => {
+    const ts = whole();
+    const { s, store, t2 } = ts;
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
+    s.joinTurn(held.id, t2.id);
+    const writer = { user: USER, turn: held.id, by: "gm", agent: "gm-1", job: null, now: 9 };
+    // The overlay write asks the chat's world only after the refusal: never here.
+    const worlds = {
+      at: () => {
+        throw new Error("the overlay write read the world of a joined turn");
+      },
+    } as unknown as LoreWorlds;
+    const before = written(ts);
+    const calls: [string, () => unknown][] = [
+      ["the store's change", () => s.addChanges(held.id, engine(tick(1)))],
+      ["the store's take-back", () => s.takeBack(held.id, -1)],
+      ["the store's staged changes", () => s.dropStaged(held.id)],
+      ["the cast's write", () => writeCast(store.db, { ...writer, at: null }, [{ character: "bram", part: "knowledge", item: null, value: { text: "Wren went down to the cellar." } }])],
+      ["the cast's take-back", () => takeBackCast(store.db, USER, held.id, -1)],
+      ["the cast's staged rows", () => dropCastStaged(store, USER, held.id)],
+      ["the story's write", () => writeStory(store.db, writer, [{ part: "beat", item: null, value: { text: "Wren goes down with the lantern." } }])],
+      ["the story's take-back", () => takeBackStory(store.db, USER, held.id, -1)],
+      ["the story's staged rows", () => dropStoryStaged(store, USER, held.id)],
+      ["the lore's overlay", () => overlayWrite(worlds, () => 9)(store.db, { user: USER, chat: "c", turn: held.id, entry: "w:cellar", note: "The cellar is flooded now.", by: "author", agent: null, job: null, ord: 0 })],
+    ];
+    for (const [what, call] of calls) expect([what, refusal(call)]).toEqual([what, ["JoinedTurnError", `turn ${held.id} was joined to turn ${t2.id}: address that turn instead`, [held.id, t2.id]]]);
+    expect(written(ts)).toBe(before);
   });
 });
 

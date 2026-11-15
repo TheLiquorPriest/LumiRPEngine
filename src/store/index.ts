@@ -1,6 +1,6 @@
 // The store's public face: what other build lanes call.
 
-export { openStore, Store, UserStore, STORE_DEFAULTS, type StoreOptions, type SessionRow } from "./store";
+export { joinable, openStore, refuseJoined, Store, UserStore, STORE_DEFAULTS, type StoreOptions, type SessionRow } from "./store";
 export { STORE_SETTING_DEFS, STORE_SETTINGS, WORLD_DOCS_SETTING_DEFS, WORLD_STATE_SETTING_DEFS } from "./settings";
 export { TreeView, type From, type NodeKind, type NodeView, type Reflection, type ValueLine, type ValuesShown, type ViewOptions } from "./view";
 export { readPart, renderView, wordLine, Template, type Part, type Piece, type View, type ViewLine } from "./words";

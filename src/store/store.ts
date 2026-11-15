@@ -271,6 +271,36 @@ function hear(heard: Heard, message: string, hidden: boolean | undefined, edits:
   else heard[message] = entry;
 }
 
+/**
+ * The one refusal of a write to a joined turn (plan §10.10, R-192 (f)), made first, over the database itself, by every write call of
+ * the store, the cast and the story, and by every reading of a turn's state: a turn joined to another is refused with the typed error
+ * naming the turn it joined, so the refusal does not rest on a caller meeting any other check first. A turn that is not there is left
+ * to the call's own check. It reads one row and writes nothing.
+ */
+export function refuseJoined(db: Database, user: string, turn: string): void {
+  const joined = db.query<{ joined: string | null }, [string, string]>("SELECT joined FROM turn WHERE user = ? AND id = ?").get(user, turn)?.joined ?? null;
+  if (joined !== null) throw new JoinedTurnError(turn, joined);
+}
+
+/**
+ * The one check of what may be joined (plan §10.10, R-192 (e)), made first by the store's, the cast's and the story's joins: `held`,
+ * a continue's open turn, and `into`, the turn tied to the message the continue's end names, both there, neither joined already, of
+ * one chat. Anything else is refused with the store's typed errors: a turn that is not there, a turn joined already (naming the turn
+ * it joined), a held turn that is not open, a turn that is not tied, turns of different chats. The two turns, read. It writes nothing.
+ */
+export function joinable(db: Database, user: string, held: string, into: string): { from: TurnRow; to: TurnRow } {
+  const [from, to] = [held, into].map((id) => {
+    const r = db.query<TurnDb, [string, string]>("SELECT * FROM turn WHERE user = ? AND id = ?").get(user, id);
+    if (!r) throw new StoreInputError(`no turn ${id}`);
+    refuseJoined(db, user, id);
+    return turnOf(r);
+  }) as [TurnRow, TurnRow];
+  if (from.status !== "open") throw new StoreInputError(`turn ${held} is ${from.status}: only a continue's open turn joins another`);
+  if (to.status !== "done" && to.status !== "cut") throw new StoreInputError(`turn ${into} is ${to.status}: a continue joins the turn tied to the message it extended`);
+  if (from.chat !== to.chat) throw new StoreInputError(`turn ${held} is chat ${from.chat}'s and turn ${into} is chat ${to.chat}'s: a continue extends a turn of its own chat`);
+  return { from, to };
+}
+
 /** Opens a store over a database: a path it opens and brings up itself, or a database whose owner made its tables. */
 export function openStore(options: StoreOptions): Store {
   return new Store(options);
@@ -647,12 +677,11 @@ export class UserStore {
 
   /**
    * A turn a write, or a reading of its state, is addressed to: one there is, and not one joined to another turn, which is refused,
-   * naming the turn it joined (plan §10.10, R-192 (f)). The store never sends such a call on itself.
+   * naming the turn it joined (plan §10.10, R-192 (f); `refuseJoined`). The store never sends such a call on itself.
    */
   private turnToWrite(id: string): TurnRow {
-    const t = this.turnOrThrow(id);
-    if (t.joined !== null) throw new JoinedTurnError(id, t.joined);
-    return t;
+    refuseJoined(this.db, this.id, id);
+    return this.turnOrThrow(id);
   }
 
   /**
@@ -1136,18 +1165,14 @@ export class UserStore {
    * applies as applied (§6.1: code reports what does not add up and never decides). The join is never refused for this. Everything
    * the store keeps by the held turn moves in the same write: a session it opened or closed names `into`; its stored states go. The
    * held turn is kept, with its own row and path node, marked as joined, never dropped: a job it started may still be running with
-   * it in its scope, and `joinedTo` names where that job writes. A held turn that is not open, a turn that is not tied, and a turn of
-   * another chat are refused. The store relies on its caller joining before anything else of the chat begins (a missed end is
+   * it in its scope, and `joinedTo` names where that job writes. What may be joined is checked first (`joinable`), as the cast's and
+   * the story's joins check it. The store relies on its caller joining before anything else of the chat begins (a missed end is
    * joined at the next intake before the next turn is begun): a job of the continue that ended before then would otherwise be
    * placed before a turn begun already. The changes it moved, in order, as they now stand on `into`: each with whether it applies
    * there and its reports.
    */
   joinTurn(held: string, into: string): ChangeRow[] {
-    const from = this.turnToWrite(held);
-    const to = this.turnToWrite(into);
-    if (from.status !== "open") throw new StoreInputError(`turn ${held} is ${from.status}: only a continue's open turn joins another`);
-    if (to.status !== "done" && to.status !== "cut") throw new StoreInputError(`turn ${into} is ${to.status}: a continue joins the turn tied to the message it extended`);
-    if (from.chat !== to.chat) throw new StoreInputError(`turn ${held} is chat ${from.chat}'s and turn ${into} is chat ${to.chat}'s: a continue extends a turn of its own chat`);
+    const { to } = joinable(this.db, this.id, held, into);
     const moved = this.changes(held);
     const own = this.changes(into);
     const outcomes = this.landing(to, own, moved);
@@ -1696,9 +1721,10 @@ export class UserStore {
   /**
    * What the review card shows of a turn (plan §6.8): its changes by lane, each with its undo — the
    * operations undoing it would record and what would be left — and the changes that already undid it.
+   * A joined turn is refused, as every reading of one is, naming the turn it joined.
    */
   reviewCard(turnId: string): { lane: Lane; changes: { change: ChangeRow; undo: { ops: string[]; left: Report[] }; undoneBy: number[] }[] }[] {
-    const turn = this.turnOrThrow(turnId);
+    const turn = this.turnToWrite(turnId);
     const own = this.changes(turn.id);
     const undone = new Map<number, number[]>();
     for (const r of this.db.query<{ id: number; undoes: number }, [string, string]>("SELECT c.id, json_extract(c.cite, '$.undoes') AS undoes FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ? AND t.chat = ? AND json_extract(c.cite, '$.undoes') IS NOT NULL ORDER BY c.id").all(this.id, turn.chat)) {
