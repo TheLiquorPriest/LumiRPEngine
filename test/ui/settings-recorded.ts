@@ -81,4 +81,10 @@ export const SETTINGS: SettingsReply = {
     setting("effort.connections.c-flash", { takes: { type: "oneOf", values: ["low", "medium", "high"] }, takesWords: "one of low, medium, high", none: "the connection's own", connection: { id: "c-flash", name: "Flash" } }),
     setting("effort.connections.Studio", { value: "high", from: "global", file: GLOBAL_FILE, takes: { type: "oneOf", values: ["low", "medium", "high"] }, takesWords: "one of low, medium, high", none: "the connection's own", connection: null }),
   ],
+  facts: [
+    { key: "lumiverse.url", name: "Lumiverse's address", value: "http://lumiverse.test:7860", from: "config.json" },
+    { key: "lumiverse.user", name: "Your Lumiverse user", value: "user-invented", from: "environment" },
+    { key: "port", name: "RPE's port, on loopback, that its connection in Lumiverse points at", value: 7871, from: "config.json" },
+    { key: "data", name: "RPE's data folder", value: "/srv/rpe-data", from: "install" },
+  ],
 };

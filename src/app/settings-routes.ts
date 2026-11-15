@@ -14,6 +14,7 @@
 import { dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import type { JsonValue, LayerLevel } from "rp-harness/contract";
+import type { InstallFact } from "./config";
 import { diskTexts, type LevelFile, readConfig } from "./config-read";
 import { readText, writeWhole } from "./disk";
 import { type Exactly, type Holds, type Infer, type Mutually, route, RouteError, shape } from "./routes";
@@ -29,6 +30,8 @@ export interface SettingsDeps {
   levels(chat: string | null): Promise<LevelFile[]>;
   /** The model layer's connections, for the settings set per connection. */
   connections(): Promise<{ id: string; name: string }[]>;
+  /** The install's facts, as config.json and the environment give them: listed, never written here. */
+  facts(): InstallFact[];
 }
 
 const T = shape.text();
@@ -88,10 +91,17 @@ const settingView = shape.named(
 );
 export type SettingView = Infer<typeof settingView>;
 
+const installFact = shape.named(
+  "InstallFact",
+  "One of the install's facts, which the command line sets and no page writes: its key in config.json, what it is, its value, and where it was given (config.json, the environment, or where the install put the data folder).",
+  shape.object({ key: T, name: T, value: shape.json(), from: shape.oneOf("config.json", "environment", "install") }),
+);
+type FactMirrored = Holds<Exactly<Infer<typeof installFact>, InstallFact>>;
+
 const settingsReply = shape.named(
   "SettingsReply",
-  "Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); and every setting.",
-  shape.object({ chat: shape.nullable(T), files: shape.list(shape.object({ level: layerLevel, file: T, problem: shape.nullable(T) })), settings: shape.list(settingView) }),
+  "Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts.",
+  shape.object({ chat: shape.nullable(T), files: shape.list(shape.object({ level: layerLevel, file: T, problem: shape.nullable(T) })), settings: shape.list(settingView), facts: shape.list(installFact) }),
 );
 export type SettingsReply = Infer<typeof settingsReply>;
 
@@ -151,7 +161,7 @@ async function settingsNow(deps: SettingsDeps, chat: string | null): Promise<Set
     const known = new Set(connections.flatMap((c) => [c.id, c.name]));
     for (const key of [...named].filter((key) => !known.has(key)).sort()) settings.push(view(key, null));
   }
-  return { chat, files: read.levels.map((l) => ({ level: l.level, file: l.file, problem: l.problem })), settings };
+  return { chat, files: read.levels.map((l) => ({ level: l.level, file: l.file, problem: l.problem })), settings, facts: deps.facts() };
 }
 
 /**

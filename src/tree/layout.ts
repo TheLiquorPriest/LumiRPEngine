@@ -13,16 +13,17 @@
 // a character or chat renamed in Lumiverse keeps its folder.
 
 import type { GuidanceKind, LayerLevel } from "rp-harness/contract";
+import { GLOBAL_CONFIG_FILE, SHIPPED_FOLDER } from "../app/config";
 
 /** Where each level other than the chat's appears in the agents' view: the same in every host. */
 export const MOUNTS = { shipped: "@shipped/", global: "@global/", character: "@character/" } as const satisfies Record<Exclude<LayerLevel, "chat">, string>;
 
-/** The shipped level's folder under the tree's root. */
-export const SHIPPED_FOLDER = "defaults";
+/** The shipped level's folder under the tree's root, as the data folder's own layout names it (`src/app/config.ts`). */
+export { SHIPPED_FOLDER };
 /** The folder of the character levels under the tree's root. */
 export const CHATS_FOLDER = "chats";
-/** The config file of the shipped and global levels (plan §5.4 "Config"). */
-export const GLOBAL_CONFIG = "RPE-global.yml";
+/** The config file of the shipped and global levels (plan §5.4 "Config"), as the data folder's own layout names it. */
+export const GLOBAL_CONFIG = GLOBAL_CONFIG_FILE;
 /** A chat's config file. */
 export const CHAT_CONFIG = "RPE.yml";
 /** The keys of a level's config file the files layer reads (RPH's `CONFIG_KEYS`): the files switched off, read at every level, added for a kind of turn, added to stacks, and pinned. */

@@ -15,6 +15,7 @@ import type { LumiverseDoor } from "../../src/adapter/lumiverse/mount";
 import { type App, type Area, MIGRATION_AREAS } from "../../src/app";
 import { compose } from "../../src/app/compose";
 import { UPDATE_SETTINGS } from "../../src/app/update";
+import { SERVER_SETTINGS } from "../../src/app/config";
 import { CAST_SETTINGS } from "../../src/cast";
 import { IFACE_SETTINGS } from "../../src/iface";
 import { LORE_SETTINGS } from "../../src/lore";
@@ -31,7 +32,7 @@ const COMPOSE = join(SRC, "app/compose.ts");
 
 /** Each area of RPE by name: the file that registers it, and the settings its file lists. */
 const OWN: Readonly<Record<string, { file: string; settings: readonly Setting[] }>> = {
-  app: { file: "app/area.ts", settings: UPDATE_SETTINGS },
+  app: { file: "app/area.ts", settings: [...UPDATE_SETTINGS, ...SERVER_SETTINGS] },
   store: { file: "store/area.ts", settings: STORE_SETTINGS },
   lore: { file: "lore/area.ts", settings: LORE_SETTINGS },
   iface: { file: "iface/area.ts", settings: IFACE_SETTINGS },
@@ -102,7 +103,9 @@ describe("each area registers from a file of its own", () => {
     expect(new Set(byAreas).size).toBe(byAreas.length);
     expect([...ownRoutes, ...byAreas].sort()).toEqual([...table].sort());
     for (const name of ["migrate", "turn", "bootstrap", "tree", "cast", "story", "build", "play", "lumiverse"]) expect({ name, routes: (added.get(name) ?? []).length > 0 }).toEqual({ name, routes: true });
-    for (const name of ["app", "store", "lore", "iface"]) expect({ name, routes: added.get(name) ?? [] }).toEqual({ name, routes: [] });
+    // The app's own area adds the Settings routes, over the whole registry, once every area is mounted.
+    expect({ name: "app", routes: (added.get("app") ?? []).sort() }).toEqual({ name: "app", routes: ["GET /api/v1/settings", "PUT /api/v1/settings"] });
+    for (const name of ["store", "lore", "iface"]) expect({ name, routes: added.get(name) ?? [] }).toEqual({ name, routes: [] });
 
     // Every migration step the database ran is one of an area's own, and every area of tables has an area that brings it.
     const brought = new Map<string, Set<number>>();

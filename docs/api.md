@@ -1607,6 +1607,19 @@ export interface HorizonEntryRow {
 }
 ```
 
+### `InstallFact`
+
+One of the install's facts, which the command line sets and no page writes: its key in config.json, what it is, its value, and where it was given (config.json, the environment, or where the install put the data folder).
+
+```ts
+export interface InstallFact {
+  key: string;
+  name: string;
+  value: JsonValue;
+  from: "config.json" | "environment" | "install";
+}
+```
+
 ### `JobCancelReply`
 
 The job as it stands after the cancel; one that had already ended comes back as it ended.
@@ -2424,13 +2437,14 @@ export interface SessionReply {
 
 ### `SettingsReply`
 
-Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); and every setting.
+Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts.
 
 ```ts
 export interface SettingsReply {
   chat: string | null;
   files: ({ level: LayerLevel; file: string; problem: string | null })[];
   settings: SettingView[];
+  facts: InstallFact[];
 }
 ```
 

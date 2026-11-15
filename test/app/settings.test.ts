@@ -11,6 +11,7 @@ import { NO_SESSION, turnSettings } from "../../src/turn";
 import { CHAT_CONFIG, CHATS_FOLDER, GLOBAL_CONFIG, SHIPPED_FOLDER } from "../../src/tree";
 import type { SettingsReply, SettingView } from "../../src/app/settings-routes";
 import { keyFor, type Setting } from "../../src/app/setting-list";
+import { loadConfig, SERVER_SETTINGS } from "../../src/app/config";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "../turn/bed";
 
 const beds: TurnBed[] = [];
@@ -239,4 +240,53 @@ test("a list of records a test area declares is shown as a table and written bac
   expect(refused.status).toBe(400);
   expect(refused.body.error).toBe('keeper.marks[1] is a record with file (a line of text) and agent (a line of text), not {"file":"persistent-workspace/tides.md"}.');
   expect(await readFile(b.app.paths.globalConfig, "utf8")).toBe(text);
+});
+
+test("the server's limits are listed under RPE-global.yml with their defaults, and a write from the page lands there and is in force after a restart", async () => {
+  const b = await openTurnBed({ answers: [] });
+  beds.push(b);
+  const configBefore = await readFile(b.app.paths.config, "utf8");
+  const listed = (await settings(b, "GET", "")).body;
+  for (const def of SERVER_SETTINGS) {
+    expect({ key: def.key, ...setting(listed, def.key) }).toMatchObject({ key: def.key, default: def.default, effect: "start", levels: ["global"], name: def.name, about: def.about });
+  }
+  // The one of Appendix D.1: RPE listens on loopback unless an address is set.
+  expect(setting(listed, "server.address")).toMatchObject({ value: "127.0.0.1", row: "RPE listens on", effectWords: "from RPE's next start" });
+
+  const put = await settings(b, "PUT", "", { level: "global", key: "server.bodyBytes", value: 2_097_152 });
+  expect(put.status).toBe(200);
+  expect(setting(put.body, "server.bodyBytes")).toMatchObject({ value: 2_097_152, from: "global", file: "@global/RPE-global.yml" });
+  expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toMatchObject({ server: { bodyBytes: 2_097_152 } });
+  // Read from the global level alone; config.json is not written.
+  expect((await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "server.bodyBytes", value: 4096 })).status).toBe(400);
+  expect(await readFile(b.app.paths.config, "utf8")).toBe(configBefore);
+  // What RPE's next start reads.
+  expect((await loadConfig(b.app.paths, {})).server.bodyBytes).toBe(2_097_152);
+});
+
+test("config.json's facts are listed, and no route writes config.json", async () => {
+  const b = await openTurnBed({ answers: [] });
+  beds.push(b);
+  const configBefore = await readFile(b.app.paths.config, "utf8");
+  const { facts } = (await settings(b, "GET", "")).body;
+  expect(facts.map((f) => [f.key, f.from])).toEqual([
+    ["lumiverse.url", "config.json"],
+    ["lumiverse.user", "config.json"],
+    ["lumiverse.database", "config.json"],
+    ["port", "config.json"],
+    ["lumiverse.connection", "config.json"],
+    ["lumiverse.models", "config.json"],
+    ["data", "install"],
+    ["database", "install"],
+  ]);
+  expect(facts.find((f) => f.key === "lumiverse.user")?.value).toBe(USER);
+  expect(facts.find((f) => f.key === "lumiverse.connection")?.value).toBe(CONNECTION);
+  // A fact, or a limit by the key config.json gave it in earlier builds, is no setting a route writes.
+  for (const key of ["port", "lumiverse.url", "lumiverse.user", "address", "live.follows"]) {
+    const answer = await settings<{ error: string }>(b, "PUT", "", { level: "global", key, value: 1 });
+    expect({ key, status: answer.status, error: answer.body.error }).toEqual({ key, status: 400, error: `RPE reads no setting "${key}".` });
+  }
+  // A limit written from the page lands in RPE-global.yml alone.
+  expect((await settings(b, "PUT", "", { level: "global", key: "server.address", value: "0.0.0.0" })).status).toBe(200);
+  expect(await readFile(b.app.paths.config, "utf8")).toBe(configBefore);
 });

@@ -1,15 +1,35 @@
-// RPE's data folder and its config file (plan §4.4, §4.5, §16). One folder holds everything RPE
-// keeps: the database, the file tree agents work in, the secrets file and the config file, and a
-// folder for backups. The config file says where RPE listens (loopback unless an address is set),
-// which Lumiverse it serves and which of its users this RPE belongs to, and holds every limit the app
-// keeps, each with its default. Four of its values can be set from the environment instead, which
-// wins over the file, so a service unit or a container can set them without editing it.
+// RPE's data folder, its config file and the app's own limits (plan §4.4, §4.5, §5.4, §16; R-133).
+// One folder holds everything RPE keeps: the database, the file tree agents work in, the secrets file
+// and the config file, and a folder for backups.
+//
+// The config file, `config.json`, holds only the install's facts: which Lumiverse (its address and,
+// where it is read, its database file), which of its users this RPE belongs to, the port RPE's
+// connection in Lumiverse points at (on loopback), and that connection with its model names. The
+// command line writes them (`rpe up`, `rpe lumiverse`); no page does. Three can be given by the
+// environment instead, which wins over the file, so a service unit or a container can set them.
+//
+// Every limit the app keeps (the address it listens on besides loopback, the origins and names allowed,
+// the body limits and the preflight's life, the lives of tokens, the live socket's bounds, the
+// database's waits and the command line's waits) is a setting in `RPE-global.yml`, at the global
+// level alone (`SERVER_SETTINGS`), shown and written on the Settings page and in force from RPE's next
+// start. The app's config (`AppConfig`), which the server, auth, the live socket, the database and the
+// command line read, is put together from the facts and those settings when it is loaded.
+//
+// An install whose config.json still holds limits, as builds before this one wrote them, has them
+// moved into `RPE-global.yml` at its first start on this build (`moveLimits`), each value kept; until
+// then the file's own are in force. Every write of config.json takes the config's lock, so the command
+// line's write and that move never lose each other's change.
 
 import { chmod, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { JsonValue, Log } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
+import { type ConfigRead, diskTexts, readConfig } from "./config-read";
+import { takeFolderLock } from "./data-folder";
 import { isMissing, OWNER_ONLY_FILE, ownerOnlyFolder, readText, writeWhole } from "./disk";
+import type { Setting } from "./setting-list";
+import { configWrites, withKeyAt } from "./yaml";
 
 export const CONFIG_FILE = "config.json";
 export const SECRETS_FILE = "secrets.json";
@@ -18,6 +38,10 @@ export const FILES_FOLDER = "files";
 export const BACKUPS_FOLDER = "backups";
 /** The file tree's global config (plan §5): connection profiles live in it, beside what other areas keep there. */
 export const GLOBAL_CONFIG_FILE = "RPE-global.yml";
+/** The shipped level's folder under the file tree's root: every shipped file, read-only. */
+export const SHIPPED_FOLDER = "defaults";
+/** The folder of the config's lock, which every writer of config.json takes. */
+export const CONFIG_LOCK_FOLDER = "config-lock";
 
 /** Where each thing RPE keeps is, under one data folder. */
 export interface DataPaths {
@@ -27,7 +51,9 @@ export interface DataPaths {
   database: string;
   /** The file tree agents work in (plan §5). */
   files: string;
+  /** The user's own global config, and the shipped copy it is read over. */
   globalConfig: string;
+  shippedConfig: string;
   backups: string;
 }
 
@@ -40,6 +66,7 @@ export function dataPaths(root: string): DataPaths {
     database: join(root, DATABASE_FILE),
     files,
     globalConfig: join(files, GLOBAL_CONFIG_FILE),
+    shippedConfig: join(files, SHIPPED_FOLDER, GLOBAL_CONFIG_FILE),
     backups: join(root, BACKUPS_FOLDER),
   };
 }
@@ -55,9 +82,9 @@ export function defaultDataFolder(env: Env, home: string = homedir()): string {
 }
 
 export interface AppConfig {
-  /** The address RPE listens on: loopback unless one is set. */
+  /** The address RPE listens on besides loopback: loopback unless one is set (the setting `server.address`). */
   address: string;
-  /** Its port; 0 takes any free one. */
+  /** Its port, which RPE's connection in Lumiverse points at; 0 takes any free one. An install's fact. */
   port: number;
   lumiverse: {
     /** Lumiverse's address as RPE reaches it; pages from its origin may call RPE. */
@@ -71,6 +98,8 @@ export interface AppConfig {
     /** The model names RPE's connection is offered (`/v1/models`). */
     models: string[];
   };
+  /** The install's facts the environment gave, by their keys in config.json (`port`, `lumiverse.url`, `lumiverse.user`). */
+  fromEnvironment: string[];
   /** Origins besides RPE's own and Lumiverse's whose pages may call RPE: an address either is published at. */
   origins: string[];
   /** Names besides RPE's own address that requests may reach it by (a published address's host name; `name:port` to hold it to a port). */
@@ -106,7 +135,7 @@ export interface AppConfig {
     sliceMs: number;
   };
   commandLine: {
-    /** How long `rpe status` and `rpe connection` wait for the running server, in milliseconds. */
+    /** How long `rpe status` and `rpe connection` wait for the running server, and a command for the data folder's lock, in milliseconds. */
     waitMs: number;
     /** How long `rpe lumiverse` waits for Lumiverse to answer its sign-in, in milliseconds. */
     signInMs: number;
@@ -115,10 +144,17 @@ export interface AppConfig {
   };
 }
 
+/** The app's limits: everything of its config but the install's facts. */
+export type AppLimits = Pick<AppConfig, "address" | "origins" | "hosts" | "server" | "auth" | "live" | "database" | "commandLine">;
+
+/** Loopback, where RPE always listens and where its connection in Lumiverse reaches it. */
+export const LOOPBACK = "127.0.0.1";
+
 export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
-  address: "127.0.0.1",
+  address: LOOPBACK,
   port: 7871,
   lumiverse: { url: null, user: null, database: null, connection: null, models: ["rpe"] },
+  fromEnvironment: [],
   origins: [],
   hosts: [],
   server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600 },
@@ -128,12 +164,72 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000 },
 });
 
-/** The environment's names for the values it may set. */
-export const CONFIG_ENV = Object.freeze({ address: "RPE_ADDRESS", port: "RPE_PORT", lumiverseUrl: "RPE_LUMIVERSE_URL", lumiverseUser: "RPE_LUMIVERSE_USER" });
+/** The environment's names for the facts it may give. */
+export const CONFIG_ENV = Object.freeze({ port: "RPE_PORT", lumiverseUrl: "RPE_LUMIVERSE_URL", lumiverseUser: "RPE_LUMIVERSE_USER" });
 
 export class ConfigError extends Error {
   override name = "ConfigError";
 }
+
+// ---------------------------------------------------------------- the app's limits as settings
+
+const D = CONFIG_DEFAULTS;
+const GLOBAL = ["shipped", "global"] as const;
+const whole = (least: number, most: number) => ({ type: "whole", least, most }) as const;
+
+/**
+ * The app's limits, each a setting of `RPE-global.yml` read from the global level alone, when RPE
+ * starts (the command line's own when a command starts): a change is in force from the next start.
+ * Each is set where its config.json key of earlier builds was (`OLD_KEYS`).
+ */
+export const SERVER_SETTING_DEFS = {
+  address: { key: "server.address", default: D.address, takes: { type: "text" }, levels: GLOBAL, perConnection: false, name: "RPE listens on", about: "The address RPE listens on besides loopback; an address other than loopback lets other machines reach RPE.", effect: "start", row: "RPE listens on" },
+  origins: { key: "server.origins", default: D.origins, takes: { type: "texts" }, levels: GLOBAL, perConnection: false, name: "Origins allowed", about: "Origins besides RPE's own and Lumiverse's whose pages may call RPE: an address RPE or Lumiverse is published at, such as https://rpe.example.", effect: "start" },
+  hosts: { key: "server.hosts", default: D.hosts, takes: { type: "texts" }, levels: GLOBAL, perConnection: false, name: "Names allowed", about: "Names besides RPE's own address that requests may reach it by: a published address's host name, with :port to hold it to a port.", effect: "start" },
+  bodyBytes: { key: "server.bodyBytes", default: D.server.bodyBytes, takes: whole(1024, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Largest request", about: "Bytes of the largest request body a route takes, unless the route says otherwise.", effect: "start" },
+  providerBodyBytes: { key: "server.providerBodyBytes", default: D.server.providerBodyBytes, takes: whole(1024, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Largest prompt", about: "Bytes of the largest request Lumiverse's generations may send RPE: a whole assembled prompt, its pictures included.", effect: "start" },
+  preflightSeconds: { key: "server.preflightSeconds", default: D.server.preflightSeconds, takes: whole(0, 86_400), levels: GLOBAL, perConnection: false, name: "Preflight kept", about: "Seconds a browser may keep RPE's answer to a page's preflight before it asks again.", effect: "start" },
+  pageTokenMinutes: { key: "auth.pageTokenMinutes", default: D.auth.pageTokenMinutes, takes: whole(1, 7 * 24 * 60), levels: GLOBAL, perConnection: false, name: "A page token holds", about: "Minutes a page token holds before the page needs a new one.", effect: "start" },
+  commandLineSeconds: { key: "auth.commandLineSeconds", default: D.auth.commandLineSeconds, takes: whole(5, 3600), levels: GLOBAL, perConnection: false, name: "The command line's token holds", about: "Seconds the token the command line makes to call the running server holds.", effect: "start" },
+  webKeyDays: { key: "auth.webKeyDays", default: D.auth.webKeyDays, takes: { type: "whole", least: 1, most: 36_500 }, orNone: true, none: "no end: it holds until a new one replaces it", levels: GLOBAL, perConnection: false, name: "The web app's key holds", about: "Days the web app's key holds after it is made.", effect: "start" },
+  queueEvents: { key: "liveSocket.queueEvents", default: D.live.queueEvents, takes: whole(1, 1_000_000), levels: GLOBAL, perConnection: false, name: "Events held for a slow page", about: "Events the live socket holds for one slow page following one chat; past it the oldest are dropped, and the page is told which.", effect: "start" },
+  messageBytes: { key: "liveSocket.messageBytes", default: D.live.messageBytes, takes: whole(256, 16 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Largest live message", about: "Bytes of the largest message a page may send on the live socket.", effect: "start" },
+  follows: { key: "liveSocket.follows", default: D.live.follows, takes: whole(1, 100_000), levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once.", effect: "start" },
+  busyMs: { key: "database.busyMs", default: D.database.busyMs, takes: whole(0, 600_000), levels: GLOBAL, perConnection: false, name: "Wait for another writer", about: "Milliseconds a write waits for another program's write to RPE's database file to finish.", effect: "start" },
+  sliceMs: { key: "database.sliceMs", default: D.database.sliceMs, takes: whole(1, 10_000), levels: GLOBAL, perConnection: false, name: "Writes run at a time", about: "Milliseconds the write queue runs writes before it lets other work in.", effect: "start" },
+  waitMs: { key: "commandLine.waitMs", default: D.commandLine.waitMs, takes: whole(100, 600_000), levels: GLOBAL, perConnection: false, name: "The command line waits for RPE", about: "Milliseconds rpe status and rpe connection wait for the running server, and a command waits for the data folder's lock.", effect: "start" },
+  signInMs: { key: "commandLine.signInMs", default: D.commandLine.signInMs, takes: whole(1000, 600_000), levels: GLOBAL, perConnection: false, name: "The command line waits for a sign-in", about: "Milliseconds rpe lumiverse waits for Lumiverse to answer its sign-in.", effect: "start" },
+  startMs: { key: "commandLine.startMs", default: D.commandLine.startMs, takes: whole(1000, 600_000), levels: GLOBAL, perConnection: false, name: "rpe up waits for RPE to start", about: "Milliseconds rpe up waits for RPE to answer once it has started RPE's service, before it puts back what it did.", effect: "start" },
+} as const satisfies Record<string, Setting>;
+
+/** Every setting of the app's own limits. */
+export const SERVER_SETTINGS: readonly Setting[] = Object.values(SERVER_SETTING_DEFS);
+
+/** Each limit's key in config.json as builds before this one wrote it, and the setting it is now. */
+const OLD_KEYS: readonly (readonly [string, Setting])[] = [
+  ["address", SERVER_SETTING_DEFS.address],
+  ["origins", SERVER_SETTING_DEFS.origins],
+  ["hosts", SERVER_SETTING_DEFS.hosts],
+  ["server.bodyBytes", SERVER_SETTING_DEFS.bodyBytes],
+  ["server.providerBodyBytes", SERVER_SETTING_DEFS.providerBodyBytes],
+  ["server.preflightSeconds", SERVER_SETTING_DEFS.preflightSeconds],
+  ["auth.pageTokenMinutes", SERVER_SETTING_DEFS.pageTokenMinutes],
+  ["auth.commandLineSeconds", SERVER_SETTING_DEFS.commandLineSeconds],
+  ["auth.webKeyDays", SERVER_SETTING_DEFS.webKeyDays],
+  ["live.queueEvents", SERVER_SETTING_DEFS.queueEvents],
+  ["live.messageBytes", SERVER_SETTING_DEFS.messageBytes],
+  ["live.follows", SERVER_SETTING_DEFS.follows],
+  ["database.busyMs", SERVER_SETTING_DEFS.busyMs],
+  ["database.sliceMs", SERVER_SETTING_DEFS.sliceMs],
+  ["commandLine.waitMs", SERVER_SETTING_DEFS.waitMs],
+  ["commandLine.signInMs", SERVER_SETTING_DEFS.signInMs],
+  ["commandLine.startMs", SERVER_SETTING_DEFS.startMs],
+];
+
+/** The top-level keys of config.json that hold the install's facts. */
+const FACT_KEYS = ["v", "port", "lumiverse"] as const;
+
+// ---------------------------------------------------------------- reading values
 
 type Reader<T> = (value: unknown, where: string) => T;
 
@@ -207,84 +303,127 @@ function readGroup<T>(raw: unknown, where: string, shape: Shape<T>): T {
   return out;
 }
 
-/** The config the file `raw` and the environment `env` give, over the defaults. `where` names the file in what is refused. */
-export function configOf(raw: unknown, env: Env, where: string): AppConfig {
-  const d = CONFIG_DEFAULTS;
+/** The address, origins and names a read of the settings gives, each checked as the server takes it: one it does not take is logged, and its default holds. */
+function checkedSetting<T>(read: ConfigRead, def: Setting, check: Reader<T>, fallback: T, log: Log | null): T {
+  const value = read.value(def);
+  try {
+    return check(value, def.key);
+  } catch (error) {
+    log?.warn("A setting has a value it does not take; its default holds.", { setting: def.key, value, why: error instanceof Error ? error.message : String(error) });
+    return structuredClone(fallback);
+  }
+}
+
+/** The app's limits as the settings of the levels every chat shares set them over their defaults. */
+export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
+  const s = SERVER_SETTING_DEFS;
+  // Every value is one its setting takes (`ConfigRead.value`), of the type its `takes` says.
+  const n = (def: Setting): number => read.value(def) as number;
+  return {
+    address: checkedSetting(read, s.address, hostName, D.address, log),
+    origins: checkedSetting(read, s.origins, listOf(origin), D.origins, log),
+    hosts: checkedSetting(read, s.hosts, listOf(hostName), D.hosts, log),
+    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds) },
+    auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null },
+    live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows) },
+    database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs) },
+    commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs) },
+  };
+}
+
+/** The limits where no file sets them. */
+export const LIMIT_DEFAULTS: Readonly<AppLimits> = Object.freeze(limitsOf(readConfig([], null)));
+
+/**
+ * The config the file `raw`, the environment `env` and the app's limits give. `where` names the file
+ * in what is refused. A config.json of an earlier build may still hold limits of its own, which are in
+ * force over the settings' until they are moved (`moveLimits`).
+ */
+export function configOf(raw: unknown, env: Env, where: string, limits: AppLimits = LIMIT_DEFAULTS): AppConfig {
+  const l = limits;
   if (isRecord(raw) && raw.v !== undefined && raw.v !== 1) throw new ConfigError(`${where} is of a format this RPE does not read (v ${String(raw.v)}).`);
   const { v: _v, ...rest } = isRecord(raw) ? raw : ({} as Record<string, unknown>);
-  const config = readGroup<AppConfig>(isRecord(raw) ? rest : raw, where, {
-    address: [hostName, d.address],
-    port: [wholeIn(0, 65535), d.port],
+  const read = readGroup<Omit<AppConfig, "fromEnvironment">>(isRecord(raw) ? rest : raw, where, {
+    address: [hostName, l.address],
+    port: [wholeIn(0, 65535), D.port],
     lumiverse: [
       (value, at) =>
         readGroup(value, at, {
-          url: [(url, where) => (url === null ? null : webAddress(url, where)), d.lumiverse.url],
-          user: [(user, where) => (user === null ? null : plainText(user, where)), d.lumiverse.user],
-          database: [(file, where) => (file === null ? null : plainText(file, where)), d.lumiverse.database],
-          connection: [(id, where) => (id === null ? null : plainText(id, where)), d.lumiverse.connection],
-          models: [listOf(plainText), d.lumiverse.models],
+          url: [(url, where) => (url === null ? null : webAddress(url, where)), D.lumiverse.url],
+          user: [(user, where) => (user === null ? null : plainText(user, where)), D.lumiverse.user],
+          database: [(file, where) => (file === null ? null : plainText(file, where)), D.lumiverse.database],
+          connection: [(id, where) => (id === null ? null : plainText(id, where)), D.lumiverse.connection],
+          models: [listOf(plainText), D.lumiverse.models],
         }),
-      d.lumiverse,
+      D.lumiverse,
     ],
-    origins: [listOf(origin), d.origins],
-    hosts: [listOf(hostName), d.hosts],
+    origins: [listOf(origin), l.origins],
+    hosts: [listOf(hostName), l.hosts],
     server: [
       (value, at) =>
         readGroup(value, at, {
-          bodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), d.server.bodyBytes],
-          providerBodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), d.server.providerBodyBytes],
-          preflightSeconds: [wholeIn(0, 86_400), d.server.preflightSeconds],
+          bodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.bodyBytes],
+          providerBodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.providerBodyBytes],
+          preflightSeconds: [wholeIn(0, 86_400), l.server.preflightSeconds],
         }),
-      d.server,
+      l.server,
     ],
     auth: [
       (value, at) =>
         readGroup(value, at, {
-          pageTokenMinutes: [wholeIn(1, 7 * 24 * 60), d.auth.pageTokenMinutes],
-          commandLineSeconds: [wholeIn(5, 3600), d.auth.commandLineSeconds],
-          webKeyDays: [orNull(wholeIn(1, 36_500)), d.auth.webKeyDays],
+          pageTokenMinutes: [wholeIn(1, 7 * 24 * 60), l.auth.pageTokenMinutes],
+          commandLineSeconds: [wholeIn(5, 3600), l.auth.commandLineSeconds],
+          webKeyDays: [orNull(wholeIn(1, 36_500)), l.auth.webKeyDays],
         }),
-      d.auth,
+      l.auth,
     ],
     live: [
       (value, at) =>
         readGroup(value, at, {
-          queueEvents: [wholeIn(1, 1_000_000), d.live.queueEvents],
-          messageBytes: [wholeIn(256, 16 * 1024 * 1024), d.live.messageBytes],
-          follows: [wholeIn(1, 100_000), d.live.follows],
+          queueEvents: [wholeIn(1, 1_000_000), l.live.queueEvents],
+          messageBytes: [wholeIn(256, 16 * 1024 * 1024), l.live.messageBytes],
+          follows: [wholeIn(1, 100_000), l.live.follows],
         }),
-      d.live,
+      l.live,
     ],
     database: [
       (value, at) =>
         readGroup(value, at, {
-          busyMs: [wholeIn(0, 600_000), d.database.busyMs],
-          sliceMs: [wholeIn(1, 10_000), d.database.sliceMs],
+          busyMs: [wholeIn(0, 600_000), l.database.busyMs],
+          sliceMs: [wholeIn(1, 10_000), l.database.sliceMs],
         }),
-      d.database,
+      l.database,
     ],
     commandLine: [
       (value, at) =>
         readGroup(value, at, {
-          waitMs: [wholeIn(100, 600_000), d.commandLine.waitMs],
-          signInMs: [wholeIn(1000, 600_000), d.commandLine.signInMs],
-          startMs: [wholeIn(1000, 600_000), d.commandLine.startMs],
+          waitMs: [wholeIn(100, 600_000), l.commandLine.waitMs],
+          signInMs: [wholeIn(1000, 600_000), l.commandLine.signInMs],
+          startMs: [wholeIn(1000, 600_000), l.commandLine.startMs],
         }),
-      d.commandLine,
+      l.commandLine,
     ],
   });
+  const config: AppConfig = { ...read, fromEnvironment: [] };
   const set = (name: string): string | undefined => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;
   };
-  const address = set(CONFIG_ENV.address);
-  if (address !== undefined) config.address = hostName(address, CONFIG_ENV.address);
   const port = set(CONFIG_ENV.port);
-  if (port !== undefined) config.port = wholeIn(0, 65535)(/^\d+$/.test(port) ? Number(port) : port, CONFIG_ENV.port);
+  if (port !== undefined) {
+    config.port = wholeIn(0, 65535)(/^\d+$/.test(port) ? Number(port) : port, CONFIG_ENV.port);
+    config.fromEnvironment.push("port");
+  }
   const url = set(CONFIG_ENV.lumiverseUrl);
-  if (url !== undefined) config.lumiverse.url = webAddress(url, CONFIG_ENV.lumiverseUrl);
+  if (url !== undefined) {
+    config.lumiverse.url = webAddress(url, CONFIG_ENV.lumiverseUrl);
+    config.fromEnvironment.push("lumiverse.url");
+  }
   const user = set(CONFIG_ENV.lumiverseUser);
-  if (user !== undefined) config.lumiverse.user = plainText(user, CONFIG_ENV.lumiverseUser);
+  if (user !== undefined) {
+    config.lumiverse.user = plainText(user, CONFIG_ENV.lumiverseUser);
+    config.fromEnvironment.push("lumiverse.user");
+  }
   return config;
 }
 
@@ -299,35 +438,127 @@ async function configFile(paths: DataPaths): Promise<unknown> {
   }
 }
 
-/** The config in the data folder, with the environment's values over it; the defaults where the folder has no config file. */
-export async function loadConfig(paths: DataPaths, env: Env): Promise<AppConfig> {
-  return configOf(await configFile(paths), env, paths.config);
+/** The app's limits as the shipped and the user's `RPE-global.yml` set them, through the one reader of the config levels; `log` hears of what is passed over. */
+export async function settingsLimits(paths: DataPaths, log: Log | null = null): Promise<AppLimits> {
+  const files = [
+    { level: "shipped" as const, file: paths.shippedConfig, disk: paths.shippedConfig },
+    { level: "global" as const, file: paths.globalConfig, disk: paths.globalConfig },
+  ];
+  return limitsOf(readConfig(await diskTexts(files), log, SERVER_SETTINGS), log);
+}
+
+/** The app's config: the install's facts in the data folder's config.json and from the environment, and its limits from `RPE-global.yml`. */
+export async function loadConfig(paths: DataPaths, env: Env, log: Log | null = null): Promise<AppConfig> {
+  return configOf(await configFile(paths), env, paths.config, await settingsLimits(paths, log));
+}
+
+/** Runs `write` holding the config's lock, which every writer of config.json takes; a lock left by a writer that ended is let go by the system, so it never waits on a dead one. */
+async function underConfigLock<T>(paths: DataPaths, what: string, write: () => Promise<T>): Promise<T> {
+  const lock = await takeFolderLock(join(paths.root, CONFIG_LOCK_FOLDER), what, { waitMs: Number.POSITIVE_INFINITY, pollMs: 5 });
+  try {
+    return await write();
+  } finally {
+    lock.release();
+  }
 }
 
 /**
- * Changes the config file in place: `change` is given its JSON, and everything else the file holds
- * is kept as it was. The file is written only when RPE reads the result.
+ * Changes the config file in place, holding the config's lock: `change` is given its JSON, and
+ * everything else the file holds is kept as it was. The file is written only when RPE reads the result.
  */
 export async function updateConfigFile(paths: DataPaths, change: (raw: Record<string, unknown>) => void): Promise<void> {
-  const raw = await configFile(paths);
-  if (!isRecord(raw)) throw new ConfigError(`${paths.config} must hold one JSON object.`);
-  change(raw);
-  configOf(raw, {}, paths.config);
-  await writeWhole(paths.config, `${JSON.stringify(raw, null, 2)}\n`);
+  await underConfigLock(paths, "a change to config.json", async () => {
+    const raw = await configFile(paths);
+    if (!isRecord(raw)) throw new ConfigError(`${paths.config} must hold one JSON object.`);
+    change(raw);
+    configOf(raw, {}, paths.config);
+    await writeWhole(paths.config, `${JSON.stringify(raw, null, 2)}\n`);
+  });
+}
+
+/** What config.json holds at a dotted key; undefined where it holds nothing. */
+function rawAt(raw: Record<string, unknown>, key: string): unknown {
+  let at: unknown = raw;
+  for (const part of key.split(".")) at = isRecord(at) ? at[part] : undefined;
+  return at;
+}
+
+/** Whether an address is loopback's own. */
+function isLoopback(address: string): boolean {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(address.toLowerCase());
+}
+
+/**
+ * Moves the limits an earlier build's config.json holds into the user's `RPE-global.yml`, each value
+ * kept as its setting, and leaves config.json the install's facts alone; holding the config's lock.
+ * An address there other than loopback is the address chosen to listen on, so it becomes
+ * `server.address`; RPE's connection in Lumiverse still reaches it on loopback. The settings are
+ * written first, so a move cut short is made again at the next start, with the same values. Gives the
+ * keys moved, which it logs; none for a config.json that holds none.
+ */
+export async function moveLimits(paths: DataPaths, log: Log): Promise<string[]> {
+  return await underConfigLock(paths, "moving config.json's limits to RPE-global.yml", async () => {
+    const raw = await configFile(paths);
+    if (!isRecord(raw)) return [];
+    const held = OLD_KEYS.flatMap(([old, def]) => {
+      const value = rawAt(raw, old);
+      return value === undefined ? [] : [{ old, def, value: value as JsonValue }];
+    });
+    if (held.length === 0) return [];
+    // Each value as the file held it, checked as it always was before it is moved.
+    configOf(raw, {}, paths.config);
+    const moving = held.filter((h) => !(h.def === SERVER_SETTING_DEFS.address && typeof h.value === "string" && isLoopback(h.value)));
+    if (moving.length > 0) {
+      await configWrites(paths.globalConfig).run(async () => {
+        let text = (await readText(paths.globalConfig)) ?? "";
+        for (const h of moving) text = withKeyAt(text, h.def.key.split("."), h.value, paths.globalConfig);
+        await mkdir(paths.files, { recursive: true });
+        await writeWhole(paths.globalConfig, text);
+      });
+    }
+    const facts = Object.fromEntries(FACT_KEYS.flatMap((key) => (raw[key] === undefined ? [] : [[key, raw[key]]])));
+    await writeWhole(paths.config, `${JSON.stringify(facts, null, 2)}\n`);
+    const moved = held.map((h) => h.old);
+    log.info("config.json's limits are settings in RPE-global.yml now, each value kept", { moved, to: moving.map((h) => h.def.key) });
+    return moved;
+  });
+}
+
+/** One of the install's facts as the Settings page lists it: its key in config.json, what it is, its value, and where it was given. */
+export interface InstallFact {
+  key: string;
+  name: string;
+  value: JsonValue;
+  /** config.json, the environment, or where the install put the data folder. */
+  from: "config.json" | "environment" | "install";
+}
+
+/** The install's facts: which Lumiverse, which user, the port RPE's connection points at, that connection and its models, and where RPE keeps its data. */
+export function installFacts(config: AppConfig, paths: DataPaths): InstallFact[] {
+  const from = (key: string): InstallFact["from"] => (config.fromEnvironment.includes(key) ? "environment" : "config.json");
+  return [
+    { key: "lumiverse.url", name: "Lumiverse's address", value: config.lumiverse.url, from: from("lumiverse.url") },
+    { key: "lumiverse.user", name: "Your Lumiverse user", value: config.lumiverse.user, from: from("lumiverse.user") },
+    { key: "lumiverse.database", name: "Lumiverse's database file", value: config.lumiverse.database, from: from("lumiverse.database") },
+    { key: "port", name: "RPE's port, on loopback, that its connection in Lumiverse points at", value: config.port, from: from("port") },
+    { key: "lumiverse.connection", name: "RPE's connection in Lumiverse", value: config.lumiverse.connection, from: from("lumiverse.connection") },
+    { key: "lumiverse.models", name: "The models that connection offers", value: config.lumiverse.models, from: from("lumiverse.models") },
+    { key: "data", name: "RPE's data folder", value: paths.root, from: "install" },
+    { key: "database", name: "RPE's database file", value: paths.database, from: "install" },
+  ];
 }
 
 /**
  * Makes the data folder ready: the folder and the backups folder enterable by their owner alone, the
- * file tree's folder, and a config file holding where RPE listens and whose it is, when there is none.
- * The limits are left out of a new file, so that a later build's defaults reach it; a limit written
- * into the file is kept.
+ * file tree's folder, and a config file holding the install's facts as they stand at first (no
+ * Lumiverse and no user yet), when there is none.
  */
 export async function prepareDataFolder(paths: DataPaths): Promise<void> {
   await ownerOnlyFolder(paths.root);
   await ownerOnlyFolder(paths.backups);
   await mkdir(paths.files, { recursive: true });
   if ((await readText(paths.config)) === null) {
-    const first = { v: 1, address: CONFIG_DEFAULTS.address, port: CONFIG_DEFAULTS.port, lumiverse: { url: null, user: null } };
+    const first = { v: 1, port: CONFIG_DEFAULTS.port, lumiverse: { url: null, user: null } };
     await writeWhole(paths.config, `${JSON.stringify(first, null, 2)}\n`);
   }
   // A secrets file someone made readable to others is made private again before RPE reads it.

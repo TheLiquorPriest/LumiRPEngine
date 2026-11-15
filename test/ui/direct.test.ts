@@ -87,7 +87,7 @@ beforeAll(async () => {
     version: "1.0.0",
     areas: [
       { name: "turns", mount: (at) => at.routes.add("turns", [turnsRoute]) },
-      { name: "settings", mount: (at) => at.routes.add("settings", settingsRoutes({ settings: [CALLS], levels: async () => [global], connections: async () => [] })) },
+      { name: "settings", mount: (at) => at.routes.add("settings", settingsRoutes({ settings: [CALLS], levels: async () => [global], connections: async () => [], facts: () => [] })) },
       { name: "connections", mount: (at) => at.routes.add("connections", connectionRoutes(testModelLayer(at.models), async () => null, () => at.config.lumiverse.user ?? "")) },
       { name: "probe", mount: (at) => at.routes.add("probe", [places]) },
     ],

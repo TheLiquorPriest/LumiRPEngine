@@ -31,7 +31,7 @@ import { playArea } from "../play/area";
 import { storeArea } from "../store/area";
 import { storyArea } from "../story/area";
 import { treeArea } from "../tree/area";
-import { RPE_GUIDANCE, treeReader } from "../tree";
+import { levelFiles, RPE_GUIDANCE, treeReader } from "../tree";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { bootstrapArea } from "../turn/bootstrap/area";
@@ -93,8 +93,21 @@ export function compose(options: ComposeOptions = {}): Composition {
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
 
   const areas: Area[] = [
-    appArea((at) => {
-      opened = at;
+    appArea({
+      opened: (at) => {
+        opened = at;
+      },
+      settings: (at) => {
+        const owner = at.config.lumiverse.user ?? "";
+        return {
+          // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
+          levels: async (chat) => {
+            const folders = chat === null ? null : made().chats.folders(owner, chat);
+            return levelFiles({ files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null });
+          },
+          connections: async () => (await made().harness.models.list(owner)).connections.map((c) => ({ id: c.id, name: c.name })),
+        };
+      },
     }),
     storeArea(),
     loreArea(),

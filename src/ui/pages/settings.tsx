@@ -384,6 +384,19 @@ export function SettingsView(props: SettingsViewProps) {
               </ul>
             </Fold>
           ))}
+          {reply.facts.length === 0 ? null : (
+            <Fold summary={`The install (${reply.facts.length})`}>
+              <p class="rpe-meta">Set by the command line (rpe up, rpe lumiverse), never on this page.</p>
+              <ul class="lre-stack rpe-plain">
+                {reply.facts.map((fact) => (
+                  <li key={fact.key} class="rpe-setting" data-fact={fact.key}>
+                    <strong>{fact.name}</strong>: {typeof fact.value === "number" ? String(fact.value) : valueWords(fact.value, "not set")}
+                    <span class="rpe-meta">{fact.from === "environment" ? " (given by the environment, over config.json)" : fact.from === "install" ? " (where the install put it)" : " (config.json)"}</span>
+                  </li>
+                ))}
+              </ul>
+            </Fold>
+          )}
         </>
       )}
     </div>

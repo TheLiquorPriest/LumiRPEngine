@@ -43,7 +43,16 @@ describe("the Settings page", () => {
     const { tree, text } = view();
     expect(text).not.toContain("Not available yet");
     expect(text).toContain("Read from @shipped/RPE-global.yml (Shipped), @global/RPE-global.yml (Yours), RPE.yml (This chat's).");
-    expect(elements(tree).filter((e) => e.type === "summary").map((e) => textOf(e.props.children))).toEqual(["limits (2)", "reply (2)", "update (1)", "off (1)", "added (1)", "pins (1)", "Connection: Flash (2)", "Names no connection there is now (1)"]);
+    expect(elements(tree).filter((e) => e.type === "summary").map((e) => textOf(e.props.children))).toEqual(["limits (2)", "reply (2)", "update (1)", "off (1)", "added (1)", "pins (1)", "Connection: Flash (2)", "Names no connection there is now (1)", "The install (4)"]);
+    // The install's facts are listed, each saying where it was given, and none has a control: the command line sets them.
+    const facts = elements(tree).filter((e) => e.props["data-fact"] !== undefined);
+    expect(facts.map((e) => textOf(e.props.children))).toEqual([
+      "Lumiverse's address: http://lumiverse.test:7860 (config.json)",
+      "Your Lumiverse user: user-invented (given by the environment, over config.json)",
+      "RPE's port, on loopback, that its connection in Lumiverse points at: 7871 (config.json)",
+      "RPE's data folder: /srv/rpe-data (where the install put it)",
+    ]);
+    expect(facts.flatMap((e) => elements(e).filter((c) => c.type === "button" || c.type === "input"))).toEqual([]);
     expect(said(tree, "limits.turn.calls")).toContain(
       "Calls in a turn60Model calls all the agents of one turn may make between them.limits.turn.calls · set in @global/RPE-global.yml (Yours) · default: 40 · takes a whole number, 1 or more · a change holds from the next turn · Appendix D.1: Calls in a turn across all agents",
     );

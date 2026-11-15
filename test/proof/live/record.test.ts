@@ -128,7 +128,7 @@ class Agents extends RpeReader {
     return this.definitions[path.replace(/^@shipped\/\.agents\//, "").replace(/\.md$/, "")] ?? "";
   }
   override async settings(): Promise<SettingsReply> {
-    return { chat: null, files: [], settings: this.views };
+    return { chat: null, files: [], settings: this.views, facts: [] };
   }
   override async connections(): Promise<ConnectionsShown> {
     return this.shown;

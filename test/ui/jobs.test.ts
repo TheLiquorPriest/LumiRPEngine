@@ -23,7 +23,7 @@ import { elements, expand, press, textOf } from "./vnodes";
 const usage = { calls: 3, input: 9_000, output: 700, cacheRead: 0, cacheWrite: 0 };
 const job = (id: string, state: JobView["state"], started: number, over: Partial<JobView> = {}): JobView => ({ id, agent: "historian", brief: "Summarize the chapter that closed.", state, scope: { user: USER, chat: CHAT, session: "s-1" }, startedBy: "user", started, usage, ...over });
 
-/** The jobs RPH keeps, in memory, each found only under its own user: a cancel ends one that has not ended, and gives one that ended as it ended. The owner's other controls are not reached by these pages. */
+/** The jobs RPH keeps, in memory, each found only under its own user, a page of them the latest started first as RPH gives it: a cancel ends one that has not ended, and gives one that ended as it ended. The owner's other controls are not reached by these pages. */
 function keptJobs(): JobsApi & { all: JobView[] } {
   const all: JobView[] = [
     job("job-old", "done", 1_000, { ended: 2_000, report: "Chapter one, summarized.", startedBy: { id: "a1", definition: "author" } }),
@@ -36,7 +36,7 @@ function keptJobs(): JobsApi & { all: JobView[] } {
   };
   return {
     all,
-    list: async (filter) => ({ jobs: all.filter((j) => j.scope.user === filter.user && (filter.chat === undefined || j.scope.chat === filter.chat)) }),
+    list: async (filter) => ({ jobs: all.filter((j) => j.scope.user === filter.user && (filter.chat === undefined || j.scope.chat === filter.chat)).toSorted((a, b) => b.started - a.started) }),
     get: async (user, id) => all.find((j) => j.id === id && j.scope.user === user),
     cancel: async (user, id) => {
       const at = all.findIndex((j) => j.id === id && j.scope.user === user);

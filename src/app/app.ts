@@ -7,7 +7,7 @@ import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
 import { Auth, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
-import { prepareDataFolder } from "./config";
+import { moveLimits, prepareDataFolder } from "./config";
 import { commandRoutes } from "./command-routes";
 import { commandSocketPath } from "./data-folder";
 import { modelsPort, ownModels } from "./connections";
@@ -202,6 +202,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const user = config.lumiverse.user;
   if (user === null || user === "") throw new Error(NO_OWNER);
   await prepareDataFolder(paths);
+  // An earlier build's config.json limits become settings in RPE-global.yml before RPE listens; until then the ones loaded are in force.
+  await moveLimits(paths, log);
   const migrations = new Migrations();
   migrations.add("app", APP_MIGRATIONS);
   for (const area of areas) for (const tables of area.tables ?? []) migrations.add(tables.area, tables.migrations);

@@ -448,6 +448,14 @@ export interface HorizonEntryRow {
   name: string | null;
 }
 
+/** One of the install's facts, which the command line sets and no page writes: its key in config.json, what it is, its value, and where it was given (config.json, the environment, or where the install put the data folder). */
+export interface InstallFact {
+  key: string;
+  name: string;
+  value: JsonValue;
+  from: "config.json" | "environment" | "install";
+}
+
 /** The job as it stands after the cancel; one that had already ended comes back as it ended. */
 export interface JobCancelReply {
   job: JobView;
@@ -978,11 +986,12 @@ export interface SessionReply {
   ends: number | null;
 }
 
-/** Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); and every setting. */
+/** Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts. */
 export interface SettingsReply {
   chat: string | null;
   files: ({ level: LayerLevel; file: string; problem: string | null })[];
   settings: SettingView[];
+  facts: InstallFact[];
 }
 
 /** A key written at a level, a chat's naming the chat (left out or null: no chat): its value, null to take the key away at that level, or `none: true` to set `~`. */
