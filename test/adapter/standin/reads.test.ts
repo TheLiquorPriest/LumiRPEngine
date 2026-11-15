@@ -123,7 +123,11 @@ describe("a dry run (`routes/generate.routes.ts:26-43`, `services/generate.servi
     };
     expect(await told({ connection_id: "conn-model" })).toEqual([400, { error: "chat_id is required" }]);
     expect(await told({ ...ask, include_request_messages: "yes" })).toEqual([400, { error: "include_request_messages must be a boolean" }]);
-    expect(await told({ chat_id: CHAT, preset_id: "preset-weir" })).toEqual([400, { error: "No connection profile found. Configure a default connection or select one for this chat." }]);
+    // With no connection asked for, Lumiverse takes the active profile, else the default, else any the user owns (`resolveActingConnectionId`, `services/connections.service.ts:408-412`): it refuses only where there is none.
+    expect((await told({ chat_id: CHAT, preset_id: "preset-weir" }))[0]).toBe(200);
+    const bare = await weirChat(LINES);
+    bare.host.connections.clear();
+    expect(await told({ chat_id: CHAT, preset_id: "preset-weir" }, bare.as(USER))).toEqual([400, { error: "No connection profile found. Configure a default connection or select one for this chat." }]);
     expect(await told({ chat_id: CHAT, connection_id: "conn-model" })).toEqual([400, { error: "No preset selected. Choose a preset before generating." }]);
     expect(await told({ ...ask, preset_id: "preset-gone" })).toEqual([400, { error: "The selected preset was deleted. Pick a different preset before generating." }]);
     expect(await told(ask, bed.as(OTHER))).toEqual([400, { error: "Chat not found" }]);

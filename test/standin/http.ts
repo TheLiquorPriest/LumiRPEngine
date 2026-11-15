@@ -16,9 +16,11 @@ import type { OpenSocket, Socket, SocketEvents } from "../../src/adapter/lumiver
 import type { PageChannel } from "../../src/ext/page";
 import type { GenerationType } from "./assembly";
 import { databankAnswer, macroAnswer, memoryAnswer, openCortex, tokenAnswer, type CortexState } from "./cortex";
+import { appendMessage, clamped, generationInput, patchChatMetadata, resolveGeneration, SERVER_ERROR, startRoute, type Env, type Reply } from "./chatwrites";
 import type { StandInDb } from "./db";
 import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
-import type { Installed, StandIn } from "./lumiverse";
+import type { Installed, Outcome, StandIn } from "./lumiverse";
+import { Profiles } from "./profiles";
 import { dryRunResult, pageOf, parsePagination, parsed, rowMetadata, rowToBook, rowToCharacter, rowToEntry, rowToMessage, rowToMessageLight, rowToPersona, rowToPreset, rowToSetting, type Pagination } from "./served";
 import { RECEIVE_LIMITS, ServerSocket, SWEEP_MS } from "./sockets";
 
@@ -62,8 +64,6 @@ interface Lockout {
 const TICKET_TTL_MS = 30_000;
 /** `REVALIDATE_PRIVATE` (`utils/http-cache.ts:12`). */
 const REVALIDATE_PRIVATE = "private, no-cache";
-/** The longest an error told to a page is (`utils/provider-errors.ts:147-156`). */
-const MAX_ERROR_LENGTH = 1000;
 /** The messages one page of a list may ask for (`routes/chats.routes.ts:800-803`, `types/pagination.ts:14`). */
 const MESSAGES_MAX = 1000;
 /** A chat's messages in order (`services/chats.service.ts:2128`). */
@@ -109,7 +109,7 @@ function revalidated(request: Request, etag: string, body: unknown): Response {
 
 /** The error a generation route tells (`routes/generate.routes.ts:27-37`): the message, clamped. */
 function generationError(message: string): Response {
-  return json(400, { error: message.length > MAX_ERROR_LENGTH ? `${message.slice(0, MAX_ERROR_LENGTH - 1)}…` : message });
+  return json(400, { error: clamped(message) });
 }
 
 export interface LumiverseServerOptions {
@@ -154,6 +154,11 @@ export class LumiverseServer {
   /** It lets a socket in only after this long (its `onOpen`, `ws/handler.ts:122-248`); never, when null. */
   openDelayMs: number | null = 0;
 
+  /** The connection profiles its routes keep (`profiles.ts`), where it has a host to make them in. */
+  readonly profiles: Profiles | undefined;
+  /** The end of each generation a route started, by its id, for a test to wait on. */
+  readonly generations = new Map<string, Promise<Outcome>>();
+
   private readonly accounts = new Map<string, Account>();
   private readonly sessions = new Map<string, Session>();
   private readonly ticketsLive = new Map<string, { user: string; expires: number }>();
@@ -172,8 +177,10 @@ export class LumiverseServer {
     this.clock = options.clock;
     this.cortex = openCortex(options.db, options.tokenizedModels ?? []);
     for (const a of options.accounts) this.accounts.set(a.username.toLowerCase(), a);
+    this.profiles = options.host === undefined ? undefined : new Profiles(options.host, () => this.clock.now());
     if (options.host) {
       const host = options.host;
+      host.clock = this.clock;
       // A worker's later task, a socket's delivery and the rows' stamps all run on the test's clock; the host's events reach the user's sockets.
       host.later = (run) => void this.clock.setTimeout(run, 0);
       host.now = () => this.clock.now();
@@ -402,6 +409,8 @@ export class LumiverseServer {
       return json(200, { extensions, isPrivileged: false });
     }
 
+    const chatWrites = await this.fromChatWrites(request, url, user);
+    if (chatWrites !== null) return chatWrites;
     const served = await this.fromRows(request, url, user);
     if (served !== null) return served;
     const written = await this.fromWrites(request, url, user);
@@ -674,6 +683,88 @@ export class LumiverseServer {
     return pageOf(page.map(rowToEntry), total, pagination);
   }
 
+  /** What the chat and connection routes read and write of the stand-in (`chatwrites.ts`, `profiles.ts`). */
+  private env(): Env | null {
+    const host = this.options.host;
+    return host === undefined || this.profiles === undefined ? null : { host, db: this.options.db, profiles: this.profiles, cortex: this.cortex };
+  }
+
+  /**
+   * A book attached to a chat as one key of its metadata, a message appended, a generation started, and the user's connection profiles
+   * (`routes/chats.routes.ts:480-516`, `:878-914`; `routes/generate.routes.ts:27-42`; `routes/connections.routes.ts`). Null for any other route.
+   */
+  private async fromChatWrites(request: Request, url: URL, user: string): Promise<Response | null> {
+    const env = this.env();
+    if (env === null) return null;
+    const path = url.pathname;
+    const method = request.method;
+    const reply = (r: Reply): Response => (r.status === 500 && typeof r.body === "string" ? new Response(r.body, { status: 500, headers: { "content-type": "text/plain; charset=UTF-8" } }) : json(r.status, r.body));
+    const chat = /^\/api\/v1\/chats\/([^/]+)\/(metadata|messages)$/.exec(path);
+    if (chat !== null) {
+      const id = decodeURIComponent(chat[1]!);
+      if (method === "PATCH" && chat[2] === "metadata") return reply(patchChatMetadata(env, user, id, await request.text()));
+      if (method === "POST" && chat[2] === "messages") return reply(appendMessage(env, user, id, await request.text()));
+      return null;
+    }
+    const starts: Record<string, "normal" | "regenerate" | "continue"> = { "/api/v1/generate": "normal", "/api/v1/generate/regenerate": "regenerate", "/api/v1/generate/continue": "continue" };
+    if (method === "POST" && path in starts) return reply(await startRoute(env, user, starts[path]!, await request.text(), this.generations));
+    return this.fromConnections(request, url, user, env, reply);
+  }
+
+  /** `routes/connections.routes.ts:43-135`: the user's profiles listed, made, read, changed and removed, and a profile's key set and cleared. */
+  private async fromConnections(request: Request, url: URL, user: string, env: Env, reply: (r: Reply) => Response): Promise<Response | null> {
+    const path = url.pathname;
+    const method = request.method;
+    const route = /^\/api\/v1\/connections(?:\/([^/]+)(\/api-key)?)?$/.exec(path);
+    if (route === null) return null;
+    const profiles = env.profiles;
+    const body = async (): Promise<Record<string, unknown> | null> => {
+      const read = parsed(await request.text(), undefined);
+      return read === undefined || read === null || typeof read !== "object" ? null : (read as Record<string, unknown>);
+    };
+    if (route[1] === undefined) {
+      if (method === "GET") {
+        const pagination = parsePagination(url.searchParams.get("limit"), url.searchParams.get("offset"));
+        return json(200, profiles.list(user, pagination));
+      }
+      if (method !== "POST") return null;
+      const given = await body();
+      if (given === null) return reply(SERVER_ERROR);
+      if (!given.name || !given.provider) return json(400, { error: "name and provider are required" });
+      return json(201, profiles.create(user, given));
+    }
+    if (route[1] === "models" || route[1] === "organization") return null;
+    const id = decodeURIComponent(route[1]);
+    if (route[2] === undefined) {
+      if (method === "GET") {
+        const found = profiles.get(user, id);
+        return found === null ? json(404, { error: "Not found" }) : json(200, profiles.shown(found));
+      }
+      if (method === "PUT") {
+        const given = await body();
+        if (given === null) return reply(SERVER_ERROR);
+        const updated = profiles.update(user, id, given);
+        return updated === null ? json(404, { error: "Not found" }) : json(200, profiles.shown(updated));
+      }
+      if (method === "DELETE") return profiles.delete(user, id) ? json(200, { success: true }) : json(404, { error: "Not found" });
+      return null;
+    }
+    if (method === "PUT") {
+      const given = await body();
+      if (given === null) return reply(SERVER_ERROR);
+      if (!given.api_key) return json(400, { error: "api_key is required" });
+      if (profiles.get(user, id) === null) return json(404, { error: "Not found" });
+      profiles.setKey(user, id, String(given.api_key));
+      return json(200, { success: true });
+    }
+    if (method === "DELETE") {
+      if (profiles.get(user, id) === null) return json(404, { error: "Not found" });
+      profiles.clearKey(user, id);
+      return json(200, { success: true });
+    }
+    return null;
+  }
+
   /**
    * `POST /api/v1/generate/dry-run` (`routes/generate.routes.ts:26-43`; `services/generate.service.ts:3080-3274`): the prompt assembled as a
    * generation would assemble it, its interceptors run with `dryRun` set, and no lock, no provider call and nothing saved. `chat_id` is
@@ -699,24 +790,13 @@ export class LumiverseServer {
       const row = rows("SELECT value FROM settings WHERE key = ? AND user_id = ?", key, user)[0];
       return row === undefined ? undefined : parsed(row.value, undefined);
     };
-    const pin = typeof metadata.connection_profile_id === "string" ? metadata.connection_profile_id.trim() : "";
-    const connection = host.connections.get(pin) ?? host.connections.get(asked("connection_id") ?? "");
-    if (connection === undefined) return generationError("No connection profile found. Configure a default connection or select one for this chat.");
-    const presetId = asked("preset_id") ?? (typeof settingOf("activeLoomPresetId") === "string" ? (settingOf("activeLoomPresetId") as string) : undefined);
-    if (presetId === undefined) return generationError(host.presets.size === 0 ? "No presets available. Create a preset before generating." : "No preset selected. Choose a preset before generating.");
-    if (!host.presets.has(presetId)) return generationError("The selected preset was deleted. Pick a different preset before generating.");
+    const env = this.env();
+    if (env === null) return json(404, { error: "Not found" });
+    const found = resolveGeneration(env, user, metadata, { ...(asked("connection_id") !== undefined ? { connection: asked("connection_id")! } : {}), ...(asked("preset_id") !== undefined ? { preset: asked("preset_id")! } : {}) });
+    if (!found.ok) return generationError(found.error);
     if (chat === undefined) return generationError("Chat not found");
-    const persona = asked("persona_id") ?? (typeof settingOf("activePersonaId") === "string" ? (settingOf("activePersonaId") as string) : undefined);
-    const outcome = await host.generate({
-      chat: chatId,
-      connection: connection.id,
-      preset: presetId,
-      type: (asked("generation_type") ?? "normal") as GenerationType,
-      dryRun: true,
-      ...(persona !== undefined ? { persona } : {}),
-      ...(asked("message_id") !== undefined ? { message: asked("message_id")! } : {}),
-      ...(isRecord(body.parameters) ? { parameters: body.parameters } : {}),
-    });
+    const connection = found.connection;
+    const outcome = await host.generate(generationInput(env, user, body, (asked("generation_type") ?? "normal") as GenerationType, found, true));
     if (outcome.error !== null) return generationError(outcome.error);
     const sourceMessages = new Map(rows(MESSAGES_ALL, chatId, user).map((row) => [String(row.id), rowToMessage(row)] as const));
     const reasoning = settingOf("reasoningSettings");

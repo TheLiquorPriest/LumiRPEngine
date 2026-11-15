@@ -4,7 +4,8 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Rows } from "../../standin/db";
-import { CHAT, json, OTHER, PASSWORD, USER, weir as weirOf, type Weir } from "./weir";
+import { LumiverseServer } from "../../standin/http";
+import { CHAT, json, LINES, OTHER, PASSWORD, USER, weir as weirOf, weirChat as weirChatOf, type Weir } from "./weir";
 
 const closing: (() => void)[] = [];
 afterEach(() => {
@@ -351,5 +352,143 @@ describe("what refuses a request with a 403 (`auth/middleware.ts:92-103`, `app.t
     }
     w.server.untrustedHost = false;
     expect((await session(w, USER)).status).toBe(200);
+  });
+});
+
+describe("a book attached to a chat, a message appended, a generation started, a connection made (`routes/chats.routes.ts:480-516`, `:878-914`; `routes/generate.routes.ts:27-42`; `routes/connections.routes.ts:55-61`)", () => {
+  const events = (w: Weir, name: string): { payload: unknown }[] => w.host.events.filter((e) => e.event === name);
+  const book = (w: Weir): void => {
+    w.host.library.addBook({ id: "book-weir", name: "The weir's lore", user: USER, entries: [{ id: "e-eel", uid: "uid-eel", book: "book-weir", comment: "The eel", constant: true, content: "EEL-LORE The eel lives under the weir." }] });
+  };
+
+  test("a book attached as one key of the chat's metadata is read by its next generation; null takes a key out; another user's chat is 404", async () => {
+    const w = await weirChatOf(closing, LINES);
+    book(w);
+    const mine = w.as(USER);
+    const dry = async (): Promise<string> => {
+      const res = await mine.post("/api/v1/generate/dry-run", { chat_id: CHAT, connection_id: "conn-model", preset_id: "preset-weir", include_request_messages: true });
+      return JSON.stringify(((await res.json()) as { request_messages: unknown }).request_messages);
+    };
+    expect(await dry()).not.toContain("EEL-LORE");
+    const patched = await mine.patch(`/api/v1/chats/${CHAT}/metadata`, { chat_world_book_ids: ["book-weir"], note: "kept" });
+    expect(patched.status).toBe(200);
+    expect(await patched.json()).toMatchObject({ id: CHAT, metadata: { chat_world_book_ids: ["book-weir"], note: "kept" } });
+    expect(events(w, "CHAT_CHANGED").map((e) => (e.payload as { changedFields: string[] }).changedFields)).toEqual([["metadata.chat_world_book_ids", "metadata.note"]]);
+    expect(await dry()).toContain("EEL-LORE");
+    // Nothing else of the metadata is touched, and a key given as null goes.
+    const cleared = await mine.patch(`/api/v1/chats/${CHAT}/metadata`, { chat_world_book_ids: null });
+    expect(await cleared.json()).toMatchObject({ metadata: { note: "kept" } });
+    expect(((await cleared.json().catch(() => ({}))) as { metadata?: Record<string, unknown> }).metadata?.chat_world_book_ids).toBeUndefined();
+    expect(await dry()).not.toContain("EEL-LORE");
+    const foreign = await w.as(OTHER).patch(`/api/v1/chats/${CHAT}/metadata`, { note: "mine now" });
+    expect([foreign.status, await foreign.json()]).toEqual([404, { error: "Not found" }]);
+    for (const body of [["a"], 3, null]) {
+      const bad = await mine.patch(`/api/v1/chats/${CHAT}/metadata`, body);
+      expect([bad.status, await bad.json()]).toEqual([400, { error: "Body must be an object of metadata keys" }]);
+    }
+  });
+
+  test("the state of an entry whose book is no longer attached is dropped with the attachment, and goes whole with the last book", async () => {
+    const w = await weirChatOf(closing, LINES);
+    book(w);
+    const mine = w.as(USER);
+    await mine.patch(`/api/v1/chats/${CHAT}/metadata`, { chat_world_book_ids: ["book-weir"], wi_state: { "uid-eel": { sticky: 2 }, "gone-uid": { sticky: 1 } } });
+    const kept = (await (await mine.patch(`/api/v1/chats/${CHAT}/metadata`, { chat_world_book_ids: ["book-weir"] })).json()) as { metadata: { wi_state?: Record<string, unknown> } };
+    expect(Object.keys(kept.metadata.wi_state ?? {})).toEqual(["uid-eel"]);
+    const none = (await (await mine.patch(`/api/v1/chats/${CHAT}/metadata`, { chat_world_book_ids: [] })).json()) as { metadata: { wi_state?: unknown } };
+    expect(none.metadata.wi_state).toBeUndefined();
+  });
+
+  test("append: name and content required, a token count where the model has a tokenizer, saved at the end and told as MESSAGE_SENT, 201", async () => {
+    const w = await weirChatOf(closing, LINES);
+    const mine = w.as(USER);
+    const missing = await mine.post(`/api/v1/chats/${CHAT}/messages`, { content: "no name" });
+    expect([missing.status, await missing.json()]).toEqual([400, { error: "name and content are required" }]);
+    const gone = await w.as(OTHER).post(`/api/v1/chats/${CHAT}/messages`, { name: "Pell", content: "not my chat", is_user: true });
+    expect([gone.status, await gone.json()]).toEqual([404, { error: "Chat not found" }]);
+    const made = await mine.post(`/api/v1/chats/${CHAT}/messages`, { name: "Mara", content: "I wait by the weir.", is_user: true, extra: { note: "kept" } });
+    expect(made.status).toBe(201);
+    const message = (await made.json()) as { id: string; name: string; content: string; is_user: boolean; index_in_chat: number; extra: Record<string, unknown> };
+    expect(message).toMatchObject({ name: "Mara", content: "I wait by the weir.", is_user: true, index_in_chat: 4, extra: { note: "kept" } });
+    expect(message.extra.tokenCount).toBeUndefined();
+    expect(events(w, "MESSAGE_SENT").at(-1)?.payload).toMatchObject({ chatId: CHAT, message: { id: message.id } });
+    expect(w.host.chats.get(CHAT)!.messages.at(-1)).toMatchObject({ id: message.id, role: "user", content: "I wait by the weir." });
+    // A model Lumiverse has a tokenizer for gives the count, a quarter of the characters here.
+    const counted = await weirChatOf(closing, LINES);
+    const tokenized = new LumiverseServer({ clock: counted.clock, db: counted.db, host: counted.host, accounts: [{ id: USER, username: "mara", password: PASSWORD }], tokenizedModels: ["model"] });
+    closing.push(() => tokenized.stop());
+    const token = (await (await tokenized.fetch(`${tokenized.base}/api/auth/sign-in/username`, { method: "POST", headers: { "content-type": "application/json" }, body: json({ username: "mara", password: PASSWORD }) })).json()) as { token: string };
+    const withCount = await tokenized.fetch(`${tokenized.base}/api/v1/chats/${CHAT}/messages`, { method: "POST", headers: { authorization: `Bearer ${token.token}`, "content-type": "application/json" }, body: json({ name: "Mara", content: "I wait by the weir.", is_user: true, connection_id: "conn-model" }) });
+    expect(((await withCount.json()) as { extra: Record<string, unknown> }).extra.tokenCount).toBe(5);
+  });
+
+  test("start: the answer is the generation's id at once; regenerate and continue go on the last reply, and are a new reply after the player's line; chat_id required; no connection is 400", async () => {
+    const w = await weirChatOf(closing, LINES);
+    const mine = w.as(USER);
+    const none = await mine.post("/api/v1/generate", {});
+    expect([none.status, await none.json()]).toEqual([400, { error: "chat_id is required" }]);
+    const started = await mine.post("/api/v1/generate", { chat_id: CHAT, connection_id: "conn-model", preset_id: "preset-weir" });
+    expect(started.status).toBe(200);
+    const { generationId, status } = (await started.json()) as { generationId: string; status: string };
+    expect(status).toBe("streaming");
+    expect(events(w, "GENERATION_STARTED").map((e) => (e.payload as { generationId: string }).generationId)).toEqual([generationId]);
+    const outcome = await w.server.generations.get(generationId)!;
+    expect(outcome.error).toBeNull();
+    expect(w.host.chats.get(CHAT)!.messages.at(-1)).toMatchObject({ role: "assistant", content: "NEW-TEXT the eel slips under the weir." });
+    // The chat ends on the reply now: a regenerate swipes it; had the player's line been last it would be a new reply.
+    const again = await mine.post("/api/v1/generate/regenerate", { chat_id: CHAT, connection_id: "conn-model", preset_id: "preset-weir" });
+    const second = (await again.json()) as { generationId: string };
+    await w.server.generations.get(second.generationId)!;
+    expect(events(w, "GENERATION_STARTED").map((e) => (e.payload as { generationType: string }).generationType)).toEqual(["normal", "regenerate"]);
+    w.host.send(CHAT, "USER-3 I turn to go.");
+    const asRegenerate = await mine.post("/api/v1/generate/regenerate", { chat_id: CHAT, connection_id: "conn-model", preset_id: "preset-weir" });
+    await w.server.generations.get(((await asRegenerate.json()) as { generationId: string }).generationId)!;
+    expect(events(w, "GENERATION_STARTED").map((e) => (e.payload as { generationType: string }).generationType).at(-1)).toBe("normal");
+    const bare = await weirChatOf(closing, LINES);
+    bare.host.connections.clear();
+    const refused = await bare.as(USER).post("/api/v1/generate", { chat_id: CHAT, preset_id: "preset-weir" });
+    expect([refused.status, await refused.json()]).toEqual([400, { error: "No connection profile found. Configure a default connection or select one for this chat." }]);
+    expect(events(bare, "GENERATION_STARTED")).toEqual([]);
+  });
+
+  test("a connection is made with its key kept as the secret, listed, read, changed whole, and removed; name and provider are required (201)", async () => {
+    const w = await weirOf(closing);
+    const mine = w.as(USER);
+    const missing = await mine.post("/api/v1/connections", { name: "RPE" });
+    expect([missing.status, await missing.json()]).toEqual([400, { error: "name and provider are required" }]);
+    const made = await mine.post("/api/v1/connections", { name: "RPE", provider: "custom", api_url: "http://127.0.0.1:7881/v1", model: "model", api_key: "secret-key", metadata: { rpe: { v: 1 } } });
+    expect(made.status).toBe(201);
+    const profile = (await made.json()) as { id: string };
+    expect(profile).toMatchObject({ name: "RPE", provider: "custom", api_url: "http://127.0.0.1:7881/v1", model: "model", has_api_key: true, is_default: false, preset_id: null, metadata: { rpe: { v: 1 } } });
+    expect(w.server.profiles!.secrets.get(`${USER}\0connection_${profile.id}_api_key`)).toBe("secret-key");
+    expect(w.host.connections.get(profile.id)).toMatchObject({ base: "http://127.0.0.1:7881/v1", key: "secret-key", model: "model" });
+    expect(events(w, "CONNECTION_ORGANIZATION_CHANGED")).toHaveLength(1);
+    const listed = (await (await mine.get("/api/v1/connections?limit=10&offset=0")).json()) as { data: { id: string }[]; total: number; limit: number; offset: number };
+    expect([listed.data.map((p) => p.id), listed.total, listed.limit, listed.offset]).toEqual([[profile.id], 1, 10, 0]);
+    expect(((await (await w.as(OTHER).get("/api/v1/connections")).json()) as { total: number }).total).toBe(0);
+    // A change replaces the metadata whole (`:517`); an empty key takes the secret away.
+    const changed = await mine.put(`/api/v1/connections/${profile.id}`, { name: "RPE two", metadata: { other: 1 }, api_key: "" });
+    expect(await changed.json()).toMatchObject({ name: "RPE two", metadata: { other: 1 }, has_api_key: false });
+    expect(w.server.profiles!.secrets.size).toBe(0);
+    expect((await mine.put(`/api/v1/connections/${profile.id}/api-key`, {})).status).toBe(400);
+    expect((await mine.put(`/api/v1/connections/${profile.id}/api-key`, { api_key: "newer" })).status).toBe(200);
+    expect(w.host.connections.get(profile.id)!.key).toBe("newer");
+    expect(((await (await mine.get(`/api/v1/connections/${profile.id}`)).json()) as { has_api_key: boolean }).has_api_key).toBe(true);
+    expect((await w.as(OTHER).get(`/api/v1/connections/${profile.id}`)).status).toBe(404);
+    expect((await mine.delete(`/api/v1/connections/${profile.id}`)).status).toBe(200);
+    expect((await mine.delete(`/api/v1/connections/${profile.id}`)).status).toBe(404);
+    expect(w.host.connections.has(profile.id)).toBe(false);
+  });
+
+  test("a connection made as default is the one a generation takes when none is asked for", async () => {
+    const w = await weirChatOf(closing, LINES);
+    w.host.connections.clear();
+    const mine = w.as(USER);
+    const made = (await (await mine.post("/api/v1/connections", { name: "RPE", provider: "custom", api_url: "http://127.0.0.1:7881/v1", model: "model", api_key: "k", is_default: true })).json()) as { id: string };
+    const started = await mine.post("/api/v1/generate", { chat_id: CHAT, preset_id: "preset-weir" });
+    expect(started.status).toBe(200);
+    await w.server.generations.get(((await started.json()) as { generationId: string }).generationId)!;
+    expect([...w.host.streams.keys()].length).toBeGreaterThan(0);
+    expect(made.id).toBeDefined();
   });
 });
