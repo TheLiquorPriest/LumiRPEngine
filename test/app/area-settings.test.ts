@@ -90,9 +90,9 @@ test("a limit the tree reads, written through the route at a chat's level, holds
   const b = await playedBed();
   const scope = { user: USER, chat: CHAT, session: NO_SESSION };
   const listing = async (): Promise<number> => {
-    const hits = await b.turns.files.find(scope, { by: "list" });
-    if (!Array.isArray(hits)) throw new Error(`the listing was refused: ${JSON.stringify(hits)}`);
-    return hits.length;
+    const found = await b.turns.files.find(scope, { by: "list" });
+    if (found.status !== "found") throw new Error(`the listing was refused: ${JSON.stringify(found)}`);
+    return found.hits.length;
   };
   const prune = () => pruneChat({ files: b.app.paths.files, chats: b.turns.chats }, USER, CHAT);
 

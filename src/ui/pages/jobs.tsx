@@ -1,7 +1,7 @@
 // The jobs (plan §13.5) as the pages list them: a chat's on its Turns page, and the user's of every chat
 // on Chats. Each job as RPH last kept it: its agent and what it was asked, how it stands, who started it,
-// when, what it spent, the limit it ended at and its report; and Cancel while it is queued or running.
-// What RPE refuses (no such job, or an RPE that runs no jobs) is shown in its words. A chat's list reads
+// when, what it spent, the limit it ended at and its report; and Cancel while it has not ended.
+// What RPE refuses (no such job) is shown in its words. A chat's list reads
 // when the page opens, when the live view says a run of the chat began or ended, and after a Cancel;
 // nothing polls.
 
@@ -14,7 +14,9 @@ import { errorWords, num, tokenWords, when } from "../words";
 /** How a job stands, as a badge says it. */
 export const JOB_STATE_WORDS: Readonly<Record<JobState, { words: string; tone?: Tone }>> = {
   queued: { words: "queued", tone: "accent" },
+  held: { words: "held", tone: "warn" },
   running: { words: "running", tone: "accent" },
+  asking: { words: "asking whether to go on", tone: "accent" },
   done: { words: "done", tone: "pos" },
   failed: { words: "failed", tone: "neg" },
   cancelled: { words: "cancelled", tone: "warn" },
@@ -22,9 +24,9 @@ export const JOB_STATE_WORDS: Readonly<Record<JobState, { words: string; tone?: 
   interrupted: { words: "interrupted", tone: "warn" },
 };
 
-/** Whether a Cancel can do anything: the job has not ended. */
+/** Whether a Cancel can do anything: the job has not ended (waiting, held, running, or asking). */
 export function cancellable(job: JobView): boolean {
-  return job.state === "queued" || job.state === "running";
+  return job.state === "queued" || job.state === "held" || job.state === "running" || job.state === "asking";
 }
 
 /** The jobs as a page holds them: the list read last, what could not be read, the Cancel out, and what RPE answered to the last one. */

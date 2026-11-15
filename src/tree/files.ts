@@ -1,17 +1,27 @@
 // RPE's file port (plan §5, §5.1; `FilesPort` in `rp-harness/contract`): reads and finds over a chat's
 // view of the tree, and writes held to where each writer may write. Every note an agent writes in a
 // turn is recorded against that turn as a version of the note (`note_version`), with what the file
-// held before and after, so a swipe, a delete or a branch can put the notes back (`notes.ts`).
+// held before and after, so a swipe, a delete or a branch can put the notes back (`notes.ts`). A scope
+// that names only the user sees the shipped and global levels alone, and writes nowhere. A find that
+// stopped before it had looked everywhere says why: its limit, a file too large, a line cut, its time.
 
 import { appendFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, LayerLevel, Places, Range, Refused, Scope, Unapplied, Writer, Written } from "rp-harness/contract";
+import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Places, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "rp-harness/contract";
 import { writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { MOUNTS } from "./layout";
 import { treeSettingsOf } from "./settings";
-import { type ChatLocation, entriesOf, kindOf, type Located, locate, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
+import { type ChatLocation, entriesOf, kindOf, type Located, locate, type Lookup, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
+
+/** The levels every chat shares, which a scope that names only the user sees. */
+const SHARED: readonly LayerLevel[] = ["shipped", "global"];
+
+/** Whether a scope names a chat: one that names only the user has no chat in view. */
+function namesChat(scope: Scope | UserScope): scope is Scope {
+  return "chat" in scope;
+}
 
 export interface TreeFilesDeps {
   /** The tree's folder: the global level. */
@@ -168,16 +178,26 @@ export function oneFileAtATime<T>(disk: string, task: () => Promise<T>): Promise
 }
 
 export function treeFiles(deps: TreeFilesDeps): TreeFiles {
-  function check(scope: Scope): void {
+  function check(scope: Scope | UserScope): void {
     if (scope.user !== deps.user) throw new Error(`This RPE belongs to the Lumiverse user ${JSON.stringify(deps.user)}, not ${JSON.stringify(scope.user)}.`);
+    if (!namesChat(scope)) return;
     safeId("session", scope.session);
     if (scope.turn !== undefined) safeId("turn", scope.turn);
   }
 
-  function location(scope: Scope): ChatLocation {
+  /** Where a scope's levels are on disk: its chat's, or, with no chat in view, the tree's folder alone. */
+  function location(scope: Scope | UserScope): ChatLocation {
     check(scope);
+    if (!namesChat(scope)) return { files: deps.files, character: null, chat: null };
     const folders = deps.chats.folders(scope.user, scope.chat);
     return { files: deps.files, character: folders?.character ?? null, chat: folders?.chat ?? null };
+  }
+
+  /** Finds a path of the scope's view: with no chat in view, a path at a character's or a chat's level, the root among them, is outside it. */
+  async function lookupIn(scope: Scope | UserScope, loc: ChatLocation, path: string): Promise<Lookup> {
+    const found = await locate(loc, path);
+    if (found.ok && !namesChat(scope) && !SHARED.includes(found.at.level)) return { ok: false, path: found.at.path, reason: "outside" };
+    return found;
   }
 
   async function places(scope: Scope): Promise<Places> {
@@ -185,7 +205,9 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     return placesOf(scope, scope.turn === undefined ? null : await deps.turnFolder(scope));
   }
 
-  async function refusal(scope: Scope, path: string, reason: Refused["reason"], writer: Writer | undefined): Promise<Refused> {
+  async function refusal(scope: Scope | UserScope, path: string, reason: Refused["reason"], writer: Writer | undefined): Promise<Refused> {
+    // A scope that names only the user writes nowhere.
+    if (!namesChat(scope)) return { status: "refused", path, reason, writable: [] };
     const at = await places(scope);
     return { status: "refused", path, reason, writable: writer === undefined ? at.writable : writableFor(at, writer) };
   }
@@ -195,27 +217,34 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     return lookup.ok ? lookup.at.disk : null;
   }
 
-  async function find(scope: Scope, query: FileQuery): Promise<FileHit[] | Refused> {
+  async function find(scope: Scope | UserScope, query: FileQuery): Promise<Found | Refused> {
     const loc = location(scope);
-    const lookup = await locate(loc, query.path ?? "");
+    const lookup = await lookupIn(scope, loc, query.path ?? "");
     if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
-    // A find that names no limit gives at most the user's setting; one that names a limit gets that many. The port can't tell an agent's find from RPE's or RPH's own, which list a turn's folder or a chat's sessions whole, and RPH holds a limit an agent names to the user's `tools.perCall` before it asks.
+    // A find that names no limit gives at most the user's setting; one that names a limit gets that many, `Infinity` every hit. The port can't tell an agent's find from RPE's or RPH's own, which list a turn's folder or a chat's sessions whole, and RPH holds a limit an agent names to the user's `tools.perCall` before it asks.
     const settings = await treeSettingsOf(loc);
     const limit = query.limit ?? settings.findLimit;
     const hits: FileHit[] = [];
+    if (limit <= 0) return { status: "found", hits };
+    // One hit past the limit is looked for, so that a find stopped at its limit knows that more were there and says so.
+    const room = limit + 1;
+    const found = (all: FileHit[], stopped: FindStopped = {}): Found => {
+      const more = all.length > limit;
+      const why: FindStopped = { ...stopped, ...(more ? { limit: { max: limit } } : {}) };
+      return { status: "found", hits: more ? all.slice(0, limit) : all, ...(Object.keys(why).length > 0 ? { stopped: why } : {}) };
+    };
     const root = at.level === "chat" && at.rest.length === 0;
-    if (limit <= 0) return hits;
     if (at.is === "none" || at.disk === null) {
       // A chat's folder not made yet still shows where the other levels are mounted.
-      if (!root || query.by !== "list") return hits;
+      if (!root || query.by !== "list") return found(hits);
     }
 
     if (query.by === "list") {
-      if (at.is === "file" && at.disk !== null) return [await fileHit(at.level, at.rest, at.disk)];
+      if (at.is === "file" && at.disk !== null) return found([await fileHit(at.level, at.rest, at.disk)]);
       if (at.is === "folder" && at.disk !== null) {
         for await (const e of walk(loc, at.level, at.rest, at.disk, query.depth ?? 1)) {
-          if (hits.length >= limit) break;
+          if (hits.length >= room) break;
           hits.push(e.folder ? { path: viewPath(at.level, e.rest), type: "folder", level: at.level, kind: kindOf(at.level, e.rest) } : await fileHit(at.level, e.rest, e.disk));
         }
       }
@@ -224,18 +253,18 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         for (const level of ["shipped", "global", "character"] as const) hits.push({ path: MOUNTS[level], type: "folder", level, kind: "yours" });
         hits.sort((a, b) => byPath({ name: a.path, folder: a.type === "folder" }, { name: b.path, folder: b.type === "folder" }));
       }
-      return hits.slice(0, limit);
+      return found(hits);
     }
-    if (at.disk === null) return hits;
-    const found = { ...at, disk: at.disk };
+    if (at.disk === null) return found(hits);
+    const within = { ...at, disk: at.disk };
 
     if (query.by === "glob") {
       const glob = new Bun.Glob(query.pattern);
-      for await (const f of filesAt(loc, found)) {
-        if (hits.length >= limit) break;
+      for await (const f of filesAt(loc, within)) {
+        if (hits.length >= room) break;
         if (glob.match(below(at, f.rest))) hits.push(await fileHit(at.level, f.rest, f.disk));
       }
-      return hits;
+      return found(hits);
     }
 
     const pattern = new RegExp(query.literal === true ? query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query.pattern, query.ignoreCase === true ? "i" : "");
@@ -244,34 +273,58 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     // A pattern may take time that grows with the cube of the text it is tested on, and the turn's folder holds lines of whole prompts:
     // a grep tests no more of a line than a hit shows, and stops with what it found once it has run `grepMs`, so it never holds RPE's one thread long.
     const stopAt = performance.now() + grepMs;
-    for await (const f of filesAt(loc, found)) {
-      if (hits.length >= limit || performance.now() >= stopAt) break;
+    /** The files over the grep's size that it passed over, the hits whose line it cut, and whether it ran out of time with more to look at. */
+    let large = 0;
+    const cutLines = new Set<FileHit>();
+    let late = false;
+    files: for await (const f of filesAt(loc, within)) {
+      if (hits.length >= room) break;
+      if (performance.now() >= stopAt) {
+        late = true;
+        break;
+      }
       if (only !== undefined && !only.match(below(at, f.rest))) continue;
       const bytes = (await stat(f.disk)).size;
-      if (bytes > grepBytes) continue;
+      if (bytes > grepBytes) {
+        large += 1;
+        continue;
+      }
       const data = await readFile(f.disk);
       if (data.includes(0)) continue;
       const lines = data.toString("utf8").split("\n");
       if (lines.at(-1) === "") lines.pop();
       for (const [i, whole] of lines.entries()) {
-        if (hits.length >= limit || performance.now() >= stopAt) break;
+        if (hits.length >= room) break files;
+        if (performance.now() >= stopAt) {
+          late = true;
+          break files;
+        }
         const line = whole.slice(0, grepLineChars);
-        if (pattern.test(line)) hits.push({ path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line });
+        if (!pattern.test(line)) continue;
+        const hit: FileHit = { path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line };
+        hits.push(hit);
+        if (whole.length > grepLineChars) cutLines.add(hit);
       }
     }
-    return hits;
+    const cutCount = hits.slice(0, limit).filter((hit) => cutLines.has(hit)).length;
+    return found(hits, {
+      ...(large > 0 ? { large: { files: large, bytes: grepBytes } } : {}),
+      ...(cutCount > 0 ? { cut: { lines: cutCount, chars: grepLineChars } } : {}),
+      ...(late ? { time: { ms: grepMs } } : {}),
+    });
   }
 
   return {
     async layers(scope) {
       check(scope);
-      return treeLayers();
+      // With no chat in view, the two levels every chat shares, under the same mounts.
+      return namesChat(scope) ? treeLayers() : treeLayers().filter((layer) => SHARED.includes(layer.level));
     },
 
     places,
 
     async read(scope, path, range): Promise<FileRead> {
-      const lookup = await locate(location(scope), path);
+      const lookup = await lookupIn(scope, location(scope), path);
       if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, undefined);
       const at = lookup.at;
       if (at.is === "none" || at.disk === null) return { status: "missing", path: at.path };
@@ -285,8 +338,10 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
 
     async write(scope, path, op, by) {
       const loc = location(scope);
-      const lookup = await locate(loc, path);
+      const lookup = await lookupIn(scope, loc, path);
       if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, by);
+      // With no chat in view, what is found is a level every chat shares: no one's to write through the port.
+      if (!namesChat(scope)) return await refusal(scope, lookup.at.path, "mounted", by);
       const writable = writableFor(await places(scope), by);
       const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writable);
       if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", by);

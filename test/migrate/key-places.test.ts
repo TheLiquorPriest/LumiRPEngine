@@ -80,7 +80,8 @@ interface Sent {
 async function started(data: string): Promise<{ models: ModelsApi; sent: Sent[]; close(): Promise<void> }> {
   const sent: Sent[] = [];
   const dir = await mkdtemp(join(tmpdir(), "rpe-key-places-"));
-  const host = await createFolderHost({ dir, user: "u1" });
+  // The layer reads its settings at the levels every chat shares, as the user it acts for.
+  const host = await createFolderHost({ dir, user: USER });
   const paths = dataPaths(data);
   const refusing = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);

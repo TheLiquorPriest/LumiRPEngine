@@ -1,8 +1,8 @@
 // The jobs on the pages, against the turn lane's own job routes in RPE's own server (in this process, on
 // a free loopback port), over a list of jobs kept in memory in place of RPH's: a chat's jobs on its Turns
 // page and the user's of every chat on Chats, newest first, each as RPH keeps it; Cancel only where a job
-// has not ended, and what it answered shown; RPE's refusals (no such job of the user's, an RPE that runs
-// no jobs) shown in its words. Every name and number here is made up.
+// has not ended, and what it answered shown; RPE's refusal of a job that is not the user's shown in its
+// words. Every name and number here is made up.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -18,12 +18,12 @@ import { type JobsShown, JobsView, readJobs } from "../../src/ui/pages/jobs";
 import { TurnsView } from "../../src/ui/pages/turns";
 import { browserDeps } from "../../src/ui/roads";
 import { CHAT, USER } from "./recorded";
-import { banners, elements, expand, press, textOf } from "./vnodes";
+import { elements, expand, press, textOf } from "./vnodes";
 
 const usage = { calls: 3, input: 9_000, output: 700, cacheRead: 0, cacheWrite: 0 };
 const job = (id: string, state: JobView["state"], started: number, over: Partial<JobView> = {}): JobView => ({ id, agent: "historian", brief: "Summarize the chapter that closed.", state, scope: { user: USER, chat: CHAT, session: "s-1" }, startedBy: "user", started, usage, ...over });
 
-/** The jobs RPH keeps, in memory, each found only under its own user: a cancel ends a queued or running one, and gives one that ended as it ended. */
+/** The jobs RPH keeps, in memory, each found only under its own user: a cancel ends one that has not ended, and gives one that ended as it ended. The owner's other controls are not reached by these pages. */
 function keptJobs(): JobsApi & { all: JobView[] } {
   const all: JobView[] = [
     job("job-old", "done", 1_000, { ended: 2_000, report: "Chapter one, summarized.", startedBy: { id: "a1", definition: "author" } }),
@@ -31,20 +31,27 @@ function keptJobs(): JobsApi & { all: JobView[] } {
     job("job-other", "queued", 4_000, { scope: { user: USER, chat: "chat-harbour", session: "s-2" } }),
     job("job-theirs", "running", 5_000, { scope: { user: "user-2", chat: CHAT, session: "s-3" } }),
   ];
+  const unreached = async (): Promise<never> => {
+    throw new Error("The jobs on these pages are started, switched, held, let go, started again and answered nowhere here.");
+  };
   return {
     all,
-    list: async (filter) => all.filter((j) => j.scope.user === filter.user && (filter.chat === undefined || j.scope.chat === filter.chat)),
+    list: async (filter) => ({ jobs: all.filter((j) => j.scope.user === filter.user && (filter.chat === undefined || j.scope.chat === filter.chat)) }),
     get: async (user, id) => all.find((j) => j.id === id && j.scope.user === user),
-    start: async () => {
-      throw new Error("No job is started here.");
-    },
     cancel: async (user, id) => {
       const at = all.findIndex((j) => j.id === id && j.scope.user === user);
       const found = all[at];
-      if (found === undefined || (found.state !== "queued" && found.state !== "running")) return found;
+      if (found === undefined || !["queued", "held", "running", "asking"].includes(found.state)) return found;
       all[at] = { ...found, state: "cancelled", ended: 6_000 };
       return all[at];
     },
+    start: unreached,
+    switches: unreached,
+    setSwitches: unreached,
+    hold: unreached,
+    letGo: unreached,
+    again: unreached,
+    answer: unreached,
   };
 }
 
@@ -57,7 +64,7 @@ const clients: RpeClient[] = [];
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "rpe-ui-jobs-"));
-  // The job routes reach only the harness's jobs: where RPE runs none, they are undefined.
+  // The job routes reach only the harness's jobs.
   const turns = {
     get harness() {
       return { jobs };
@@ -152,7 +159,7 @@ describe("the jobs, on RPE's own job routes", () => {
     read.reader.stop();
   });
 
-  test("the user's jobs of every chat, each saying its chat; an RPE that runs no jobs says so, in its words", async () => {
+  test("the user's jobs of every chat, each saying its chat", async () => {
     jobs = keptJobs();
     const all = await reading(null, (s) => s.jobs !== null);
     all.reader.stop();
@@ -160,11 +167,5 @@ describe("the jobs, on RPE's own job routes", () => {
     const { tree, row } = view(all.shown(), true);
     expect(textOf(tree)).toContain("Your jobs");
     expect(textOf(row("job-other")?.props.children)).toContain("chat chat-harbour");
-
-    jobs = undefined;
-    const none = await reading(CHAT, (s) => !s.loading);
-    none.reader.stop();
-    expect(none.shown().problem).toBe("This RPE runs no jobs.");
-    expect(banners(view(none.shown()).tree)).toEqual([{ title: "The jobs could not be read", text: "The jobs could not be readThis RPE runs no jobs." }]);
   });
 });

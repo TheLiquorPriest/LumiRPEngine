@@ -12,7 +12,7 @@ import { duration } from "../../src/ui/words";
 import { askingClient, settle } from "./asking";
 import { banners, elements, expand, press, textOf } from "./vnodes";
 
-const KEYED: ConnectionShown = { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", retries: 4, limits: { "deepseek-v4-flash": { contextWindow: 64_000 } }, default: true, key: { set: true }, limitsInForce: { contextWindow: { tokens: 64_000, from: "user" }, maxTokens: { tokens: 8_192, from: "pi" } } };
+const KEYED: ConnectionShown = { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", retries: 4, limits: { "deepseek-v4-flash": { contextWindow: 64_000 } }, default: true, key: { set: true }, limitsInForce: { contextWindow: { tokens: 64_000, from: "user" }, maxTokens: { tokens: 8_192, from: "pi" }, pictures: null, asked: ["pictures"] } };
 const SIGNED: ConnectionShown = { id: "c-studio", name: "Studio", provider: "anthropic", auth: "signin", default: false, key: null, signedIn: false, limitsInForce: null };
 const LIST: ConnectionsShown = {
   connections: [KEYED, SIGNED],
@@ -106,7 +106,7 @@ describe("the Connections page", () => {
     const flash = elements(listed.tree).find((e) => e.props["data-connection"] === "c-flash");
     press(flash, "Test it");
     expect(listed.asked).toEqual([{ test: "c-flash" }]);
-    const answered = view({ tests: { "c-flash": { busy: false, tested: { ok: true, ms: 840, model: "deepseek-v4-flash", limits: { contextWindow: { tokens: 128_000, from: "pi" }, maxTokens: null } }, problem: null } } });
+    const answered = view({ tests: { "c-flash": { busy: false, tested: { ok: true, ms: 840, model: "deepseek-v4-flash", limits: { contextWindow: { tokens: 128_000, from: "pi" }, maxTokens: null, pictures: null, asked: ["maxTokens", "pictures"] } }, problem: null } } });
     expect(answered.text).toContain(`It answered in ${duration(840)}, as deepseek-v4-flash. Context window: 128,000 tokens, as pi lists it · Longest reply: not known.`);
     const refused = view({ tests: { "c-studio": { busy: false, tested: { ok: false, ms: 120, error: "401: the key (the key) is not valid.", limits: null }, problem: null } } });
     expect(banners(refused.tree)).toEqual([{ title: "It did not answer", text: `It did not answer401: the key (the key) is not valid. (${duration(120)})` }]);
@@ -120,7 +120,7 @@ describe("the Connections page", () => {
   });
 
   test("a test that answers as another model than the connection names, with limits the catalogue lists, says so in one sentence and offers them; taking them opens the form with them filled in and writes nothing", () => {
-    const tested = { ok: true as const, ms: 900, model: "deepseek-flash", limits: { contextWindow: { tokens: 1_000_000, from: "pi" as const }, maxTokens: { tokens: 384_000, from: "pi" as const } } };
+    const tested = { ok: true as const, ms: 900, model: "deepseek-flash", limits: { contextWindow: { tokens: 1_000_000, from: "pi" as const }, maxTokens: { tokens: 384_000, from: "pi" as const }, pictures: null, asked: ["pictures" as const] } };
     const other = view({ tests: { "c-flash": { busy: false, tested, problem: null } } });
     const offer = elements(other.tree).find((e) => e.props["data-offer"] === "limits");
     expect(textOf(offer?.props.children)).toBe("The provider answered as deepseek-flash, not deepseek-v4-flash, so RPH does not use these figures for this connection unless you take them as its own.Take these limits");
@@ -128,7 +128,7 @@ describe("the Connections page", () => {
     expect(other.asked).toEqual([{ kind: "form", id: "c-flash", fill: { contextWindow: 1_000_000, maxTokens: 384_000 } }]);
     // The same model, or a catalogue with nothing for it: no offer.
     expect(elements(view({ tests: { "c-flash": { busy: false, tested: { ...tested, model: "deepseek-v4-flash" }, problem: null } } }).tree).some((e) => e.props["data-offer"] === "limits")).toBe(false);
-    expect(elements(view({ tests: { "c-flash": { busy: false, tested: { ...tested, limits: { contextWindow: null, maxTokens: null } }, problem: null } } }).tree).some((e) => e.props["data-offer"] === "limits")).toBe(false);
+    expect(elements(view({ tests: { "c-flash": { busy: false, tested: { ...tested, limits: { contextWindow: null, maxTokens: null, pictures: null, asked: ["contextWindow", "maxTokens", "pictures"] } }, problem: null } } }).tree).some((e) => e.props["data-offer"] === "limits")).toBe(false);
     // The form opens with the figures filled in, says nothing is written until saved, and saving sends them as the connection's model's own.
     const form = view({ action: { kind: "form", id: "c-flash", fill: { contextWindow: 1_000_000, maxTokens: 384_000 } } });
     const field = (name: string) => elements(form.tree).find((e) => e.type === "input" && e.props.name === name)?.props.defaultValue;

@@ -82,7 +82,7 @@ test("every setting RPH and RPE read is listed for a chat: the value in force, i
   expect(setting(body, "limits.turn.calls").passed?.why).toContain("a whole number, at least 1");
   // Per connection: the one the global file names by its name, and by its id where no file names it.
   expect(setting(body, "reply.forms.Floor model")).toMatchObject({ value: "two-step", from: "global", connection: { id: made.body.id, name: "Floor model" } });
-  expect(setting(body, `effort.connections.${made.body.id}`)).toMatchObject({ value: null, from: null, connection: { id: made.body.id, name: "Floor model" } });
+  expect(setting(body, `jobs.connections.${made.body.id}.perDay`)).toMatchObject({ value: null, from: null, connection: { id: made.body.id, name: "Floor model" } });
 
   // With no chat, the levels every chat shares.
   const shared = await settings(b, "GET", "");
@@ -231,7 +231,8 @@ test("a list of records a test area declares is shown as a table and written bac
   expect(setting(put.body, "keeper.marks").value).toEqual(written);
   const text = await readFile(b.app.paths.globalConfig, "utf8");
   for (const line of ["# The keeper's marks.", "# The end."]) expect(text.split("\n")).toContain(line);
-  expect(Bun.YAML.parse(text)).toEqual({ keeper: { marks: written } });
+  // The bed's own `off:` line stays as it was.
+  expect(Bun.YAML.parse(text)).toEqual({ off: [], keeper: { marks: written } });
 
   // A record short of a field is refused, and nothing is written.
   const refused = await settings<{ error: string }>(b, "PUT", "", { level: "global", key: "keeper.marks", value: [{ file: "persistent-workspace/tides.md" }] });

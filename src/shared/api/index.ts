@@ -453,17 +453,30 @@ export interface JobCancelReply {
   job: JobView;
 }
 
+/** Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on. */
+export interface JobLimits {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  tokens?: number;
+  time?: number;
+  askAt?: number;
+}
+
 /** The user's jobs (of every chat, or of one) as RPH last kept each, the newest started first. */
 export interface JobsReply {
   jobs: JobView[];
 }
 
-/** A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, and the limit it ended at. */
+/** Where a job stands. */
+export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
+
+/** A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, and where it asks. */
 export interface JobView {
   id: string;
   agent: string;
   brief: string;
-  state: "queued" | "running" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
+  state: JobState;
   scope: Scope;
   startedBy: AgentRef | "user";
   started: number;
@@ -471,6 +484,25 @@ export interface JobView {
   usage: Usage;
   report?: string;
   limit?: LimitHit;
+  /** The attachments its start named, by name. */
+  attach?: string[];
+  /** The limits of its own its start gave. */
+  limits?: JobLimits;
+  /** The names in attach nobody could find. */
+  missing?: string[];
+  /** Each write it made, its sub-agents' included, in order. */
+  wrote?: JobWrite[];
+  /** For a job the owner started again: the job it repeats. */
+  repeats?: string;
+  /** For a job that asks: the ask point it reached, and the tokens it had spent when it did. */
+  asks?: { at: number; tokens: number };
+}
+
+/** A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer. */
+export interface JobWrite {
+  tool: string;
+  lane?: string;
+  line: string;
 }
 
 /** What a route that takes a turn's id answers, with status 409, for a turn that was joined to another: the turn asked for and the turn it joined, which is the one to ask for. */
@@ -567,10 +599,10 @@ export interface LevelValue {
   mark?: LevelMark;
 }
 
-/** A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs. */
+/** A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs or its throttle. */
 export interface LimitHit {
-  limit: "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs";
-  per: "turn" | "agent" | "job" | "day";
+  limit: "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs" | "callTokensIn" | "callTokensOut" | "callTime" | "toolRounds" | "repeats" | "tokensPerMinute";
+  per: "turn" | "agent" | "job" | "day" | "connection";
   max: number;
   value: number;
   agent?: AgentRef;
@@ -731,22 +763,34 @@ export interface MissingPermissionShown {
   why: string;
 }
 
+/** A figure of a model the Connections page asks for where nobody has given it. */
+export type ModelFigure = "contextWindow" | "maxTokens" | "pictures";
+
 /** One limit of a model, in tokens, and where it came from. */
 export interface ModelLimit {
   tokens: number;
   from: "user" | "pi" | "connection";
 }
 
-/** A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it. */
+/** A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; and the figures nobody has given, in the order the page asks for them. */
 export interface ModelLimits {
   contextWindow: ModelLimit | null;
   maxTokens: ModelLimit | null;
+  pictures: ModelPictures | null;
+  asked: ModelFigure[];
 }
 
-/** A model's limits as entered or reported: its context window and its longest answer, in tokens. */
+/** A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures. */
 export interface ModelLimitsEntry {
   contextWindow?: number;
   maxTokens?: number;
+  pictures?: boolean;
+}
+
+/** Whether a model takes pictures, and where that came from. */
+export interface ModelPictures {
+  takes: boolean;
+  from: "user" | "pi" | "connection";
 }
 
 /** A note file of a chat: its path in the chat's view, its size now (0 for one no longer there), and how many times agents wrote it in turns. */
@@ -871,7 +915,7 @@ export interface RunOutcome {
   status: "released" | "no-reply" | "stopped" | "limit" | "failed";
   released: boolean;
   limit?: LimitHit;
-  error?: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed"; limit?: LimitHit; detail?: string; text?: string };
+  error?: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string };
   usage: Usage;
 }
 
@@ -890,7 +934,7 @@ export interface RunShown {
   /** What this run sent to the chat. */
   reply: ReplySoFar;
   /** Why the reply failed, when it did. */
-  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed"; limit?: LimitHit; detail?: string; text?: string } | null;
+  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
   /** What stopped it where it stood; null for neither a limit nor the hold. */
   stoppedBy: StoppedBy | null;
   /** What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line. */
@@ -1017,18 +1061,25 @@ export interface Span {
   to: number | null;
 }
 
-/** One part of an agent's stack: which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing; a part left out is listed with why. */
+/** One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why. */
 export interface StackPartRow {
+  /** What the part is. */
+  kind: "definition" | "instruction" | "rule" | "contract" | "guide" | "description" | "skills" | "given";
+  /** Its name as `off:` lists name it; for `given`, the item as `opening:` writes it. */
   part: string;
-  /** The file it came from; for a part left out as `missing`, where it would be. */
+  /** The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it. */
   path: string;
   level: LayerLevel;
-  /** SHA-256 of the file, lower-case hex; absent for a part left out as `missing`. */
+  /** SHA-256 of the file (for `given`, of its text), lower-case hex; absent for a part left out as `missing`. */
   hash?: string;
   /** Where it sits, or for a part left out, where it would. */
   where: "opening" | "briefing";
   /** Why it is left out; absent for a part in the stack. */
   left?: "missing" | "off" | "empty" | "broken" | "needs";
+  /** Its text as the agent gets it; absent when left out, and for `given` outside a session. */
+  text?: string;
+  /** For a part the briefing is handed: the situations that add it. */
+  situations?: string[];
 }
 
 /** The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why. */
@@ -1274,7 +1325,7 @@ export interface TraceDelta {
 }
 
 /** What RPH did; each kind's fields are the facts of it. */
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened"; from?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened"; from?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 
 /** An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it. */
 export interface TraceRecord {
@@ -1383,7 +1434,7 @@ export interface TurnReply {
   /** What its latest run sent to the chat so far. */
   reply: ReplySoFar;
   /** Why the reply failed, when it did. */
-  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed"; limit?: LimitHit; detail?: string; text?: string } | null;
+  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
   /** Its runs' events as far as the read reaches, in order: of the run asked for (the turn's first when none), those numbered `from` on; and every record of each run that began after it. */
   trace: TraceRecord[];
   /** The lore of the turn's prompt, by id, as its intake kept it: the entries Lumiverse activated for it (Lumiverse's ids), and the entries its lore map showed the Author (RPE's ids, as the map writes them). */

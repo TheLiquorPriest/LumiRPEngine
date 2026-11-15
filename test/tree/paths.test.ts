@@ -73,13 +73,13 @@ describe("RPE's tree keeps a chat to its own view", () => {
     for (const at of ["@character/", "@global/", ...spellings(CHATS_FOLDER).map((c) => `@global/${c}`), ...spellings(sibling.folder).map((c) => `@character/${c}`)]) {
       for (const query of [{ by: "list", depth: 6 }, { by: "glob", pattern: "**/*" }, { by: "grep", pattern: "quillfeather" }] as const) {
         const found = await tree.port.find(scope, { ...query, path: at });
-        const paths = Array.isArray(found) ? found.map((h) => h.path) : [];
+        const paths = found.status === "found" ? found.hits.map((h) => h.path) : [];
         expect({ at, by: query.by, leaked: paths.filter((p) => p.includes("vault") || p.includes(sibling.folder) || p.includes(stranger.folder)) }).toEqual({ at, by: query.by, leaked: [] });
       }
     }
     // The character's level shows its own files and guidance folders only.
     const character = await tree.port.find(scope, { by: "list", path: "@character/" });
-    expect(Array.isArray(character) ? character.map((h) => h.path) : character).toEqual(["@character/AGENTS.md"]);
+    expect(character.status === "found" ? character.hits.map((h) => h.path) : character).toEqual(["@character/AGENTS.md"]);
     for (const disk of [sibling.disk, stranger.disk]) expect(await readFile(join(disk, "persistent-workspace", "vault.md"), "utf8")).toBe(SECRET);
     // The other chat keeps its secret to itself, and its own scope reads it.
     expect(await tree.port.read({ ...scope, chat: "kit-chat-2" }, "persistent-workspace/vault.md")).toMatchObject({ status: "read", text: SECRET });
@@ -95,7 +95,7 @@ describe("RPE's tree keeps a chat to its own view", () => {
       for (const op of OPS) expect({ path, op: op.op, write: await tree.port.write(scope, path, op, agent) }).toMatchObject({ write: { status: "refused", reason: "link" } });
     }
     const grep = await tree.port.find(scope, { by: "grep", pattern: "quillfeather|shipped turn" });
-    expect(grep).toEqual([]);
+    expect(grep).toEqual({ status: "found", hits: [] });
     expect(await stat(join(sibling.disk, "planted.md")).catch(() => null)).toBeNull();
     expect(await readFile(join(tree.levelDir("shipped"), "TURN.md"), "utf8")).toBe("The shipped turn guidance.\n");
   });

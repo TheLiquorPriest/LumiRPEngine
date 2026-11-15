@@ -84,8 +84,15 @@ const promptNotice = shape.named(
 );
 export const limitHit = shape.named(
   "LimitHit",
-  "A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs.",
-  shape.object({ limit: shape.oneOf("calls", "tokensIn", "tokensOut", "tokens", "time", "depth", "agents", "jobs"), per: shape.oneOf("turn", "agent", "job", "day"), max: N, value: N, agent: opt(agentRef), connection: opt(T) }),
+  "A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs or its throttle.",
+  shape.object({
+    limit: shape.oneOf("calls", "tokensIn", "tokensOut", "tokens", "time", "depth", "agents", "jobs", "callTokensIn", "callTokensOut", "callTime", "toolRounds", "repeats", "tokensPerMinute"),
+    per: shape.oneOf("turn", "agent", "job", "day", "connection"),
+    max: N,
+    value: N,
+    agent: opt(agentRef),
+    connection: opt(T),
+  }),
 );
 const release = shape.named(
   "Release",
@@ -98,14 +105,19 @@ const callPermission = shape.named(
   "The permission a write or external tool's call ran under: the lane its tier puts it under (external for a tool of the external tier), the user's setting for that lane, and under Confirm the user's word on the call.",
   shape.object({ lane: T, setting: shape.oneOf("auto", "confirm", "never"), answer: opt(approvalAnswer) }),
 );
+const jobLimits = shape.named(
+  "JobLimits",
+  "Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on.",
+  shape.object({ calls: opt(N), tokensIn: opt(N), tokensOut: opt(N), tokens: opt(N), time: opt(N), askAt: opt(N) }),
+);
 export const jobView = shape.named(
   "JobView",
-  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, and the limit it ended at.",
+  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, and where it asks.",
   shape.object({
     id: T,
     agent: T,
     brief: T,
-    state: shape.oneOf("queued", "running", "done", "failed", "cancelled", "off-path", "interrupted"),
+    state: shape.named("JobState", "Where a job stands.", shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted")),
     scope,
     startedBy: shape.union(agentRef, shape.literal("user")),
     started: N,
@@ -113,9 +125,21 @@ export const jobView = shape.named(
     usage,
     report: opt(T),
     limit: opt(limitHit),
+    attach: opt(shape.list(T), "The attachments its start named, by name."),
+    limits: opt(jobLimits, "The limits of its own its start gave."),
+    missing: opt(shape.list(T), "The names in attach nobody could find."),
+    wrote: opt(shape.list(shape.named("JobWrite", "A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer.", shape.object({ tool: T, lane: opt(T), line: T }))), "Each write it made, its sub-agents' included, in order."),
+    repeats: opt(T, "For a job the owner started again: the job it repeats."),
+    asks: opt(shape.object({ at: N, tokens: N }), "For a job that asks: the ask point it reached, and the tokens it had spent when it did."),
   }),
 );
-export const replyError = shape.object({ code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed"), limit: opt(limitHit), detail: opt(T), text: opt(T) });
+export const replyError = shape.object({
+  code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed", "no-definition", "no-tags"),
+  limit: opt(limitHit),
+  detail: opt(T),
+  agent: opt(T, "For no-definition and no-tags: the agent definition the turn named as its lead."),
+  text: opt(T),
+});
 const runOutcome = shape.named(
   "RunOutcome",
   "How a run ended, whether a reply was released, the limit or the failure, and what every agent of it spent.",
@@ -127,9 +151,12 @@ const traceEvent = shape.named(
   shape.union(
     shape.object({ kind: shape.literal("run_started"), run: shape.oneOf("turn", "job", "talk"), turn: opt(shape.named("TurnKind", "What a generation asks for.", shape.oneOf("new", "swipe", "regenerate", "continue", "impersonate"))), lead: T }),
     shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T) }),
+    shape.object({ kind: shape.literal("intent_began") }),
     shape.object({ kind: shape.literal("intent"), text: T }),
     shape.object({ kind: shape.literal("call_started"), call: N, connection: T, model: T, sampling: opt(sampling), maxTokens: opt(N), messages: N, tools: N, request: opt(T), toolTokens: opt(N), openingTokens: opt(N) }),
     shape.object({ kind: shape.literal("call_ended"), call: N, model: T, text: T, thinking: opt(T), toolCalls: shape.list(toolCall), stop: T, usage, ms: N, error: opt(T) }),
+    shape.object({ kind: shape.literal("connection_wait"), connection: T, for: shape.oneOf("minute", "place"), ms: opt(N) }),
+    shape.object({ kind: shape.literal("connection_stand_in"), named: T, used: T }),
     shape.object({ kind: shape.literal("tool_started"), callId: T, tool: T, args: shape.json(), closing: shape.yesNo(), via: opt(shape.literal("tool_use")) }),
     shape.object({ kind: shape.literal("tool_update"), callId: T, tool: T, partial: toolResult }),
     shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N, permission: opt(callPermission) }),
@@ -146,6 +173,9 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("prompt_notices"), notices: shape.list(promptNotice), pictures: opt(shape.list(shape.object({ message: N, count: N }))) }),
     shape.object({ kind: shape.literal("todo"), items: shape.list(shape.object({ text: T, done: shape.yesNo() })) }),
     shape.object({ kind: shape.literal("limit"), hit: limitHit }),
+    shape.object({ kind: shape.literal("paused"), call: N }),
+    shape.object({ kind: shape.literal("resumed"), call: N, ms: N }),
+    shape.object({ kind: shape.literal("said"), call: N, text: T }),
     shape.object({ kind: shape.literal("released"), release }),
     shape.object({ kind: shape.literal("progress_missing"), time: N }),
     shape.object({ kind: shape.literal("compacted"), session: T, before: N, after: N, keptTurns: N }),

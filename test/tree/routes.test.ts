@@ -84,7 +84,8 @@ describe("the Files page's routes", () => {
             suggestions = new TreeSuggestions({ db: a.db, writes: a.writes, now: a.now });
             const chats = new TreeChats(a.db, a.writes, a.paths.files);
             port = treeFiles({ files: a.paths.files, user: OWNER, chats, turnFolder: async () => null, writes: a.writes, now: a.now });
-            const stack = (user: string, chat: string, agent: string) => loadGuidance(port, { user, chat, session: "none" }).stackParts(agent);
+            // The definition, instruction and rule files of the agent's stack, as the harness's own `definitions.stack` lists them among its parts.
+            const stack = async (user: string, chat: string, agent: string) => (await loadGuidance(port, { user, chat, session: "none" }).stack(agent)).entries.map(({ replaces: _replaces, layered: _layered, ...part }) => part);
             a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, suggestions, turning: () => turning, stack }));
           },
         },

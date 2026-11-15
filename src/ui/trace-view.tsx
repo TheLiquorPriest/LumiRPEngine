@@ -48,13 +48,16 @@ const REPLY_ERROR_WORDS: Readonly<Record<ReplyError["code"], string>> = {
   provider: "The model's provider failed.",
   stopped: "The turn was stopped.",
   failed: "The harness failed.",
+  "no-definition": "No agent definition in force for the chat defines the turn's lead.",
+  "no-tags": "The connection's replies are marked by tags, and no reply contract in force names them.",
 };
 
 /** Why a reply failed, in words; null where the status beside it already says all of it. */
 export function replyErrorWords(error: ReplyError, status: RunStatus | "running"): string | null {
   if (error.code === status && error.detail === undefined) return null;
   const limit = error.limit === undefined ? "" : ` (${error.limit.limit} per ${error.limit.per}: ${num(error.limit.value)} of ${num(error.limit.max)})`;
-  return `${REPLY_ERROR_WORDS[error.code]}${limit}${error.detail === undefined ? "" : ` ${error.detail}`}`;
+  const lead = error.agent === undefined ? "" : ` (the lead: ${error.agent})`;
+  return `${REPLY_ERROR_WORDS[error.code]}${limit}${lead}${error.detail === undefined ? "" : ` ${error.detail}`}`;
 }
 
 /** What a run is, in a few words: "New reply, led by author". */

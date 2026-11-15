@@ -152,14 +152,17 @@ export const pruneReply = shape.object({ pruned: prunedShown });
 
 const stackPartRow = shape.named(
   "StackPartRow",
-  "One part of an agent's stack: which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing; a part left out is listed with why.",
+  "One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why.",
   shape.object({
-    part: T,
-    path: field(T, "The file it came from; for a part left out as `missing`, where it would be."),
+    kind: field(shape.oneOf("definition", "instruction", "rule", "contract", "guide", "description", "skills", "given"), "What the part is."),
+    part: field(T, "Its name as `off:` lists name it; for `given`, the item as `opening:` writes it."),
+    path: field(T, "The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it."),
     level: layerLevel,
-    hash: opt(T, "SHA-256 of the file, lower-case hex; absent for a part left out as `missing`."),
+    hash: opt(T, "SHA-256 of the file (for `given`, of its text), lower-case hex; absent for a part left out as `missing`."),
     where: field(shape.oneOf("opening", "briefing"), "Where it sits, or for a part left out, where it would."),
     left: opt(shape.oneOf("missing", "off", "empty", "broken", "needs"), "Why it is left out; absent for a part in the stack."),
+    text: opt(T, "Its text as the agent gets it; absent when left out, and for `given` outside a session."),
+    situations: opt(shape.list(T), "For a part the briefing is handed: the situations that add it."),
   }),
 );
 export const stackReply = shape.named("StackReply", "The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why.", shape.object({ agent: T, parts: shape.list(stackPartRow) }));

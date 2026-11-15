@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import type { FileHit, FileQuery, Refused } from "rp-harness/contract";
+import type { FileQuery, Found } from "rp-harness/contract";
 import { KIT_SEED } from "rp-harness/testing/kit";
 import { type LaidTree, layTree } from "./fixtures";
 
@@ -40,36 +40,37 @@ afterAll(async () => {
   await rm(place, { recursive: true, force: true });
 });
 
-async function timed(label: string, query: FileQuery): Promise<FileHit[]> {
+async function timed(label: string, query: FileQuery): Promise<Found> {
   const started = performance.now();
-  const found: FileHit[] | Refused = await tree.port.find(scope, query);
+  const found = await tree.port.find(scope, query);
   const ms = performance.now() - started;
-  if (!Array.isArray(found)) throw new Error(`${label} was refused: ${found.reason}`);
-  console.log(`[tree timing] ${label}: ${found.length} hits in ${ms.toFixed(1)} ms`);
+  if (found.status !== "found") throw new Error(`${label} was refused: ${found.reason}`);
+  console.log(`[tree timing] ${label}: ${found.hits.length} hits in ${ms.toFixed(1)} ms`);
   return found;
 }
 
 test(`find and grep over a chat folder of ${FILES} files`, async () => {
   const bulk = "persistent-workspace/bulk";
   const listed = await timed("list, every depth", { by: "list", path: bulk, depth: 3, limit: ALL });
-  expect(listed.filter((h) => h.type === "file")).toHaveLength(FILES);
+  expect(listed.hits.filter((h) => h.type === "file")).toHaveLength(FILES);
 
   const globbed = await timed("glob **/*.md under the folder", { by: "glob", pattern: "**/*.md", path: bulk, limit: ALL });
-  expect(globbed).toHaveLength(FILES);
+  expect(globbed.hits).toHaveLength(FILES);
 
   const fromRoot = await timed("glob **/*.md from the chat's root", { by: "glob", pattern: "**/*.md", limit: ALL });
-  expect(fromRoot.filter((h) => h.path.startsWith(`${bulk}/`))).toHaveLength(FILES);
+  expect(fromRoot.hits.filter((h) => h.path.startsWith(`${bulk}/`))).toHaveLength(FILES);
 
   const rare = await timed("grep, 20 matching lines", { by: "grep", pattern: "drowned bell", path: bulk, limit: ALL });
-  expect(rare).toHaveLength(FILES / 100);
+  expect(rare.hits).toHaveLength(FILES / 100);
 
   const fromRootGrep = await timed("grep from the chat's root, 21 matching lines", { by: "grep", pattern: "drowned bell", limit: ALL });
-  expect(fromRootGrep.map((h) => h.path)).toContain("WORLD.md");
-  expect(fromRootGrep).toHaveLength(FILES / 100 + 1);
+  expect(fromRootGrep.hits.map((h) => h.path)).toContain("WORLD.md");
+  expect(fromRootGrep.hits).toHaveLength(FILES / 100 + 1);
 
   const every = await timed("grep, every line matching", { by: "grep", pattern: "tide", path: bulk, limit: ALL });
-  expect(every).toHaveLength(FILES * 8 - FILES / 100);
+  expect(every.hits).toHaveLength(FILES * 8 - FILES / 100);
 
   const capped = await timed("grep at a limit of 200", { by: "grep", pattern: "tide", path: bulk, limit: 200 });
-  expect(capped).toHaveLength(200);
+  expect(capped).toEqual({ status: "found", hits: expect.any(Array), stopped: { limit: { max: 200 } } });
+  expect(capped.hits).toHaveLength(200);
 });

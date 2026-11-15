@@ -39,7 +39,7 @@ test("a connection is shown with its model's limits, the user's override first, 
   const baseUrl = provider(mode);
   const b = await openTurnBed({ answers: [] });
   beds.push(b);
-  const override: ModelLimits = { contextWindow: { tokens: 32_000, from: "user" }, maxTokens: { tokens: 2_000, from: "user" } };
+  const override: Pick<ModelLimits, "contextWindow" | "maxTokens"> = { contextWindow: { tokens: 32_000, from: "user" }, maxTokens: { tokens: 2_000, from: "user" } };
 
   const made = await b.page<ConnectionShown & { error?: string }>("POST", "/api/v1/connections", { connection: { name: "Stand-in", provider: "openai-compatible", auth: "key", baseUrl, model: MODEL, limits: { [MODEL]: { contextWindow: 32_000, maxTokens: 2_000 } } }, key: KEY });
   expect(made.body.error).toBeUndefined();
