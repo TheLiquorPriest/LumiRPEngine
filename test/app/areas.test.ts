@@ -209,7 +209,7 @@ describe("the hooks areas fill", () => {
     const question = (b: TurnBed): Promise<Response> => {
       const registration = b.composition.door.registration();
       if (registration === null) throw new Error("RPE made no registration");
-      const asked: Question = { v: 1, user: USER, chat: CHAT, purpose: "prompt", generation: null, path: [{ id: "m-greeting", index: 0, swipe: 0 }], entries: [] };
+      const asked: Question = { v: 1, user: USER, chat: CHAT, purpose: "prompt", generation: null, path: [{ id: "m-greeting", index: 0, swipe: 0, user: false, hash: "0".repeat(32) }], entries: [] };
       return fetch(`${b.listening.url}${QUESTION_PATH}`, { method: "POST", headers: { authorization: `Bearer ${registration.key}`, [USER_HEADER]: USER, "content-type": "application/json" }, body: JSON.stringify(asked) });
     };
     // No area fills the secrecy lane: today's answer, that the secrets are not known, so the extension keeps every marked secret out.
