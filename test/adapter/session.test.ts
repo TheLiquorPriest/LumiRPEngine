@@ -22,7 +22,7 @@ afterEach(() => {
   }
 });
 
-function bed(signIn: StoredSignIn | null = null) {
+function bed(signIn: StoredSignIn | null = null, clientAddress?: string) {
   const clock = new FakeClock();
   const db = new StandInDb();
   db.write({
@@ -37,7 +37,7 @@ function bed(signIn: StoredSignIn | null = null) {
     settings: [],
     message_breakdowns: [],
   });
-  const server = new LumiverseServer({ clock, db, accounts: [{ id: USER, username: "tamsin", password: PASSWORD }, { id: "user-wren", username: "wren", password: "another" }] });
+  const server = new LumiverseServer({ clock, db, accounts: [{ id: USER, username: "tamsin", password: PASSWORD }, { id: "user-wren", username: "wren", password: "another" }], ...(clientAddress !== undefined ? { clientAddress } : {}) });
   open.push({ db, server });
   const saved: (StoredSignIn | null)[] = [];
   const logs: string[] = [];
@@ -100,6 +100,22 @@ describe("signing in", () => {
     expect(locked.message).toContain("for about 5 minutes");
     expect(server.signIns).toHaveLength(8);
     expect(session.state().state).toBe("signed-out");
+  });
+
+  test("five wrong passwords from another machine lock its address out: RPE says so with the wait, and so does every call after, a held session's read too, until it lifts", async () => {
+    const { clock, server, session, read } = bed(null, "192.0.2.40");
+    await session.signIn("tamsin", PASSWORD);
+    for (let i = 0; i < 4; i++) expect((await failure(session.signIn("tamsin", "wrong"))).problem).toBe("refused");
+    const locked = await failure(session.signIn("tamsin", "wrong"));
+    expect(locked.problem).toBe("locked");
+    expect(locked.status).toBe(429);
+    expect(locked.message).toContain("for about 15 minutes");
+    expect(locked.message).toContain("Too many failed sign-in attempts. Try again later.");
+    expect(locked.message).toContain("It does this after repeated failed sign-ins.");
+    expect(server.lockoutState()).toMatchObject({ level: 1 });
+    expect((await failure(read())).problem).toBe("locked");
+    await clock.advance(15 * 60 * 1000);
+    expect(await read()).toMatchObject({ id: "chat-a" });
   });
 });
 

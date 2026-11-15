@@ -8,87 +8,17 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createDbReader, type DbReader } from "../../../src/adapter/lumiverse/db";
 import { createHttpReads } from "../../../src/adapter/lumiverse/http-reads";
 import type { LumiverseReads } from "../../../src/adapter/lumiverse/reads";
-import { LumiverseSession } from "../../../src/adapter/lumiverse/session";
-import { streamedReply } from "../../../src/adapter/lumiverse/stream";
-import { FakeClock } from "../../standin/clock";
-import { StandInDb, type Rows } from "../../standin/db";
-import { LumiverseServer } from "../../standin/http";
-import { StandIn, type ChatMessage, type Preset } from "../../standin/lumiverse";
-
-const USER = "user-mara";
-const OTHER = "user-pell";
-const CHAT = "chat-weir";
-const MODEL = "http://127.0.0.1:7881";
-const CLOCK = { now: (): number => Date.now(), setTimeout: (run: () => void, ms: number): unknown => setTimeout(run, ms), clearTimeout: (handle: unknown): void => clearTimeout(handle as Timer) };
-const json = (value: unknown): string => JSON.stringify(value);
+import type { Rows } from "../../standin/db";
+import type { ChatMessage, Preset } from "../../standin/lumiverse";
+import { CHAT, json, LINES, OTHER, USER, weir as weirOf, weirChat as weirChatOf, type Weir } from "./weir";
 
 const closing: (() => void)[] = [];
 afterEach(() => {
   for (const close of closing.splice(0)) close();
 });
 
-const EMPTY: Rows = { user: [], characters: [], chats: [], messages: [], world_books: [], world_book_entries: [], personas: [], presets: [], settings: [], message_breakdowns: [] };
-const USERS = [
-  { id: USER, name: "Mara", email: "mara@example.invalid", username: "mara" },
-  { id: OTHER, name: "Pell", email: "pell@example.invalid", username: "pell" },
-];
-
-/** One signed-in user of the weir's server. */
-interface Asker {
-  get(path: string, headers?: Record<string, string>): Promise<Response>;
-  post(path: string, body: unknown): Promise<Response>;
-  session: LumiverseSession;
-}
-
-interface Weir {
-  db: StandInDb;
-  server: LumiverseServer;
-  host: StandIn;
-  as(user: string): Asker;
-}
-
-/** The weir's server, a database with two users in it, and a session of each; `get` and `post` answer as that user. */
-async function weir(rows: Partial<Rows> = {}): Promise<Weir> {
-  const db = new StandInDb();
-  closing.push(() => db.close());
-  db.write({ ...EMPTY, ...rows, user: USERS });
-  const host = new StandIn();
-  host.db = db;
-  const clock = new FakeClock();
-  const server = new LumiverseServer({ clock, db, host, accounts: [USER, OTHER].map((id) => ({ id, username: id.replace("user-", ""), password: "reed lamp reed" })) });
-  closing.push(() => server.stop());
-  const sessions = new Map<string, LumiverseSession>();
-  const tokens = new Map<string, string>();
-  for (const id of [USER, OTHER]) {
-    const session = new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => id, clock, log: () => undefined });
-    tokens.set(id, (await session.signIn(id.replace("user-", ""), "reed lamp reed")).token);
-    sessions.set(id, session);
-  }
-  const send = (user: string, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<Response> =>
-    server.fetch(`${server.base}${path}`, { method, headers: { authorization: `Bearer ${tokens.get(user)!}`, ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
-  return { db, server, host, as: (user) => ({ session: sessions.get(user)!, get: (path, headers = {}) => send(user, "GET", path, headers), post: (path, body) => send(user, "POST", path, {}, body) }) };
-}
-
-/** A stand-in Lumiverse with the weir's chat in a database, on a model that answers every request with one line; how often the model was asked is `asked()`. */
-async function weirChat(messages: ChatMessage[], preset: Partial<Preset> = {}): Promise<Weir & { asked(): number }> {
-  const bed = await weir();
-  let asked = 0;
-  bed.host.servers.set(MODEL, async (request) => {
-    asked++;
-    return streamedReply(async (out) => out.content("NEW-TEXT the eel slips under the weir."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, keepAlive: null });
-  });
-  bed.host.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
-  bed.host.presets.set("preset-weir", { id: "preset-weir", name: "Weir", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a night at the weir." }], ...preset });
-  bed.host.addChat({ id: CHAT, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages });
-  return { ...bed, asked: () => asked };
-}
-
-const LINES: ChatMessage[] = [
-  { id: "m0", role: "assistant", content: "GREET The weir hums in the dark." },
-  { id: "m1", role: "user", content: "USER-1 I lower the lantern." },
-  { id: "m2", role: "assistant", content: "REPLY-1 Ilsa points at the water." },
-  { id: "m3", role: "user", content: "USER-2 I step to the edge." },
-];
+const weir = (rows: Partial<Rows> = {}): Promise<Weir> => weirOf(closing, rows);
+const weirChat = (messages: ChatMessage[], preset: Partial<Preset> = {}): Promise<Weir & { asked(): number }> => weirChatOf(closing, messages, preset);
 
 describe("the stored breakdown (`routes/generate.routes.ts:175-181`, `services/breakdown.service.ts:14-21`)", () => {
   test("serves what was stored with a reply, and 404 where none is: another user's, a deleted reply's, one never made", async () => {
@@ -338,7 +268,7 @@ describe("every read RPE's HTTP road makes (`src/adapter/lumiverse/http-reads.ts
     expect(character).not.toBeNull();
     expect(character!.extensions._lumiverse_library_scope).toBe("mine");
     const { _lumiverse_library_scope: _scope, ...withoutScope } = character!.extensions;
-    expect({ ...character!, extensions: withoutScope }).toEqual(await database.character("char-ilsa"));
+    expect(await database.character("char-ilsa")).toEqual({ ...character!, extensions: withoutScope });
     expect(await http.persona("persona-mara")).toEqual(await database.persona("persona-mara"));
     expect((await http.defaultPersona())?.id).toBe("persona-mara");
     expect(await http.preset("preset-weir")).toEqual(await database.preset("preset-weir"));

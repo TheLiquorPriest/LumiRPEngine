@@ -15,7 +15,9 @@ import { isRecord } from "../../src/shared/json";
 import type { OpenSocket, Socket, SocketEvents } from "../../src/adapter/lumiverse/socket";
 import type { PageChannel } from "../../src/ext/page";
 import type { GenerationType } from "./assembly";
+import { databankAnswer, macroAnswer, memoryAnswer, openCortex, tokenAnswer, type CortexState } from "./cortex";
 import type { StandInDb } from "./db";
+import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
 import type { Installed, StandIn } from "./lumiverse";
 import { dryRunResult, pageOf, parsePagination, parsed, rowMetadata, rowToBook, rowToCharacter, rowToEntry, rowToMessage, rowToMessageLight, rowToPersona, rowToPreset, rowToSetting, type Pagination } from "./served";
 import { CLIENT_TIMEOUT_MS, ServerSocket, SWEEP_MS } from "./sockets";
@@ -41,6 +43,19 @@ const UPDATE_AGE_MS = 24 * 60 * 60 * 1000;
 /** `authSensitiveLimiter` (`app.ts:254-259`): eight sign-ins per five minutes per address. */
 const SIGN_IN_MAX = 8;
 const SIGN_IN_WINDOW_MS = 5 * 60 * 1000;
+/** `FAILURE_THRESHOLD`, `INITIAL_LOCKOUT_STEPS_MS`, `MAX_LOCKOUT_MS` and `STATE_TTL_MS` (`services/auth-lockout.service.ts:24-31`, `:33`): five failed sign-ins lock an address for 15 minutes, 30, 60, then 6 hours, doubling to at most 7 days. */
+const LOCKOUT_FAILURES = 5;
+const LOCKOUT_STEPS_MS = [15 * 60_000, 30 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
+const LOCKOUT_MAX_MS = 7 * 24 * 60 * 60_000;
+const LOCKOUT_TTL_MS = 7 * 24 * 60 * 60_000;
+
+/** What Lumiverse holds of one address's failed sign-ins (`LockoutState`, `services/auth-lockout.service.ts:3-9`). */
+interface Lockout {
+  failures: number;
+  level: number;
+  lockedUntil: number;
+  lastActivityAt: number;
+}
 /** `TICKET_TTL_MS` (`ws/tickets.ts:22`). */
 const TICKET_TTL_MS = 30_000;
 /** `REVALIDATE_PRIVATE` (`utils/http-cache.ts:12`). */
@@ -65,6 +80,11 @@ interface EntryOptions {
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+}
+
+/** What a route of `cortex.ts` answers: its body as JSON; a body that was not JSON Hono answers 500 as plain text, which these routes name by a string. */
+function answered(a: { status: number; body: unknown }): Response {
+  return a.status === 500 && typeof a.body === "string" ? new Response(a.body, { status: 500, headers: { "content-type": "text/plain; charset=UTF-8" } }) : json(a.status, a.body);
 }
 
 /** `ifNoneMatchSatisfies` (`utils/http-cache.ts:19-33`): the client's `If-None-Match` lists the tag, weak or strong, or `*`. */
@@ -99,6 +119,13 @@ export interface LumiverseServerOptions {
   host?: StandIn;
   /** How long Lumiverse's handler of an extension's message takes (`ws/handler.ts:440-467`): the extension's lookup and the post to its worker. */
   handlerMs?: number;
+  /**
+   * The address Lumiverse sees RPE's requests come from (`getClientIp`, `app.ts:131-133`). Lumiverse never locks out a loopback address (`services/
+   * auth-lockout.service.ts:150-155`), so on the default, RPE beside Lumiverse, only the sign-in limiter holds; a test that plays RPE on another machine gives its address.
+   */
+  clientAddress?: string;
+  /** The models Lumiverse has a tokenizer for; for any other its token count is null (`services/tokenizer.service.ts:455-463`). */
+  tokenizedModels?: readonly string[];
 }
 
 /** An installed extension as the stand-in lists it (`GET /api/v1/spindle`). */
@@ -132,9 +159,14 @@ export class LumiverseServer {
   private readonly frontends = new Map<string, Map<string, ServerSocket>>();
   private readonly listed = new Map<string, Listed>();
   private sweep: unknown;
+  /** What Lumiverse holds of the client's failed sign-ins (`services/auth-lockout.service.ts:90-100`, `:118-182`), by the one address the stand-in sees. */
+  private lockout: Lockout | null = null;
+  /** The memory, databanks and token counts its routes answer from (`cortex.ts`); a test puts a databank's chunks in `cortex.bankChunks`. */
+  readonly cortex: CortexState;
 
   constructor(private readonly options: LumiverseServerOptions) {
     this.clock = options.clock;
+    this.cortex = openCortex(options.db, options.tokenizedModels ?? []);
     for (const a of options.accounts) this.accounts.set(a.username.toLowerCase(), a);
     if (options.host) {
       const host = options.host;
@@ -176,6 +208,11 @@ export class LumiverseServer {
   /** The sessions alive now. */
   sessionCount(user: string): number {
     return [...this.sessions.values()].filter((s) => s.user === user && this.alive(s)).length;
+  }
+
+  /** What Lumiverse holds of the client address's failed sign-ins now: its failures counted, its lockout's level and when it lifts; null for an address with no state. */
+  lockoutState(): { failures: number; level: number; lockedUntil: number } | null {
+    return this.lockout === null ? null : { failures: this.lockout.failures, level: this.lockout.level, lockedUntil: this.lockout.lockedUntil };
   }
 
   /** The sockets of a user open now, with the frontend session each was opened with. */
@@ -232,29 +269,90 @@ export class LumiverseServer {
     return s;
   }
 
+  /** `getClientIp`'s answer for every request (`app.ts:131-133`): the one address the stand-in sees. */
+  private get clientAddress(): string {
+    return this.options.clientAddress ?? "127.0.0.1";
+  }
+
+  /** `getActiveLockout` (`services/auth-lockout.service.ts:107-116`), a state with no failure and no activity for a week swept as `:57-69` does within the minute. */
+  private activeLockout(now: number): Lockout | null {
+    const state = this.lockout;
+    if (state === null) return null;
+    if (state.failures === 0 && now - Math.max(state.lastActivityAt, state.lockedUntil) > LOCKOUT_TTL_MS) {
+      this.lockout = null;
+      return null;
+    }
+    return state.lockedUntil > now ? state : null;
+  }
+
+  /** The refusal of a locked address (`buildPayload`, `:184-192`; `applyLockoutHeaders`, `app.ts:109-115`): 429 with the wait in `Retry-After`. */
+  private lockoutAnswer(state: Lockout, message: string, now: number): Response {
+    const seconds = Math.max(1, Math.ceil((state.lockedUntil - now) / 1000));
+    return json(429, { error: message, retryAfterSeconds: seconds, lockedUntil: new Date(state.lockedUntil).toISOString(), lockoutLevel: state.level, reason: "login" }, { "retry-after": String(seconds) });
+  }
+
+  /**
+   * What `app.ts:280-315` does after a sign-in answers: a success clears the count of failures; a 401 is one more, and the fifth locks the address out for
+   * 15 minutes, then 30 minutes, 1 hour, 6 hours, doubling after that to at most 7 days (`recordFailure`, `:118-153`; `nextLockoutMs`, `:84-93`), the fifth's own answer a 429.
+   * A loopback address is never locked (`:127-130`). Any other answer (the limiter's 429) is no failure.
+   */
+  private afterSignIn(res: Response, now: number): Response {
+    if (res.status >= 200 && res.status < 300) {
+      if (this.lockout !== null) {
+        this.lockout.lastActivityAt = now;
+        this.lockout.failures = 0;
+      }
+      return res;
+    }
+    if (res.status !== 401 || this.clientAddress === "127.0.0.1" || this.clientAddress === "::1") return res;
+    const state = (this.lockout ??= { failures: 0, level: 0, lockedUntil: 0, lastActivityAt: now });
+    state.lastActivityAt = now;
+    state.failures++;
+    if (state.failures < LOCKOUT_FAILURES) return res;
+    state.level++;
+    state.lockedUntil = now + (state.level <= LOCKOUT_STEPS_MS.length ? LOCKOUT_STEPS_MS[state.level - 1]! : Math.min(LOCKOUT_STEPS_MS.at(-1)! * 2 ** (state.level - LOCKOUT_STEPS_MS.length), LOCKOUT_MAX_MS));
+    state.failures = 0;
+    return this.lockoutAnswer(state, "Too many failed sign-in attempts. Try again later.", now);
+  }
+
+  /** Better Auth's username sign-in (`auth/index.ts:114-116`; `better-auth/dist/plugins/username/index.mjs:57-160`), behind the sign-in limiter (`app.ts:254-276`, `middleware/rate-limit.ts:114-121`). */
+  private async signIn(request: Request, now: number): Promise<Response> {
+    this.signInsAt = this.signInsAt.filter((t) => now - t < SIGN_IN_WINDOW_MS);
+    if (this.signInsAt.length >= SIGN_IN_MAX) {
+      const retrySec = Math.ceil((this.signInsAt[0]! + SIGN_IN_WINDOW_MS - now) / 1000);
+      return json(429, { error: "Too many authentication attempts. Try again in a few minutes.", retryAfterSeconds: retrySec }, { "retry-after": String(retrySec) });
+    }
+    this.signInsAt.push(now);
+    const body = parsed(await request.text(), null) as { username?: unknown; password?: unknown } | null;
+    const account = typeof body?.username === "string" ? this.accounts.get(body.username.toLowerCase()) : undefined;
+    const ok = account !== undefined && body?.password === account.password;
+    this.signIns.push({ username: typeof body?.username === "string" ? body.username : "", ok });
+    // `plugins/username/error-codes.mjs:5`, thrown as `APIError.from` (`@better-auth/core/dist/error/index.mjs:20-25`).
+    if (!ok) return json(401, { message: "Invalid username or password", code: "INVALID_USERNAME_OR_PASSWORD" });
+    const token = crypto.randomUUID().replaceAll("-", "");
+    this.sessions.set(token, { token, user: account.id, expiresAt: now + SESSION_MS, updatedAt: now });
+    // The bearer plugin also sets the token as a header (`better-auth/dist/plugins/bearer/index.mjs:71-72`).
+    return json(200, { token, user: { id: account.id, name: account.username, username: account.username, email: `${account.username}@example.invalid` } }, { "set-auth-token": token });
+  }
+
   private async answer(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const now = this.clock.now();
 
-    // Better Auth's username sign-in (`auth/index.ts:114-116`; `better-auth/dist/plugins/username/index.mjs:57-160`), behind the sign-in limiter (`app.ts:254-276`, `middleware/rate-limit.ts:114-121`).
-    if (request.method === "POST" && path === "/api/auth/sign-in/username") {
-      this.signInsAt = this.signInsAt.filter((t) => now - t < SIGN_IN_WINDOW_MS);
-      if (this.signInsAt.length >= SIGN_IN_MAX) {
-        const retrySec = Math.ceil((this.signInsAt[0]! + SIGN_IN_WINDOW_MS - now) / 1000);
-        return json(429, { error: "Too many authentication attempts. Try again in a few minutes.", retryAfterSeconds: retrySec }, { "retry-after": String(retrySec) });
-      }
-      this.signInsAt.push(now);
-      const body = parsed(await request.text(), null) as { username?: unknown; password?: unknown } | null;
-      const account = typeof body?.username === "string" ? this.accounts.get(body.username.toLowerCase()) : undefined;
-      const ok = account !== undefined && body?.password === account.password;
-      this.signIns.push({ username: typeof body?.username === "string" ? body.username : "", ok });
-      // `plugins/username/error-codes.mjs:5`, thrown as `APIError.from` (`@better-auth/core/dist/error/index.mjs:20-25`).
-      if (!ok) return json(401, { message: "Invalid username or password", code: "INVALID_USERNAME_OR_PASSWORD" });
-      const token = crypto.randomUUID().replaceAll("-", "");
-      this.sessions.set(token, { token, user: account.id, expiresAt: now + SESSION_MS, updatedAt: now });
-      // The bearer plugin also sets the token as a header (`better-auth/dist/plugins/bearer/index.mjs:71-72`).
-      return json(200, { token, user: { id: account.id, name: account.username, username: account.username, email: `${account.username}@example.invalid` } }, { "set-auth-token": token });
+    // A locked address is refused on every route under `/api/`, before any other check (`app.ts:134-158`).
+    if (path.startsWith("/api/")) {
+      const locked = this.activeLockout(now);
+      if (locked !== null) return this.lockoutAnswer(locked, "Too many authentication failures from this client. Try again later.", now);
+    }
+
+    if (request.method === "POST" && path === "/api/auth/sign-in/username") return this.afterSignIn(await this.signIn(request, now), now);
+
+    // `POST /api/auth/sign-out` (Better Auth, `app.ts:356-357`; `better-auth/dist/api/routes/sign-out.mjs:27-61`): the session the request holds is ended, and `{success: true}` answered, with or without one.
+    if (request.method === "POST" && path === "/api/auth/sign-out") {
+      const token = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
+      if (token !== undefined) this.sessions.delete(token);
+      return json(200, { success: true });
     }
 
     // `GET /api/auth/get-session` (`better-auth/dist/api/routes/session.mjs:19-130`): the session and its user, or `null`.
@@ -286,6 +384,8 @@ export class LumiverseServer {
 
     const served = await this.fromRows(request, url, user);
     if (served !== null) return served;
+    const written = await this.fromWrites(request, url, user);
+    if (written !== null) return written;
 
     // `POST /api/v1/generate/stop` (`app.ts:443`, `routes/generate.routes.ts:45-65`): the generation named, else the chat's,
     // else every one of the user's. An id is taken only when it is truthy (`:48`, `:53`, `:60`): an empty one names nothing.
@@ -408,6 +508,64 @@ export class LumiverseServer {
     if (settingRoute !== null) {
       const row = rows("SELECT key, value, updated_at FROM settings WHERE key = ? AND user_id = ?", named(settingRoute)!, user)[0];
       return row === undefined ? json(404, { error: "Not found" }) : json(200, rowToSetting(row));
+    }
+    // A chat's memory (`routes/memory-cortex.routes.ts`): entities and consolidations; there is no route that searches it.
+    const memory = memoryAnswer(rows, user, path, url.searchParams);
+    return memory === null ? null : answered(memory);
+  }
+
+  /**
+   * The routes that write to the rows or answer by the stand-in's own: macros, token counts, a databank search (`cortex.ts`), the user's books and their entries
+   * with the revision check (`entries.ts`). Null for any other route. The body is read from a copy, so the routes after this one can read it.
+   */
+  private async fromWrites(request: Request, url: URL, user: string): Promise<Response | null> {
+    const db = this.options.db;
+    const path = url.pathname;
+    const method = request.method;
+    if (method !== "POST" && method !== "PUT" && method !== "DELETE") return null;
+    const rows = (sql: string, ...params: (string | number | null)[]): Record<string, unknown>[] => db?.rows(sql, ...params) ?? [];
+    const now = Math.floor(this.clock.now() / 1000);
+    const sent = (w: Written, status = 200): Response => {
+      if (!w.ok) return json(w.status, w.body);
+      if (w.event !== undefined) this.options.host?.emit(w.event.name, w.event.payload, user);
+      return json(status, w.body);
+    };
+    if (method === "POST") {
+      const raw = ["/api/v1/macros/resolve", "/api/v1/macros/resolve-batch", "/api/v1/tokenizers/count", "/api/v1/tokenizers/count-batch", "/api/v1/databanks/search"].includes(path) ? await request.clone().text() : "";
+      const counted = tokenAnswer(this.cortex, path, raw) ?? macroAnswer(rows, user, path, raw) ?? databankAnswer(this.cortex, rows, user, path, raw);
+      if (counted !== null) return answered(counted);
+    }
+    if (db === undefined) return null;
+    const bodyOf = async (): Promise<Record<string, unknown> | null> => {
+      const body = parsed(await request.clone().text(), null);
+      return isRecord(body) ? body : null;
+    };
+    // `POST /api/v1/world-books` (`routes/world-books.routes.ts:318-323`): 201.
+    if (method === "POST" && path === "/api/v1/world-books") {
+      const body = await bodyOf();
+      return body === null ? new Response("Internal Server Error", { status: 500, headers: { "content-type": "text/plain; charset=UTF-8" } }) : sent(createBook(db, user, body, now), 201);
+    }
+    const route = /^\/api\/v1\/world-books\/([^/]+)\/entries(?:\/([^/]+))?$/.exec(path);
+    if (route === null) return null;
+    const bookId = decodeURIComponent(route[1]!);
+    const entryId = route[2] === undefined ? undefined : decodeURIComponent(route[2]);
+    if (method === "POST" && entryId === undefined) {
+      if (rows("SELECT id FROM world_books WHERE id = ? AND user_id = ?", bookId, user)[0] === undefined) return json(404, { error: "World book not found" });
+      const body = await bodyOf();
+      return body === null ? json(400, { error: "JSON object required" }) : sent(createEntry(db, user, bookId, body, now), 201);
+    }
+    if (entryId === undefined) return null;
+    if (method === "PUT") {
+      const existing = entryOf(db, user, entryId);
+      if (existing === undefined || existing.world_book_id !== bookId) return json(404, { error: "Not found" });
+      const body = await bodyOf();
+      if (body === null) return json(400, { error: "JSON object required" });
+      const wrote = updateEntry(db, user, entryId, body, now);
+      return wrote === null ? json(404, { error: "Not found" }) : sent(wrote);
+    }
+    if (method === "DELETE") {
+      const wrote = deleteEntry(db, user, entryId, now);
+      return wrote === null ? json(404, { error: "Not found" }) : sent(wrote);
     }
     return null;
   }
