@@ -1,0 +1,1226 @@
+# The fate of every file of today's build (STANDALONE-PLAN §15.4; PlanSwap-4). Read by fates.ts,
+# which says what each field means; checked by fates.test.ts and the fence (fence.test.ts).
+#
+# Every file under src/backend, src/frontend, src/shared, src/engine, src/packs, src/cli and
+# src/worker, and src/backend.ts, src/frontend.ts and src/spindle-augment.ts, has one line, settled by
+# its path and never by its name. A package that adds a file under those folders adds its line; one
+# that moves or removes a file keeps its line, so the list ends as the report of which went (R-50).
+#
+# Made on 15 Nov from the exact import graph (the fence's reader, equal edge for edge to
+# `tsc --explainFiles` over src/, test/ and scripts/) and Bun's metafile of the shipped entries. Each
+# removed file of src/shared, src/engine and src/packs is one that nothing kept reaches; each kept
+# one is reached from a kept item without passing through a removed file.
+#
+# path	fate	package or Kept item	row or home	note
+src/backend.ts	removed	PlanSwap-9	halves	the previous extension's backend entry: it starts the old backend
+src/backend/agents.ts	removed	PlanSwap-8	halves
+src/backend/agents.ts	piece	PlanOps-10	src/app/outside.ts	the outside MCP servers' check-ins and the kit report (agents.ts:45)
+src/backend/agents/assistant.ts	removed	PlanSwap-8	agents
+src/backend/agents/blobs.ts	removed	PlanSwap-8	agents
+src/backend/agents/compaction-memo.ts	removed	PlanSwap-8	agents
+src/backend/agents/compaction.ts	removed	PlanSwap-8	agents
+src/backend/agents/context.ts	removed	PlanSwap-8	agents
+src/backend/agents/curator-gate.ts	removed	PlanSwap-8	agents
+src/backend/agents/final-review.ts	removed	PlanSwap-8	agents
+src/backend/agents/live.ts	removed	PlanSwap-8	agents
+src/backend/agents/main-agent.ts	removed	PlanSwap-8	agents
+src/backend/agents/orchestrator.ts	removed	PlanSwap-8	agents
+src/backend/agents/persist.ts	removed	PlanSwap-8	agents
+src/backend/agents/provider.ts	removed	PlanSwap-8	agents
+src/backend/agents/receipts.ts	removed	PlanSwap-8	agents
+src/backend/agents/review.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/agent.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/classic.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/contracts.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/curator.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/director.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/index.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/intent.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/minds-ask.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/minds.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/prose-check.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/read.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/scene.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/test.ts	removed	PlanSwap-8	agents
+src/backend/agents/roles/world.ts	removed	PlanSwap-8	agents
+src/backend/agents/runtime.ts	removed	PlanSwap-8	agents
+src/backend/agents/sessions.ts	removed	PlanSwap-8	agents
+src/backend/agents/sweep.ts	removed	PlanSwap-8	agents
+src/backend/agents/system-files.ts	removed	PlanSwap-8	agents
+src/backend/agents/tools/condense.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-ports.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/checks.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/fight.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/index.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/kit.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/people.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/play.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/story-minds.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/story-prepare.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/story-record.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/story-stage.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/story.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/surfaces.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/time.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/turn.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/world-build.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/world-kit.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-tools/world.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness-turn.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/harness.ts	removed	PlanSwap-8	gate	today's harness engine's tools, on LumiAH; their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/lore.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/past-turns.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/propose.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read-view.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/checks.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/index.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/items.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/knowledge.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/minds.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/money.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/orgs.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/people.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/places.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/quests.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/read/time.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/registry.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/resolve.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/schema.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/transcript-files.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/workspace.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/index.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/items.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/knowledge.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/minds.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/money.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/orgs.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/people.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/places.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/projects.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/quests.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/revenue.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/write/time.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/tools/writer.ts	removed	PlanSwap-8	agents	the tool registry and its tools (§15.4 caution 1); their logic is carried as the operations (§6.8 l.760; PlanIface-31 accounts for each)
+src/backend/agents/transcripts.ts	removed	PlanSwap-8	agents
+src/backend/agents/turn-ctx.ts	removed	PlanSwap-8	agents
+src/backend/agents/turn-task.ts	removed	PlanSwap-8	agents
+src/backend/agents/turn-writer.ts	removed	PlanSwap-8	agents
+src/backend/agents/usage.ts	removed	PlanSwap-8	agents
+src/backend/agents/yields.ts	removed	PlanSwap-8	agents
+src/backend/book-lore.ts	removed	PlanSwap-8	halves
+src/backend/book-lore.ts	piece	PlanSwap-6	src/secrecy/	the ids and pure readers (bookEntryTitle, bookLoreId, bookMarkLoreId, bookEntryLore, bookMarkLores, bookLoreEntries) and the pure core of booksLore (book-lore.ts:333-352)
+src/backend/book-lore.ts	piece	PlanChatUI-B3	src/build/lore/	markBookEntry, writeBookFields
+src/backend/book.ts	removed	PlanSwap-8	gate	engine-managed book entries
+src/backend/chain-cache.ts	removed	PlanSwap-8	halves
+src/backend/chat-agent-meta.ts	removed	PlanSwap-8	agents
+src/backend/chat-agent-meta.ts	piece	PlanSwap-5	src/migrate/today/	agentMetaOf
+src/backend/chat-knowledge-prefs.ts	removed	PlanSwap-8	halves	the tidy's switch (tidyOn, :81) is the chat's setting things.tidy in RPE, carried by PlanCarry-6
+src/backend/chat-knowledge-prefs.ts	piece	PlanSwap-5	src/migrate/today/	chatKnowledgePrefsOf
+src/backend/chat-meta-queue.ts	removed	PlanSwap-8	halves
+src/backend/chat-prefs.ts	removed	PlanSwap-8	halves	its map display and the tidy's leave-alone list (tidyLeft) are the chat's settings in RPE (things.tidyLeft), carried by PlanCarry-6
+src/backend/chat-read.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/chips.ts	removed	PlanSwap-8	halves
+src/backend/chips.ts	piece	PlanSwap-5	src/migrate/today/	ChipStore (all of it)
+src/backend/claims.ts	removed	PlanSwap-8	classic	the classic pipeline's claims step; not src/shared/claims.ts, which is kept
+src/backend/diagnostics.ts	removed	PlanSwap-8	halves
+src/backend/dispatch.ts	removed	PlanSwap-8	halves	its old engines' requests go with them (lre.restart, lre.sections, lre.minds, lre.acceptance, lre.live, lre.prompts)
+src/backend/dispatch.ts	piece	PlanChatUI-B6	src/build/worlds-routes.ts	Build's handling of worlds, editors, things and characters on a draft, sheets, templates and table updates (R-85)
+src/backend/dispatch.ts	piece	PlanChatUI-B4	src/build/chats-routes.ts	a world's chats, attach and upgrade (R-85)
+src/backend/dispatch.ts	piece	PlanTurnKinds-21	src/play/routes.ts	the panels' taps that manage, lre.action and lre.fix (R-85)
+src/backend/dispatch.ts	piece	PlanChatUI-P1	src/play/panel-reads.ts	the panels' state (R-85)
+src/backend/give-way.ts	removed	PlanSwap-8	halves
+src/backend/global-workspace.ts	removed	PlanSwap-8	agents
+src/backend/gm-memo.ts	removed	PlanSwap-8	halves
+src/backend/gm.ts	removed	PlanSwap-8	halves
+src/backend/harness/assistant.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/card.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/definitions/index.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/definitions/lumiah.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/extension.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/jobs.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/mount.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/record.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/record.ts	piece	PlanSwap-5	src/migrate/today/	recHarnessOf
+src/backend/harness/shapes.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/skills/index.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/harness/turn.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/host.ts	removed	PlanSwap-8	halves
+src/backend/host.ts	piece	PlanSwap-5	src/shared/host.ts	the host's shapes: HostPort, HostMessage, HostChat, HostCapabilities, HostBookEntry, WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict (all of it, types only)
+src/backend/inferred-words.ts	removed	PlanSwap-8	classic
+src/backend/inspector-log.ts	removed	PlanSwap-8	classic
+src/backend/interpret-context.ts	removed	PlanSwap-8	classic
+src/backend/jobs.ts	removed	PlanSwap-8	halves
+src/backend/jobs.ts	piece	PlanChatUI-B2	src/build/jobs/	the keeping half: JobRunner's kept list, storedJob, storedResult, boundedInput, the interrupted rule, JobError
+src/backend/jobs.ts	piece	PlanChatUI-B5	src/build/jobs/	the model half: proposalReply, the kinds' branches of run, proposeRoutines
+src/backend/json-hiding.ts	removed	PlanSwap-8	gate	the regex scripts, which go with the old engines (§4.3 l.295); the scripts already in Lumiverse stay (§15.2 l.1651)
+src/backend/knowledge-seed.ts	removed	PlanSwap-8	classic
+src/backend/knowledge-step.ts	removed	PlanSwap-8	classic
+src/backend/ledger-io.ts	removed	PlanSwap-8	halves	the guard's registration (:977-989) goes with it
+src/backend/ledger-io.ts	piece	PlanSwap-5	src/migrate/today/	today's ledger reader: decodeJournal, journalPath, LedgerService, toChain, decodeLedger and what they need
+src/backend/lore-ids.ts	removed	PlanSwap-8	agents
+src/backend/lore-index.ts	removed	PlanSwap-8	halves
+src/backend/lore-index.ts	piece	PlanChatUI-B5	src/build/jobs/	all of it
+src/backend/lore-pins.ts	removed	PlanSwap-8	halves
+src/backend/lore-pins.ts	piece	PlanChatUI-B3	src/build/lore/	all of it
+src/backend/lore-routing.ts	removed	PlanSwap-8	agents
+src/backend/lore-secrets.ts	removed	PlanSwap-8	halves
+src/backend/lore-secrets.ts	piece	PlanSwap-6	src/secrecy/	the secrecy half's working-out: textOf, secretTexts, bookSecrecy, secrecyParts, textParts, heldTo, markFields, stricter, switchedOffForSecrecy and copiedOriginals' rule (all of it)
+src/backend/lore-steps.ts	removed	PlanSwap-8	classic
+src/backend/lore.ts	removed	PlanSwap-8	halves
+src/backend/lore.ts	piece	PlanChatUI-B3	src/build/lore/	all of it
+src/backend/lumiverse-mcp.ts	removed	PlanSwap-8	halves
+src/backend/lumiverse-mcp.ts	piece	PlanOps-10	src/app/outside.ts	which of Lumiverse's own MCP profiles run this extension's servers, for Reconnect
+src/backend/main.ts	removed	PlanSwap-8	halves	starts the runtime, the dispatcher and LumiAH's backend
+src/backend/map-job.ts	removed	PlanSwap-8	halves
+src/backend/map-job.ts	piece	PlanChatUI-B5	src/build/jobs/	all of it
+src/backend/memory-budget.ts	removed	PlanSwap-8	classic
+src/backend/message-cache.ts	removed	PlanSwap-8	halves
+src/backend/mind-ask.ts	removed	PlanSwap-8	classic
+src/backend/minds-context.ts	removed	PlanSwap-8	classic
+src/backend/minds-run.ts	removed	PlanSwap-8	classic
+src/backend/minds.ts	removed	PlanSwap-8	classic
+src/backend/place-facts.ts	removed	PlanSwap-8	classic
+src/backend/plan-notes.ts	removed	PlanSwap-8	classic
+src/backend/preset-binding.ts	removed	PlanSwap-8	classic
+src/backend/preset-lint.ts	removed	PlanSwap-8	classic
+src/backend/prompts.ts	removed	PlanSwap-8	texts	the texts registry's server half (§4.3 l.295)
+src/backend/proposals.ts	removed	PlanSwap-8	halves
+src/backend/proposals.ts	piece	PlanChatUI-B5	src/build/jobs/	all of it
+src/backend/push.ts	removed	PlanSwap-8	halves
+src/backend/requirement-words.ts	removed	PlanSwap-8	classic
+src/backend/requirement-words.ts	piece	PlanSwap-6	src/play/state/	playerReason
+src/backend/routine-ask.ts	removed	PlanSwap-8	classic
+src/backend/routine-proposals.ts	removed	PlanSwap-8	halves
+src/backend/routine-proposals.ts	piece	PlanChatUI-B5	src/build/jobs/	all of it
+src/backend/runtime.ts	removed	PlanSwap-8	halves	the tidy's only call (runtime.ts:1315-1322) is not moved: code never applies the tidy by itself (R-173)
+src/backend/runtime.ts	piece	PlanSwap-5	src/migrate/today/	readRun (runtime.ts:270-274)
+src/backend/runtime.ts	piece	PlanTurnKinds-21	src/play/unfit.ts	unfitReason (runtime.ts:4757), the true reason a refused pick gets
+src/backend/secrecy-migration.ts	removed	PlanSwap-8	halves
+src/backend/secrecy-migration.ts	piece	PlanChatUI-B3	src/build/lore/	all of it
+src/backend/section-refs.ts	removed	PlanSwap-8	classic
+src/backend/sections-build.ts	removed	PlanSwap-8	classic	the classic pipeline's sections; not src/shared/sections.ts, which is kept
+src/backend/settings-store.ts	removed	PlanSwap-8	settings	the settings registry's server half (§4.3 l.295)
+src/backend/settings-store.ts	piece	PlanSwap-5	src/migrate/today/	SettingsStore
+src/backend/skip-plan.ts	removed	PlanSwap-8	classic
+src/backend/skip.ts	removed	PlanSwap-8	classic
+src/backend/spindle-host.ts	removed	PlanSwap-8	halves	the guard's registration (:570-571) goes with it
+src/backend/spindle-host.ts	piece	PlanSwap-5	src/migrate/today/	decodeMessage
+src/backend/staged.ts	removed	PlanSwap-8	halves
+src/backend/staged.ts	piece	PlanSwap-5	src/migrate/today/	StagedActions (all of it)
+src/backend/start-markers.ts	removed	PlanSwap-8	halves
+src/backend/start-markers.ts	piece	PlanSwap-5	src/migrate/today/	startMarkersFrom (all of it)
+src/backend/steps.ts	removed	PlanSwap-8	classic	the classic pipeline's steps; not src/engine/steps.ts, which is kept
+src/backend/stored-json.ts	removed	PlanSwap-8	halves
+src/backend/stored-json.ts	piece	PlanSwap-5	src/worlds/	readStoredJson (all of it)
+src/backend/story/budget.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/cast.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/feed.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/minds.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/narration.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/notebook.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/opening.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/pages.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/prepare-carry.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/prepare-live.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/prepare-run.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/prepare.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/preset.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/story/record.ts	removed	PlanSwap-8	gate	today's harness engine, LumiAH's mount in today's backend
+src/backend/turn-frame.ts	removed	PlanSwap-8	halves
+src/backend/turn-model.ts	removed	PlanSwap-8	classic
+src/backend/turn-steps.ts	removed	PlanSwap-8	classic
+src/backend/turn-steps.ts	piece	PlanSwap-6	src/play/state/	unfitRef with its UnfitRef shape (turn-steps.ts:233-256)
+src/backend/upgrade-preview.ts	removed	PlanSwap-8	halves
+src/backend/upgrade-preview.ts	piece	PlanChatUI-B4	src/worlds/upgrade-preview.ts	all of it
+src/backend/view.ts	removed	PlanSwap-8	halves
+src/backend/view.ts	piece	PlanSwap-6	src/play/state/	today's view builders: hud, scene, controls, palette, notWorldView, TIMELAPSE_ACTION
+src/backend/wi-interceptor.ts	removed	PlanSwap-8	gate	the half of the World Info gate that held lore back from the harness
+src/backend/wi-interceptor.ts	piece	PlanSwap-6	src/secrecy/	the secrecy verdict: worldInfoVerdict, usersOwn, blind
+src/backend/worlds.ts	removed	PlanSwap-8	halves
+src/backend/worlds.ts	piece	PlanSwap-5	src/worlds/	the world store: WorldStore, WorldError, DraftNotice (all of it)
+src/cli/agent-kit.ts	kept	cli
+src/cli/args.ts	kept	cli
+src/cli/commands.ts	kept	cli
+src/cli/connection.ts	kept	cli
+src/cli/coverage.ts	kept	cli
+src/cli/credentials.ts	kept	cli
+src/cli/diff.ts	kept	cli
+src/cli/follow.ts	kept	cli
+src/cli/kit-api.ts	kept	cli
+src/cli/live.ts	kept	cli
+src/cli/local-engine.ts	kept	cli
+src/cli/main.ts	kept	cli
+src/cli/mcp.ts	kept	cli
+src/cli/offline.ts	kept	cli
+src/cli/read.ts	kept	cli
+src/cli/report.ts	kept	cli
+src/cli/sandbox.ts	kept	cli
+src/cli/search.ts	kept	cli
+src/cli/serve.ts	kept	cli
+src/cli/text.d.ts	kept	cli
+src/cli/texts.ts	kept	cli
+src/cli/tool-module.ts	kept	cli
+src/cli/tools-build.ts	kept	cli
+src/cli/tools-config.ts	kept	cli
+src/cli/tools-jobs.ts	kept	cli
+src/cli/tools-lore.ts	kept	cli
+src/cli/tools-play.ts	kept	cli
+src/cli/tools-sandbox.ts	kept	cli
+src/cli/tools.ts	kept	cli
+src/cli/version.ts	kept	cli
+src/engine/access.ts	kept	engine
+src/engine/action-words.ts	kept	engine
+src/engine/adjudication.ts	kept	engine
+src/engine/authoring.ts	kept	engine
+src/engine/beats.ts	kept	engine
+src/engine/bounds.ts	removed	PlanSwap-10	halves	the old runtime's bounds on a model's proposed change; only runtime.ts:41 imports it
+src/engine/calendar.ts	kept	engine
+src/engine/character.ts	kept	engine
+src/engine/checks.ts	kept	engine
+src/engine/cues.ts	kept	engine
+src/engine/decide.ts	kept	engine
+src/engine/dice.ts	kept	engine
+src/engine/edits.ts	kept	engine
+src/engine/effects.ts	kept	engine
+src/engine/engine-pack.ts	kept	engine		engine.feed, engine.out.* and engine.ws.* still fold existing ledgers (caution 2)
+src/engine/entry.ts	kept	engine
+src/engine/events.ts	kept	engine
+src/engine/expr.ts	kept	engine
+src/engine/feed.ts	kept	engine
+src/engine/gm-view.ts	kept	engine
+src/engine/inferred.ts	kept	engine
+src/engine/ledger/chain.ts	kept	engine
+src/engine/ledger/fold.ts	kept	engine
+src/engine/ledger/journal.ts	kept	engine		the ledger core; today's ledger reader (PlanSwap-5) stands on it
+src/engine/ledger/path.ts	kept	engine
+src/engine/ledger/reference.ts	kept	engine
+src/engine/life.ts	kept	engine
+src/engine/lore-lint.ts	kept	engine
+src/engine/lore-pins.ts	kept	engine
+src/engine/lore.ts	kept	engine
+src/engine/materialize.ts	kept	engine
+src/engine/money-migrate.ts	kept	engine
+src/engine/narration-channels.ts	kept	engine
+src/engine/org.ts	kept	engine
+src/engine/outputs.ts	kept	engine
+src/engine/pack-kit.ts	kept	engine
+src/engine/place-lore.ts	kept	engine
+src/engine/place-names.ts	kept	engine
+src/engine/places-in-play.ts	kept	engine
+src/engine/plan-day.ts	kept	engine
+src/engine/player-events.ts	kept	engine
+src/engine/presence.ts	kept	engine
+src/engine/read-pass.ts	kept	engine
+src/engine/realism.ts	kept	engine
+src/engine/reconcile-things.ts	kept	engine
+src/engine/registry-impl.ts	kept	engine
+src/engine/registry.ts	kept	engine
+src/engine/relations.ts	kept	engine
+src/engine/relocate.ts	kept	engine
+src/engine/resolve.ts	kept	engine
+src/engine/rng.ts	kept	engine
+src/engine/rules.ts	kept	engine
+src/engine/ruleset-lint.ts	kept	engine
+src/engine/ruleset.ts	kept	engine
+src/engine/schedules.ts	kept	engine
+src/engine/scope.ts	kept	engine
+src/engine/seen.ts	kept	engine
+src/engine/selector.ts	kept	engine
+src/engine/simulate.ts	kept	engine
+src/engine/state.ts	kept	engine
+src/engine/steps.ts	kept	engine		the pure engine's model steps and turn-pipeline types; engine/authoring.ts:25 imports it, so the lore reaches it
+src/engine/story/budget.ts	removed	PlanSwap-10	gate	today's harness engine's story; only its tools and src/backend/story/ import it
+src/engine/story/checks.ts	removed	PlanSwap-10	gate	today's harness engine's story; only its tools and src/backend/story/ import it
+src/engine/story/drafts.ts	removed	PlanSwap-10	gate	today's harness engine's story; besides it only a kept test imports it (test/ledger/story-record.test.ts, which PlanSwap-7 rewrites)
+src/engine/story/feed.ts	removed	PlanSwap-10	gate	today's harness engine's story; only its tools and src/backend/story/ import it
+src/engine/story/record.ts	kept	engine		today's story record, which the migration carries (src/migrate/story-record.ts)
+src/engine/table-updates.ts	kept	engine
+src/engine/thing-gm.ts	kept	engine
+src/engine/thing-index.ts	kept	engine
+src/engine/thing-ops.ts	kept	engine
+src/engine/thing-resolve.ts	kept	engine
+src/engine/thing-tidy.ts	kept	engine		tidyFindings (:159) and tidyRun (:282) stay: PlanTurnKinds-23 and PlanChatUI-P7 read them
+src/engine/thing-tidy.ts	cut	PlanSwap-8		tidyTurn and TidyTurnInput (:318-335), whose only caller is runtime.ts:1315-1322: code never applies the tidy by itself (R-173)
+src/engine/thing-view.ts	kept	engine
+src/engine/thing-words.ts	kept	engine
+src/engine/things.ts	kept	engine
+src/engine/time-limits.ts	kept	engine
+src/engine/time.ts	kept	engine
+src/engine/touched.ts	kept	engine
+src/engine/tracks.ts	kept	engine
+src/engine/turn.ts	kept	engine
+src/engine/typed-intent.ts	kept	engine
+src/engine/upgrade.ts	kept	engine
+src/engine/visibility.ts	kept	engine
+src/engine/working.ts	kept	engine
+src/engine/workspace.ts	kept	engine		the workspace events still fold existing ledgers (caution 2)
+src/engine/world-draft.ts	kept	engine
+src/engine/world-lint.ts	kept	engine
+src/engine/world-state.ts	kept	engine
+src/frontend.ts	removed	PlanSwap-9	ui	the previous extension's entry and drawer
+src/frontend/adjudication-form.tsx	kept	under
+src/frontend/agents-view.ts	removed	PlanSwap-9	ui	the drawer's MCP server page and update notice; RPE's Runtime page lists the check-ins (PlanOps-10)
+src/frontend/agents.tsx	removed	PlanSwap-9	ui	the drawer's MCP server page and update notice; RPE's Runtime page lists the check-ins (PlanOps-10)
+src/frontend/app.ts	kept	under
+src/frontend/bar-height.ts	kept	under
+src/frontend/batch.ts	kept	under
+src/frontend/build/batch-sheet.tsx	kept	builder
+src/frontend/build/book-lore.tsx	kept	builder
+src/frontend/build/build.tsx	kept	builder
+src/frontend/build/character-model.ts	kept	builder
+src/frontend/build/character.tsx	kept	builder
+src/frontend/build/check.tsx	kept	builder
+src/frontend/build/chrome.tsx	kept	builder
+src/frontend/build/contents.tsx	kept	builder
+src/frontend/build/data-updates.tsx	kept	builder
+src/frontend/build/draft.ts	kept	builder
+src/frontend/build/effect-args.tsx	kept	builder
+src/frontend/build/expr-editor.tsx	kept	builder
+src/frontend/build/facet-editor.tsx	kept	builder
+src/frontend/build/form-kit.tsx	kept	builder
+src/frontend/build/held.tsx	kept	builder
+src/frontend/build/jobs.tsx	kept	builder
+src/frontend/build/lookup-editor.tsx	kept	builder
+src/frontend/build/lore-editor.tsx	kept	builder
+src/frontend/build/lore-pins.tsx	kept	builder
+src/frontend/build/lore-secrecy.tsx	kept	builder
+src/frontend/build/minds-editor.tsx	kept	builder
+src/frontend/build/needs-editor.tsx	kept	builder
+src/frontend/build/org-convert.ts	kept	builder
+src/frontend/build/organizations.tsx	kept	builder
+src/frontend/build/owner-picker.tsx	kept	builder
+src/frontend/build/profile-picker.tsx	kept	builder
+src/frontend/build/propose-routines.tsx	kept	builder
+src/frontend/build/routine-editor.tsx	kept	builder
+src/frontend/build/routine-settings.tsx	kept	builder
+src/frontend/build/ruleset-editor.tsx	kept	builder
+src/frontend/build/schedule-form.tsx	kept	builder
+src/frontend/build/schema-form.tsx	kept	builder
+src/frontend/build/schema.ts	kept	builder
+src/frontend/build/section-template.tsx	kept	builder
+src/frontend/build/selector-editor.tsx	kept	builder
+src/frontend/build/table-editor.tsx	kept	builder
+src/frontend/build/things-model.ts	kept	builder
+src/frontend/build/things.tsx	kept	builder
+src/frontend/build/tiers-editor.tsx	kept	builder
+src/frontend/character/bed-picker.tsx	kept	hud		the character views
+src/frontend/character/place-picker.tsx	kept	hud		the character views
+src/frontend/character/places.ts	kept	hud		the character views
+src/frontend/character/text-list.tsx	kept	hud		the character views
+src/frontend/chat-heads.ts	kept	under
+src/frontend/chip-roles.ts	kept	hud
+src/frontend/chips.tsx	kept	hud
+src/frontend/components.tsx	kept	under
+src/frontend/decode.ts	kept	under
+src/frontend/delta.ts	removed	PlanSwap-9	halves	the page's half of the previous extension's protocol: the kept UI talks RPE's typed routes (R-47)
+src/frontend/diagnostics.tsx	removed	PlanSwap-9	ui	the old engines' views; its ActivityLine gives way to src/frontend/play/activity.tsx (PlanChatUI-P1)
+src/frontend/drawer.tsx	removed	PlanSwap-9	ui	the previous extension's entry and drawer
+src/frontend/fix-editor.tsx	kept	hud
+src/frontend/format.ts	kept	under
+src/frontend/gm/assistant.tsx	removed	PlanSwap-9	ui	the old engines' views
+src/frontend/gm/batch.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/character-ops.ts	kept	things		the things browser's entity page (gm/entity.tsx) opens a person through it
+src/frontend/gm/character.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/chat-knowledge.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/chat-money.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/chat-things.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/chat.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/curtain.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/editor.ts	kept	things
+src/frontend/gm/engine.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/entity.tsx	kept	things
+src/frontend/gm/feed.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/gate.ts	kept	things
+src/frontend/gm/live.tsx	removed	PlanSwap-9	ui
+src/frontend/gm/mode.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/parts.ts	kept	things
+src/frontend/gm/pins.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/pins.tsx	piece	PlanChatUI-B4	src/frontend/build/upgrade.tsx	the upgrade part
+src/frontend/gm/section-preview.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/sections.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/things.tsx	kept	things		GM mode's things browser, kept by PlanSwap-9 for PlanChatUI-P6, which mounts it on World behind the gate
+src/frontend/gm/ui.tsx	moved	PlanSwap-9	src/ui/	ActionRow and ActionRows, which Build's lore files and the packs' GM panels import
+src/frontend/gm/use-gm-parts.ts	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/workspace-tree.ts	removed	PlanSwap-9	ui
+src/frontend/gm/workspace.tsx	removed	PlanSwap-9	ui
+src/frontend/gm/world.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/harness/mode.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/harness/pages.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/host.ts	kept	under
+src/frontend/hud-float.ts	kept	hud
+src/frontend/hud.tsx	kept	hud
+src/frontend/icons.tsx	moved	PlanSwap-6	src/ui/icons.tsx	a shell file the new pages use (its file name there is PlanSwap-6's)
+src/frontend/inferred-form.tsx	kept	under
+src/frontend/json-text.ts	kept	under
+src/frontend/layout.ts	kept	under
+src/frontend/map-math.ts	kept	under
+src/frontend/markdown.tsx	moved	PlanSwap-6	src/ui/markdown.tsx	a shell file the new pages use (its file name there is PlanSwap-6's)
+src/frontend/money-input.tsx	kept	under
+src/frontend/multi-select.tsx	kept	under
+src/frontend/overlay-controller.ts	kept	hud
+src/frontend/overlays.tsx	kept	hud
+src/frontend/packs.ts	kept	under
+src/frontend/palette.tsx	kept	hud
+src/frontend/place-entry.tsx	kept	under
+src/frontend/play/context.tsx	removed	PlanSwap-9	ui
+src/frontend/play/glance.tsx	kept	hud
+src/frontend/play/gm.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539); GM mode's own panel, which mounts the things browser today: it goes once GM mode is folded, PlanChatUI-P6 mounting the browser on World instead
+src/frontend/play/journal.tsx	kept	hud
+src/frontend/play/now.tsx	kept	hud
+src/frontend/play/play.tsx	kept	hud
+src/frontend/play/scene.tsx	kept	hud
+src/frontend/protocol-client.ts	removed	PlanSwap-9	halves	the page's half of the previous extension's protocol: the kept UI talks RPE's typed routes (R-47)
+src/frontend/queued.ts	kept	under
+src/frontend/reconnect.ts	removed	PlanSwap-9	halves	the page's half of the previous extension's protocol: the kept UI talks RPE's typed routes (R-47)
+src/frontend/registry.ts	kept	under
+src/frontend/requests.ts	kept	under
+src/frontend/restart.ts	removed	PlanSwap-9	ui
+src/frontend/review-card.tsx	kept	hud
+src/frontend/scroll.ts	kept	under
+src/frontend/settings/adjudication.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/agent-prompts.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/agents.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/assistant.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/changed.ts	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/context.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
+src/frontend/settings/defaults.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/inferred.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/kit.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/kit.tsx	piece	PlanSwap-9	src/packs/gear/ui/	SettingRow (packs/gear/ui/config.tsx:24)
+src/frontend/settings/labels.ts	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/lore.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/main-agent.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
+src/frontend/settings/minds-patch.ts	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/minds-patch.ts	piece	PlanChatUI-B1	src/frontend/build/	MEMORY_FIELDS, memoryValue (build/minds-editor.tsx:19), where a kept reader reads the memory fields (R-50)
+src/frontend/settings/minds.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/narrator.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/narrator.tsx	piece	PlanSwap-9	src/frontend/build/	NarratorViewControl (build/schema-form.tsx:29): the narrator's view of secrets is kept (§15.2 l.1620)
+src/frontend/settings/preset.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/prompt-editor.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/prompt-editor.tsx	piece	PlanChatUI-B1	src/frontend/build/	VarsPanel, isVarsKey (build/build.tsx:51), where a kept reader reads what Build's step templates edit (R-50)
+src/frontend/settings/realism.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/realism.tsx	piece	PlanSwap-9	src/frontend/build/	ClaimsControl, floorNote (build/schema-form.tsx:28)
+src/frontend/settings/replies.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/retention.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/role-page.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
+src/frontend/settings/roles.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
+src/frontend/settings/settings.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/speed.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
+src/frontend/settings/steps.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
+src/frontend/settings/story.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
+src/frontend/settings/timeouts.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
+src/frontend/settings/upgrade.tsx	moved	PlanChatUI-B4	src/frontend/build/upgrade.tsx	today's Upgrade sheet, into Build
+src/frontend/setup.tsx	removed	PlanSwap-9	ui	the previous extension's entry and drawer
+src/frontend/store.ts	moved	PlanSwap-6	src/ui/store.ts	a shell file the new pages use (its file name there is PlanSwap-6's)
+src/frontend/story/cast.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/connections.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/editor.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/files.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/model-pick.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/model.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/notebook.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/open.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/prepare-live-styles.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/prepare-live.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/prepare.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/record.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/styles.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/story/tab.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/styles.ts	removed	PlanSwap-9	ui	the previous extension's entry and drawer
+src/frontend/styles/assistant.ts	removed	PlanSwap-9	ui	the old engines' views
+src/frontend/styles/build.ts	kept	under
+src/frontend/styles/character.ts	kept	under
+src/frontend/styles/chat.ts	kept	under
+src/frontend/styles/components.ts	moved	PlanSwap-6	src/ui/styles/components.ts	a shell file the new pages use (its file name there is PlanSwap-6's)
+src/frontend/styles/diagnostics.ts	removed	PlanSwap-9	ui	the old engines' views
+src/frontend/styles/forms.ts	kept	under
+src/frontend/styles/gm.ts	kept	under
+src/frontend/styles/harness.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
+src/frontend/styles/live.ts	removed	PlanSwap-9	ui	the old engines' views
+src/frontend/styles/minds.ts	kept	under
+src/frontend/styles/packs-me.ts	kept	under
+src/frontend/styles/packs-money.ts	kept	under
+src/frontend/styles/packs-world.ts	kept	under
+src/frontend/styles/play.ts	kept	under
+src/frontend/styles/routines-gm.ts	kept	under
+src/frontend/styles/select.ts	kept	under
+src/frontend/styles/settings.ts	kept	under
+src/frontend/styles/shell.ts	kept	under
+src/frontend/styles/things.ts	kept	under
+src/frontend/styles/tokens.ts	moved	PlanSwap-6	src/ui/styles/tokens.ts	a shell file the new pages use (its file name there is PlanSwap-6's)
+src/frontend/styles/visual-editors.ts	kept	under
+src/frontend/styles/workspace.ts	removed	PlanSwap-9	ui	the old engines' views
+src/frontend/swipe-ask.tsx	removed	PlanSwap-9	ui
+src/frontend/things/add-thing.tsx	kept	things
+src/frontend/things/at-once.tsx	kept	things
+src/frontend/things/move-sheet.tsx	kept	things
+src/frontend/things/owner-sheet.tsx	kept	things
+src/frontend/things/play-where.ts	kept	things
+src/frontend/things/specs.tsx	kept	things
+src/frontend/things/what-it-is.tsx	kept	things
+src/frontend/things/where-picker.tsx	kept	things
+src/frontend/things/where.ts	kept	things
+src/frontend/time-controls.tsx	kept	hud
+src/frontend/to-top.tsx	removed	PlanSwap-9	ui	the old engines' views
+src/frontend/ui-registry.ts	kept	under
+src/packs/calendar/core/index.ts	kept	packs
+src/packs/calendar/core/tables/modern-us/dst.json	kept	packs
+src/packs/calendar/core/tables/modern-us/holidays.json	kept	packs
+src/packs/calendar/core/tables/modern-us/observances.json	kept	packs
+src/packs/calendar/core/tables/modern-us/school.json	kept	packs
+src/packs/calendar/core/tables/modern-us/shifts.json	kept	packs
+src/packs/calendar/core/tables/modern-us/shipped.json	kept	packs
+src/packs/calendar/core/tables/modern-us/work.json	kept	packs
+src/packs/calendar/core/view.ts	kept	packs
+src/packs/calendar/ui/index.ts	kept	packs
+src/packs/calendar/ui/panel.tsx	kept	packs
+src/packs/calendar/ui/schedule-editor.tsx	kept	packs
+src/packs/castlife/core/commitments.ts	kept	packs
+src/packs/castlife/core/cues.ts	kept	packs
+src/packs/castlife/core/index.ts	kept	packs
+src/packs/castlife/core/occasions.ts	kept	packs
+src/packs/castlife/core/places.ts	kept	packs
+src/packs/castlife/core/routines.ts	kept	packs
+src/packs/castlife/core/skip-plan.ts	removed	PlanSwap-10	classic	the classic pipeline's skip plan call; only backend/skip-plan.ts imports it, and castlife.skip_plan still folds (castlife/core/routines.ts:156), caution 2
+src/packs/castlife/core/story.ts	kept	packs
+src/packs/castlife/core/usual.ts	kept	packs
+src/packs/castlife/core/view.ts	kept	packs
+src/packs/castlife/ui/index.ts	kept	packs
+src/packs/castlife/ui/needs.tsx	kept	packs
+src/packs/castlife/ui/panel.tsx	kept	packs
+src/packs/castlife/ui/person.tsx	kept	packs
+src/packs/castlife/ui/routines-gm.tsx	kept	packs
+src/packs/castlife/ui/routines-ops.ts	kept	packs
+src/packs/combat/core/flow.ts	kept	packs
+src/packs/combat/core/index.ts	kept	packs
+src/packs/combat/core/model.ts	kept	packs
+src/packs/combat/core/view.ts	kept	packs
+src/packs/combat/ui/index.ts	kept	packs
+src/packs/combat/ui/panel.tsx	kept	packs
+src/packs/economy/core/acting.ts	kept	packs
+src/packs/economy/core/actions.ts	kept	packs
+src/packs/economy/core/assets.ts	kept	packs
+src/packs/economy/core/books.ts	kept	packs
+src/packs/economy/core/business.ts	kept	packs
+src/packs/economy/core/cash-rule.ts	kept	packs
+src/packs/economy/core/credit.ts	kept	packs
+src/packs/economy/core/cycle.ts	kept	packs
+src/packs/economy/core/depreciation.ts	kept	packs
+src/packs/economy/core/employment.ts	kept	packs
+src/packs/economy/core/exempt.ts	kept	packs
+src/packs/economy/core/feed.ts	kept	packs
+src/packs/economy/core/flows.ts	kept	packs
+src/packs/economy/core/gains.ts	kept	packs
+src/packs/economy/core/history.ts	kept	packs
+src/packs/economy/core/holdings.ts	kept	packs
+src/packs/economy/core/income.ts	kept	packs
+src/packs/economy/core/index.ts	kept	packs
+src/packs/economy/core/items.ts	kept	packs
+src/packs/economy/core/journal.ts	kept	packs
+src/packs/economy/core/kinds.ts	kept	packs
+src/packs/economy/core/listing.ts	kept	packs
+src/packs/economy/core/model.ts	kept	packs
+src/packs/economy/core/module.ts	kept	packs
+src/packs/economy/core/modules.ts	kept	packs
+src/packs/economy/core/notes.ts	kept	packs
+src/packs/economy/core/options.ts	kept	packs
+src/packs/economy/core/pay.ts	kept	packs
+src/packs/economy/core/pricing.ts	kept	packs
+src/packs/economy/core/process.ts	kept	packs
+src/packs/economy/core/projects.ts	kept	packs
+src/packs/economy/core/property.ts	kept	packs
+src/packs/economy/core/records.ts	kept	packs
+src/packs/economy/core/revenue.ts	kept	packs
+src/packs/economy/core/run.ts	kept	packs
+src/packs/economy/core/shares.ts	kept	packs
+src/packs/economy/core/stakes.ts	kept	packs
+src/packs/economy/core/statements.ts	kept	packs
+src/packs/economy/core/summary.ts	kept	packs
+src/packs/economy/core/tables/modern-us/catalog.json	kept	packs
+src/packs/economy/core/tables/modern-us/categories.json	kept	packs
+src/packs/economy/core/tables/modern-us/exempt.json	kept	packs
+src/packs/economy/core/tables/modern-us/finance.json	kept	packs
+src/packs/economy/core/tables/modern-us/index_history.json	kept	packs
+src/packs/economy/core/tables/modern-us/occupations.json	kept	packs
+src/packs/economy/core/tables/modern-us/projects.json	kept	packs
+src/packs/economy/core/tables/modern-us/regions.json	kept	packs
+src/packs/economy/core/tables/modern-us/shipped.json	kept	packs
+src/packs/economy/core/taxes.ts	kept	packs
+src/packs/economy/core/treasury.ts	kept	packs
+src/packs/economy/core/unemployment.ts	kept	packs
+src/packs/economy/core/view.ts	kept	packs
+src/packs/economy/core/wealth.ts	kept	packs
+src/packs/economy/core/winding.ts	kept	packs
+src/packs/economy/core/work.ts	kept	packs
+src/packs/economy/core/worth.ts	kept	packs
+src/packs/economy/core/year-close.ts	kept	packs
+src/packs/economy/ui/accounts.tsx	kept	packs
+src/packs/economy/ui/assets.tsx	kept	packs
+src/packs/economy/ui/config.tsx	kept	packs
+src/packs/economy/ui/credit.tsx	kept	packs
+src/packs/economy/ui/decode.ts	kept	packs
+src/packs/economy/ui/field-editors.tsx	kept	packs
+src/packs/economy/ui/flows.tsx	kept	packs
+src/packs/economy/ui/forms.tsx	kept	packs
+src/packs/economy/ui/glance.tsx	kept	packs
+src/packs/economy/ui/gm.tsx	kept	packs
+src/packs/economy/ui/hub.tsx	kept	packs
+src/packs/economy/ui/index.ts	kept	packs
+src/packs/economy/ui/inout.tsx	kept	packs
+src/packs/economy/ui/layout.ts	kept	packs
+src/packs/economy/ui/lines.tsx	kept	packs
+src/packs/economy/ui/nav.tsx	kept	packs
+src/packs/economy/ui/orgs.tsx	kept	packs
+src/packs/economy/ui/ownership.tsx	kept	packs
+src/packs/economy/ui/pages.tsx	kept	packs
+src/packs/economy/ui/panel.tsx	kept	packs
+src/packs/economy/ui/pay-prefs.tsx	kept	packs
+src/packs/economy/ui/place-part.tsx	kept	packs
+src/packs/economy/ui/projects.ts	kept	packs
+src/packs/economy/ui/requests.ts	kept	packs
+src/packs/economy/ui/revenue.tsx	kept	packs
+src/packs/economy/ui/routes.ts	kept	packs
+src/packs/economy/ui/sheet.tsx	kept	packs
+src/packs/economy/ui/statements.tsx	kept	packs
+src/packs/economy/ui/taxes.tsx	kept	packs
+src/packs/economy/ui/work.tsx	kept	packs
+src/packs/gear/core/carry.ts	kept	packs
+src/packs/gear/core/feed.ts	kept	packs
+src/packs/gear/core/index.ts	kept	packs
+src/packs/gear/core/model.ts	kept	packs
+src/packs/gear/core/put-away.ts	kept	packs
+src/packs/gear/core/sets.ts	kept	packs
+src/packs/gear/core/tables/modern-us/containers.json	kept	packs
+src/packs/gear/core/tables/modern-us/items.json	kept	packs
+src/packs/gear/core/tables/modern-us/kits.json	kept	packs
+src/packs/gear/core/tables/modern-us/shipped.json	kept	packs
+src/packs/gear/core/tables/modern-us/slots.json	kept	packs
+src/packs/gear/core/thing-lint.ts	kept	packs
+src/packs/gear/core/view.ts	kept	packs
+src/packs/gear/ui/add-sheet.tsx	kept	packs
+src/packs/gear/ui/belongings.tsx	kept	packs
+src/packs/gear/ui/choices.ts	kept	packs
+src/packs/gear/ui/config.tsx	kept	packs
+src/packs/gear/ui/glance.tsx	kept	packs
+src/packs/gear/ui/here.tsx	kept	packs
+src/packs/gear/ui/index.ts	kept	packs
+src/packs/gear/ui/item.tsx	kept	packs
+src/packs/gear/ui/manage.tsx	kept	packs
+src/packs/gear/ui/panel.tsx	kept	packs
+src/packs/gear/ui/sets-sheet.tsx	kept	packs
+src/packs/index.ts	kept	packs
+src/packs/minds/core/contract.ts	kept	packs
+src/packs/minds/core/edit.ts	kept	packs
+src/packs/minds/core/events.ts	kept	packs		the older minds pack's events still fold existing ledgers (caution 2)
+src/packs/minds/core/fidelity.ts	kept	packs
+src/packs/minds/core/gm.ts	removed	PlanSwap-10	halves	the old GM view's minds; only backend/gm.ts and the agents' tools import it
+src/packs/minds/core/index.ts	kept	packs
+src/packs/minds/core/intent.ts	removed	PlanSwap-10	classic	read by the classic minds context alone (backend/minds-context.ts)
+src/packs/minds/core/knowledge-channels.ts	kept	packs
+src/packs/minds/core/knowledge-section.ts	kept	packs
+src/packs/minds/core/knowledge.ts	kept	packs
+src/packs/minds/core/known.ts	kept	packs
+src/packs/minds/core/lint.ts	kept	packs
+src/packs/minds/core/section.ts	kept	packs
+src/packs/minds/core/state.ts	kept	packs
+src/packs/minds/ui/gm.tsx	kept	packs
+src/packs/minds/ui/index.ts	kept	packs
+src/packs/minds/ui/known.tsx	kept	packs
+src/packs/minds/ui/ops.ts	kept	packs
+src/packs/minds/ui/run.tsx	kept	packs
+src/packs/orgs/core/access.ts	kept	packs
+src/packs/orgs/core/actions.ts	kept	packs
+src/packs/orgs/core/agenda.ts	kept	packs
+src/packs/orgs/core/approvals.ts	kept	packs
+src/packs/orgs/core/decisions.ts	kept	packs
+src/packs/orgs/core/feed.ts	kept	packs
+src/packs/orgs/core/follow.ts	kept	packs
+src/packs/orgs/core/found.ts	kept	packs
+src/packs/orgs/core/gm.ts	kept	packs
+src/packs/orgs/core/index.ts	kept	packs
+src/packs/orgs/core/lint.ts	kept	packs
+src/packs/orgs/core/log.ts	kept	packs
+src/packs/orgs/core/motions.ts	kept	packs
+src/packs/orgs/core/ops.ts	kept	packs
+src/packs/orgs/core/party.ts	kept	packs
+src/packs/orgs/core/seats.ts	kept	packs
+src/packs/orgs/core/story.ts	kept	packs
+src/packs/orgs/core/view.ts	kept	packs
+src/packs/orgs/core/wind.ts	kept	packs
+src/packs/orgs/ui/chart-model.ts	kept	packs
+src/packs/orgs/ui/chart.tsx	kept	packs
+src/packs/orgs/ui/decisions.tsx	kept	packs
+src/packs/orgs/ui/decode.ts	kept	packs
+src/packs/orgs/ui/edit.ts	kept	packs
+src/packs/orgs/ui/feed.tsx	kept	packs
+src/packs/orgs/ui/gm.tsx	kept	packs
+src/packs/orgs/ui/home.tsx	kept	packs
+src/packs/orgs/ui/index.ts	kept	packs
+src/packs/orgs/ui/member.tsx	kept	packs
+src/packs/orgs/ui/org.tsx	kept	packs
+src/packs/orgs/ui/overview.tsx	kept	packs
+src/packs/orgs/ui/party.tsx	kept	packs
+src/packs/orgs/ui/people.tsx	kept	packs
+src/packs/orgs/ui/plan.tsx	kept	packs
+src/packs/orgs/ui/projects.tsx	kept	packs
+src/packs/orgs/ui/property.tsx	kept	packs
+src/packs/orgs/ui/rules.tsx	kept	packs
+src/packs/orgs/ui/words.ts	kept	packs
+src/packs/relationships/core/index.ts	kept	packs
+src/packs/sheets/core/index.ts	kept	packs
+src/packs/sheets/ui/glance.tsx	kept	packs
+src/packs/sheets/ui/index.ts	kept	packs
+src/packs/sheets/ui/panel.tsx	kept	packs
+src/packs/space/core/feed.ts	kept	packs
+src/packs/space/core/grid-play.ts	kept	packs
+src/packs/space/core/index.ts	kept	packs
+src/packs/space/core/map-scope.ts	kept	packs
+src/packs/space/core/places.ts	kept	packs
+src/packs/space/core/positions.ts	kept	packs
+src/packs/space/core/travel.ts	kept	packs
+src/packs/space/core/view.ts	kept	packs
+src/packs/space/ui/canvas-theme.ts	kept	packs
+src/packs/space/ui/editors.tsx	kept	packs
+src/packs/space/ui/index.ts	kept	packs
+src/packs/space/ui/labels.ts	kept	packs
+src/packs/space/ui/map-draw.ts	kept	packs
+src/packs/space/ui/map-editor.tsx	kept	map-editor
+src/packs/space/ui/map-preview.tsx	kept	packs
+src/packs/space/ui/map-walls.ts	kept	packs
+src/packs/space/ui/map.tsx	kept	packs
+src/packs/space/ui/place.tsx	kept	packs
+src/packs/space/ui/view.ts	kept	packs
+src/packs/starters/fantasy_town.json	kept	starters
+src/packs/starters/index.ts	kept	starters
+src/packs/starters/info.ts	kept	starters
+src/packs/starters/modern_slice_of_life.json	kept	starters
+src/packs/starters/mystery_manor.json	kept	starters
+src/packs/starters/shipped.json	kept	starters
+src/packs/starters/tables.ts	kept	starters
+src/packs/story/core/index.ts	kept	packs
+src/packs/story/ui/index.ts	kept	packs
+src/packs/story/ui/objectives.ts	kept	packs
+src/packs/story/ui/panel.tsx	kept	packs
+src/packs/story/ui/quest.tsx	kept	packs
+src/packs/story/ui/track-editor.tsx	kept	packs
+src/packs/vehicles/core/access.ts	kept	packs
+src/packs/vehicles/core/index.ts	kept	packs
+src/packs/vehicles/core/tables/modern-us/classes.json	kept	packs
+src/packs/vehicles/core/tables/modern-us/factors.json	kept	packs
+src/packs/vehicles/core/tables/modern-us/shipped.json	kept	packs
+src/packs/vehicles/core/view.ts	kept	packs
+src/packs/vehicles/ui/glance.tsx	kept	packs
+src/packs/vehicles/ui/here.tsx	kept	packs
+src/packs/vehicles/ui/index.ts	kept	packs
+src/packs/vehicles/ui/manage.tsx	kept	packs
+src/packs/vehicles/ui/panel.tsx	kept	packs
+src/packs/vehicles/ui/picker.tsx	kept	packs
+src/packs/weather/core/index.ts	kept	packs
+src/shared/activity.ts	kept	under
+src/shared/adjudication.ts	kept	under
+src/shared/agent-context.ts	kept	under
+src/shared/agent-failures.ts	removed	PlanSwap-10	agents	nothing kept reaches it
+src/shared/agent-pipeline.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/agent-prompts.ts	removed	PlanSwap-10	texts	the agents engine's texts; nothing kept reaches it
+src/shared/agent-roles.ts	kept	under
+src/shared/agent-settings.ts	kept	under
+src/shared/agent-tools-read.ts	kept	under
+src/shared/agent-tools-write.ts	kept	under
+src/shared/agent-tools.ts	kept	under
+src/shared/agent-yield.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/agents.ts	kept	under
+src/shared/character.ts	kept	under
+src/shared/claims.ts	kept	under		the claim policy a world and a chat carry; shared/world.ts:56, engine/state.ts and engine/realism.ts read it
+src/shared/classes.ts	kept	under
+src/shared/diagnostics.ts	kept	under
+src/shared/final-review.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/finance.ts	kept	under
+src/shared/gm-parts.ts	kept	under
+src/shared/grid.ts	kept	under
+src/shared/harness-text-kit.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-args.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-build.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-minds.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-people.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-play.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-prepare.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-preset.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-record.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-shapes.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-stage.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-story.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-surfaces.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts-world.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/harness-texts.ts	removed	PlanSwap-10	texts	today's harness engine's texts
+src/shared/hash.ts	kept	under
+src/shared/ids.ts	kept	under
+src/shared/inferred.ts	kept	under
+src/shared/items-build.ts	kept	under
+src/shared/json-patch.ts	kept	under
+src/shared/json.ts	kept	under
+src/shared/ledger.ts	kept	under
+src/shared/live.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/lore-routing.ts	removed	PlanSwap-10	agents	nothing kept reaches it
+src/shared/lore.ts	kept	under
+src/shared/lre-map-v1.schema.json	kept	under
+src/shared/macros.ts	kept	under
+src/shared/main-agent-prompts.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/maps.ts	kept	under
+src/shared/minds.ts	kept	under
+src/shared/money.ts	kept	under
+src/shared/needs.ts	kept	under
+src/shared/offstage.ts	kept	under
+src/shared/org-feed.ts	kept	under
+src/shared/org-motions.ts	kept	under
+src/shared/org-ops.ts	kept	under
+src/shared/org-view.ts	kept	under
+src/shared/org.ts	kept	under
+src/shared/party.ts	kept	under
+src/shared/prepare-live.ts	removed	PlanSwap-10	gate	today's harness engine's; nothing kept reaches it
+src/shared/profiles/classic.ts	kept	under
+src/shared/profiles/custom.ts	kept	under
+src/shared/profiles/fifth.ts	kept	under
+src/shared/profiles/index.ts	kept	under
+src/shared/profiles/modern.ts	kept	under
+src/shared/profiles/parts.ts	kept	under
+src/shared/profiles/types.ts	kept	under
+src/shared/projects.ts	kept	under
+src/shared/prompts.ts	removed	PlanSwap-10	texts	the texts registry (§4.3 l.295)
+src/shared/protocol.ts	moved	PlanSwap-13	src/ui/kept/protocol.ts	moved in part by PlanSwap-13 (wave 4, after PlanSwap-9); the rest, the previous extension's protocol, removed by PlanSwap-10 once nothing speaks it
+src/shared/protocol.ts	piece	PlanSwap-13	src/ui/kept/protocol.ts	the kept UI's request and answer types
+src/shared/protocol.ts	piece	PlanSwap-13	src/shared/	the data shapes other kept code reads (EditOp, LintIssue, JsonPatchOp, WorldCollection, WorldPart, TableUpdate and the rest), each to a home of its own
+src/shared/revenue.ts	kept	under
+src/shared/role-prompts.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/role-routes.ts	removed	PlanSwap-10	settings	the settings pages' role routes; nothing kept reaches it
+src/shared/routines.ts	kept	under
+src/shared/schema-check.ts	kept	under
+src/shared/secret-marks.ts	kept	under
+src/shared/sections.ts	kept	under		the world's own wording of the built-in sections (WorldDoc.sectionTemplates, §15.2 l.1595); engine/authoring.ts:17 reads it
+src/shared/settings.ts	moved	PlanSwap-13	src/migrate/today/	moved in part by PlanSwap-13 (wave 4, after PlanSwap-9); the rest, the settings registry (§4.3 l.295), removed by PlanSwap-10
+src/shared/settings.ts	piece	PlanSwap-13	src/migrate/today/	what the migration reads of today's settings
+src/shared/settings.ts	piece	PlanSwap-10	src/shared/	what the kept panels and the carried state read: the narrator's view of secrets, the map display, the tidy-up choices, the knowledge threshold (PlanSwap-10 item 2)
+src/shared/skip-plan.ts	removed	PlanSwap-10	classic	nothing kept reaches it
+src/shared/speed-presets.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
+src/shared/state-view.ts	kept	under
+src/shared/steps.ts	kept	under
+src/shared/stores.ts	kept	under
+src/shared/story-models.ts	removed	PlanSwap-10	gate	today's harness engine's; nothing kept reaches it
+src/shared/story-pages.ts	removed	PlanSwap-10	gate	today's harness engine's; nothing kept reaches it
+src/shared/tables.ts	kept	under
+src/shared/tax-year.ts	kept	under
+src/shared/text-diff.ts	kept	under
+src/shared/thing-gm.ts	kept	under
+src/shared/thing-view.ts	kept	under
+src/shared/things.ts	kept	under
+src/shared/tiers.ts	kept	under
+src/shared/timeouts.ts	kept	under
+src/shared/timeouts.ts	cut	PlanSwap-9		the six turn timeouts (engineRunMs, preLookupMs, finalReviewMs, postReplyMs, postLookupMs, skipPlanMs) and guardMs
+src/shared/travel.ts	kept	under
+src/shared/vehicles.ts	kept	under
+src/shared/words.ts	kept	under
+src/shared/world-diff.ts	kept	under
+src/shared/world.ts	kept	under
+src/spindle-augment.ts	kept	under		src/frontend/host.ts imports it (types), and src/ui/kept/host.ts that; PlanSwap-10 owns it
+src/worker/background-lane.ts	kept	worker
+
+# Tests that go with what they test.
+test/backend/action-words.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/adjudication.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-api.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-blobs.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-change-types.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-chat-perf.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-failures.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-learned.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-lore-tools.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-persist.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-reads.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-roles-paths.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-roles.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-runtime.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-secrecy.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-sessions.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-sweep.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-telemetry.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-tools.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-turns.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-waits.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-workspace.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-writer.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agent-writes.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/agents.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/assistant.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/bought-along.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/cash-gift.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/character.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/chat-copy-sequences.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/chat-copy.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/chat-export.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/check-world-times.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/chip-safety.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/claims-controls.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/compaction-memo.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/context-gov.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/context-handler.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/curator-gate.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/curator-tools.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/curator-turns.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/deleted-message.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/diagnostics.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/dispatch-gm-part.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/dispatch.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/engine-feed.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/engine-first.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/eviction-races.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/extract-prefix.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/extract-prompt.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/final-review.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/fixes.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/fresh-outlets.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/give-way.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/gm-edits.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/gm-knowledge.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/gm-memo.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/gm-minds.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/gm-remove.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/gm-things.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/group-plans.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/hard-locks.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-answers.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-assistant.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-boundary.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-build.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-definitions.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-docs.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-fight.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-held.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-input.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-kit.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-listing.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-lore.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-notes.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-people.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-play.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-story.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-surfaces.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-tools.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-walk.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-cast-world.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-copy.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-driver.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-e2e-apart.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-e2e-kit.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-e2e-story.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-e2e.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-fallback.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-gates.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-held-turn.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-jobs.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-mount.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-resume.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-runtime.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-seat-open.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-sovereign.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-turn.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-unplayed.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-wait.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-world-draft.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/harness-world-made.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/helper-model.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/hidden-newcomer.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/hold-writes.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/inferred-checks.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/inferred-controls.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/inspector-delivery.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/interpret-catalog.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/interpret-context.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/journal-window.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/json-hiding.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/kind-overlay.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/knowledge-step.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/live-session.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/live-trace.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/lore-live.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/lore-routing.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/lore-steps.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/lore.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/main-agent-digest.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/main-agent-secrecy.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/main-agent.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/map-display.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/maps.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/mechanical-actions.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/memory-bounds.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/memory-budget.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/message-time.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/mid-run-changes.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/mind-reads.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/mind-sources.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/minds-run.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/minds-scene.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/minds.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/money-before-open.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/money-controls.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/money-flows.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/money-names.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/money-plans.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/money-work-assets.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/move-activity.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/moved-along.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/narrated-bounds.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/narrated-move.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/narrator-prices.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/narrator-view.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/offstage-tell.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/outcome-words.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/outlets.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/outline-sections.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/overflow.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/page-sync.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/party.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/past-turn.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/pay-method.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/place-fix-places.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/place-names.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/player-claims.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/pov-place.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/preset-binding.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/preset-blocks.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/presets.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/presumed-move.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/preview-gates.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/profiles.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/prompts-turns.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/prompts.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/property-purchase.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/push-coalescing.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/quest-ids.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/quest-play.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/reads.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/reply-clock.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/reply-read-items.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/reply-read-orgs.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/reply-retry.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/requirement-words.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/reread-chips.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/restart.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/retention-settings.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/role-grounding.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/routine-ask.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/routine-play.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/runtime.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/secrecy-migration.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/section-budget.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/section-checks.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/section-counts.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/section-preview.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/section-tokens.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/section-wording.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/security.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/session-receipts.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/settings-caveats.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/sheet-preview.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/skip-cap.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/skip-plan.test.ts	removed	PlanSwap-8	classic	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/skip.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/speed-threshold.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/spindle-host-presets.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/staged-actions.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/stance.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/state-view-perf.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/stated-span.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/step-defaults.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/step-history.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/step-placeholders.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/step-prompts.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/step-template-checks.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/steps.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/store-hardening.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-chat-read.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-cover.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-minds-turn.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-minds.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-moves.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-notebook.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-opening.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-payments.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-pin.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-prepare-live.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-prepare-run.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-prepare.test.ts	removed	PlanSwap-8	gate	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-preset.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-record-tools.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-record-turn.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-routines.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/story-stage.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/table-updates.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/text-hashing.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/thing-fix.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/time-fix.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/timeouts.test.ts	removed	PlanSwap-8	settings	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tool-weight.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-checks.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-decisions.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-items.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-knowledge.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-listing.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-minds.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-money.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-orgs-wind.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-orgs.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-people.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-places.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-projects.test.ts	removed	PlanSwap-8	agents	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-quests.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tools-time.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/transfer-parties.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/tuning-settings.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/turn-latency.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/turn-reads.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/typed-actions.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/typed-money-world.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/typed-reads.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/typed-skip.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/typed-time.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/untracked-changes.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/upgrade-kind.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/upgrade-spoilers.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/upgrade.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/usual-moves.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/vehicles-curator.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/view-live.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/whole-reads.test.ts	removed	PlanSwap-8	texts	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/world-defaults.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/world-info-lore.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/backend/worlds-ids.test.ts	removed	PlanSwap-8	halves	a test of today's backend; it goes with test/backend/ (PlanSwap-8 item 2), and a test of a piece that moves goes with the piece first
+test/frontend/agent-turn-settings.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/agents-view.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/assistant-settings.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/assistant-ui.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/delta.test.ts	removed	PlanSwap-9	halves	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/diagnostics.test.ts	removed	PlanSwap-9	halves	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/gm-chat-money.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/gm-feed.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/harness-pages.test.ts	removed	PlanSwap-9	gate	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/harness-preview.test.ts	removed	PlanSwap-9	gate	a test of the old half of dev/preview (harness-fixture.ts), which PlanSwap-9 removes
+test/frontend/harness-sovereign-settings.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/live-ui.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/lore-settings.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/narrator-settings.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/prompts-ui.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/protocol-client.test.ts	removed	PlanSwap-9	halves	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/reconnect.test.ts	removed	PlanSwap-9	halves	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/replies-settings.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/request-timeout.test.ts	removed	PlanSwap-9	halves	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/restart-claims.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/retention-ui.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/section-preview.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/settings-nav.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/step-prompts-ui.test.ts	removed	PlanSwap-9	settings	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/story-pages.test.ts	removed	PlanSwap-9	gate	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/story-prepare-live.test.ts	removed	PlanSwap-9	gate	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/to-top.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/frontend/workspace-ui.test.ts	removed	PlanSwap-9	ui	a test of removed UI (PlanSwap-9 item 3)
+test/packs/minds/intent.test.ts	removed	PlanSwap-10	classic	a test of a file nothing kept reaches
+test/shared/role-routes.test.ts	removed	PlanSwap-10	settings	a test of a removed shared file
+test/shared/speed-presets.test.ts	removed	PlanSwap-10	settings	a test of a removed shared file

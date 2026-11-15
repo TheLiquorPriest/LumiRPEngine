@@ -7,19 +7,24 @@
 //   - the light extension holds nothing of the application (it runs inside Lumiverse);
 //   - the pages hold nothing of the server;
 //   - the store knows nothing of Lumiverse, of the harness, or of who calls it;
-//   - today's build is read only by the migration, and LumiAH is imported nowhere else; Build takes
-//     today's world store alone from it;
-//   - the play panels take only today's view builders, with what they import, from today's backend;
+//   - which zones may still import today's build at all; which of its files each still imports, and
+//     LumiAH, are the fence's (test/removal/): every file of today's build has a fate, nothing that
+//     stays imports one that goes but the imports listed as not yet moved, and LumiAH is reached
+//     through none of what stays;
+//   - the homes made for what leaves today's build are zones of their own: Build, the operations and
+//     the migration take his worlds from `worlds`, and the extension and the lore take the secrecy
+//     rule from `secrecy`, which runs inside Lumiverse too;
 //   - the harness is reached through its package, never through pi directly.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { NEW_ZONES } from "./removal/fates";
 
 const ROOT = resolve(import.meta.dir, "..");
 const SRC = join(ROOT, "src");
 
-const ZONES = ["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree", "build", "play"] as const;
+const ZONES = NEW_ZONES;
 type Zone = (typeof ZONES)[number];
 
 /** The carried engine's folders a zone may import from, named by their first path segment. */
@@ -43,18 +48,22 @@ const RULES: Record<Zone, Rule> = {
   app: { zones: [], carried: ["shared"], harness: true },
   tree: { zones: ["app"], carried: ["shared"], harness: true },
   adapter: { zones: ["app"], carried: ["shared"], harness: true },
-  lore: { zones: ["app", "store"], carried: PURE, harness: true },
-  iface: { zones: ["app", "store"], carried: PURE, harness: true },
+  lore: { zones: ["app", "store", "secrecy"], carried: PURE, harness: true },
+  iface: { zones: ["app", "store", "worlds"], carried: PURE, harness: true },
   cast: { zones: ["app", "store", "iface"], carried: PURE, harness: true },
   story: { zones: ["app", "store", "iface", "cast"], carried: PURE, harness: true },
   // The migration's database is whole: the story's writes count the lore's overlays, so it lays the lore's tables too.
-  migrate: { zones: ["app", "store", "cast", "story", "build", "lore"], carried: [...PURE, "backend"] },
+  migrate: { zones: ["app", "store", "cast", "story", "build", "lore", "worlds"], carried: [...PURE, "backend"] },
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
-  ext: { zones: ["adapter"], carried: ["shared", "backend"], sandboxed: true },
-  build: { zones: ["app", "store"], carried: [...PURE, "backend"] },
+  ext: { zones: ["adapter", "secrecy"], carried: ["shared", "backend"], sandboxed: true },
+  build: { zones: ["app", "store", "worlds"], carried: [...PURE, "backend"] },
   // A panel's payment keeps the books the way an agent's does, so it uses the engine tools' own bookkeeping.
   play: { zones: ["app", "store", "iface"], carried: [...PURE, "backend"] },
+  // His worlds behind one world service over the store: today's world store moves here (PlanSwap-5), the service beside it (PlanChatUI-B1).
+  worlds: { zones: ["app", "store"], carried: PURE },
+  // The secrecy half of the World Info gate (§9.6), one rule that RPE's answer and the extension's fail-closed answer both run (PlanSwap-6).
+  secrecy: { zones: [], carried: PURE, sandboxed: true },
 };
 
 /** The harness's contract is types only; importing it as types costs nothing anywhere, a page included. */
@@ -62,41 +71,6 @@ const CONTRACT = "rp-harness/contract";
 
 /** The one place everything is put together: the application's entry may import every server zone. */
 const COMPOSITION = /^app\/(main|cli|compose)\.ts$/;
-
-/** What the extension may take from today's backend: the secrecy rules and the host's shapes, nothing else. */
-const EXT_BACKEND = /^backend\/(lore-secrets|host)/;
-
-/** What Build may take from today's backend: today's world store and the stored-JSON reader it uses, with what those two import. */
-function buildBackend(): Set<string> {
-  const out = new Set<string>();
-  const queue = ["backend/worlds.ts", "backend/stored-json.ts"].map((rel) => join(SRC, rel));
-  while (queue.length > 0) {
-    const file = queue.pop() as string;
-    if (out.has(file) || !existsSync(file)) continue;
-    out.add(file);
-    for (const { spec } of specsOf(readFileSync(file, "utf8"))) {
-      const target = spec.startsWith(".") ? resolveLocal(file, spec) : null;
-      if (target !== null && relative(SRC, target).split("\\").join("/").startsWith("backend/")) queue.push(target);
-    }
-  }
-  return out;
-}
-
-/** What the play panels may take from today's backend: today's state view builders (the HUD, the scene, the palette, the controls), with what they import. */
-function playBackend(): Set<string> {
-  const out = new Set<string>();
-  const queue = [join(SRC, "backend/view.ts")];
-  while (queue.length > 0) {
-    const file = queue.pop() as string;
-    if (out.has(file) || !existsSync(file)) continue;
-    out.add(file);
-    for (const { spec } of specsOf(readFileSync(file, "utf8"))) {
-      const target = spec.startsWith(".") ? resolveLocal(file, spec) : null;
-      if (target !== null && relative(SRC, target).split("\\").join("/").startsWith("backend/")) queue.push(target);
-    }
-  }
-  return out;
-}
 
 /** Adapter modules the extension shares with RPE must hold no server code; they are checked as sandboxed too. */
 function sharedWithExtension(): Set<string> {
@@ -167,8 +141,6 @@ function withoutComments(source: string): string {
 describe("the standalone application's boundaries", () => {
   const all = ZONES.flatMap((zone) => files(join(SRC, zone)));
   const shared = sharedWithExtension();
-  const build = buildBackend();
-  const play = playBackend();
 
   test("every import stays inside what its zone may reach", () => {
     const violations: string[] = [];
@@ -190,22 +162,16 @@ describe("the standalone application's boundaries", () => {
           if (isZone(top)) {
             if (composes && !RULES[top].sandboxed) continue;
             if (!rule.zones.includes(top)) violations.push(`${rel} (${zone}) → ${target}: ${zone} may not import ${top}`);
-            else if (sandboxed && !shared.has(resolveLocal(file, spec))) violations.push(`${rel} → ${target}: not among what the extension shares`);
+            else if (sandboxed && !RULES[top].sandboxed && !shared.has(resolveLocal(file, spec))) violations.push(`${rel} → ${target}: not among what the extension shares`);
           } else if (!(rule.carried as readonly string[]).includes(top)) {
             violations.push(`${rel} (${zone}) → ${target}: ${zone} may not import ${top}`);
-          } else if (zone === "ext" && top === "backend" && !EXT_BACKEND.test(target)) {
-            violations.push(`${rel} → ${target}: the extension takes only the secrecy rules and the host's shapes from today's backend`);
-          } else if (zone === "build" && top === "backend" && !build.has(resolveLocal(file, spec))) {
-            violations.push(`${rel} → ${target}: Build takes only today's world store from today's backend`);
-          } else if (zone === "play" && top === "backend" && !play.has(resolveLocal(file, spec))) {
-            violations.push(`${rel} → ${target}: the play panels take only today's view builders from today's backend`);
           }
         } else if (spec.startsWith("node:") || spec.startsWith("bun:") || spec === "bun") {
           if (sandboxed) violations.push(`${rel}: ${spec} in code that runs in a page or inside Lumiverse`);
         } else if (spec === "rp-harness" || spec.startsWith("rp-harness/")) {
           if (!rule.harness && !(typeOnly && spec === CONTRACT)) violations.push(`${rel} (${zone}): the harness package is not imported here`);
-        } else if (spec.startsWith("lumi-ah")) {
-          if (zone !== "migrate") violations.push(`${rel}: ${spec} is imported only by the migration`);
+        } else if (spec === "lumi-ah" || spec.startsWith("lumi-ah/")) {
+          // LumiAH is the fence's (test/removal/fence.ts), judged through every chain of what stays.
         } else if (spec.startsWith("@earendil-works/")) {
           violations.push(`${rel}: pi is reached through the harness package, not directly (${spec})`);
         } else if (spec === "preact" || spec.startsWith("preact/")) {
