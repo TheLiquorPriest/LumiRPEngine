@@ -71,7 +71,7 @@ export function backupSize(files: readonly { name: string; bytes: number }[], ch
 }
 
 /** Makes the backup in `dest` (made if missing, its owner's alone); never over an archive already there. */
-export async function makeBackup(input: { dest: string; sources: readonly BackupSource[]; chats: readonly BackupChat[]; roots: BackupManifest["roots"]; now?: () => Date }): Promise<BackupResult> {
+export async function makeBackup(input: { dest: string; sources: readonly BackupSource[]; chats: readonly BackupChat[]; roots: BackupManifest["roots"]; pieceBytes: number; now?: () => Date }): Promise<BackupResult> {
   const made = (input.now?.() ?? new Date()).toISOString();
   await ownerOnlyFolder(input.dest);
   const path = join(input.dest, `rpe-migration-backup-${made.replace(/[:.]/g, "-")}.tar`);
@@ -82,7 +82,7 @@ export async function makeBackup(input: { dest: string; sources: readonly Backup
     if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new Error(`A backup is already at ${path}; the migration never writes over one.`);
     throw error;
   }
-  const tar = TarWriter.open(path);
+  const tar = TarWriter.open(path, input.pieceBytes);
   try {
     const files: BackupManifest["files"] = [];
     for (const source of input.sources) {
