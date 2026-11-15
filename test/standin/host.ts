@@ -160,6 +160,44 @@ export class ExtensionHost {
   frontendSent(message: { extension: string; payload: unknown; user: string | undefined; session: string | undefined }): boolean {
     return this.frontends?.(message) ?? false;
   }
+
+  /** The generating session of a user (`getActiveFrontendSession`, `spindle/frontend-session.ts:36-42`): the stand-in server answers it from its sockets; with none, none. */
+  activeFrontendSession: (user: string) => string | undefined = () => undefined;
+
+  /** What waits on each open modal, by the request id Lumiverse gives it (`worker-host-presentation-api.ts:504-512`). */
+  private readonly modalWaits = new Map<string, { modals: Map<string, unknown>; key: string; resolve(answer: { dismissedBy: string }): void }[]>();
+
+  waitForModal(requestId: string, wait: { modals: Map<string, unknown>; key: string; resolve(answer: { dismissedBy: string }): void }): void {
+    this.modalWaits.set(requestId, [...(this.modalWaits.get(requestId) ?? []), wait]);
+  }
+
+  /**
+   * A modal dismissed (`SPINDLE_MODAL_RESULT`, `ws/handler.ts:419-428`; `handleModalClose`, `:533-554`): every open modal of that request id gives, whichever user's socket said it (Lumiverse
+   * matches the id alone), with who dismissed it, "user" where nobody says.
+   */
+  modalResult(requestId: string, dismissedBy?: string): void {
+    const waiting = this.modalWaits.get(requestId) ?? [];
+    this.modalWaits.delete(requestId);
+    for (const wait of waiting) {
+      wait.modals.delete(wait.key);
+      wait.resolve({ dismissedBy: dismissedBy ?? "user" });
+    }
+  }
+
+  /** An event on the bus (`ws/bus.ts:502-544`): to the extensions' workers; the host that has sockets (`rows.ts`) tells them too. */
+  emit(event: string, payload: unknown, userId?: string, _options?: { topic?: string }): void {
+    this.toWorkers(event, payload, userId);
+  }
+
+  /** An event posted to one worker alone (`postToWorker`, `spindle/worker-host.ts:1602-1609`): handled on a later task by its handlers, with no check that it asked for the event. */
+  protected post(ext: Ext, event: string, payload: unknown, userId: string): void {
+    const copy = structuredClone(payload);
+    this.later(() => {
+      if (ext.stopped) return;
+      for (const handler of ext.handlers.get(event) ?? []) handler(copy, userId);
+    });
+  }
+
   protected readonly installed: Ext[] = [];
   /** The clock every timer of the host runs on: the process's own unless a test gives one it moves by hand. */
   clock: HostClock = PROCESS_CLOCK;
@@ -268,10 +306,16 @@ export class ExtensionHost {
         });
       },
       sendToFrontend(payload, user, options) {
+        // `frontend_message` (`spindle/worker-host.ts:2129-2160`): a user-scoped extension reaches its installer alone, whatever user the call names; an operator's reaches the user it names, or
+        // every user's pages where it names none. A session named is sent to alone; one that is gone, with a user to tell, tells the sending worker alone, on a later task.
+        const target = ext.scope === "user" ? (ext.installedBy ?? undefined) : typeof user === "string" && user.length > 0 ? user : undefined;
         const session = options?.frontendSessionId;
-        const delivered = host.frontendSent({ extension: ext.id, payload: structuredClone(payload), user, session });
-        // A message for a session that is gone tells the worker so, and no socket (`spindle/worker-host.ts:2143-2149`).
-        if (!delivered && session !== undefined && user !== undefined) host.toWorkers("FRONTEND_SESSION_CLOSED", { frontendSessionId: session }, user);
+        if (session) {
+          const delivered = target !== undefined && host.frontendSent({ extension: ext.id, payload: structuredClone(payload), user: target, session });
+          if (!delivered && target !== undefined) host.post(ext, "FRONTEND_SESSION_CLOSED", { frontendSessionId: session }, target);
+          return;
+        }
+        host.frontendSent({ extension: ext.id, payload: structuredClone(payload), user: target, session: undefined });
       },
       onFrontendMessage(handler) {
         ext.frontend.add(handler);
@@ -301,13 +345,24 @@ export class ExtensionHost {
         setJson: async (path, value, options) => host.writeFile(host.within(userRoot(options?.userId), path), JSON.stringify(value, null, 2)),
       },
       modal: {
-        // A modal opened with a request id of the caller's is closed by it (`spindle/worker-host-presentation-api.ts:486-554`).
+        // `handleModalOpen` and `handleModalClose` (`spindle/worker-host-presentation-api.ts:486-554`): the user is the installer's for a user-scoped extension, else the one the call names, and an
+        // operator's call with none fails; the modal is announced to the user, and the call gives when the modal is dismissed, with who dismissed it. A modal opened with a request id of the
+        // caller's is closed by it, which dismisses it as the extension.
         open: async (options) => {
-          modals.set(`${options.userId ?? ""}\u0000${options.modalRequestId ?? ""}`, { title: options.title, items: options.items });
-          return { dismissedBy: "extension" };
+          const resolved = ext.scope === "user" ? (ext.installedBy ?? "") : (options.userId ?? "");
+          if (resolved === "") throw new Error("userId is required for operator-scoped extensions");
+          const requestId = `spindle-modal:${ext.id}:${options.modalRequestId ?? crypto.randomUUID()}`;
+          const key = `${resolved}\u0000${options.modalRequestId ?? ""}`;
+          const answered = Promise.withResolvers<{ dismissedBy: string }>();
+          host.waitForModal(requestId, { modals, key, resolve: answered.resolve });
+          modals.set(key, { title: options.title, items: options.items });
+          host.emit("SPINDLE_MODAL_OPEN", { requestId, extensionId: ext.id, extensionName: ext.identifier, title: options.title, items: options.items, persistent: options.persistent ?? false }, resolved);
+          return await answered.promise;
         },
         close: async (id, user) => {
-          modals.delete(`${user ?? ""}\u0000${id}`);
+          const resolved = ext.scope === "user" ? (ext.installedBy ?? "") : (user ?? "");
+          if (resolved === "") throw new Error("userId is required for operator-scoped extensions");
+          host.modalResult(`spindle-modal:${ext.id}:${id}`, "extension");
         },
       },
       grant: (permission) => change(permission, true),

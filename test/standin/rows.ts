@@ -94,7 +94,7 @@ export class ChatRows extends ExtensionHost {
    * `eventBus.emit` (`ws/bus.ts:502-544`): a frame to each of the user's sockets at once, through the
    * server where one serves this host, and the event to the extensions' workers.
    */
-  emit(event: string, payload: unknown, userId?: string, options?: { topic?: string }): void {
+  override emit(event: string, payload: unknown, userId?: string, options?: { topic?: string }): void {
     this.events.push({ event, payload });
     this.sockets?.(event, payload, userId, options);
     this.toWorkers(event, payload, userId);

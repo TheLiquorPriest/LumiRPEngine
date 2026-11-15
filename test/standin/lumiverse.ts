@@ -215,6 +215,8 @@ export class StandIn extends ChatRows {
     const type = input.type ?? "normal";
     const dryRun = live === null;
     const generationId = live === null ? null : live.id;
+    // The user's generating session, named when the generation is started (`getActiveFrontendSession`, `services/generate.service.ts:1550`, `:3090`): the newest frontend session that is not a widget's.
+    const frontendSessionId = this.activeFrontendSession(chat.user);
     const backgroundSwipe = !dryRun && input.backgroundSwipe === true;
     let target: { message: string | null; swipe: number | null } = { message: null, swipe: null };
     let excluded: string | null = null;
@@ -284,7 +286,7 @@ export class StandIn extends ChatRows {
       // Announced before the prompt is assembled (`:2036-2055`), and the assembly starts on a later task (`:2068-2073`, `:1059`). A continue
       // names the swipe it goes on, the one its message shows, and no message (`:1962-1968`): only a swipe, a regenerate and a new reply's
       // staged message set `targetMessageId` (`:1928-1938`, `:1988-2006`). What none set, an impersonation's both, is left unset.
-      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe, characterId: speakerId, characterName: speakerName, generationType: type, frontendSessionId: undefined }, chat.user);
+      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : (target.message ?? undefined), targetSwipeId: target.swipe ?? undefined, backgroundSwipe, characterId: speakerId, characterName: speakerName, generationType: type, frontendSessionId }, chat.user);
     }
     started?.(generationId);
     // Setup stops where Lumiverse's own checks are (`checkAborted`, `services/generate.service.ts:1721-1731`, `:2309`, `:2960`): a stop that comes while it waits
@@ -306,10 +308,10 @@ export class StandIn extends ChatRows {
       checkAborted();
       // ---- the extensions' context handlers, first in the pipeline (`generate.service.ts:1063-1083`): what they give back is the
       // context, the frontend session put back; one that asks to cancel stops the generation.
-      let context: Record<string, unknown> = { frontendSessionId: undefined, chatId: chat.id, connectionId: connection.id, personaId: input.persona, generationType: type, dryRun, userId: chat.user };
+      let context: Record<string, unknown> = { frontendSessionId, chatId: chat.id, connectionId: connection.id, personaId: input.persona, generationType: type, dryRun, userId: chat.user };
       if (this.contextHandlers.length > 0) {
         const handled = await this.contextHandlerChain(context, chat.user);
-        if (handled) context = { ...(handled as Record<string, unknown>), frontendSessionId: undefined };
+        if (handled) context = { ...(handled as Record<string, unknown>), frontendSessionId };
         if (context.cancelGeneration === true) throw new CancelledByExtension();
       }
       checkAborted();
@@ -473,7 +475,7 @@ export class StandIn extends ChatRows {
         const failed = failureOf(failure, connection);
         if (kept.messageId !== undefined) this.setSwipeScopedExtra(chat, kept.messageId, swipe, { generationOutcome: { ...(how ?? {}), error: failed.error } });
         frames.flush();
-        this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId: kept.messageId, content: kept.content, ...failed, ...(how ?? {}), usage: undefined, generationType: type, frontendSessionId: undefined }, chat.user);
+        this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId: kept.messageId, content: kept.content, ...failed, ...(how ?? {}), usage: undefined, generationType: type, frontendSessionId }, chat.user);
         return { generationId, ...(kept.messageId !== undefined ? { messageId: kept.messageId } : {}), error: failed.error, stopped: false, prompt: sent, body, reply: null, parameters, stored: null, worldInfo, contextClipStats };
       }
       // A reply that ended well (`:4065-4310`): its text finished, saved where it goes, its macros resolved, what belongs to its swipe written, then told.
@@ -493,7 +495,7 @@ export class StandIn extends ChatRows {
       }
       frames.flush();
       timing.completedAt = this.clock.now();
-      this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: savedText, usage: reply.usage ?? undefined, finish_reason: reply.finishReason, generationType: type, frontendSessionId: undefined, impersonateDraft: landing.draft && type === "impersonate" ? true : undefined }, chat.user);
+      this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: savedText, usage: reply.usage ?? undefined, finish_reason: reply.finishReason, generationType: type, frontendSessionId, impersonateDraft: landing.draft && type === "impersonate" ? true : undefined }, chat.user);
       // What follows comes on a later task, after the terminal event (`:4305-4310`): the token count and the timings, then the breakdown stored where a message was saved and the tokenizer counted
       // (`:4432-4497`); `stored` waits for it.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -545,7 +547,7 @@ export class StandIn extends ChatRows {
       // A failed setup ends the generation with its error, its empty message removed (`:2987-3048`).
       const failed = failureOf(error, connection);
       if (staged !== null) this.deleteMessage(chat.id, staged);
-      if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, ...failed, generationType: type, frontendSessionId: undefined }, chat.user);
+      if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, ...failed, generationType: type, frontendSessionId }, chat.user);
       return { generationId, error: failed.error, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo, contextClipStats };
     }
   }

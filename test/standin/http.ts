@@ -181,6 +181,7 @@ export class LumiverseServer {
       host.later = (run) => void this.clock.setTimeout(run, 0);
       host.now = () => this.clock.now();
       host.frontends = (m) => this.toFrontend(m.extension, m.payload, m.user, m.session);
+      host.activeFrontendSession = (user) => this.activeFrontendSession(user);
       host.sockets = (event, payload, user, options) => this.frame(event, payload, user, options);
     }
     // The bus's sweep (`ws/bus.ts:17-18`, `:457-466`): every minute, a socket silent for two is closed.
@@ -941,6 +942,20 @@ export class LumiverseServer {
       const worker = typeof frame.extensionId === "string" ? this.options.host?.spindle.workerFor(viewer, frame.extensionId) : undefined;
       if (worker !== undefined && socket.closed === null) worker.fromFrontend(frame.payload, socket.user, socket.session);
     }
+    if (frame.type === "SPINDLE_MODAL_RESULT") {
+      // `ws/handler.ts:419-428`: the page's answer to a modal, matched by its request id alone.
+      if (typeof frame.requestId === "string" && frame.requestId !== "") this.options.host?.modalResult(frame.requestId, typeof frame.dismissedBy === "string" ? frame.dismissedBy : undefined);
+    }
+  }
+
+  /**
+   * `getActiveFrontendSession` (`spindle/frontend-session.ts:36-42`): the user's newest frontend session that may execute a generation, which a socket opened with `frontend_runtime=widget` never does; a session
+   * opened again keeps the place it had (`registerFrontendSession` sets the same key of a map, `:14-27`). What each generation names as its `frontendSessionId` (`services/generate.service.ts:1550`, `:3090`).
+   */
+  activeFrontendSession(user: string): string | undefined {
+    let active: string | undefined;
+    for (const [id, socket] of this.frontends.get(user) ?? []) if (socket.executionOwner) active = id;
+    return active;
   }
 
   /** `sendToFrontend` (`spindle/worker-host.ts:2129-2160`): to the session named alone, or to every socket of the user. */
@@ -990,7 +1005,7 @@ export class LumiverseServer {
         return;
       }
       this.clock.clearTimeout(admission);
-      served.admit(user, session);
+      served.admit(user, session, u.searchParams.get("frontend_runtime") === "widget");
       this.register(served);
       served.send(JSON.stringify({ event: "CONNECTED", payload: { message: "Connected to Lumiverse event bus", userId: user, role: this.roleOf(user), extensionCommands: [] }, timestamp: this.clock.now() }));
     };

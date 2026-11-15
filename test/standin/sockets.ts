@@ -66,6 +66,8 @@ export class ServerSocket {
   visible = true;
   /** The chat its page says it is viewing (`stream_focus`, `ws/handler.ts:306-312`; `setClientStreamFocus`, `ws/bus.ts:296-318`): the stream tokens of that chat reach this socket and no other of the user's. */
   focus: string | null = null;
+  /** Whether its frontend session may be the generating one (`executionOwner`, `ws/handler.ts:201`): a socket opened with `frontend_runtime=widget` never is (`spindle/frontend-session.ts:36-42`). */
+  executionOwner = true;
   /** When the client last sent anything (`ws/handler.ts:257`). */
   lastInbound: number;
   private pending = 0;
@@ -107,9 +109,10 @@ export class ServerSocket {
   }
 
   /** Let in once its ticket is taken (`ws/receive-queue.ts:104-109`): it is whose it is, and what its queue kept is run. */
-  admit(user: string, session?: string): void {
+  admit(user: string, session?: string, widget = false): void {
     this.options.user = user;
     if (session !== undefined) this.options.session = session;
+    this.executionOwner = !widget;
     this.admitted = true;
     void this.pump();
   }
