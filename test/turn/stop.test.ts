@@ -33,10 +33,13 @@ async function firstTurnAtWork(b: TurnBed): Promise<string> {
   const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
   expect(out.error).toBeNull();
   const store = b.turns.store.user(USER);
-  return await b.until("the first turn to be tied while its run goes on", () => {
+  const turn = await b.until("the first turn to be tied while its run goes on", () => {
     const run = b.turns.runs.byGeneration(USER, out.generationId!);
     return run !== null && store.turn(run.turn)?.status === "done" && b.turns.runs.running(USER, run.turn) !== undefined ? run.turn : null;
   });
+  // Its work after the reply waits on its own call, so the answer held for it is its own.
+  await b.until("the work after the reply to call its model", () => b.model.requests.length >= 2);
+  return turn;
 }
 
 const WAITING = "Finishing the last turn's work first.";
