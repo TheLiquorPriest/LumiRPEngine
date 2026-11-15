@@ -65,7 +65,8 @@ export async function answer(res: Response, what: string): Promise<unknown> {
   return body;
 }
 
-interface Profile {
+/** A connection of the signed-in user's as Lumiverse's connections API gives it (`rowToProfile`): whether it has a key, never the key. */
+export interface Profile {
   id: string;
   name: string;
   provider: string;
@@ -97,7 +98,7 @@ const withMark = (metadata: Record<string, unknown>): Record<string, unknown> =>
  * as large as Lumiverse allows. Lumiverse answers `{ data, total, limit, offset }`; a bare list is
  * read as it comes, as one from before it was paged.
  */
-async function everyConnection(call: LumiverseCall): Promise<Profile[]> {
+export async function everyConnection(call: LumiverseCall): Promise<Profile[]> {
   const found: Profile[] = [];
   for (let offset = 0; ; ) {
     const body = await answer(await call("GET", `${CONNECTIONS}?limit=${PAGE}&offset=${offset}`), "the question about your connections");

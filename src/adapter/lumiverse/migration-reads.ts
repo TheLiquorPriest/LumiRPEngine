@@ -3,10 +3,11 @@
 // in Lumiverse. Read-only: SELECTs and the read-only pragmas `schema_version` and `table_info`, nothing
 // else. Every statement is scoped to the one user the run was opened for, the user bound as a value
 // through the table that owns the row: another user's chat, message, book or setting reads as none.
-// Before the first read, and again whenever the file's schema version moves, every table and column
-// read is checked against the type Lumiverse declares it with (`db/baseline.sql`); a file that differs
-// is refused, with one sentence naming the difference, until its schema moves again. No connection key
-// is read, and no table that holds one.
+// Before a read, and again whenever the file's schema version moves, every table and column it reads
+// is checked against the type Lumiverse declares it with (`db/baseline.sql`); a file that differs is
+// refused, with one sentence naming the difference, until its schema moves again. No connection key is
+// read: a connection's key is a secret Lumiverse keeps apart (`connection_profiles` holds whether it has
+// one, not the key), and of the connections only the columns that say what each one is are read.
 //
 // The caller opens the file and hands it in: the migration reads a database Lumiverse may have stopped
 // (so no log is beside it), which the plain open of `db.ts` refuses, and which the caller opens without
@@ -43,18 +44,27 @@ export const MIGRATION_COLUMNS: Readonly<Record<string, Readonly<Record<string, 
   regex_scripts: { user_id: "TEXT", folder: "TEXT" },
 };
 
-const TABLES = Object.keys(MIGRATION_COLUMNS);
-const COLUMNS = `WITH t(name) AS (VALUES ${TABLES.map(() => "(?)").join(", ")}) SELECT t.name AS tbl, c.name AS col, c.type AS type FROM t LEFT JOIN pragma_table_info(t.name) AS c`;
+/**
+ * The columns of the user's connections the migration reads, checked when it reads them: what each
+ * connection is (`connection_profiles`, `db/baseline.sql:122-133`; `user_id` and `has_api_key` by
+ * migrations 013 and 016), never its key, which is no column of it.
+ */
+export const PROFILE_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  connection_profiles: { id: "TEXT", name: "TEXT", provider: "TEXT", api_url: "TEXT", model: "TEXT", user_id: "TEXT", updated_at: "INTEGER" },
+};
+
 const SCHEMA = "SELECT schema_version AS schema FROM pragma_schema_version";
 
-/** How the file differs from what the migration reads, in one sentence; null when every column read is there as declared. */
-export function migrationSchemaDifference(db: Database): string | null {
-  const found = new Map<string, Map<string, string>>(TABLES.map((t) => [t, new Map()]));
-  for (const row of db.query<{ tbl: string; col: string | null; type: string | null }, string[]>(COLUMNS).all(...TABLES)) {
+/** How the file differs from the tables and columns given (the migration's, unless others are named), in one sentence; null when every one is there as declared. */
+export function migrationSchemaDifference(db: Database, read: Readonly<Record<string, Readonly<Record<string, string>>>> = MIGRATION_COLUMNS): string | null {
+  const tables = Object.keys(read);
+  const found = new Map<string, Map<string, string>>(tables.map((t) => [t, new Map()]));
+  const query = `WITH t(name) AS (VALUES ${tables.map(() => "(?)").join(", ")}) SELECT t.name AS tbl, c.name AS col, c.type AS type FROM t LEFT JOIN pragma_table_info(t.name) AS c`;
+  for (const row of db.query<{ tbl: string; col: string | null; type: string | null }, string[]>(query).all(...tables)) {
     if (row.col !== null) found.get(row.tbl)?.set(row.col, (row.type ?? "").trim().toUpperCase());
   }
   const differences: string[] = [];
-  for (const [table, columns] of Object.entries(MIGRATION_COLUMNS)) {
+  for (const [table, columns] of Object.entries(read)) {
     const has = found.get(table)!;
     if (has.size === 0) {
       differences.push(`it has no table "${table}"`);
@@ -105,6 +115,17 @@ export interface InstallRow {
   version: string;
 }
 
+/** One of the user's connections in Lumiverse, as what it is: its provider, address and model, never its key. */
+export interface ProfileRow {
+  id: string;
+  name: string;
+  /** Lumiverse's id for its provider (`custom` for an OpenAI-compatible one). */
+  provider: string;
+  /** Its address (`api_url`); empty where the provider gives its own. */
+  url: string;
+  model: string;
+}
+
 export interface MigrationReads {
   /** The user's name, or null when there is no such user. */
   username(): string | null;
@@ -130,6 +151,8 @@ export interface MigrationReads {
   promptOrders(): JsonValue[];
   /** One of the user's settings; null when there is none. */
   setting(key: string): LvSetting | null;
+  /** The user's connections in Lumiverse, the most recently changed first (`connections.service.ts`'s list): what each is, never its key. */
+  connectionProfiles(): ProfileRow[];
   close(): void;
 }
 
@@ -152,23 +175,23 @@ const OF_CHAT = "FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_i
 /** Opens the migration's reads of `opened`, for `user`'s rows only. Closing them closes the database. */
 export function migrationReads(opened: OpenedDatabase, user: string): MigrationReads {
   const { db } = opened;
-  // The schema version the columns were last checked at, and the one a difference was found at (the file is refused until its schema moves).
-  let checked: number | null = null;
-  let refusedAt: number | null = null;
-  let refusal = "";
+  /** By the tables a read names: the schema version they were last checked at, and the one a difference was found at (those reads are refused until the schema moves). */
+  const checks = new Map<object, { checked: number | null; refusedAt: number | null; refusal: string }>();
 
-  /** The database, its columns checked at its schema as it stands now. */
-  function door(): Database {
+  /** The database, the tables and columns `read` names checked at its schema as it stands now. */
+  function door(read = MIGRATION_COLUMNS): Database {
     const schema = db.query<{ schema: number }, []>(SCHEMA).get()?.schema ?? -1;
-    if (refusedAt === schema) throw new Error(refusal);
-    if (checked !== schema) {
-      const difference = migrationSchemaDifference(db);
+    let state = checks.get(read);
+    if (state === undefined) checks.set(read, (state = { checked: null, refusedAt: null, refusal: "" }));
+    if (state.refusedAt === schema) throw new Error(state.refusal);
+    if (state.checked !== schema) {
+      const difference = migrationSchemaDifference(db, read);
       if (difference !== null) {
-        refusedAt = schema;
-        refusal = `RPE does not read Lumiverse's database: it was made by a Lumiverse RPE does not know: ${difference}.`;
-        throw new Error(refusal);
+        state.refusedAt = schema;
+        state.refusal = `RPE does not read Lumiverse's database: it was made by a Lumiverse RPE does not know: ${difference}.`;
+        throw new Error(state.refusal);
       }
-      checked = schema;
+      state.checked = schema;
     }
     return db;
   }
@@ -248,6 +271,11 @@ export function migrationReads(opened: OpenedDatabase, user: string): MigrationR
     setting(key) {
       const row = door().query<Record<string, unknown>, [string, string]>("SELECT key, value, updated_at FROM settings WHERE key = ? AND user_id = ?").get(key, user);
       return row === null ? null : settingFrom(row);
+    },
+    connectionProfiles() {
+      return door(PROFILE_COLUMNS)
+        .query<ProfileRow, [string]>("SELECT id, name, provider, api_url AS url, model FROM connection_profiles WHERE user_id = ? ORDER BY updated_at DESC, id ASC")
+        .all(user);
     },
     close: () => opened.close(),
   };
