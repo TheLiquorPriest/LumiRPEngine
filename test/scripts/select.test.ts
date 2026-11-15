@@ -107,8 +107,13 @@ describe("on this repository", () => {
     expect(run(selectTests(repo, ["src/backend/runtime.ts"], opts))).toContain("test/backend/runtime.test.ts");
   });
 
-  test("the budget is spent in the targeted run's own unit, each file's time in one `bun test` process, so a module most tests reach still runs over a hundred of them", () => {
-    // In a process of its own a file's time is mostly the process starting and loading (the whole run's recording, test/timings-all.json): a minute of that runs a fraction of these.
-    for (const module of ["src/backend/harness/extension.ts", "src/engine/ledger/fold.ts"]) expect({ module, run: selectTests(repo, [module], opts).run.length > 100 }).toEqual({ module, run: true });
+  test("the budget is spent in the targeted run's own unit, each file's time in one `bun test` process, so a module most tests reach runs more of them than a minute of whole processes would", () => {
+    // In a process of its own a file's time is mostly the process starting and loading (the whole run's recording, test/timings-all.json): a minute of that runs fewer of these.
+    // The count is compared with that, not with a fixed number: how many fit in a minute follows the record, which is made again as the tests change.
+    const wholeProcesses = { ...opts, timings: readTimings(resolve(root, "test/timings-all.json")) };
+    for (const module of ["src/backend/harness/extension.ts", "src/engine/ledger/fold.ts"]) {
+      const own = selectTests(repo, [module], opts).run.length;
+      expect({ module, moreThanWholeProcesses: own > selectTests(repo, [module], wholeProcesses).run.length }).toEqual({ module, moreThanWholeProcesses: true });
+    }
   });
 });
