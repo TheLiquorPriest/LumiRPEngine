@@ -54,7 +54,8 @@ afterAll(() => {
 });
 
 async function cli(args: string[], env: Record<string, string> = {}): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["bun", join(ROOT, "src/cli/main.ts"), ...args], { env: { PATH: process.env.PATH ?? "", HOME: home, XDG_CONFIG_HOME: join(home, "config"), ...env }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  // The CLI runs on the Bun this test runs on. A `bun` found on the PATH can be another, older one, and under a Bun before 1.4 the CLI's `--version` line adds that it can't follow LumiRPEngine's tools.
+  const proc = Bun.spawn([process.execPath, join(ROOT, "src/cli/main.ts"), ...args], { env: { PATH: process.env.PATH ?? "", HOME: home, XDG_CONFIG_HOME: join(home, "config"), ...env }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   return { code, out, err };
 }

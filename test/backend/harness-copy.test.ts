@@ -79,7 +79,11 @@ describe("the runtime's copy of a chat the engine plays", () => {
     bed.script = cast({ name: "author", is: offers("reply_write"), lines: author(10, "The street lamps flicker, then hold.") }).script;
     const swiped = await bed.reply(chatId, { type: "swipe" });
     expect([swiped.error, swiped.content]).toEqual([null, "The street lamps flicker, then hold."]);
-    await bed.until(async () => recHarnessOf(await recordOn(rig, chatId, secondId))?.record !== told, "the swipe's record in the ledger");
+    // The swipe's own record, there and not the first telling's: until the ledger has it, the reply shows the swipe with no record at all, which is not the swipe's record either.
+    await bed.until(async () => {
+      const record = recHarnessOf(await recordOn(rig, chatId, secondId))?.record;
+      return record !== undefined && record !== told;
+    }, "the swipe's record in the ledger");
     const retold = recHarnessOf(await recordOn(rig, chatId, secondId))?.record;
 
     // The player deletes the reply's first telling: the ledger moves the swipe's record to the place it now has, with no write of the runtime's.

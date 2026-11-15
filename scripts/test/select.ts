@@ -1,4 +1,4 @@
-// Which test files cover a change: the selection behind `bun run test` (scripts/test/run.ts).
+// Which test files cover a change: the selection behind `bun run check` and `bun scripts/test/run.ts`.
 //
 // Each changed path picks test files:
 //   - a test file picks itself;

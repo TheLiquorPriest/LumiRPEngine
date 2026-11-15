@@ -170,7 +170,7 @@ describe("the story engine's preset reader", () => {
     expect(kept.diagnostics).toContain(`The preset's block "Broken" has a macro whose braces don't match, so it was read on its own.`);
   });
 
-  test.skipIf(HOST_REPO === null)("Lumiverse's own macro engine reads the seeded variables, a variable one block sets reaches the next, and the pass splits back", async () => {
+  test.skipIf(HOST_REPO === null)(`Lumiverse's own macro engine reads the seeded variables, a variable one block sets reaches the next, and the pass splits back${HOST_REPO === null ? " (skipped: set LRE_HOST_REPO to a Lumiverse host checkout)" : ""}`, async () => {
     const repo = HOST_REPO ?? "";
     const host = hostOf(
       [

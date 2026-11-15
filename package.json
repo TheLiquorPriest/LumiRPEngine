@@ -29,13 +29,12 @@
     "templates": "bun scripts/templates/build.ts",
     "reference": "bun scripts/reference/build.ts",
     "api": "bun scripts/api/generate.ts",
-    "test": "\"$npm_execpath\" test ./test/app ./test/adapter ./test/store ./test/iface ./test/cast ./test/story ./test/lore ./test/play ./test/turn ./test/tree ./test/ui ./test/ext ./test/migrate ./test/guidance ./test/build ./test/build-mode ./test/docs-standalone ./test/proof ./test/standalone-boundaries.test.ts",
-    "test:old": "bun scripts/test/run.ts",
-    "check": "bun scripts/test/run.ts --check",
-    "test:all": "bun scripts/test-all.ts",
-    "test:release": "bun scripts/test/run.ts --release",
-    "test:properties": "bun scripts/test/run.ts --properties",
-    "test:timings": "bun scripts/test-all.ts --record"
+    "test": "\"$npm_execpath\" scripts/test-all.ts",
+    "check": "\"$npm_execpath\" scripts/test/run.ts --check",
+    "test:all": "\"$npm_execpath\" scripts/test-all.ts",
+    "test:release": "\"$npm_execpath\" scripts/test/run.ts --release",
+    "test:properties": "\"$npm_execpath\" scripts/test/run.ts --properties",
+    "test:timings": "\"$npm_execpath\" scripts/test-all.ts --record"
   },
   "type": "module"
 }

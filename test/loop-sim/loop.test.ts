@@ -9,7 +9,7 @@ import { ALL_NOTE } from "../../src/engine/simulate";
 import type { InterpretOutput } from "../../src/engine/steps";
 import { timelapseIntent } from "../../src/engine/turn";
 import { hashJson } from "../../src/shared/hash";
-import { STARTER_WORLDS } from "../../src/packs/index";
+import { STARTER_INFO, STARTER_WORLDS } from "../../src/packs/index";
 import { modernUsWorld } from "../packs/riverton";
 import { fold, startState, trialBalance } from "../packs/support";
 import { doubleBookings, leaks, reg, Session } from "./harness";
@@ -143,8 +143,12 @@ describe("loop-sim: Story default", () => {
 
 describe("loop-sim: converted starter worlds", () => {
   const starters = Object.entries(STARTER_WORLDS);
-  test.skipIf(starters.length > 0)("no converted starter worlds are wired yet", () => {
-    expect(starters).toEqual([]);
+  // The neutral templates shipped in data-src/templates are what `bun run templates` converts: each is a world the Build tab offers and this loop runs.
+  test("every shipped starter world is converted, offered by the Build tab, and run here", () => {
+    const shipped = [...new Bun.Glob("*.json").scanSync({ cwd: `${import.meta.dir}/../../data-src/templates` })].map((file) => file.slice(0, -".json".length).replace(/-/g, "_")).sort();
+    expect(shipped.length).toBeGreaterThan(0);
+    expect(starters.map(([id]) => id).sort()).toEqual(shipped);
+    expect(STARTER_INFO.map((t) => t.id).sort()).toEqual(shipped);
   });
   for (const [id, make] of starters) {
     test(`${id}: 20 turns as authored hold the invariants`, () => {

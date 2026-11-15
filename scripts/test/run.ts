@@ -1,24 +1,26 @@
-// The test runs (README "Tests"): what to run during a change, before a commit and at release.
+// The test runs (README "Tests") besides the gate: what to run during a change, before a commit and
+// at release. The gate, every test file each in a process of its own, is `bun run test`
+// (scripts/test-all.ts).
 //
 //   bun scripts/test/run.ts               the tests for what changed since the branch left main, and in the working tree
-//   bun scripts/test/run.ts --check       both typechecks and the generated files' checks, then those tests
-//   bun scripts/test/run.ts --release     the release gate: the checks, every test file, the property suite on the fixed seeds and fresh ones
+//   bun scripts/test/run.ts --check       both typechecks and the generated files' checks, then those tests (`bun run check`)
+//   bun scripts/test/run.ts --release     the release gate: the checks, every test file through the per-file runner, the property suite on the fixed seeds and fresh ones
 //   bun scripts/test/run.ts --properties  the property suite alone, on the fixed seeds and fresh ones
 //   bun scripts/test/run.ts --timings     records test/timings.json again (every test file but the property suite, one after another in one process)
 //   bun scripts/test/run.ts <test files>  these files
 //
 //   --base <ref>      compare with <ref> instead of main (HEAD: only what isn't committed yet)
 //   --budget <s>      seconds of recorded test time for the tests taken nearest first (default 60)
-//   --list            print the selection and stop
+//   --list            print the selection and stop; with --release, every test file the per-file runner runs
 //   --fresh <n>       fresh sequences for --release and --properties (default 200; 0 for none)
 //   --seed-base <b>   the fresh sequences' seed base (default a new one), to run a release's again
 //   -- <args>         passed on to `bun test` (`-t <pattern>`, `--bail`)
 //
-// Test files run in parallel, one process per core, slowest first by test/timings.json, whose times
-// are each file's in one `bun test` process that runs them one after another: the unit `--budget`
-// is in. Every test file, each in a process of its own, is `bun run test:all` (scripts/test-all.ts),
-// which orders by its own recording, test/timings-all.json (`bun run test:timings`), of each file's
-// whole process.
+// The tests for what changed run in one `bun test` process, a worker per core, slowest first by
+// test/timings.json, whose times are each file's in one `bun test` process that runs them one after
+// another: the unit `--budget` is in. The release runs every test file as the gate does, each in a
+// process of its own (scripts/test-all.ts), ordered by the per-file runner's own recording,
+// test/timings-all.json (`bun run test:timings`), of each file's whole process.
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -26,7 +28,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { addCoverage, coverageGaps, noCoverage, type Coverage } from "../../test/support/coverage";
 import { changedSince, isTest, readRepo, readTimings, selectTests, type Pick } from "./select";
-import { TIMEOUT_MS } from "../test-all";
+import { TIMEOUT_MS, judge, readKnown, runAll, summarize, testFiles } from "../test-all";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const TIMINGS = "test/timings.json";
@@ -99,8 +101,9 @@ function exec(label: string, cmd: readonly string[], options: { quiet?: boolean;
 const bun = process.execPath;
 const tsc = join(ROOT, "node_modules/.bin/tsc");
 
+/** The tests in one `bun test` process; each file is told the per-test limit Bun is given, as the gate tells it (`RPE_TEST_LIMIT_MS`). */
 function bunTest(label: string, files: readonly string[], extra: readonly string[], env: Record<string, string> = {}): Promise<Done> {
-  return exec(label, [bun, "test", "--parallel", `--timeout=${TIMEOUT_MS}`, `--timings=${TIMINGS}`, ...extra, ...files.map((f) => `./${f}`)], { env });
+  return exec(label, [bun, "test", "--parallel", `--timeout=${TIMEOUT_MS}`, `--timings=${TIMINGS}`, ...extra, ...files.map((f) => `./${f}`)], { env: { RPE_TEST_LIMIT_MS: String(TIMEOUT_MS), ...env } });
 }
 
 /** Both typechecks and the generated files: the static half of `--check` and of the release gate. */
@@ -112,6 +115,14 @@ function checks(): Promise<Done[]> {
     exec("the starter worlds are current", [bun, "scripts/templates/build.ts", "--check"], { quiet: true }),
     exec("the starter templates validate", [bun, "validate.ts"], { quiet: true, cwd: join(ROOT, "data-src/templates") }),
   ]);
+}
+
+/** Every test file through the per-file runner, each in a process of its own as `bun run test` runs them, judged as the gate judges them (its known failures reported with their owners), with that run's summary. */
+async function suite(extra: readonly string[]): Promise<Done> {
+  const started = performance.now();
+  const judged = judge(await runAll({ jobs: Math.max(1, availableParallelism() - 2), files: testFiles(ROOT), bun: extra }), { known: readKnown(ROOT) });
+  for (const line of summarize(judged)) console.log(line);
+  return { label: `tests: every test file, each in a process of its own (${judged.run.first.length})`, ok: judged.ok, ms: performance.now() - started, out: "" };
 }
 
 /**
@@ -189,7 +200,7 @@ function describe(changed: readonly string[], since: string, base: string, run: 
   for (const p of shown) console.log(`  ${p.file}  (${p.why})`);
   const further = run.length - shown.length;
   if (further > 0) console.log(`  … and ${further} more that reach what changed through their imports (--list names them)`);
-  if (left.length > 0) console.log(`${left.length} more test file(s) reach what changed but didn't fit the budget; \`bun run test:all\` runs every one.`);
+  if (left.length > 0) console.log(`${left.length} more test file(s) reach what changed but didn't fit the budget; \`bun run test\` runs every one.`);
   if (list) for (const p of left) console.log(`  not run: ${p.file}  (${p.why})`);
   if (uncovered.length > 0) console.log(`No test reaches: ${uncovered.join(", ")}`);
 }
@@ -238,8 +249,12 @@ async function main(): Promise<boolean> {
       return (await exec("timings", [bun, "test", `--timings=${TIMINGS}`, "--update-timings", `--path-ignore-patterns=${PROPERTIES}`])).ok;
     }
     case "release": {
+      if (args.list) {
+        for (const file of testFiles(ROOT)) console.log(file);
+        return true;
+      }
       const steps = await checks();
-      const tests = bunTest("tests: every test file but the property suite", [], [`--path-ignore-patterns=${PROPERTIES}`, ...args.bun]);
+      const tests = suite(args.bun);
       // The shards spend much of their time waiting on the fake host's event loop, so a few share
       // the cores with the test files, and the rest start as the files finish.
       const props = properties(args.fresh, args.seedBase, Math.max(2, Math.floor(availableParallelism() / 3)), tests);
