@@ -88,7 +88,7 @@ function harnessImport(spec: string, typeOnly: boolean, zone: Zone, rule: Rule):
 }
 
 /** The one place everything is put together: the application's entry may import every server zone. */
-const COMPOSITION = /^app\/(main|cli|compose)\.ts$/;
+const COMPOSITION = /^app\/(main|cli|compose|commands\/[\w-]+)\.ts$/;
 
 /** Adapter modules the extension shares with RPE must hold no server code; they are checked as sandboxed too. */
 function sharedWithExtension(): Set<string> {

@@ -5,13 +5,13 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes, rawRoute, storedKey } from "../../src/app";
 import { secretHash, takeKeyHash } from "../../src/app/auth";
-import { runCli } from "../../src/app/cli";
+import { runCli, USAGE } from "../../src/app/cli";
 import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
 
 describe("rpe", () => {
@@ -43,7 +43,7 @@ describe("rpe", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);
+            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", group: "provider", does: "A test's provider endpoint.", answers: "a chat completion", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);
           },
         },
       ],
@@ -196,5 +196,24 @@ describe("rpe", () => {
     }
     expect(existsSync(nowhere)).toBe(false);
     expect((await rpe(["version"])).code).toBe(2);
+  });
+
+  test("every command the usage names is answered from its own file, and no command's file imports another's", () => {
+    const names = [...new Set([...USAGE.matchAll(/^ {2}rpe ([a-z]+)\b/gm)].map((m) => m[1] ?? ""))];
+    expect(names).toEqual(["up", "down", "serve", "status", "version", "lumiverse", "key", "connection", "allow", "deny", "backup", "migrate", "check"]);
+    // `allow` and `deny` are the two directions of one switch.
+    const stem = (name: string): string => (name === "allow" || name === "deny" ? "switch" : name);
+    const folder = join(import.meta.dir, "../../src/app/commands");
+    const dispatcher = readFileSync(join(import.meta.dir, "../../src/app/cli.ts"), "utf8");
+    const stems = new Set(names.map(stem));
+    for (const name of stems) {
+      expect(existsSync(join(folder, `${name}.ts`))).toBe(true);
+      expect(dispatcher).toContain(`from "./commands/${name}"`);
+      const text = readFileSync(join(folder, `${name}.ts`), "utf8");
+      for (const imported of [...text.matchAll(/from "\.\/([\w-]+)"/g)].map((m) => m[1] ?? "")) {
+        // `up` runs the swap from its own part, `swap-up`, which is not a command of its own.
+        expect(stems.has(imported) ? `${name} imports ${imported}` : "").toBe("");
+      }
+    }
   });
 });
