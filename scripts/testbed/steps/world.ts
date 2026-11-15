@@ -1,9 +1,10 @@
-// Item 1: one world with every part filled. It starts from the engine's modern starter (the one
-// with the most money, vehicles, groups and quests), takes the `modern` ruleset profile (a ruleset
-// with its sheet layout, checks and progression), and gets the invented parts in `world-parts.ts`,
-// all through the engine's own CLI; then it is committed. Build's own requests then build the lore
-// index entry into the player's book, and a Build job (Check world, no model) leaves its run in the
-// world's jobs. The `revision` step later makes a second revision and leaves a draft standing.
+// Item 1: one world, filled. It starts from the engine's modern starter (the one with the most
+// money, vehicles, groups and quests), takes the `modern` ruleset profile (a ruleset with its sheet
+// layout, checks and progression), and gets the invented parts in `world-parts.ts`, all through the
+// engine's own CLI; then it is committed. Build's own requests then build the lore index entry into
+// the player's book, and a Build job (Check world, no model) leaves its run in the world's jobs. The
+// `revision` step later makes a second revision, then, after the classic chat's turns, the one that
+// fills the parts this one leaves empty (`thirdRevision`), and leaves a draft standing.
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,10 +1,13 @@
 // The invented parts the test world adds to the engine's modern starter, so that every part of a
-// world document holds something (STANDALONE-PLAN §15.2, "What a world holds"): a map drawn in
-// squares the size of a town block, its own lore with a secret only one person holds and one behind
-// a gate, a lore index and pins, a club, a quest, a vehicle, money, a routine, needs, minds and the
-// rest. All of it is made up for the test; the starter's own town stays as it ships. The world's own
-// `sections` stay empty: a section of the world's own stands in place of the engine's narrator
-// sections, and a classic turn then has nothing to fill the prompt with.
+// world document holds something (STANDALONE-PLAN §15.2, "What a world holds"; §15.5, "a world with
+// every part filled"): a map drawn in squares the size of a town block, its own lore with a secret
+// only one person holds and one behind a gate, a lore index and pins, a club, a quest, a vehicle,
+// money, a routine, needs, minds and the rest. All of it is made up for the test; the starter's own
+// town stays as it ships. The parts that change how today's classic pipeline plays come last, in a
+// revision of their own (`thirdRevision`), made after the classic chat's turns: a section of the
+// world's own stands in place of the engine's narrator sections (`builtInSectionsOf`, on `main`
+// `src/shared/sections.ts:41-48`), and a step template of its own in place of a built-in step's
+// instructions, so a chat that plays that revision on the classic pipeline plays another prompt.
 
 type Op = { op: "add" | "replace"; path: string; value: unknown };
 
@@ -196,5 +199,36 @@ export function secondRevision(): Op[] {
       path: "/lore/lore_watch_whistle",
       value: { id: "lore_watch_whistle", title: "The Harbor Watch whistle", content: "Three short blasts on the Harbor Watch whistle mean a boat is loose; one long one means the volunteer on the round wants company.", keys: ["watch whistle"], links: ["harbor_watch"] },
     },
+  ];
+}
+
+/** Where the third revision's adopted entry points: the book's entry carrying an earlier build's secrecy fields (`book` step). */
+export interface LegacyEntryRef {
+  bookId: string;
+  legacyEntryId: string;
+}
+
+/**
+ * The third revision: the parts the starter and the first two revisions leave empty. No chat is
+ * upgraded to it, so every chat already played keeps the prompt it played with. Each value is one
+ * the world's own lint takes without an error (on `main`, `src/engine/authoring.ts:160-165` for the
+ * caps and `suppressed`, `:312-346` for sections and their wording, `:347-355` for step templates).
+ */
+export function thirdRevision(book: LegacyEntryRef): Op[] {
+  return [
+    // A section of the world's own with a pack-rendered id, so its lines have a source (`section_unfed`, authoring.ts:343).
+    {
+      op: "add",
+      path: "/sections/scene",
+      value: { id: "scene", label: "Scene", rank: 2, template: "Where in Port Alder the player character is now, when, and what they can see and hear there, block by block.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+    },
+    // The world's wording of a built-in section it still has without listing it (`builtInSectionsOf` keeps Minds once it lists its own).
+    { op: "add", path: "/sectionTemplates", value: { minds: "What each person in Port Alder has on their mind, each scoped to what that person knows.\n{{lines}}" } },
+    { op: "add", path: "/steps/harbor_brief", value: { id: "harbor_brief", purpose: "brief", template: "Keep the brief to the docks, the shop and the people the player character can see; name each as the world names them.", output: "text", signals: [] } },
+    // An adopted entry's source, a retired design the format keeps (on `main`, `src/shared/world.ts:1324-1325`).
+    { op: "add", path: "/suppressed/-", value: { bookId: book.bookId, entryId: book.legacyEntryId } },
+    { op: "add", path: "/spawnCap", value: 30 },
+    { op: "add", path: "/placeCap", value: 40 },
+    { op: "add", path: "/placesPerTurn", value: 3 },
   ];
 }

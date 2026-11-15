@@ -31,7 +31,9 @@ export const leftovers: Step = {
     await ctx.log.once("leftovers:unnamed-file", async () => {
       const path = join(userStorage(ctx.env, ctx.userId), UNNAMED_FILE);
       if (!existsSync(path)) writeFileSync(path, "Harbor Watch rota, kept here by hand for the migration's test: Mon Dale, Wed Jordan, Fri Danny.\n");
-      ctx.log.log({ step: "leftovers", action: "placed", kind: "file no inventory row names (by hand)", id: path });
+      // Named in the record the read-back and every later step check it by (`lib/instance/planted.ts`, `unnamedFilePresent`).
+      ctx.log.set("planted:unnamed", { row: "unnamed", kind: "a file no row names", made: "planted", where: "storage", path: UNNAMED_FILE });
+      ctx.log.log({ step: "leftovers", action: "placed", kind: "unnamed: a file no row names", id: UNNAMED_FILE });
     });
   },
 };
