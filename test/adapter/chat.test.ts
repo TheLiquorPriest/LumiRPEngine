@@ -151,6 +151,24 @@ for (const source of ["database", "http"] as const) {
       await expect(chat.search(theirs, { text: "lighthouse" })).rejects.toThrow(NoSuchChat);
       await expect(chat.info({ ...scope, user: "user-other" })).rejects.toThrow("There is no chat chat-coast for this RPE's Lumiverse user.");
     });
+
+    test("the reads under the port answer alike from the file and over the routes: the chat, its path at stored numbers, a stretch by place, messages by id, the stored breakdown of its latest reply that has one", async () => {
+      const db = new StandInDb();
+      closing.push(() => db.close());
+      const stored = { entries: [{ name: "Main", type: "block", tokens: 3, role: "system", content: "You narrate." }], chatHistoryTokens: 12, totalTokens: 15, model: "model" };
+      db.write({ ...chatRows("user-tamsin", "chat-coast", COAST, 1), message_breakdowns: [{ message_id: "c1", chat_id: "chat-coast", user_id: "user-tamsin", data: json({ ...stored, totalTokens: 1 }) }, { message_id: "c3", chat_id: "chat-coast", user_id: "user-tamsin", data: json(stored) }] });
+      const read = await readsOf(db, "user-tamsin", source);
+      closing.push(() => read.close());
+      expect(await read.reads.chat("chat-coast")).toMatchObject({ id: "chat-coast", user: "user-tamsin", name: "A chat" });
+      expect(await read.reads.chat("chat-other")).toBeNull();
+      // A delete left a gap: the path lists the numbers Lumiverse stored, not places.
+      expect((await read.reads.path("chat-coast"))?.map((s) => [s.id, s.index, s.hidden])).toEqual([["c0", 0, false], ["c1", 1, false], ["c2", 3, true], ["c3", 4, false], ["c4", 5, false]]);
+      expect(await read.reads.path("chat-other")).toBeNull();
+      expect((await read.reads.messages("chat-coast", { from: 1, to: 3 })).map((m) => m.id)).toEqual(["c1", "c2"]);
+      expect((await read.reads.messagesById("chat-coast", ["c4", "x0", "c0"])).map((m) => m.id)).toEqual(["c0", "c4"]);
+      expect(await read.reads.breakdown("chat-coast")).toEqual(stored);
+      expect(await read.reads.breakdown("chat-other")).toBeNull();
+    });
   });
 
   // The kit's seed laid into the stand-in: its chat's messages in Lumiverse's rows; the stretches the

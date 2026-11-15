@@ -9,11 +9,15 @@
 // An extension installed in the stand-in (`lumiverse.ts`) hears a socket's `SPINDLE_BACKEND_MSG`, and
 // its `sendToFrontend` reaches the socket of the session it names.
 
+import { createHash } from "node:crypto";
 import type { Clock } from "rp-harness/contract";
+import { isRecord } from "../../src/shared/json";
 import type { OpenSocket, Socket, SocketEvents } from "../../src/adapter/lumiverse/socket";
 import type { PageChannel } from "../../src/ext/page";
+import type { GenerationType } from "./assembly";
 import type { StandInDb } from "./db";
 import type { Installed, StandIn } from "./lumiverse";
+import { dryRunResult, pageOf, parsePagination, parsed, rowMetadata, rowToBook, rowToCharacter, rowToEntry, rowToMessage, rowToMessageLight, rowToPersona, rowToPreset, rowToSetting, type Pagination } from "./served";
 import { CLIENT_TIMEOUT_MS, ServerSocket, SWEEP_MS } from "./sockets";
 
 type Timers = Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
@@ -39,34 +43,51 @@ const SIGN_IN_MAX = 8;
 const SIGN_IN_WINDOW_MS = 5 * 60 * 1000;
 /** `TICKET_TTL_MS` (`ws/tickets.ts:22`). */
 const TICKET_TTL_MS = 30_000;
-/** A page of a list is at most 1000 rows (`types/pagination.ts:12-14`). */
-const PAGE_MAX = 1000;
+/** `REVALIDATE_PRIVATE` (`utils/http-cache.ts:12`). */
+const REVALIDATE_PRIVATE = "private, no-cache";
+/** The longest an error told to a page is (`utils/provider-errors.ts:147-156`). */
+const MAX_ERROR_LENGTH = 1000;
+/** The messages one page of a list may ask for (`routes/chats.routes.ts:800-803`, `types/pagination.ts:14`). */
+const MESSAGES_MAX = 1000;
+/** A chat's messages in order (`services/chats.service.ts:2128`). */
+const MESSAGES_ALL = "SELECT m.* FROM messages m JOIN chats c ON m.chat_id = c.id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC";
+/** What an entry list sorts by (`services/world-books.service.ts:1498-1504`). */
+const ENTRY_SORT_COLUMNS: Record<string, string> = { order: "order_value", priority: "priority", created: "created_at", updated: "updated_at", name: "comment" };
+
+interface EntryOptions {
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  search?: string;
+  folder?: string;
+  tags?: string[];
+  type?: "trigger" | "constant" | "vector";
+}
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 }
 
-const parsed = (text: unknown, fallback: unknown): unknown => {
-  if (typeof text !== "string") return fallback;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return fallback;
-  }
-};
+/** `ifNoneMatchSatisfies` (`utils/http-cache.ts:19-33`): the client's `If-None-Match` lists the tag, weak or strong, or `*`. */
+function ifNoneMatchSatisfies(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const normalize = (value: string): string => (value.trim().startsWith("W/") ? value.trim().slice(2).trim() : value.trim());
+  const current = normalize(etag);
+  return header
+    .split(",")
+    .map((v) => v.trim())
+    .some((v) => v === "*" || normalize(v) === current);
+}
 
-/** A message row as Lumiverse's light list serves it (`rowToMessage` and `rowToMessageLight`, `services/chats.service.ts:587-605`, `:655-669`): lists parsed, `is_user` a boolean, the swipes not shown left out. */
-function lightMessage(row: Record<string, unknown>): Record<string, unknown> {
-  const swipes = parsed(row.swipes, [row.content ?? ""]);
-  const swipeId = typeof row.swipe_id === "number" ? row.swipe_id : 0;
-  const list = Array.isArray(swipes) ? swipes : [row.content ?? ""];
-  return {
-    ...row,
-    is_user: row.is_user === 1 || row.is_user === true,
-    swipes: list.length > 1 ? list.map((s, i) => (i === swipeId ? s : null)) : list,
-    swipe_dates: parsed(row.swipe_dates || "[]", []),
-    extra: parsed(row.extra, {}),
-  };
+/** A route that revalidates (`routes/world-books.routes.ts:296-306`): the tag and `Cache-Control` on its answer, a 304 with no body where the client holds the tag already. */
+function revalidated(request: Request, etag: string, body: unknown): Response {
+  const headers = { ETag: etag, "Cache-Control": REVALIDATE_PRIVATE };
+  if (ifNoneMatchSatisfies(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
+  return json(200, body, headers);
+}
+
+/** The error a generation route tells (`routes/generate.routes.ts:27-37`): the message, clamped. */
+function generationError(message: string): Response {
+  return json(400, { error: message.length > MAX_ERROR_LENGTH ? `${message.slice(0, MAX_ERROR_LENGTH - 1)}…` : message });
 }
 
 export interface LumiverseServerOptions {
@@ -263,20 +284,8 @@ export class LumiverseServer {
       return json(200, { extensions, isPrivileged: false });
     }
 
-    const db = this.options.db;
-    const chatPath = /^\/api\/v1\/chats\/([^/]+)(\/messages)?$/.exec(path);
-    if (request.method === "GET" && chatPath !== null) {
-      const chatId = decodeURIComponent(chatPath[1]!);
-      const chat = db?.rows("SELECT * FROM chats WHERE id = ? AND user_id = ?", chatId, user)[0];
-      // `GET /api/v1/chats/:id` (`routes/chats.routes.ts:410-421`), the chat as `rowToChat` gives it.
-      if (chatPath[2] === undefined) return chat === undefined ? json(404, { error: "Not found" }) : json(200, { ...chat, metadata: parsed(chat.metadata, {}) });
-      // `GET /api/v1/chats/:chatId/messages` (`routes/chats.routes.ts:792-821`): a page of the light list, `{data, total, limit, offset}` (`services/pagination.ts:27-45`).
-      if (chat === undefined || db === undefined) return json(404, { error: "Chat not found" });
-      const all = db.rows("SELECT * FROM messages WHERE chat_id = ? ORDER BY index_in_chat, rowid", chatId);
-      const limit = Math.min(PAGE_MAX, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
-      const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
-      return json(200, { data: all.slice(offset, offset + limit).map(lightMessage), total: all.length, limit, offset });
-    }
+    const served = await this.fromRows(request, url, user);
+    if (served !== null) return served;
 
     // `POST /api/v1/generate/stop` (`app.ts:443`, `routes/generate.routes.ts:45-65`): the generation named, else the chat's,
     // else every one of the user's. An id is taken only when it is truthy (`:48`, `:53`, `:60`): an empty one names nothing.
@@ -287,6 +296,256 @@ export class LumiverseServer {
     }
 
     return json(404, { error: "Not found" });
+  }
+
+  // ---------------------------------------------------------------- what the rows answer
+
+  /**
+   * The routes RPE reads from, answered from the stand-in's rows as Lumiverse's services read them: a chat and its messages
+   * (`routes/chats.routes.ts`), a stored breakdown and a dry run (`routes/generate.routes.ts`), the user's books and their entries,
+   * a character, the personas, a preset and a setting. Null for any other route.
+   */
+  private async fromRows(request: Request, url: URL, user: string): Promise<Response | null> {
+    const db = this.options.db;
+    const path = url.pathname;
+    const rows = (sql: string, ...params: (string | number | null)[]): Record<string, unknown>[] => db?.rows(sql, ...params) ?? [];
+    const match = (re: RegExp): RegExpExecArray | null => re.exec(path);
+    const named = (m: RegExpExecArray | null, at = 1): string | undefined => (m === null ? undefined : decodeURIComponent(m[at]!));
+    const pagination = parsePagination(url.searchParams.get("limit"), url.searchParams.get("offset"));
+
+    if (request.method === "POST" && path === "/api/v1/generate/dry-run") return this.dryRun(request, user);
+    if (request.method !== "GET") return null;
+
+    // `GET /api/v1/chats/:id` and its messages (`routes/chats.routes.ts:410-421`, `:792-821`).
+    const chatRoute = match(/^\/api\/v1\/chats\/([^/]+)(\/messages)?$/);
+    if (chatRoute !== null) {
+      const chatId = named(chatRoute)!;
+      const chat = rows("SELECT * FROM chats WHERE id = ? AND user_id = ?", chatId, user)[0];
+      if (chatRoute[2] === undefined) {
+        if (chat === undefined) return json(404, { error: "Not found" });
+        const shown = { ...chat, metadata: rowMetadata(chat.metadata) };
+        const base = { ...shown, character_display_owner: this.displayOwner(user, chat.character_id) };
+        return json(200, url.searchParams.get("messages") === "false" ? base : { ...base, messages: rows(MESSAGES_ALL, chatId, user).map(rowToMessage) });
+      }
+      if (chat === undefined) return json(404, { error: "Chat not found" });
+      return this.messageList(url, chatId, user, rows);
+    }
+
+    // `GET /api/v1/generate/breakdown/:messageId` (`routes/generate.routes.ts:175-181`; `services/breakdown.service.ts:14-21`): what was stored with the reply, or 404.
+    const breakdownRoute = match(/^\/api\/v1\/generate\/breakdown\/([^/]+)$/);
+    if (breakdownRoute !== null) {
+      const row = rows("SELECT data FROM message_breakdowns WHERE message_id = ? AND user_id = ?", named(breakdownRoute)!, user)[0];
+      const data = row === undefined ? null : parsed(row.data, null);
+      return data === null ? json(404, { error: "No breakdown found for this message" }) : json(200, data);
+    }
+
+    // The user's world books (`routes/world-books.routes.ts:302-342`, `:907-938`): no route for one entry.
+    if (path === "/api/v1/world-books") {
+      const sig = rows("SELECT COUNT(*) as count, COALESCE(MAX(updated_at), 0) as maxUpdatedAt FROM world_books WHERE user_id = ?", user)[0]!;
+      const etag = `"wb-list-${sig.count}-${sig.maxUpdatedAt}-${pagination.limit}-${pagination.offset}"`;
+      const list = rows("SELECT * FROM world_books WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?", user, pagination.limit, pagination.offset);
+      return revalidated(request, etag, pageOf(list.map(rowToBook), Number(sig.count), pagination));
+    }
+    const bookRoute = match(/^\/api\/v1\/world-books\/([^/]+)(\/entries)?$/);
+    if (bookRoute !== null) {
+      const bookId = named(bookRoute)!;
+      const book = rows("SELECT * FROM world_books WHERE id = ? AND user_id = ?", bookId, user)[0];
+      if (book === undefined) return json(404, { error: bookRoute[2] === undefined ? "Not found" : "World book not found" });
+      const sig = rows("SELECT COUNT(*) as count, COALESCE(MAX(updated_at), 0) as maxUpdatedAt, COALESCE(SUM(revision), 0) as revisionSum FROM world_book_entries WHERE world_book_id = ?", bookId)[0]!;
+      const stamp = `${book.updated_at}-${sig.count}-${sig.maxUpdatedAt}-${sig.revisionSum}-${pagination.limit}-${pagination.offset}`;
+      if (bookRoute[2] === undefined) {
+        const entries = this.entriesPage(bookId, pagination, {}, rows);
+        return revalidated(request, `"wb-${bookId}-${stamp}"`, { ...rowToBook(book), entries });
+      }
+      const sortBy = url.searchParams.get("sort_by");
+      const sortDir = url.searchParams.get("sort_dir");
+      const type = url.searchParams.get("type");
+      const options: EntryOptions = {
+        ...(sortBy !== null && sortBy in ENTRY_SORT_COLUMNS ? { sortBy } : {}),
+        ...(sortDir === "desc" || sortDir === "asc" ? { sortDir } : {}),
+        ...((url.searchParams.get("search") ?? "") !== "" ? { search: url.searchParams.get("search")! } : {}),
+        ...(url.searchParams.get("folder") !== null ? { folder: url.searchParams.get("folder")! } : {}),
+        ...(url.searchParams.getAll("tag").length > 0 ? { tags: url.searchParams.getAll("tag") } : {}),
+        ...(type === "trigger" || type === "constant" || type === "vector" ? { type } : {}),
+      };
+      const etag = `"wb-entries-${bookId}-${stamp}-${options.sortBy ?? ""}-${options.sortDir ?? ""}"`;
+      return revalidated(request, etag, this.entriesPage(bookId, pagination, options, rows));
+    }
+
+    // `GET /api/v1/characters/:id` (`routes/characters.routes.ts:860-865`).
+    const characterRoute = match(/^\/api\/v1\/characters\/([^/]+)$/);
+    if (characterRoute !== null) {
+      const row = rows("SELECT * FROM characters WHERE id = ? AND user_id = ?", named(characterRoute)!, user)[0];
+      return row === undefined ? json(404, { error: "Not found" }) : json(200, rowToCharacter(row));
+    }
+
+    // `GET /api/v1/personas` and one persona (`routes/personas.routes.ts:85-89`, `:272-277`).
+    if (path === "/api/v1/personas") {
+      const total = Number(rows("SELECT COUNT(*) as count FROM personas WHERE user_id = ?", user)[0]!.count);
+      const list = rows("SELECT * FROM personas WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?", user, pagination.limit, pagination.offset);
+      return json(200, pageOf(list.map(rowToPersona), total, pagination));
+    }
+    const personaRoute = match(/^\/api\/v1\/personas\/([^/]+)$/);
+    if (personaRoute !== null) {
+      const row = rows("SELECT * FROM personas WHERE id = ? AND user_id = ?", named(personaRoute)!, user)[0];
+      return row === undefined ? json(404, { error: "Not found" }) : json(200, rowToPersona(row));
+    }
+
+    // `GET /api/v1/presets/:id` (`routes/presets.routes.ts:139-158`): tagged by the preset's cache revision and the user.
+    const presetRoute = match(/^\/api\/v1\/presets\/([^/]+)$/);
+    if (presetRoute !== null) {
+      const presetId = named(presetRoute)!;
+      const row = rows("SELECT * FROM presets WHERE id = ? AND user_id = ?", presetId, user)[0];
+      if (row === undefined) return json(404, { error: "Not found" });
+      const scope = createHash("sha256").update(user).digest("base64url");
+      const headers = { ETag: `W/"preset-${presetId}-${Number(row.cache_revision ?? 0)}-${scope}"`, "Cache-Control": REVALIDATE_PRIVATE, Vary: "Cookie, Accept-Encoding" };
+      if (ifNoneMatchSatisfies(request.headers.get("if-none-match"), headers.ETag)) return new Response(null, { status: 304, headers });
+      return json(200, rowToPreset(row), headers);
+    }
+
+    // `GET /api/v1/settings/:key` (`routes/settings.routes.ts:20-25`): the value parsed.
+    const settingRoute = match(/^\/api\/v1\/settings\/([^/]+)$/);
+    if (settingRoute !== null) {
+      const row = rows("SELECT key, value, updated_at FROM settings WHERE key = ? AND user_id = ?", named(settingRoute)!, user)[0];
+      return row === undefined ? json(404, { error: "Not found" }) : json(200, rowToSetting(row));
+    }
+    return null;
+  }
+
+  /** `getCharacterDisplayOwner` (`services/characters.service.ts:52-68`): which enabled extension the character's own record names as the one that draws it. */
+  private displayOwner(user: string, characterId: unknown): string | null {
+    const providers = [...this.listed.values()].map((l) => l.identifier);
+    if (providers.length === 0 || typeof characterId !== "string" || characterId === "") return null;
+    const whens = providers.map(() => "WHEN json_extract(extensions, '$.' || ? || '.display_owner') = 1 THEN ?").join(" ");
+    const row = this.options.db?.rows(`SELECT (CASE ${whens} ELSE NULL END) AS owner FROM characters WHERE id = ? AND user_id = ?`, ...providers.flatMap((id) => [id, id]), characterId, user)[0];
+    return typeof row?.owner === "string" ? row.owner : null;
+  }
+
+  /**
+   * A chat's message list (`routes/chats.routes.ts:792-821`): the light form unless `full=true` asks for every swipe; a keyset page
+   * before a boundary (`beforeIndex` and `beforeId`, both required together, `services/chats.service.ts:2257-2275`); the newest page
+   * of `tail=true` (`:2226-2245`); else an offset page, `{data, total, limit, offset}`.
+   */
+  private messageList(url: URL, chatId: string, user: string, rows: (sql: string, ...params: (string | number | null)[]) => Record<string, unknown>[]): Response {
+    const shape = url.searchParams.get("full") === "true" ? rowToMessage : rowToMessageLight;
+    const requested = url.searchParams.get("beforeIndex");
+    if (requested !== null) {
+      const index = Number(requested);
+      const id = url.searchParams.get("beforeId");
+      if (!Number.isSafeInteger(index) || index < 0 || !id) return json(400, { error: "beforeIndex and beforeId must identify a message boundary" });
+      const limit = Math.min(parsePagination(url.searchParams.get("limit")).limit, MESSAGES_MAX);
+      const before = rows(
+        `SELECT m.* FROM messages m JOIN chats c ON m.chat_id = c.id
+        WHERE m.chat_id = ? AND c.user_id = ? AND m.index_in_chat <= ?
+          AND (m.index_in_chat < ? OR m.id < ?)
+        ORDER BY m.index_in_chat DESC, m.id DESC LIMIT ?`,
+        chatId,
+        user,
+        index,
+        index,
+        id,
+        limit + 1,
+      );
+      const more = before.length > limit;
+      if (more) before.length = limit;
+      return json(200, { data: before.reverse().map(shape), has_more: more, limit });
+    }
+    const total = Number(rows("SELECT COUNT(*) as count FROM messages m JOIN chats c ON m.chat_id = c.id WHERE m.chat_id = ? AND c.user_id = ?", chatId, user)[0]!.count);
+    if (url.searchParams.get("tail") === "true") {
+      const limit = Math.min(parsePagination(url.searchParams.get("limit")).limit, MESSAGES_MAX);
+      const newest = rows("SELECT m.* FROM messages m JOIN chats c ON m.chat_id = c.id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat DESC, m.id DESC LIMIT ?", chatId, user, limit).reverse();
+      return json(200, { data: newest.map(shape), total, limit, offset: Math.max(0, total - newest.length) });
+    }
+    const pagination = parsePagination(url.searchParams.get("limit"), url.searchParams.get("offset"));
+    const page = rows(`${MESSAGES_ALL} LIMIT ? OFFSET ?`, chatId, user, pagination.limit, pagination.offset);
+    return json(200, pageOf(page.map(shape), total, pagination));
+  }
+
+  /** `listEntriesPaginated` (`services/world-books.service.ts:1550-1620`): sorted by `order` unless asked, filtered by folder, tags, type and search. */
+  private entriesPage(bookId: string, pagination: Pagination, options: EntryOptions, rows: (sql: string, ...params: (string | number | null)[]) => Record<string, unknown>[]): unknown {
+    const column = ENTRY_SORT_COLUMNS[options.sortBy ?? "order"] ?? "order_value";
+    const collate = options.sortBy === "name" ? " COLLATE NOCASE" : "";
+    const direction = options.sortDir === "desc" ? "DESC" : "ASC";
+    const conditions = ["e.world_book_id = ?"];
+    const params: (string | number | null)[] = [bookId];
+    const search = options.search?.trim() ?? "";
+    if (search !== "") {
+      // Lumiverse matches a trigram index of the entry's text for three characters or more, each word a phrase, all of them (`:1524-1530`); a shorter
+      // query is a substring of one of four columns (`:1585-1591`). The stand-in has no index: each word is a substring of the same four columns.
+      const words = search.length >= 3 ? search.split(/\s+/).filter(Boolean) : [search];
+      for (const word of words) {
+        const like = `%${word.replace(/[\\%_]/g, "\\$&")}%`;
+        conditions.push("(e.comment LIKE ? ESCAPE '\\' OR e.content LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' OR e.keysecondary LIKE ? ESCAPE '\\')");
+        params.push(like, like, like, like);
+      }
+    }
+    if (options.folder !== undefined) {
+      conditions.push("e.folder = ?");
+      params.push(options.folder.trim());
+    }
+    for (const tag of [...new Set((options.tags ?? []).map((t) => t.trim()).filter(Boolean))]) {
+      conditions.push("EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(e.tags) THEN CASE WHEN json_type(e.tags) = 'array' THEN e.tags ELSE '[]' END ELSE '[]' END) t WHERE t.value = ?)");
+      params.push(tag);
+    }
+    if (options.type === "constant") conditions.push("e.constant = 1");
+    if (options.type === "vector") conditions.push("e.constant = 0 AND e.vectorized = 1");
+    if (options.type === "trigger") conditions.push("e.constant = 0 AND e.vectorized = 0");
+    const where = conditions.join(" AND ");
+    const total = Number(rows(`SELECT COUNT(*) as count FROM world_book_entries e WHERE ${where}`, ...params)[0]!.count);
+    const page = rows(`SELECT e.* FROM world_book_entries e WHERE ${where} ORDER BY e.${column}${collate} ${direction}, e.id ASC LIMIT ? OFFSET ?`, ...params, pagination.limit, pagination.offset);
+    return pageOf(page.map(rowToEntry), total, pagination);
+  }
+
+  /**
+   * `POST /api/v1/generate/dry-run` (`routes/generate.routes.ts:26-43`; `services/generate.service.ts:3080-3274`): the prompt assembled as a
+   * generation would assemble it, its interceptors run with `dryRun` set, and no lock, no provider call and nothing saved. `chat_id` is
+   * required (400); a failure is told as 400 with its message. The connection is the chat's pin, else the one asked (`connection_id`)
+   * (`services/generation/connection-resolution.ts:65-91`; the stand-in has no default connection).
+   */
+  private async dryRun(request: Request, user: string): Promise<Response> {
+    const host = this.options.host;
+    const db = this.options.db;
+    if (host === undefined) return json(404, { error: "Not found" });
+    const text = await request.text();
+    const body = parsed(text, undefined) as Record<string, unknown> | null | undefined;
+    // `c.req.json()` throws on what is not JSON, and the app has no handler of its own for it: Hono answers 500.
+    if (body === undefined) return new Response("Internal Server Error", { status: 500, headers: { "content-type": "text/plain; charset=UTF-8" } });
+    if (body === null || typeof body !== "object" || !body.chat_id) return json(400, { error: "chat_id is required" });
+    const asked = (key: string): string | undefined => (typeof body[key] === "string" && body[key] !== "" ? (body[key] as string) : undefined);
+    if (body.include_request_messages !== undefined && typeof body.include_request_messages !== "boolean") return generationError("include_request_messages must be a boolean");
+    const chatId = String(body.chat_id);
+    const rows = (sql: string, ...params: (string | number | null)[]): Record<string, unknown>[] => db?.rows(sql, ...params) ?? [];
+    const chat = rows("SELECT * FROM chats WHERE id = ? AND user_id = ?", chatId, user)[0];
+    const metadata = chat === undefined ? {} : rowMetadata(chat.metadata);
+    const settingOf = (key: string): unknown => {
+      const row = rows("SELECT value FROM settings WHERE key = ? AND user_id = ?", key, user)[0];
+      return row === undefined ? undefined : parsed(row.value, undefined);
+    };
+    const pin = typeof metadata.connection_profile_id === "string" ? metadata.connection_profile_id.trim() : "";
+    const connection = host.connections.get(pin) ?? host.connections.get(asked("connection_id") ?? "");
+    if (connection === undefined) return generationError("No connection profile found. Configure a default connection or select one for this chat.");
+    const presetId = asked("preset_id") ?? (typeof settingOf("activeLoomPresetId") === "string" ? (settingOf("activeLoomPresetId") as string) : undefined);
+    if (presetId === undefined) return generationError(host.presets.size === 0 ? "No presets available. Create a preset before generating." : "No preset selected. Choose a preset before generating.");
+    if (!host.presets.has(presetId)) return generationError("The selected preset was deleted. Pick a different preset before generating.");
+    if (chat === undefined) return generationError("Chat not found");
+    const persona = asked("persona_id") ?? (typeof settingOf("activePersonaId") === "string" ? (settingOf("activePersonaId") as string) : undefined);
+    const outcome = await host.generate({
+      chat: chatId,
+      connection: connection.id,
+      preset: presetId,
+      type: (asked("generation_type") ?? "normal") as GenerationType,
+      dryRun: true,
+      ...(persona !== undefined ? { persona } : {}),
+      ...(asked("message_id") !== undefined ? { message: asked("message_id")! } : {}),
+      ...(isRecord(body.parameters) ? { parameters: body.parameters } : {}),
+    });
+    if (outcome.error !== null) return generationError(outcome.error);
+    const sourceMessages = new Map(rows(MESSAGES_ALL, chatId, user).map((row) => [String(row.id), rowToMessage(row)] as const));
+    const reasoning = settingOf("reasoningSettings");
+    return json(
+      200,
+      dryRunResult({ outcome, connection, sourceMessages, reasoningSettings: isRecord(reasoning) ? reasoning : null, includeRequestMessages: body.include_request_messages === true }),
+    );
   }
 
   // ---------------------------------------------------------------- sockets
