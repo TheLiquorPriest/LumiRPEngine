@@ -213,7 +213,8 @@ describe("lore where Lumiverse puts it (`services/prompt-assembly.service.ts:349
 
   /** The prompt the interceptor was handed: each message's first word, and whether it is flagged as lore. */
   async function placed(preset: Partial<Preset>, entries: Entry[]): Promise<{ handed: [string, boolean][]; out: Outcome; texts: string[] }> {
-    const lv = marsh(marshLines([]), preset, entries);
+    // These tests place lore, not the prompt's end: the empty-send nudge Lumiverse adds after a reply is left out here, and held by prompt.test.ts.
+    const lv = marsh(marshLines([]), { emptySendNudge: "", ...preset }, entries);
     const seen = handed(lv);
     const out = await generate(lv);
     return { handed: seen[0]!.map((m) => [textOf(m).split(" ")[0]!, m.__isWorldInfoEntry === true]), out, texts: seen[0]!.map((m) => textOf(m)) };
@@ -335,6 +336,7 @@ describe("a dry run (`services/generate.service.ts:3080-3274`)", () => {
       ["block", "Main", "b-main", "MAIN You narrate a ferry crossing a marsh."],
       ["world_info", "World Info Before: The ferry", null, "FERRY-LORE The ferry runs at dawn."],
       ["block", "Fog", "b-depth", "DEPTH-NOTE The fog thickens."],
+      ["utility", "Empty Send Nudge", null, "[Write the next reply only as Tamsin.]"],
       ["utility", "Assistant Prefill", null, "PREFILL Tamsin"],
     ]);
     expect([dry.generationId, dry.stored, lv.stored.size, lv.chats.get(CHAT)!.messages.length]).toEqual([null, null, 0, 3]);

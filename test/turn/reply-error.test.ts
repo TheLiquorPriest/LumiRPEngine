@@ -23,6 +23,14 @@ test("a provider that fails before the reply: the notice carries the provider's 
   expect(seen?.reasoning).toContain("The model's provider failed before a reply was written.");
   expect(seen?.reasoning).not.toContain("UPSTREAM-WORDS");
   expect(seen?.reasoning).not.toContain("relay-7");
+  // The message Lumiverse keeps holds no text and that thinking, the line without the provider's words, and says in its outcome why it ended.
+  expect(out.messageId).toBeDefined();
+  const kept = b.db.rows("SELECT content, extra FROM messages WHERE id = ?", out.messageId!)[0]!;
+  expect(kept.content).toBe("");
+  const extra = JSON.parse(String(kept.extra)) as { reasoningBySwipe: string[]; generationOutcomeBySwipe: { error: string }[] };
+  expect(extra.reasoningBySwipe[0]).toContain("The model's provider failed before a reply was written.");
+  expect(extra.reasoningBySwipe[0]).not.toContain("UPSTREAM-WORDS");
+  expect(extra.generationOutcomeBySwipe[0]!.error).toContain("UPSTREAM-WORDS");
 });
 
 // The Author ends with no reply after `reply-missing`'s one reminder: its plain text, with no reply contract's mark, both times.

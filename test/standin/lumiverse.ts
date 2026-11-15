@@ -32,6 +32,8 @@ export interface Connection {
   model: string;
   /** Its name, which a failed generation's end event carries (`connectionName`, `services/generate.service.ts:630-647`). */
   name?: string;
+  /** Its provider (`connection.provider`): a DeepSeek or Moonshot connection is sent the preset's reasoning prefill (`services/prompt-assembly.service.ts:4164-4181`). */
+  provider?: string;
   /** Its own record: a "Start Reply With" bound to it stands in place of the user's, an empty one too (`services/prompt-assembly.service.ts:4130-4137`). */
   metadata?: { reasoningBindings?: { promptBias?: string } };
 }
@@ -62,6 +64,11 @@ export interface GenerateInput {
    * target") and while the chat has a generation running ("A generation is already running for this chat", `:1608`).
    */
   backgroundSwipe?: boolean;
+  /** What the player typed before an impersonation (`impersonate_input`, `services/generate.service.ts:2773-2774`), and the mode he chose (`impersonate_mode`, absent: "prompts", `:2769-2772`). */
+  impersonateInput?: string;
+  impersonateMode?: "prompts" | "oneliner";
+  /** The feedback of a regenerate (`regen_feedback`, `regen_feedback_position`, `regen_feedback_format`, `services/generate.service.ts:257-259`): what he typed, where it goes and its format. */
+  regenFeedback?: { text: string; position: "system" | "user"; format?: string };
 }
 
 export interface Outcome {
@@ -255,7 +262,9 @@ export class StandIn extends ChatRows {
     const requested = input.targetCharacter !== undefined && members.includes(input.targetCharacter) ? input.targetCharacter : undefined;
     const spoke = dryRun ? undefined : type === "continue" ? goesOn?.characterId : type === "swipe" || type === "regenerate" ? swipeTarget?.characterId : undefined;
     const inferred = spoke !== undefined && members.includes(spoke) ? spoke : undefined;
-    const speakerId = (type === "swipe" || type === "regenerate" || type === "continue" ? inferred || requested : requested || inferred) || chat.character.id;
+    // The member the generation is aimed at, before the chat's own character stands in (`pipelineTargetCharId`, `:1853`): what the nudges read.
+    const aimedAt = (type === "swipe" || type === "regenerate" || type === "continue" ? inferred || requested : requested || inferred) || undefined;
+    const speakerId = aimedAt ?? chat.character.id;
     const speakerCard = this.library.charactersByIds(chat.user, [speakerId]).get(speakerId);
     const speakerName = speakerCard === undefined ? "Assistant" : effectiveName(speakerCard);
     if (!dryRun) {
@@ -362,7 +371,20 @@ export class StandIn extends ChatRows {
       // ---- the prompt (`assembly.ts`), over the history as the user's settings, the context anchor, Memory and the databank mentions shape it
       const bound = connection.metadata?.reasoningBindings?.promptBias;
       const shaped = this.shapeHistory(chat, metadata, speaker, messages);
-      const assembled = assemble(preset, lore.entries, shaped.messages, { type, promptBias: typeof bound === "string" ? bound : this.promptBias, names, world: { placements: chain.placementByEntryId, insertionOrder: chain.insertionOrderByEntryId }, ...shaped.ending, ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}) });
+      const assembled = assemble(preset, lore.entries, shaped.messages, {
+        type,
+        promptBias: typeof bound === "string" ? bound : this.promptBias,
+        names,
+        world: { placements: chain.placementByEntryId, insertionOrder: chain.insertionOrderByEntryId },
+        targetCharacterId: aimedAt,
+        group: groupMetadata.group === true ? members : undefined,
+        provider: connection.provider,
+        impersonateInput: input.impersonateInput,
+        impersonateMode: type === "impersonate" ? (input.impersonateMode ?? "prompts") : undefined,
+        regenFeedback: input.regenFeedback,
+        ...shaped.ending,
+        ...(goesOn !== null ? { continueMessageId: goesOn.id, continuePostfix: postfix } : {}),
+      });
       const { prompt, breakdown } = assembled;
       contextClipStats = assembled.contextClipStats;
       sent = prompt;
@@ -406,12 +428,16 @@ export class StandIn extends ChatRows {
       const base = connection.base.replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
       // The authored start of the reply, which the model goes on from (`:3702-3722`): streamed to the page first and saved in front of the model's text.
       const prefill = breakdown.find((e) => e.type === "utility" && e.name === "Assistant Prefill")?.content ?? "";
+      // The start of the thinking a DeepSeek or Moonshot connection was sent (`:3710-3712`): streamed as thinking before anything, and saved in front of the model's own thinking, which is all the
+      // reasoning carrier holds (`nativeReasoningContent`, `:3455-3471`).
+      const reasoningPrefill = breakdown.find((e) => e.type === "utility" && e.name === "Reasoning Prefill")?.content ?? "";
       const thinkingSetting = this.library.setting(chat.user, "reasoningSettings") as { autoParse?: unknown; prefix?: unknown; suffix?: unknown } | undefined;
       const text: TextSettings = { cot: { autoParse: thinkingSetting?.autoParse === true, delimiters: resolveReasoningDelimiters(thinkingSetting) }, trim: preset.trimIncompleteWords === true, scripts: this.regexScripts };
-      const seen: StreamSeen = { content: prefill, reasoning: "" };
+      const seen: StreamSeen = { content: prefill, reasoning: reasoningPrefill };
       this.streams.set(live.id, seen);
       const timing: Timing = { streamingStartedAt: this.clock.now(), wasStreaming: streaming };
       const frames = new StreamFrames(() => this.clock, (frame) => this.emit("STREAM_TOKEN_RECEIVED", frame, chat.user, { topic: `stream:${chat.user}:${chat.id}` }), { generationId: live.id, chatId: chat.id });
+      frames.push("reasoning", reasoningPrefill);
       if (prefill !== "") {
         // A prefill that opens thinking is thinking from its first word (`:3706-3709`).
         const part = text.cot.autoParse ? extractDelimitedReasoning(prefill, text.cot.delimiters) : { cleaned: prefill, reasoning: "" };
@@ -447,10 +473,10 @@ export class StandIn extends ChatRows {
           const read = streaming ? await readStream(res, seen, hooks) : await readWhole(res, hooks);
           timing.responseStoppedAt = this.clock.now();
           // The reply's own text is the model's; the prefill is in front of what the player sees and what is saved.
-          reply = streaming ? { ...read, content: read.content.slice(prefill.length) } : read;
+          reply = streaming ? { ...read, content: read.content.slice(prefill.length), reasoning: read.reasoning.slice(reasoningPrefill.length) } : read;
           if (!streaming) {
             seen.content = prefill + read.content;
-            seen.reasoning = read.reasoning;
+            seen.reasoning = reasoningPrefill + read.reasoning;
           }
         } finally {
           release();
@@ -462,11 +488,11 @@ export class StandIn extends ChatRows {
       const carrierOf = (thinking: string): Record<string, unknown> | undefined => (thinking === "" ? undefined : { type: "reasoning_content", content: thinking });
       if (reply === null) {
         // Stopped by the user or failed while the provider was called or read (`:4502-4579`): whatever came is kept, a staged message that got nothing removed (`persistPartialContent`, `:3565-3680`).
-        const kept = this.land(chat, landing, false, partialText({ content: seen.content, reasoning: seen.reasoning, prefill, streamed: streaming }, text), carrierOf(seen.reasoning));
+        const kept = this.land(chat, landing, false, partialText({ content: seen.content, reasoning: seen.reasoning, prefill, streamed: streaming }, text), carrierOf(seen.reasoning.slice(reasoningPrefill.length)));
         const how = seen.finishReason !== undefined ? { finish_reason: seen.finishReason } : null;
         const swipe = target.swipe ?? undefined;
         if (kept.messageId !== undefined && type !== "impersonate") this.setSwipeScopedExtra(chat, kept.messageId, swipe, { generationOutcome: how });
-        const heard = { content: seen.content.slice(prefill.length), reasoning: seen.reasoning, finishReason: seen.finishReason ?? "", usage: null };
+        const heard = { content: seen.content.slice(prefill.length), reasoning: seen.reasoning.slice(reasoningPrefill.length), finishReason: seen.finishReason ?? "", usage: null };
         if (failure === null) {
           frames.flush();
           this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: kept.content }, chat.user);
@@ -479,7 +505,7 @@ export class StandIn extends ChatRows {
         return { generationId, ...(kept.messageId !== undefined ? { messageId: kept.messageId } : {}), error: failed.error, stopped: false, prompt: sent, body, reply: null, parameters, stored: null, worldInfo, contextClipStats };
       }
       // A reply that ended well (`:4065-4310`): its text finished, saved where it goes, its macros resolved, what belongs to its swipe written, then told.
-      const finished = finishedText({ content: prefill + reply.content, reasoning: reply.reasoning, prefill, streamed: streaming }, text);
+      const finished = finishedText({ content: prefill + reply.content, reasoning: reasoningPrefill + reply.reasoning, prefill, streamed: streaming }, text);
       const carrier = carrierOf(reply.reasoning);
       const landed = this.land(chat, landing, true, finished, carrier);
       const messageId = landed.messageId;

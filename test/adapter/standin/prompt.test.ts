@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { streamedReply } from "../../../src/adapter/lumiverse/stream";
 import type { PromptMessageDTO } from "../../../src/ext/spindle";
-import { StandIn, type ChatMessage, type Outcome, type Preset } from "../../standin/lumiverse";
+import { StandIn, type ChatMessage, type GenerateInput, type Outcome, type Preset } from "../../standin/lumiverse";
 import { textOf } from "../../standin/steps";
 
 const USER = "user-quay";
@@ -26,12 +26,12 @@ function quayLines(asked = false): ChatMessage[] {
 }
 
 /** A stand-in Lumiverse with the quay's chat on a model that answers every request with one line. */
-function quay(messages: ChatMessage[], preset: Partial<Preset> = {}): StandIn {
+function quay(messages: ChatMessage[], preset: Partial<Preset> = {}, metadata: Record<string, unknown> = {}): StandIn {
   const lv = new StandIn();
   lv.servers.set(MODEL, async (request) => streamedReply(async (out) => out.content("NEW-TEXT she says."), { id: "reply", model: "model", created: 0 }, request.signal, { clock: CLOCK, turn: false }));
   lv.connections.set("conn-model", { id: "conn-model", base: `${MODEL}/v1`, key: "model-key", model: "model" });
   lv.presets.set("preset-quay", { id: "preset-quay", name: "Quay", blocks: [{ id: "b-main", name: "Main", role: "system", content: "MAIN You narrate a quay at dusk." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }], ...preset });
-  lv.addChat({ id: CHAT, user: USER, character: { id: "char-oona", name: "Oona" }, messages });
+  lv.addChat({ id: CHAT, user: USER, character: { id: "char-oona", name: "Oona" }, messages, metadata });
   return lv;
 }
 
@@ -83,14 +83,14 @@ describe("the prefill as Lumiverse sends it (`services/prompt-assembly.service.t
   test("an impersonation has one only with Continue prefill on, and then the preset's impersonation start where it sets one (`:4126-4128`, `:4153-4158`)", async () => {
     const off = await generate(quay(quayLines(), { assistantPrefill: PREFILL, assistantImpersonation: "IMPERSONATE I lean on the rail and" }), "impersonate");
     expect(off.prompt.some((m) => m.partial === true)).toBe(false);
-    expect(utilities(off)).toEqual([]);
+    expect(utilities(off)).toEqual([["Impersonation Prompt", "user", IMPERSONATION]]);
 
     const prefilled = await generate(quay(quayLines(), { assistantPrefill: PREFILL, continuePrefill: true }), "impersonate");
-    expect(ending(prefilled, 1)).toEqual([["assistant", PREFILL, true]]);
+    expect(ending(prefilled, 2)).toEqual([["system", IMPERSONATION, false], ["assistant", PREFILL, true]]);
 
     const own = await generate(quay(quayLines(), { assistantPrefill: PREFILL, assistantImpersonation: "IMPERSONATE I lean on the rail and", continuePrefill: true }), "impersonate");
     expect(ending(own, 1)).toEqual([["assistant", "IMPERSONATE I lean on the rail and", true]]);
-    expect(utilities(own)).toEqual([["Assistant Prefill", "assistant", "IMPERSONATE I lean on the rail and"]]);
+    expect(utilities(own)).toEqual([["Impersonation Prompt", "system", IMPERSONATION], ["Assistant Prefill", "assistant", "IMPERSONATE I lean on the rail and"]]);
   });
 
   test("the user's Start Reply With comes first and the preset's prefill after it, in one message; a connection's own takes its place, an empty one too (`:4130-4151`)", async () => {
@@ -216,7 +216,7 @@ describe("a continue, as Lumiverse picks its message and makes its prompt", () =
 const SOURCE_KEYS = ["__isChatHistory", "sourceMessageId", "sourceIndexInChat", "__chatHistorySource", "__sourceMessageId", "__sourceIndexInChat"];
 
 describe("a continue, as Lumiverse announces it and hands it to the extensions", () => {
-  test("a continue's start event names only its swipe, its moved message carries no source key, and the page sends the last non-user message (`services/generate.service.ts:1962-1968`, `:2040-2055`; `frontend/src/components/chat/InputArea.tsx:2238-2250`)", async () => {
+  test("an interceptor is handed a continue's moved message with no source key to name it by (`spindle/worker-host.ts:3189-3197`, `spindle/source-message-metadata.ts:1-4`); its start event names only its swipe, the page sends the last non-user message", async () => {
     // The greeting is the chat's first message, and Oona's reply shows its second swipe.
     const lines: ChatMessage[] = [{ ...quayLines()[0]!, greeting: 0 }, quayLines()[1]!, { ...quayLines()[2]!, swipeId: 1 }];
     const lv = quay(lines);
@@ -256,5 +256,206 @@ describe("a continue, as Lumiverse announces it and hands it to the extensions",
     await generate(impersonated, "impersonate");
     const its = impersonated.events.find((e) => e.event === "GENERATION_STARTED")!.payload as Record<string, unknown>;
     expect([its.targetMessageId, its.targetSwipeId]).toEqual([undefined, undefined]);
+  });
+});
+
+/** The generation with the inputs only some kinds carry. */
+async function generateWith(lv: StandIn, type: "normal" | "swipe" | "regenerate" | "continue" | "impersonate", more: Partial<GenerateInput>): Promise<Outcome> {
+  const out = await lv.generate({ chat: CHAT, connection: "conn-model", preset: "preset-quay", type, ...more });
+  expect(out.error).toBeNull();
+  return out;
+}
+
+/** Lumiverse's own lines, as its defaults resolve them for Oona's chat with no persona (`services/prompt-behavior.ts:10-17`). */
+const IMPERSONATION = "[Write your next reply from the point of view of User, using the chat history so far as a guideline for the writing style of User. Don't write as Oona or system. Don't describe actions of Oona.]";
+const EMPTY_SEND = "[Write the next reply only as Oona.]";
+
+describe("the impersonation prompt (`services/prompt-assembly.service.ts:4010-4040`)", () => {
+  test("an impersonation ends with the impersonation prompt before the prefill, what the player typed after it, and it is recorded as the Impersonation Prompt", async () => {
+    // Without the prefill: a user message, last. Nothing typed, the preset's line alone.
+    const plain = await generate(quay(quayLines()), "impersonate");
+    expect(ending(plain, 1)).toEqual([["user", IMPERSONATION, false]]);
+    expect(utilities(plain)).toEqual([["Impersonation Prompt", "user", IMPERSONATION]]);
+
+    // What he typed follows the line after a blank line.
+    const typed = await generateWith(quay(quayLines()), "impersonate", { impersonateInput: "  TYPED I tie the boat up and  " });
+    expect(ending(typed, 1)).toEqual([["user", `${IMPERSONATION}\n\nTYPED I tie the boat up and`, false]]);
+
+    // With "Continue prefill" on, the line is a system message and the prefill stands after it.
+    const prefilled = await generate(quay(quayLines(), { continuePrefill: true, assistantPrefill: PREFILL }), "impersonate");
+    expect(ending(prefilled, 2)).toEqual([["system", IMPERSONATION, false], ["assistant", PREFILL, true]]);
+    expect(utilities(prefilled)).toEqual([["Impersonation Prompt", "system", IMPERSONATION], ["Assistant Prefill", "assistant", PREFILL]]);
+  });
+
+  test("the preset's own line stands in its place, with its macros resolved; an empty one leaves only what was typed, and no line and nothing typed, nothing", async () => {
+    const own = await generate(quay(quayLines(), { impersonationPrompt: "OWN Speak as {{user}}, not {{char}}." }), "impersonate");
+    expect(ending(own, 1)).toEqual([["user", "OWN Speak as User, not Oona.", false]]);
+
+    const onlyTyped = await generateWith(quay(quayLines(), { impersonationPrompt: "" }), "impersonate", { impersonateInput: "TYPED I tie the boat up and" });
+    expect(ending(onlyTyped, 1)).toEqual([["user", "TYPED I tie the boat up and", false]]);
+
+    const none = await generate(quay(quayLines(), { impersonationPrompt: "" }), "impersonate");
+    expect(ending(none, 1)).toEqual([["assistant", "REPLY-1 Oona is coiling rope.", false]]);
+    expect(utilities(none)).toEqual([]);
+  });
+
+  test("the one-liner mode sends the chat's history and the prompt alone: no preset block, no lore (`:2771-2790`, `onelinerImpersonation`)", async () => {
+    /** The quay with a book of its own on the character, a fresh stand-in each time: an impersonation saves the player's reply. */
+    const withLore = (): StandIn => {
+      const lv = quay(quayLines(true));
+      lv.library.addBook({ id: "book-quay", name: "Quay", user: USER, entries: [{ id: "e-lamp", book: "book-quay", comment: "Lamps", constant: true, content: "LAMP-LORE the lamps burn oil." }] });
+      lv.library.addCharacter(USER, { id: "char-oona", name: "Oona", extensions: { world_book_ids: ["book-quay"] } });
+      return lv;
+    };
+    const full = await generate(withLore(), "impersonate");
+    expect(full.prompt.some((m) => textOf(m).includes("MAIN"))).toBe(true);
+    expect(full.prompt.some((m) => textOf(m).includes("LAMP-LORE"))).toBe(true);
+
+    const one = await generateWith(withLore(), "impersonate", { impersonateMode: "oneliner", impersonateInput: "TYPED I nod." });
+    expect(one.prompt.map((m) => [m.role, textOf(m)])).toEqual([
+      ["assistant", "GREET The lamps along the quay are lit."],
+      ["user", "USER-1 I walk to the end of the quay."],
+      ["assistant", "REPLY-1 Oona is coiling rope."],
+      ["user", "USER-2 I ask her about the boat."],
+      ["user", `${IMPERSONATION}\n\nTYPED I nod.`],
+    ]);
+  });
+});
+
+describe("a send with nothing typed after a reply, and the nudges (`:4066-4118`; `services/prompt-behavior.ts:92-117`)", () => {
+  test("a normal generation of a chat whose last message is not the player's gets the empty-send nudge as a user message before the prefill", async () => {
+    const out = await generate(quay(quayLines(), { assistantPrefill: PREFILL }), "normal");
+    expect(ending(out, 3)).toEqual([["assistant", "REPLY-1 Oona is coiling rope.", false], ["user", EMPTY_SEND, false], ["assistant", PREFILL, true]]);
+    expect(utilities(out)).toEqual([["Empty Send Nudge", "user", EMPTY_SEND], ["Assistant Prefill", "assistant", PREFILL]]);
+  });
+
+  test("and nowhere else: not after the player's line, not on a swipe, a regenerate, a continue or an impersonation, and not where the preset's is empty or a hidden message ends the chat", async () => {
+    expect(ending(await generate(quay(quayLines(true)), "normal"), 1)).toEqual([["user", "USER-2 I ask her about the boat.", false]]);
+    for (const kind of ["swipe", "regenerate", "continue"] as const) {
+      const out = await generate(quay(quayLines()), kind);
+      expect(utilities(out).map(([name]) => name)).not.toContain("Empty Send Nudge");
+    }
+    expect(utilities(await generate(quay(quayLines()), "impersonate")).map(([name]) => name)).not.toContain("Empty Send Nudge");
+    expect(utilities(await generate(quay(quayLines(), { emptySendNudge: "" }), "normal"))).toEqual([]);
+    // A hidden line of the player's after the reply: the last visible message is still the reply's.
+    const hidden = await generate(quay([...quayLines(), { id: "m3", role: "user", content: "USER-2 I ask her about the boat.", hidden: true }]), "normal");
+    expect(ending(hidden, 1)).toEqual([["user", EMPTY_SEND, false]]);
+    // The preset's own line, its macros resolved.
+    expect(ending(await generate(quay(quayLines(), { emptySendNudge: "OWN Go on as {{char}}." }), "normal"), 1)).toEqual([["user", "OWN Go on as Oona.", false]]);
+  });
+
+  test("a group chat's reply for one of its members gets the preset's group nudge naming the speaker, and not the empty-send nudge", async () => {
+    const lv = quay(quayLines(), {}, { group: true, character_ids: ["char-oona", "char-wick"] });
+    lv.library.addCharacter(USER, { id: "char-oona", name: "Oona" });
+    lv.library.addCharacter(USER, { id: "char-wick", name: "Wick" });
+    const named = await generateWith(lv, "normal", { targetCharacter: "char-wick" });
+    expect(ending(named, 1)).toEqual([["user", "[Write the next reply only as Wick.]", false]]);
+    expect(utilities(named)).toEqual([["Group Nudge", "user", "[Write the next reply only as Wick.]"]]);
+    // Aimed at no member the group's own nudge is not sent, and the chat after a reply is nudged as any other.
+    const unaimed = await generate(lv, "normal");
+    expect(utilities(unaimed).map(([name]) => name)).toEqual(["Empty Send Nudge"]);
+    // A member that is not in the group is no target; the preset's own line and its empty one.
+    expect(ending(await generateWith(lv, "normal", { targetCharacter: "char-nobody" }), 1)).toEqual([["user", EMPTY_SEND, false]]);
+    lv.presets.get("preset-quay")!.groupNudge = "";
+    expect(utilities(await generateWith(lv, "normal", { targetCharacter: "char-wick" }))).toEqual([]);
+  });
+
+  test("send if empty is sent where Lumiverse sends it, and nowhere else (`:4042-4064`)", async () => {
+    const blankLines = (): ChatMessage[] => [...quayLines(true), { id: "m4", role: "assistant", content: "" }];
+    // The prompt ends on an assistant message with no text: the preset's line follows as a user message. Lumiverse leaves the blank message itself out of what it sends, after
+    // the interceptors (`:1414-1423`).
+    const sent = await generate(quay(blankLines(), { sendIfEmpty: "SEND {{char}} has gone quiet.", emptySendNudge: "" }), "normal");
+    expect(ending(sent, 2)).toEqual([["user", "USER-2 I ask her about the boat.", false], ["user", "SEND Oona has gone quiet.", false]]);
+    expect(utilities(sent)).toEqual([["Send If Empty", "user", "SEND Oona has gone quiet."]]);
+    // The preset's line is empty by default, and a prompt that ends on text, or on the player's line, sends none.
+    expect(utilities(await generate(quay(blankLines(), { emptySendNudge: "" }), "normal"))).toEqual([]);
+    expect(utilities(await generate(quay(quayLines(), { sendIfEmpty: "SEND Go on.", emptySendNudge: "" }), "normal"))).toEqual([]);
+    expect(utilities(await generate(quay(quayLines(true), { sendIfEmpty: "SEND Go on." }), "normal"))).toEqual([]);
+  });
+});
+
+describe("the reasoning prefill on DeepSeek and Moonshot (`:4164-4181`)", () => {
+  const REASONING = "REASON Oona's rope is the thing to start from, so {{char}} reaches for it.";
+  const RESOLVED = "REASON Oona's rope is the thing to start from, so Oona reaches for it.";
+
+  function deepseek(provider: string | undefined, preset: Partial<Preset> = {}): StandIn {
+    const lv = quay(quayLines(true), { assistantPrefill: PREFILL, reasoningPrefill: REASONING, ...preset });
+    lv.connections.set("conn-model", { ...lv.connections.get("conn-model")!, ...(provider !== undefined ? { provider } : {}) });
+    return lv;
+  }
+
+  test.each(["deepseek", "moonshot"])("a %s connection is sent it as the prefill's reasoning_content, apart from the visible prefix, and it is recorded as the Reasoning Prefill", async (provider) => {
+    const out = await generate(deepseek(provider), "normal");
+    const last = out.prompt.at(-1)!;
+    expect([last.role, textOf(last), last.partial, last.reasoning_content]).toEqual(["assistant", PREFILL, true, RESOLVED]);
+    expect(utilities(out)).toEqual([["Assistant Prefill", "assistant", PREFILL], ["Reasoning Prefill", "assistant", RESOLVED]]);
+    expect((out.body!.messages as Record<string, unknown>[]).at(-1)).toEqual({ role: "assistant", content: PREFILL, reasoning_content: RESOLVED });
+  });
+
+  test("with no visible prefill the message is empty and holds only the reasoning; another provider, a connection of none and a continue are sent none", async () => {
+    const only = await generate(deepseek("deepseek", { assistantPrefill: "" }), "normal");
+    expect(ending(only, 1)).toEqual([["assistant", "", true]]);
+    expect(only.prompt.at(-1)!.reasoning_content).toBe(RESOLVED);
+
+    for (const other of ["openai", undefined]) {
+      const out = await generate(deepseek(other), "normal");
+      expect(out.prompt.at(-1)!.reasoning_content).toBeUndefined();
+      expect(utilities(out)).toEqual([["Assistant Prefill", "assistant", PREFILL]]);
+    }
+    const lv = quay(quayLines(), { reasoningPrefill: REASONING });
+    lv.connections.set("conn-model", { ...lv.connections.get("conn-model")!, provider: "deepseek" });
+    const goesOn = await generate(lv, "continue");
+    expect(goesOn.prompt.some((m) => m.reasoning_content !== undefined && m.role === "assistant" && m.partial === true && textOf(m).includes("Oona's rope"))).toBe(false);
+    expect(utilities(goesOn).map(([name]) => name)).not.toContain("Reasoning Prefill");
+  });
+});
+
+describe("the regeneration feedback (`:3920-3985`)", () => {
+  const FEEDBACK = { text: "FEEDBACK make it darker", position: "user" as const };
+
+  test("sent as the user's: after a line in the last user message of the history, whose marks it keeps, and recorded as the Regen Feedback", async () => {
+    const lv = quay(quayLines());
+    const seen = handed(lv);
+    const out = await generateWith(lv, "regenerate", { regenFeedback: FEEDBACK });
+    expect(ending(out, 1)).toEqual([["user", "USER-1 I walk to the end of the quay.\n[OOC: FEEDBACK make it darker]", false]]);
+    expect(utilities(out)).toEqual([["Regen Feedback", "user", "[OOC: FEEDBACK make it darker]"]]);
+    // It stayed the history message it was: the interceptor is told which message it came from.
+    expect(seen[0]!.filter((m) => m.__isChatHistory === true).map((m) => m.sourceMessageId)).toEqual(["m0", "m1"]);
+  });
+
+  test("sent as the system's: a system message at the end; the player's own format stands in place of Lumiverse's, its macros resolved", async () => {
+    const out = await generateWith(quay(quayLines()), "regenerate", { regenFeedback: { text: "FEEDBACK make it darker", position: "system", format: "NOTE {{user}} asks: {{$regenInput}}!" } });
+    expect(ending(out, 2)).toEqual([["user", "USER-1 I walk to the end of the quay.", false], ["system", "NOTE User asks: FEEDBACK make it darker!", false]]);
+    expect(utilities(out)).toEqual([["Regen Feedback", "system", "NOTE User asks: FEEDBACK make it darker!"]]);
+  });
+
+  test("none is sent without it, and the feedback goes before the prefill", async () => {
+    expect(utilities(await generate(quay(quayLines()), "regenerate"))).toEqual([]);
+    const out = await generateWith(quay(quayLines(), { assistantPrefill: PREFILL }), "regenerate", { regenFeedback: { ...FEEDBACK, position: "system" } });
+    expect(ending(out, 2)).toEqual([["system", "[OOC: FEEDBACK make it darker]", false], ["assistant", PREFILL, true]]);
+  });
+});
+
+describe("the last reply of the history, trimmed (`rtrimLastHistoryAssistant`, `:672-707`)", () => {
+  const lines = (): ChatMessage[] => [
+    { id: "m0", role: "assistant", content: "GREET The lamps along the quay are lit.  " },
+    { id: "m1", role: "user", content: "USER-1 I walk to the end of the quay.  " },
+    { id: "m2", role: "assistant", content: "REPLY-1 Oona is coiling rope.  \n " },
+  ];
+
+  test("the last reply in history ends with no trailing spaces; a continued message and a prefill keep theirs", async () => {
+    const out = await generate(quay(lines()), "normal");
+    // Only the newest assistant message is trimmed: an earlier one, and the player's, are sent as they are.
+    expect(out.prompt.map((m) => textOf(m)).filter((t) => t.startsWith("GREET") || t.startsWith("USER-1") || t.startsWith("REPLY-1"))).toEqual([
+      "GREET The lamps along the quay are lit.  ",
+      "USER-1 I walk to the end of the quay.  ",
+      "REPLY-1 Oona is coiling rope.",
+    ]);
+    // A continue goes on the message as it is, its own postfix after it.
+    const goesOn = await generate(quay(lines(), { continuePostfix: " " }), "continue");
+    expect(ending(goesOn, 2)[0]).toEqual(["assistant", "REPLY-1 Oona is coiling rope.  \n ", false]);
+    // A prefill the preset wrote is no history: it keeps its trailing space.
+    const spaced = await generate(quay(lines(), { assistantPrefill: "PREFILL Oona looks up and " }), "normal");
+    expect(ending(spaced, 1)).toEqual([["assistant", "PREFILL Oona looks up and ", true]]);
   });
 });

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import type { TurnList } from "../../src/ui/api";
+import { textOf } from "../standin/steps";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -156,5 +157,17 @@ describe("the other kinds of turn", () => {
     expect(store.chat(CHAT)?.head).toBe(before.head);
     expect(b.db.rows("SELECT id, content FROM messages WHERE chat_id = ? ORDER BY index_in_chat", CHAT)).toEqual(before.rows);
     expect((await turnList(b))[0]).toEqual([attempt.id, "impersonate", false]);
+  });
+
+  test("an impersonation is sent as Lumiverse ends it: the impersonation prompt before any prefill, a user message last, the player's draft after it, and the Author is handed it", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("I nod and keep climbing.")] });
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "impersonate", impersonateDraft: true, impersonateInput: "I nod and" });
+    expect(out.error).toBeNull();
+    const last = out.prompt.at(-1)!;
+    expect(last.role).toBe("user");
+    expect(textOf(last)).toMatch(/^\[Write your next reply from the point of view of .+\]\n\nI nod and$/s);
+    await settledTurn(b, out.generationId!);
+    expect(JSON.stringify(b.model.requests[1]!.messages)).toContain("point of view of");
   });
 });

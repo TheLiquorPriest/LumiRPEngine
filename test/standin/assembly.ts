@@ -10,7 +10,7 @@ import type { WI_MARKERS } from "./db";
 import { buildHistoryPlan, clipToContextBudget, selectHistoryMessages, type ContextClipStats, type CortexConfig, type MemoryOfChat, type MessageLimit } from "./history";
 import type { Entry, Placement } from "./lore";
 import { indexInChat, type ChatMessage } from "./rows";
-import type { ReasoningDelimiters } from "./save";
+import { resolveMacros, type ReasoningDelimiters } from "./save";
 import { stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role } from "./steps";
 
 /**
@@ -61,6 +61,16 @@ export interface Preset {
   continuePostfix?: string;
   /** The line that asks the model to go on with a continued message (`prompts.promptBehavior.continueNudge`): absent, Lumiverse's own; empty, none. */
   continueNudge?: string;
+  /** The line that asks for a reply when a normal generation starts from a chat whose last message is not the player's (`promptBehavior.emptySendNudge`): absent, Lumiverse's own; empty, none. */
+  emptySendNudge?: string;
+  /** The line that asks a group member for its reply (`promptBehavior.groupNudge`): absent, Lumiverse's own; empty, none. */
+  groupNudge?: string;
+  /** The line that asks for the player's own reply, an impersonation's (`promptBehavior.impersonationPrompt`): absent, Lumiverse's own; empty, none. */
+  impersonationPrompt?: string;
+  /** Sent as a user message when the prompt ends on an assistant message with no text (`promptBehavior.sendIfEmpty`): absent or empty, nothing. */
+  sendIfEmpty?: string;
+  /** The start of the model's thinking, sent to a DeepSeek or Moonshot connection as the prefill's `reasoning_content` (`completionSettings.reasoningPrefill`). */
+  reasoningPrefill?: string;
   /** "Squash system messages": a system message joins the system message before it (`completionSettings.squashSystemMessages`). */
   squashSystemMessages?: boolean;
   /** "Use system prompt": off, every system message is sent as the user's (`completionSettings.useSystemPrompt`); absent, on. */
@@ -75,6 +85,13 @@ export interface Preset {
 
 /** Lumiverse's own continue nudge, for a preset that sets none (`services/prompt-behavior.ts:10`). */
 export const CONTINUE_NUDGE = "[Continue your last message without repeating its original content.]";
+/** Lumiverse's own lines for a preset that sets none (`DEFAULT_PROMPT_BEHAVIOR`, `services/prompt-behavior.ts:10-17`), and the regeneration feedback's format (`:1463`). */
+export const EMPTY_SEND_NUDGE = "[Write the next reply only as {{char}}.]";
+export const GROUP_NUDGE = "[Write the next reply only as {{char}}.]";
+export const IMPERSONATION_PROMPT =
+  "[Write your next reply from the point of view of {{user}}, using the chat history so far as a guideline for the writing style of {{user}}. Don't write as {{char}} or system. Don't describe actions of {{char}}.]";
+export const REGEN_FEEDBACK_FORMAT = "[OOC: {{$regenInput}}]";
+const REGEN_INPUT = "{{$regenInput}}";
 
 export type GenerationType = "normal" | "swipe" | "regenerate" | "continue" | "impersonate";
 
@@ -115,6 +132,16 @@ export interface Ending {
    */
   carriers?: ReadonlyMap<string, string>;
   reasoning?: { keepInHistory: number; delimiters: ReasoningDelimiters };
+  /** What the player typed before an impersonation (`impersonate_input`), and the mode he chose (`impersonate_mode`, absent: "prompts"). */
+  impersonateInput?: string;
+  impersonateMode?: "prompts" | "oneliner";
+  /** The feedback a regenerate carries (`regen_feedback`, `regen_feedback_position`, `regen_feedback_format`). */
+  regenFeedback?: { text: string; position: "system" | "user"; format?: string };
+  /** The member the generation was aimed at, before the chat's own character stands in (`pipelineTargetCharId`, `services/generate.service.ts:1853`), and the members of a group chat. */
+  targetCharacterId?: string;
+  group?: readonly string[];
+  /** The provider of the connection (`connection.provider`): DeepSeek and Moonshot are sent a reasoning prefill. */
+  provider?: string;
 }
 
 /** One entry of the assembly's breakdown (`AssemblyBreakdownEntry`). */
@@ -655,10 +682,68 @@ function stripReasoningFromHistory(history: LlmMessage[], keep: { keepInHistory:
   }
 }
 
+/**
+ * The regeneration feedback (`:3920-3985`, `resolveRegenFeedbackPrompt` `:1471-1488`): the format's macros resolved, then the player's text put where `{{$regenInput}}` stands. At the end as
+ * a system message for `system`; for `user`, a line after the newest user message of the chat's history, its marks kept, or a user message of its own where there is none.
+ */
+function addRegenFeedback(prompt: LlmMessage[], breakdown: BreakdownEntry[], feedback: { text: string; position: "system" | "user"; format?: string }, macros: { user: string; char: string }): void {
+  const content = resolveMacros(feedback.format ?? REGEN_FEEDBACK_FORMAT, macros).split(REGEN_INPUT).join(feedback.text);
+  if (feedback.position === "system") {
+    prompt.push({ role: "system", content });
+    breakdown.push({ type: "utility", name: "Regen Feedback", role: "system", content });
+    return;
+  }
+  for (let i = prompt.length - 1; i >= 0; i--) {
+    const m = prompt[i]!;
+    if (m.role !== "user" || m.__chatHistorySource !== true) continue;
+    if (typeof m.content === "string") prompt[i] = { ...m, content: `${m.content}\n${content}` };
+    else {
+      const parts = [...m.content];
+      const at = parts.findIndex((p) => p.type === "text");
+      const text = at >= 0 ? parts[at]! : null;
+      if (text !== null && text.type === "text") parts[at] = { type: "text", text: `${text.text}\n${content}` };
+      else parts.unshift({ type: "text", text: content });
+      prompt[i] = { ...m, content: parts };
+    }
+    breakdown.push({ type: "utility", name: "Regen Feedback", role: "user", content });
+    return;
+  }
+  prompt.push({ role: "user", content });
+  breakdown.push({ type: "utility", name: "Regen Feedback", role: "user", content });
+}
+
+/**
+ * `rtrimLastHistoryAssistant` (`:672-707`): the newest assistant message of the chat's history loses its trailing whitespace, the last text part of a message of parts; the message a continue
+ * goes on with is left as it is, and a prefill, which is no history, too.
+ */
+function rtrimLastHistoryAssistant(prompt: LlmMessage[], keep: string | undefined): void {
+  for (let i = prompt.length - 1; i >= 0; i--) {
+    const m = prompt[i]!;
+    if (m.role !== "assistant" || m.__chatHistorySource !== true) continue;
+    if (keep !== undefined && keep !== "" && m.__sourceMessageId === keep) return;
+    if (typeof m.content === "string") {
+      const trimmed = m.content.replace(/\s+$/, "");
+      if (trimmed !== m.content) prompt[i] = { ...m, content: trimmed };
+    } else {
+      for (let j = m.content.length - 1; j >= 0; j--) {
+        const part = m.content[j]!;
+        if (part.type !== "text") continue;
+        const trimmed = part.text.replace(/\s+$/, "");
+        if (trimmed !== part.text) prompt[i] = { ...m, content: m.content.map((p, k) => (k === j ? { type: "text" as const, text: trimmed } : p)) };
+        break;
+      }
+    }
+    return;
+  }
+}
+
 /** The prompt for these messages, each history message carrying the number Lumiverse stored for it (`:229-231`, `:3361`, `:3398`). */
-export function assemble(preset: Preset, active: readonly Entry[], messages: readonly ChatMessage[], ending: Ending): Assembled {
+export function assemble(preset: Preset, entries: readonly Entry[], messages: readonly ChatMessage[], ending: Ending): Assembled {
   const breakdown: BreakdownEntry[] = [];
   const prompt: LlmMessage[] = [];
+  // The one-liner mode of an impersonation skips the preset's blocks and the lore: the chat's history, then the impersonation prompt (`:2771-2790`, `onelinerImpersonation`, `:8153-8300`).
+  const oneliner = ending.type === "impersonate" && ending.impersonateMode === "oneliner";
+  const active = oneliner ? [] : entries;
   const lore = placedLore(active, ending.world);
   const pending: InHistory[] = [];
   const appends: Append[] = [];
@@ -668,7 +753,7 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
   let hasWiAfter = false;
   // Lumiverse sends the history only at a block marked `chat_history` (`:3161`): a preset with none sends none, and the lore that goes around the history
   // goes to the start and the end of the prompt (`:3732-3756`).
-  const blocks = preset.blocks;
+  const blocks: readonly Block[] = oneliner ? [{ id: "oneliner-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] : preset.blocks;
   // Lore pinned beside a marker block, by the marker's id and the side (`pinnedByMarker`, `:3092-3106`). The "after" ones of a block are put in
   // at the top of the next turn of the loop, so they follow all that the block put in, and the last block's after the loop.
   const pinnedBy = (marker: string, side: "before" | "after"): PinnedLore[] => lore.pinned.filter((p) => p.marker === marker && p.side === side);
@@ -696,7 +781,7 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
       const history = buildHistory(messages, ending);
       prompt.push(...history);
       breakdown.push({ type: "chat_history", name: "Chat History", messageCount: history.length, firstMessageIndex: firstChatIdx });
-      if (ending.mention !== undefined && ending.mention !== "") {
+      if (!oneliner && ending.mention !== undefined && ending.mention !== "") {
         for (let i = prompt.length - 1; i >= firstChatIdx; i--) {
           if (prompt[i]!.role !== "user") continue;
           prompt[i] = appendToFirstText(prompt[i]!, ending.mention);
@@ -775,6 +860,9 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
     if (p.worldInfo) breakdown.push({ type: "world_info", name: p.name, role: p.role, content: p.content });
     else breakdown.push({ type: "block", name: p.name, role: p.role, content: p.content, ...(p.attributesWorldInfoMarkerTokens === true ? { tokenCountContent: p.tokenCountContent, attributesWorldInfoMarkerTokens: true } : {}), blockId: p.blockId });
   }
+  const macros = { user: ending.names.user, char: ending.names.character };
+  // The regeneration feedback (`:3920-3985`), before the continue nudge.
+  if (ending.regenFeedback !== undefined && ending.regenFeedback.text !== "") addRegenFeedback(prompt, breakdown, ending.regenFeedback, macros);
   // A continue's nudge, without "Continue prefill" (`services/prompt-assembly.service.ts:3987-4008`): marked, so that it is moved to stand
   // after the continued message below.
   if (ending.type === "continue" && preset.continuePrefill !== true) {
@@ -784,19 +872,71 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
       breakdown.push({ type: "utility", name: "Continue Nudge", role: "system", content: nudge });
     }
   }
+  // The impersonation prompt (`:4010-4040`): the preset's line, macros resolved, then what the player typed before it, a user message at the end of the prompt, a system one
+  // with "Continue prefill" on, where the prefill is to stand as the partial assistant message after it.
+  if (ending.type === "impersonate") {
+    const line = preset.impersonationPrompt ?? IMPERSONATION_PROMPT;
+    const typed = (ending.impersonateInput ?? "").trim();
+    const resolved = line === "" ? "" : resolveMacros(line, macros);
+    const text = typed === "" ? resolved : resolved === "" ? typed : `${resolved}\n\n${typed}`;
+    if (text !== "") {
+      const role: Role = preset.continuePrefill === true ? "system" : "user";
+      prompt.push({ role, content: text });
+      breakdown.push({ type: "utility", name: "Impersonation Prompt", role, content: text });
+    }
+  }
+  // "Send If Empty" (`:4042-4064`): the prompt ends on an assistant message with no text.
+  const sendIfEmpty = preset.sendIfEmpty ?? "";
+  const endsOn = prompt.at(-1);
+  if (sendIfEmpty !== "" && endsOn !== undefined && endsOn.role === "assistant" && typeof endsOn.content === "string" && endsOn.content.trim() === "") {
+    const text = resolveMacros(sendIfEmpty, macros);
+    if (text !== "") {
+      prompt.push({ role: "user", content: text });
+      breakdown.push({ type: "utility", name: "Send If Empty", role: "user", content: text });
+    }
+  }
+  // The empty-send nudge (`:4066-4090`, `shouldInjectEmptySendNudge`, `services/prompt-behavior.ts:92-104`): a normal generation aimed at no member, from a chat whose last visible message is not the player's.
+  if (prompt.length > 0 && ending.type === "normal" && ending.targetCharacterId === undefined) {
+    const lastVisible = messages.findLast((m) => m.hidden !== true);
+    const line = preset.emptySendNudge ?? EMPTY_SEND_NUDGE;
+    const text = lastVisible !== undefined && lastVisible.role !== "user" && line !== "" ? resolveMacros(line, macros) : "";
+    if (text !== "") {
+      prompt.push({ role: "user", content: text });
+      breakdown.push({ type: "utility", name: "Empty Send Nudge", role: "user", content: text });
+    }
+  }
+  // The group nudge (`:4095-4118`, `shouldInjectGroupNudge`): a group chat's generation aimed at one of its members.
+  if (ending.group !== undefined && ending.targetCharacterId !== undefined && ending.group.includes(ending.targetCharacterId)) {
+    const line = preset.groupNudge ?? GROUP_NUDGE;
+    const text = line === "" ? "" : resolveMacros(line, macros);
+    if (text !== "") {
+      prompt.push({ role: "user", content: text });
+      breakdown.push({ type: "utility", name: "Group Nudge", role: "user", content: text });
+    }
+  }
   // The prefill (`services/prompt-assembly.service.ts:4120-4198`): the user's "Start Reply With", unless it is blank, then the preset's
-  // start, as one partial assistant message, and nothing at all when both are empty. A continue has none: its own message is the reply
-  // it goes on with. An impersonation has one only with "Continue prefill" on, the preset's impersonation start where it sets one. The
-  // stand-in resolves no macros in them, and its connections are custom ones, which take no reasoning prefill (`:4164-4181`).
+  // start, macros resolved, as one partial assistant message, and nothing at all when both are empty. A continue has none: its own message is
+  // the reply it goes on with. An impersonation has one only with "Continue prefill" on, the preset's impersonation start where it sets one.
   const startsReply = ending.type !== "impersonate" || preset.continuePrefill === true;
   const prefill: string[] = [];
-  if (startsReply && ending.type !== "continue" && ending.promptBias.trim() !== "") prefill.push(ending.promptBias);
+  if (startsReply && ending.type !== "continue" && ending.promptBias.trim() !== "") {
+    const resolved = resolveMacros(ending.promptBias, macros);
+    if (resolved !== "") prefill.push(resolved);
+  }
   const presetStart = ending.type === "continue" || !startsReply ? "" : ending.type === "impersonate" && preset.assistantImpersonation ? preset.assistantImpersonation : (preset.assistantPrefill ?? "");
-  if (presetStart !== "") prefill.push(presetStart);
-  if (prefill.length > 0) {
+  if (presetStart !== "") {
+    const resolved = resolveMacros(presetStart, macros);
+    if (resolved !== "") prefill.push(resolved);
+  }
+  // The start of the model's thinking, for a DeepSeek or Moonshot connection (`:4164-4181`): the prefill message's `reasoning_content`, apart from its text; on a kind that takes
+  // a prefill, and never on a continue.
+  const takesReasoning = (ending.provider === "deepseek" || ending.provider === "moonshot") && startsReply && ending.type !== "continue";
+  const reasoningPrefill = takesReasoning && (preset.reasoningPrefill ?? "") !== "" ? resolveMacros(preset.reasoningPrefill!, macros) : "";
+  if (prefill.length > 0 || reasoningPrefill !== "") {
     const text = prefill.join("");
-    prompt.push({ role: "assistant", content: text, partial: true });
+    prompt.push({ role: "assistant", content: text, partial: true, ...(reasoningPrefill !== "" ? { reasoning_content: reasoningPrefill } : {}) });
     breakdown.push({ type: "utility", name: "Assistant Prefill", role: "assistant", content: text });
+    if (reasoningPrefill !== "") breakdown.push({ type: "utility", name: "Reasoning Prefill", role: "assistant", content: reasoningPrefill });
   }
   // The preset's completion settings, over the whole prompt before any interceptor sees it (`:4210`).
   applyCompletionSettings(prompt, preset, ending.names);
@@ -807,6 +947,8 @@ export function assemble(preset: Preset, active: readonly Entry[], messages: rea
   // A block that expanded the pool counts only its wrapper, so the pool's rows count (`attributeExpandedMarkerWorldInfoTokens`, `:1522-1533`, called
   // after the appends, `:4240`); the exclusion stays where the macro was in no block that was sent.
   if (breakdown.some((e) => e.attributesWorldInfoMarkerTokens === true)) for (const e of breakdown) if (e.type === "world_info" && e.marker === "wi_marker") delete e.excludeFromTotal;
+  // The newest assistant history message loses its trailing whitespace; a continue's target and a prefill keep theirs (`rtrimLastHistoryAssistant`, `:672-707`, called at `:4243-4249`).
+  rtrimLastHistoryAssistant(prompt, ending.type === "continue" ? ending.continueMessageId : undefined);
   // `finalizeContinuePrompt` (`:742-775`, called at `:4314-4338`): the continued message, the newest assistant history message with the
   // continued message's id (or the newest of all, where Lumiverse found none), leaves the history: the postfix is appended, it is a
   // partial reply with "Continue prefill" on, it loses its history mark and keeps its other keys, its source among them, and it goes

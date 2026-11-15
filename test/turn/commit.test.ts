@@ -120,6 +120,22 @@ describe("a turn is tied to the swipe its generation wrote", () => {
   });
 });
 
+describe("a turn whose preset has a prefill", () => {
+  test("is tied to the message Lumiverse saved and announced with the prefill in front, by the hash of what was stored", async () => {
+    const b = await bed({ answers: [replying("turns, and the sea is loud."), replying("Wren nods.")] });
+    // Lumiverse sends the preset's start of the reply as a partial last message and saves it in front of the model's text (`generate.service.ts:3702-3722`, `:4161`, `:4189`).
+    b.host.presets.get(PRESET)!.assistantPrefill = "The lamp ";
+    const generation = await play(b, "normal", "I climb the stairs.");
+    const turn = await settledTurn(b, generation);
+    const saved = "The lamp turns, and the sea is loud.";
+    const ended = b.host.events.find((e) => e.event === "GENERATION_ENDED")!.payload as { content: string; messageId: string };
+    expect(ended.content).toBe(saved);
+    expect(b.host.chats.get(CHAT)!.messages.at(-1)!).toMatchObject({ id: ended.messageId, content: saved });
+    // RPE's own reply is the model's text alone; the turn is tied to what was stored, with the prefill in front.
+    expect(turn).toMatchObject({ status: "done", message: ended.messageId, hash: textHash(saved) });
+  });
+});
+
 /** The Author's first call in a continue: its intent, then thirty minutes passed in the world, recorded on the turn. */
 const PASS_TIME: Answer = { pieces: [{ text: "<intent>Then the storm.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", minutes: 30, source: { from: "prose" } }] } }] };
 
