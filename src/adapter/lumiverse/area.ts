@@ -41,6 +41,8 @@ const UNFILLED: AdapterLanes = {
   start: async () => {
     throw none("start");
   },
+  // No model known: nothing is trimmed past the window.
+  room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
   secrecy: UNFILLED_SECRECY,
   hiddenReadable: async () => false,
   ranges: async () => ({}),
@@ -64,6 +66,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     changes: { changed: (change) => lane("changes").changed(change), reopened: () => lane("changes").reopened() },
     window: (ask, signal) => lane("window")(ask, signal),
     start: (ask, signal) => lane("start")(ask, signal),
+    room: (chat, reply, signal) => lane("room")(chat, reply, signal),
     secrecy: (ask, signal) => lane("secrecy")(ask, signal),
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),
     ranges: (chat) => lane("ranges")(chat),

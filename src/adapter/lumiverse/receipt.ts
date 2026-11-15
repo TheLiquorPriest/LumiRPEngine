@@ -35,6 +35,25 @@ export interface PromptReads {
   messageLimit(signal: AbortSignal): Promise<number | null>;
 }
 
+/** The Author's model's room for a chat's prompt (§4.2 l.237, §11): its window as pi reports it less the reply's room, how RPH counts a prompt for it, and whether the story record covers chat messages. */
+export interface ModelRoom {
+  /** Tokens the prompt may take; null where nobody knows the model's window, and nothing is trimmed. */
+  room: number | null;
+  count(prompt: readonly { role: string; content: string | unknown[] }[]): Promise<number>;
+  covered(messages: readonly string[]): Promise<boolean>;
+}
+
+/** The Author's room for this chat's turn; `reply`: the request's own room for the reply (`max_tokens`), null where it names none. */
+export type ModelRooms = (chat: string, reply: number | null, signal: AbortSignal) => Promise<ModelRoom>;
+
+/** History the model's own window left out after the window's cut: the oldest left, the first and last of them, how many, and whether the story record covers them. */
+export interface Trimmed {
+  from: KeepPoint;
+  to: KeepPoint;
+  count: number;
+  covered: boolean;
+}
+
 /** The receipt's reads made from RPE's reads of Lumiverse (`reads.ts`). */
 export function promptReads(reads: LumiverseReads): PromptReads {
   return {
@@ -73,7 +92,9 @@ export type PromptNotice =
   /** History before the window's start that stays in the prompt, because the body is not told apart where it stands. */
   | { kind: "uncut"; history: number }
   /** Lumiverse's joining settings could not be read; the joining was found from the body. */
-  | { kind: "joining-unread"; why: string };
+  | { kind: "joining-unread"; why: string }
+  /** The Author's model's room could not be told; the prompt went as the window left it. */
+  | { kind: "room-unknown"; why: string };
 
 /** Lumiverse's own clipping inside RPE's window (§4.2): how many of the window's messages the prompt lacks, and which of Lumiverse's settings left them out where that can be told. */
 export interface Clipped {
@@ -100,6 +121,14 @@ export interface Cut {
   secrecy: Tag["secrecy"];
   /** The question's time, asked to answered or given up at its wait, as the tag said: what row 0.4's median is measured from. */
   question: Tag["question"];
+  /** What the model's own window left out after the window's cut (§4.2 l.237); null where all fit, or the room could not be told. */
+  trimmed: Trimmed | null;
+}
+
+/** The request's own room for the reply, as OpenAI's chat format names it; null where it names none. */
+function replyRoom(body: Record<string, unknown>): number | null {
+  const asked = body.max_tokens ?? body.max_completion_tokens;
+  return typeof asked === "number" && Number.isSafeInteger(asked) && asked > 0 ? asked : null;
 }
 
 export interface Received {
@@ -188,7 +217,7 @@ function words(error: unknown): string {
  * goes as it came, and the turn's notices say what stays. A window that is on and a chat whose rows
  * cannot be read are refused rather than sent with more history than the window allows.
  */
-export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow; reads: PromptReads }, signal: AbortSignal): Promise<Received> {
+export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow; reads: PromptReads; room: ModelRooms }, signal: AbortSignal): Promise<Received> {
   if (tag.user !== own.user) throw new Refused(403, "This reply's chat belongs to another Lumiverse user than the one this RPE plays for.");
   const messages = readBodyMessages(body.messages);
   if (messages === null) throw new Refused(400, "The request's messages are not in the chat format RPE reads.");
@@ -215,14 +244,33 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
     keep = await own.window({ user: tag.user, chat: tag.chat, generation, path }, signal);
   }
   const left = new Set(historyCut(tag.messages.map((m) => ({ history: m.history === true, index: m.source?.index ?? null })), keep));
+  /** The body with these listed messages left out: by the tag's list where every listed message was found, else as far as the body says. */
+  const cutOut = (gone: ReadonlySet<number>): { messages: LaidMessage[]; stillSent: number } => (laid.complete ? { messages: rebuild(laid, tag.messages, gone), stillSent: 0 } : partialCut(laid, gone));
   let sent: LaidMessage[] = laid.messages;
   let byRpe = left.size;
-  if (left.size > 0 && laid.complete) sent = rebuild(laid, tag.messages, left);
-  else if (left.size > 0) {
-    const cut = partialCut(laid, left);
+  if (left.size > 0) {
+    const cut = cutOut(left);
     sent = cut.messages;
     byRpe -= cut.stillSent;
     if (cut.stillSent > 0) notices.push({ kind: "uncut", history: cut.stillSent });
+  }
+  // The model's own window has the last word (§4.2 l.237): the oldest history left goes until what is sent fits it.
+  let trimmed: Trimmed | null = null;
+  try {
+    const model = await own.room(tag.chat, replyRoom(body), signal);
+    if (model.room !== null) {
+      const history = tag.messages.flatMap((m, i) => (m.history === true && m.source !== undefined && !left.has(i) ? [i] : []));
+      const gone: number[] = [];
+      while (history.length > 0 && (await model.count(sent)) > model.room) {
+        gone.push(history.shift()!);
+        sent = cutOut(new Set([...left, ...gone])).messages;
+      }
+      const sources = gone.map((i) => tag.messages[i]!.source!);
+      if (sources.length > 0) trimmed = { from: sources[0]!, to: sources.at(-1)!, count: sources.length, covered: await model.covered(sources.map((s) => s.id)) };
+    }
+  } catch (error) {
+    // The room could not be told: the prompt goes as the window left it, and the turn's notice says so.
+    notices.push({ kind: "room-unknown", why: words(error) });
   }
   if (!laid.complete) notices.push({ kind: "unmatched", missing: laid.missing.length });
   else if (laid.pictures.sent < laid.pictures.listed) notices.push({ kind: "pictures", dropped: laid.pictures.listed - laid.pictures.sent });
@@ -233,6 +281,6 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
   } catch {
     // Only told: a chat whose rows cannot be read now has its clipping not known.
   }
-  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe, joining: { ...laid.joining, from: joining === null ? "body" : "settings" }, told: laid.complete, clipped, notices, secrecy: tag.secrecy, question: tag.question };
+  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe, joining: { ...laid.joining, from: joining === null ? "body" : "settings" }, told: laid.complete, clipped, notices, secrecy: tag.secrecy, question: tag.question, trimmed };
   return { tag, overlay: laid, messages: sent, cut };
 }

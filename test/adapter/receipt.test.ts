@@ -12,7 +12,7 @@ import { createDbReader } from "../../src/adapter/lumiverse/db";
 import { createHttpReads } from "../../src/adapter/lumiverse/http-reads";
 import { rawLayout } from "../../src/adapter/lumiverse/layout";
 import type { Joining } from "../../src/adapter/lumiverse/overlay";
-import { promptReads, receive, type ChatRows, type PromptReads } from "../../src/adapter/lumiverse/receipt";
+import { promptReads, receive as receiveWith, type ChatRows, type ModelRoom, type PromptReads } from "../../src/adapter/lumiverse/receipt";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { readTag, type Tag } from "../../src/adapter/lumiverse/wire";
 import { historyWindow, WINDOW_DEFAULTS } from "../../src/story/window";
@@ -26,6 +26,12 @@ const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
 
 /** RPE's reads on receipt over the stand-in's own rows: the joining its settings give (the rig's: none), and no message limit. */
 const reads = (rows: ChatRows, joining: Joining = { post: "none", collapse: false }): PromptReads => ({ rows, joining: async () => joining, messageLimit: async () => null });
+
+/** No model's window known: nothing is trimmed past the window's cut. */
+const NO_ROOM: ModelRoom = { room: null, count: async () => 0, covered: async () => false };
+
+/** The receipt with no model's room unless a test gives one. */
+const receive = (tag: Tag, body: Record<string, unknown>, own: Omit<Parameters<typeof receiveWith>[2], "room"> & { room?: Parameters<typeof receiveWith>[2]["room"] }, signal: AbortSignal) => receiveWith(tag, body, { room: async () => NO_ROOM, ...own }, signal);
 
 /** The window of `size` over the path the window is asked, as RPE's turn lane counts it. */
 const windowOf = (size: number, step: number | null = null) => async (ask: WindowAsk) => historyWindow(await ask.path(), { ...WINDOW_DEFAULTS, size, step }, new Set()).first;

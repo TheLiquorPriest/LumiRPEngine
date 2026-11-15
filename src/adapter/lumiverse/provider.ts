@@ -13,7 +13,7 @@ import type { HistoryWindow } from "./answer";
 import type { HeardGenerations } from "./heard";
 import { rawLayout, type BlocksHint } from "./layout";
 import type { RawLayout } from "rp-harness/contract";
-import { receive, Refused, type Cut, type PromptReads } from "./receipt";
+import { receive, Refused, type Cut, type ModelRooms, type PromptReads } from "./receipt";
 import { streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
 import { readTag, TAG_FIELD, type Role, type Tag, type TagLore } from "./wire";
 
@@ -65,6 +65,8 @@ export interface ProviderDeps {
   window: HistoryWindow;
   /** What the receipt reads of Lumiverse when the request arrives, by RPE's own reads (`receipt.ts`): the chat's rows the window counts when RPE makes the cut itself and that tell Lumiverse's own clipping, and the settings that say how Lumiverse joined the prompt. */
   reads: PromptReads;
+  /** The Author's model's room for the chat's prompt (the turn lane, through RPH's model port): what the model's own window lets through (§4.2 l.237). */
+  room: ModelRooms;
   /** Lumiverse's breakdown of the chat's prompt, a hint for names (`hint.ts`); null when it has none. */
   blocks(tag: Tag, signal: AbortSignal): Promise<BlocksHint | null>;
   /** RPH's model layer, for requests passed through: its pass, given the user this RPE belongs to. */
@@ -131,7 +133,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, json: (
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {
-      received = await receive(read.tag, body, { user: deps.user, window: deps.window, reads: deps.reads }, request.signal);
+      received = await receive(read.tag, body, { user: deps.user, window: deps.window, reads: deps.reads, room: deps.room }, request.signal);
     } catch (e) {
       // The window is the user's setting: a reply whose window RPE could not work out is not sent with more history than it allows.
       return e instanceof Refused ? error(e.status, e.message) : error(500, `RPE could not prepare this reply: ${e instanceof Error ? e.message : String(e)}`);

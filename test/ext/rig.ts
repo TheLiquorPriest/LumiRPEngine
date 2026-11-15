@@ -183,6 +183,8 @@ export class Rig {
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
       window: onReceipt,
+      // No model's window is known to the rig: nothing is trimmed past the window's cut.
+      room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
       reads: {
         // Lumiverse's rows as they stand when the request arrives: the stand-in's chat, each message at its stored number.
         rows: async (chat) => this.lv.rowsOf(chat),

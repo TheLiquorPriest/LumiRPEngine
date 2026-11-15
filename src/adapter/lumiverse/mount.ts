@@ -19,6 +19,7 @@ import type { SettingsReader } from "../../app/config-read";
 import { PAGE_SETTINGS } from "../../app/page-settings";
 import { isRecord } from "../../shared/json";
 import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
+import { promptReads, type ModelRooms } from "./receipt";
 import { createChatReads, type ChatReads } from "./chat";
 import { createDbReader, type DbReader } from "./db";
 import { followChanges, type ChatChanges } from "./events";
@@ -28,7 +29,6 @@ import { createHttpReads } from "./http-reads";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
-import { promptReads } from "./receipt";
 import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
@@ -46,6 +46,8 @@ export interface AdapterLanes {
   window: HistoryWindow;
   /** The turn lane: where a turn not yet begun will start on the path a question carries, from RPE's own state alone (R-5). */
   start: TurnStarts;
+  /** The turn lane: the Author's model's room for a chat's prompt, as RPH's model port reports its window and counts a prompt, and whether the story record covers messages. */
+  room: ModelRooms;
   /** The lore lane: what each secret reads as in this prompt. */
   secrecy: SecrecyRules;
   /** A chat's setting: agents may read the messages the user hid. */
@@ -265,6 +267,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             allowed: providerKey,
             window: lanes.window,
             reads: promptReads(p.reads),
+            room: lanes.room,
             blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => settings().dryRunMs }),
             models: lanes.models,
             passConnection: lanes.passConnection,
