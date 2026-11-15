@@ -8,7 +8,7 @@ import { h } from "preact";
 import { pageRoad } from "../../src/ext/page";
 import type { LiveEvent } from "../../src/shared/api";
 import type { ExtensionStatus } from "../../src/ui/api";
-import { type ClientState, createClient, extensionConnector, KEY_LET_GO, type LiveListener, pathOf, replyOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
+import { type ClientState, createClient, extensionConnector, isJoined, KEY_LET_GO, type LiveListener, pathOf, replyOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
 import { CHAT, RECORDED, turnListAt } from "./recorded";
@@ -652,6 +652,39 @@ describe("the web shell's live socket", () => {
     await settle();
     expect(key).toBeNull();
     expect(client.state.get()).toEqual({ phase: "signed-out", error: KEY_LET_GO });
+  });
+});
+
+describe("a turn joined to another", () => {
+  const HELD = "turn-held";
+  const FIRST = "turn-first";
+
+  test("the client hands the page a joined turn's answer as its own kind, and asking again for the turn joined gives that turn's reply", async () => {
+    // RPE answers the held turn with status 409 and the turn it joined, and the turn it joined with its reply; a chat's list that is no turn's answers 409 as a refusal.
+    const channel = new Channel((sent) => {
+      if (sent.path === `/api/v1/chats/${CHAT}/turns/${HELD}`) return { status: 409, body: { joined: { turn: HELD, joined: FIRST } } };
+      if (sent.path === `/api/v1/chats/${CHAT}/turns/${FIRST}`) return { status: 200, body: { id: FIRST } };
+      return { status: 409, body: { error: "Not now." } };
+    });
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+
+    // Neither a reply nor an error: the answer of its own kind, which names both turns.
+    const asked = await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat: CHAT, turn: HELD });
+    expect(isJoined(asked)).toBe(true);
+    if (!isJoined(asked)) throw new Error("the held turn was not answered as joined");
+    expect(asked).toEqual({ joined: { turn: HELD, joined: FIRST } });
+    // A page that does not follow yet reads it as a refusal in words, naming the turn to ask for.
+    expect(() => replyOf(asked)).toThrow(`Turn ${HELD} was joined to turn ${FIRST}`);
+    expect(() => replyOf(asked)).toThrow(RpeError);
+
+    // Asking again for the turn it names gives that turn's reply.
+    const again = await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat: CHAT, turn: asked.joined.joined });
+    expect(isJoined(again)).toBe(false);
+    expect(again as unknown).toEqual({ id: FIRST });
+    expect(channel.requests.map((r) => r.path)).toEqual([`/api/v1/chats/${CHAT}/turns/${HELD}`, `/api/v1/chats/${CHAT}/turns/${FIRST}`]);
+
+    // Any other 409 is RPE's refusal, thrown in its own words.
+    await expect(client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT })).rejects.toMatchObject({ status: 409, message: "Not now." });
   });
 });
 

@@ -8,6 +8,7 @@ import type { App, QueryFields, Route, RunningServer } from "../../src/app";
 import { appRoutes, connectionRoutes, lineLog, RouteTable, rawRoute, route, shape } from "../../src/app";
 import { startServer } from "../../src/app/server";
 import { Builds } from "../../src/app/update";
+import { JoinedTurnError } from "../../src/store/types";
 import { bearer, type Bed, LUMIVERSE, makeBed, makeKey, testModelLayer } from "./helpers";
 
 /** A page route that says how much it was sent, held to 1 KiB. */
@@ -118,6 +119,48 @@ const lights = route({
   handle: ({ query }) => pageAfter(["the breakwater light", "the harbor light", "the point light"], query.after, query.limit ?? 2),
 });
 
+/** Routes whose code finds a turn joined to another: the store's refusal is thrown under a JSON route and under a raw one. */
+const joinedProbes = [
+  route({
+    method: "POST",
+    path: "/api/v1/probe/turns/:turn/note",
+    access: "page",
+    group: "service",
+    does: "Notes a turn.",
+    joined: true,
+    body: shape.object({ text: shape.text() }),
+    reply: shape.object({ noted: shape.yesNo() }),
+    handle: ({ params }) => {
+      ran++;
+      throw new JoinedTurnError(params.turn, "turn-first");
+    },
+  }),
+  rawRoute({
+    method: "GET",
+    path: "/api/v1/probe/turns/:turn/raw",
+    access: "page",
+    group: "service",
+    does: "Answers a turn in its own way.",
+    answers: "whatever the turn holds",
+    joined: true,
+    raw: () => {
+      ran++;
+      throw new JoinedTurnError("turn-held", "turn-first");
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/v1/probe/breaks",
+    access: "page",
+    group: "service",
+    does: "Fails, as a bug does.",
+    reply: shape.nothing(),
+    handle: () => {
+      throw new Error("the harbor ledger is torn");
+    },
+  }),
+];
+
 /** A request written by hand on a connection of its own, for what `fetch` will not send (a GET with a body), and what came back. */
 async function byHand(server: RunningServer, request: { method: string; path: string; headers: Record<string, string>; body: string }): Promise<{ status: number; body: unknown }> {
   const chunks: Buffer[] = [];
@@ -144,7 +187,7 @@ describe("the server", () => {
     app = await bed.open({
       config: { hosts: ["rpe.example"], origins: ["https://lumiverse.example"] },
       areas: [
-        { name: "probe", mount: (a) => a.routes.add("probe", [echo, ...notes, places, moored, lights]) },
+        { name: "probe", mount: (a) => a.routes.add("probe", [echo, ...notes, places, moored, lights, ...joinedProbes]) },
         { name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models), async () => null, () => a.config.lumiverse.user ?? "")) },
       ],
     });
@@ -458,6 +501,36 @@ describe("the server", () => {
       // @ts-expect-error It declares no credential, so it is handed none to read.
       handle: ({ credential }) => ({ whose: credential }),
     });
+  });
+
+  test("a JoinedTurnError thrown under a route is answered 409 in the one place, never 500, and nothing more is read or written", async () => {
+    const changes = (): number => app.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()?.n ?? -1;
+    const failures = (): string[] => bed.logs.filter((line) => line.includes(" error "));
+    // What one ordinary request of a page costs the database, for what a refused one is held to.
+    const first = changes();
+    expect((await fetch(`${server.url}/api/v1/probe/notes`, { headers: page })).status).toBe(200);
+    const ordinary = changes() - first;
+    ran = 0;
+
+    const before = changes();
+    const noted = await fetch(`${server.url}/api/v1/probe/turns/turn-held/note`, { method: "POST", headers: { ...page, "content-type": "application/json" }, body: JSON.stringify({ text: "A note." }) });
+    expect(noted.status).toBe(409);
+    expect(noted.headers.get("cache-control")).toBe("no-store");
+    expect(await noted.json()).toEqual({ joined: { turn: "turn-held", joined: "turn-first" } });
+    // A raw route's code is under the same place.
+    const raw = await fetch(`${server.url}/api/v1/probe/turns/turn-held/raw`, { headers: page });
+    expect(raw.status).toBe(409);
+    expect(await raw.json()).toEqual({ joined: { turn: "turn-held", joined: "turn-first" } });
+    // Each handler ran once and stopped where it threw; the database was written no more than a request that answered.
+    expect(ran).toBe(2);
+    expect(changes() - before).toBeLessThanOrEqual(2 * ordinary);
+    expect(failures()).toEqual([]);
+
+    // A failure of the server's own is still one: 500, and logged.
+    const broken = await fetch(`${server.url}/api/v1/probe/breaks`, { headers: page });
+    expect(broken.status).toBe(500);
+    expect(failures()).toHaveLength(1);
+    expect(failures()[0]).toContain("the harbor ledger is torn");
   });
 });
 

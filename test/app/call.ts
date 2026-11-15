@@ -1,5 +1,7 @@
 // A route called as the server calls it, without the network: the query read as the route declares it, the body held to its
 // declaration, and the handler given only those, with the user and a signal; a refusal is the `RouteError` the server answers with.
+// The reply is held to the route's declaration as the server would send it (as JSON): a call whose route answers what its
+// declaration does not take fails there, naming the fields, so every test of an area's routes checks its replies at run time.
 // For tests of an area's routes that need no server, their requests made by hand.
 
 import { type App, type DeclaredRoute, problemsOf, readQuery, RouteError, type RouteReply } from "../../src/app";
@@ -30,7 +32,11 @@ export async function callRoute<R extends JsonRoute>(route: R, given: Given): Pr
     if (problems.length > 0) throw new RouteError(400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
   }
   const handle = route.handle as (call: unknown) => unknown;
-  return (await handle({ params: given.params ?? {}, query: read.value, body, user: given.user, signal: new AbortController().signal })) as RouteReply<R>;
+  const reply = await handle({ params: given.params ?? {}, query: read.value, body, user: given.user, signal: new AbortController().signal });
+  const sent = reply === undefined ? undefined : JSON.parse(JSON.stringify(reply));
+  const wrong = problemsOf(route.reply, sent, "reply");
+  if (wrong.length > 0) throw new Error(`${at} answered what its declaration does not take: ${wrong.slice(0, 3).join(" ")}`);
+  return reply as RouteReply<R>;
 }
 
 /** What is wrong with `reply` as the reply the table declares for `key` (`"GET /api/v1/chats"`): none where it is what the declaration takes, field for field. */
@@ -39,4 +45,16 @@ export function replyProblems(app: Pick<App, "routes">, key: string, reply: unkn
   if (info === undefined) throw new Error(`The table holds no route ${key}.`);
   if (!("reply" in info.declared)) throw new Error(`${key} answers in its own way, and declares no reply.`);
   return problemsOf(info.declared.reply, reply, "reply");
+}
+
+/**
+ * What is wrong with `reply` as the reply of the route a request reached: the route is the table's whose method and path
+ * pattern the request's path (its query left off) fits, a param taking one segment and `*` the rest. Throws when none fits.
+ */
+export function answeredProblems(app: Pick<App, "routes">, method: string, path: string, reply: unknown): string[] {
+  const at = path.split("?")[0] ?? path;
+  const fits = (pattern: string): boolean => new RegExp(`^${pattern.split("/").map((s) => (s === "*" ? ".+" : s.startsWith(":") ? "[^/]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("/")}$`).test(at);
+  const info = app.routes.list().find((r) => r.method === method && fits(r.path));
+  if (info === undefined) throw new Error(`The table holds no route that answers ${method} ${at}.`);
+  return replyProblems(app, `${info.method} ${info.path}`, reply);
 }
