@@ -55,6 +55,16 @@ export interface Installed extends ExtSpindle {
   registerInterceptor(handler: PromptHandler, priorityOrOptions?: number | InterceptorOptions, options?: InterceptorOptions): () => void;
 }
 
+/** An entry an extension's interceptor added to the breakdown (`type: "extension"`, `services/generate.service.ts:565-583`). */
+export interface ExtensionBreakdownEntry {
+  type: "extension";
+  name: string;
+  role: string;
+  content: string;
+  extensionId: string;
+  extensionName: string;
+}
+
 export interface Ext {
   id: string;
   identifier: string;
@@ -539,12 +549,13 @@ export class ExtensionHost {
    * without `generation_parameters` (`:1922-1931`); an answer for a registration the worker no longer holds is ignored (`:1913-1917`). A fault ends the generation only where the registration is required (`:187-212`),
    * and a stop of the generation always does (`:188-198`).
    */
-  protected async interceptorPipeline(messages: LlmMessage[], context: Record<string, unknown>, userId: string | null, signal?: AbortSignal): Promise<{ messages: LlmMessage[]; parameters: Record<string, unknown> | undefined }> {
+  protected async interceptorPipeline(messages: LlmMessage[], context: Record<string, unknown>, userId: string | null, signal?: AbortSignal): Promise<{ messages: LlmMessage[]; parameters: Record<string, unknown> | undefined; breakdown: ExtensionBreakdownEntry[] }> {
     let result = messages;
     // `collectSourceMessageMetadata` (`spindle/source-message-metadata.ts:59-75`).
     const sources = new Map<string, { index: number; metadata: unknown }>();
     for (const m of messages) if (m.__chatHistorySource === true && typeof m.__sourceMessageId === "string" && typeof m.__sourceIndexInChat === "number") sources.set(m.__sourceMessageId, { index: m.__sourceIndexInChat, metadata: m.__sourceMessageMetadata ?? {} });
     let merged: Record<string, unknown> | undefined;
+    const entries: (ExtensionBreakdownEntry & { messageIndex: number })[] = [];
     for (const registration of this.interceptors) {
       if (registration.userId && registration.userId !== userId) continue;
       if (!matchesInterceptor(registration.match, context, registration.ext.identifier)) continue;
@@ -598,19 +609,30 @@ export class ExtensionHost {
           }
           // A result for a registration the worker no longer holds, or for a worker that has stopped, is ignored (`:1913-1917`), so no answer comes and the limit ends the wait.
           if (registration.ext.interceptor !== registration || registration.ext.stopped) return await new Promise<never>(() => undefined);
-          const normalized = Array.isArray(returned) ? { messages: returned } : returned;
+          const normalized: { messages: PromptMessageDTO[]; parameters?: Record<string, unknown>; breakdown?: unknown } = Array.isArray(returned) ? { messages: returned } : returned;
           let parameters = normalized.parameters;
           if (parameters && Object.keys(parameters).length > 0 && !registration.ext.granted.has("generation_parameters")) {
             this.log.push("Stripping interceptor parameters — generation_parameters permission not granted");
             parameters = undefined;
           }
-          return { messages: structuredClone(normalized.messages) as LlmMessage[], parameters };
+          // The entries the extension marks for the breakdown (`messageIndex`, `name`), each taken as the host takes it (`spindle/worker-host.ts:1932-1936`, `:3245-3270`): one whose index is no message of its own result is dropped.
+          const marked = Array.isArray(normalized.breakdown) ? (normalized.breakdown as { messageIndex?: unknown; name?: unknown }[]) : [];
+          const breakdown = marked.flatMap((entry): (ExtensionBreakdownEntry & { messageIndex: number })[] => {
+            const messageIndex = Number(entry?.messageIndex);
+            const message = normalized.messages[messageIndex];
+            if (!Number.isInteger(messageIndex) || messageIndex < 0 || message === undefined) return [];
+            const content = typeof message.content === "string" ? message.content : (message.content as { text?: string }[]).map((part) => part.text || "").join("");
+            const label = typeof entry?.name === "string" && entry.name.trim() ? entry.name.trim() : registration.ext.identifier;
+            return [{ type: "extension", messageIndex, name: label, role: message.role, content, extensionId: registration.ext.identifier, extensionName: registration.ext.identifier }];
+          });
+          return { messages: structuredClone(normalized.messages) as LlmMessage[], parameters, breakdown };
         })();
         // An answer that comes after the wait has ended fails no one.
         call.catch(() => undefined);
         const output = await Promise.race([call, ended.promise]);
         result = output.messages;
         if (output.parameters && Object.keys(output.parameters).length > 0) merged = { ...merged, ...output.parameters };
+        entries.push(...output.breakdown);
       } catch (error) {
         if (signal?.aborted) throw error;
         this.log.push(`[Spindle] Interceptor error from ${registration.ext.id}: ${error instanceof Error ? error.message : String(error)}`);
@@ -621,7 +643,9 @@ export class ExtensionHost {
         signal?.removeEventListener("abort", onAbort);
       }
     }
-    return { messages: result, parameters: merged };
+    // `appendInterceptorBreakdownEntries` (`services/generate.service.ts:565-583`): after the assembly's own, in the order of the messages they mark.
+    const breakdown = entries.sort((a, b) => a.messageIndex - b.messageIndex).map(({ messageIndex: _at, ...entry }) => entry);
+    return { messages: result, parameters: merged, breakdown };
   }
 }
 

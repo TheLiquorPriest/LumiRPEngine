@@ -129,3 +129,21 @@ describe("both storage layouts", () => {
     expect(await listFor(USER)).toEqual(["reedwarden"]);
   });
 });
+
+describe("what an interceptor marks for the breakdown (`spindle/worker-host.ts:1932-1936`, `:3245-3270`; `services/generate.service.ts:565-583`)", () => {
+  test("each entry it names is taken by the index of a message of its own result, with that message's role and text, the extension's name where it gives none, in the order of the messages; an index that is none is dropped", async () => {
+    const { StandIn } = await import("../../standin/lumiverse");
+    const lv = new StandIn();
+    const ext = lv.install(["interceptor"], "reedwarden");
+    ext.registerInterceptor(
+      async (messages) => ({ messages: [...messages, { role: "system", content: "SECOND added" }, { role: "user", content: "FIRST added" }], breakdown: [{ messageIndex: 2, name: "Second" }, { messageIndex: 1 }, { messageIndex: 9, name: "Nowhere" }, { messageIndex: -1 }] } as never),
+      { priority: 1 },
+    );
+    const run = (lv as unknown as { interceptorPipeline(m: unknown[], c: Record<string, unknown>, u: string | null): Promise<{ breakdown: unknown[] }> }).interceptorPipeline.bind(lv);
+    const out = await run([{ role: "system", content: "MAIN" }], { chatId: "c" }, "user-mara");
+    expect(out.breakdown).toEqual([
+      { type: "extension", name: "reedwarden", role: "system", content: "SECOND added", extensionId: "reedwarden", extensionName: "reedwarden" },
+      { type: "extension", name: "Second", role: "user", content: "FIRST added", extensionId: "reedwarden", extensionName: "reedwarden" },
+    ]);
+  });
+});

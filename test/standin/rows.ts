@@ -7,6 +7,7 @@
 // and lines; paths are Lumiverse's `src/`.
 
 import type { StandInDb } from "./db";
+import { normalizeStoredExtra, projectActiveSwipeExtra } from "./extra";
 import { ExtensionHost } from "./host";
 import { SpindleManager } from "./spindle";
 import { Library, type Character } from "./books";
@@ -103,7 +104,11 @@ export class ChatRows extends ExtensionHost {
   protected messageRow(id: string): Record<string, unknown> | null {
     const row = this.db?.rows("SELECT * FROM messages WHERE id = ?", id)[0];
     if (row === undefined) return null;
-    return { ...row, is_user: row.is_user === 1, swipes: JSON.parse(String(row.swipes)) as unknown, swipe_dates: JSON.parse(String(row.swipe_dates)) as unknown, extra: JSON.parse(String(row.extra)) as unknown };
+    // The fields kept for each swipe show those of the swipe on display, at the top of `extra` (`rowToMessage`, `services/chats.service.ts:402-470`).
+    const swipes = JSON.parse(String(row.swipes)) as unknown[];
+    const shown = Number(row.swipe_id);
+    const extra = projectActiveSwipeExtra(normalizeStoredExtra(JSON.parse(String(row.extra)) as Record<string, unknown>, swipes.length, shown), shown);
+    return { ...row, is_user: row.is_user === 1, swipes, swipe_dates: JSON.parse(String(row.swipe_dates)) as unknown, extra };
   }
 
   /**
@@ -233,10 +238,14 @@ export class ChatRows extends ExtensionHost {
     if (!chat || at < 0) throw new Error("the stand-in has no such message");
     // A chat put in place by hand is numbered before its first delete, so the gap is where Lumiverse would leave it.
     this.numbered(chat);
+    const gone = chat.messages[at]!;
+    // A breakdown holds the history its reply was made from, so deleting a message voids that of every later one (`services/chats.service.ts:3236-3240`; `services/breakdown.service.ts:35-55`).
+    const later = chat.messages.filter((m) => indexInChat(m) > indexInChat(gone)).map((m) => m.id);
     chat.messages.splice(at, 1);
     this.db?.run("DELETE FROM messages WHERE id = ? AND chat_id = ?", id, chatId);
     this.db?.run("DELETE FROM message_breakdowns WHERE message_id = ?", id);
-    this.stored.delete(id);
+    for (const after of later) this.db?.run("DELETE FROM message_breakdowns WHERE message_id = ?", after);
+    for (const dropped of [id, ...later]) this.stored.delete(dropped);
     this.emit("MESSAGE_DELETED", { chatId, messageId: id }, chat.user);
   }
 

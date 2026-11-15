@@ -5,7 +5,7 @@
 
 import { questionRoute, type HistoryWindow, type SecrecyAsk, type WindowStep } from "../../src/adapter/lumiverse/answer";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
-import { CONFIRM_PATH, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
+import { CONFIRM_PATH, EXTENSION_IDENTIFIER, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
@@ -240,7 +240,7 @@ export class Rig {
 
   /** Installs and starts the extension (again: a restarted worker remembers only its storage), and RPE registers with it as its relay socket would. */
   async start(): Promise<this> {
-    this.ext = this.lv.install(this.options.granted ?? ALL);
+    this.ext = this.lv.install(this.options.granted ?? ALL, EXTENSION_IDENTIFIER);
     const registered = Promise.withResolvers<void>();
     this.lv.frontends = (m) => {
       if (m.session !== RELAY_SESSION) return false;
