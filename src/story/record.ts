@@ -10,7 +10,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { type Store, StoreInputError } from "../store";
+import { JoinedTurnError, type Store, StoreInputError } from "../store";
 import type { StoryAt } from "./path";
 
 /** The parts of the record, as the plan names them (§8.1). */
@@ -232,11 +232,13 @@ export function writeStory(db: Database, writer: StoryWriter, writes: readonly S
  * Takes back one agent's story rows on an open turn (every agent's when none is named), by the
  * agent's handle, inside the caller's queued write, beside the store's `dropStaged`: the lead
  * dropping a sub-agent's writes. The overlays it wrote through the story's write go with them. How
- * many went. A turn that is not open has nothing staged, and is refused as the store refuses it.
+ * many went. A turn that is not open has nothing staged, and is refused as the store refuses it: one
+ * joined to another turn with the typed error naming the turn it joined.
  */
 export function dropStoryStaged(store: Store, user: string, turn: string, agent?: string): number {
   const row = store.user(user).turn(turn);
   if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
+  if (row.joined !== null) throw new JoinedTurnError(turn, row.joined);
   if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged story rows can be taken back`);
   let gone = 0;
   for (const table of ["story_entry", "lore_overlay"]) gone += (agent === undefined ? store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ?`, [user, turn]) : store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND agent = ?`, [user, turn, agent])).changes;
@@ -261,6 +263,38 @@ export function takeBackStory(db: Database, user: string, turn: string, after: n
   let gone = 0;
   for (const table of ["story_entry", "lore_overlay"]) gone += db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`, [user, turn, after]).changes;
   return gone;
+}
+
+/**
+ * A continue's held turn's story rows and the lore's overlays become the rows of the turn it extended (plan §10.10, "Continue:
+ * the same turn, extended"; R-192 (e), (f)), inside the caller's queued write, before the store's `joinTurn` there, which marks
+ * the held turn joined: every row of the held turn, a job's included, takes `into`, after that turn's own writes, in the order
+ * they were made (their places, `storyMark`, the overlays among the story's rows), each as it was written (its id, value, writer,
+ * agent, job and time), nothing worked out again. A job's rows keep their job: a job is recorded with the turn that started it
+ * (§10.9), and after the end that is the turn the continue extended. Refused as the store refuses the join: a held turn that is
+ * not open, a turn that is not tied, turns of different chats, a turn joined already. How many moved.
+ */
+export function joinStory(store: Store, user: string, held: string, into: string): number {
+  const u = store.user(user);
+  const from = u.turn(held);
+  const to = u.turn(into);
+  if (from === null) throw new StoreInputError(`turn ${held} is not there`);
+  if (to === null) throw new StoreInputError(`turn ${into} is not there`);
+  if (from.joined !== null) throw new JoinedTurnError(held, from.joined);
+  if (to.joined !== null) throw new JoinedTurnError(into, to.joined);
+  if (from.status !== "open") throw new StoreInputError(`turn ${held} is ${from.status}: only a continue's open turn's story rows join another turn`);
+  if (to.status !== "done" && to.status !== "cut") throw new StoreInputError(`turn ${into} is ${to.status}: a continue's story rows join the turn tied to the message it extended`);
+  if (from.chat !== to.chat) throw new StoreInputError(`turn ${held} is chat ${from.chat}'s and turn ${into} is chat ${to.chat}'s: a continue extends a turn of its own chat`);
+  const next = storyMark(store.db, user, into) + 1;
+  // The overlays share the story rows' places on a turn, so both tables are taken in one order.
+  const rows = store.db
+    .query<{ overlay: 0 | 1; id: number }, [string, string]>(
+      "SELECT 0 AS overlay, id, ord, created FROM story_entry WHERE user = ?1 AND turn = ?2 UNION ALL SELECT 1, id, ord, created FROM lore_overlay WHERE user = ?1 AND turn = ?2 ORDER BY ord, created, overlay, id",
+    )
+    .all(user, held);
+  const put = [store.db.query<unknown, [string, number, number]>("UPDATE story_entry SET turn = ?, ord = ? WHERE id = ?"), store.db.query<unknown, [string, number, number]>("UPDATE lore_overlay SET turn = ?, ord = ? WHERE id = ?")] as const;
+  rows.forEach((r, i) => put[r.overlay].run(into, next + i, r.id));
+  return rows.length;
 }
 
 /**
