@@ -11,7 +11,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { FactDef, FactValue, LoreEntry, Scope } from "rp-harness/contract";
+import type { ActivatedLore, FactDef, FactValue, LoreEntry, Scope } from "rp-harness/contract";
 import { writeWhole } from "../app/disk";
 import type { LoreWrites } from "./ids";
 import { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
@@ -143,6 +143,17 @@ export interface LoreIndexDeps {
   now?: () => number;
 }
 
+/** An entry Lumiverse activated for a turn's prompt, as the lore map read it: what the turn's folder lays out, reading nothing again. */
+export interface ActivatedRead extends ActivatedLore {
+  /** Its text as any reader may read it (`LoreCatalogEntry.text`); absent where the map's reading of the chat's lore holds no entry of this id. */
+  text?: string;
+}
+
+/** The lore map in full for a turn, with the entries that activated for its prompt as the map read them, in the tag's order. */
+export interface TurnLoreMap extends LoreMap {
+  activated: ActivatedRead[];
+}
+
 const UNINDEXED = "lore.unindexed";
 
 export class LoreIndex {
@@ -156,9 +167,10 @@ export class LoreIndex {
    * The lore map in full for a turn (`map.ts`), on the first form `Lore.loreMap` gives: each entry
    * with what the index says of it; the activated entries the overlays on the turn's path have
    * outdated; and the entries bound to who and what is on the horizon, in the horizon's order, that
-   * are not in the map's first parts, up to the setting's limit, with the count of any left out.
+   * are not in the map's first parts, up to the setting's limit, with the count of any left out. With
+   * it, the entries that activated as it read them, their text from its reading of the chat's lore.
    */
-  async loreMap(ask: LoreMapAsk): Promise<LoreMap> {
+  async loreMap(ask: LoreMapAsk): Promise<TurnLoreMap> {
     const [first, entries] = await Promise.all([this.deps.lore.loreMap(ask), this.entries(ask)]);
     const byId = new Map(entries.map((e) => [e.id, e]));
     const described = (l: LoreMapLine): LoreMapLine => {
@@ -190,7 +202,11 @@ export class LoreIndex {
       const e = byId.get(id);
       return e === undefined ? [] : [{ ...described({ id, title: e.title }), bound: to }];
     });
-    return { inPrompt, world, changed, bound, leftOut: Math.max(0, order.length - this.settings.bound), notIndexed: entries.filter((e) => !e.indexed).length };
+    const activated = first.inPrompt.map(({ id, title, source, how }): ActivatedRead => {
+      const text = byId.get(id)?.text;
+      return { id, title, source: source ?? "", ...(how !== undefined ? { how } : {}), ...(text !== undefined ? { text } : {}) };
+    });
+    return { inPrompt, world, changed, bound, leftOut: Math.max(0, order.length - this.settings.bound), notIndexed: entries.filter((e) => !e.indexed).length, activated };
   }
 
   /** Every entry of the chat's lore, in the catalog's order, with its index lines. */

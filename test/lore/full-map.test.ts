@@ -7,7 +7,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Lore, LoreIndex, loreLines, type LoreMap, loreMapFields, type LoreWorlds, overlayWrite } from "../../src/lore/index";
+import { Lore, LoreIndex, loreLines, loreMapFields, type LoreWorlds, overlayWrite } from "../../src/lore/index";
+import type { TurnLoreMap } from "../../src/lore/indexing";
 import { ATLAS, CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
 
@@ -21,7 +22,7 @@ describe("the lore map in full", () => {
   let index: LoreIndex;
   let worlds: LoreWorlds;
   let horizon: string[] = [];
-  let map: LoreMap;
+  let map: TurnLoreMap;
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "rpe-lore-full-map-"));
@@ -74,12 +75,12 @@ describe("the lore map in full", () => {
   test("lists what activated, what the story changed of it, the world's entries the chat names, and what is bound to the horizon", () => {
     expect(map).toEqual({
       inPrompt: [
-        { id: "e-2", title: "The lamp room", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }] },
+        { id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }] },
         // No run has indexed it: its keys stand in.
-        { id: "e-3", title: GULL, keys: ["gull"] },
+        { id: "e-3", title: GULL, source: "Reed Coast Atlas", how: "keyword", keys: ["gull"] },
       ],
       // Only the overlays of the turns on the path, oldest first.
-      changed: [{ id: "e-2", title: "The lamp room", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], notes: ["The lamp was relit after the wreck.", "Its glass cracked in the storm."] }],
+      changed: [{ id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], notes: ["The lamp was relit after the wreck.", "Its glass cracked in the storm."] }],
       world: [{ id: "w-tithe_law", title: "The harbor tithe", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }] }],
       // The player's character's first, then each character present, then the places; none that is in the parts above.
       // The tide bell, bound to the fishmarket, is past the limit; the ferry is bound to nobody on the horizon.
@@ -91,6 +92,11 @@ describe("the lore map in full", () => {
       leftOut: 1,
       // The gulls and the drowned crown.
       notIndexed: 2,
+      // What activated, as the map read it, text and all: the turn's folder lays its lore file out from this, reading nothing again.
+      activated: [
+        { id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", text: "Green glass and whale oil, kept burning by the night watch." },
+        { id: "e-3", title: GULL, source: "Reed Coast Atlas", how: "keyword", text: "Gulls nest on the harbor wall every spring and fight over the fish scraps." },
+      ],
     });
   });
 

@@ -5,8 +5,9 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Answer } from "rp-harness/testing/rig";
+import { calendarOf, formatClock } from "../../src/engine/calendar";
 import type { ChatMessage } from "../standin/lumiverse";
-import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions } from "./bed";
+import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -80,5 +81,30 @@ describe("the story record in the turn", () => {
     expect(swiped).not.toBe("");
     expect(swiped).not.toContain("THREAD-STORM");
     expect(swiped).not.toContain("## Story brief");
+  });
+
+  test("a live turn keeps its story time", async () => {
+    const b = await bed({
+      answers: [
+        { pieces: [{ text: "<intent>The bells ring six.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", until: "2026-01-01 18:00", source: { from: "prose" } }] } }] },
+        { pieces: [{ text: "<reply>Six bells, and the lamps are lit.</reply>" }] },
+        replying("The lamp turns."),
+      ],
+    });
+    const first = await settledTurn(b, await play(b, "normal", "I wait for the bells."));
+    const second = await settledTurn(b, await play(b, "normal", "I look at the sky."));
+    const store = b.turns.store.user(USER);
+
+    // The first turn began before anyone set the clock: its briefing gave no story time, and its row keeps none.
+    expect(store.turn(first.id)?.storyTime).toBeNull();
+    // The second keeps the time its briefing gave: the clock where it started, which its turn's facts showed as six in the evening.
+    const kept = store.turn(second.id)?.storyTime ?? null;
+    const { state } = store.startOf(second.id);
+    expect(kept).toBe(state.world.clock);
+    const world = b.turns.store.env.worlds(state.world.revision);
+    if (kept === null || world === undefined) throw new Error("the second turn kept no story time, or its world cannot be read");
+    const facts = b.requests[1]!.briefing.find((block) => block.name === "turn-facts")?.text ?? "";
+    expect(facts).toContain(`Story time: ${formatClock(calendarOf(world), kept)}.`);
+    expect(facts).toContain("6:00 PM");
   });
 });

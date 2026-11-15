@@ -15,6 +15,27 @@ export type RunState = RunStatus | "running";
 /** A run's kind: the kind of turn Lumiverse asked for, or a Settle now run (`TurnLane.settle`), which writes nothing into the chat. */
 export type RunKind = TurnKind | "settle";
 
+/** A stretch of a run's time between two of its moments, epoch milliseconds, on the clock its other moments are read by. */
+export interface Stretch {
+  from: number;
+  to: number;
+}
+
+/** One step of a turn's intake (plan §10.1): its name and its stretch, which never holds a wait for the turn before (`RunRecord.wait`). */
+export interface IntakeStep extends Stretch {
+  step: string;
+}
+
+/** How the turn's folder (plan §5.3) was written alongside the run. */
+export interface FolderWrite {
+  /** When its writing began: once the lead's first model call had gone out, or the run had ended with none. */
+  from: number;
+  /** When its writing ended; null while it goes on. */
+  to: number | null;
+  /** Why it could not be written in full, where it could not; null where it was. */
+  error: string | null;
+}
+
 /** A run as it is kept. */
 export interface RunRecord {
   /** The run's own id: a continue runs its turn again under a new one. */
@@ -38,6 +59,19 @@ export interface RunRecord {
   firstWord: number | null;
   released: number | null;
   ended: number | null;
+  /**
+   * Intake's own steps (plan §4.7: intake is timed "not counting any wait for the previous turn's work, which is reported on its
+   * own"), in order, from `received` to the run's start, each beginning where the step or wait before it ended. Null for a run that
+   * had no intake of its own (a Settle now) or was kept before they were.
+   */
+  intake: IntakeStep[] | null;
+  /**
+   * Each wait for the turn before, in order: for the intake before this one to hold its run, for every change heard so far to be
+   * recorded (that turn's end among them), then for that turn's run; none when nothing was waited for. Null as for `intake`.
+   */
+  wait: Stretch[] | null;
+  /** How the turn's folder was written alongside the run; null before its writing began, for a run that writes none, or one kept before. */
+  folder: FolderWrite | null;
   usage: Usage | null;
   /** What went to the chat as the reply. */
   reply: string;
@@ -85,6 +119,9 @@ interface RunRow {
   first_word: number | null;
   released: number | null;
   ended: number | null;
+  intake: string | null;
+  wait: string | null;
+  folder: string | null;
   usage: string | null;
   reply: string;
   progress: string;
@@ -114,6 +151,9 @@ function recordOf(user: string, r: RunRow): RunRecord {
     firstWord: r.first_word,
     released: r.released,
     ended: r.ended,
+    intake: r.intake === null ? null : (JSON.parse(r.intake) as IntakeStep[]),
+    wait: r.wait === null ? null : (JSON.parse(r.wait) as Stretch[]),
+    folder: r.folder === null ? null : (JSON.parse(r.folder) as FolderWrite),
     usage: r.usage === null ? null : (JSON.parse(r.usage) as Usage),
     reply: r.reply,
     progress: JSON.parse(r.progress) as string[],
@@ -141,10 +181,11 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intake, wait, folder, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
+         intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
          usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved,
          settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
       [
@@ -163,6 +204,9 @@ export class Runs {
         r.firstWord,
         r.released,
         r.ended,
+        r.intake === null ? null : JSON.stringify(r.intake),
+        r.wait === null ? null : JSON.stringify(r.wait),
+        r.folder === null ? null : JSON.stringify(r.folder),
         r.usage === null ? null : JSON.stringify(r.usage),
         r.reply,
         JSON.stringify(r.progress),

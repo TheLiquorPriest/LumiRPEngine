@@ -293,7 +293,7 @@ export class Lore {
    */
   async loreMap(ask: LoreMapAsk): Promise<LoreMap> {
     const activated = (await this.turns.activated(ask.user, ask.chat, ask.turn)) ?? [];
-    const inPrompt = (await this.named(ask.user, activated)).map(({ id, title }): LoreMapLine => ({ id, title }));
+    const inPrompt = (await this.named(ask.user, activated)).map(({ id, title, source, how }): LoreMapLine => ({ id, title, source, ...(how !== undefined ? { how } : {}) }));
     const at = this.worlds.at(ask.user, ask.chat, ask.turn);
     if (at === null) return { inPrompt, world: [] };
     const said = keysIn(ask.messages, ask.matching ?? LUMIVERSE_KEY_MATCHING);

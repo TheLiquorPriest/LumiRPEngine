@@ -231,4 +231,15 @@ CREATE TABLE turn_job (
 CREATE INDEX turn_job_chat ON turn_job (user, chat);
 `,
   },
+  {
+    version: 8,
+    name: "each run's intake by step, its waits for the turn before, and how its turn's folder was written",
+    // JSON, as `runs.ts` reads them: `intake` the steps in order, each `{ step, from, to }`; `wait` the waits, each `{ from, to }`;
+    // `folder` `{ from, to, error }`. A run kept before has none of them, and each reads as null.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN intake TEXT;
+ALTER TABLE turn_run ADD COLUMN wait TEXT;
+ALTER TABLE turn_run ADD COLUMN folder TEXT;
+`,
+  },
 ];

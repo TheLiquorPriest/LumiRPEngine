@@ -149,12 +149,15 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     const requests: TurnRequest[] = [];
     let providerKey: string | null = null;
 
+    // A wait on what is shown, bounded by the test's own limit: the one the suite's runner gives Bun and tells the file in
+    // `RPE_TEST_LIMIT_MS`, else Bun's own 5 seconds, which bound a file run alone; so a busy machine does not fail it sooner.
+    const limitMs = Number(process.env.RPE_TEST_LIMIT_MS) || 5_000;
     const until = async <T>(what: string, check: () => T | null | undefined | false | Promise<T | null | undefined | false>): Promise<T> => {
-      const end = Date.now() + 5_000;
+      const end = Date.now() + limitMs;
       for (;;) {
         const got = await check();
         if (got) return got;
-        if (Date.now() > end) throw new Error(`waited five seconds for ${what}`);
+        if (Date.now() > end) throw new Error(`waited the test's limit of ${limitMs} ms for ${what}`);
         await Bun.sleep(2);
       }
     };

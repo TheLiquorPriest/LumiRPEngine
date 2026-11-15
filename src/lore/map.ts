@@ -11,6 +11,7 @@
 // fields they lay out. `Lore.loreMap` gives the first form, parts 1 and 3 by id and title alone.
 
 import type { Fields, LinesPart } from "rp-harness";
+import type { ActivatedLore } from "rp-harness/contract";
 import type { LoreBinding } from "./indexing";
 import { listField, loreLine } from "./tools";
 
@@ -18,6 +19,10 @@ import { listField, loreLine } from "./tools";
 export interface LoreMapLine {
   id: string;
   title: string;
+  /** For an entry that activated: its book's name, '' where the book cannot be read. No line of the map shows it. */
+  source?: string;
+  /** For an entry that activated: how, in the lore's own four words (`lore.ts` `HOWS`); absent where Lumiverse did not say. No line of the map shows it. */
+  how?: ActivatedLore["how"];
   /** What the index says it is, where a run or the user has said. */
   kind?: string;
   line?: string;

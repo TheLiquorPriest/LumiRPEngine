@@ -43,9 +43,10 @@ describe("the lore map", () => {
     const [lamp, gull] = await lore.activated({ ...AT, turn: "turn-1" });
     const gullTitle = "Gulls nest on the harbor wall every spring…";
     expect(map).toEqual({
+      // Each with its book's name and how it activated, which the turn's folder lays out; no line of the map shows either.
       inPrompt: [
-        { id: lamp?.id ?? "", title: "The lamp room" },
-        { id: gull?.id ?? "", title: gullTitle },
+        { id: lamp?.id ?? "", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword" },
+        { id: gull?.id ?? "", title: gullTitle, source: "Reed Coast Atlas", how: "vector" },
       ],
       // Not the keeper's log, whose title comes up but none of its keys; not the world's copy of the gull entry.
       world: [
