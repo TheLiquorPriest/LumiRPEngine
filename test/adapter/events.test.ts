@@ -7,6 +7,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { followChanges, forkOf, knownOf, reconcile, type ChatChange, type KnownChat } from "../../src/adapter/lumiverse/events";
+import { messageFrom } from "../../src/adapter/lumiverse/rows";
 import { createDbReader, type DbReader } from "../../src/adapter/lumiverse/db";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { LumiverseSocket } from "../../src/adapter/lumiverse/socket";
@@ -123,18 +124,21 @@ async function bed() {
 
   /** What the turn lane knows of the chat when its turn starts: every message, and the generation it played whose end it has not heard. */
   const known = async (): Promise<KnownChat> => ({ chat: CHAT, messages: ((await reads.path(CHAT)) ?? []).map(knownOf), awaiting: [{ generation: "gen-7", message: "m5" }] });
-  return { clock, server, socket, reads, lumiverse, heard, known, reopened: () => reopened };
+  return { clock, server, socket, reads, lumiverse, heard, known, message, reopened: () => reopened };
 }
 
-/** Every change of one turn's span, as the events tell it. */
-const ALL: ChatChange[] = [
-  { kind: "message-edited", chat: CHAT, message: "m1" },
-  { kind: "message-edited", chat: CHAT, message: "m2" },
-  { kind: "message-deleted", chat: CHAT, message: "m3" },
-  { kind: "message-swiped", chat: CHAT, message: "m4", swipe: 1 },
-  { kind: "message-edited", chat: CHAT, message: "m5" },
-  { kind: "generation-ended", chat: CHAT, generation: "gen-7", message: "m5" },
-];
+/** Every change of one turn's span, as the events tell it: each message's hidden mark and showing swipe as `messageFrom` reads the row now. */
+function all(b: Awaited<ReturnType<typeof bed>>): ChatChange[] {
+  const now = (id: string) => messageFrom(b.message(id));
+  return [
+    { kind: "message-edited", chat: CHAT, message: "m1", hidden: false, shown: now("m1").shown },
+    { kind: "message-edited", chat: CHAT, message: "m2", hidden: true, shown: now("m2").shown },
+    { kind: "message-deleted", chat: CHAT, message: "m3" },
+    { kind: "message-swiped", chat: CHAT, message: "m4", swipe: 1, shown: now("m4").shown },
+    { kind: "message-edited", chat: CHAT, message: "m5", hidden: false, shown: now("m5").shown },
+    { kind: "generation-ended", chat: CHAT, generation: "gen-7", message: "m5" },
+  ];
+}
 
 /** Each event of the span, by what it tells. */
 type Dropped = "edit" | "hidden" | "delete" | "swipe" | "reply saved" | "generation ended";
@@ -155,8 +159,30 @@ describe("Lumiverse's changes to a chat", () => {
     await play(b, null);
     const ids = b.lumiverse.fork("m2", "chat-branch");
     await b.clock.advance(0);
-    expect(b.heard).toEqual([...ALL, { kind: "chat-forked", from: CHAT, chat: "chat-branch", ids }]);
+    expect(b.heard).toEqual([...all(b), { kind: "chat-forked", from: CHAT, chat: "chat-branch", ids }]);
     expect(ids).toEqual({ m0: "chat-branch-m0", m1: "chat-branch-m1", m2: "chat-branch-m2" });
+  });
+
+  test("a hide heard on the event socket hands the lane the hidden flag, an unhide hands false, his edit of the showing swipe is marked updated, and a generation's start is told", async () => {
+    const b = await bed();
+    b.lumiverse.hide("m2");
+    // The hidden mark taken off again (`bulkSetHidden`, `chats.service.ts:3105-3131`).
+    b.server.emit("MESSAGE_EDITED", { chatId: CHAT, message: { ...b.message("m2"), extra: {} } }, USER);
+    // `updateSwipe` of the swipe it shows (`:3369`), then of one it does not.
+    const m4 = b.message("m4");
+    b.server.emit("MESSAGE_SWIPED", { chatId: CHAT, message: m4, action: "updated", swipeId: 0 }, USER);
+    b.server.emit("MESSAGE_SWIPED", { chatId: CHAT, message: m4, action: "updated", swipeId: 1 }, USER);
+    b.server.emit("GENERATION_STARTED", { generationId: "gen-8", chatId: CHAT, model: "m", targetMessageId: null, targetSwipeId: null }, USER);
+    await b.clock.advance(0);
+    const shown = messageFrom(b.message("m2")).shown;
+    expect(b.heard).toEqual([
+      { kind: "message-edited", chat: CHAT, message: "m2", hidden: true, shown },
+      { kind: "message-edited", chat: CHAT, message: "m2", hidden: false, shown },
+      { kind: "message-swiped", chat: CHAT, message: "m4", swipe: 0, shown: messageFrom(m4).shown, updated: true },
+      { kind: "message-swiped", chat: CHAT, message: "m4", swipe: 0, shown: messageFrom(m4).shown },
+      { kind: "generation-started", chat: CHAT, generation: "gen-8" },
+    ]);
+    expect(shown).toEqual({ date: 1_767_600_002, hash: expect.any(String) });
   });
 
   for (const dropped of ["edit", "hidden", "delete", "swipe", "reply saved", "generation ended"] as const) {
@@ -165,9 +191,10 @@ describe("Lumiverse's changes to a chat", () => {
       const before = await b.known();
       await play(b, dropped);
       const found = await reconcile(b.reads, before);
+      const ALL = all(b);
       const missed = ALL.filter((c) => !b.heard.some((h) => JSON.stringify(h) === JSON.stringify(c)));
       expect(missed).toHaveLength(1);
-      // Whatever the events did not say, the database does; and it says nothing they did not.
+      // Whatever the events did not say, the database does, with the same marks, dates and hashes; and it says nothing they did not.
       expect(found).toEqual(expect.arrayContaining(missed));
       expect(found.toSorted((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y)))).toEqual(ALL.toSorted((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
     });
@@ -205,6 +232,8 @@ describe("Lumiverse's changes to a chat", () => {
     await b.clock.advance(1_000);
     expect(b.socket.state().state).toBe("open");
     expect(b.reopened()).toBe(1);
-    expect((await reconcile(b.reads, before)).length).toBe(ALL.length);
+    const found = await reconcile(b.reads, before);
+    expect(found).toHaveLength(all(b).length);
+    expect(found).toEqual(expect.arrayContaining(all(b)));
   });
 });

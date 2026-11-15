@@ -5,26 +5,38 @@
 // turn lane asks `reconcile` what changed against what it knew: it finds the same changes in the
 // database, and a missed event is never fatal.
 //
-// The events and their payloads (Lumiverse's `src/`): `GENERATION_ENDED` `{generationId, chatId,
+// The events and their payloads (Lumiverse's `src/`): `GENERATION_STARTED` `{generationId, chatId, …}`
+// (`services/generate.service.ts:2040-2054`); `GENERATION_ENDED` `{generationId, chatId,
 // messageId, …}`, with `error` when it failed and no `messageId` when it failed before writing
-// (`services/generate.service.ts:4289-4306`, `:4565-4583`, `:3038-3050`); `GENERATION_STOPPED`
+// (`:4289-4306`, `:4565-4583`, `:3038-3050`); `GENERATION_STOPPED`
 // `{generationId, chatId, content}` (`:3013-3021`, `:4528-4536`); `MESSAGE_EDITED` `{chatId, message}`,
 // for a hidden mark too (`services/chats.service.ts:1551`, `:3131`); `MESSAGE_DELETED` `{chatId,
 // messageId}` (`:3205`, `:3255`); `MESSAGE_SWIPED` `{chatId, message, action, swipeId}` (`:3331`,
 // `:3369`, `:3439`, `:3478`); `CHAT_FORKED` `{sourceChatId, forkedChatId, messageIdMap}` (`:3604-3616`).
+// A message an event carries is read as RPE reads a row (`rows.ts` `messageFrom`), so its showing
+// swipe's date and hash are the ones a comparison of the chat's rows finds.
 
 import { isRecord } from "../../shared/json";
 import type { LumiverseReads, LvStep } from "./reads";
+import { type LvMessage, messageFrom } from "./rows";
 import type { LumiverseSocket } from "./socket";
 
+/** A message's showing swipe as a change gives it: its date as `swipe_dates` holds it, and the hash of its text (`messageFrom`). */
+export type ShownSwipe = LvMessage["shown"];
+
 export type ChatChange =
+  /** A generation began in the chat: Lumiverse's own writes to the chat's messages for it come until its end is told. */
+  | { kind: "generation-started"; chat: string; generation: string }
   /** A generation is over. `message`: the message it saved to; null when it saved none (it failed before writing, or the event did not say). */
   | { kind: "generation-ended"; chat: string; generation: string; message: string | null; error?: string; stopped?: true }
-  /** A message's text, or its hidden mark, changed in the swipe it shows. */
-  | { kind: "message-edited"; chat: string; message: string }
+  /** A message's text, its hidden mark or its `extra` changed in the swipe it shows: its hidden mark and that swipe, as they are now. */
+  | { kind: "message-edited"; chat: string; message: string; hidden: boolean; shown: ShownSwipe }
   | { kind: "message-deleted"; chat: string; message: string }
-  /** A message shows another swipe, or gained or lost one: `swipe` is the one it shows now. */
-  | { kind: "message-swiped"; chat: string; message: string; swipe: number }
+  /**
+   * A message shows another swipe, gained or lost one, or had a swipe's text written: `swipe` is the one it shows now, `shown` that
+   * swipe as it is now; `updated` where the swipe written is the one it shows.
+   */
+  | { kind: "message-swiped"; chat: string; message: string; swipe: number; shown: ShownSwipe; updated?: true }
   /** `chat` was made from `from`, each message of `from` up to the fork given a new id: old id to new. */
   | { kind: "chat-forked"; from: string; chat: string; ids: Record<string, string> };
 
@@ -50,10 +62,16 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
       const error = str(payload.error);
       return { kind: "generation-ended", chat, generation, message: str(payload.messageId), ...(error !== null ? { error } : {}), ...(event === "GENERATION_STOPPED" ? { stopped: true as const } : {}) };
     }
+    case "GENERATION_STARTED": {
+      const chat = str(payload.chatId);
+      const generation = str(payload.generationId);
+      return chat === null || generation === null ? null : { kind: "generation-started", chat, generation };
+    }
     case "MESSAGE_EDITED": {
       const chat = str(payload.chatId) ?? str(message?.chat_id);
-      const id = str(message?.id);
-      return chat === null || id === null ? null : { kind: "message-edited", chat, message: id };
+      if (chat === null || message === null || str(message.id) === null) return null;
+      const m = messageFrom(message);
+      return { kind: "message-edited", chat, message: m.id, hidden: m.hidden, shown: m.shown };
     }
     case "MESSAGE_DELETED": {
       const chat = str(payload.chatId);
@@ -62,9 +80,11 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
     }
     case "MESSAGE_SWIPED": {
       const chat = str(payload.chatId);
-      const id = str(message?.id);
-      const swipe = message?.swipe_id;
-      return chat === null || id === null || typeof swipe !== "number" ? null : { kind: "message-swiped", chat, message: id, swipe };
+      if (chat === null || message === null || str(message.id) === null || typeof message.swipe_id !== "number") return null;
+      const m = messageFrom(message);
+      // A swipe's text written (`updateSwipe`, `action: "updated"`) is an edit of what shows only where the swipe written is the one shown.
+      const updated = payload.action === "updated" && payload.swipeId === m.swipe;
+      return { kind: "message-swiped", chat, message: m.id, swipe: m.swipe, shown: m.shown, ...(updated ? { updated: true as const } : {}) };
     }
     case "CHAT_FORKED": {
       const from = str(payload.sourceChatId);
@@ -132,8 +152,8 @@ export async function reconcile(reads: LumiverseReads, known: KnownChat): Promis
   for (const k of known.messages) {
     const m = now.get(k.id);
     if (m === undefined) changes.push({ kind: "message-deleted", chat: known.chat, message: k.id });
-    else if (m.swipe !== k.swipe || m.swipes !== k.swipes) changes.push({ kind: "message-swiped", chat: known.chat, message: k.id, swipe: m.swipe });
-    else if (m.hidden !== k.hidden || m.shown.hash !== k.hash) changes.push({ kind: "message-edited", chat: known.chat, message: k.id });
+    else if (m.swipe !== k.swipe || m.swipes !== k.swipes) changes.push({ kind: "message-swiped", chat: known.chat, message: k.id, swipe: m.swipe, shown: m.shown });
+    else if (m.hidden !== k.hidden || m.shown.hash !== k.hash) changes.push({ kind: "message-edited", chat: known.chat, message: k.id, hidden: m.hidden, shown: m.shown });
   }
   return changes;
 }
