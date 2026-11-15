@@ -63,3 +63,39 @@ export function projectActiveSwipeExtra(stored: Record<string, unknown>, swipeId
   }
   return out;
 }
+
+/**
+ * `removeSwipeScopedExtraEntry` (`:482-580`): the entry of the swipe taken out of every per-swipe list, `variableStateBySwipe` and the `preset_contexts` of the extensions' metadata
+ * included; a list left with nothing in it is dropped (the variable records and the contexts are kept as lists).
+ */
+export function removeSwipeScopedEntry(extra: Record<string, unknown> | null | undefined, swipeCount: number, legacySwipeId: number, removed: number): Record<string, unknown> {
+  const normalized = normalizeStoredExtra(extra, swipeCount, legacySwipeId);
+  const without = (list: unknown[]): unknown[] => list.filter((_, at) => at !== removed);
+  if (Array.isArray(normalized.variableStateBySwipe)) normalized.variableStateBySwipe = without(normalized.variableStateBySwipe);
+  const metadata = normalized.spindle_metadata;
+  if (isObject(metadata) && Array.isArray(metadata.preset_contexts)) normalized.spindle_metadata = { ...metadata, preset_contexts: without(metadata.preset_contexts) };
+  for (const key of SWIPE_SCOPED_EXTRA_KEYS) {
+    const name = SCOPED[key];
+    const list = normalized[name];
+    if (!Array.isArray(list)) continue;
+    const left = without(list);
+    if (left.some((entry) => entry !== null)) normalized[name] = left;
+    else delete normalized[name];
+  }
+  return normalized;
+}
+
+/**
+ * `preserveSwipeScopedExtraArrays` (`:638-652`): an `extra` sent whole keeps the stored `variableStateBySwipe` whatever it carries, and each per-swipe list it leaves out
+ * (`undefined`) as it was stored.
+ */
+export function keepStoredSwipeArrays(incoming: Record<string, unknown>, stored: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...incoming };
+  if (stored.variableStateBySwipe !== undefined) merged.variableStateBySwipe = stored.variableStateBySwipe;
+  else delete merged.variableStateBySwipe;
+  for (const key of SWIPE_SCOPED_EXTRA_KEYS) {
+    const name = SCOPED[key];
+    if (merged[name] === undefined && stored[name] !== undefined) merged[name] = stored[name];
+  }
+  return merged;
+}

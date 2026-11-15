@@ -13,27 +13,26 @@ import type { TurnRow } from "../../src/store";
 import { sceneSession } from "../../src/story";
 import type { TurnList } from "../../src/ui/api";
 import { CONTINUE_NUDGE } from "../standin/assembly";
-import { CHARACTER, CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
+import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
   for (const b of beds.splice(0)) await b.close();
 });
 
-const BRANCH = "chat-gannet-again";
-
-/** Lumiverse's fork of the bed's chat at its last reply (`chats.service.ts:3540-3576`): each message copied in its place under a new id. */
-function branchAtLastReply(b: TurnBed): void {
-  const rows = b.db.rows("SELECT id, is_user, content FROM messages WHERE chat_id = ? ORDER BY index_in_chat", CHAT);
-  const messages = rows.map((m, i) => ({ id: `m-again-${i}`, role: m.is_user === 1 ? ("user" as const) : ("assistant" as const), content: String(m.content) }));
-  b.host.addChat({ id: BRANCH, user: USER, name: "The lighthouse, again", character: CHARACTER, messages, metadata: { branched_from: CHAT, branch_at_message: String(rows.at(-1)!.id) } });
+/** Lumiverse's fork of the bed's chat at its last message (`branchChat`, `chats.service.ts:3506-3635`), made as the player makes it through the stand-in: the new chat's id, and the id its copy of that message has in it (from the map the fork tells). */
+function branchAtLastReply(b: TurnBed): { chat: string; last: string } {
+  const at = String(b.db.rows("SELECT id FROM messages WHERE chat_id = ? ORDER BY index_in_chat DESC LIMIT 1", CHAT)[0]!.id);
+  const chat = b.host.branch(CHAT, at, "The lighthouse, again")!;
+  const forked = b.host.events.findLast((e) => e.event === "CHAT_FORKED")!.payload as { messageIdMap: Record<string, string> };
+  return { chat, last: forked.messageIdMap[at]! };
 }
 
 /** The turn of a generation in the branch, once Lumiverse's end of it is recorded and no run of the branch goes on. */
-async function settledInBranch(b: TurnBed, generation: string): Promise<TurnRow> {
+async function settledInBranch(b: TurnBed, chat: string, generation: string): Promise<TurnRow> {
   return await b.until(`the branch's turn of generation ${generation} to be settled`, () => {
     const turn = b.turns.store.user(USER).turn(b.turns.runs.byGeneration(USER, generation)?.turn ?? "");
-    return turn !== null && turn.status !== "open" && b.turns.runs.ofChat(USER, BRANCH).length === 0 ? turn : null;
+    return turn !== null && turn.status !== "open" && b.turns.runs.ofChat(USER, chat).length === 0 ? turn : null;
   });
 }
 
@@ -49,17 +48,17 @@ test("a branch's first turn plays in a session of the branch's own, forked from 
   }
   const point = b.requests[1]!.scope;
 
-  branchAtLastReply(b);
-  b.host.send(BRANCH, "I look out to sea.");
-  const generation = (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET })).generationId!;
+  const branch = branchAtLastReply(b);
+  b.host.send(branch.chat, "I look out to sea.");
+  const generation = (await b.host.generate({ chat: branch.chat, connection: CONNECTION, preset: PRESET })).generationId!;
   await b.until("the branch's turn to be tied", () => b.turns.store.user(USER).turn(b.turns.runs.byGeneration(USER, generation)?.turn ?? "")?.status === "done");
 
   const asked = b.requests[2]!;
   expect(asked.parent).toBe(point.turn);
-  expect(asked.scope.chat).toBe(BRANCH);
+  expect(asked.scope.chat).toBe(branch.chat);
   expect(asked.scope.session).not.toBe(point.session);
-  expect(await b.turns.harness.sessions!.get({ user: USER, chat: BRANCH, session: asked.scope.session })).toMatchObject({ chat: BRANCH, state: "open", from: { chat: CHAT, session: point.session, turn: point.turn } });
-  expect(b.turns.store.user(USER).sessions(BRANCH).map((s) => s.id)).toEqual([asked.scope.session]);
+  expect(await b.turns.harness.sessions!.get({ user: USER, chat: branch.chat, session: asked.scope.session })).toMatchObject({ chat: branch.chat, state: "open", from: { chat: CHAT, session: point.session, turn: point.turn } });
+  expect(b.turns.store.user(USER).sessions(branch.chat).map((s) => s.id)).toEqual([asked.scope.session]);
   expect(JSON.stringify(b.model.requests.at(-1)!.messages)).toContain("INTENT-TWO");
 });
 
@@ -83,42 +82,45 @@ test("a continue in a branch of the reply it shares with the chat it was made fr
   expect(recorded).toHaveLength(1);
   const sourcePath = store.path(CHAT);
 
-  branchAtLastReply(b);
-  const continuing = await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET, type: "continue" });
+  const branch = branchAtLastReply(b);
+  const continuing = await b.host.generate({ chat: branch.chat, connection: CONNECTION, preset: PRESET, type: "continue" });
   // The branch's reply is sent last, out of its history, with no postfix, as the preset sets none, and the nudge after it
-  // (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`).
+  // (`prompt-assembly.service.ts:742-775`, `generate.service.ts:1969-1978`). The copy carries the `extra` of the reply it was copied from
+  // (`chats.service.ts:3540-3576`), so it is sent with the thinking that reply kept, as the source's own would be.
+  const kept = (JSON.parse(String(b.db.rows("SELECT extra FROM messages WHERE id = ?", shared.message)[0]!.extra)) as { reasoningBySwipe: string[] }).reasoningBySwipe[0]!;
+  expect(kept).not.toBe("");
   expect((continuing.body!.messages as unknown[]).slice(-2)).toEqual([
-    { role: "assistant", content: "The lamp turns." },
+    { role: "assistant", content: "The lamp turns.", reasoning_content: kept },
     { role: "system", content: CONTINUE_NUDGE },
   ]);
-  const continued = await settledInBranch(b, continuing.generationId!);
-  const saved = String(b.db.rows("SELECT content FROM messages WHERE id = ?", "m-again-2")[0]!.content);
+  const continued = await settledInBranch(b, branch.chat, continuing.generationId!);
+  const saved = String(b.db.rows("SELECT content FROM messages WHERE id = ?", branch.last)[0]!.content);
   expect(saved).toStartWith("The lamp turns.");
   expect(saved).toEndWith("And the sea calms.");
   // The continue is a turn of the branch's own, after the shared one, tied to the branch's message, with what it recorded.
-  expect(continued).toMatchObject({ chat: BRANCH, parent: shared.id, kind: "continue", status: "done", message: "m-again-2" });
+  expect(continued).toMatchObject({ chat: branch.chat, parent: shared.id, kind: "continue", status: "done", message: branch.last });
   expect(store.changes(continued.id).map((c) => c.lane)).toEqual(["engine"]);
-  expect(store.path(BRANCH).find((e) => e.message === "m-again-2")).toMatchObject({ turn: continued.id, node: continued.node });
-  expect(b.requests[1]).toMatchObject({ kind: "continue", parent: shared.id, scope: { chat: BRANCH, turn: continued.id } });
+  expect(store.path(branch.chat).find((e) => e.message === branch.last)).toMatchObject({ turn: continued.id, node: continued.node });
+  expect(b.requests[1]).toMatchObject({ kind: "continue", parent: shared.id, scope: { chat: branch.chat, turn: continued.id } });
   // Each chat's Turn page lists the runs played in it: the branch's, its continue, on its path at its message; the source's, the shared turn.
   const listed = async (chat: string) => (await b.page<TurnList>("GET", `/api/v1/chats/${chat}/turns`)).body.turns.map((t) => [t.id, t.kind, t.onPath, t.message]);
-  expect(await listed(BRANCH)).toEqual([[continued.id, "continue", true, "m-again-2"]]);
+  expect(await listed(branch.chat)).toEqual([[continued.id, "continue", true, branch.last]]);
   expect(await listed(CHAT)).toEqual([[shared.id, "new", true, shared.message]]);
   // It plays in a session of the branch's own, as the shared turn left it, so the Author has what it did there.
-  expect(await b.turns.harness.sessions!.get({ user: USER, chat: BRANCH, session: b.requests[1]!.scope.session })).toMatchObject({ chat: BRANCH, from: { chat: CHAT, session: point.session, turn: shared.id } });
+  expect(await b.turns.harness.sessions!.get({ user: USER, chat: branch.chat, session: b.requests[1]!.scope.session })).toMatchObject({ chat: branch.chat, from: { chat: CHAT, session: point.session, turn: shared.id } });
   expect(JSON.stringify(b.model.requests[2]!.messages)).toContain("INTENT-ONE");
   // The source keeps its turn as it was: its message, its text, what it recorded, its path.
   expect(store.turn(shared.id)).toMatchObject({ chat: CHAT, message: shared.message, hash: shared.hash });
   expect(store.changes(shared.id)).toEqual(recorded);
   expect(store.path(CHAT)).toEqual(sourcePath);
   // The branch's state holds the shared turn's thirty minutes, then its own fifteen.
-  expect(store.headState(BRANCH).state.world.clock - store.headState(CHAT).state.world.clock).toBe(15);
+  expect(store.headState(branch.chat).state.world.clock - store.headState(CHAT).state.world.clock).toBe(15);
 
   // Each chat plays on from its own: told nothing of the other's, the source after the shared turn, the branch after its own.
   b.host.send(CHAT, "I wait.");
   expect((await settledTurn(b, (await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET })).generationId!)).parent).toBe(shared.id);
-  b.host.send(BRANCH, "I look out to sea.");
-  expect((await settledInBranch(b, (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET })).generationId!)).parent).toBe(continued.id);
+  b.host.send(branch.chat, "I look out to sea.");
+  expect((await settledInBranch(b, branch.chat, (await b.host.generate({ chat: branch.chat, connection: CONNECTION, preset: PRESET })).generationId!)).parent).toBe(continued.id);
   for (const asked of b.requests.slice(2)) for (const kind of ["edit", "swiped", "unplayed", "deleted"]) expect(asked.since.map((s) => s.kind)).not.toContain(kind);
 });
 
@@ -151,17 +153,17 @@ test("after a continue in a branch of the reply it shares, the branch still hold
   const sourcePath = store.path(CHAT);
   const sourceSessions = store.sessions(CHAT);
 
-  branchAtLastReply(b);
-  const continued = await settledInBranch(b, (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET, type: "continue" })).generationId!);
-  expect(continued).toMatchObject({ chat: BRANCH, parent: shared.id, kind: "continue" });
+  const branch = branchAtLastReply(b);
+  const continued = await settledInBranch(b, branch.chat, (await b.host.generate({ chat: branch.chat, connection: CONNECTION, preset: PRESET, type: "continue" })).generationId!);
+  expect(continued).toMatchObject({ chat: branch.chat, parent: shared.id, kind: "continue" });
   // The scene the shared turn opened is still the branch's, and the session the continue played in is still open.
-  expect(store.line(BRANCH).map((l) => l.turn)).toEqual([shared.id, continued.id]);
-  expect(sceneSession(b.turns.store, USER, BRANCH, continued.id).scene).toBe(scene);
-  expect(store.sessions(BRANCH).map((s) => [s.scene, s.closedBy])).toEqual([[scene, null]]);
+  expect(store.line(branch.chat).map((l) => l.turn)).toEqual([shared.id, continued.id]);
+  expect(sceneSession(b.turns.store, USER, branch.chat, continued.id).scene).toBe(scene);
+  expect(store.sessions(branch.chat).map((s) => [s.scene, s.closedBy])).toEqual([[scene, null]]);
 
   // The branch's next turn: the Author's briefing has the scene, and Wren's agent her base, both from the shared turn.
-  b.host.send(BRANCH, "Is the sea calm?");
-  const next = await settledInBranch(b, (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET })).generationId!);
+  b.host.send(branch.chat, "Is the sea calm?");
+  const next = await settledInBranch(b, branch.chat, (await b.host.generate({ chat: branch.chat, connection: CONNECTION, preset: PRESET })).generationId!);
   expect(next.parent).toBe(continued.id);
   expect(JSON.stringify(b.model.requests[3]!.messages)).toContain("SCENE-WATCH Night watch");
   const wren = b.model.requests.map((r) => JSON.stringify(r.messages)).find((sent) => sent.includes("BRIEF-CALM"));
@@ -193,15 +195,15 @@ test.each(["swipe", "regenerate"] as const)("a %s in a branch of the reply it sh
   });
   await b.until("the source's run to be at work after its reply", () => b.model.requests.length === 2);
 
-  branchAtLastReply(b);
+  const branch = branchAtLastReply(b);
   // The branch's path is compared once before, as any earlier request of the branch compares it (here a Settle now, refused): it
   // holds the shared turn at the branch's copy of the reply.
-  expect((await b.page("POST", `/api/v1/chats/${BRANCH}/settle`)).status).toBe(409);
-  expect(store.path(BRANCH).find((e) => e.message === "m-again-2")?.turn).toBe(shared.id);
-  const made = await settledInBranch(b, (await b.host.generate({ chat: BRANCH, connection: CONNECTION, preset: PRESET, type: kind })).generationId!);
+  expect((await b.page("POST", `/api/v1/chats/${branch.chat}/settle`)).status).toBe(409);
+  expect(store.path(branch.chat).find((e) => e.message === branch.last)?.turn).toBe(shared.id);
+  const made = await settledInBranch(b, branch.chat, (await b.host.generate({ chat: branch.chat, connection: CONNECTION, preset: PRESET, type: kind })).generationId!);
   // A turn of the branch's own, beside the shared one, at the branch's copy of the reply.
-  expect(made).toMatchObject({ chat: BRANCH, kind, parent: shared.parent, status: "done", message: "m-again-2" });
-  expect(store.path(BRANCH).find((e) => e.message === "m-again-2")?.turn).toBe(made.id);
+  expect(made).toMatchObject({ chat: branch.chat, kind, parent: shared.parent, status: "done", message: branch.last });
+  expect(store.path(branch.chat).find((e) => e.message === branch.last)?.turn).toBe(made.id);
   // The harness is told of no turn of the source's leaving a path, and the source's run goes on to its end, its turn on its path.
   expect(b.left.map((s) => s.turn)).not.toContain(shared.id);
   held.open();
@@ -219,15 +221,15 @@ test("Settle now in a branch whose newest turn is the one it shares with the cha
   const recorded = store.changes(shared.id);
   expect(recorded).toHaveLength(1);
 
-  branchAtLastReply(b);
-  expect(await b.page("POST", `/api/v1/chats/${BRANCH}/settle`)).toEqual({
+  const branch = branchAtLastReply(b);
+  expect(await b.page("POST", `/api/v1/chats/${branch.chat}/settle`)).toEqual({
     status: 409,
     body: { error: "The newest turn on this chat's path is the one it shares with the chat it was branched from, so what Settle now records would go into that chat's history too. Play a turn in this chat first, then settle it." },
   });
   expect(b.turns.runs.ofTurn(USER, shared.id).map((r) => r.kind)).toEqual(["new"]);
   expect(store.changes(shared.id)).toEqual(recorded);
   // The shared turn stays on both chats' lines.
-  expect(store.line(BRANCH).map((l) => l.turn)).toEqual([shared.id]);
+  expect(store.line(branch.chat).map((l) => l.turn)).toEqual([shared.id]);
   expect(store.line(CHAT).map((l) => l.turn)).toEqual([shared.id]);
   expect(b.model.requests).toHaveLength(2);
 });

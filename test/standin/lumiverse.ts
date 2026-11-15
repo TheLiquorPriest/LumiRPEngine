@@ -154,6 +154,12 @@ export class StandIn extends ChatRows {
   /** The models its tokenizer knows (`countForModel`, `services/tokenizer.service.ts`): a reply's token count is worked out only for these, else only the provider's own count is used. Counts are the stand-in's own, a quarter of the characters. */
   readonly tokenizedModels = new Set<string>();
 
+  /** `computeMessageTokenCount` (`services/message-token-count.ts:51-66`): none for no text, for the user's switch off (`showMessageTokenCount`), for no connection or for a model it has no tokenizer for; else the stand-in's count. */
+  protected override countTokens(user: string, connection: string | undefined, text: string): number | null {
+    const model = connection === undefined || connection === "" ? undefined : this.connections.get(connection)?.model;
+    return text !== "" && this.library.setting(user, "showMessageTokenCount") !== false && model !== undefined && this.tokenizedModels.has(model) ? Math.ceil(text.length / 4) : null;
+  }
+
   /**
    * `POST /api/v1/generate/stop` (`routes/generate.routes.ts:45-65`): the generation named (a stale id falls back to the chat's when the chat is given), else the chat's, else
    * every one of the user's; whether any was.
@@ -717,29 +723,6 @@ export class StandIn extends ChatRows {
       return text === null || text === "" ? [] : [`## ${documents.get(slug)!.name}\n${text}`];
     });
     return resolved.length === 0 ? "" : ["", "---", "", "# Additional Context", "The user has attached the following reference material for you to consider when responding.", "", resolved.join("\n\n---\n\n")].join("\n");
-  }
-
-  /** The chat's metadata as its row holds it now; the chat held in memory where there is no database. */
-  private metadataOf(chat: Chat): Record<string, unknown> {
-    const row = this.db?.rows("SELECT metadata FROM chats WHERE id = ? AND user_id = ?", chat.id, chat.user)[0];
-    return row === undefined ? (chat.metadata ?? {}) : (JSON.parse(String(row.metadata)) as Record<string, unknown>);
-  }
-
-  /**
-   * `mergeChatMetadataAsync` (`services/chats.service.ts:5241-5244`; `db/chat-operations.ts:22-33`, `:57-80`): each key given replaces
-   * the chat's own, a key given as undefined is removed (`:68`), the row's stamp is raised, and the change is told as `CHAT_CHANGED` with the keys that differ
-   * (`services/chats.service.ts:1466-1500`, `:5198-5204`).
-   */
-  mergeChatMetadata(chat: Chat, partial: Record<string, unknown>): void {
-    const before = this.metadataOf(chat);
-    const metadata = { ...before, ...partial };
-    for (const [key, value] of Object.entries(partial)) if (value === undefined) delete metadata[key];
-    const changedFields = Object.keys(partial).filter((key) => (partial[key] === undefined ? key in before : !(key in before) || JSON.stringify(before[key]) !== JSON.stringify(partial[key]))).map((key) => `metadata.${key}`);
-    this.db?.run("UPDATE chats SET metadata = ?, updated_at = ? WHERE id = ? AND user_id = ?", JSON.stringify(metadata), Math.floor(this.now() / 1000), chat.id, chat.user);
-    chat.metadata = metadata;
-    const row = this.db?.rows("SELECT * FROM chats WHERE id = ? AND user_id = ?", chat.id, chat.user)[0];
-    const shown = row === undefined ? { id: chat.id, user_id: chat.user, character_id: chat.character.id, name: chat.name ?? "", metadata } : { ...row, metadata };
-    this.emit("CHAT_CHANGED", { chat: shown, changedFields }, chat.user);
   }
 
   /**

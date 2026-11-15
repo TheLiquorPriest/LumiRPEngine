@@ -15,6 +15,27 @@ import type { LlmMessage } from "./steps";
 
 export type Server = (request: Request) => Promise<Response>;
 
+/** A message an extension writes with `chat.appendMessage` (`ChatAppendMessageDTO`): its role, text, and optionally the name, the character who speaks it (an assistant's) and its own metadata. */
+export interface ChatAppend {
+  role: "system" | "user" | "assistant";
+  content: string;
+  name?: string;
+  characterId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** What the extensions' `chat` calls reach of the chats (`spindle/worker-host.ts:4019-4024`, `:4123-4448`): the stand-in's chat rows (`rows.ts`) give it. */
+export interface ChatStore {
+  /** The user who owns the chat (`chats.user_id`); none where there is no such chat. */
+  ownerOf(chatId: string): string | undefined;
+  hasMessage(chatId: string, messageId: string): boolean;
+  isHidden(chatId: string, messageId: string): boolean;
+  /** `bulkSetHidden` (`services/chats.service.ts:3087-3132`). */
+  hide(chatId: string, messageIds: readonly string[], hidden: boolean): void;
+  /** A message written as `handleChatAppendMessage` writes one; gives its id. */
+  append(chatId: string, message: ChatAppend): string;
+}
+
 /** The extension side of one installed extension: Spindle's API as its worker sees it, and what the test does to it. */
 export interface Installed extends ExtSpindle {
   /** Low-level, for a test that starts a worker by hand with `install(granted)`: the change reaches the worker at once, with none of the manager's announcements (an admin's grant is `spindle.setPermissions`). */
@@ -54,6 +75,16 @@ export interface Installed extends ExtSpindle {
    * argument's where a number is given). One per extension, a second replacing the first; needs `interceptor`. The host checks `match` against the generation's context before it calls the extension.
    */
   registerInterceptor(handler: PromptHandler, priorityOrOptions?: number | InterceptorOptions, options?: InterceptorOptions): () => void;
+  /**
+   * `spindle.chat` (`spindle/worker-runtime.ts:2432-2454`; `spindle/worker-host.ts:4123-4448`): messages written, hidden and shown after they are made. Each needs `chat_mutation` ("Permission denied: chat_mutation …" without it),
+   * and a user-scoped extension reaches only its installer's chats. `triggerGeneration` is not modelled: a test starts a generation as the user does.
+   */
+  readonly chat: {
+    setMessageHidden(chatId: string, messageId: string, hidden: boolean): Promise<void>;
+    setMessagesHidden(chatId: string, messageIds: readonly string[], hidden: boolean): Promise<void>;
+    isMessageHidden(chatId: string, messageId: string): Promise<boolean>;
+    appendMessage(chatId: string, message: ChatAppend): Promise<{ id: string }>;
+  };
 }
 
 /** An entry an extension's interceptor added to the breakdown (`type: "extension"`, `services/generate.service.ts:565-583`). */
@@ -214,6 +245,11 @@ export class ExtensionHost {
     return undefined;
   }
 
+  /** The chats the extensions' `chat` calls reach: `rows.ts`, which holds them, gives them; this host holds none. */
+  protected chatStore(): ChatStore | null {
+    return null;
+  }
+
   /**
    * The wall-clock limit of an extension's prompt interceptor, worked out at each call (`resolveInterceptorTimeout`, `services/spindle-settings.service.ts:6-8`, `:22-28`, `:38-62`; `spindle/worker-host.ts:3159-3163`): the
    * manifest's `interceptorTimeoutMs` where it has one, else the Spindle setting of the user it is installed for (an operator's: the oldest account's), 10 seconds where neither is set; held between 1 and 300 seconds.
@@ -293,6 +329,19 @@ export class ExtensionHost {
     // `spindle/world-info-interceptor.ts:192-194`, `spindle/context-handler.ts:23-26`).
     const place = <R extends Registration<unknown>>(list: R[], registration: R): R[] =>
       [...list.filter((r) => r.ext !== ext), registration].sort((a, b) => a.priority - b.priority);
+    // The start of each `chat` call (`spindle/worker-host.ts:4130-4143`, `:4375-4377`): `chat_mutation`, the chat's owner, and a user-scoped extension reaching only its installer's chats (`enforceScopedUser`, `:1178-1186`).
+    const reach = (chatId: string, before?: () => void): { store: ChatStore; owner: string } => {
+      if (!ext.granted.has("chat_mutation")) throw new Error("Permission denied: chat_mutation — Chat mutation permission not granted");
+      before?.();
+      const store = host.chatStore();
+      const owner = store?.ownerOf(chatId);
+      if (store === null || owner === undefined) throw new Error("Chat not found");
+      if (ext.scope === "user") {
+        if (ext.installedBy === null) throw new Error("Extension owner is not set");
+        if (owner !== ext.installedBy) throw new Error("Extension is user-scoped and cannot access this user context");
+      }
+      return { store, owner };
+    };
     const api: Installed = {
       logs: ext.logs,
       id: ext.id,
@@ -363,6 +412,28 @@ export class ExtensionHost {
           const resolved = ext.scope === "user" ? (ext.installedBy ?? "") : (user ?? "");
           if (resolved === "") throw new Error("userId is required for operator-scoped extensions");
           host.modalResult(`spindle-modal:${ext.id}:${id}`, "extension");
+        },
+      },
+      chat: {
+        setMessageHidden: async (chatId, messageId, hidden) => {
+          const { store } = reach(chatId);
+          if (!store.hasMessage(chatId, messageId)) throw new Error("Message not found");
+          store.hide(chatId, [messageId], !!hidden);
+        },
+        setMessagesHidden: async (chatId, messageIds, hidden) => {
+          const { store } = reach(chatId, () => {
+            if (!Array.isArray(messageIds)) throw new Error("messageIds must be an array of strings");
+          });
+          store.hide(chatId, messageIds.filter((id): id is string => typeof id === "string" && id !== ""), !!hidden);
+        },
+        isMessageHidden: async (chatId, messageId) => {
+          const { store } = reach(chatId);
+          if (!store.hasMessage(chatId, messageId)) throw new Error("Message not found");
+          return store.isHidden(chatId, messageId);
+        },
+        appendMessage: async (chatId, message) => {
+          const { store } = reach(chatId);
+          return { id: store.append(chatId, message) };
         },
       },
       grant: (permission) => change(permission, true),
