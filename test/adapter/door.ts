@@ -19,6 +19,7 @@ import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { startExtension } from "../../src/ext/start";
 import { treeReader } from "../../src/tree/settings";
 import { ALL } from "../ext/rig";
+import { ADMIN, installRpe } from "../standin/install";
 import { StandInDb } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
 import { StandIn, type Installed } from "../standin/lumiverse";
@@ -39,6 +40,8 @@ export interface DoorBed {
   installed: Installed;
   /** Lumiverse's id for the extension. */
   extension: string;
+  /** An admin grants the extension a permission: its worker hears it on a later task, which `until` runs. */
+  grant(permission: string): void;
   providerKey: string;
   /** What RPE told its extension of itself. */
   registration: Registration;
@@ -85,9 +88,8 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
     const host = new StandIn();
     const server = new LumiverseServer({ clock, db, host, accounts: [{ id: USER, username: "tamsin", password: PASSWORD }], ...(options.handlerMs !== undefined ? { handlerMs: options.handlerMs } : {}) });
     cleanups.push(() => server.stop());
-    const installed = server.install(EXTENSION_IDENTIFIER, options.granted ?? ALL);
-    const running = await startExtension(installed);
-    cleanups.push(() => running.stop());
+    const { id, worker: installed } = await installRpe(host, { granted: options.granted ?? ALL, code: (api) => startExtension(api) });
+    cleanups.push(() => host.spindle.disable(ADMIN, id));
 
     // RPE signed in as `rpe lumiverse` leaves it: the session's token in RPE's secrets.
     const paths = dataPaths(join(root, "data"));
@@ -173,7 +175,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
     const registration = door.registration();
     if (registration === null) throw new Error("RPE made no registration");
     const kept = (): Registration | null => readRegistration(JSON.parse(host.readFile(`users/${USER}/extensions/${EXTENSION_IDENTIFIER}/${REGISTRATION_FILE}`) ?? "null"));
-    return { app, listening, door, host, server, installed, extension: installed.id, providerKey, registration, kept, logs, heard, until, run, close };
+    return { app, listening, door, host, server, installed, extension: id, grant: (permission) => void host.spindle.setPermissions(ADMIN, id, { grant: [permission] }), providerKey, registration, kept, logs, heard, until, run, close };
   } catch (error) {
     await close();
     throw error;

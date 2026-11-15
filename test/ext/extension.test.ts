@@ -13,6 +13,7 @@ import { DEADLINE_MS, PRIORITY } from "../../src/ext/start";
 import { ALL, FERRY_SECRET, FERRY_SHOWN, harborBooks, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
 import { FakeClock, settle } from "../standin/clock";
 import { WORLD_INFO_INTERCEPTOR_TIMEOUT_MS } from "../standin/lore";
+import { installRpe } from "../standin/install";
 
 const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
 const WINDOW = [8, 9, 10, 11];
@@ -274,13 +275,16 @@ describe("the request's parts, told apart", () => {
 });
 
 describe("the prompt interceptor's own faults, dry runs and permissions", () => {
-  /** The extension's two interceptors registered by hand, with the generations they pair by given. */
-  function handWired(rig: Rig, generations: Generations, isRpe: (connection: string) => boolean): void {
-    const ext = rig.lv.install(ALL);
-    const road = { base: RPE, headers: { "x-rpe-extension": "rpe-extension-key" } };
-    ext.registerWorldInfoInterceptor(worldInfoInterceptor({ road: async () => road, proxy: (url, init) => ext.cors(url, init), generations, keptOut: new KeptOut(16), deadlineMs: 3_000, log: () => undefined }), PRIORITY);
-    ext.on("GENERATION_STARTED", (payload, user) => generations.started(payload, user));
-    ext.registerInterceptor(promptInterceptor({ generations, isRpe, granted: (p) => ext.permissions.has(p), log: () => undefined }), { priority: PRIORITY, required: true });
+  /** The extension's two interceptors registered by hand in a worker an admin installed and enabled, with the generations they pair by given. */
+  async function handWired(rig: Rig, generations: Generations, isRpe: (connection: string) => boolean): Promise<void> {
+    await installRpe(rig.lv, {
+      code: (ext) => {
+        const road = { base: RPE, headers: { "x-rpe-extension": "rpe-extension-key" } };
+        ext.registerWorldInfoInterceptor(worldInfoInterceptor({ road: async () => road, proxy: (url, init) => ext.cors(url, init), generations, keptOut: new KeptOut(16), deadlineMs: 3_000, log: () => undefined }), PRIORITY);
+        ext.on("GENERATION_STARTED", (payload, user) => generations.started(payload, user));
+        ext.registerInterceptor(promptInterceptor({ generations, isRpe, granted: (p) => ext.permissions.has(p), log: () => undefined }), { priority: PRIORITY, required: true });
+      },
+    });
   }
 
   test("a fault in the interceptor stops a reply on RPE's connection with a line saying why, and a reply on another connection goes through untouched", async () => {
@@ -290,7 +294,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
         throw new Error("the generation's facts were lost");
       }
     }
-    handWired(rig, new Lost(16), (c) => c === "conn-rpe");
+    await handWired(rig, new Lost(16), (c) => c === "conn-rpe");
     const stopped = await rig.generate("conn-rpe");
     expect(stopped.error).toBe("RPE stopped this reply before it was sent, because its extension failed: the generation's facts were lost");
     expect(stopped.body).toBeNull();
@@ -304,7 +308,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
 
   test("when the extension cannot tell whose connection a reply is on, the reply goes through untouched: another chat's is played as before, and one on RPE's connection arrives untagged and is passed on", async () => {
     const rig = new Rig();
-    handWired(rig, new Generations(16), () => {
+    await handWired(rig, new Generations(16), () => {
       throw new Error("the registration could not be read");
     });
     const other = await rig.generate("conn-other");
@@ -334,8 +338,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
     const stopped = await rig.generate("conn-rpe");
     expect(stopped.error).toContain("generation_parameters");
     expect(stopped.body).toBeNull();
-    rig.ext.grant("generation_parameters");
-    await settle();
+    await rig.grant("generation_parameters");
     expect(rig.notice()).toBeNull();
     const played = await rig.generate("conn-rpe");
     expect(played.error).toBeNull();
@@ -347,7 +350,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
     expect(rig.notice()).toEqual(["interceptor"]);
     await rig.generate("conn-rpe");
     expect(rig.passed).toHaveLength(1);
-    rig.ext.grant("interceptor");
+    await rig.grant("interceptor");
     await rig.generate("conn-rpe");
     expect(rig.turns).toHaveLength(1);
   });
@@ -357,11 +360,37 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
     const stopped = await rig.generate("conn-rpe");
     expect(stopped.error).toBe("RPE could not tell which generation this prompt belongs to, so it stopped the reply. Send it again.");
     expect(rig.questions).toHaveLength(0);
-    rig.ext.grant("generation");
+    await rig.grant("generation");
     const played = await rig.generate("conn-rpe");
     expect(played.error).toBeNull();
     expect(rig.questions).toHaveLength(1);
     expect(rig.turns[0]!.cut.byExtension).toBe(7);
+  });
+
+  test("Lumiverse stops the extension mid-generation: the generation fails in RPE's chat and in another, whatever the extension answers after, and the restarted extension plays on", async () => {
+    const rig = await new Rig().start();
+    rig.lv.addChat({ id: "chat-quay", user: USER, character: { id: "char-quay", name: "Quay" }, messages: [{ id: "q0", role: "user", content: "QUAY-0 I walk the quay." }] });
+    // Both generations are in the extension's interceptor, which is slow to answer.
+    const release = rig.holdInterceptor();
+    const here = rig.generate("conn-rpe");
+    const there = rig.generate("conn-other", { chat: "chat-quay" });
+    for (let i = 0; i < 2_000 && rig.interceptorAsked < 2; i++) await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    expect(rig.interceptorAsked).toBe(2);
+    await rig.restart();
+    const [ours, theirs] = await Promise.all([here, there]);
+    // A required interceptor fails the generation it was called for when Lumiverse stops its worker, in any chat (plan §4.2).
+    for (const out of [ours, theirs]) {
+      expect(out.error).toBe("Extension worker stopped");
+      expect(out.body).toBeNull();
+    }
+    expect(rig.turns).toHaveLength(0);
+    expect(rig.otherBodies).toHaveLength(0);
+    // What the old worker answers now is dropped, and the restarted extension is called for the next generation.
+    release();
+    const played = await rig.generate("conn-rpe");
+    expect(played.error).toBeNull();
+    expect(rig.turns).toHaveLength(1);
+    expect(rig.interceptorAsked).toBe(3);
   });
 });
 

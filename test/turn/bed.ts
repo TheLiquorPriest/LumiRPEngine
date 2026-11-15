@@ -20,9 +20,10 @@ import { hashJson } from "../../src/shared/hash";
 import type { WorldDoc } from "../../src/shared/world";
 import type { TurnRow } from "../../src/store";
 import type { Turns } from "../../src/turn";
-import { ALL, REAL_CLOCK } from "../ext/rig";
+import { REAL_CLOCK } from "../ext/rig";
 import { StandInDb } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
+import { ADMIN, installRpe } from "../standin/install";
 import { type ChatMessage, StandIn } from "../standin/lumiverse";
 
 export const USER = "user-marlow";
@@ -129,8 +130,8 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     host.db = db;
     const server = new LumiverseServer({ clock: REAL_CLOCK, db, host, accounts: [{ id: USER, username: "marlow", password: PASSWORD }] });
     cleanups.push(() => server.stop());
-    const running = await startExtension(server.install(EXTENSION_IDENTIFIER, ALL));
-    cleanups.push(() => running.stop());
+    const { id } = await installRpe(host, { code: (api) => startExtension(api) });
+    cleanups.push(() => host.spindle.disable(ADMIN, id));
 
     // RPE signed in as `rpe lumiverse` leaves it: the session's token in RPE's secrets.
     const paths = dataPaths(join(root, "rpe"));

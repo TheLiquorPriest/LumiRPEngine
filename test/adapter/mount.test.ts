@@ -273,7 +273,7 @@ describe("who the extension takes a registration from", () => {
     expect(b.door.extension()).toEqual({ registered: false, why: expect.stringContaining("could not reach RPE"), missing: [{ permission: "cors_proxy", why: expect.any(String) }] });
     expect(b.kept()).toBeNull();
     expect(b.installed.modals.has(`${USER}\u0000${NOTICE_ID}`)).toBe(true);
-    b.installed.grant("cors_proxy");
+    b.grant("cors_proxy");
     await b.until("RPE to be registered", () => b.door.extension().registered);
     expect(b.door.extension()).toEqual({ registered: true, why: null, missing: [] });
     expect(b.kept()).toEqual(b.registration);
@@ -290,7 +290,7 @@ describe("what the extension is missing, on RPE's own pages", () => {
     expect(b.logs.filter((line) => line.includes("missing permissions") && line.includes("ui_panels"))).toHaveLength(1);
     // Nothing else opens it.
     expect((await fetch(`${b.listening.url}${EXTENSION_STATUS_PATH}`)).status).toBe(401);
-    b.installed.grant("ui_panels");
+    b.grant("ui_panels");
     await b.until("RPE to hear the grant", () => b.door.extension().missing?.length === 0);
     expect(await status()).toEqual({ registered: true, why: null, missing: [] });
   });
@@ -304,7 +304,7 @@ describe("what the extension is missing, on RPE's own pages", () => {
     expect(refused.status).toBe(503);
     expect(await refusalWords(refused)).toContain("interceptor");
     expect(b.heard.passed).toEqual([]);
-    b.installed.grant("interceptor");
+    b.grant("interceptor");
     await b.until("RPE to hear the grant", () => b.door.extension().missing?.length === 0);
     expect((await untagged()).status).toBe(200);
     expect(b.heard.passed).toHaveLength(1);

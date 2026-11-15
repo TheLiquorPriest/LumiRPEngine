@@ -6,7 +6,7 @@
 // clone (a test gives each remote's branches and the manifest of each), the extension's build, its update checks, and the Illarin sources.
 
 import { IDENTIFIER_PATTERN, isValidPermission } from "lumiverse-spindle-types";
-import type { Installed } from "./host";
+import type { HostClock, Installed } from "./host";
 
 /** `PRIVILEGED_PERMISSIONS` (`spindle/manager.service.ts:878-907`): what an owner or an admin alone may grant. */
 export const PRIVILEGED_PERMISSIONS: ReadonlySet<string> = new Set([
@@ -125,6 +125,8 @@ export interface SpindleHost {
   install(granted: readonly string[], identifier?: string, options?: { id?: string; scope?: "user" | "operator"; installedBy?: string | null; interceptorTimeoutMs?: number }): Installed;
   notifyPermissionChanged(id: string, permission: string, granted: boolean, allGranted: readonly string[]): void;
   emit(event: string, payload: unknown, userId?: string): void;
+  /** The clock its later tasks run on; one a test moves by hand has `advance`. */
+  readonly clock: HostClock & { advance?(ms: number): Promise<void> };
 }
 
 const isOwnerOrAdmin = (viewer: Viewer): boolean => viewer.role === "owner" || viewer.role === "admin";
@@ -155,6 +157,21 @@ export class SpindleManager {
   /** The worker of an extension that is running, as its code sees Spindle. */
   worker(id: string): Installed | undefined {
     return this.records.get(id)?.worker ?? undefined;
+  }
+
+  /** Lumiverse's identifier for the extension, by its id; the id itself where none is installed (the stand-in's by-hand workers). */
+  identifierOf(id: string): string {
+    return this.records.get(id)?.manifest.identifier ?? id;
+  }
+
+  /** `getEnabledExtensionIdentifiers` (`spindle/manager.service.ts:2027-2033`): the identifiers of every enabled extension, whoever installed it. */
+  enabledIdentifiers(): string[] {
+    return [...this.records.values()].filter((r) => r.enabled).map((r) => r.manifest.identifier);
+  }
+
+  /** `getExtensionForUser` then `getWorkerHost` (`ws/handler.ts:445-452`): the running worker of an extension the viewer may see, none for any other. */
+  workerFor(viewer: Viewer, id: string): Installed | undefined {
+    return this.visible(viewer, id)?.worker ?? undefined;
   }
 
   // ---------------------------------------------------------------- who sees and who manages
@@ -385,5 +402,25 @@ export class SpindleManager {
       }
     }
     return { requested: [...(r.manifest.permissions ?? [])], granted: all };
+  }
+
+  /**
+   * An extension set up as an admin sets one up on Lumiverse's Extensions page, for a rig that wants one running: installed from `url`'s branch, the permissions of `granted` that need an admin granted, then
+   * enabled (which grants the permissions the manifest asks for that need none, and starts its worker), and any of those that `granted` leaves out revoked, as an admin revokes one. The worker's later tasks
+   * are run before it gives the extension's record (the test's clock moved by nothing, or the process's given a turn).
+   */
+  async setUp(viewer: Viewer, setup: { url: string; manifest: Manifest; code?: Extension; granted: readonly string[]; scope?: "user"; userId?: string }): Promise<ExtensionInfo> {
+    this.remote(setup.url, { branches: { main: setup.manifest } });
+    if (setup.code !== undefined) this.provide(setup.manifest.identifier, setup.code);
+    const info = this.install(viewer, { github_url: setup.url, branch: "main", ...(setup.scope === undefined ? {} : { scope: setup.scope, user_id: setup.userId }) });
+    const privileged = setup.granted.filter((permission) => PRIVILEGED_PERMISSIONS.has(permission));
+    if (privileged.length > 0) this.setPermissions(viewer, info.id, { grant: privileged });
+    await this.enable(viewer, info.id);
+    const withheld = (setup.manifest.permissions ?? []).filter((permission) => !PRIVILEGED_PERMISSIONS.has(permission) && !setup.granted.includes(permission));
+    if (withheld.length > 0) this.setPermissions(viewer, info.id, { revoke: withheld });
+    const clock = this.host.clock;
+    if (clock.advance !== undefined) await clock.advance(0);
+    else await Bun.sleep(2);
+    return this.list(viewer).find((extension) => extension.id === info.id)!;
   }
 }

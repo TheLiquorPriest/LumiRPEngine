@@ -20,7 +20,7 @@ import { appendMessage, clamped, generationInput, patchChatMetadata, resolveGene
 import type { StandInDb } from "./db";
 import { embeddingConfig } from "./embeddings";
 import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
-import type { Installed, Outcome, StandIn } from "./lumiverse";
+import type { Outcome, StandIn } from "./lumiverse";
 import { Profiles } from "./profiles";
 import { Refused, type Viewer } from "./spindle";
 import { dryRunResult, pageOf, parsePagination, parsed, rowMetadata, rowToBook, rowToCharacter, rowToEntry, rowToMessage, rowToMessageLight, rowToPersona, rowToPreset, rowToSetting, type Pagination } from "./served";
@@ -132,12 +132,6 @@ export interface LumiverseServerOptions {
   tokenizedModels?: readonly string[];
 }
 
-/** An installed extension as the stand-in lists it (`GET /api/v1/spindle`). */
-interface Listed {
-  installed: Installed;
-  identifier: string;
-}
-
 export class LumiverseServer {
   readonly base = "http://lumiverse.test:7860";
   readonly clock: Timers;
@@ -168,7 +162,6 @@ export class LumiverseServer {
   private readonly sockets = new Set<ServerSocket>();
   /** Frontend sessions by user, then by session id (`spindle/frontend-session.ts:11-27`). */
   private readonly frontends = new Map<string, Map<string, ServerSocket>>();
-  private readonly listed = new Map<string, Listed>();
   private sweep: unknown;
   /** What Lumiverse holds of the client's failed sign-ins (`services/auth-lockout.service.ts:90-100`, `:118-182`), by the one address the stand-in sees. */
   private lockout: Lockout | null = null;
@@ -205,14 +198,6 @@ export class LumiverseServer {
   }
 
   // ---------------------------------------------------------------- what a test does to it
-
-  /** Installs an extension in the stand-in host under its identifier (`spindle/manager.service.ts`). */
-  install(identifier: string, granted: readonly string[]): Installed {
-    if (!this.options.host) throw new Error("the stand-in server has no host to install in");
-    const installed = this.options.host.install(granted, identifier);
-    this.listed.set(installed.id, { installed, identifier });
-    return installed;
-  }
 
   /** Every session of `user` ends: it expired, or the user signed out everywhere. */
   endSessions(user: string): void {
@@ -416,10 +401,9 @@ export class LumiverseServer {
 
     // `GET /api/v1/spindle` (`routes/spindle.routes.ts:45-58`): the extensions the user may use.
     if (request.method === "GET" && path === "/api/v1/spindle") {
-      const legacy = [...this.listed.entries()].map(([id, l]) => ({ id, identifier: l.identifier, name: l.identifier, enabled: true, status: "running" }));
       const viewer = this.viewerOf(user);
       const managed = this.options.host?.spindle.list(viewer).map((ext) => ({ ...ext, frontend_runtime_capabilities: [] })) ?? [];
-      return json(200, { extensions: [...legacy, ...managed], isPrivileged: viewer.role !== "user" });
+      return json(200, { extensions: managed, isPrivileged: viewer.role !== "user" });
     }
 
     const spindle = await this.fromSpindle(request, url, user);
@@ -637,7 +621,7 @@ export class LumiverseServer {
 
   /** `getCharacterDisplayOwner` (`services/characters.service.ts:52-68`): which enabled extension the character's own record names as the one that draws it. */
   private displayOwner(user: string, characterId: unknown): string | null {
-    const providers = [...this.listed.values()].map((l) => l.identifier);
+    const providers = this.options.host?.spindle.enabledIdentifiers() ?? [];
     if (providers.length === 0 || typeof characterId !== "string" || characterId === "") return null;
     const whens = providers.map(() => "WHEN json_extract(extensions, '$.' || ? || '.display_owner') = 1 THEN ?").join(" ");
     const row = this.options.db?.rows(`SELECT (CASE ${whens} ELSE NULL END) AS owner FROM characters WHERE id = ? AND user_id = ?`, ...providers.flatMap((id) => [id, id]), characterId, user)[0];
@@ -953,14 +937,15 @@ export class LumiverseServer {
       const handled = Promise.withResolvers<void>();
       this.clock.setTimeout(handled.resolve, this.options.handlerMs ?? 0);
       await handled.promise;
-      const listed = typeof frame.extensionId === "string" ? this.listed.get(frame.extensionId) : undefined;
-      if (listed !== undefined && socket.closed === null) listed.installed.fromFrontend(frame.payload, socket.user, socket.session);
+      const viewer = this.viewerOf(socket.user);
+      const worker = typeof frame.extensionId === "string" ? this.options.host?.spindle.workerFor(viewer, frame.extensionId) : undefined;
+      if (worker !== undefined && socket.closed === null) worker.fromFrontend(frame.payload, socket.user, socket.session);
     }
   }
 
   /** `sendToFrontend` (`spindle/worker-host.ts:2129-2160`): to the session named alone, or to every socket of the user. */
   private toFrontend(extension: string, data: unknown, user: string | undefined, session: string | undefined): boolean {
-    const identifier = this.listed.get(extension)?.identifier ?? extension;
+    const identifier = this.options.host?.spindle.identifierOf(extension) ?? extension;
     const frame = JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", timestamp: this.clock.now(), payload: { extensionId: extension, identifier, data } });
     if (session !== undefined) {
       const socket = user === undefined ? undefined : this.frontends.get(user)?.get(session);

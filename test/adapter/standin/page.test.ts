@@ -15,6 +15,7 @@ import type { HostUi } from "../../../src/spindle-augment";
 import { FakeClock } from "../../standin/clock";
 import { StandInDb } from "../../standin/db";
 import { LumiverseServer } from "../../standin/http";
+import { ADMIN, installRpe } from "../../standin/install";
 import { type Installed, StandIn } from "../../standin/lumiverse";
 import { openPage, type StandInPage } from "../../standin/page";
 import type { PageElement } from "../../ui/kept/dom";
@@ -63,13 +64,14 @@ async function openBed(granted: readonly string[], options: { backend?: boolean 
     settings: [],
     message_breakdowns: [],
   });
-  const server = new LumiverseServer({ clock, db, host: new StandIn(), accounts: [ACCOUNT] });
+  const host = new StandIn();
+  const server = new LumiverseServer({ clock, db, host, accounts: [ACCOUNT] });
   closing.push(() => server.stop());
-  const installed = server.install(EXTENSION_IDENTIFIER, granted);
-  if (options.backend === true) {
-    const running = await startExtension(installed);
-    closing.push(() => running.stop());
-  }
+  // Installed, granted and enabled as an admin does, with the extension's backend started in its worker when the test asks for it.
+  const { id, worker: installed } = await installRpe(host, { granted, ...(options.backend === true ? { code: (api) => startExtension(api) } : {}) });
+  closing.push(() => {
+    void host.spindle.disable(ADMIN, id);
+  });
   return { clock, db, server, installed, page: await openOn(server, installed) };
 }
 

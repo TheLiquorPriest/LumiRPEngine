@@ -13,7 +13,8 @@ import { NEEDS } from "../../src/ext/permissions";
 import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
 import { textOf as textKey } from "../../src/secrecy/lore-secrets";
 import type { JsonObject } from "../../src/shared/json";
-import { FakeClock } from "../standin/clock";
+import { FakeClock, settle } from "../standin/clock";
+import { ADMIN, installRpe } from "../standin/install";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
 import type { Book } from "../standin/books";
 import { historyWindow, WINDOW_DEFAULTS } from "../../src/story/window";
@@ -133,8 +134,14 @@ export const RELAY_SESSION = "0123456789abcdef0123456789abcdef";
 
 export class Rig {
   readonly lv = new StandIn();
+  /** The extension's worker as Spindle shows it to the extension, and what the extension started there. */
   ext!: Installed;
   running!: RunningExtension;
+  /** Lumiverse's id for the extension. */
+  extension!: string;
+  /** The interceptor calls Lumiverse made of the extension, and the gate a test holds them at (`holdInterceptor`). */
+  interceptorAsked = 0;
+  private holding: PromiseWithResolvers<void> | null = null;
   readonly questions: Question[] = [];
   readonly turns: TaggedTurn[] = [];
   readonly passed: JsonObject[] = [];
@@ -238,23 +245,65 @@ export class Rig {
     this.lv.addChat(this.chat);
   }
 
-  /** Installs and starts the extension (again: a restarted worker remembers only its storage), and RPE registers with it as its relay socket would. */
+  /**
+   * Installs the extension as an admin does and starts it (the worker of a restart remembers only its storage), and RPE registers with it as its relay socket would. What `granted` leaves out of what
+   * the extension asks for is withheld, so its notice names it; a grant after the start is `grant`.
+   */
   async start(): Promise<this> {
-    this.ext = this.lv.install(this.options.granted ?? ALL, EXTENSION_IDENTIFIER);
-    const registered = Promise.withResolvers<void>();
+    const code = async (api: Installed): Promise<RunningExtension> => {
+      // The interceptor's calls wait for `holdInterceptor`'s release, where a test holds one, as a worker slow to answer would.
+      const slow: Installed = {
+        ...api,
+        registerInterceptor: (handler, priorityOrOptions, options) =>
+          api.registerInterceptor(
+            async (messages, context) => {
+              this.interceptorAsked++;
+              await this.holding?.promise;
+              return await handler(messages, context);
+            },
+            priorityOrOptions,
+            options,
+          ),
+      };
+      this.running = await startExtension(slow, this.options.deadlineMs !== undefined ? { deadlineMs: this.options.deadlineMs } : {});
+      return this.running;
+    };
+    const installed = await installRpe(this.lv, { granted: this.options.granted ?? ALL, code });
+    this.extension = installed.id;
+    this.ext = installed.worker;
+    return await this.register();
+  }
+
+  /** RPE's registration reaches the extension on its relay socket, and the extension takes it or refuses it (as it must where RPE cannot be reached to confirm it). */
+  private async register(): Promise<this> {
+    const answered = Promise.withResolvers<void>();
     this.lv.frontends = (m) => {
       if (m.session !== RELAY_SESSION) return false;
       this.toRpe.push(m.payload);
-      if (typeof m.payload === "object" && m.payload !== null && "rpe" in m.payload && m.payload.rpe === "registered") registered.resolve();
+      if (typeof m.payload === "object" && m.payload !== null && "rpe" in m.payload && (m.payload.rpe === "registered" || m.payload.rpe === "refused")) answered.resolve();
       return true;
     };
-    this.running = await startExtension(this.ext, this.options.deadlineMs !== undefined ? { deadlineMs: this.options.deadlineMs } : {});
     const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connection: "conn-rpe", relay: RELAY_SESSION, build: "test" };
     this.ext.fromFrontend({ rpe: "register", registration }, USER, RELAY_SESSION);
     // The worker's later task runs on the host's clock: where the test moves it, it runs now.
     await this.options.clock?.advance(0);
-    await registered.promise;
+    await answered.promise;
     return this;
+  }
+
+  /** An admin grants a permission: the worker hears it on a later task, which runs before this gives. */
+  async grant(permission: string): Promise<void> {
+    this.lv.spindle.setPermissions(ADMIN, this.extension, { grant: [permission] });
+    if (this.options.clock !== undefined) await this.options.clock.advance(0);
+    else await Bun.sleep(2);
+    await settle();
+  }
+
+  /** The extension's interceptor calls wait, from now, until the gate this gives is let go: the generation is in the middle of its interceptor, as when the extension is slow. */
+  holdInterceptor(): () => void {
+    const gate = Promise.withResolvers<void>();
+    this.holding = gate;
+    return () => gate.resolve();
   }
 
   /** The permission notice the extension shows the user now: what it names as missing; null when none is up. */
@@ -264,18 +313,25 @@ export class Rig {
     return NEEDS.filter((n) => shown.items.some((i) => typeof i === "object" && i !== null && "content" in i && String(i.content).startsWith(`${n.permission}:`))).map((n) => n.permission);
   }
 
-  restart(): Promise<this> {
-    this.running.stop();
-    this.ext.stop();
-    return this.start();
+  /** Lumiverse restarts the extension: its worker stops, with every call it was asked and has not answered failed, and starts again. */
+  async restart(): Promise<this> {
+    await this.lv.spindle.restart(ADMIN, this.extension);
+    this.ext = this.lv.spindle.worker(this.extension)!;
+    return await this.register();
+  }
+
+  /** An admin disables the extension: its worker stops. */
+  async stop(): Promise<void> {
+    await this.lv.spindle.disable(ADMIN, this.extension);
   }
 
   rpeDown(): void {
     this.lv.servers.delete(RPE);
   }
 
-  generate(connection: "conn-rpe" | "conn-other", extra: { type?: "normal" | "swipe"; dryRun?: boolean } = {}): Promise<Outcome> {
-    return this.lv.generate({ chat: this.chat.id, connection, preset: PRESET.id, ...extra });
+  generate(connection: "conn-rpe" | "conn-other", extra: { type?: "normal" | "swipe"; dryRun?: boolean; chat?: string } = {}): Promise<Outcome> {
+    const { chat, ...rest } = extra;
+    return this.lv.generate({ chat: chat ?? this.chat.id, connection, preset: PRESET.id, ...rest });
   }
 }
 
