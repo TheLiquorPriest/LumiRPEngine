@@ -16,6 +16,7 @@ import { type App, type Area, MIGRATION_AREAS } from "../../src/app";
 import { compose } from "../../src/app/compose";
 import { UPDATE_SETTINGS } from "../../src/app/update";
 import { SERVER_SETTINGS } from "../../src/app/config";
+import { PAGE_SETTINGS } from "../../src/app/page-settings";
 import { CAST_SETTINGS } from "../../src/cast";
 import { IFACE_SETTINGS } from "../../src/iface";
 import { LORE_SETTINGS } from "../../src/lore";
@@ -32,7 +33,7 @@ const COMPOSE = join(SRC, "app/compose.ts");
 
 /** Each area of RPE by name: the file that registers it, and the settings its file lists. */
 const OWN: Readonly<Record<string, { file: string; settings: readonly Setting[] }>> = {
-  app: { file: "app/area.ts", settings: [...UPDATE_SETTINGS, ...SERVER_SETTINGS] },
+  app: { file: "app/area.ts", settings: [...UPDATE_SETTINGS, ...SERVER_SETTINGS, ...PAGE_SETTINGS] },
   store: { file: "store/area.ts", settings: STORE_SETTINGS },
   lore: { file: "lore/area.ts", settings: LORE_SETTINGS },
   iface: { file: "iface/area.ts", settings: IFACE_SETTINGS },

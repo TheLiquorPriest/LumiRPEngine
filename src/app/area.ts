@@ -5,6 +5,7 @@
 
 import type { App, Area } from "./app";
 import { installFacts, SERVER_SETTINGS } from "./config";
+import { PAGE_SETTINGS } from "./page-settings";
 import { type SettingsDeps, settingsRoutes } from "./settings-routes";
 import { UPDATE_SETTINGS } from "./update";
 
@@ -19,7 +20,7 @@ export interface AppTakes {
 export function appArea(takes?: AppTakes): Area {
   return {
     name: "app",
-    settings: [...UPDATE_SETTINGS, ...SERVER_SETTINGS],
+    settings: [...UPDATE_SETTINGS, ...SERVER_SETTINGS, ...PAGE_SETTINGS],
     ...(takes === undefined
       ? {}
       : {
