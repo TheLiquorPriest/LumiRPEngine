@@ -16,7 +16,7 @@
 // own, so nothing else of a tree can change what RPH makes of it.
 
 import { loadGuidance, SHIPPED_GUIDANCE, type TemplatePart } from "rp-harness";
-import type { FileHit, FileRead, FilesPort, Layer, Scope } from "rp-harness/contract";
+import type { FileRead, FilesPort, Found, Layer, Refused, Scope } from "rp-harness/contract";
 import { sha256 } from "./record";
 
 const SCOPE: Scope = { user: "floor", chat: "floor", session: "floor" };
@@ -41,7 +41,7 @@ function oneFile(name: string, text: string): FilesPort {
       throw new Error("the one-file port holds no places");
     },
     read: async (_scope, asked): Promise<FileRead> => (asked === path ? { status: "read", path, level: "chat", kind: "yours", text, start: 1, end: lines, lines, bytes, hash: sha256(text), modified: 0 } : { status: "missing", path: asked }),
-    find: async (_scope, query): Promise<FileHit[]> => (query.by === "list" && query.path === FOLDER ? [{ path, type: "file", level: "chat", kind: "yours", bytes }] : []),
+    find: async (_scope, query): Promise<Found | Refused> => ({ status: "found", hits: query.by === "list" && query.path === FOLDER ? [{ path, type: "file", level: "chat", kind: "yours", bytes }] : [] }),
     write: async (_scope, asked) => ({ status: "refused", path: asked, reason: "outside", writable: [] }),
   };
 }
