@@ -270,19 +270,45 @@ export interface Folded {
 }
 
 /**
- * Where on a chat's path a turn not yet begun will start (plan §4.2, §9.6): after the message its
- * generation follows (a new reply, a continue, an impersonation), or in place of the reply a swipe
- * or a regenerate replaces.
+ * One message of a chat's path as the chat application showed it when it was asked where a coming turn starts (plan §9.6 l.1121):
+ * its id, whether it is the player's, its place in the chat, the swipe that shows (null where the asker did not say) and the hash of
+ * that swipe's text, by which a turn knows its swipe (§6.3 l.617). Where the question is asked, neither a swipe's date nor a hidden
+ * mark is seen.
  */
-export type TurnPoint = { follows: string; replaces?: never } | { replaces: string; follows?: never };
+export interface SeenMessage {
+  id: string;
+  user: boolean;
+  index: number;
+  swipe: number | null;
+  hash: string;
+}
 
 /**
- * What the extension's question is answered from (plan §4.2, §9.6, R-5): the state where a turn not
- * yet begun will start (`node` is the path node it will stand after, null at the chat's start), and
- * the chat's path before that point, oldest first, each message with its hidden mark (R-21).
+ * Where a turn not yet begun will start on the path it comes with, which ends there (plan §4.2, §9.6): after the path's newest
+ * message, the one its generation follows (a new reply, a continue, an impersonation; null on a path with no message), or in place
+ * of the reply a swipe or a regenerate replaces, which the path leaves out, or ends with and is passed over.
+ */
+export type TurnPoint = { follows: string | null; replaces?: never } | { replaces: string; follows?: never };
+
+/**
+ * What the extension's question is answered from (plan §4.2, §9.6, R-5): the state where a turn not yet begun will start on the path
+ * the question carries, folded along the chain of turns that path shows (`node` is the key of the path node the turn will stand
+ * after, which a comparison of that path stores, null at the chat's start), and that path up to the point, oldest first, each
+ * message with the hidden mark the store holds for it (R-21; none for one no comparison has seen) and the turn the tree ties its
+ * showing text to (null: none).
  */
 export interface TurnStart extends Folded {
-  messages: PathEntry[];
+  messages: (SeenMessage & { hidden: boolean; turn: string | null })[];
+  /**
+   * The message whose turn the coming turn follows, and that turn: the answer stands at that turn's end on this path. Null when it
+   * stands at the world's start: the tree ties no message of the path to a turn, or the store does not know the chat (`known`).
+   */
+  at: { message: string; turn: string } | null;
+  /**
+   * Whether the store knows the chat. One it does not know plays no world yet, as the chat the store makes for it does, so its
+   * answer is the blank world's start.
+   */
+  known: boolean;
 }
 
 /** Input the store refuses because it cannot be read: an unknown lane, a malformed value, a turn that is not there. */

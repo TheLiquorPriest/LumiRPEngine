@@ -2,16 +2,17 @@
 // known by its date and saved hash and never by its position, messages gone take their turns off the
 // path, a branch shares its source's turns through the chat application's old-to-new id map, and the
 // path keeps each message's hidden mark. The extension's question (plan §4.2, §9.6, R-5, R-21) is
-// answered from RPE's own store: the state where the coming turn will start, and the path's marks.
+// answered from RPE's own store, on the path the question carries: the state where the coming turn
+// will start, as the turn's own comparison will then find it, and that path with the store's marks.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { castAt } from "../../src/cast/path";
 import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
-import { StoreInputError, type ShownMessage } from "../../src/store/types";
+import { StoreInputError, type SeenMessage, type ShownMessage } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
-import { carried, engine, goTo, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
+import { carried, engine, goTo, hand, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
 
 const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state.world.entities[POV]?.fields.place;
@@ -20,6 +21,23 @@ const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state
 function reopened(ts: TestStore): Store {
   return openStore({ db: ts.store.db, registry: registry(), worlds: (r) => ts.worlds.get(r) });
 }
+
+/**
+ * A chat's path as the extension sees it where it asks: the player's lines `[id, text]` and replies `[id, text, swipe]`, each at
+ * its place. Lumiverse's World Info context gives each message's id, `is_user`, `swipe_id`, `index_in_chat` and the text it shows,
+ * and no swipe date and no hidden flag (`src/services/prompt-assembly.service.ts:2289-2305`).
+ */
+function seen(...messages: ([string, string] | [string, string, number])[]): SeenMessage[] {
+  return messages.map(([id, text, swipe], index) => ({ id, user: swipe === undefined, index, swipe: swipe ?? 0, hash: hashOf(text) }));
+}
+
+/** The same path as the turn's own comparison is later shown it, each reply with its swipe's date. */
+function asShown(path: readonly SeenMessage[], dates: Readonly<Record<string, number>>): ShownMessage[] {
+  return path.map((m) => (m.user ? { id: m.id, user: true, hash: m.hash } : { id: m.id, user: false, hash: m.hash, date: dates[m.id] ?? null }));
+}
+
+/** How many changes the store's database has made so far: a call that writes nothing leaves it as it is. */
+const written = (ts: TestStore): number | undefined => ts.store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()?.n;
 
 describe("hidden marks", () => {
   let bed: TurnBed | null = null;
@@ -103,6 +121,9 @@ describe("hidden marks", () => {
   });
 });
 
+/** A message of a path as a test writes it: a player's line `[id, text]`, or a reply `[id, text, swipe]`. */
+type Line = [string, string] | [string, string, number];
+
 describe("the question's call", () => {
   test("after a restart the question's call answers from RPE's own snapshot, for the head and for a swipe's point, and holds the state", () => {
     let clock = 0;
@@ -115,37 +136,39 @@ describe("the question's call", () => {
     const [seventh, eighth, ninth, tenth] = turns.slice(6);
     if (!seventh || !eighth || !ninth || !tenth) throw new Error("ten turns were not played");
     // The chat as the last turn's comparison saw it: the player's lines between the replies, an aside and its answer hidden.
-    const chat: ShownMessage[] = turns.flatMap((_, i) => [
-      { id: `u${i + 1}`, user: true, hash: hashOf(`Line ${i + 1}.`), hidden: i === 4 },
-      { id: `m${i + 1}`, user: false, hash: hashOf(`Reply ${i + 1}.`), date: i + 1, hidden: i === 4 },
+    const lines = turns.flatMap((_, i): Line[] => [
+      [`u${i + 1}`, `Line ${i + 1}.`],
+      [`m${i + 1}`, `Reply ${i + 1}.`, 0],
     ]);
-    s.sync("c", chat);
+    const dates = Object.fromEntries(turns.map((_, i) => [`m${i + 1}`, i + 1]));
+    s.sync("c", asShown(seen(...lines), dates).map((m) => ({ ...m, hidden: m.id === "u5" || m.id === "m5" })));
     const warm = { head: hashJson(s.headState("c").state), swipe: hashJson(s.stateAt(ninth.id).state), deleted: hashJson(s.stateAt(seventh.id).state) };
+    // The player's newest line, sent since that comparison: a new reply follows it.
+    const now = seen(...lines, ["u11", "Line 11."]);
     // While RPE runs, the answer is the state it holds.
-    expect(s.turnStart("c", { follows: "u11" }).state).toBe(s.headState("c").state);
+    expect(s.turnStart("c", now, { follows: "u11" }).state).toBe(s.headState("c").state);
 
     // RPE starts again: nothing is held, and the store is all it has. It reads no chat application and calls no model.
     const cold = reopened(ts).user(USER);
-    const written = (): number | undefined => ts.store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()?.n;
-    const before = written();
-    // A new reply follows the player's newest line, which the path does not hold yet: it was sent after the last comparison.
-    const atHead = cold.turnStart("c", { follows: "u11" });
-    // A swipe of the newest reply starts where that reply's turn started.
-    const atSwipe = cold.turnStart("c", { replaces: "m10" });
-    // After the player deleted everything after their eighth line, a new reply follows that line: it starts after the seventh turn,
-    // not at the head RPE last held.
-    const atDeleted = cold.turnStart("c", { follows: "u8" });
-    expect(written()).toBe(before);
+    const before = written(ts);
+    const atHead = cold.turnStart("c", now, { follows: "u11" });
+    // A swipe of the newest reply: Lumiverse leaves the reply it replaces out of what it shows the extension
+    // (`src/services/generate.service.ts:1928-1932`, `src/services/prompt-assembly.service.ts:1900-1904`).
+    const atSwipe = cold.turnStart("c", seen(...lines.slice(0, -1)), { replaces: "m10" });
+    // The player deletes the last three exchanges and sends a new line: it follows the seventh reply.
+    const atDeleted = cold.turnStart("c", seen(...lines.slice(0, 14), ["u11", "Line 11."]), { follows: "u11" });
+    expect(written(ts)).toBe(before);
     expect([atHead.node, hashJson(atHead.state)]).toEqual([tenth.node, warm.head]);
     expect([atSwipe.node, hashJson(atSwipe.state)]).toEqual([ninth.node, warm.swipe]);
     expect([atDeleted.node, hashJson(atDeleted.state)]).toEqual([seventh.node, warm.deleted]);
     expect([atHead, atSwipe, atDeleted].map((a) => a.state.world.entities[POV]?.fields.place)).toEqual(["market_square", "cellar", "far_road"]);
-    // The path's messages before each point, each with its mark, so the window counts no hidden message (R-21).
-    expect(atHead.messages.map((e) => e.message)).toEqual(chat.map((m) => m.id));
-    expect(atSwipe.messages.map((e) => e.message)).toEqual(chat.slice(0, -1).map((m) => m.id));
-    expect(atDeleted.messages.map((e) => e.message)).toEqual(chat.slice(0, 15).map((m) => m.id));
-    expect(atHead.messages.filter((e) => e.hidden).map((e) => e.message)).toEqual(["u5", "m5"]);
-    expect([atHead, atSwipe, atDeleted].map((a) => a.messages.filter((e) => !e.hidden).length)).toEqual([18, 17, 13]);
+    // The path the question carried up to each point, with the marks the store holds by message id, so the window counts no hidden
+    // message (R-21); the newest line, which no comparison has seen yet, has none.
+    expect(atHead.messages.map((m) => m.id)).toEqual([...lines.map(([id]) => id), "u11"]);
+    expect(atSwipe.messages.map((m) => m.id)).toEqual(lines.slice(0, -1).map(([id]) => id));
+    expect(atDeleted.messages.map((m) => m.id)).toEqual([...lines.slice(0, 14).map(([id]) => id), "u11"]);
+    expect(atHead.messages.filter((m) => m.hidden).map((m) => m.id)).toEqual(["u5", "m5"]);
+    expect([atHead, atSwipe, atDeleted].map((a) => a.messages.filter((m) => !m.hidden).length)).toEqual([19, 17, 13]);
 
     // Held after: the turns that follow start from the very states the question was answered from, with nothing folded again.
     const next = cold.beginTurn({ chat: "c", kind: "normal" });
@@ -160,8 +183,289 @@ describe("the question's call", () => {
     doc.state.world.clock += 1000;
     ts.store.db.run("UPDATE snapshot SET state = ? WHERE node = ?", [JSON.stringify(doc), eighth.node]);
     const again = reopened(ts).user(USER);
-    expect(again.turnStart("c", { follows: "u11" }).state.world.clock - atHead.state.world.clock).toBe(1000);
-    expect(again.turnStart("c", { replaces: "m10" }).state.world.clock - atSwipe.state.world.clock).toBe(1000);
+    expect(again.turnStart("c", now, { follows: "u11" }).state.world.clock - atHead.state.world.clock).toBe(1000);
+    expect(again.turnStart("c", seen(...lines.slice(0, -1)), { replaces: "m10" }).state.world.clock - atSwipe.state.world.clock).toBe(1000);
+  });
+
+  test("after the last exchange is deleted in Lumiverse and before any comparison, the answer for a new line is the state before the deleted exchange", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const t2 = play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV), tick(5)));
+    play(s, "c", "m3", "She takes it down to the cellar.", 3, engine(goTo(POV, "cellar"), tick(20)));
+    const lines: Line[] = [
+      ["u1", "in"],
+      ["m1", "Wren comes in from the rain.", 0],
+      ["u2", "light"],
+      ["m2", "Bram lends her a lantern.", 0],
+      ["u3", "down"],
+      ["m3", "She takes it down to the cellar.", 0],
+    ];
+    s.sync("c", asShown(seen(...lines), { m1: 1, m2: 2, m3: 3 }));
+    // RPE's record stands at the third reply. In Lumiverse the player deletes that exchange and sends a new line.
+    const path = seen(...lines.slice(0, 4), ["u4", "wait here"]);
+    const before = written(ts);
+    const answer = s.turnStart("c", path, { follows: "u4" });
+    expect(written(ts)).toBe(before);
+    expect([answer.node, hashJson(answer.state)]).toEqual([t2.node, hashJson(s.stateAt(t2.id).state)]);
+    expect(answer.state.world.entities[POV]?.fields.place).toBe("common_room");
+    expect(s.headState("c").state.world.clock - answer.state.world.clock).toBe(20);
+    expect(answer.messages.map((m) => [m.id, m.turn])).toEqual([
+      ["u1", null],
+      ["m1", t1.id],
+      ["u2", null],
+      ["m2", t2.id],
+      ["u4", null],
+    ]);
+    // The turn's own comparison then finds the same point, and starts from the state the question was answered from.
+    s.sync("c", asShown(path, { m1: 1, m2: 2 }));
+    expect(s.headState("c").state).toBe(answer.state);
+  });
+
+  test("after the newest reply is flipped to its other swipe and before any comparison, the answer is the state after that swipe's turn", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const cellar = play(s, "c", "m2", "She goes down to the cellar.", 2, engine(goTo(POV, "cellar")));
+    const market = play(s, "c", "m2", "She steps out to the market.", 3, engine(goTo(POV, "market_square")), { target: "m2" });
+    const lines = (second: Line): Line[] => [["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "where now"], second];
+    // The last comparison saw the first swipe showing.
+    s.sync("c", asShown(seen(...lines(["m2", "She goes down to the cellar.", 0])), { m1: 1, m2: 2 }));
+    expect(placeOf(s, "c")).toBe("cellar");
+    // In Lumiverse the player flips to the other swipe and sends a new line.
+    const path = seen(...lines(["m2", "She steps out to the market.", 1]), ["u3", "look around"]);
+    const answer = s.turnStart("c", path, { follows: "u3" });
+    expect([answer.node, hashJson(answer.state)]).toEqual([market.node, hashJson(s.stateAt(market.id).state)]);
+    expect(answer.state.world.entities[POV]?.fields.place).toBe("market_square");
+    expect(answer.messages.find((m) => m.id === "m2")?.turn).toBe(market.id);
+    // Flipped back before any comparison, the answer follows the first swipe again.
+    const back = s.turnStart("c", seen(...lines(["m2", "She goes down to the cellar.", 0]), ["u3", "look around"]), { follows: "u3" });
+    expect([back.node, back.state.world.entities[POV]?.fields.place]).toEqual([cellar.node, "cellar"]);
+    // The turn's own comparison finds the swipe that shows, and starts from the state the question was answered from.
+    s.sync("c", asShown(path, { m1: 1, m2: 3 }));
+    expect(s.headState("c").state).toBe(answer.state);
+  });
+
+  test("after an earlier reply's swipe is flipped and before any comparison, the answer holds the later turns applied again on the new chain", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV), tick(5)));
+    const t3 = play(s, "c", "m3", "She takes it down to the cellar.", 3, engine(goTo(POV, "cellar"), ...hand("lantern", POV, "cask")));
+    const t4 = play(s, "c", "m4", "Odile and she talk an hour.", 4, engine(tick(60)));
+    // The other swipe of the second reply, made later: a candle, and a longer wait.
+    const candle = s.beginTurn({ chat: "c", kind: "swipe", on: t1.node });
+    s.addChanges(candle.id, engine(make("candle", "Candle", POV), tick(15)));
+    s.tieTurn(candle.id, { message: "m2", hash: hashOf("Bram finds her a candle."), date: 5 });
+    const lines = (second: Line): Line[] => [["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "light"], second, ["u3", "down"], ["m3", "She takes it down to the cellar.", 0], ["u4", "talk"], ["m4", "Odile and she talk an hour.", 0]];
+    s.sync("c", asShown(seen(...lines(["m2", "Bram lends her a lantern.", 0])), { m1: 1, m2: 2, m3: 3, m4: 4 }));
+    // The fourth turn's own record holds the lantern, handed into the cask.
+    const own = s.stateAt(t4.id).state.world;
+    expect(carried(own, "cask")).toEqual(["lantern"]);
+    // In Lumiverse the player flips the second reply to the candle, and sends a new line.
+    const path = seen(...lines(["m2", "Bram finds her a candle.", 1]), ["u5", "back up"]);
+    const before = written(ts);
+    const answer = s.turnStart("c", path, { follows: "u5" });
+    expect(written(ts)).toBe(before);
+    // The later turns stand on the candle now, their changes applied again; handing over a lantern never made there no longer applies.
+    expect(answer.rebased).toEqual([t3.id, t4.id]);
+    expect(answer.notApplied.map((n) => [n.turn, n.op, n.reports])).toEqual([
+      [t3.id, "unlink", [{ code: "missing_relation" }]],
+      [t3.id, "link", [{ code: "missing_relation" }]],
+    ]);
+    const world = answer.state.world;
+    expect(world.entities.lantern).toBeUndefined();
+    expect(carried(world, POV)).toContain("candle");
+    expect(world.entities[POV]?.fields.place).toBe("cellar");
+    expect(world.clock - own.clock).toBe(15 - 5);
+    expect(answer.messages.find((m) => m.id === "m2")?.turn).toBe(candle.id);
+    // After a restart, with nothing held, the answer is the same.
+    expect(hashJson(reopened(ts).user(USER).turnStart("c", path, { follows: "u5" }).state)).toBe(hashJson(answer.state));
+    // The turn's own comparison finds the same chain: it stores the key the answer was held under, and starts from that state.
+    const report = s.sync("c", asShown(path, { m1: 1, m2: 5, m3: 3, m4: 4 }));
+    expect(report.rebased?.turns).toEqual([t3.id, t4.id]);
+    expect(s.chat("c")?.head).toBe(answer.node);
+    expect(s.headState("c").state).toBe(answer.state);
+  });
+
+  test("after a reply in the middle is deleted and before any comparison, the answer holds the later turns applied again without it", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV), tick(5)));
+    const t3 = play(s, "c", "m3", "She walks out onto the far road.", 3, engine(goTo(POV, "far_road"), tick(7)));
+    const t4 = play(s, "c", "m4", "The road is long.", 4, engine(tick(9)));
+    const lines: Line[] = [
+      ["u1", "in"],
+      ["m1", "Wren comes in from the rain.", 0],
+      ["u2", "light"],
+      ["m2", "Bram lends her a lantern.", 0],
+      ["u3", "out"],
+      ["m3", "She walks out onto the far road.", 0],
+      ["u4", "on"],
+      ["m4", "The road is long.", 0],
+    ];
+    const dates = { m1: 1, m2: 2, m3: 3, m4: 4 };
+    s.sync("c", asShown(seen(...lines), dates));
+    // The fourth turn's own record holds the lantern the second turn made.
+    const own = s.stateAt(t4.id).state.world;
+    expect(carried(own, POV)).toContain("lantern");
+    // In Lumiverse the player deletes the second exchange, and sends a new line.
+    const path = seen(...lines.slice(0, 2), ...lines.slice(4), ["u5", "keep going"]);
+    const before = written(ts);
+    const answer = s.turnStart("c", path, { follows: "u5" });
+    expect(written(ts)).toBe(before);
+    expect(answer.rebased).toEqual([t3.id, t4.id]);
+    expect(answer.notApplied).toEqual([]);
+    const world = answer.state.world;
+    expect(world.entities.lantern).toBeUndefined();
+    expect(world.entities[POV]?.fields.place).toBe("far_road");
+    expect(own.clock - world.clock).toBe(5);
+    expect(answer.messages.map((m) => [m.id, m.turn])).toEqual([
+      ["u1", null],
+      ["m1", t1.id],
+      ["u3", null],
+      ["m3", t3.id],
+      ["u4", null],
+      ["m4", t4.id],
+      ["u5", null],
+    ]);
+    // The turn's own comparison finds the exchange gone and the same chain, and starts from the state the question was answered from.
+    const report = s.sync("c", asShown(path, dates));
+    expect(report.gone.map((g) => g.message)).toEqual(["u2", "m2"]);
+    expect(s.chat("c")?.head).toBe(answer.node);
+    expect(s.headState("c").state).toBe(answer.state);
+  });
+
+  test("a path whose every message is unknown to the tree answers the world's start and says so", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10), goTo(POV, "cellar")));
+    const t2 = play(s, "c", "m2", "Bram lends her a lantern.", 2, engine(make("lantern", "Lantern", POV)));
+    const lines: Line[] = [
+      ["u1", "in"],
+      ["m1", "Wren comes in from the rain.", 0],
+      ["u2", "light"],
+      ["m2", "Bram lends her a lantern.", 0],
+    ];
+    s.sync("c", asShown(seen(...lines), { m1: 1, m2: 2 }).map((m) => ({ ...m, hidden: m.id === "u2" })));
+    // While the path shows the tree's turns, the answer names the reply and the turn it stands after.
+    expect(s.turnStart("c", seen(...lines, ["u3", "and then"]), { follows: "u3" }).at).toEqual({ message: "m2", turn: t2.id });
+    // In Lumiverse each reply now shows a swipe RPE did not play, and a reply written elsewhere follows them.
+    const path = seen(["u1", "in"], ["m1", "Wren stays out in the rain.", 1], ["u2", "light"], ["m2", "Nobody has a lantern.", 1], ["u3", "and then"], ["m3", "A reply written elsewhere.", 0], ["u4", "go on"]);
+    const before = written(ts);
+    const answer = s.turnStart("c", path, { follows: "u4" });
+    expect(written(ts)).toBe(before);
+    expect([answer.at, answer.known, answer.node]).toEqual([null, true, null]);
+    expect(answer.state.world.entities[POV]?.fields.place).toBe("common_room");
+    expect(answer.messages.map((m) => [m.id, m.turn, m.hidden])).toEqual([
+      ["u1", null, false],
+      ["m1", null, false],
+      ["u2", null, true],
+      ["m2", null, false],
+      ["u3", null, false],
+      ["m3", null, false],
+      ["u4", null, false],
+    ]);
+    // The world's start is the chat's world's, as a chat on the same world starts.
+    s.createChat({ id: "fresh", revision });
+    expect(hashJson(answer.state)).toBe(hashJson(s.headState("fresh").state));
+  });
+
+  test("a chat RPE has never seen answers the world's start and says so", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    // A chat RPE plays, beside the one it has never seen.
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(goTo(POV, "cellar")));
+    const path = seen(["x-m0", "The tide is out.", 0], ["x-u1", "hello"], ["x-m1", "Hello yourself.", 0], ["x-u2", "what now"]);
+    const before = written(ts);
+    const answer = s.turnStart("elsewhere", path, { follows: "x-u2" });
+    expect(written(ts)).toBe(before);
+    expect(s.chat("elsewhere")).toBeNull();
+    expect([answer.at, answer.known, answer.node]).toEqual([null, false, null]);
+    expect(answer.messages.map((m) => [m.id, m.turn, m.hidden])).toEqual([
+      ["x-m0", null, false],
+      ["x-u1", null, false],
+      ["x-m1", null, false],
+      ["x-u2", null, false],
+    ]);
+    // It plays no world yet, as the chat RPE makes for it at its first turn (`src/turn/turns.ts`, `#chat`) does.
+    s.createChat({ id: "elsewhere" });
+    expect(hashJson(answer.state)).toBe(hashJson(s.headState("elsewhere").state));
+  });
+
+  test("a branch's first question, before any comparison, is answered at the turns it shares with its source", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "source", revision });
+    play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    const shared = play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar"), make("lamp", "Lamp", POV)));
+    play(s, "source", "m3", "A long rest.", 3, engine(tick(120)));
+    // The branch is made at the second reply, from the fork's old-to-new map; nothing has compared it yet.
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" }, at: "m2" });
+    expect(s.path("branch")).toEqual([]);
+    const answer = s.turnStart("branch", seen(["b-u1", "in"], ["b-m1", "Into the inn.", 0], ["b-u2", "down"], ["b-m2", "Down the stairs.", 0], ["b-u3", "look around"]), { follows: "b-u3" });
+    expect(answer.at).toEqual({ message: "b-m2", turn: shared.id });
+    expect([answer.node, hashJson(answer.state)]).toEqual([shared.node, hashJson(s.stateAt(shared.id).state)]);
+    expect(carried(answer.state.world, POV)).toContain("lamp");
+  });
+
+  test("the point agrees with the end of the path it comes with: a reply it replaces at the end is passed over, any other point is refused", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    play(s, "c", "m2", "She goes down to the cellar.", 2, engine(goTo(POV, "cellar")));
+    const lines: Line[] = [
+      ["u1", "in"],
+      ["m1", "Wren comes in from the rain.", 0],
+      ["u2", "where now"],
+      ["m2", "She goes down to the cellar.", 0],
+    ];
+    // A swipe of the second reply starts after the first, whether the path leaves that reply out, as Lumiverse's does, or ends with it.
+    const left = s.turnStart("c", seen(...lines.slice(0, -1)), { replaces: "m2" });
+    const ending = s.turnStart("c", seen(...lines), { replaces: "m2" });
+    expect([left.at, ending.at]).toEqual([
+      { message: "m1", turn: t1.id },
+      { message: "m1", turn: t1.id },
+    ]);
+    expect(ending.messages.map((m) => m.id)).toEqual(["u1", "m1", "u2"]);
+    // Any other point would answer somewhere the path does not end: it is refused, not guessed at.
+    expect(() => s.turnStart("c", seen(...lines), { follows: "m1" })).toThrow(StoreInputError);
+    expect(() => s.turnStart("c", seen(...lines), { replaces: "m1" })).toThrow(StoreInputError);
+    expect(() => s.turnStart("c", seen(...lines), { follows: null })).toThrow(StoreInputError);
+    expect(s.turnStart("c", [], { follows: null }).at).toBeNull();
+  });
+
+  test("the answer's state is the store's own, held and frozen: a reader cannot change it, and the next turn starts from it as folded", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10), goTo(POV, "cellar")));
+    const path = seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "and then"]);
+    s.sync("c", asShown(path.slice(0, 2), { m1: 1 }));
+    const answer = s.turnStart("c", path, { follows: "u2" });
+    const wren = answer.state.world.entities[POV];
+    if (wren === undefined) throw new Error("no Wren in the answer");
+    // A reader that writes to what it was handed is stopped where it writes: a module runs strict, so a frozen object throws.
+    expect(() => {
+      wren.fields.place = "far_road";
+    }).toThrow(TypeError);
+    expect(() => answer.state.horizon.push("place:far_road")).toThrow(TypeError);
+    // The turn that follows starts from that very state, as it was folded.
+    const next = s.beginTurn({ chat: "c", kind: "normal" });
+    expect(s.startOf(next.id).state).toBe(answer.state);
+    expect([s.startOf(next.id).state.world.entities[POV]?.fields.place, s.startOf(next.id).state.horizon]).toEqual(["cellar", []]);
+    // A change goes through the store, which applies it to a copy of its own: the answer stays as it was.
+    s.addChanges(next.id, engine(goTo(POV, "market_square")));
+    expect(s.stateAt(next.id).state.world.entities[POV]?.fields.place).toBe("market_square");
+    expect(answer.state.world.entities[POV]?.fields.place).toBe("cellar");
   });
 });
 

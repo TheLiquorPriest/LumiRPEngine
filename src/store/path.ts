@@ -1,6 +1,6 @@
 // The turn tree's paths (plan §6.3), without the database: a path node's key, which turn a shown
-// swipe is, and what changed between the path last compared and the one the chat shows now. The
-// comparison is of ids and hashes only.
+// swipe is, the chain of path nodes a path's turns stand at, and what changed between the path last
+// compared and the one the chat shows now. The comparison is of ids and hashes only.
 //
 // A path node is one turn as it stands after the turns before it on one path. The same turn stands
 // on as many nodes as the paths it has been folded on: its own (the path it was made on), and any
@@ -9,7 +9,7 @@
 // the one it was made on.
 
 import { hashParts } from "../shared/hash";
-import type { PathEntry, PathReport, ShownMessage, TurnRow } from "./types";
+import { StoreInputError, type PathEntry, type PathReport, type SeenMessage, type ShownMessage, type TurnPoint, type TurnRow } from "./types";
 
 /** The key of `turn` standing after the path node `prev` (null: at the chat's start). */
 export function nodeKey(prev: string | null, turn: string): string {
@@ -50,6 +50,66 @@ export function swipeIndex(turn: Pick<TurnRow, "hash" | "date">, swipes: readonl
   if (both >= 0) return both;
   const byHash = swipes.findIndex((s) => s.hash === turn.hash);
   return byHash >= 0 ? byHash : null;
+}
+
+/**
+ * The turn a reply's showing text is, among the turns tied to its message, by that text's hash alone (plan §9.6 l.1121, §6.3 l.617):
+ * the newest whose saved text has it, else the newest the chat was last compared showing edited to it. None for a text no turn is
+ * known by: a reply edited since the last comparison, or a swipe RPE did not play. With no swipe's date to go by, a reply whose text
+ * changed cannot be told from another swipe, and its position is never read.
+ */
+export function turnByHash(candidates: readonly TurnRow[], hash: string): TurnRow | null {
+  const tied = candidates.filter((t) => t.status === "done" || t.status === "cut").sort((a, b) => b.created - a.created);
+  return tied.find((t) => t.hash === hash) ?? tied.find((t) => t.edited === hash) ?? null;
+}
+
+/**
+ * A path as it was seen when it was asked where a coming turn starts (plan §9.6 l.1121-1122), up to the point, which is where it
+ * ends: each message with the turn its showing text is among those `tied` to it (`turnByHash`; the player's own lines none, as in a
+ * comparison). A point that does not agree with where the path ends is refused. Nothing but the path and the turns tied to its
+ * messages enters into it: where the store last compared the chat does not.
+ */
+export function turnsShown(path: readonly SeenMessage[], point: TurnPoint, tied: ReadonlyMap<string, readonly TurnRow[]>): { message: SeenMessage; turn: TurnRow | null }[] {
+  const newest = path.at(-1)?.id ?? null;
+  let upTo = path.length;
+  if (point.replaces !== undefined) {
+    if (newest === point.replaces) upTo--;
+    else if (path.some((m) => m.id === point.replaces)) throw new StoreInputError(`the reply ${point.replaces} a turn replaces is on its path but not where the path ends`);
+  } else if (newest !== point.follows) {
+    throw new StoreInputError(`a turn that follows ${point.follows ?? "no message"} does not start where its path ends (${newest ?? "no message"})`);
+  }
+  return path.slice(0, upTo).map((message) => ({ message, turn: message.user ? null : turnByHash(tied.get(message.id) ?? [], message.hash) }));
+}
+
+/** A turn showing on a path, and the message it shows at. */
+export interface ShowingTurn {
+  turn: string;
+  message: string;
+}
+
+/**
+ * The path nodes a run of turns showing along a path stand at, chained after the node `prev` (null: the chat's start), the first at
+ * `depth` (plan §6.3): each turn after the one before it, so a turn made after another stands rebased there, and a turn begun after
+ * the turn its own message holds (a branch's continue of a reply it shares; `goesOn` names that turn) after a node for that turn
+ * first, which stays on the line. A key names the whole path to its node, so a path seen before has the keys it had. Gives each
+ * turn's key, and every node as a row: its key, the node before it, its turn and its depth.
+ */
+export function chainOf(run: readonly ShowingTurn[], prev: string | null, depth: number, goesOn: ReadonlyMap<string, string>): { keys: string[]; nodes: [string, string | null, string, number][] } {
+  const keys: string[] = [];
+  const nodes: [string, string | null, string, number][] = [];
+  for (const { turn } of run) {
+    const first = goesOn.get(turn);
+    if (first !== undefined) {
+      const key = nodeKey(prev, first);
+      nodes.push([key, prev, first, depth++]);
+      prev = key;
+    }
+    const key = nodeKey(prev, turn);
+    nodes.push([key, prev, turn, depth++]);
+    keys.push(key);
+    prev = key;
+  }
+  return { keys, nodes };
 }
 
 /** What comparing the path last compared (`before`) with the one shown now (`after`) finds, besides edits, a branch and what no longer applies. */
