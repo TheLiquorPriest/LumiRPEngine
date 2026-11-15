@@ -13,7 +13,7 @@
 // What the extension says back (it took the registration, or refused it and why, and what it is
 // missing) is logged once each time it changes, and kept for RPE's pages.
 
-import type { Clock, HistoryRange, ModelsApi } from "rp-harness/contract";
+import type { Clock, HistoryRange } from "rp-harness/contract";
 import { AuthRefused, bearerOf, rawRoute, route, type App, type Area } from "../../app";
 import { isRecord } from "../../shared/json";
 import { questionRoute, type HistoryWindow, type SecrecyRules } from "./answer";
@@ -23,7 +23,7 @@ import { followChanges, type ChatChanges } from "./events";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
-import { modelsEndpoint, providerEndpoint, type TurnPlayer } from "./provider";
+import { modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
 import { Relay, type RelaySettings } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
@@ -46,8 +46,8 @@ export interface AdapterLanes {
   ranges(chat: string): Promise<Record<string, HistoryRange>>;
   /** The turn lane: the messages Lumiverse's memory stands in for with a summary in the chat's prompt, from the tag's `summary` marks. */
   summarized(chat: string): Promise<ReadonlySet<string>>;
-  /** RPH's model layer, for requests passed through. */
-  models: Pick<ModelsApi, "pass">;
+  /** RPH's model layer, for requests passed through: its pass, given the user this RPE belongs to. */
+  models: OwnerPass;
   /** The connection a request with no tag goes on; null for RPH's default (a user's choice, kept with RPE's global settings). */
   passConnection(): string | null;
 }

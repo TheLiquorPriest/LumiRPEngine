@@ -79,9 +79,9 @@ runKitPart("RPE's turn facts", "facts", async (_seed, place) => {
   return { facts, close };
 });
 
-runKitPart("RPE's harness state", "store", async (seed, place) => {
+runKitPart("RPE's harness state", "store", async (_seed, place) => {
   const { db, writes, close } = database(place);
-  return { store: kvStore(db, writes, () => seed.scope.user), close };
+  return { store: kvStore(db, writes), close };
 });
 
 runKitPart("RPE's trace", "trace", async (seed, place) => {

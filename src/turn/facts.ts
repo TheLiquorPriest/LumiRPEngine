@@ -14,10 +14,18 @@
 //   turn.last.without.intent   1 when the last reply RPE released on the turn before on that line (a continue's: on its own turn)
 //                              went out with no intent record taken before it, as RPH told it (`TurnEvents.released`); else 0
 
-import type { FactDef, FactsPort, FactValue, Release, Scope } from "rp-harness/contract";
+import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
 import type { Store } from "../store";
 import { storyAt } from "../story/path";
 import type { RunRecord } from "./runs";
+
+/**
+ * What the fact reads of a release RPE kept as RPH told it (`events.ts`, kind `released`): the field RPH set on one that went out with no
+ * intent record taken before it, as it did until it stopped holding a reply for the record, so a release kept then still counts.
+ */
+interface KeptRelease {
+  withoutIntent?: true;
+}
 
 /** Facts one area counts. */
 export interface FactSource {
@@ -132,7 +140,7 @@ export function turnFacts(store: Store, run: (user: string, turn: string) => Fac
         // What RPH told of the turn's releases is kept with it (`events.ts`, kind `released`); the latest stands for the turn.
         const before = turns.at(-1);
         const told = before === undefined ? null : store.db.query<{ body: string }, [string, string]>("SELECT body FROM turn_told WHERE user = ? AND turn = ? AND kind = 'released' ORDER BY id DESC LIMIT 1").get(scope.user, before);
-        out["turn.last.without.intent"] = { count: told !== null && (JSON.parse(told.body) as Release).withoutIntent === true ? 1 : 0 };
+        out["turn.last.without.intent"] = { count: told !== null && (JSON.parse(told.body) as KeptRelease).withoutIntent === true ? 1 : 0 };
       }
       return out;
     },

@@ -98,6 +98,19 @@ test("a start is refused in words for a chat Lumiverse does not hold, and where 
   expect(await boot.b.turns.harness.jobs?.list({ user: USER })).toEqual([]);
 });
 
+test("the bootstrap reads its jobs as its user's", async () => {
+  const boot = await openBootBed({ answers: [{ pieces: [{ hold: gate() }, { text: "Read the last two scenes." }] }] });
+  beds.push(boot);
+  const { b, jobs, call } = boot;
+  const started = await call<JobView>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
+  expect(started.status).toBe(200);
+  // What the bootstrap keeps of the chat's jobs is his, in RPH's store: another user's scope holds none of it.
+  expect([(await b.turns.env.store.list({ user: USER }, "rpe/bootstrap/")).length, await b.turns.env.store.list({ user: "user-tamsin" }, "rpe/bootstrap/")]).toEqual([1, []]);
+  // His chat's page reads his job as RPH holds it for him, and a second start of his finds it under way.
+  expect((await jobs.chat(USER, CHAT)).jobs.map((j) => [j.id, j.view?.state])).toEqual([[started.body.id, "running"]]);
+  expect(await call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {})).toEqual({ status: 409, body: { error: `A bootstrap job of chat ${CHAT} is running (job ${started.body.id}). Another can be started once it has ended.` } });
+});
+
 test("the job is stopped at the token limit the player set: it ends with what it has, and its record says which limit stopped it", async () => {
   const boot = await openBootBed({
     global: "bootstrap:\n  tokenLimit: 1000\n",

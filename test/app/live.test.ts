@@ -4,6 +4,7 @@
 // socket tests start the server in-process on a free loopback port.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { TraceRecord } from "rp-harness/contract";
 import type { App, LiveBatch, LiveData, LiveEvent, LivePublish, RunningServer } from "../../src/app";
 import { LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, problemsOf, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
 import { LIVE_SOCKET } from "../../src/app/live";
@@ -194,6 +195,28 @@ describe("the live socket", () => {
     expect(new Set(sent.map((m) => m.type))).toEqual(new Set(["following", "refused", "events"]));
     expect(sent.filter((m) => m.missed !== undefined).map((m) => m.missed)).toEqual([{ from: 2, to: 4 }]);
     expect(new Set(eventsOf(sent).map((e) => (isRecord(e) ? e.kind : null)))).toEqual(new Set(Object.keys(LIVE_KINDS)));
+  });
+
+  test("a trace record with RPH's new fields, a tool's permission and a call's start, reaches a page whole", async () => {
+    // Records as RPH gives them, typed by RPH's own trace types: a call's start in its tool calls, the permission a write ran under, the pictures a request could not carry.
+    const usage = { calls: 1, input: 40, cacheRead: 0, cacheWrite: 0, output: 12 };
+    const records: TraceRecord[] = [
+      { ...RECORD, seq: 2, event: { kind: "call_ended", call: 1, model: "model-harbor", text: "", toolCalls: [{ id: "call-1", name: "ledger_write", args: { entry: "Two casks short." }, began: 1_700 }, { id: "call-2", name: "ledger_read", args: {} }], stop: "toolUse", usage, ms: 900 } },
+      { ...RECORD, seq: 3, event: { kind: "tool_ended", callId: "call-1", tool: "ledger_write", result: { content: [{ type: "text", text: "Written." }] }, clean: true, endedRun: false, ms: 4, permission: { lane: "ledger", setting: "confirm", answer: { go: false, reason: "Not tonight." } } } },
+      { ...RECORD, seq: 4, event: { kind: "tool_ended", callId: "call-2", tool: "web_fetch", result: { content: [{ type: "text", text: "Fetched." }] }, clean: true, endedRun: false, ms: 9, permission: { lane: "external", setting: "auto" } } },
+      { ...RECORD, seq: 5, event: { kind: "prompt_notices", notices: [], pictures: [{ message: 3, count: 2 }] } },
+    ];
+    const p = await page(server, token);
+    const following = p.next("following");
+    p.socket.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
+    await following;
+    for (const record of records) app.live.publish("chat-a", { kind: "trace", data: record });
+    const eventsOf = (): Record<string, unknown>[] => p.messages.flatMap((m) => (m.type === "events" && Array.isArray(m.events) ? (m.events as Record<string, unknown>[]) : []));
+    while (eventsOf().length < records.length) await p.next("events");
+    p.socket.close();
+    expect(eventsOf().map((e) => e.data)).toEqual(records);
+    const sent = p.messages.filter((m) => m.type === "events");
+    expect(sent.map((m) => problemsOf(LIVE_SOCKET.answers, m))).toEqual(sent.map(() => []));
   });
 });
 

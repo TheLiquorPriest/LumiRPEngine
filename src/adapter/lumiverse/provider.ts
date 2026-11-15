@@ -6,7 +6,7 @@
 // chat reply is read, its history window checked or made, its prompt laid out, and handed to the turn
 // lane, which writes the reply to the response as the turn goes, streamed or whole as the request asked.
 
-import type { Clock, ModelsApi, PassError, Usage as PassUsage } from "rp-harness/contract";
+import type { Clock, PassError, PassRequest, PassSink, Usage as PassUsage } from "rp-harness/contract";
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
 import { rawLayout, type BlocksHint } from "./layout";
@@ -41,6 +41,11 @@ export interface TurnPlayer {
   standbyLine(turn: TaggedTurn): string;
 }
 
+/** RPH's model layer's pass (`ModelsApi.pass`), given the user this RPE belongs to: the door names no user of its own. */
+export interface OwnerPass {
+  pass(request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void>;
+}
+
 export interface ProviderDeps {
   /** The Lumiverse user this RPE plays for. */
   user: string;
@@ -51,8 +56,8 @@ export interface ProviderDeps {
   rows: ChatRows;
   /** Lumiverse's breakdown of the chat's prompt, a hint for names (`hint.ts`); null when it has none. */
   blocks(tag: Tag, signal: AbortSignal): Promise<BlocksHint | null>;
-  /** RPH's model layer, for requests passed through. */
-  models: Pick<ModelsApi, "pass">;
+  /** RPH's model layer, for requests passed through: its pass, given the user this RPE belongs to. */
+  models: OwnerPass;
   /** The connection a request with no tag is passed on to; null for RPH's default. */
   passConnection(): string | null;
   /**

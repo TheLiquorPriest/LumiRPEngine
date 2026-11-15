@@ -477,27 +477,28 @@ describe("the kinds of what happened since", () => {
 });
 
 describe("the user served", () => {
-  test("the files and the harness's state serve the user set when they are asked, and refuse a scope of anyone else or of no user", async () => {
+  test("the files serve the user set when they are asked, and refuse a scope of anyone else or of no user; the harness's state is kept by the user its scope names", async () => {
     const b = await bed({ answers: [] });
     const config = b.app.config.lumiverse as { user: string | null };
     const scope = { user: USER, chat: CHAT, session: NO_SESSION };
     try {
       expect((await b.turns.files.places(scope)).notes).toBe("persistent-workspace/");
       await expect(b.turns.files.places({ ...scope, user: "" })).rejects.toThrow();
-      await b.turns.env.store.set("kit/count", 3);
+      await b.turns.env.store.set(scope, "kit/count", 3);
 
       config.user = null;
       await expect(b.turns.files.places(scope)).rejects.toThrow("belongs to no Lumiverse user yet");
-      await expect(b.turns.env.store.get("kit/count")).rejects.toThrow("belongs to no Lumiverse user yet");
+      // The store has no user of its own: what a scope's user keeps reads the same whoever is set.
+      expect(await b.turns.env.store.get(scope, "kit/count")).toBe(3);
 
       // A user set after the lane was built is the one served from then on.
       config.user = "user-tamsin";
       await expect(b.turns.files.places(scope)).rejects.toThrow();
       expect((await b.turns.files.places({ ...scope, user: "user-tamsin" })).notes).toBe("persistent-workspace/");
-      expect(await b.turns.env.store.get("kit/count")).toBeUndefined();
+      expect(await b.turns.env.store.get({ user: "user-tamsin" }, "kit/count")).toBeUndefined();
     } finally {
       config.user = USER;
     }
-    expect(await b.turns.env.store.get("kit/count")).toBe(3);
+    expect(await b.turns.env.store.get(scope, "kit/count")).toBe(3);
   });
 });

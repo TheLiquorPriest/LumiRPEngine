@@ -1,5 +1,12 @@
 {
-  "failures": [],
+  "failures": [
+    {
+      "file": "test/turn/intent.test.ts",
+      "owner": "PlanTurn-3",
+      "wave": "1",
+      "why": "the harness no longer marks a release as made without an intent record (rp-harness 063cb6d5), so the fact turn.last.without.intent stays 0 for new turns until RPE counts it itself from the order in which the record and the reply's first text arrived"
+    }
+  ],
   "leftovers": [
     {
       "name": "rpe-standin-*",

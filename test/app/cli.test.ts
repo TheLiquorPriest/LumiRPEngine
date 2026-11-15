@@ -43,7 +43,7 @@ describe("rpe", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), storedKey(a.models))]);
+            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);
           },
         },
       ],

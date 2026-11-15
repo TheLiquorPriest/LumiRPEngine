@@ -101,11 +101,11 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const user = today.sources.userId;
   const worlds = await carryWorlds(db, user, today.user, report.items, run);
 
-  // The connections of the runtime the run took, the user's, through the models port the app gives RPH; each, the default and each setting replaced only where RPE's copy is still what a run put there.
+  // The connections of the runtime the run took, the user's, through the models port the app gives RPH, into his own documents (he is the install's user: the run refuses another's); each, the default and each setting replaced only where RPE's copy is still what a run put there.
   const earlier = putPrints(db, user);
   const runtime = today.runtime.runtimes[0]?.name ?? null;
   const serial = oneToolAtATime(await lumiahSettings(today));
-  const carriedConnections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets)), runtime, today.runtime.files, serial, earlier);
+  const carriedConnections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets), () => user), user, runtime, today.runtime.files, serial, earlier);
   const connections = carriedConnections === null || "why" in carriedConnections ? carriedConnections : carriedConnections.carried;
   if (carriedConnections !== null && !("why" in carriedConnections)) keepPutPrints(db, user, carriedConnections.put);
   const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier);

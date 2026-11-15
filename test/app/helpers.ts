@@ -95,15 +95,15 @@ export function cliIo(answers: { secret?: string | null } = {}): CliIO & { outs:
 }
 
 /**
- * A stand-in for RPH's model layer, for the routes' tests: it keeps its two documents through the
- * app's `ModelsPort`, as the real layer does, and shows a connection as `ConnectionView` says, a
+ * A stand-in for RPH's model layer, for the routes' tests: it keeps each user's two documents through
+ * the app's `ModelsPort`, as the real layer does, and shows a connection as `ConnectionView` says, a
  * key's last four characters and never the key.
  */
 export function testModelLayer(port: ModelsPort): ConnectionsApi {
   let made = 0;
-  const load = async (): Promise<{ doc: ConnectionsDoc; secrets: SecretsDoc }> => ({
-    doc: ((await port.loadConnections()) as ConnectionsDoc | null) ?? { v: 1, default: null, connections: [] },
-    secrets: ((await port.loadSecrets()) as SecretsDoc | null) ?? { v: 1, keys: {}, signins: {} },
+  const load = async (user: string): Promise<{ doc: ConnectionsDoc; secrets: SecretsDoc }> => ({
+    doc: ((await port.loadConnections({ user })) as ConnectionsDoc | null) ?? { v: 1, default: null, connections: [] },
+    secrets: ((await port.loadSecrets({ user })) as SecretsDoc | null) ?? { v: 1, keys: {}, signins: {} },
   });
   const view = (c: StoredConnection, doc: ConnectionsDoc, secrets: SecretsDoc): ConnectionView => {
     const { headers, ...rest } = c;
@@ -116,12 +116,12 @@ export function testModelLayer(port: ModelsPort): ConnectionsApi {
     };
   };
   return {
-    async list() {
-      const { doc, secrets } = await load();
+    async list(user) {
+      const { doc, secrets } = await load(user);
       return { connections: doc.connections.map((c) => view(c, doc, secrets)), default: doc.default, providers: [] };
     },
-    async save(input, key) {
-      const { doc, secrets } = await load();
+    async save(user, input, key) {
+      const { doc, secrets } = await load(user);
       const id = input.id ?? `connection-${++made}`;
       const at = doc.connections.findIndex((c) => c.id === id);
       if (input.id !== undefined && at === -1) throw new Error("That connection is no longer there.");
@@ -131,22 +131,22 @@ export function testModelLayer(port: ModelsPort): ConnectionsApi {
       doc.default ??= id;
       if (typeof key === "string") secrets.keys[id] = key;
       if (key === null) delete secrets.keys[id];
-      await port.saveConnections(doc);
-      await port.saveSecrets(secrets);
+      await port.saveConnections({ user }, doc);
+      await port.saveSecrets({ user }, secrets);
       return view(stored, doc, secrets);
     },
-    async remove(id) {
-      const { doc, secrets } = await load();
+    async remove(user, id) {
+      const { doc, secrets } = await load(user);
       doc.connections = doc.connections.filter((c) => c.id !== id);
       if (doc.default === id) doc.default = null;
       delete secrets.keys[id];
-      await port.saveConnections(doc);
-      await port.saveSecrets(secrets);
+      await port.saveConnections({ user }, doc);
+      await port.saveSecrets({ user }, secrets);
     },
-    async setDefault(id) {
-      const { doc } = await load();
+    async setDefault(user, id) {
+      const { doc } = await load(user);
       doc.default = id;
-      await port.saveConnections(doc);
+      await port.saveConnections({ user }, doc);
     },
     // It calls no provider and knows no model: the routes' tests of a test and of limits run on RPH's own layer.
     test: async () => ({ ok: false, ms: 0, error: "This stand-in calls no provider." }),

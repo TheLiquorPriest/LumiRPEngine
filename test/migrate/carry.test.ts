@@ -117,10 +117,10 @@ describe("what the real run carries besides the chats", () => {
 
   test("the connections and their keys reach RPH's two documents through the models port, and no key is written anywhere else", async () => {
     const paths = dataPaths(data);
-    const port = modelsPort(paths, new SecretsFile(paths.secrets));
-    expect(await port.loadConnections()).toEqual({ v: 1, default: "conn-1", connections: [{ id: "conn-1", name: "Main", provider: "deepseek", auth: "key", model: "deepseek-chat", effort: "high", headers: ["X-Team", "X-Gone"], serialTools: true }] });
+    const port = modelsPort(paths, new SecretsFile(paths.secrets), () => USER);
+    expect(await port.loadConnections({ user: USER })).toEqual({ v: 1, default: "conn-1", connections: [{ id: "conn-1", name: "Main", provider: "deepseek", auth: "key", model: "deepseek-chat", effort: "high", headers: ["X-Team", "X-Gone"], serialTools: true }] });
     // Beside the key and the header's value, the place they were given for, in the model layer's own form (key-places.test.ts plays it through a start).
-    expect(await port.loadSecrets()).toEqual({ v: 1, keys: { "conn-1": SECRETS.key }, signins: { anthropic: { type: "oauth", access: SECRETS.access, refresh: SECRETS.refresh, expires: 1 } }, headers: { "conn-1": { "X-Team": SECRETS.header } }, places: { "conn-1": expect.any(String) }, device: "device-0001" });
+    expect(await port.loadSecrets({ user: USER })).toEqual({ v: 1, keys: { "conn-1": SECRETS.key }, signins: { anthropic: { type: "oauth", access: SECRETS.access, refresh: SECRETS.refresh, expires: 1 } }, headers: { "conn-1": { "X-Team": SECRETS.header } }, places: { "conn-1": expect.any(String) }, device: "device-0001" });
     expect(report.carried?.connections).toEqual({ runtime: "home", connections: ["conn-1"], leftOut: 1, keys: 1, signins: 1, headerValues: 1, kept: 0, default: "conn-1", changedInRpe: [], defaultKept: false });
     // The backup is today's data as it was, kept by its owner alone; outside it and the secrets file, no secret is anywhere in RPE's data folder.
     const holding: string[] = [];
@@ -237,13 +237,13 @@ describe("what the real run carries besides the chats", () => {
 
   test("a later run leaves the keys and sign-ins RPE already has: a key changed in RPE, a sign-in RPE refreshed since", async () => {
     const paths = dataPaths(data);
-    const port = modelsPort(paths, new SecretsFile(paths.secrets));
-    const had = (await port.loadSecrets()) as Record<string, unknown>;
+    const port = modelsPort(paths, new SecretsFile(paths.secrets), () => USER);
+    const had = (await port.loadSecrets({ user: USER })) as Record<string, unknown>;
     const refreshed = { type: "oauth", access: "access-refreshed-in-rpe", refresh: "refresh-refreshed-in-rpe", expires: 2_000_000_000_000 };
-    await port.saveSecrets({ ...(had as object), v: 1, keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } } as Parameters<typeof port.saveSecrets>[0]);
+    await port.saveSecrets({ user: USER }, { ...(had as object), v: 1, keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } } as Parameters<typeof port.saveSecrets>[1]);
     const fourth = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T12:00:00.000Z") });
     expect(fourth.ran).toBe(true);
-    expect(await port.loadSecrets()).toMatchObject({ keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } });
+    expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } });
     expect(fourth.report.carried?.connections).toMatchObject({ keys: 0, signins: 0, kept: 2 });
   });
 });

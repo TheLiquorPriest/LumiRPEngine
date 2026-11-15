@@ -33,7 +33,7 @@ import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, pruneChat, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
-import { kvStore, servedUser } from "./kv";
+import { kvStore, servedUser, storeUsers } from "./kv";
 import { riskyPattern } from "./pattern";
 import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
@@ -292,7 +292,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     searchers: [],
     facts,
     models: app.models,
-    store: kvStore(app.db, app.writes, owner),
+    store: kvStore(app.db, app.writes),
     trace,
     // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
     events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log }),
@@ -324,5 +324,11 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     clock,
     log: app.log,
   });
+  // A job a restart cut off is kept as interrupted, and told, on its user's first call of the jobs (§13.5): each user the store holds is
+  // listed once now that the harness and the lane its end is told to are made, so his are shown as interrupted at once, before he calls.
+  // A list that fails is logged, and the start goes on.
+  for (const user of storeUsers(app.db)) {
+    harness.jobs?.list({ user }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
+  }
   return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore, loreIndex, notes, suggestions };
 }

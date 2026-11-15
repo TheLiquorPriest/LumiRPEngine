@@ -91,7 +91,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
       ranges: async (chat) => namedStretches(made().store, owner(), chat),
       summarized: async (chat) => made().prompts.summarized(owner(), chat),
-      models: { pass: (request, sink, signal) => made().harness.models.pass(request, sink, signal) },
+      // The model layer's pass, given the user this RPE belongs to: the door names no user of its own.
+      models: { pass: (request, sink, signal) => made().harness.models.pass(owner(), request, sink, signal) },
       passConnection: () => (app === null ? null : passConnection(app.paths.files, app.log)),
     },
     {
@@ -146,7 +147,7 @@ export function compose(options: ComposeOptions = {}): Composition {
           views: (scope, agent, ref) => bootstrap.view(scope, agent, ref),
           ...(options.harness !== undefined ? { harness: options.harness } : {}),
         });
-        at.routes.add("connections", connectionRoutes(turns.harness.models, storedKey(at.models)));
+        at.routes.add("connections", connectionRoutes(turns.harness.models, storedKey(at.models), owner));
         const { chats, harness, lane, runs } = turns;
         // A restart onto a new app file waits for the turns and the jobs that run, and for a request whose turn is still being taken in.
         at.builds.counts(async () => runs.chatsGoing().length + lane.intakesGoing() + ((await harness.jobs?.list({ user: owner(), states: ["running", "queued"] })) ?? []).length);
@@ -163,7 +164,7 @@ export function compose(options: ComposeOptions = {}): Composition {
                 return layer.config === undefined || base === null ? [] : [{ level: layer.level, file: `${layer.mount}${layer.config}`, disk: join(where.files, ...base, layer.config) }];
               });
             },
-            connections: async () => (await harness.models.list()).connections.map((c) => ({ id: c.id, name: c.name })),
+            connections: async () => (await harness.models.list(owner())).connections.map((c) => ({ id: c.id, name: c.name })),
           }),
         );
         at.routes.add(

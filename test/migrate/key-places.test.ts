@@ -18,7 +18,7 @@ import { MODELS_KEY, modelsPort } from "../../src/app/connections";
 import { SecretsFile } from "../../src/app/secrets";
 import { withTopLevelKey } from "../../src/app/yaml";
 import { migrate } from "../../src/migrate/migrate";
-import { buildFixture, RUNTIME, SECRETS, STRAY, type Fixture } from "./fixture";
+import { buildFixture, RUNTIME, SECRETS, STRAY, USER, type Fixture } from "./fixture";
 import { TREE as tree } from "./tree";
 
 const FIRST = "https://first.example.invalid/v1";
@@ -63,11 +63,11 @@ const atAddress =
 async function movedInRpe(data: string, address: string): Promise<void> {
   const paths = dataPaths(data);
   const text = await readFile(paths.globalConfig, "utf8");
-  // The file the runs wrote: its `models` is the connections document.
-  const global = Bun.YAML.parse(text) as Record<typeof MODELS_KEY, ConnectionsDoc>;
-  const doc = global[MODELS_KEY];
+  // The file the runs wrote: its `models` holds the user's connections document under his name.
+  const global = Bun.YAML.parse(text) as Record<typeof MODELS_KEY, Record<string, ConnectionsDoc>>;
+  const doc = global[MODELS_KEY][USER] as ConnectionsDoc;
   const models = { ...doc, connections: doc.connections.map((c) => (c.id === "conn-1" ? { ...c, baseUrl: address } : c)) };
-  await writeFile(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, models, paths.globalConfig));
+  await writeFile(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, { ...global[MODELS_KEY], [USER]: models }, paths.globalConfig));
 }
 
 /** A call the model layer sent: where to, and every header it carried. */
@@ -87,7 +87,7 @@ async function started(data: string): Promise<{ models: ModelsApi; sent: Sent[];
     sent.push({ url: request.url, headers: Object.fromEntries(request.headers) });
     return Response.json({ error: { message: "Refused by the stand-in.", type: "invalid_request_error" } }, { status: 401 });
   };
-  const harness = createHarness({ ...host, models: modelsPort(paths, new SecretsFile(paths.secrets)) }, { fetch: refusing as typeof fetch });
+  const harness = createHarness({ ...host, models: modelsPort(paths, new SecretsFile(paths.secrets), () => USER) }, { fetch: refusing as typeof fetch });
   return {
     models: harness.models,
     sent,
@@ -102,8 +102,8 @@ async function started(data: string): Promise<{ models: ModelsApi; sent: Sent[];
 async function testCalls(data: string): Promise<{ sent: Sent[]; key: unknown }> {
   const layer = await started(data);
   try {
-    await layer.models.test("conn-1");
-    const shown = (await layer.models.list()).connections.find((c) => c.id === "conn-1");
+    await layer.models.test(USER, "conn-1");
+    const shown = (await layer.models.list(USER)).connections.find((c) => c.id === "conn-1");
     return { sent: [...layer.sent], key: shown?.key };
   } finally {
     await layer.close();

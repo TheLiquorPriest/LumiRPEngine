@@ -40,7 +40,7 @@ describe("the switches", () => {
               },
               handle: async ({ body }) => ({ changed: await a.writes.run((db) => db.run(body.sql).changes) }),
             });
-            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), storedKey(a.models))]);
+            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), storedKey(a.models), () => OWNER)]);
           },
         },
       ],

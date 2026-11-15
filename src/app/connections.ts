@@ -2,19 +2,24 @@
 // `rp-harness/contract`), and the routes the Connections page and `rpe connection` use.
 //
 // RPH's model layer holds the rules and writes both documents; RPE keeps each exactly as the layer
-// gives it, where the plan puts it. The connections document (names, providers, models, efforts,
-// limits, and the names of the headers each connection's calls send) is the `models` key of the file
-// tree's `RPE-global.yml`, read and edited with the rest of the global config, and read from the file
-// each time it is asked for, so a hand edit counts. The secrets document (each connection's key and
-// its headers' values, and the sign-ins) is part `models` of the secrets file and nowhere else.
+// gives it, where the plan puts it, and each user's under his own name (READINGS R-52): one user's
+// connections, keys and sign-ins are never given for another. The connections document (names,
+// providers, models, efforts, limits, and the names of the headers each connection's calls send) is
+// the user's entry under the `models` key of the file tree's `RPE-global.yml`, read and edited with the
+// rest of the global config, and read from the file each time it is asked for, so a hand edit counts.
+// The secrets document (each connection's key and its headers' values, and the sign-ins) is the
+// user's entry in part `models` of the secrets file and nowhere else. Documents written before, which
+// name no user, are the install's user's: they are moved under him at the first start
+// (`ownModels`, before anything reads them), and read as his wherever one is still found.
 //
 // The routes go through the model layer (`ModelsApi`), never round it: it is the documents' one
-// writer. A key is written through them and never read back: what they return shows only whether a
-// key is set, none of the key itself. A connection is shown with its model's limits as RPH uses them
-// (the user's override, else pi's, else what the provider's server reported), and tested with one
-// small call, whose answer never carries the key, even where the provider's words repeat it.
+// writer. They act for the user this RPE belongs to, never for one a caller names. A key is written
+// through them and never read back: what they return shows only whether a key is set, none of the
+// key itself. A connection is shown with its model's limits as RPH uses them (the user's override,
+// else pi's, else what the provider's server reported), and tested with one small call, whose answer
+// never carries the key, even where the provider's words repeat it.
 
-import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, ModelLimits, ModelsApi, ModelsPort } from "rp-harness/contract";
+import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, Log, ModelLimits, ModelsApi, ModelsPort, UserScope } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { DataPaths } from "./config";
@@ -23,7 +28,7 @@ import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "
 import type { SecretsFile } from "./secrets";
 import { configWrites, withTopLevelKey, yamlMapping } from "./yaml";
 
-/** The key of `RPE-global.yml` the connections document is kept under. */
+/** The key of `RPE-global.yml` the connections documents are kept under, each under its user. */
 export const MODELS_KEY = "models";
 const SECRETS_PART = "models";
 /**
@@ -31,6 +36,31 @@ const SECRETS_PART = "models";
  * connections it wrote. Read until the layer's next save has moved them, then taken away.
  */
 const EARLIER_HEADERS_PART = "headers";
+
+type ByUser = Record<string, JsonValue>;
+
+/** A mapping whose every value is a mapping: documents kept by user (a document of the layer's holds `v`, a number). */
+function mappingsOnly(held: JsonValue): boolean {
+  return isRecord(held) && Object.values(held).every(isRecord);
+}
+
+/** The earlier headers' values kept by user: by user, then by connection id, then by header (written before, by connection id, a header's value is text or null). */
+function headersByUser(held: JsonValue): boolean {
+  return isRecord(held) && Object.values(held).every(mappingsOnly);
+}
+
+/** What is held, by user: as it is where it is kept so; a document written before, which names no user, the install's user's (nobody's while the install names none). */
+function byUser(held: JsonValue | undefined | null, owner: string | null, kept: (held: JsonValue) => boolean): ByUser {
+  if (held === undefined || held === null) return {};
+  if (kept(held)) return held as ByUser;
+  return owner === null || owner === "" ? {} : { [owner]: held };
+}
+
+/** The user a save is for: a scope that names none keeps nothing (READINGS R-179: nothing is kept without a user). */
+function userOf(scope: UserScope): string {
+  if (scope.user === "") throw new Error("A call of the model layer's documents names no user, so nothing is kept for it.");
+  return scope.user;
+}
 
 /** The connections document as the file holds it; a connection written the earlier way gets its headers' values back, in the form the layer reads and moves at its next save. */
 function withEarlierHeaders(doc: unknown, earlier: JsonValue | null): unknown {
@@ -41,31 +71,73 @@ function withEarlierHeaders(doc: unknown, earlier: JsonValue | null): unknown {
   };
 }
 
-/** Where RPH's model layer keeps its two documents: `RPE-global.yml`'s `models`, and the secrets file. */
-export function modelsPort(paths: DataPaths, secrets: SecretsFile): ModelsPort {
-  const writes = new OneAtATime();
-  return {
-    async loadConnections() {
+/** The connections documents of `RPE-global.yml`'s text, by user. */
+function connectionsIn(text: string | null, paths: DataPaths, owner: string | null): ByUser {
+  return text === null ? {} : byUser(yamlMapping(text, paths.globalConfig)[MODELS_KEY] as JsonValue | undefined, owner, mappingsOnly);
+}
+
+/**
+ * Moves the documents written before, which name no user, under the install's user (`owner`), as older rows take the user in the step
+ * that adds the column (READINGS R-179): the connections document, the secrets document and the headers' values kept the earlier way.
+ * Run at the first start, before anything reads them; documents kept by user already are left as they are, and so is everything while
+ * the install names no user. A file that does not read is left as it is, and the log says why: the layer's reads say what is wrong with it.
+ */
+export async function ownModels(paths: DataPaths, secrets: SecretsFile, owner: string | null, log: Log): Promise<void> {
+  if (owner === null || owner === "") return;
+  try {
+    await configWrites(paths.globalConfig).run(async () => {
       const text = await readText(paths.globalConfig);
-      const doc = text === null ? undefined : yamlMapping(text, paths.globalConfig)[MODELS_KEY];
-      return doc === undefined ? null : withEarlierHeaders(doc, await secrets.read(EARLIER_HEADERS_PART));
+      const held = text === null ? undefined : (yamlMapping(text, paths.globalConfig)[MODELS_KEY] as JsonValue | undefined);
+      if (text === null || held === undefined || held === null || mappingsOnly(held)) return;
+      await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, { [owner]: held }, paths.globalConfig));
+    });
+  } catch (error) {
+    log.warn("the connections in RPE-global.yml were not moved under the install's user", { error: error instanceof Error ? error.message : String(error) });
+  }
+  try {
+    for (const [part, kept] of [
+      [SECRETS_PART, mappingsOnly],
+      [EARLIER_HEADERS_PART, headersByUser],
+    ] as const) {
+      const held = await secrets.read(part);
+      if (held !== null && !kept(held)) await secrets.write(part, { [owner]: held });
+    }
+  } catch (error) {
+    log.warn("the secrets of the connections were not moved under the install's user", { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/** Where RPH's model layer keeps each user's two documents: his entry of `RPE-global.yml`'s `models`, and his of the secrets file's part. `owner`: the install's user, whose a document that names none is. */
+export function modelsPort(paths: DataPaths, secrets: SecretsFile, owner: () => string | null): ModelsPort {
+  const writes = new OneAtATime();
+  const earlierHeaders = async (): Promise<ByUser> => byUser(await secrets.read(EARLIER_HEADERS_PART), owner(), headersByUser);
+  return {
+    async loadConnections(scope) {
+      const doc = connectionsIn(await readText(paths.globalConfig), paths, owner())[scope.user];
+      return doc === undefined ? null : withEarlierHeaders(doc, (await earlierHeaders())[scope.user] ?? null);
     },
-    saveConnections(doc) {
-      return writes.run(() =>
+    async saveConnections(scope, doc) {
+      const user = userOf(scope);
+      await writes.run(() =>
         // The Settings routes write the same file.
         configWrites(paths.globalConfig).run(async () => {
           const text = (await readText(paths.globalConfig)) ?? "";
-          await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, doc, paths.globalConfig));
-          // A save of the layer's has moved the earlier values, into its secrets (which it saves first) or, where it could not, into this document.
-          if ((await secrets.read(EARLIER_HEADERS_PART)) !== null) await secrets.write(EARLIER_HEADERS_PART, null);
+          const held = connectionsIn(text, paths, owner());
+          await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, { ...held, [user]: doc }, paths.globalConfig));
+          // A save of the layer's has moved the user's earlier values, into its secrets (which it saves first) or, where it could not, into this document.
+          const { [user]: moved, ...others } = await earlierHeaders();
+          if (moved !== undefined) await secrets.write(EARLIER_HEADERS_PART, Object.keys(others).length === 0 ? null : others);
         }),
       );
     },
-    loadSecrets: () => secrets.read(SECRETS_PART),
-    saveSecrets: (doc) => {
+    async loadSecrets(scope) {
+      return byUser(await secrets.read(SECRETS_PART), owner(), mappingsOnly)[scope.user] ?? null;
+    },
+    async saveSecrets(scope, doc) {
+      const user = userOf(scope);
       // The contract's secrets document is JSON by its own definition (it is kept anywhere and given back as it was).
       const json = doc as unknown as JsonValue;
-      return writes.run(() => secrets.write(SECRETS_PART, json));
+      await writes.run(async () => secrets.write(SECRETS_PART, { ...byUser(await secrets.read(SECRETS_PART), owner(), mappingsOnly), [user]: json }));
     },
   };
 }
@@ -155,17 +227,17 @@ const connectionTested = shape.named(
 export type ConnectionTested = Infer<typeof connectionTested>;
 
 /** A model's limits as RPH uses them; null for a connection whose model RPH cannot place (a provider no longer offered, say). */
-async function limitsOf(api: ConnectionsApi, id: string, model?: string): Promise<ModelLimits | null> {
+async function limitsOf(api: ConnectionsApi, user: string, id: string, model?: string): Promise<ModelLimits | null> {
   try {
-    return await api.limits(id, model);
+    return await api.limits(user, id, model);
   } catch {
     return null;
   }
 }
 
-async function shown(api: ConnectionsApi, view: ConnectionView): Promise<ConnectionShown> {
+async function shown(api: ConnectionsApi, user: string, view: ConnectionView): Promise<ConnectionShown> {
   const { key, ...rest } = view;
-  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: view.model === undefined ? null : await limitsOf(api, view.id) };
+  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: view.model === undefined ? null : await limitsOf(api, user, view.id) };
 }
 
 /** A provider's words with the key taken out, and the end of it a provider shows of one ("sk-…abcd"). */
@@ -174,10 +246,10 @@ function withoutKey(words: string, key: string | null): string {
   return words.replaceAll(key, "(the key)").replaceAll(key.slice(-4), "…");
 }
 
-/** A connection's key as the layer's secrets document keeps it (`keys`, by connection id); null where it has none. */
-export function storedKey(port: ModelsPort): (id: string) => Promise<string | null> {
-  return async (id) => {
-    const doc = await port.loadSecrets();
+/** A user's connection's key as the layer's secrets document keeps it (`keys`, by connection id); null where it has none. */
+export function storedKey(port: ModelsPort): (user: string, id: string) => Promise<string | null> {
+  return async (user, id) => {
+    const doc = await port.loadSecrets({ user });
     const key = isRecord(doc) && isRecord(doc.keys) ? doc.keys[id] : undefined;
     return typeof key === "string" ? key : null;
   };
@@ -202,9 +274,10 @@ async function layer<T>(call: () => Promise<T>): Promise<T> {
 
 /**
  * The routes to list, add, change and remove a connection, choose the default and test one, over the
- * model layer. `keyOf` gives a connection's stored key, only so that a test's answer can be cleared of it.
+ * model layer, each for the user this RPE belongs to (`owner`), whoever the caller's credential names.
+ * `keyOf` gives a user's connection's stored key, only so that a test's answer can be cleared of it.
  */
-export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Promise<string | null>) {
+export function connectionRoutes(api: ConnectionsApi, keyOf: (user: string, id: string) => Promise<string | null>, owner: () => string) {
   return [
     route({
       method: "GET",
@@ -214,8 +287,9 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Pro
       does: "The connections, each with whether a key is set (nothing of the key) and its model's limits as RPH uses them; the default; the providers offered.",
       reply: connectionsShown,
       handle: async () => {
-        const list = await api.list();
-        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, c))) };
+        const user = owner();
+        const list = await api.list(user);
+        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, user, c))) };
       },
     }),
     route({
@@ -228,7 +302,7 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Pro
       reply: connectionShown,
       handle: async ({ body }) => {
         if (body.connection.id !== undefined) throw new RouteError(400, "A new connection has no id: to change one, PUT /api/v1/connections/<its id>.");
-        return await shown(api, await layer(() => api.save(body.connection, body.key)));
+        return await shown(api, owner(), await layer(() => api.save(owner(), body.connection, body.key)));
       },
     }),
     route({
@@ -239,10 +313,10 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Pro
       does: "Changes a connection, whole: a field left out is cleared; its key stays when the body leaves it out, and goes when it is null.",
       body: saveConnection,
       reply: connectionShown,
-      handle: async ({ params, body }) => await shown(api, await layer(() => api.save({ ...body.connection, id: params.id }, body.key))),
+      handle: async ({ params, body }) => await shown(api, owner(), await layer(() => api.save(owner(), { ...body.connection, id: params.id }, body.key))),
     }),
-    route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", group: "connections", does: "Removes a connection, and its key.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.remove(params.id)) }),
-    route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", group: "connections", does: "Makes a connection the default.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.setDefault(params.id)) }),
+    route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", group: "connections", does: "Removes a connection, and its key.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.remove(owner(), params.id)) }),
+    route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", group: "connections", does: "Makes a connection the default.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.setDefault(owner(), params.id)) }),
     route({
       method: "POST",
       path: "/api/v1/connections/:id/test",
@@ -251,9 +325,10 @@ export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Pro
       does: "Tests a connection with one small call: how long it took, and the model that answered or the provider's words with its key taken out; and that model's limits.",
       reply: connectionTested,
       handle: async ({ params, signal }) => {
-        const test = await api.test(params.id, signal);
-        if (test.ok) return { ...test, limits: await limitsOf(api, params.id, test.model) };
-        return { ...test, error: withoutKey(test.error, await keyOf(params.id)), limits: null };
+        const user = owner();
+        const test = await api.test(user, params.id, signal);
+        if (test.ok) return { ...test, limits: await limitsOf(api, user, params.id, test.model) };
+        return { ...test, error: withoutKey(test.error, await keyOf(user, params.id)), limits: null };
       },
     }),
   ] as const;

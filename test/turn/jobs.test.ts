@@ -8,10 +8,12 @@
 // name is invented.
 
 import { afterEach, expect, test } from "bun:test";
-import type { JobState } from "rp-harness/contract";
+import type { JobState, JobView } from "rp-harness/contract";
 import { type Answer, gate } from "rp-harness/testing/rig";
+import { type JsonRoute, RouteError } from "../../src/app";
 import type { LiveEvent } from "../../src/app/live";
 import type { ChangeInput } from "../../src/store";
+import { NO_SESSION, turnRoutes } from "../../src/turn";
 import { jobsEndedBetween } from "../../src/turn/jobs";
 import { world } from "../iface/rig";
 import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
@@ -114,7 +116,7 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
   const id = (brief: string): string => views.find((v) => v.brief === brief)?.id ?? "";
   expect(views.map((v) => [v.brief, v.scope.turn, v.ended]).sort()).toEqual(Object.values(briefs).map((brief) => [brief, first, undefined]).sort());
   expect(views.map((v) => v.state).sort()).toEqual(["queued", "running", "running"]);
-  expect((await b.turns.harness.jobs?.cancel(id(briefs.cancelled)))?.state).toBe("cancelled");
+  expect((await b.turns.harness.jobs?.cancel(USER, id(briefs.cancelled)))?.state).toBe("cancelled");
   held.done.open();
   held.failed.open();
   const states: JobState[] = ["done", "failed", "cancelled"];
@@ -132,6 +134,41 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
   expect([store.stateAt(first).state.world.entities.bram?.fields.mood, store.stateAt(second).state.world.entities.bram?.fields.mood]).toEqual(["steady", "sour"]);
   const after = JSON.stringify(b.model.requests.at(-1)?.messages);
   for (const line of [`A job finished: ${id(briefs.done)}`, `A job failed before it finished: ${id(briefs.failed)}`, `A job was cancelled before it finished: ${id(briefs.cancelled)}`]) expect(after).not.toContain(line);
+});
+
+/** A job the user starts for the bed's chat, its agent's first call held by the script; given once it runs. */
+async function heldJob(b: TurnBed, brief: string): Promise<JobView> {
+  const started = await b.turns.harness.jobs!.start({ user: USER, chat: CHAT, session: NO_SESSION }, { agent: "historian", brief });
+  return await b.until("the job to run", async () => ((await b.turns.harness.jobs!.get(USER, started.id))?.state === "running" ? started : null));
+}
+
+test("another user's job is not found, and is not cancelled", async () => {
+  const b = await openTurnBed({ answers: [{ pieces: [{ hold: gate() }, { text: "The log holds three storm nights." }] }] });
+  beds.push(b);
+  const job = await heldJob(b, "Tally the keeper's log for the storm nights.");
+  const other = "user-tamsin";
+  const jobs = b.turns.harness.jobs!;
+  expect([await jobs.get(other, job.id), await jobs.cancel(other, job.id)]).toEqual([undefined, undefined]);
+  // The page's route, called in the other user's name, finds no such job and stops nothing.
+  const cancel = turnRoutes({ turns: b.turns, chatName: async () => null }).find((r) => r.method === "POST" && r.path === "/api/v1/jobs/:job/cancel") as unknown as JsonRoute<string, "page", unknown, unknown>;
+  const refused = await Promise.resolve(cancel.handle({ params: { job: job.id }, query: new URLSearchParams(), body: undefined, user: other, request: new Request("http://rpe.invalid/"), signal: new AbortController().signal })).then(
+    () => null,
+    (error: unknown) => (error instanceof RouteError ? [error.status, error.message] : error),
+  );
+  expect(refused).toEqual([404, `There is no job ${job.id}.`]);
+  expect((await jobs.get(USER, job.id))?.state).toBe("running");
+  // In his own name, the page cancels it.
+  expect((await b.page<{ job: JobView }>("POST", `/api/v1/jobs/${job.id}/cancel`)).body.job).toMatchObject({ id: job.id, state: "cancelled" });
+});
+
+test("a job cut off by a restart is listed as interrupted at RPE's start, before any call of its user", async () => {
+  const b = await openTurnBed({ answers: [{ pieces: [{ hold: gate() }, { text: "The log holds three storm nights." }] }] });
+  beds.push(b);
+  const job = await heldJob(b, "Tally the keeper's log for the storm nights.");
+  await b.restart();
+  // Nothing calls the jobs in the user's name: what RPE keeps of the job, as RPH tells it, shows it interrupted all the same.
+  const kept = await b.until("the job to be kept as interrupted", () => jobsEndedBetween(b.app.db, USER, CHAT, 0, Number.MAX_SAFE_INTEGER).find((j) => j.view.id === job.id && j.view.state === "interrupted"));
+  expect(kept.view).toMatchObject({ id: job.id, state: "interrupted", brief: "Tally the keeper's log for the storm nights.", ended: expect.any(Number) });
 });
 
 /**

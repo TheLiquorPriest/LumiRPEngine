@@ -167,21 +167,21 @@ export async function bookTrouble(runtime: string, files: readonly RuntimeFile[]
 }
 
 /**
- * Carries the runtime's connections and keys into RPE's two documents through `port`: the secrets
+ * Carries the runtime's connections and keys into `user`'s two documents through `port`: the secrets
  * first, as the model layer saves them, then the connections. `files` are the runtime's files the
  * migration found; `runtime` the runtime it took, the one this user registered; `earlier` what
  * earlier runs put into RPE's documents (`migration_put`). Null when that runtime keeps no
  * connections; `{ why }` when its files can't be read, and nothing is carried. Else what was carried,
  * and what this run put there, by what it is, to be kept for the next run.
  */
-export async function carryConnections(port: ModelsPort, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>, earlier: PutPrints): Promise<{ carried: ConnectionsCarried; put: Map<string, string> } | { why: string } | null> {
+export async function carryConnections(port: ModelsPort, user: string, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>, earlier: PutPrints): Promise<{ carried: ConnectionsCarried; put: Map<string, string> } | { why: string } | null> {
   const book = await bookOf(runtime, files, serial);
   if (book === null || "why" in book) return book;
   const ids = new Set(book.connections.map((c) => c.id));
   const put = new Map<string, string>();
 
   // Each of today's connections against RPE's copy: taken where RPE holds none and no run put one there, or where RPE's is still what a run put there; else RPE's stands.
-  const hadDoc = await port.loadConnections();
+  const hadDoc = await port.loadConnections({ user });
   const held = (isRecord(hadDoc) && Array.isArray(hadDoc.connections) ? hadDoc.connections : []).filter((c: unknown): c is StoredConnection => isRecord(c) && typeof c.id === "string");
   const own = held.filter((c) => !ids.has(c.id));
   const taken: StoredConnection[] = [];
@@ -203,7 +203,7 @@ export async function carryConnections(port: ModelsPort, runtime: string, files:
   const result = [...own, ...taken];
   const there = new Set(result.map((c) => c.id));
 
-  const hadSecrets = await port.loadSecrets();
+  const hadSecrets = await port.loadSecrets({ user });
   const had = isRecord(hadSecrets) ? hadSecrets : {};
   const carried = { keys: 0, signins: 0, headerValues: 0, kept: 0 };
   const keys = strings(had.keys, isString);
@@ -266,7 +266,7 @@ export async function carryConnections(port: ModelsPort, runtime: string, files:
     ...(Object.keys(places).length > 0 ? { places } : {}),
     ...(device !== undefined ? { device } : {}),
   };
-  await port.saveSecrets(secrets);
+  await port.saveSecrets({ user }, secrets);
 
   // The default as the connections: today's where RPE's is still what a run put there, or where no run put one and RPE has none of its own choosing; else RPE's stands.
   const ourDefault = (isRecord(hadDoc) ? text(hadDoc.default) : undefined) ?? null;
@@ -276,7 +276,7 @@ export async function carryConnections(port: ModelsPort, runtime: string, files:
   const chosen = takeTodays ? todays : ourDefault;
   if (takeTodays) put.set("default", hashJson(todays));
   const doc: ConnectionsDoc = { v: 1, default: chosen, connections: result };
-  await port.saveConnections(doc);
+  await port.saveConnections({ user }, doc);
   return {
     carried: {
       runtime,

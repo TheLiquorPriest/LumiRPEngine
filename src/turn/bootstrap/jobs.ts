@@ -130,8 +130,8 @@ export class BootstrapJobs {
   /** The chat's bootstrap: its six facts, and its bootstrap jobs with how each stands or ended. */
   async chat(user: string, chat: string): Promise<BootstrapChat> {
     const turns = this.#deps.turns();
-    const kept = keptOf(await turns.env.store.get(keyOf(chat)));
-    const [facts, views] = await Promise.all([this.facts(user, chat), Promise.all(kept.map((k) => turns.harness.jobs?.get(k.job)))]);
+    const kept = keptOf(await turns.env.store.get({ user }, keyOf(chat)));
+    const [facts, views] = await Promise.all([this.facts(user, chat), Promise.all(kept.map((k) => turns.harness.jobs?.get(user, k.job)))]);
     return { chat, facts, jobs: kept.map((k, i) => ({ id: k.job, relive: k.relive, tokenLimit: k.tokenLimit, view: views[i] ?? null })) };
   }
 
@@ -143,7 +143,7 @@ export class BootstrapJobs {
   async view(scope: Scope, agent: AgentRef, ref: string): Promise<string | null> {
     if (ref === BOOTSTRAP_FACTS) return JSON.stringify(await this.facts(scope.user, scope.chat));
     if (ref !== BOOTSTRAP_JOB || agent.job === undefined) return null;
-    const kept = keptOf(await this.#deps.turns().env.store.get(keyOf(scope.chat))).find((k) => k.job === agent.job);
+    const kept = keptOf(await this.#deps.turns().env.store.get(scope, keyOf(scope.chat))).find((k) => k.job === agent.job);
     const ask = kept ?? this.#asking.get(`${scope.user}\u0000${scope.chat}`);
     return ask === undefined ? null : JSON.stringify({ ...(ask.relive !== null ? { relive: ask.relive } : {}), tokenLimit: ask.tokenLimit });
   }
@@ -153,8 +153,8 @@ export class BootstrapJobs {
     const jobs = turns.harness.jobs;
     if (jobs === undefined) return refused(503, "This RPE runs no jobs, so no bootstrap job can be started.");
     const scope: Scope = { user, chat, session: NO_SESSION };
-    for (const kept of keptOf(await turns.env.store.get(keyOf(chat)))) {
-      const view = await jobs.get(kept.job);
+    for (const kept of keptOf(await turns.env.store.get(scope, keyOf(chat)))) {
+      const view = await jobs.get(user, kept.job);
       if (view !== undefined && UNDER_WAY[view.state] === true) return refused(409, `A bootstrap job of chat ${chat} is ${view.state} (job ${view.id}). Another can be started once it has ended.`);
     }
     try {
@@ -175,7 +175,7 @@ export class BootstrapJobs {
         return refused(409, error instanceof Error ? error.message : String(error));
       }
       const job: KeptJob = { job: view.id, ...ask };
-      await turns.env.store.update(keyOf(chat), (current) => ({ jobs: [...keptOf(current), job] }) as unknown as JsonValue);
+      await turns.env.store.update(scope, keyOf(chat), (current) => ({ jobs: [...keptOf(current), job] }) as unknown as JsonValue);
       return { started: view };
     } finally {
       this.#asking.delete(place);

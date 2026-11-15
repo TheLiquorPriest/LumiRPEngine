@@ -76,5 +76,5 @@ test("a turn stopped before its reply's first word is dropped, RPH is told it le
 
   await b.until("the turn to be dropped", () => b.turns.store.user(USER).turn(turn)?.status === "dropped");
   await b.until("RPH to be told the turn left the path", () => b.left.some((s) => s.turn === turn));
-  expect(await b.until("the job to be cut off", async () => (await b.turns.harness.jobs?.get(running.id))?.state === "off-path")).toBe(true);
+  expect(await b.until("the job to be cut off", async () => (await b.turns.harness.jobs?.get(USER, running.id))?.state === "off-path")).toBe(true);
 });

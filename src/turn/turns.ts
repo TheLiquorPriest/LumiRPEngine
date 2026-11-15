@@ -1062,7 +1062,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const soFar =
         keptFrom === null
           ? null
-          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, settings.lead, scope.turn), settings: settings.storySoFar, tokens: turnTokens, layout: soFarPart });
+          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, settings.lead, scope.user, scope.turn), settings: settings.storySoFar, tokens: turnTokens, layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
     }
     if (briefPart?.format === "template") {
@@ -1073,15 +1073,15 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * The lead's window in tokens, as the model layer reports it for the connection its definition names (`default`, or none, is the
-   * default connection). Where the model layer cannot tell it, 0, so the story so far is given its floor; the log says so.
+   * The lead's window in tokens, as the model layer reports it for the turn's user's connection its definition names (`default`, or none,
+   * is his default connection). Where the model layer cannot tell it, 0, so the story so far is given its floor; the log says so.
    */
-  async #authorWindow(guidance: Guidance, lead: string, turn: string): Promise<number> {
+  async #authorWindow(guidance: Guidance, lead: string, user: string, turn: string): Promise<number> {
     try {
       const named = (await guidance.definition(lead))?.model;
       const models = this.#d.harness().models;
-      const connection = named === undefined || named === "default" ? null : ((await models.list()).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
-      const window = (await models.limits(connection)).contextWindow;
+      const connection = named === undefined || named === "default" ? null : ((await models.list(user)).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
+      const window = (await models.limits(user, connection)).contextWindow;
       if (window !== null) return window.tokens;
       this.#d.log.info("The lead's window is not known, so the story so far is given its floor.", { turn, lead });
     } catch (error) {

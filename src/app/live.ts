@@ -43,7 +43,7 @@ const agentRef = shape.named("AgentRef", "One agent of a run: its handle, its de
 const usage = shape.named("Usage", "Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.", shape.object({ calls: N, input: N, cacheRead: N, cacheWrite: N, output: N, reasoning: opt(N) }));
 const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
 const sampling = shape.named("Sampling", "Sampling by its usual names, as a preset sets it; each one absent is the connection's own.", shape.object({ temperature: opt(N), top_p: opt(N), top_k: opt(N), min_p: opt(N), frequency_penalty: opt(N), presence_penalty: opt(N), repetition_penalty: opt(N), seed: opt(N), stop: opt(shape.list(T)) }));
-const toolCall = shape.named("ToolCallView", "A tool call a model made: the model's id for it, the tool, and its arguments.", shape.object({ id: T, name: T, args: shape.json() }));
+const toolCall = shape.named("ToolCallView", "A tool call a model made: the model's id for it, the tool, its arguments, and when the model began writing it, where the provider gave it in pieces.", shape.object({ id: T, name: T, args: shape.json(), began: opt(N) }));
 const toolContent = shape.union(shape.object({ type: shape.literal("text"), text: T }), shape.object({ type: shape.literal("image"), data: T, mimeType: T }));
 const toolResult = shape.named("ToolResult", "A tool's answer: what the model is shown, whether it failed, what it reports beyond it, its marks, and data for the live view.", shape.object({ content: shape.list(toolContent), error: opt(shape.literal(true)), reports: opt(shape.list(T)), marks: opt(shape.list(T)), details: opt(shape.json()) }));
 const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
@@ -89,8 +89,14 @@ const limitHit = shape.named(
 );
 const release = shape.named(
   "Release",
-  "The reply's release: whose text, in which form, the file for a file released, its length, and whether it went out before the turn's intent record was taken.",
-  shape.object({ by: agentRef, form: shape.oneOf("tags", "message", "narrator", "narrator-live", "file"), path: opt(T), length: N, withoutIntent: opt(shape.literal(true)) }),
+  "The reply's release: whose text, in which form, the file for a file released, and its length.",
+  shape.object({ by: agentRef, form: shape.oneOf("tags", "message", "narrator", "narrator-live", "file"), path: opt(T), length: N }),
+);
+const approvalAnswer = shape.union(shape.object({ go: shape.literal(true) }), shape.object({ go: shape.literal(false), reason: opt(T) }));
+const callPermission = shape.named(
+  "CallPermission",
+  "The permission a write or external tool's call ran under: the lane its tier puts it under (external for a tool of the external tier), the user's setting for that lane, and under Confirm the user's word on the call.",
+  shape.object({ lane: T, setting: shape.oneOf("auto", "confirm", "never"), answer: opt(approvalAnswer) }),
 );
 const jobView = shape.named(
   "JobView",
@@ -126,7 +132,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("call_ended"), call: N, model: T, text: T, thinking: opt(T), toolCalls: shape.list(toolCall), stop: T, usage, ms: N, error: opt(T) }),
     shape.object({ kind: shape.literal("tool_started"), callId: T, tool: T, args: shape.json(), closing: shape.yesNo(), via: opt(shape.literal("tool_use")) }),
     shape.object({ kind: shape.literal("tool_update"), callId: T, tool: T, partial: toolResult }),
-    shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N }),
+    shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N, permission: opt(callPermission) }),
     shape.object({ kind: shape.literal("rule_fired"), firing: ruleFiring }),
     shape.object({
       kind: shape.literal("hook"),
@@ -136,8 +142,8 @@ const traceEvent = shape.named(
       ms: N,
     }),
     shape.object({ kind: shape.literal("approval_asked"), callId: T, tool: T, lane: T }),
-    shape.object({ kind: shape.literal("approval_answered"), callId: T, tool: T, lane: T, answer: shape.union(shape.object({ go: shape.literal(true) }), shape.object({ go: shape.literal(false), reason: opt(T) })) }),
-    shape.object({ kind: shape.literal("prompt_notices"), notices: shape.list(promptNotice) }),
+    shape.object({ kind: shape.literal("approval_answered"), callId: T, tool: T, lane: T, answer: approvalAnswer }),
+    shape.object({ kind: shape.literal("prompt_notices"), notices: shape.list(promptNotice), pictures: opt(shape.list(shape.object({ message: N, count: N }))) }),
     shape.object({ kind: shape.literal("todo"), items: shape.list(shape.object({ text: T, done: shape.yesNo() })) }),
     shape.object({ kind: shape.literal("limit"), hit: limitHit }),
     shape.object({ kind: shape.literal("released"), release }),

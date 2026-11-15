@@ -23,7 +23,7 @@ import { banners, elements, expand, press, textOf } from "./vnodes";
 const usage = { calls: 3, input: 9_000, output: 700, cacheRead: 0, cacheWrite: 0 };
 const job = (id: string, state: JobView["state"], started: number, over: Partial<JobView> = {}): JobView => ({ id, agent: "historian", brief: "Summarize the chapter that closed.", state, scope: { user: USER, chat: CHAT, session: "s-1" }, startedBy: "user", started, usage, ...over });
 
-/** The jobs RPH keeps, in memory: a cancel ends a queued or running one, and gives one that ended as it ended. */
+/** The jobs RPH keeps, in memory, each found only under its own user: a cancel ends a queued or running one, and gives one that ended as it ended. */
 function keptJobs(): JobsApi & { all: JobView[] } {
   const all: JobView[] = [
     job("job-old", "done", 1_000, { ended: 2_000, report: "Chapter one, summarized.", startedBy: { id: "a1", definition: "author" } }),
@@ -34,12 +34,12 @@ function keptJobs(): JobsApi & { all: JobView[] } {
   return {
     all,
     list: async (filter) => all.filter((j) => j.scope.user === filter.user && (filter.chat === undefined || j.scope.chat === filter.chat)),
-    get: async (id) => all.find((j) => j.id === id),
+    get: async (user, id) => all.find((j) => j.id === id && j.scope.user === user),
     start: async () => {
       throw new Error("No job is started here.");
     },
-    cancel: async (id) => {
-      const at = all.findIndex((j) => j.id === id);
+    cancel: async (user, id) => {
+      const at = all.findIndex((j) => j.id === id && j.scope.user === user);
       const found = all[at];
       if (found === undefined || (found.state !== "queued" && found.state !== "running")) return found;
       all[at] = { ...found, state: "cancelled", ended: 6_000 };

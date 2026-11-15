@@ -379,12 +379,12 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "POST",
       path: "/api/v1/jobs/:job/cancel",
       access: "page",
-      // A job that has ended already is given as it ended: nothing of it is cancelled.
+      // A job that has ended already is given as it ended: nothing of it is cancelled. Another user's job is no job of his.
       handle: async ({ user, params }) => {
         const jobs = jobsApi();
-        const job = await jobs.get(params.job);
-        if (job === undefined || job.scope.user !== user) throw new RouteError(404, `There is no job ${params.job}.`);
-        return { job: (await jobs.cancel(job.id)) ?? job };
+        const job = await jobs.get(user, params.job);
+        if (job === undefined) throw new RouteError(404, `There is no job ${params.job}.`);
+        return { job: (await jobs.cancel(user, job.id)) ?? job };
       },
     }),
   ] as const;
