@@ -15,7 +15,8 @@
     "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
   },
   "bin": {
-    "lumirpengine": "dist/lumirpengine.js"
+    "lumirpengine": "dist/lumirpengine.js",
+    "rpe": "dist/rpe.js"
   },
   "engines": {
     "bun": ">=1.4",
