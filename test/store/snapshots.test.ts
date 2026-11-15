@@ -1,10 +1,12 @@
 // Snapshots (plan §6.3): every N turns along a path, N a setting, a cold start begins at the nearest
 // one; a change added before a snapshot drops it; a stored starting state stands for a turn's state.
 
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { openStore, type Store } from "../../src/store/store";
-import { carried, engine, goTo, hand, play, POV, registry, testStore, tick, USER, type TestStore } from "./fixtures";
+import type { SeenMessage, ShownMessage } from "../../src/store/types";
+import { carried, engine, goTo, hand, hashOf, play, POV, registry, testStore, tick, USER, type TestStore } from "./fixtures";
 
 const places = ["cellar", "market_square", "far_road", "common_room"];
 
@@ -86,6 +88,31 @@ describe("snapshots", () => {
     ts.s.updateTurn(second.id, { intent: "noted" });
     expect(snapshotDepths(ts.store)).toEqual([4, 8]);
     expect(hashJson(reopened(ts).user(USER).headState("c").state)).toBe(hashJson(ts.s.headState("c").state));
+  });
+
+  test("after a delete far back, the comparison leaves the same snapshots with or without a question before it", () => {
+    const ts = playMany(25, 120);
+    const exchanges = Array.from({ length: 120 }, (_, i) => i + 1);
+    const shown = (ns: readonly number[]): ShownMessage[] => ns.flatMap((n) => [{ id: `u${n}`, user: true, hash: hashOf(`Line ${n}.`) }, { id: `m${n}`, user: false, hash: hashOf(`Reply ${n}.`), date: n }]);
+    ts.s.sync("c", shown(exchanges));
+    // Each way runs on a copy of the same database, so the turns, and the keys of their nodes, are the same ones.
+    const played = ts.store.db.serialize();
+    const kept = [...shown(exchanges.filter((n) => n !== 10)), { id: "u121", user: true, hash: hashOf("Line 121.") }];
+    /** The 10th exchange deleted and a line sent; asked about first or not; compared. The snapshots it leaves. */
+    const leftAfter = (askFirst: boolean) => {
+      let at = 1_000;
+      const copy = testStore({ db: Database.deserialize(played), snapshotEvery: 25, now: () => ++at });
+      if (askFirst) copy.s.turnStart("c", kept.map((m, index): SeenMessage => ({ id: m.id, user: m.user, index, swipe: 0, hash: m.hash })), { follows: "u121" });
+      copy.s.sync("c", kept);
+      return {
+        depths: snapshotDepths(copy.store),
+        rows: copy.store.db.query<Record<string, unknown>, []>("SELECT node, kind, fingerprint, upto, state FROM snapshot ORDER BY node").all(),
+      };
+    };
+    const alone = leftAfter(false);
+    // The 110 turns after the delete stand rebased one place earlier: those at 25, 50, 75 and 100 keep their states there too.
+    expect(alone.depths).toEqual([25, 25, 50, 50, 75, 75, 100, 100]);
+    expect(leftAfter(true).rows).toEqual(alone.rows);
   });
 
   test("a stored starting state stands for a turn's state on its own path, whatever the turns before it hold", () => {

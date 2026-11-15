@@ -12,7 +12,7 @@ import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
 import { migrateStore, STORE_MIGRATIONS } from "../../src/store/schema";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
-import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage } from "../../src/store/types";
+import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage, type TurnRow } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
 import { carried, engine, goTo, hand, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
@@ -402,20 +402,42 @@ describe("the question's call", () => {
     expect(hashJson(answer.state)).toBe(hashJson(s.headState("elsewhere").state));
   });
 
-  test("a branch's first question, before any comparison, is answered at the turns it shares with its source", () => {
+  test("a branch made from the fork's map alone: its first question is answered at the source's state at the fork", () => {
     const ts = testStore();
     const { s, revision } = ts;
     s.createChat({ id: "source", revision });
     play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
     const shared = play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar"), make("lamp", "Lamp", POV)));
     play(s, "source", "m3", "A long rest.", 3, engine(tick(120)));
-    // The branch is made at the second reply, from the fork's old-to-new map; nothing has compared it yet.
-    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" }, at: "m2" });
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2], ["u3", "rest"], ["m3", "A long rest.", 3]));
+    // Lumiverse forks the chat at the second reply. `CHAT_FORKED` says the source, the branch and the old-to-new map, nothing more,
+    // and the turn lane tells the store so when it hears it; nothing has compared the branch yet.
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" } });
+    // The fork is at the last message of the source's path that the map names.
+    expect(s.chat("branch")).toMatchObject({ sourceChat: "source", sourceMessage: "m2" });
     expect(s.path("branch")).toEqual([]);
-    const answer = s.turnStart("branch", seen(["b-u1", "in"], ["b-m1", "Into the inn.", 0], ["b-u2", "down"], ["b-m2", "Down the stairs.", 0], ["b-u3", "look around"]), { follows: "b-u3" });
-    expect(answer.at).toEqual({ message: "b-m2", turn: shared.id });
+    const lines = seen(["b-u1", "in"], ["b-m1", "Into the inn.", 0], ["b-u2", "down"], ["b-m2", "Down the stairs.", 0], ["b-u3", "look around"]);
+    const answer = s.turnStart("branch", lines, { follows: "b-u3" });
+    expect([answer.known, answer.at]).toEqual([true, { message: "b-m2", turn: shared.id }]);
     expect([answer.node, hashJson(answer.state)]).toEqual([shared.node, hashJson(s.stateAt(shared.id).state)]);
     expect(carried(answer.state.world, POV)).toContain("lamp");
+    // Its first comparison says where it was branched from.
+    expect(s.sync("branch", asShown(lines, { "b-m1": 1, "b-m2": 2 })).branched).toEqual({ from: "source", at: "m2" });
+  });
+
+  test("a fork not yet told answers the world's start, unknown", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "source", revision });
+    play(s, "source", "m1", "Into the inn.", 1, engine(goTo(POV, "cellar")));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1]));
+    // Lumiverse has forked the chat and the store has not been told: the copies carry new ids that no link names yet.
+    const answer = s.turnStart("branch", seen(["b-u1", "in"], ["b-m1", "Into the inn.", 0], ["b-u2", "look"]), { follows: "b-u2" });
+    expect([answer.known, answer.at, answer.node]).toEqual([false, null, null]);
+    expect(answer.state.world.entities[POV]?.fields.place).not.toBe("cellar");
+    // Told, the same question is answered at the source's state there.
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1" } });
+    expect(s.turnStart("branch", seen(["b-u1", "in"], ["b-m1", "Into the inn.", 0], ["b-u2", "look"]), { follows: "b-u2" }).state.world.entities[POV]?.fields.place).toBe("cellar");
   });
 
   test("the point agrees with the end of the path it comes with: a reply it replaces at the end is passed over, any other point is refused", () => {
@@ -468,6 +490,167 @@ describe("the question's call", () => {
     s.addChanges(next.id, engine(goTo(POV, "market_square")));
     expect(s.stateAt(next.id).state.world.entities[POV]?.fields.place).toBe("market_square");
     expect(answer.state.world.entities[POV]?.fields.place).toBe("cellar");
+  });
+
+  test("on an unchanged path of 10,001 messages the question costs no more than a fixed multiple of reading the chat's path once", () => {
+    // 5,000 played replies, compared once. They are begun one after another and tied newest first, so no tie rewrites the path and
+    // the chat is made quickly; it is what is measured on. No snapshot is kept on the way.
+    const ts = testStore({ snapshotEvery: 1_000_000 });
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const replies = 5_000;
+    ts.store.db.transaction(() => {
+      const turns: TurnRow[] = [];
+      for (let i = 0; i < replies; i++) turns.push(s.beginTurn({ chat: "c", kind: "normal", on: turns.at(-1)?.node ?? null }));
+      for (let i = replies; i >= 1; i--) s.tieTurn(turns[i - 1]?.id ?? "", { message: `m${i}`, hash: hashOf(`Reply ${i}.`), date: i });
+    })();
+    const exchanges = Array.from({ length: replies }, (_, i): [[string, string], [string, string, number]] => [[`u${i + 1}`, `Line ${i + 1}.`], [`m${i + 1}`, `Reply ${i + 1}.`, 0]]);
+    const path = seen(...exchanges.flat(), ["u-next", "And then."]);
+    s.sync("c", asShown(path.slice(0, -1), Object.fromEntries(exchanges.map(([, [m]], i) => [m, i + 1]))));
+    const ask = () => s.turnStart("c", path, { follows: "u-next" });
+    expect(ask().at?.message).toBe(`m${replies}`);
+    // Reading the chat's path once is the least a comparison of it does, and grows with the chat as any reading of the path must.
+    // Taken in turns with the question, so a busy machine slows both alike, and the least of many runs of each, which noise only
+    // adds to: a guard, not the gate (R-15).
+    const text = ts.store.db.query<{ path: string }, []>("SELECT path FROM chat").get()?.path ?? "";
+    let question = Number.POSITIVE_INFINITY;
+    let reading = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 25; i++) {
+      let from = performance.now();
+      ask();
+      question = Math.min(question, performance.now() - from);
+      from = performance.now();
+      JSON.parse(text);
+      reading = Math.min(reading, performance.now() - from);
+    }
+    console.log(`the question on an unchanged path of ${2 * replies + 1} messages: ${question.toFixed(2)} ms; reading the chat's path once: ${reading.toFixed(2)} ms`);
+    expect(question).toBeLessThanOrEqual(3 * reading);
+  });
+
+  test("two swipes with the same text, the older showing and nothing changed: the answer is the older swipe's turn", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const older = play(s, "c", "m2", "The road forks.", 2, engine(goTo(POV, "cellar")));
+    // A regenerate came back word for word with other changes; the older swipe was shown again, and compared so.
+    const newer = play(s, "c", "m2", "The road forks.", 3, engine(goTo(POV, "far_road")), { target: "m2" });
+    const lines = seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "which way"], ["m2", "The road forks.", 0], ["u3", "left"]);
+    s.sync("c", asShown(lines.slice(0, 4), { m1: 1, m2: 2 }));
+    expect(s.path("c").find((e) => e.message === "m2")?.turn).toBe(older.id);
+    // The text names both swipes; shown as it was then, the reply is the turn the comparison tied, not the newer one.
+    const answer = s.turnStart("c", lines, { follows: "u3" });
+    expect(answer.at).toEqual({ message: "m2", turn: older.id });
+    expect(answer.state.world.entities[POV]?.fields.place).toBe("cellar");
+    // As the turn's own comparison finds it: the next turn starts from that very state.
+    s.sync("c", asShown(lines, { m1: 1, m2: 2 }));
+    expect(s.startOf(s.beginTurn({ chat: "c", kind: "normal" }).id).state).toBe(answer.state);
+    // A reply changed since is known by its text, as before: the newer swipe's own words now showing are the newer swipe's turn.
+    const third = play(s, "c", "m2", "The road bends.", 4, engine(goTo(POV, "market_square")), { target: "m2" });
+    const changed = seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "which way"], ["m2", "The road bends.", 2], ["u3", "left"]);
+    expect(s.turnStart("c", changed, { follows: "u3" }).at).toEqual({ message: "m2", turn: third.id });
+    expect(newer.id).not.toBe(older.id);
+  });
+
+  test("a reader cannot change the rebased and not-applied lists an answer gives, nor the next answer's", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "A lantern is lit.", 1, engine(make("lantern", "Lantern", POV)));
+    const second = play(s, "c", "m2", "Wren sets the lantern in the cask.", 2, engine(...hand("lantern", POV, "cask")));
+    play(s, "c", "m1", "The lamps stay dark.", 3, engine(tick(5)), { target: "m1" });
+    // The first reply flipped to its swipe with no lantern: the second turn stands rebased on it, and its hand-over does not apply.
+    const lines = seen(["u1", "in"], ["m1", "The lamps stay dark.", 1], ["u2", "the cask"], ["m2", "Wren sets the lantern in the cask.", 0], ["u3", "and then"]);
+    const answer = s.turnStart("c", lines, { follows: "u3" });
+    expect(answer.rebased).toEqual([second.id]);
+    expect(answer.notApplied.map((n) => [n.turn, n.op])).toEqual([
+      [second.id, "unlink"],
+      [second.id, "link"],
+    ]);
+    const given = structuredClone({ rebased: answer.rebased, notApplied: answer.notApplied });
+    // The briefing reads these lists for what to look over and what no longer applies: a reader that wrote to them is stopped there.
+    expect(() => answer.rebased.push("t-elsewhere")).toThrow(TypeError);
+    expect(() => answer.notApplied.splice(0, 1)).toThrow(TypeError);
+    expect(() => answer.notApplied[0]?.reports.push({ code: "added_by_a_reader" })).toThrow(TypeError);
+    // Nor what the next answer gives, nor the comparison that follows.
+    const again = s.turnStart("c", lines, { follows: "u3" });
+    expect({ rebased: again.rebased, notApplied: again.notApplied }).toEqual(given);
+    expect(s.sync("c", asShown(lines, { m1: 3, m2: 2 })).notApplied).toEqual(given.notApplied);
+  });
+
+  test("after addChanges with an object value, the caller's own object can still be changed, and the held state cannot", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    const turn = s.beginTurn({ chat: "c", kind: "normal" });
+    // A set whose value is an object: the engine's handler puts the change's value into the state as it is.
+    const notes = { mood: "wary", seen: ["bram"] };
+    const { state } = s.addChanges(turn.id, engine({ type: "set", entity: POV, field: "notes", value: notes }));
+    // The caller's object is still its own to change; the store applied and keeps a copy of its own.
+    notes.seen.push("odile");
+    expect(notes.seen).toEqual(["bram", "odile"]);
+    const held = state.world.entities[POV]?.fields.notes as { seen: string[] } | undefined;
+    expect(held?.seen).toEqual(["bram"]);
+    expect(() => held?.seen.push("odile")).toThrow(TypeError);
+    expect(s.stateAt(turn.id).state.world.entities[POV]?.fields.notes).toEqual({ mood: "wary", seen: ["bram"] });
+  });
+
+  test("a path holding a message id twice is refused", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const [line, reply, next] = seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "again"]);
+    if (line === undefined || reply === undefined || next === undefined) throw new Error("no path");
+    // Lumiverse's messages have ids of their own: a path holding one twice is malformed, and would fold that turn twice.
+    const before = written(ts);
+    expect(() => s.turnStart("c", [line, reply, { ...reply, index: 2 }, { ...next, index: 3 }], { follows: "u2" })).toThrow(StoreInputError);
+    expect(() => s.turnStart("c", [line, { ...line, index: 1 }, { ...reply, index: 2 }, { ...next, index: 3 }], { follows: "u2" })).toThrow(StoreInputError);
+    expect(written(ts)).toBe(before);
+    expect(s.turnStart("c", [line, reply, next], { follows: "u2" }).at?.message).toBe("m1");
+  });
+
+  test("a reply whose edit was recorded is answered at its turn", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
+    const lit = play(s, "c", "m2", "The lantern is lit.", 2, engine(make("lantern", "Lantern", POV)));
+    const lines = (reply: string, swipe: number): SeenMessage[] => seen(["u1", "in"], ["m1", "Wren comes in from the rain.", 0], ["u2", "light it"], ["m2", reply, swipe], ["u3", "and then"]);
+    // The player fixed the reply's words and the comparison recorded the edit; then another swipe was shown, and compared so.
+    s.sync("c", asShown(lines("The lantern is lit, at last.", 0).slice(0, 4), { m1: 1, m2: 2 }));
+    expect(s.turn(lit.id)?.edited).toBe(hashOf("The lantern is lit, at last."));
+    const dark = play(s, "c", "m2", "The lantern stays dark.", 3, engine(tick(1)), { target: "m2" });
+    s.sync("c", asShown(lines("The lantern stays dark.", 1).slice(0, 4), { m1: 1, m2: 3 }));
+    expect(s.path("c").find((e) => e.message === "m2")?.turn).toBe(dark.id);
+    // Shown again, the edited words are no saved text of either swipe: the edit recorded on the first says it is that turn.
+    const answer = s.turnStart("c", lines("The lantern is lit, at last.", 0), { follows: "u3" });
+    expect(answer.at).toEqual({ message: "m2", turn: lit.id });
+    expect(carried(answer.state.world, POV)).toContain("lantern");
+  });
+
+  test("a branch's continue of a shared reply, its first exchange deleted, is answered at the shared turn then the branch's own", () => {
+    const ts = testStore();
+    const { s, revision } = ts;
+    s.createChat({ id: "source", revision });
+    const first = play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    const shared = play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar")));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2]));
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" } });
+    s.sync("branch", shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u2", "down"], ["b-m2", "Down the stairs.", 2]));
+    // The branch continues the reply it shares: its own turn goes on after the shared one, in the branch's place at that message.
+    const on = s.path("branch").find((e) => e.message === "b-m2")?.node ?? null;
+    const own = play(s, "branch", "b-m2", "Down the stairs. The lamp gutters.", 2, engine(tick(30)), { on, kind: "continue" });
+    // Then its first exchange is deleted, before any comparison, and a line is sent.
+    const lines = seen(["b-u2", "down"], ["b-m2", "Down the stairs. The lamp gutters.", 0], ["b-u3", "look"]);
+    const answer = s.turnStart("branch", lines, { follows: "b-u3" });
+    expect(answer.at).toEqual({ message: "b-m2", turn: own.id });
+    expect(answer.rebased).toEqual([shared.id, own.id]);
+    // The shared turn stands first, without the deleted reply's quarter hour, and the branch's own after it.
+    expect([answer.state.world.entities[POV]?.fields.place, answer.state.world.clock - s.startOf(first.id).state.world.clock]).toEqual(["cellar", 30]);
+    // As the turn's own comparison finds it.
+    s.sync("branch", asShown(lines, { "b-m2": 2 }));
+    expect(hashJson(s.startOf(s.beginTurn({ chat: "branch", kind: "normal" }).id).state)).toBe(hashJson(answer.state));
   });
 });
 

@@ -23,7 +23,7 @@ import type { WorldState } from "../engine/state";
 import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type StoredChange } from "./fold";
 import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
-import { chainOf, comparePaths, matchTurn, nodeKey, turnsShown, type ShowingTurn } from "./path";
+import { chainOf, comparePaths, matchTurn, nodeKey, turnByHash, turnsShown, type ShowingTurn } from "./path";
 import { BLANK_REVISION, blankWorld } from "./blank";
 import { MIGRATED_REVISION, readWorldDoc, type WorldRevisionRow } from "./worlds";
 import { isWorldDoc } from "../engine/authoring";
@@ -184,6 +184,13 @@ interface Held {
   rows: Map<string, { upto: number; state: string }>;
 }
 
+/** A chat's path as its last comparison took it, read from the text its row keeps, with its entries by message id. */
+interface ComparedPath {
+  text: string;
+  entries: readonly PathEntry[];
+  byMessage: ReadonlyMap<string, PathEntry>;
+}
+
 function turnOf(r: TurnDb): TurnRow {
   return {
     id: r.id,
@@ -268,6 +275,7 @@ export class Store {
   private readonly owned: boolean;
   private readonly folds = new Map<string, Cached>();
   private readonly held = new Map<string, Held>();
+  private readonly compared = new Map<string, ComparedPath>();
   private readonly views = new WeakMap<StoreState, TreeView>();
 
   constructor(options: StoreOptions) {
@@ -310,10 +318,11 @@ export class Store {
     return new UserStore(this, id);
   }
 
-  /** Lets go of everything held in memory: folded states, and snapshots waiting for a write. */
+  /** Lets go of everything held in memory: folded states, snapshots waiting for a write, and the paths read last. */
   dropCaches(): void {
     this.folds.clear();
     this.held.clear();
+    this.compared.clear();
   }
 
   /** Closes the database if the store opened it; one it was handed stays open, its owner's to close. */
@@ -341,13 +350,14 @@ export class Store {
   }
 
   /**
-   * @internal Holds a folded state in memory. Its state is frozen, through and through, once, here: every reader of that point is
-   * handed this one object (a question, the turn that follows it, the tree), so a reader that changed it would change what every
-   * later fold and turn there starts from. Freezing costs a walk of the state when it is held, a fraction of the copy every fold
-   * makes already; copying it for every reader would cost that copy on every question.
+   * @internal Holds a folded state in memory. It is frozen, through and through, once, here: its state, and the lists of turns standing
+   * rebased and of what no longer applies that come with it, reports and all. Every reader of that point is handed these very objects
+   * (a question, the turn that follows it, the comparison's report, the tree), so a reader that changed one would change what every
+   * later fold, briefing and turn there starts from. Freezing costs a walk of the state when it is held, a fraction of the copy every
+   * fold makes already; copying it for every reader would cost that copy on every question.
    */
   keep(key: string, folded: Folded, upto: number, mark: string | null): void {
-    deepFreeze(folded.state);
+    deepFreeze(folded);
     this.folds.delete(key);
     this.folds.set(key, { mark, folded, upto });
     for (const oldest of this.folds.keys()) {
@@ -374,7 +384,10 @@ export class Store {
     }
   }
 
-  /** @internal Stores the user's held snapshots while the mark they were folded under still holds; inside a write. */
+  /**
+   * @internal Stores the user's held snapshots while the mark they were folded under still holds; inside a write. One of a node not
+   * stored yet (a question's fold of a path no comparison has stored) waits, under that mark, for the write that stores the node.
+   */
   flush(user: string): void {
     const held = this.held.get(user);
     if (!held) return;
@@ -384,7 +397,28 @@ export class Store {
       "INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) SELECT ?1, ?2, 'cache', ?3, ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM path_node WHERE user = ?1 AND key = ?2)",
     );
     const now = this.now();
-    for (const [node, row] of held.rows) put.run(user, node, this.fingerprint, row.upto, row.state, now);
+    const waiting = new Map<string, { upto: number; state: string }>();
+    for (const [node, row] of held.rows) if (put.run(user, node, this.fingerprint, row.upto, row.state, now).changes === 0) waiting.set(node, row);
+    if (waiting.size > 0) this.held.set(user, { mark: held.mark, rows: waiting });
+  }
+
+  /**
+   * @internal A chat's path as its last comparison took it, from the text the chat's row keeps: read once for each text, so a
+   * question asked again of a chat not compared since does not read the whole path again. Read it, never change it.
+   */
+  comparedPath(user: string, chat: string, text: string): ComparedPath {
+    const key = `${user}\u0000${chat}`;
+    const hit = this.compared.get(key);
+    if (hit !== undefined && hit.text === text) return hit;
+    const entries = pathOf(text);
+    const read: ComparedPath = { text, entries, byMessage: new Map(entries.map((e) => [e.message, e])) };
+    this.compared.delete(key);
+    this.compared.set(key, read);
+    for (const oldest of this.compared.keys()) {
+      if (this.compared.size <= this.foldsKept) break;
+      this.compared.delete(oldest);
+    }
+    return read;
   }
 
   /** @internal */ viewOf(state: StoreState): TreeView {
@@ -489,13 +523,16 @@ export class UserStore {
   /**
    * A branch (plan §6.3): a new chat whose messages carry new ids for the source chat's, by the
    * old-to-new map the chat application gave when it made the copy. The branch's path finds the
-   * source's turns through the map, so shared history is shared, not copied.
+   * source's turns through the map, so shared history is shared, not copied. The fork point is the
+   * message the branch was made at: given, or, as Lumiverse's `CHAT_FORKED` gives only the two chats
+   * and the map, the last message of the source's path that the map names.
    */
   branchChat(input: { id: string; from: string; map: Readonly<Record<string, string>>; at?: string | null }): ChatRow {
     const source = this.chatOrThrow(input.from);
     if (this.chat(input.id)) throw new StoreInputError(`chat ${input.id} exists`);
+    const at = input.at ?? pathOf(source.path).findLast((e) => Object.hasOwn(input.map, e.message))?.message ?? null;
     this.write(false, () => {
-      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, created) VALUES (?, ?, ?, ?, ?, ?, ?)", [this.id, input.id, source.world, source.revision, input.from, input.at ?? null, this.store.now()]);
+      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, created) VALUES (?, ?, ?, ?, ?, ?, ?)", [this.id, input.id, source.world, source.revision, input.from, at, this.store.now()]);
       const link = this.db.query("INSERT OR REPLACE INTO message_link (user, chat, message, source_chat, source_message) VALUES (?, ?, ?, ?, ?)");
       for (const [old, now] of Object.entries(input.map)) link.run(this.id, input.id, now, input.from, old);
     });
@@ -975,7 +1012,9 @@ export class UserStore {
     const existing = this.changes(turnId);
     // Groups that did not land earlier in the turn: a unit tied to one does not land either.
     const fell = new Set(existing.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
-    const items: Item[] = inputs.map((c) => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
+    // The engine's handlers put a change's own objects into the state, which is then held frozen: they apply the store's copy, so the
+    // caller's values stay the caller's.
+    const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: turnId, n: turn.depth + 1, by: c.by ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = applyChecked(this.store.env, state, items, fell);
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
@@ -1108,18 +1147,26 @@ export class UserStore {
    * later turns stand rebased, their changes applied again. A reply edited since the last comparison is known by the edit heard for
    * it (`heardEdit`). With it, that path up to the point, each message with the hidden mark the store holds for it (heard since the
    * last comparison, else as that comparison took it), and where the answer stands. A path none of whose messages the tree ties to a
-   * turn, and a chat the store does not know, are answered at the world's start, and the answer says so. Where the store last compared
-   * the chat does not decide the point or the chain, and nothing is kept from one question to the next. It reads RPE's own store only
-   * (the state held in memory, else folded from the nearest snapshot), asks neither the chat application nor a model, and writes
-   * nothing. The state is held under the keys a comparison of that path will store, so the turn that follows starts from it; it may
-   * be the held state itself: read it, never change it.
+   * turn, and a chat the store does not know, are answered at the world's start, and the answer says so. The point and the chain come
+   * from the path alone; what the last comparison found is reused where the path still shows it, as the comparison reuses it: a reply
+   * shown as it was then (its id and text) keeps the turn it was tied to then, and the turns standing as they stood keep their stored
+   * nodes, whose keys name the same turns. It reads RPE's own store only (the state held in memory, else folded from the nearest
+   * snapshot), asks neither the chat application nor a model, and writes nothing. The state is held under the keys a comparison of
+   * that path will store, so the turn that follows starts from it; it may be the held state itself: read it, never change it.
    */
   turnStart(chat: string, path: readonly SeenMessage[], point: TurnPoint): TurnStart {
     const row = this.chatDb(chat);
     const heard: Heard = row === null ? {} : (JSON.parse(row.heard) as Heard);
-    // A reply's turn is known by its saved text, by the edit the last comparison recorded on it, or by an edit heard since for it.
+    const compared = row === null ? null : this.store.comparedPath(this.id, chat, row.path);
+    const was = (m: SeenMessage): PathEntry | undefined => compared?.byMessage.get(m.id);
+    const asThen = (m: SeenMessage): string | null => {
+      const then = was(m);
+      return !m.user && then !== undefined && then.turn !== null && then.hash === m.hash ? then.turn : null;
+    };
+    // Any other reply's turn is known by its saved text, by the edit the last comparison recorded on it, or by an edit heard since.
+    const changed = path.flatMap((m) => (m.user || asThen(m) !== null ? [] : [m.id]));
     const tied = new Map(
-      [...this.tiedTo(chat, path.flatMap((m) => (m.user ? [] : [m.id])))].map(([message, turns]) => [
+      [...(changed.length === 0 ? [] : this.tiedTo(chat, changed))].map(([message, turns]) => [
         message,
         turns.flatMap((t) => {
           const edit = heard[message]?.edits?.[t.id];
@@ -1127,15 +1174,23 @@ export class UserStore {
         }),
       ]),
     );
-    const shown = turnsShown(path, point, tied);
-    const marks = new Map(row === null ? [] : pathOf(row.path).map((e) => [e.message, e.hidden]));
+    const shown = turnsShown(path, point, (m) => asThen(m) ?? turnByHash(tied.get(m.id) ?? [], m.hash)?.id ?? null);
     // A mark heard since the last comparison is newer than the one it took.
-    const messages = shown.map(({ message, turn }) => ({ ...message, hidden: heard[message.id]?.hidden ?? marks.get(message.id) ?? false, turn: turn?.id ?? null }));
-    const held = shown.flatMap(({ message, turn }): ShowingTurn[] => (turn === null ? [] : [{ turn: turn.id, message: message.id }]));
-    const { nodes } = chainOf(held, null, 0, this.goesOn(chat, held, 0));
+    const messages = shown.map(({ message, turn }) => ({ ...message, hidden: heard[message.id]?.hidden ?? was(message)?.hidden ?? false, turn }));
+    const held = shown.flatMap(({ message, turn }): ShowingTurn[] => (turn === null ? [] : [{ turn, message: message.id }]));
+    // The stored nodes of the turns as they stood, as long as the turns before them are the same; from there, the chain the path shows.
+    const stood = compared?.entries.filter((e) => e.turn !== null) ?? [];
+    let same = 0;
+    while (same < held.length && stood[same]?.turn === held[same]?.turn && stood[same]?.node != null) same++;
+    const prev = stood[same - 1]?.node ?? null;
+    const depth = prev === null ? 0 : (this.db.query<{ depth: number }, [string, string]>("SELECT depth FROM path_node WHERE user = ? AND key = ?").get(this.id, prev)?.depth ?? -1) + 1;
+    const fresh = chainOf(held.slice(same), prev, depth, this.goesOn(chat, held, same));
+    const end = fresh.nodes.at(-1)?.[0] ?? prev;
     const last = held.at(-1);
     const at = last === undefined ? null : { message: last.message, turn: last.turn };
-    return { ...(nodes.length === 0 ? this.initial(row?.revision ?? null) : this.foldPath(nodes)), messages, at, known: row !== null };
+    // Every node stored: the state there, as any stored node's. Else the chain from the start, needed only when nothing is held for it.
+    const folded = end === null ? this.initial(row?.revision ?? null) : fresh.nodes.length === 0 ? this.foldNode(end).folded : this.foldPath(end, () => chainOf(held, null, 0, this.goesOn(chat, held, 0)).nodes);
+    return { ...folded, messages, at, known: row !== null };
   }
 
   /** State at the end of the chat's path: rebased turns' changes applied again where they now stand. */
@@ -1266,16 +1321,20 @@ export class UserStore {
   }
 
   /**
-   * Folds a path given by its node rows, oldest first, as `foldNode` folds a stored one: to the deepest of them the store holds, then
-   * the rest in memory, each turn's changes applied again where it stands rebased, and jobs' changes placed along it. It writes
-   * nothing, and holds the state under the path's last key, so a comparison that stores these nodes finds it held.
+   * Folds a path ending at the node `end`, given by its node rows, oldest first, as `foldNode` folds a stored one: to the deepest of
+   * them the store holds, then the rest in memory, each turn's changes applied again where it stands rebased, and jobs' changes placed
+   * along it. The rows are asked for only when no state is held at `end`. It writes nothing, and holds the state under `end`, so a
+   * comparison that stores these nodes finds it held; and the snapshots a fold of those nodes would store, which wait for the write
+   * that stores the nodes (`Store.flush`), as a comparison folding them itself stores them.
    */
-  private foldPath(nodes: readonly (readonly [key: string, prev: string | null, turn: string, depth: number])[]): Folded {
-    const last = nodes.at(-1);
-    if (last === undefined) throw new StoreInputError("a path to fold has at least one turn");
+  private foldPath(end: string, chain: () => readonly (readonly [key: string, prev: string | null, turn: string, depth: number])[]): Folded {
     const mark = this.store.markOf(this.id);
-    const hit = this.store.cached(this.cacheKey(last[0]), mark);
+    const hit = this.store.cached(this.cacheKey(end), mark);
     if (hit) return hit.folded;
+    const nodes = chain();
+    // The chain from the start names the same turns as the one reused from the last comparison, so it ends at the same key.
+    const last = nodes.at(-1)?.[0];
+    if (last !== end) throw new Error(`the chain of a question's path ends at ${last ?? "no node"}, not at ${end}`);
     const stored = new Set(
       this.db
         .query<{ key: string }, [string, string]>("SELECT n.key FROM json_each(?2) j CROSS JOIN path_node n ON n.user = ?1 AND n.key = j.value")
@@ -1283,10 +1342,10 @@ export class UserStore {
         .map((r) => r.key),
     );
     const deepest = nodes.findLastIndex(([key]) => stored.has(key));
-    if (deepest === nodes.length - 1) return this.foldNode(last[0]).folded;
+    if (deepest === nodes.length - 1) return this.foldNode(end).folded;
     const turns = new Map(
       this.db
-        .query<{ id: string; node: string; created: number }, [string, string]>("SELECT t.id, t.node, t.created FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
+        .query<{ id: string; node: string; status: string; created: number }, [string, string]>("SELECT t.id, t.node, t.status, t.created FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
         .all(this.id, JSON.stringify(nodes.map(([, , turn]) => turn)))
         .map((t) => [t.id, t]),
     );
@@ -1295,9 +1354,17 @@ export class UserStore {
     const byTurn = this.changesOf(rest.map(([, , turn]) => turn));
     const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 })));
     const steps = rest.map(([key, , turn, depth]): FoldStep => ({ node: key, turn, n: depth + 1, own: turns.get(turn)?.node === key, changes: byTurn.get(turn) ?? [], jobs: placed.get(key) ?? [] }));
-    const result = foldSteps(this.store.env, { state: structuredClone(base.folded.state), upto: base.upto }, steps);
-    const folded: Folded = { node: last[0], state: result.state, notApplied: [...base.folded.notApplied, ...result.notApplied], rebased: [...base.folded.rebased, ...result.rebased] };
-    this.store.keep(this.cacheKey(last[0]), folded, result.upto, mark);
+    const every = this.store.snapshotEvery;
+    const snaps: [string, number, string][] = [];
+    const result = foldSteps(this.store.env, { state: structuredClone(base.folded.state), upto: base.upto }, steps, (step, state, upto, notApplied, rebased) => {
+      // Every `snapshotEvery` turns along the path, once its turn is no longer open, as `foldNode` keeps them.
+      if (step.n % every !== 0 || turns.get(step.turn)?.status === "open") return;
+      const doc: SnapshotDoc = { state, notApplied: [...base.folded.notApplied, ...notApplied], rebased: [...base.folded.rebased, ...rebased] };
+      snaps.push([step.node, upto, JSON.stringify(doc)]);
+    });
+    this.store.hold(this.id, mark, snaps);
+    const folded: Folded = { node: end, state: result.state, notApplied: [...base.folded.notApplied, ...result.notApplied], rebased: [...base.folded.rebased, ...result.rebased] };
+    this.store.keep(this.cacheKey(end), folded, result.upto, mark);
     return folded;
   }
 

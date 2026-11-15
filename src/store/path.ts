@@ -65,11 +65,16 @@ export function turnByHash(candidates: readonly TurnRow[], hash: string): TurnRo
 
 /**
  * A path as it was seen when it was asked where a coming turn starts (plan §9.6 l.1121-1122), up to the point, which is where it
- * ends: each message with the turn its showing text is among those `tied` to it (`turnByHash`; the player's own lines none, as in a
- * comparison). A point that does not agree with where the path ends is refused. Nothing but the path and the turns tied to its
- * messages enters into it: where the store last compared the chat does not.
+ * ends: each message with the turn its showing text is (`turnOf`, asked of the replies only; the player's own lines have none, as in
+ * a comparison). A path that holds a message twice cannot be read, and is refused (plan §6.1), as a point that does not agree with
+ * where the path ends is.
  */
-export function turnsShown(path: readonly SeenMessage[], point: TurnPoint, tied: ReadonlyMap<string, readonly TurnRow[]>): { message: SeenMessage; turn: TurnRow | null }[] {
+export function turnsShown(path: readonly SeenMessage[], point: TurnPoint, turnOf: (reply: SeenMessage) => string | null): { message: SeenMessage; turn: string | null }[] {
+  const ids = new Set<string>();
+  for (const m of path) {
+    if (ids.has(m.id)) throw new StoreInputError(`the message ${m.id} is on the path twice`);
+    ids.add(m.id);
+  }
   const newest = path.at(-1)?.id ?? null;
   let upTo = path.length;
   if (point.replaces !== undefined) {
@@ -78,7 +83,7 @@ export function turnsShown(path: readonly SeenMessage[], point: TurnPoint, tied:
   } else if (newest !== point.follows) {
     throw new StoreInputError(`a turn that follows ${point.follows ?? "no message"} does not start where its path ends (${newest ?? "no message"})`);
   }
-  return path.slice(0, upTo).map((message) => ({ message, turn: message.user ? null : turnByHash(tied.get(message.id) ?? [], message.hash) }));
+  return path.slice(0, upTo).map((message) => ({ message, turn: message.user ? null : turnOf(message) }));
 }
 
 /** A turn showing on a path, and the message it shows at. */
