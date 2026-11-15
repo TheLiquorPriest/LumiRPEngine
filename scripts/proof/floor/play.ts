@@ -218,7 +218,7 @@ export async function playFloor(play: Play): Promise<void> {
  * gate judges every row of the table over it; G0 (`scripts/proof/g0/`), the floor in miniature, judges the
  * first four rows over the same play. Gives the run and the chat it was played in.
  */
-export async function playPairs(play: Play, acts: FloorActs, reader: FloorReader, option: { plain: string; rpe: string } | null, build: BuildReader | null): Promise<{ run: FloorRun; chat: string }> {
+export async function playPairs(play: Pick<Play, "run" | "keep">, acts: FloorActs, reader: FloorReader, option: { plain: string; rpe: string } | null, build: BuildReader | null): Promise<{ run: FloorRun; chat: string }> {
   const fixture = await reader.fixture();
   const chat = await acts.chat(fixture.card.id);
   const plainConnection = option?.plain ?? acts.connections.plain;
