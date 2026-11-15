@@ -4,10 +4,10 @@
 // Every kind of record has its own words here; a kind this build does not know is drawn as it came.
 
 import type { ComponentChildren } from "preact";
-import type { PromptNotice, ReleaseForm, ReplyError, RunStatus, ToolResult, TraceRecord } from "rp-harness/contract";
+import type { ReleaseForm, ReplyError, RunStatus } from "rp-harness/contract";
 import { Icon, type IconName } from "./icons";
 import { markdown } from "./markdown";
-import type { TurnRunKind } from "../shared/api";
+import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
 import { Badge, Fold, Pre, type Tone } from "./atoms";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
