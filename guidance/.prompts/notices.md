@@ -1,8 +1,8 @@
 ---
-description: The wording of every notice an agent can be shown. One notice per line, a name, a colon, then its text. Change the words freely. Delete a line and that notice is no longer shown. A notice states a fact; it asks for nothing.
+description: The wording of every notice an agent or the player can be shown - those an agent is given in its briefing, and those the Turn page and the live view show of a turn. One notice per line, a name, a colon, then its text. Change the words freely. Delete a line and that notice is no longer shown. A notice states a fact; it asks for nothing.
 format: lines
 ---
-file_changed: You changed {{path}} since this session opened. The copy in the opening block no longer stands. Its whole current text follows.
+file_changed: {{path}} was changed since this session opened. The copy in the opening block no longer stands. Its whole current text follows.
 file_off: {{path}} has been switched off since this session opened. The copy in the opening block no longer stands.
 skills_changed: The list of skills in the opening block no longer stands.{{#listed}} The list as it stands now follows.{{/listed}}
 migrated_chat: This chat was carried over from the earlier build. Its state, cast and story record are as that build left them. {{carried}}
@@ -23,3 +23,4 @@ settle_asked: The player asked, from the Turn page, for this turn to be settled 
 previous_run_stopped: The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.
 saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}
 cut_short: The reply in message {{message}} was stopped before it was finished. The chat kept only the part written by then.
+progress_missing: This chat's progress.md has no still line, so nothing keeps a long turn alive: the chat application ends a generation that shows nothing after ten minutes. The turn's own time limit was held at {{time}} milliseconds.

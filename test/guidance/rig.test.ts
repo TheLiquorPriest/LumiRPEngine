@@ -87,3 +87,13 @@ test("`write_reply` hands the prose to the writer the Author's definition names"
   expect(textsOf(narrator)).toContain("Wren looks up from the lamp.");
   expect(narrator?.messages.at(-1)).toMatchObject({ role: "user" });
 });
+
+test("the reply contract is in the Author's opening block once: the briefing holds no copy of it, and still names the turn's folder", async () => {
+  const b = (bed = await openTurnBed({ answers: [replying("Wren looks up.")] }));
+  await play(b, "I wave.");
+  const first = textsOf(b.model.requests[0]);
+  expect(first.split("# The reply contract").length - 1).toBe(1);
+  expect(first).not.toContain("How what you write now is marked");
+  expect(first).toContain("# Briefing for this turn");
+  expect(first).toContain("The same material is on disk for agents you delegate to:");
+});

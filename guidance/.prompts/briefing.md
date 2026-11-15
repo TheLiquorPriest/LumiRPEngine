@@ -83,28 +83,10 @@ The reply already begins with these words. The chat application puts them in fro
 
 {{story_brief}}
 {{/story_brief}}
-{{#facts}}
-
-## Counts
-
-{{#facts.lines}}
-- {{.}}
-{{/facts.lines}}
-{{/facts}}
 {{#turn_files}}
 
 The same material is on disk for agents you delegate to: {{turn_files}}
 {{/turn_files}}
-{{#reply_contract}}
-
-## How what you write now is marked
-
-{{reply_contract}}
-{{#turn_files}}
-
-This turn's folder: `{{turn_files}}`
-{{/turn_files}}
 {{#intent_path}}
 This turn's intent file: `{{intent_path}}`
 {{/intent_path}}
-{{/reply_contract}}
