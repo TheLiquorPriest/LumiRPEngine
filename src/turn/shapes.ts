@@ -4,11 +4,11 @@
 // says the same. Written once here, read by the routes (`routes.ts`) and by every page through the
 // generated types.
 
-import type { FindStopped } from "rp-harness/contract";
+import type { FindStopped, KeptMessage } from "rp-harness/contract";
 import { type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, replyError, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { PanelRequest } from "./player";
-import type { RunKind, RunState, StoppedBy } from "./runs";
+import type { NotGiven, RunKind, RunState, StoppedBy } from "./runs";
 
 const T = shape.text();
 const N = shape.number();
@@ -84,6 +84,16 @@ export const chatsReply = shape.named(
 const turnRow = shape.named("TurnRow", "A turn as a chat's list shows it.", shape.object(rowFields));
 export const turnsReply = shape.named("TurnsReply", "A chat's turns, newest first.", shape.object({ turns: shape.list(turnRow), more: field(shape.yesNo(), "Older turns remain.") }));
 
+const notGiven = shape.named(
+  "NotGiven",
+  "Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, pictures in a system or assistant message (which carries text only), or parts that are neither text nor a picture by its data, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why.",
+  shape.union(
+    shape.object({ what: shape.oneOf("pictures", "textOnly", "parts"), messages: field(shape.list(N), "The messages of the prompt that held them, by place from 0."), count: N }),
+    shape.object({ what: shape.oneOf("world-state", "on-stage"), error: field(T, "Why it could not be made.") }),
+  ),
+);
+type NotGivenMirrored = Holds<Exactly<Infer<typeof notGiven>, NotGiven>>;
+
 const runShown = shape.named(
   "RunShown",
   "One run of a turn: its first, or a continue of it, which runs the turn again under a run id of its own; or a Settle now run on it.",
@@ -99,6 +109,7 @@ const runShown = shape.named(
     error: field(nullable(replyError), "Why the reply failed, when it did."),
     stoppedBy: field(nullable(stoppedBy), "What stopped it where it stood; null for neither a limit nor the hold."),
     lastText: field(shape.yesNo(), "What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line."),
+    notGiven: field(shape.list(notGiven), "What its lead was not given of its prompt and its briefing, each told in its briefing; none when it was given all."),
     trace: field(shape.list(traceRecord), "Its own trace records, numbered from 1 within the run, as far as the read reaches (the turn's `trace`)."),
     requests: field(
       shape.list(shape.object({ agent: T, definition: T, call: N, file: T })),
@@ -147,6 +158,23 @@ export const folderReply = shape.named(
   shape.object({ files: shape.list(folderEntry), stopped: opt(findStopped, "How the file host stopped short of the whole folder; absent when it listed it all.") }),
 );
 export const fileReply = shape.named("FileReply", "One file of a turn's folder, by its path below the folder, as text.", shape.object({ name: T, text: T }));
+
+const keptMessage = shape.named(
+  "KeptMessage",
+  "One message of a model call's request as it was sent: its role, its text, and the block the harness placed it as (`opening`, `frame`, `prompt`, `session:carry`, `briefing`, a given name, `brief`); none for the run's own conversation.",
+  shape.object({ role: T, text: T, block: opt(T, "The block it was placed as; absent for the run's own conversation.") }),
+);
+type KeptMessageMirrored = Holds<Exactly<Infer<typeof keptMessage>, KeptMessage>>;
+export const requestReply = shape.named(
+  "RequestReply",
+  "One model call's request, by its file below the turn's folder, rebuilt from the pointers the harness kept into the turn's files: every message as it was sent, in order, and each tool declared with the file its words came from. Where what is rebuilt is not what was sent, it says so and shows nothing.",
+  shape.object({
+    name: T,
+    same: field(shape.yesNo(), "What was rebuilt is what was sent, by the hash the file keeps; false where it is not, and nothing is shown."),
+    messages: field(shape.list(keptMessage), "Every message as it was sent, in order; none where `same` is false."),
+    tools: field(shape.list(shape.object({ name: T, file: opt(T, "The file its description came from; absent for a host's own tool.") })), "Each tool declared, in order; none where `same` is false."),
+  }),
+);
 
 export const settleReply = shape.named("SettleReply", "The newest turn, and the Settle now run begun on it.", shape.object({ turn: shape.turnId(), run: T }));
 

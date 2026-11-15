@@ -8,6 +8,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Log, Scope, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
 import type { LiveHub } from "../app";
+import { isRecord } from "../shared/json";
 import type { TreeFiles } from "../tree";
 import type { RunTimes } from "./spans";
 
@@ -111,7 +112,10 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
         for (const line of text.split("\n")) {
           if (line.trim() === "") continue;
           try {
-            out.push(JSON.parse(line) as TraceRecord);
+            // The harness writes its own transcript lines (`{ at, type, … }`: a message, a call, a result) in the same file: only
+            // the trace's records are the trace.
+            const record: unknown = JSON.parse(line);
+            if (isRecord(record) && typeof record.seq === "number" && isRecord(record.event)) out.push(record as unknown as TraceRecord);
           } catch {
             unreadable++;
           }

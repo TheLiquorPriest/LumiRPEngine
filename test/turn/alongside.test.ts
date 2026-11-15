@@ -42,9 +42,9 @@ async function folderText(b: TurnBed, turn: TurnRow, name: string): Promise<stri
   return read.text;
 }
 
-/** The files of a turn's folder that only RPE writes: the harness writes its own views of the prompt there too. */
+/** The files of a turn's folder that only RPE writes: the harness writes its own views of the prompt there too, and `briefing.md`. */
 function rpeFolderFile(path: string): boolean {
-  return [TURN_FILES.lore, TURN_FILES.worldState, TURN_FILES.briefing, TURN_FILES.turn].some((name) => path.endsWith(`/${name}`)) || path.includes(`/${TURN_FILES.attempts}`);
+  return [TURN_FILES.lore, TURN_FILES.worldState, TURN_FILES.turn].some((name) => path.endsWith(`/${name}`)) || path.includes(`/${TURN_FILES.attempts}`);
 }
 
 /** RPE's writes of the turn's folder, each held open until `release`: the first one asked for, with how many requests the model had been sent by then. */
@@ -143,8 +143,8 @@ describe("the Author starts at once; the turn's folder follows it", () => {
     expect(run.status).toBe("released");
     expect(run.folder?.error).toContain("the disk is full");
     expect(b.logged.some((l) => l.level === "error" && l.message === "The turn's folder could not be written in full." && l.fields?.turn === turn.id)).toBe(true);
-    // The rest of the folder is written all the same, and its turn.json names what was.
-    expect(JSON.parse(await folderText(b, turn, TURN_FILES.turn)).files.some((f: string) => f.endsWith(TURN_FILES.briefing))).toBe(true);
+    // The rest of the folder is written all the same, and its turn.json names what was, which is not the file that failed.
+    expect(JSON.parse(await folderText(b, turn, TURN_FILES.turn)).files.some((f: string) => f.endsWith(TURN_FILES.worldState))).toBe(false);
   });
 
   test("nothing read for the folder before the first call", async () => {

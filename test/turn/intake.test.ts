@@ -39,9 +39,9 @@ async function playTurn(b: TurnBed, said: string) {
   return await settledTurn(b, out.generationId!);
 }
 
-/** The files of a turn's folder only RPE writes: the harness writes its own views of the prompt there too. */
+/** The files of a turn's folder only RPE writes: the harness writes its own views of the prompt there too, and `briefing.md`. */
 function rpeFolderFile(path: string): boolean {
-  return [TURN_FILES.lore, TURN_FILES.worldState, TURN_FILES.briefing, TURN_FILES.turn].some((name) => path.endsWith(`/${name}`)) || path.includes(`/${TURN_FILES.attempts}`);
+  return [TURN_FILES.lore, TURN_FILES.worldState, TURN_FILES.turn].some((name) => path.endsWith(`/${name}`)) || path.includes(`/${TURN_FILES.attempts}`);
 }
 
 /** Intake's steps and its waits, in the order they happened: each from where the one before it ended. */

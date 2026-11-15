@@ -19,7 +19,7 @@ import { JoinedTurnError, type NodeView, type ValuesShown } from "../store";
 import { TURN_FILES } from "./folder";
 import type { Turns } from "./lane";
 import type { RunRecord } from "./runs";
-import { chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, panelRequestBody, panelRequestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
+import { chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, panelRequestBody, panelRequestReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 
 /** Fixed: turns a chat's list gives when the page names no limit, and the most it gives. */
 export const TURN_LIST = { limit: 50, most: 500 } as const;
@@ -155,6 +155,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         error: run.error,
         stoppedBy: run.stoppedBy,
         lastText: run.lastText,
+        notGiven: run.notGiven,
         trace: trace.filter(within),
         requests,
       };
@@ -328,6 +329,22 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         const read = folder === null ? null : await turns.files.read(scope, `${folder}${name}`);
         if (folder === null || read?.status !== "read" || !read.path.startsWith(folder)) throw new RouteError(404, `Turn ${params.turn}'s folder has no file ${name}.`);
         return { name, text: read.text };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/chats/:chat/turns/:turn/requests/*",
+      access: "page",
+      group: "turns",
+      does: "One model call's request, by its file below the turn's folder (a run's `requests`), rebuilt exactly as it was sent; where it cannot be, it says so and shows nothing.",
+      reply: requestReply,
+      joined: true,
+      handle: async ({ user, params }) => {
+        const { scope, folder } = await folderOf(turnOf(user, params.chat, params.turn));
+        const name = fileName(params["*"]);
+        const rebuilt = folder === null ? undefined : await turns.harness.rebuildRequest(scope, `${folder}${name}`);
+        if (rebuilt === undefined) throw new RouteError(404, `Turn ${params.turn}'s folder has no request ${name}.`);
+        return rebuilt.same ? { name, same: true, messages: rebuilt.messages, tools: rebuilt.tools } : { name, same: false, messages: [], tools: [] };
       },
     }),
     route({

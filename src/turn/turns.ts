@@ -21,7 +21,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
-import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
+import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
@@ -34,6 +34,7 @@ import { calendarOf, formatClock } from "../engine/calendar";
 import { mapLines, mapView } from "../iface";
 import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
+import { isRecord } from "../shared/json";
 import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
 import { type SceneSession, sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
@@ -46,7 +47,7 @@ import type { PlayerSide } from "./player";
 import type { TurnPrompts } from "./prompt";
 import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
-import type { IntakeStep, Run, RunRecord, Runs, Stretch } from "./runs";
+import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import { type TurnSettings, turnSettings } from "./settings";
 import { type FoundItem, foundItems, type KeptItem, type SinceKept } from "./since";
@@ -71,7 +72,7 @@ export const PARTS = {
 } as const;
 
 /** The names the briefing's template places the host's blocks by. */
-export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state", storySoFar: "story-so-far", storyBrief: "story-brief", onStage: "on-stage" } as const;
+export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state", storySoFar: "story-so-far", storyBrief: "story-brief", onStage: "on-stage", notGiven: "not-given" } as const;
 
 /** The briefing's header field that names the cast's views of the characters on stage the Author is given (`castPresentViews`). */
 export const ON_STAGE_VIEWS = "on_stage_views";
@@ -183,6 +184,25 @@ function lines(part: TemplatePart | LinesPart | undefined): LinesPart | undefine
   return part?.format === "lines" ? part : undefined;
 }
 
+/** The notices part's line that tells each thing a lead was not given (`NotGiven`). */
+const NOT_GIVEN_LINES: Readonly<Record<NotGiven["what"], string>> = {
+  pictures: "pictures_not_taken",
+  textOnly: "pictures_text_only",
+  parts: "parts_not_carried",
+  "world-state": "world_state_failed",
+  "on-stage": "on_stage_failed",
+};
+
+/** What a lead was not given, one line of the notices part each: the messages that held it and how many, or why a block could not be made. */
+function notGivenText(notGiven: readonly NotGiven[], notices: LinesPart | undefined): string {
+  return notGiven
+    .flatMap((n) => {
+      const line = notices?.line(NOT_GIVEN_LINES[n.what], "error" in n ? { error: n.error } : { count: n.count, messages: n.messages.join(", ") });
+      return line === undefined || line.trim() === "" ? [] : [line];
+    })
+    .join("\n");
+}
+
 function words(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -258,6 +278,10 @@ interface BriefingFor {
   message: string | null;
   writing: string | null;
   keep: string | null;
+  /** The lead's model's limits, read when first asked (`TurnLane.#leadLimits`). */
+  limits: () => Promise<ModelLimits | null>;
+  /** What of the prompt the lead's model is not given (`promptOf`); none for a run given no prompt. */
+  notGiven: NotGiven[];
 }
 
 /** What a Settle now gives back: the turn its run is on and the run's id, or the words it was refused in. */
@@ -424,8 +448,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         this.#d.log.error("The chat's notes could not be put as they stand at this turn's start.", { turn: begun.id, error: words(error) }),
       );
 
-      const { messages, left } = promptOf(tagged.prompt);
-      if (left > 0) this.#d.log.warn("Parts of the prompt RPH cannot carry were left out.", { turn: begun.id, parts: left });
+      // The prompt as the lead's model takes it (plan §4.2 "A prompt with pictures"): a picture of the player's goes to it only where its
+      // model is known to take pictures. Its limits are read once, and only where something needs them.
+      let leadLimits: Promise<ModelLimits | null> | undefined;
+      const limits = (): Promise<ModelLimits | null> => (leadLimits ??= this.#leadLimits(guidance, settings.lead, user, begun.id));
+      const pictured = tagged.prompt.some((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((part) => isRecord(part) && part.type === "image_url"));
+      const { messages, left } = promptOf(tagged.prompt, pictured && (await limits())?.pictures?.takes === true);
       const prefill = prefillOf(tagged, messages);
       // What Lumiverse puts in front of the reply when it saves it: for a continue, the text the swipe it goes on held, else the prefill.
       const goneOn = goesOn === null ? undefined : (await reads.messagesById(chat, [goesOn]))[0];
@@ -462,6 +490,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         error: null,
         stoppedBy: null,
         lastText: false,
+        notGiven: [],
         base: front,
         saved: null,
         settled: null,
@@ -493,8 +522,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // The briefing's blocks, and what has happened since the last turn.
         const found = { steps, notices: lines(notices), guidance, last, stopped, again: continued !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
-        const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null };
-        const [{ blocks: briefing, loreMap, activated, storyTime }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, begun, found)]);
+        const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left };
+        const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, begun, found)]);
+        run.notGiven = notGiven;
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
@@ -749,6 +779,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         error: null,
         stoppedBy: null,
         lastText: false,
+        notGiven: [],
         base: "",
         saved: null,
         settled: null,
@@ -774,8 +805,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
-        const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id) };
-        const [{ blocks: briefing }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
+        const limits = (): Promise<ModelLimits | null> => this.#leadLimits(guidance, settings.lead, user, turn.id);
+        const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [] };
+        const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
+        run.notGiven = notGiven;
         const asked = lines(notices)?.line("settle_asked");
         request = {
           scope,
@@ -1059,12 +1092,21 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   /**
    * The briefing's blocks (plan §10.2 block 4): the turn's facts, the lore map, the world state, the cast's views of those on stage,
-   * the story so far and the story brief, each laid out by its part and measured by the chat's settings. For the turn's folder and its
-   * row, the ids of the entries the lore map names, the entries that activated as the lore map read them, and the story time the
-   * turn's facts give, as the world's clock reads (null where the chat keeps none).
+   * the story so far and the story brief, each laid out by its part and measured by the chat's settings; and what the lead is not given,
+   * of its prompt (`at.notGiven`) and of these blocks, told by the notices part. For the turn's folder and its row, the ids of the
+   * entries the lore map names, the entries that activated as the lore map read them, and the story time the turn's facts give, as the
+   * world's clock reads (null where the chat keeps none); and for the run, what the lead was not given.
    */
-  async #briefing(reads: LumiverseReads, guidance: Guidance, scope: Scope & { turn: string }, at: BriefingFor, steps: readonly LvStep[], settings: TurnSettings): Promise<{ blocks: ContextBlock[]; loreMap: string[]; activated: ActivatedRead[]; storyTime: number | null }> {
+  async #briefing(
+    reads: LumiverseReads,
+    guidance: Guidance,
+    scope: Scope & { turn: string },
+    at: BriefingFor,
+    steps: readonly LvStep[],
+    settings: TurnSettings,
+  ): Promise<{ blocks: ContextBlock[]; loreMap: string[]; activated: ActivatedRead[]; storyTime: number | null; notGiven: NotGiven[] }> {
     const blocks: ContextBlock[] = [];
+    const failed: NotGiven[] = [];
     const [factsPart, mapPart] = await Promise.all([guidance.part(PARTS.turnFacts), guidance.part(PARTS.loreMap)]);
     const time = this.#storyTime(scope.user, scope.chat, scope.turn);
     if (factsPart?.format === "template") {
@@ -1087,7 +1129,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (laid.trim() !== "") blocks.push({ name: BLOCKS.loreMap, text: laid.trimEnd() });
     }
     // The world state (plan §6.9), compiled by the store and worded by the layout file in force for the chat, read whole, with each
-    // place's map worded by the map's lines in force. A world state that cannot be compiled is left out of this turn's briefing, and
+    // place's map worded by the map's lines in force. A world state that cannot be compiled is told in this briefing in its place, and
     // the log says why.
     const statePart = await guidance.part(PARTS.worldState);
     const layout = statePart === undefined ? null : await this.#d.files.read(scope, statePart.source.path);
@@ -1098,11 +1140,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });
+        failed.push({ what: "world-state", error: words(error) });
       }
     }
     // The cast's views of the characters on stage (plan §7.1, §15.2): which views, of which castings, is what the briefing's header names
     // (`on_stage_views`), each character's laid out by its part, one after another in the order named. Nobody is on stage where the story
-    // record holds no scene open at the turn. Views that cannot be read are left out of this turn's briefing, and the log says why.
+    // record holds no scene open at the turn. Views that cannot be read are told in this briefing in their place, and the log says why.
     const said = (await guidance.part(PARTS.briefing))?.header[ON_STAGE_VIEWS];
     const named = Array.isArray(said) ? said.flatMap((name) => (typeof name === "string" && name.trim() !== "" ? [name.trim()] : [])) : [];
     const stage = named.length === 0 ? null : stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
@@ -1114,6 +1157,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         if (text !== "") blocks.push({ name: BLOCKS.onStage, text });
       } catch (error) {
         this.#d.log.error("The cast's views of those on stage could not be read for this turn's briefing.", { turn: scope.turn, error: words(error) });
+        failed.push({ what: "on-stage", error: words(error) });
       }
     }
     // The story so far, for the history the window left out of the prompt, and the story brief (plan §8.1): drawn from the story
@@ -1125,31 +1169,42 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const soFar =
         keptFrom === null
           ? null
-          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, settings.lead, scope.user, scope.turn), settings: settings.storySoFar, tokens: turnTokens, layout: soFarPart });
+          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: this.#leadWindow(await at.limits(), settings.lead, scope.turn), settings: settings.storySoFar, tokens: turnTokens, layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
     }
     if (briefPart?.format === "template") {
       const brief = storyBrief({ ...point, layout: briefPart });
       if (brief.text.trim() !== "") blocks.push({ name: BLOCKS.storyBrief, text: brief.text });
     }
-    return { blocks, loreMap: [...new Set([...map.inPrompt, ...map.world, ...(map.bound ?? [])].map((line) => line.id))], activated: map.activated, storyTime: time?.clock ?? null };
+    // What the lead is not given (plan §4.2 "A prompt with pictures", Y6): of its prompt, and of this briefing, each told by its line of
+    // the notices part, and kept on the run.
+    const notGiven = [...at.notGiven, ...failed];
+    const told = notGivenText(notGiven, lines(await guidance.part(PARTS.notices)));
+    if (told !== "") blocks.push({ name: BLOCKS.notGiven, text: told });
+    return { blocks, loreMap: [...new Set([...map.inPrompt, ...map.world, ...(map.bound ?? [])].map((line) => line.id))], activated: map.activated, storyTime: time?.clock ?? null, notGiven };
   }
 
   /**
-   * The lead's window in tokens, as the model layer reports it for the turn's user's connection its definition names (`default`, or none,
-   * is his default connection). Where the model layer cannot tell it, 0, so the story so far is given its floor; the log says so.
+   * The lead's model's limits, as the model layer gives them for the turn's user's connection its definition names (`default`, or none,
+   * is his default connection): its window, and whether it takes pictures. Null where the model layer cannot tell them; the log says so.
    */
-  async #authorWindow(guidance: Guidance, lead: string, user: string, turn: string): Promise<number> {
+  async #leadLimits(guidance: Guidance, lead: string, user: string, turn: string): Promise<ModelLimits | null> {
     try {
       const named = (await guidance.definition(lead))?.model;
       const models = this.#d.harness().models;
       const connection = named === undefined || named === "default" ? null : ((await models.list(user)).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
-      const window = (await models.limits(user, connection)).contextWindow;
-      if (window !== null) return window.tokens;
-      this.#d.log.info("The lead's window is not known, so the story so far is given its floor.", { turn, lead });
+      return await models.limits(user, connection);
     } catch (error) {
-      this.#d.log.info("The lead's window could not be read, so the story so far is given its floor.", { turn, lead, error: words(error) });
+      this.#d.log.info("The lead's model's limits could not be read: its window is taken as unknown, and it is given no pictures.", { turn, lead, error: words(error) });
+      return null;
     }
+  }
+
+  /** The lead's window in tokens, from its model's limits; where nobody can tell it, 0, so the story so far is given its floor, and the log says so. */
+  #leadWindow(limits: ModelLimits | null, lead: string, turn: string): number {
+    const window = limits?.contextWindow ?? null;
+    if (window !== null) return window.tokens;
+    this.#d.log.info("The lead's window is not known, so the story so far is given its floor.", { turn, lead });
     return 0;
   }
 

@@ -8,7 +8,8 @@
 // is switched off, or that lays out nothing, is not written.
 //
 // The views of the prompt itself (the whole prompt, the history it holds, the preset's guidance) are the
-// harness's prompt map's: it writes them in this folder during the run, from the request.
+// harness's prompt map's: it writes them in this folder during the run, from the request. So is
+// `briefing.md`, what the lead was told at its run's start as it was sent, which a kept request points into.
 
 import type { Fields, Guidance, LinesPart, TemplatePart } from "rp-harness";
 import type { LiveApi, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
@@ -25,13 +26,12 @@ export const TURN_FILES = {
   persona: "persona.md",
   character: "character.md",
   worldState: "world-state.md",
-  briefing: "briefing.md",
   turn: "turn.json",
   attempts: "previous-attempts/",
 } as const;
 
-/** The prompt parts the files are laid out by; the briefing's file is laid out as the Author's briefing is. */
-export const FOLDER_PARTS = { lore: "turn-lore", card: "turn-card", attempt: "turn-attempt", briefing: "briefing" } as const;
+/** The prompt parts the files are laid out by. */
+export const FOLDER_PARTS = { lore: "turn-lore", card: "turn-card", attempt: "turn-attempt" } as const;
 
 /**
  * Lumiverse's own markers of the preset blocks that put the persona and the character card in the
@@ -70,27 +70,6 @@ export interface FolderAsk {
   lore: readonly ActivatedRead[];
   attempts: readonly Attempt[];
   received: number;
-}
-
-/**
- * The briefing's fields as RPH fills the Author's briefing with the host's part of it (`harness/turn.ts` `#briefing`): the host's
- * blocks by name, the turn, the prefill and what happened since. What RPH adds at the run (rules due, files changed, the reply
- * contract) is not the host's to know here.
- */
-function briefingFields(req: TurnRequest, turnFiles: string): Fields {
-  const host: Record<string, string> = {};
-  for (const block of req.briefing) {
-    host[block.name] = block.text;
-    host[block.name.replaceAll("-", "_")] = block.text;
-  }
-  return {
-    ...host,
-    turn: { kind: req.kind, ...(req.speaker !== undefined ? { speaker: req.speaker } : {}) },
-    ...(req.prefill !== undefined && req.prefill !== "" ? { prefill: req.prefill } : {}),
-    ...(req.since.length > 0 ? { since: { items: req.since.map((item) => item.text) } } : {}),
-    ...(req.briefing.length > 0 ? { blocks: req.briefing.map((block) => ({ name: block.name, text: block.text })) } : {}),
-    turn_files: turnFiles,
-  };
 }
 
 /** The preset's blocks by id, with Lumiverse's marker for each that has one. */
@@ -159,8 +138,8 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
   const folder = places.turn;
   if (folder === undefined) return [];
   const { guidance, tagged } = ask;
-  const [lorePart, cardPart, attemptPart, briefingPart] = await Promise.all(
-    [FOLDER_PARTS.lore, FOLDER_PARTS.card, FOLDER_PARTS.attempt, FOLDER_PARTS.briefing].map(async (name): Promise<TemplatePart | undefined> => {
+  const [lorePart, cardPart, attemptPart] = await Promise.all(
+    [FOLDER_PARTS.lore, FOLDER_PARTS.card, FOLDER_PARTS.attempt].map(async (name): Promise<TemplatePart | undefined> => {
       const part: TemplatePart | LinesPart | undefined = await guidance.part(name);
       return part?.format === "template" ? part : undefined;
     }),
@@ -191,7 +170,6 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
     cards.then((c) => write(TURN_FILES.persona, c.persona)),
     cards.then((c) => write(TURN_FILES.character, c.character)),
     write(TURN_FILES.worldState, ask.request.briefing.find((b) => b.name === "world-state")?.text),
-    write(TURN_FILES.briefing, briefingPart?.render(briefingFields(ask.request, folder)).text),
     ...ask.attempts.map((a, i) =>
       write(`${TURN_FILES.attempts}attempt-${i + 1}.md`, attemptPart?.render({ n: i + 1, turn: a.turn, ...(a.intent !== null ? { intent: a.intent } : {}), ...(a.reply !== null ? { reply: a.reply } : {}) }).text),
     ),

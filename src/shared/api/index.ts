@@ -107,6 +107,9 @@ export interface CallPermission {
   answer?: { go: true } | { go: false; reason?: string };
 }
 
+/** Why a tool call never ran: a limit spent before it started, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, or a permission or rule that could not be asked. */
+export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string };
+
 /** A casting in force: the player's pin, else the Author's; with the Author's line for the character, where it wrote one. */
 export interface CastingRow {
   as: CastRole;
@@ -280,7 +283,7 @@ export interface ConnectionShown {
   default: boolean;
   /** For a connection that signs in: whether the sign-in holds. */
   signedIn?: boolean;
-  key: { set: boolean } | null;
+  key: { set: boolean; waiting?: boolean } | null;
   limitsInForce: ModelLimits | null;
   /** Why its model's limits could not be read; null where they were read, each of them known or not. */
   limitsProblem?: string | null;
@@ -532,6 +535,14 @@ export interface JobWrite {
 /** What a route that takes a turn's id answers, with status 409, for a turn that was joined to another: the turn asked for and the turn it joined, which is the one to ask for. */
 export interface JoinedAnswer {
   joined: { turn: TurnId; joined: TurnId };
+}
+
+/** One message of a model call's request as it was sent: its role, its text, and the block the harness placed it as (`opening`, `frame`, `prompt`, `session:carry`, `briefing`, a given name, `brief`); none for the run's own conversation. */
+export interface KeptMessage {
+  role: string;
+  text: string;
+  /** The block it was placed as; absent for the run's own conversation. */
+  block?: string;
 }
 
 /** A new key of a kind, shown once; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did. */
@@ -833,6 +844,9 @@ export interface NotesReply {
   rewritten: NoteRow[];
 }
 
+/** Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, pictures in a system or assistant message (which carries text only), or parts that are neither text nor a picture by its data, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why. */
+export type NotGiven = { what: "pictures" | "textOnly" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
+
 /** A panel's request: what was pressed, and what it was pressed on, where it was pressed on something. */
 export interface PanelRequestAsk {
   what: string;
@@ -917,6 +931,17 @@ export interface ReplySoFar {
   progress: string[];
 }
 
+/** One model call's request, by its file below the turn's folder, rebuilt from the pointers the harness kept into the turn's files: every message as it was sent, in order, and each tool declared with the file its words came from. Where what is rebuilt is not what was sent, it says so and shows nothing. */
+export interface RequestReply {
+  name: string;
+  /** What was rebuilt is what was sent, by the hash the file keeps; false where it is not, and nothing is shown. */
+  same: boolean;
+  /** Every message as it was sent, in order; none where `same` is false. */
+  messages: KeptMessage[];
+  /** Each tool declared, in order; none where `same` is false. */
+  tools: { name: string; file?: string }[];
+}
+
 /** Where a restart onto RPE's app file on disk stands: nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand. */
 export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand";
 
@@ -966,6 +991,8 @@ export interface RunShown {
   stoppedBy: StoppedBy | null;
   /** What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line. */
   lastText: boolean;
+  /** What its lead was not given of its prompt and its briefing, each told in its briefing; none when it was given all. */
+  notGiven: NotGiven[];
   /** Its own trace records, numbered from 1 within the run, as far as the read reaches (the turn's `trace`). */
   trace: TraceRecord[];
   /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call, each named by its path below the folder. */
@@ -1353,7 +1380,7 @@ export interface TraceDelta {
 }
 
 /** What RPH did; each kind's fields are the facts of it. */
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened"; from?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened"; from?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 
 /** An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it. */
 export interface TraceRecord {
@@ -1746,6 +1773,15 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: TurnLoreReply;
+    paged: false;
+    joined: true;
+  };
+  /** One model call's request, by its file below the turn's folder (a run's `requests`), rebuilt exactly as it was sent; where it cannot be, it says so and shows nothing. */
+  "GET /api/v1/chats/:chat/turns/:turn/requests/*": {
+    params: { chat: string; turn: string; "*": string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: RequestReply;
     paged: false;
     joined: true;
   };

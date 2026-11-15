@@ -12,6 +12,8 @@ import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type Turn
 /** The harness's views of the prompt in a turn's folder, as RPH's shipped `prompt-map` part names them. */
 const PROMPT_VIEW = "assembled-preset-prompt.md";
 const HISTORY_VIEW = "visible-chat-history.md";
+/** What the lead was told at its run's start, as sent: the harness's file of the turn's folder. */
+const BRIEFING_FILE = "briefing.md";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -94,8 +96,8 @@ describe("the turn's folder", () => {
     expect(await text(b, scope, `${folder}${TURN_FILES.character}`)).toBe(`# The character: Wren Hale\n\n## Wren's card\n\n${CARD}\n`);
     expect(await text(b, scope, `${folder}${TURN_FILES.persona}`)).toBe(`# The player's persona\n\n## Who you are\n\n${PERSONA}\n`);
 
-    // The briefing as the Author's template lays out the host's part of it.
-    const briefing = await text(b, scope, `${folder}${TURN_FILES.briefing}`);
+    // The briefing as the Author was told it at its run's start, which the harness writes as it was sent.
+    const briefing = await text(b, scope, `${folder}${BRIEFING_FILE}`);
     expect(briefing).toContain("# Briefing for this turn");
     expect(briefing).toContain("- This turn: new, replying as Wren Hale.");
     // The world state as the store compiles it for the chat's world (the blank one, for a chat that names none), laid out by its own part: in the briefing, and on its own.
@@ -106,13 +108,13 @@ describe("the turn's folder", () => {
 
     const data = JSON.parse(await text(b, scope, `${folder}${TURN_FILES.turn}`)) as { turn: string; kind: string; parent: string | null; files: string[]; prompt: { leftOut: unknown } };
     expect(data).toMatchObject({ turn: turn.id, kind: "new", parent: turn.parent, prompt: { leftOut: [{ from: 0, to: 2 }] } });
-    expect(data.files).toEqual([TURN_FILES.persona, TURN_FILES.character, TURN_FILES.worldState, TURN_FILES.briefing].map((f) => `${folder}${f}`));
+    expect(data.files).toEqual([TURN_FILES.persona, TURN_FILES.character, TURN_FILES.worldState].map((f) => `${folder}${f}`));
 
     // Generated: an agent's write to any of them is refused, and changes nothing.
-    for (const file of [PROMPT_VIEW, TURN_FILES.briefing, TURN_FILES.turn]) {
+    for (const file of [PROMPT_VIEW, BRIEFING_FILE, TURN_FILES.turn]) {
       expect(await b.turns.files.write(scope, `${folder}${file}`, { op: "write", text: "overwritten\n" }, KIT_AGENT)).toMatchObject({ status: "refused", reason: "generated" });
     }
-    expect(await text(b, scope, `${folder}${TURN_FILES.briefing}`)).toBe(briefing);
+    expect(await text(b, scope, `${folder}${BRIEFING_FILE}`)).toBe(briefing);
   });
 
   test("a swipe's folder holds each earlier attempt at the reply, with its intent record", async () => {

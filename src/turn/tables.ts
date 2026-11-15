@@ -302,4 +302,12 @@ INSERT OR REPLACE INTO job (user, id, started, chat, state, value)
 DELETE FROM kv WHERE substr(key, 1, 9) = 'jobs/all/' AND EXISTS (SELECT 1 FROM job WHERE job.user = kv.user AND job.id = substr(kv.key, 10));
 `,
   },
+  {
+    version: 14,
+    name: "what each run's lead was not given of its prompt and its briefing",
+    // JSON, as `runs.ts` reads it: a list of `NotGiven`. A run kept before has none, and reads as one given all.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN not_given TEXT;
+`,
+  },
 ];
