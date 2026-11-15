@@ -120,6 +120,8 @@ export function compose(options: ComposeOptions = {}): Composition {
           connections: async () => (await made().harness.models.list(owner)).connections.map((c) => ({ id: c.id, name: c.name })),
         };
       },
+      // The web app's sign-in with a Lumiverse account asks Lumiverse through the door.
+      accounts: door.accounts,
     }),
     storeArea(),
     loreArea(() => ({ store: made().store, turns: made().prompts.lore })),
