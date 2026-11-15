@@ -13,7 +13,7 @@
 //   `POST /api/v1/tokenizers/count` (`src/routes/tokenizers.routes.ts:86-93`): `tokenizerSvc.countForModel`, the count Lumiverse's
 //   own speed figure takes of a response's visible text (`src/services/generate.service.ts:4340-4356`).
 
-import type { ConnectionsShown, SettingsReply } from "../../../src/shared/api";
+import type { ConnectionsShown, SettingsReply, SettingsWrite } from "../../../src/shared/api";
 import type { TreeFileEntry, TreeFileText, TurnFile } from "../../../src/ui/api";
 import { isRecord } from "../../../src/shared/json";
 import { HttpError, type Lumiverse } from "../../testbed/lib/lumiverse";
@@ -81,6 +81,14 @@ export class RpeReader {
 
   settings(chat: string): Promise<SettingsReply> {
     return this.get(`/api/v1/settings?chat=${encodeURIComponent(chat)}`) as Promise<SettingsReply>;
+  }
+
+  /** Writes one setting into one level's config file, as the Settings page does (`PUT /api/v1/settings`); answers every setting as it then stands. Settings are never guidance: a gate that writes one is not changing what the agents are told. */
+  async put(write: SettingsWrite): Promise<SettingsReply> {
+    const reply = await fetch(`${this.base}/api/v1/settings`, { method: "PUT", headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${this.token}` }, body: JSON.stringify(write) });
+    const text = await reply.text();
+    if (!reply.ok) throw new Error(`RPE PUT /api/v1/settings: ${reply.status} ${text.slice(0, 300)}`);
+    return JSON.parse(text) as SettingsReply;
   }
 
   /** RPE's own connections, as its route shows them (no key): the provider each is of, by name and id. */

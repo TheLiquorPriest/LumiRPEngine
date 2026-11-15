@@ -50,7 +50,7 @@ export function keptFault(value: unknown, form: CountedForm): string | null {
   if (value.form !== form) return `it counts the ${String(value.form)} form, not the ${form} form`;
   if (typeof value.run !== "string" || value.run === "") return "it names no run";
   const count = value.count;
-  if (!isRecord(count) || typeof count.played !== "number" || typeof count.kept !== "number" || !isRecord(count.by) || !Array.isArray(count.why)) return "its count is not the turns kept and played";
+  if (!isRecord(count) || typeof count.played !== "number" || typeof count.kept !== "number" || typeof count.unread !== "number" || !isRecord(count.by) || !Array.isArray(count.why)) return "its count is not the turns kept, missed and unread";
   if (count.verdict !== "pass" && count.verdict !== "fail" && count.verdict !== "not judged") return "its count gives no verdict";
   if (!Array.isArray(value.turns)) return "it lists no turns";
   if (form === "two-step" && value.calls !== null && !isRecord(value.calls)) return "its calls are not counted";
@@ -170,6 +170,9 @@ export function countWords(kept: FormKept): string {
   const misses = Object.entries(count.by)
     .filter(([outcome]) => outcome !== "kept")
     .map(([outcome, n]) => `${n} ${outcome}`);
+  const unread = count.unread > 0 ? `; ${count.unread} turn(s) could not be read` : "";
   const calls = kept.calls === null ? "" : `; exactly 2 calls in ${kept.calls.exact} of ${kept.calls.of} turns`;
-  return `${kept.form === "tags" ? "tag form" : "two-step form"}: kept in ${count.kept} of ${count.played} turns (the plan asks ${TAGS_PASS.hits} of ${TAGS_PASS.of})${misses.length > 0 ? `; missed: ${misses.join(", ")}` : ""}${calls}`;
+  // The plan asks 28 of 30 of the tags alone; the two-step form's count is reported, with no pass of the plan's.
+  const asks = kept.form === "tags" ? ` (the plan asks ${TAGS_PASS.hits} of ${TAGS_PASS.of})` : "";
+  return `${kept.form === "tags" ? "tag form" : "two-step form"}: kept in ${count.kept} of ${count.played} turns${asks}${misses.length > 0 ? `; missed: ${misses.join(", ")}` : ""}${unread}${calls}`;
 }

@@ -161,11 +161,14 @@ export function twoStepTurn(trace: readonly TraceRecord[], tags: ReplyTags): { o
   return { outcome: "kept", calls: counted };
 }
 
-/** A form's thirty (or fewer) turns counted: how many were kept, by each outcome, and the plan's verdict. */
+/** A form's thirty (or fewer) turns counted: how many were kept, by each outcome, how many could not be read, and the plan's verdict. */
 export interface FormCount {
+  /** The turns played, those whose trace could not be read included. */
   played: number;
   kept: number;
   by: Record<string, number>;
+  /** Turns played whose trace was not read: neither kept nor missed, so a verdict that they could change is not given. */
+  unread: number;
   verdict: "pass" | "fail" | "not judged";
   why: string[];
 }
@@ -174,22 +177,28 @@ export interface FormCount {
  * The count of a form over its turns: kept against 28 of 30. Judged only on all thirty turns, or earlier
  * when the miss count already makes 28 of 30 out of reach (a form stopped once 28 could no longer be
  * reached, as the first build stopped its tag variants); fewer turns than that are not judged, with how
- * many were played.
+ * many were played. A turn whose trace could not be read (`unread`) is not kept and not a miss: the count
+ * fails only when 28 are out of reach even were every unread turn kept, passes only on 28 kept, and is not
+ * judged between, so a failed read of RPE never tells the owner the floor model lost its tags.
  */
-export function formCount(outcomes: readonly string[]): FormCount {
+export function formCount(outcomes: readonly string[], unread = 0): FormCount {
   const by: Record<string, number> = {};
   for (const o of outcomes) by[o] = (by[o] ?? 0) + 1;
   const kept = by.kept ?? 0;
-  const played = outcomes.length;
-  const reachable = kept + (TAGS_PASS.of - played);
+  const played = outcomes.length + unread;
+  const reachable = kept + unread + (TAGS_PASS.of - played);
   const why: string[] = [];
   let verdict: FormCount["verdict"];
   if (reachable < TAGS_PASS.hits) verdict = "fail";
   else if (played < TAGS_PASS.of) {
     verdict = "not judged";
     why.push(`${played} of ${TAGS_PASS.of} turns were played, and ${TAGS_PASS.hits} of ${TAGS_PASS.of} can still be reached`);
-  } else verdict = kept >= TAGS_PASS.hits ? "pass" : "fail";
-  return { played, kept, by, verdict, why };
+  } else if (kept >= TAGS_PASS.hits) verdict = "pass";
+  else {
+    verdict = "not judged";
+    why.push(`${unread} turn(s) could not be read, and with them kept ${TAGS_PASS.hits} of ${TAGS_PASS.of} can still be reached`);
+  }
+  return { played, kept, by, unread, verdict, why };
 }
 
 /** Calls per turn against exactly `want`: how many turns made exactly that many, over the turns whose reply was released. */

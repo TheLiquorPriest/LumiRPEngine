@@ -40,6 +40,8 @@ export interface Replay {
   facts?: RunFacts;
   /** When the run starts, by the runner's clock (default: now): the run is named for it and says so in its record. */
   at?: Date;
+  /** The acts and reader the play is given, in place of the ones made from `run`'s turns (a gate that plays other lines than the floor's, with a reader of its own); `run` then only gives the facts. */
+  source?: (sent: Sent[]) => { acts: FloorActs; reader: FloorReader; played: () => FloorRun["turns"] };
 }
 
 /** Each line the play sent, in order: the connection and the line. */
@@ -169,7 +171,7 @@ export default gate({ ...original, rig: played, live: played });
 `,
     );
     const sent: Sent[] = [];
-    const replay_ = replayOf(replay, sent);
+    const replay_ = replay.source === undefined ? replayOf(replay, sent) : replay.source(sent);
     current = replay_;
     // The chat page shows the chat as far as it was played, read when the check reads it.
     const pages = {

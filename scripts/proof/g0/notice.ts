@@ -10,6 +10,7 @@
 import type { FloorRun, Row } from "../../testbed/floor-measure";
 import { countWords, type FormsReading, needsTwoStep, usable } from "./forms";
 import { TAGS_PASS } from "../lib/phase0";
+import type { Found, Rechecked } from "../lib/pi";
 import type { EffortFacts, G0Verdict } from "./verdict";
 
 /** One finding the owner is told of. */
@@ -127,4 +128,28 @@ export function g0Notices(input: { run: FloorRun; rows: readonly Row[]; verdict:
   const failed = g0FailedNotice(input.run, input.rows, input.verdict, input.effort, input.variant);
   if (failed !== null) out.push(failed);
   return out;
+}
+
+/** The choice the plan gives him about pi's loop (§18.1 row 0.2's fail column): fix around pi, as the plan builds, or keep LumiAH's loop for now. */
+export const FIX_AROUND_PI = "Fix around pi, as RPH does now and the plan builds: a stop that waits on no tool and lets no further request start, the rules due at a run's end as one follow-up after a batch that ended it, and the preset's sampling set in each provider's own request fields. pi stays pinned exactly, and an upgrade is a deliberate task gated by the suite (§13.7).";
+export const KEEP_LUMIAH_LOOP = "Keep LumiAH's loop for now: the packages that build the loop on pi wait, and today's loop goes on answering.";
+
+/** pi's loop fell short in three places (§18.1 row 0.2's fail column): each finding re-checked against the pinned pi and RPH as they stand, with what RPH does around it, and the choice that is his. */
+export function loopNotice(rechecked: readonly Rechecked[], versions: { core: string | null; ai: string | null }): Notice {
+  const seen = (found: Found): string => (found.at === null ? `NOT FOUND NOW: ${found.what}` : `${found.what} (${found.at}: ${found.text ?? ""})`);
+  const figures = rechecked.flatMap((r) => [
+    `${r.title}: ${r.holds ? "still reads now as Phase 0 found it" : "NO LONGER reads as Phase 0 found it: read what is not found below"}`,
+    `  the plan says: ${r.plan}`,
+    ...r.pi.map((f) => `  pi ${versions.core ?? "(version not read)"}${versions.ai === null ? "" : ` / pi-ai ${versions.ai}`}: ${seen(f)}`),
+    ...r.around.map((f) => `  RPH around it: ${seen(f)}`),
+  ]);
+  return findingNotice({
+    id: "loop",
+    title: "pi's loop falls short in three places, and the loop is built around it unless you rule otherwise",
+    at: "§18.1 row 0.2's fail column: told before wave 1, with the choice of fixing around pi or keeping LumiAH's loop",
+    found: [`Phase 0 found three places where pi's loop falls short of what the plan asks of it: ${rechecked.map((r) => r.title.toLowerCase()).join("; ")}. Each was asked again of the pinned pi and of RPH as they stand now.`],
+    figures,
+    options: [FIX_AROUND_PI, KEEP_LUMIAH_LOOP],
+    until: "what the plan builds stands: RPH's loop is built around pi.",
+  });
 }

@@ -158,10 +158,18 @@ export interface Ground {
 /** One turn as read back: what the page timed, Lumiverse told, Lumiverse counted, and RPE's side. */
 export type TurnRead = Pick<FloorTurn, "page" | "socket" | "visible" | "visibleWhy" | "rpe" | "error">;
 
+/** The floor's fixture as the play needs it: the preset, persona and card it plays with (by id) and the book it was made with. */
+export interface FloorFixture {
+  preset: { id: string };
+  persona: { id: string };
+  card: { id: string };
+  book: BookDesign;
+}
+
 /** What the play reads, and how one line is sent and read back. */
 export interface FloorReader {
   /** The fixture setup made: its preset, persona, card and book. */
-  fixture(): Promise<{ preset: { id: string }; persona: { id: string }; card: { id: string }; book: BookDesign }>;
+  fixture(): Promise<FloorFixture>;
   /** The chat's ground before the first pair, and whatever must listen from then on. */
   ground(chat: string, plainConnection: string, preset: string): Promise<Ground>;
   /** One line: sent by `send`; Lumiverse's end heard (at most `LIMITS.afterEnd` after the page's); its shown text counted for `model`; on RPE, its side once its run has ended (at most `LIMITS.runEnd`). */
