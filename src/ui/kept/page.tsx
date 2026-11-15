@@ -11,7 +11,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { AppContext as TodayContext } from "../../frontend/app";
 import { Build } from "../../frontend/build/build";
 import { Banner, IdsSurface, Toasts } from "../../frontend/components";
-import { type Readable, useSelect } from "../../frontend/store";
+import { type Readable, useSelect } from "../store";
 import type { ErrorMessage } from "../../shared/protocol";
 import { useApp } from "../app";
 import type { Timers } from "../roads";

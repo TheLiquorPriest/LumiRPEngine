@@ -20,7 +20,7 @@ import { humanize } from "../../../frontend/format";
 import { FieldRow } from "../../../frontend/gm/entity";
 import { gmOpen } from "../../../frontend/gm/gate";
 import { ActionRow, ActionRows, GmPage, useGmFocus, usePages } from "../../../frontend/gm/ui";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps, OrgTabDef, OrgTabProps } from "../../../frontend/registry";
 import { OWNER_ROLES, PAY_BASES, PAY_CHOICE_LABELS, PAY_CHOICES, UNPAID, type OwnerRole } from "../../../shared/finance";

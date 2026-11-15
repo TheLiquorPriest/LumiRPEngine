@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
 import { go, holdNew } from "../../src/frontend/build/chrome";
-import { createStore } from "../../src/frontend/store";
+import { createStore } from "../../src/ui/store";
 
 function app(answer: boolean) {
   const asked: string[] = [];

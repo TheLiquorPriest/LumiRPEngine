@@ -30,7 +30,7 @@ import type { ResultBodies, SessionMessageView, SessionView, WorkspaceFileView }
 import { GLOBAL_PREFIX, isFilePath, isGlobalPath, isKeptPath, isLearnedPath, isTranscriptPath, levelPath, PINS_PATH } from "../../shared/stores";
 import { useApp } from "../app";
 import { Badge, Button, Disclosure, Empty, Field, IdText, Seg, useBusy } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import type { GmSectionProps, RequestBody } from "../registry";
 import { GmPage, usePages } from "./ui";
 import { AREA_WORDS, type FileChip, fileChips, folderOf, systemWords, workspaceArea, workspaceGroups, type WorkspaceNode, writerWords } from "./workspace-tree";

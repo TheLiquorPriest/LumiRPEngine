@@ -22,7 +22,7 @@ import { type App, type Draft, initialUi, makeRequest, type Overlays, playAt, ty
 import { UI_PACKS } from "../../../frontend/packs";
 import { ProtocolClient } from "../../../frontend/protocol-client";
 import type { Send } from "../../../frontend/registry";
-import { createStore, type Readable, type Store } from "../../../frontend/store";
+import { createStore, type Readable, type Store } from "../../store";
 import { buildCatalog } from "../../../frontend/ui-registry";
 import type { Timers } from "../../roads";
 import { showIdsChosen, TOAST_MS, TOASTS_SHOWN } from "../app";

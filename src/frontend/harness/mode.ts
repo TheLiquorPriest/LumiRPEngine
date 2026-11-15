@@ -6,7 +6,7 @@
 // rules are tested without a browser; nothing here imports LumiAH.
 
 import type { Mode } from "../app";
-import type { IconName } from "../icons";
+import type { IconName } from "../../ui/icons";
 import type { SyncState } from "../protocol-client";
 
 /** The tab on the drawer's bar. Its label is the one word for it wherever a page points there. */

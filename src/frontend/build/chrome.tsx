@@ -14,8 +14,8 @@ import type { App, BuildRoute } from "../app";
 import { useApp } from "../app";
 import { Button, Disclosure, Field, IdText, PageHeader, useShowIds } from "../components";
 import { humanize } from "../format";
-import type { IconName } from "../icons";
-import { Icon } from "../icons";
+import type { IconName } from "../../ui/icons";
+import { Icon } from "../../ui/icons";
 import type { Send } from "../registry";
 import { deriveId } from "./schema";
 

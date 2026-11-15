@@ -19,7 +19,7 @@ import type { EditOp } from "../../../shared/protocol";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Meter, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, NumberField, SelectField, TextField, unchangedProblem, type Choice } from "./forms";
 import type { GmControls, PlayerControls, SectionProps, SegmentProps } from "./hub";
 import { accountBlocks, accountControls, accountGroups, activityChoices, activityOf, autopaySources, businessAccounts, cardControls, cardLimitsShown, findAccount, findCard, flowSources, gmAutopaySources, groupOf, MOVE_CONTROLS, moveFrom, overviewBlocks, ownBusiness, paySources, possessive, transferTargets, utilisation, type AccountGroup, type MoveControl } from "./layout";

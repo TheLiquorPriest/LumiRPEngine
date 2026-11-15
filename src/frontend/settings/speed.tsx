@@ -12,7 +12,7 @@ import { currentSpeedPreset, patchAt, PRESET_ROWS, presetChanges, rowChanged, ro
 import { type SettingsRoute, useApp } from "../app";
 import { Banner, Button, Empty, HostSwitch, NumberStepper, Section, Seg } from "../components";
 import { LastTurnTime } from "../diagnostics";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { SettingRow } from "./kit";
 
 /** The rows this build's settings have (a row whose setting another part of Settings hasn't added yet is left out), in their group. */

@@ -9,8 +9,8 @@ import type { NoteKind } from "../../shared/ledger";
 import { useApp } from "../app";
 import { loadDraft } from "../build/draft";
 import { Badge, Button, Empty, IconButton, Seg, useBusy } from "../components";
-import type { IconName } from "../icons";
-import { Icon } from "../icons";
+import type { IconName } from "../../ui/icons";
+import { Icon } from "../../ui/icons";
 import type { PanelProps } from "../registry";
 
 const KIND: Record<NoteKind, { label: string; tone: "neutral" | "accent" | "warn" | "neg"; icon: IconName }> = {

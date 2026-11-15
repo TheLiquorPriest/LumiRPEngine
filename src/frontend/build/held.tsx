@@ -11,8 +11,8 @@ import type { ErrorMessage } from "../../shared/protocol";
 import type { App } from "../app";
 import { useApp } from "../app";
 import { Button } from "../components";
-import { Icon } from "../icons";
-import { createStore, useSelect } from "../store";
+import { Icon } from "../../ui/icons";
+import { createStore, useSelect } from "../../ui/store";
 
 /** A form holding edits over a change made elsewhere. */
 export interface HeldForm {

@@ -4,7 +4,7 @@
 // another (a stake, votes, a role, a seat) and whom your powers pass through. Pure.
 
 import { formatCents } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import { OWNER_ROLE_LABELS } from "../../../shared/finance";
 import { ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, type OrgLimits, type OrgPower, type OrgPowerFamily, type OrgType } from "../../../shared/org";
 import type { OrgLinkView, OrgPositionView, OrgPowerView, OrgRef, OrgView } from "../../../shared/org-view";

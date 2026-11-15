@@ -15,7 +15,7 @@ import { EVERY, ScheduleForm, scheduleWrite, slotIssues, targetWords } from "../
 import { FieldInput, lintAt } from "../../../frontend/build/schema-form";
 import { Button, Disclosure, SaveBar, useBusy } from "../../../frontend/components";
 import type { EditorProps } from "../../../frontend/registry";
-import { useSelect } from "../../../frontend/store";
+import { useSelect } from "../../../ui/store";
 
 export function ScheduleEditor(props: EditorProps) {
   const app = useApp();

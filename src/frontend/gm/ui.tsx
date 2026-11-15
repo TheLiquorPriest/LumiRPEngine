@@ -9,7 +9,7 @@ import { useApp, useUi } from "../app";
 import { focusTaken, gmOpen } from "./gate";
 import type { EditNotice } from "./editor";
 import { Button, IconButton, IdText, PageHeader } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 
 export interface Pages<T> {
   /** The page over the list, or null for the list itself. */

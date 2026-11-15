@@ -5,7 +5,7 @@
 // last one, as it ended.
 
 import { useEffect, useState } from "preact/hooks";
-import { useSelect } from "../../frontend/store";
+import { useSelect } from "../store";
 import { useApp, useNow } from "../app";
 import { replyOf } from "../client";
 import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../atoms";

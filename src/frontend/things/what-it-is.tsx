@@ -13,7 +13,7 @@ import type { VehiclePick } from "../../shared/vehicles";
 import { FormSheet } from "../build/form-kit";
 import { wordsOf } from "../character/places";
 import { Button, Empty, List, ListRow, Section } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 
 /** What a thing added is: what a player's Add says (`ThingIs`), or a vehicle, which the vehicles pack makes from its class. */
 export type ThingKind = ThingIs | "vehicle";

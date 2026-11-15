@@ -13,7 +13,7 @@ import { orgRoute, useApp } from "../../../frontend/app";
 import { Avatar, Badge, Button, Disclosure, Empty, IdText, List, ListRow, PageHeader, Section } from "../../../frontend/components";
 import { list, str } from "../../../frontend/decode";
 import { FixEditor } from "../../../frontend/fix-editor";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { SheetProps } from "../../../frontend/registry";
 import { whereFixTarget } from "../../../frontend/requests";
 import type { ChatId, EntityId } from "../../../shared/ids";

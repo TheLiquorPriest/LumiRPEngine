@@ -14,7 +14,7 @@ import type { ChatId } from "../shared/ids";
 import type { GenerateAs, ResultBodies, ReviewCardView, ReviewItemView } from "../shared/protocol";
 import { Badge, Button, IdText } from "./components";
 import { humanize } from "./format";
-import { Icon, type IconName } from "./icons";
+import { Icon, type IconName } from "../ui/icons";
 
 /** A review request as the card sends it (C13 `lre.review`). */
 export type ReviewBody = { type: "lre.review"; chatId: ChatId } & ({ op: "apply"; turn: string; keys?: string[] } | { op: "reject"; turn: string });

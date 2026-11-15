@@ -5,7 +5,7 @@
 
 import type { ComponentType } from "preact";
 import type { PanelHome, SheetKind, SheetRoute } from "./app";
-import type { IconName } from "./icons";
+import type { IconName } from "../ui/icons";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { GmReadPart } from "../shared/gm-parts";
 import type { ChatId, EntityId, FieldId, KindId, PackId, PanelId } from "../shared/ids";

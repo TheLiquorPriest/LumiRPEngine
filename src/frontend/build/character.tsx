@@ -18,7 +18,7 @@ import { Badge, Banner, Button, Disclosure, IconButton, SaveBar, Section, Seg, u
 import { humanize } from "../format";
 import type { EditorProps } from "../registry";
 import { characterRequest } from "../requests";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { employerPicker, entityPatch, GROUP_LABEL, relationGroups, type EmployerKind, type RelationGroup } from "./character-model";
 import { deleteItem, go, ItemHeader } from "./chrome";
 import { CheckField, FormGroup, ItemRow, RefPicker, type RefOption } from "./form-kit";

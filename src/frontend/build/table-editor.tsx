@@ -19,7 +19,7 @@ import { useApp } from "../app";
 import type { SegOption } from "../components";
 import { Badge, Button, Disclosure, Empty, Field, IconButton, IdText, List, ListRow, Row, SaveBar, Section, Seg, useBusy, useShowIds } from "../components";
 import { humanize } from "../format";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { parseJsonText } from "../json-text";
 import { MoneyInput } from "../money-input";
 import type { EditorProps, Send } from "../registry";

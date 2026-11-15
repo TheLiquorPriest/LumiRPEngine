@@ -6,7 +6,7 @@
 // else through the extension (client.ts).
 
 import { render } from "preact";
-import { createStore, type Readable, useSelect } from "../frontend/store";
+import { createStore, type Readable, useSelect } from "./store";
 import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
 import { navOf, Notices, PageFor, PagesBar, routeFor } from "./frame";

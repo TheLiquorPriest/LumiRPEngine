@@ -16,8 +16,8 @@ import { Avatar, Badge, Empty, IconButton, List, ListRow, Section, useBusy } fro
 import { FixEditor } from "../fix-editor";
 import { formatMinutes, humanize } from "../format";
 import { cashText } from "../hud";
-import type { IconName } from "../icons";
-import { Icon } from "../icons";
+import type { IconName } from "../../ui/icons";
+import { Icon } from "../../ui/icons";
 import type { PanelDef, PanelProps } from "../registry";
 import { NeedsYou, QuickActions, StatusBanners } from "./now";
 import { EngineBlocked, NoConnectionNotice, useHarnessBlocked } from "../gm/engine";

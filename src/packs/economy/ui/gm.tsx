@@ -13,7 +13,7 @@ import { Disclosure, Empty, HostSelect, JsonView } from "../../../frontend/compo
 import { humanize } from "../../../frontend/format";
 import { gmOpen } from "../../../frontend/gm/gate";
 import { useGmFocus } from "../../../frontend/gm/ui";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { GmSectionProps } from "../../../frontend/registry";
 import { decodeFinanceView } from "./decode";
 import { MoneyHub, type GmControls } from "./hub";

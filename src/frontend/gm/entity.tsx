@@ -17,7 +17,7 @@ import { TagListInput } from "../build/selector-editor";
 import { Badge, Banner, Button, Field, HostSwitch, IconButton, IdText, Meter, Section } from "../components";
 import { parseFixValue } from "../fix-editor";
 import { formatMinutes, humanize } from "../format";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { MoneyInput } from "../money-input";
 import { adjustOp, bringOp, classifyOp, entityStateOp, lifeEditOp, partyOf, placesMatching, relationFields } from "../requests";
 import { isPartyTier, PARTY_RELATION, PARTY_TIERS, TIER_LABELS, type PartyTier } from "../../shared/party";

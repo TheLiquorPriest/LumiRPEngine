@@ -11,7 +11,7 @@ import type { Bounds, Point, Transform } from "../../../frontend/map-math";
 import { toScreen } from "../../../frontend/map-math";
 import { hasCell } from "../../../shared/grid";
 import { VOID_TERRAIN, type PlaceMark } from "../../../shared/maps";
-import { ICONS, type IconName } from "../../../frontend/icons";
+import { ICONS, type IconName } from "../../../ui/icons";
 import type { MapDisplay } from "../../../shared/world";
 import type { MapPlaceView, MapScopeView } from "../core/map-scope";
 import type { CanvasPalette } from "./canvas-theme";

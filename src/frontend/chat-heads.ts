@@ -4,8 +4,8 @@
 // fixed gutter.
 
 import type { Rect } from "./layout";
-import type { Readable } from "./store";
-import { createStore } from "./store";
+import type { Readable } from "../ui/store";
+import { createStore } from "../ui/store";
 
 /** Breathing room between a chat head and the content it would otherwise cover. */
 const HEAD_ROOM = 8;

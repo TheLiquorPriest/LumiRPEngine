@@ -9,7 +9,7 @@ import { isRecord } from "../../../shared/json";
 import { pushSheet, useApp } from "../../../frontend/app";
 import { Empty, JsonView, List, ListRow, Section, Seg } from "../../../frontend/components";
 import { list, num, oneOf, optStr, str, strings } from "../../../frontend/decode";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import type { PanelProps } from "../../../frontend/registry";
 import { GlanceCard } from "../../../frontend/play/glance";
 

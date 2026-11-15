@@ -13,8 +13,8 @@ import type { PrepareState as CardState, StoryNames } from "../../shared/story-p
 import { useApp } from "../app";
 import { Badge, Button, Disclosure, List, ListRow, Meter, Stat } from "../components";
 import { HARNESS_MODE } from "../harness/mode";
-import { Icon, type IconName } from "../icons";
-import { useSelect } from "../store";
+import { Icon, type IconName } from "../../ui/icons";
+import { useSelect } from "../../ui/store";
 import { pageStore, type RecentStore } from "../things/play-where";
 import { ToTopButton, useToTop } from "../to-top";
 import { andList, DEPTH_WORDS, nameIn, STORY_AGENTS, tokensText } from "./model";

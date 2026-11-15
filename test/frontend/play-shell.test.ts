@@ -3,7 +3,7 @@ import type { PanelHome } from "../../src/frontend/app";
 import { initialUi, openAt, orgRoute, orgRouteOf, playAt, popSheet, pushSheet, showPanel, switchChat } from "../../src/frontend/app";
 import type { Overlays } from "../../src/frontend/app";
 import { ProtocolClient } from "../../src/frontend/protocol-client";
-import { createStore } from "../../src/frontend/store";
+import { createStore } from "../../src/ui/store";
 import { needsYou, needsYouDetail, TurnRunning } from "../../src/frontend/play/now";
 import { EngineNotice } from "../../src/frontend/play/scene";
 import { blockedNotice } from "../../src/frontend/gm/engine";

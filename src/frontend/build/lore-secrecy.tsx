@@ -15,8 +15,8 @@ import { STEP_LABEL } from "../../shared/steps";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, IconButton, PageHeader, Section, useBusy } from "../components";
 import { ActionRow, ActionRows } from "../gm/ui";
-import { Icon } from "../icons";
-import { useSelect } from "../store";
+import { Icon } from "../../ui/icons";
+import { useSelect } from "../../ui/store";
 import { bookLabels } from "./book-lore";
 
 /** A book as the page last read it: its move, or why it couldn't be read. */

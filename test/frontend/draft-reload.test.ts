@@ -10,7 +10,7 @@ import type { Timers } from "../../src/frontend/build/draft";
 import { commitDraft, discardDraft, draftSend, loadDraft, QUIET_MS, recheckDraft, trackDraft } from "../../src/frontend/build/draft";
 import { heldForms } from "../../src/frontend/build/held";
 import { ProtocolClient } from "../../src/frontend/protocol-client";
-import { createStore } from "../../src/frontend/store";
+import { createStore } from "../../src/ui/store";
 import type { FrontendToBackend } from "../../src/shared/protocol";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
 import { testWorld } from "../support/test-pack";

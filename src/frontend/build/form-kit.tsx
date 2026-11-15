@@ -8,7 +8,7 @@ import { createContext } from "preact";
 import { useContext, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { LintIssue } from "../../shared/protocol";
 import { HostSelect, IdText, PageHeader, useShowIds } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { revealInScroller } from "../scroll";
 
 /** Lets a sheet know a sheet opened inside it, so only the innermost one shows. */

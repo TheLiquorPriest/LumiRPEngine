@@ -4,8 +4,8 @@
 // 1400 px, where the bar across the top cannot hold every page and still name the chat, it keeps the pages
 // used most and More; at 640 px and below it gives way to the bar at the bottom. The drawer always has its own.
 
-import { COMPONENTS_CSS } from "../frontend/styles/components";
-import { TOKENS_CSS } from "../frontend/styles/tokens";
+import { COMPONENTS_CSS } from "./styles/components";
+import { TOKENS_CSS } from "./styles/tokens";
 
 const OWN_CSS = `
 .rpe{min-width:0}

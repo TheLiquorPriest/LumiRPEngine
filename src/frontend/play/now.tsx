@@ -8,8 +8,8 @@ import { KeepReportChip } from "../chips";
 import { chipRole, chipTone } from "../chip-roles";
 import { Badge, Banner, Button, List, ListRow, Section, useBusy } from "../components";
 import { HARNESS_MODE } from "../harness/mode";
-import type { IconName } from "../icons";
-import { Icon } from "../icons";
+import type { IconName } from "../../ui/icons";
+import { Icon } from "../../ui/icons";
 import { isMobile } from "../layout";
 import { visiblePanels } from "./play";
 

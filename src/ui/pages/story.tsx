@@ -8,7 +8,7 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useSelect } from "../../frontend/store";
+import { useSelect } from "../store";
 import type { StoryAnswer, StoryItemShown, StoryList, StoryListPart, StoryStruck } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Gated, PageHeader, Row, Section } from "../atoms";

@@ -8,7 +8,7 @@
 import { openAt, orgRoute, useApp } from "../../../frontend/app";
 import { Banner, Button, List, ListRow, Section } from "../../../frontend/components";
 import { formatCents } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import { GLANCE_ROWS, GlanceCard } from "../../../frontend/play/glance";
 import type { PanelProps } from "../../../frontend/registry";
 import { isRecord } from "../../../shared/json";

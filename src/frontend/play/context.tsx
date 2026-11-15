@@ -19,7 +19,7 @@ import { useApp } from "../app";
 import { Badge, Banner, Empty, IconButton, JsonView, List, ListRow, Meter, Section } from "../components";
 import { list, num, oneOf, optNum, str, strings } from "../decode";
 import { ActionRow, ActionRows } from "../gm/ui";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import type { PanelProps } from "../registry";
 import { STEP_LABEL } from "../../shared/steps";
 import type { MindCallTrace } from "../../shared/minds";

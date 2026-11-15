@@ -2,7 +2,7 @@
 // service or registration; at most three rows.
 
 import { Badge, ListRow } from "../../../frontend/components";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import type { PanelProps } from "../../../frontend/registry";
 import type { GarageView } from "../core/view";
 import { GLANCE_ROWS, GlanceCard } from "../../../frontend/play/glance";

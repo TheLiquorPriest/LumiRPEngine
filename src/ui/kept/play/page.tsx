@@ -15,7 +15,7 @@ import { Banner, Toasts } from "../../../frontend/components";
 import { setCurrency } from "../../../frontend/format";
 import { Hud } from "../../../frontend/hud";
 import { Play } from "../../../frontend/play/play";
-import { type Readable, useSelect } from "../../../frontend/store";
+import { type Readable, useSelect } from "../../store";
 import { useApp } from "../../app";
 import { Banner as PageBanner } from "../../atoms";
 import type { RpeClient } from "../../client";

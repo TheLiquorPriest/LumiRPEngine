@@ -13,7 +13,7 @@ import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, PARTY_KINDS, 
 import { formatMoney } from "../../../shared/world";
 import { Badge, Button, Disclosure, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, unchangedProblem, WEEKDAY_CHOICES, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
 import { fallbackSources, findAccount, findFlow, flowControls, flowSources, flowTargets, gmParties, payeeProblem, viewAccounts, type FlowControl } from "./layout";

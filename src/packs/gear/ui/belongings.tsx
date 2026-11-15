@@ -26,7 +26,7 @@ import { OverflowMenu, type MenuItem } from "../../../frontend/build/chrome";
 import { FormSheet } from "../../../frontend/build/form-kit";
 import { wordsOf } from "../../../frontend/character/places";
 import { Badge, Button, Empty, HostSelect, IdText, List, ListRow, Meter, Section, Seg } from "../../../frontend/components";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import { PickBox, SelectBar, useSelection, type Selection } from "../../../frontend/multi-select";
 import type { Req } from "../../../frontend/requests";
 import { AtOnceNotice, thingsFix, useAtOnce, type ThingsFixRequest } from "../../../frontend/things/at-once";

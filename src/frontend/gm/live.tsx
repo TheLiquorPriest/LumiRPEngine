@@ -26,7 +26,7 @@ import { Badge, Button, Empty, Seg, useBusy } from "../components";
 import { cancelTurn, elapsedText, openSpeed, TurnTimeView } from "../diagnostics";
 import type { GmSectionProps, RequestBody } from "../registry";
 import { scrollParent } from "../scroll";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { ToTopButton, useToTop } from "../to-top";
 
 /** A live request as the tab sends it (`lre.live`). */

@@ -19,7 +19,7 @@ import { Chip } from "../../../frontend/build/form-kit";
 import { Badge, Banner, Button, Empty, Field, IdText, List, ListRow, Section, Seg, Stat } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
 import { GmPage, SheetLink, useGmFocus, usePages } from "../../../frontend/gm/ui";
-import { Icon, type IconName } from "../../../frontend/icons";
+import { Icon, type IconName } from "../../../ui/icons";
 import { fidelityGroups } from "../../../frontend/batch";
 import { PickBox, SelectBar, useSelection } from "../../../frontend/multi-select";
 import { MoneyInput } from "../../../frontend/money-input";

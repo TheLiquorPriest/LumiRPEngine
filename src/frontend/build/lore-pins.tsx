@@ -19,7 +19,7 @@ import { Badge, Button, Section, useBusy } from "../components";
 import { ActionRow, ActionRows } from "../gm/ui";
 import { IconButton } from "../components";
 import { STEP_LABEL } from "../../shared/steps";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { bookLabels } from "./book-lore";
 import { draftSend } from "./draft";
 import { Issues } from "./form-kit";

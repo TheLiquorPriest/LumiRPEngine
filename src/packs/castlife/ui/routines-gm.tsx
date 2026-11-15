@@ -27,7 +27,7 @@ import { Badge, Banner, Button, Empty, IdText, List, ListRow, NumberStepper, Sec
 import { formatMinutes } from "../../../frontend/format";
 import { nameOf } from "../../../frontend/gm/editor";
 import { GmPage, SheetLink, useGmFocus, usePages } from "../../../frontend/gm/ui";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { GmSectionProps, Send } from "../../../frontend/registry";
 import type { RoutineBinding, RoutineRow, StoryChange } from "./routines-ops";
 import {

@@ -12,7 +12,7 @@
 import { useState } from "preact/hooks";
 import { orgRoute, type SheetRoute } from "../../../frontend/app";
 import { Badge, Button, Section } from "../../../frontend/components";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { OrgView } from "../../../shared/org-view";
 import { controlChain, controlTree, defaultOpen, reportingTree, rerooted, rowMenu, rowPress, treeRows, type ChartAction, type ChartNode, type OwnershipTab, type TreeRow } from "./chart-model";
 import { orgEditRoute, rulesControls } from "./edit";

@@ -15,8 +15,8 @@ import type { KindDef, RelationTypeDef, WorldDoc } from "../shared/world";
 import type { Viewport } from "./layout";
 import type { ProtocolClient, SyncState } from "./protocol-client";
 import type { RequestBody, Send } from "./registry";
-import type { Readable, Store } from "./store";
-import { useSelect } from "./store";
+import type { Readable, Store } from "../ui/store";
+import { useSelect } from "../ui/store";
 import type { UiCatalog } from "./ui-registry";
 
 /** The drawer's modes. `harness` holds the harness's own pages and is offered only while the open chat plays on the harness (`harness/mode.ts`). */

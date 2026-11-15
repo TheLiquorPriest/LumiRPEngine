@@ -12,7 +12,7 @@ import type { EncounterView } from "../../packs/combat/ui/panel";
 import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel";
 import { Button, Empty, Field, List, ListRow, Section } from "../components";
 import { fidelityGroups } from "../batch";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import { BatchPage } from "./batch";

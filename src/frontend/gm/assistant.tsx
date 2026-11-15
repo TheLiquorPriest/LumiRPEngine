@@ -18,10 +18,10 @@ import { type AssistantMessage, type AssistantProposal, type AssistantRun, type 
 import type { GmView } from "../../shared/state-view";
 import { formatMs } from "../../shared/timeouts";
 import { useApp } from "../app";
-import { markdown } from "../markdown";
+import { markdown } from "../../ui/markdown";
 import { Badge, Button, Disclosure, Empty, useBusy } from "../components";
 import { humanize } from "../format";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import type { GmSectionProps } from "../registry";
 import type { Req } from "../requests";
 import { scrollParent } from "../scroll";

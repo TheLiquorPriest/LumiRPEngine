@@ -18,7 +18,7 @@ import { typeFields } from "../../shared/items-build";
 import type { TableRow } from "../../shared/tables";
 import type { WorldDoc } from "../../shared/world";
 import type { EntityGroup } from "../app";
-import type { IconName } from "../icons";
+import type { IconName } from "../../ui/icons";
 import { entityPatch } from "./character-model";
 import { deriveId, newItem } from "./schema";
 import { kindIs } from "./selector-editor";

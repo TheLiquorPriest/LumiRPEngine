@@ -11,7 +11,7 @@ import type { JsonObject } from "../../shared/json";
 import type { KnowledgeBatch, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindLengthKey, MindLengths, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
 import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, isListCount, KNOWLEDGE_BATCHES, KNOWLEDGE_LIMITS, KNOWLEDGE_RANGES, KNOWLEDGE_TEXT_IDS, KNOWLEDGE_TEXTS, knowledgeLimitRange, MIND_LENGTH_DEFAULTS, MIND_LIST_COUNTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MIND_TEXT_LENGTHS, mindLengthRange, MINDS_DEFAULTS } from "../../shared/minds";
 import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section, Seg } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { PromptEditor } from "./prompt-editor";
 import type { KnowledgeSettingsChange, MemoryField } from "./minds-patch";
 import { knowledgeLimitPatch, knowledgePatch, knowledgePlaceholders, knowledgeTextPatch, MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsLengthPatch, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, missingPlaceholders, withMemoryLevel } from "./minds-patch";

@@ -19,8 +19,8 @@ import { BAND_LABEL } from "../../shared/tiers";
 import { useApp } from "../app";
 import { QUEUED_TOAST } from "../queued";
 import { Banner, Button, Empty, HostSlider, HostSwitch, Seg, useBusy } from "../components";
-import type { IconName } from "../icons";
-import { Icon } from "../icons";
+import type { IconName } from "../../ui/icons";
+import { Icon } from "../../ui/icons";
 import { claimsMarker, resolveMarker, type Req } from "../requests";
 import { revealInScroller } from "../scroll";
 

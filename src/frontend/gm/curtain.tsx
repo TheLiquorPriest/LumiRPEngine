@@ -2,7 +2,7 @@
 // truth shows, with Hide. Both wear GM gold, which marks GM chrome only.
 
 import { Button } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 
 /** In front of every page that shows the truth while the gate is closed; nothing behind it is asked for or drawn. */
 export function Gate(props: { onReveal(): void }) {

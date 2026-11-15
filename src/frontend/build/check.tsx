@@ -10,8 +10,8 @@ import type { LintFix, LintIssue, WorldCollection, WorldPart } from "../../share
 import type { WorldDoc } from "../../shared/world";
 import { useApp, type BuildRoute } from "../app";
 import { Badge, Banner, Button, Empty, IdText, PageHeader, Section, Seg, useBusy } from "../components";
-import { Icon } from "../icons";
-import { useSelect } from "../store";
+import { Icon } from "../../ui/icons";
+import { useSelect } from "../../ui/store";
 import { COLLECTION_INFO, go, itemLabel, PART_INFO } from "./chrome";
 import { draftSend, loadDraft } from "./draft";
 

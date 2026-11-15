@@ -7,7 +7,7 @@ import { isCorrection, OWNER_ROLE_LABELS, OWNER_ROLES, ROLE_RIGHTS, type Journal
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, List, ListRow, Section, Seg } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import { FieldRow } from "../../../frontend/gm/entity";
 import { ActionRows } from "../../../frontend/gm/ui";
 import { SelectField, type Choice } from "./forms";

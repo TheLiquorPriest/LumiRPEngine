@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
-import { markdown, markdownBlocks } from "../../src/frontend/markdown";
+import { markdown, markdownBlocks } from "../../src/ui/markdown";
 import { propsOf, type Props } from "../support/tree";
 
 function textOf(node: unknown): string {

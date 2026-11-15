@@ -17,7 +17,7 @@ import type { Send } from "../../frontend/registry";
 import { trackDraft } from "../../frontend/build/draft";
 import { UI_PACKS } from "../../frontend/packs";
 import { ProtocolClient } from "../../frontend/protocol-client";
-import { createStore, type Readable } from "../../frontend/store";
+import { createStore, type Readable } from "../store";
 import { buildCatalog } from "../../frontend/ui-registry";
 import type { Timers } from "../roads";
 import type { KeptHost } from "./host";

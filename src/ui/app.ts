@@ -4,7 +4,7 @@
 
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
-import type { Readable } from "../frontend/store";
+import type { Readable } from "./store";
 import type { RpeClient } from "./client";
 import type { Gate } from "./gate";
 import type { KeptHost } from "./kept/host";

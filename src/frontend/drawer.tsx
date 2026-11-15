@@ -21,14 +21,14 @@ import { UpdateNotice } from "./agents";
 import { GmMode } from "./gm/mode";
 import { HARNESS_MODE, harnessChat, harnessOffered, shownMode } from "./harness/mode";
 import { type HarnessPages, HarnessReach, HarnessTab, useWaiting } from "./harness/pages";
-import type { IconName } from "./icons";
-import { Icon } from "./icons";
+import type { IconName } from "../ui/icons";
+import { Icon } from "../ui/icons";
 import type { Rect } from "./layout";
 import { Play } from "./play/play";
 import { scrollParent } from "./scroll";
 import { Settings } from "./settings/settings";
 import { AcceptanceBanner } from "./settings/agents";
-import { useSelect } from "./store";
+import { useSelect } from "../ui/store";
 
 /** A mode as the bar shows it. */
 export interface ModeEntry {

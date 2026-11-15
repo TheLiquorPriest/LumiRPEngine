@@ -8,7 +8,7 @@ import { planProfile, PROFILE_IDS, PROFILES, type ProfileChoice, type ProfileGro
 import type { Draft } from "../app";
 import { useApp } from "../app";
 import { Badge, Button, IdText, Row, Seg, useBusy } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { draftSend } from "./draft";
 
 const GROUPS: readonly { id: ProfileGroup; label: string }[] = [

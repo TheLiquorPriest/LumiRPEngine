@@ -4,8 +4,8 @@
 // a case in `PageFor`, and both shells offer it.
 
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { Icon, type IconName } from "../frontend/icons";
-import { useSelect } from "../frontend/store";
+import { Icon, type IconName } from "./icons";
+import { useSelect } from "./store";
 import type { ExtensionStatus, MissingPermission } from "./api";
 import { chatOf, type Route, type Shell, useApp } from "./app";
 import { Badge, Banner, Button, Empty, Fold } from "./atoms";

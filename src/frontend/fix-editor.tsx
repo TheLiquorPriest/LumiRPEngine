@@ -12,7 +12,7 @@ import type { FieldFixTarget, FixTarget, TimeFixTarget } from "../shared/state-v
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../shared/world";
 import { useApp, useView } from "./app";
 import { Button, Field, useBusy } from "./components";
-import { Icon } from "./icons";
+import { Icon } from "../ui/icons";
 import { MoneyInput } from "./money-input";
 import { fixRequest, timeFixRequest, type Req } from "./requests";
 import { toastQueued } from "./queued";

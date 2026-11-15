@@ -15,7 +15,7 @@
 // Pure.
 
 import { orgRoute, type SheetRoute } from "../../../frontend/app";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import { OWNER_ROLE_LABELS, type OwnerRole } from "../../../shared/finance";
 import type { OrgLinkView, OrgPersonView, OrgPositionView, OrgRef, OrgView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_TIERS } from "../../../shared/party";

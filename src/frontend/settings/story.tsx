@@ -31,7 +31,7 @@ import type { StateView } from "../../shared/state-view";
 import type { SettingsRoute } from "../app";
 import { useApp } from "../app";
 import { Banner, Button, Disclosure, Empty, HostSwitch, List, NumberStepper, Section, Seg, Stat } from "../components";
-import type { IconName } from "../icons";
+import type { IconName } from "../../ui/icons";
 import { MIND_FILE_LABEL } from "../story/files";
 import { type AgentConnections, NO_CONNECTION, notTheRuntimes, notTheRuntimesMark, useAgentConnections, useOpenConnections } from "../story/connections";
 import { ModelPickRows, pickText } from "../story/model-pick";

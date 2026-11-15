@@ -13,10 +13,10 @@ import { Badge, Button, Empty, IconButton, List, ListRow, useBusy } from "./comp
 import { ActivityLine } from "./diagnostics";
 import { FixEditor } from "./fix-editor";
 import { formatCents, formatMinutes, humanize } from "./format";
-import { Icon } from "./icons";
+import { Icon } from "../ui/icons";
 import { hudMode, isMobile } from "./layout";
 import { stagedRequest, timeMarker } from "./requests";
-import { useSelect } from "./store";
+import { useSelect } from "../ui/store";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
 

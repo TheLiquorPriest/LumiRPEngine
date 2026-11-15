@@ -5,8 +5,8 @@
 
 import type { ComponentChildren } from "preact";
 import type { PromptNotice, ReleaseForm, ReplyError, RunStatus, ToolResult, TraceRecord } from "rp-harness/contract";
-import { Icon, type IconName } from "../frontend/icons";
-import { markdown } from "../frontend/markdown";
+import { Icon, type IconName } from "./icons";
+import { markdown } from "./markdown";
 import type { RunKind } from "./api";
 import { Badge, Fold, Pre, type Tone } from "./atoms";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";

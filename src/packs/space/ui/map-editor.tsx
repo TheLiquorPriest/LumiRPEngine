@@ -23,7 +23,7 @@ import { CheckField, Chip, FormGroup, FormSheet, Issues, ItemRow, RefPicker, typ
 import { useHeld } from "../../../frontend/build/held";
 import { deriveId, newItem } from "../../../frontend/build/schema";
 import { Badge, Banner, Button, Disclosure, Empty, Field, IconButton, IdText, NumberStepper, SaveBar, Seg, Tabs, tabPanel, useBusy, useShowIds } from "../../../frontend/components";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import { lineAt, parseJsonText } from "../../../frontend/json-text";
 import { hitTest, TAP_SLOP, toScreen, toWorld, type Point, type Transform } from "../../../frontend/map-math";
 import type { EditorProps } from "../../../frontend/registry";

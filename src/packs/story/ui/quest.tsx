@@ -8,7 +8,7 @@
 import { useApp } from "../../../frontend/app";
 import { toastQueued } from "../../../frontend/queued";
 import { Badge, Button, Empty, IdText, List, ListRow, PageHeader, Section, useBusy } from "../../../frontend/components";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { SheetProps } from "../../../frontend/registry";
 import { hintRequest } from "../../../frontend/requests";
 import { decodeQuestsView, KIND_LABEL, objectiveCount, STATUS_LABEL } from "./panel";

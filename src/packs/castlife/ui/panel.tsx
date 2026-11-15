@@ -14,7 +14,7 @@ import { ORGS_ORG_PANEL } from "../../../shared/org-view";
 import { openAt, orgRoute, pushSheet, useApp } from "../../../frontend/app";
 import { Avatar, Badge, Button, Disclosure, Empty, Field, JsonView, List, ListRow, Section } from "../../../frontend/components";
 import { list, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { PanelProps } from "../../../frontend/registry";
 
 export const SLOT_KINDS = ["work", "sleep", "free", "travel", "other"] as const;

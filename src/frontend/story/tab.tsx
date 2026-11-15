@@ -6,7 +6,7 @@
 import type { ComponentChildren } from "preact";
 import type { HarnessPage, HarnessRoute } from "../app";
 import { BottomNav } from "../components";
-import type { IconName } from "../icons";
+import type { IconName } from "../../ui/icons";
 import { CastPage } from "./cast";
 import type { StoryFiles } from "./files";
 import { NotebookPage } from "./notebook";

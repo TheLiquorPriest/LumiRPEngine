@@ -18,7 +18,7 @@ import type { ModelPick } from "../../shared/settings";
 import { useApp } from "../app";
 import { HARNESS_MODE, harnessChat } from "../harness/mode";
 import { type Connection, useConnections } from "../settings/steps";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 
 /** One of the runtime's connections, as a picker names and offers it. */
 export interface RuntimeConnection {

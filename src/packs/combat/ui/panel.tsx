@@ -10,7 +10,7 @@ import type { PaletteEntry, PaletteOption } from "../../../shared/state-view";
 import { useApp } from "../../../frontend/app";
 import { Badge, Button, Empty, JsonView, Meter, Section, useBusy } from "../../../frontend/components";
 import { bool, list, num, obj, oneOf, optStr, str, strings } from "../../../frontend/decode";
-import { Icon } from "../../../frontend/icons";
+import { Icon } from "../../../ui/icons";
 import type { PanelProps, Send } from "../../../frontend/registry";
 import { paletteRequest } from "../../../frontend/requests";
 import type { EncounterRow, EncounterView } from "../core/view";

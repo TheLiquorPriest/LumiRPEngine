@@ -11,7 +11,7 @@ import { watchChatHeads } from "./chat-heads";
 import { Empty, IconButton, Toasts } from "./components";
 import type { Host } from "./host";
 import { WorldSheet } from "./hud";
-import { Icon } from "./icons";
+import { Icon } from "../ui/icons";
 import type { Rect } from "./layout";
 import { isMobile, mapFloatRect, sheetRect } from "./layout";
 import type { FloatSurface } from "./overlay-controller";

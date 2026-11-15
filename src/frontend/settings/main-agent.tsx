@@ -24,7 +24,7 @@ import type { SessionView } from "../../shared/protocol";
 import { defaultTimeouts, type TimeoutSettings } from "../../shared/timeouts";
 import { type SettingsRoute, useApp } from "../app";
 import { HostSwitch, Seg } from "../components";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { mainChanged, ownChanged, sessionChanged } from "./changed";
 import { LimitRow, NavRow, OwnBudget, SettingRow } from "./kit";
 import { EFFORT_HELP, EFFORT_LABEL, FINAL_REVIEW_FAIL_HELP } from "./labels";

@@ -11,7 +11,7 @@ import { facetsInOrder, facetTree } from "../../shared/classes";
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import type { FacetId, FacetValueDef, FacetValueId, WorldDoc } from "../../shared/world";
 import { Button, Disclosure, Field, IconButton, IdText, useShowIds } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import type { RefOption } from "./form-kit";
 import { Chip, FormSheet, ItemRow, RefPicker } from "./form-kit";
 import { deriveId } from "./schema";

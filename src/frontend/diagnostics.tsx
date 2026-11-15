@@ -16,8 +16,8 @@ import type { JsonObject } from "../shared/json";
 import { PHASE_CONTROL, speedRow } from "../shared/speed-presets";
 import { type App, useApp } from "./app";
 import { Badge, Banner, Button, Empty, List, ListRow, NumberStepper, Section, Seg, useBusy } from "./components";
-import { Icon } from "./icons";
-import { useSelect } from "./store";
+import { Icon } from "../ui/icons";
+import { useSelect } from "../ui/store";
 
 /** Opens the drawer at Settings → Diagnostics (`setup` listens). */
 export const OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";

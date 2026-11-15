@@ -6,7 +6,7 @@ import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { HostUi } from "../spindle-augment";
 import type { DrawerState, HostBridge } from "./app";
 import type { Viewport } from "./layout";
-import { createStore } from "./store";
+import { createStore } from "../ui/store";
 
 export interface Host extends HostBridge {
   ui: HostUi;

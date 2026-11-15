@@ -33,7 +33,7 @@ import { CannotStopNotice, OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
 import { atTurnRecord, OPEN_TURN_RECORD_EVENT } from "./story/open";
 import type { StoryAt } from "../shared/story-pages";
 import { timeMarker } from "./requests";
-import { createStore } from "./store";
+import { createStore } from "../ui/store";
 import { CSS } from "./styles";
 import { setCurrency } from "./format";
 import { buildCatalog } from "./ui-registry";

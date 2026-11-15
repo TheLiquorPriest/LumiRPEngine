@@ -4,7 +4,7 @@
 // stream. For the Turn page: one turn, kept up to date live, read again when a run of it begins or ends.
 
 import { describe, expect, test } from "bun:test";
-import { createStore } from "../../src/frontend/store";
+import { createStore } from "../../src/ui/store";
 import type { LiveEvent, TraceRecord } from "../../src/shared/api";
 import type { MissingPermission, RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
 import type { ClientState, LiveListener, RpeClient } from "../../src/ui/client";

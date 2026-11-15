@@ -9,7 +9,7 @@
 // said in the client's own words until a read succeeds, and the last state read stays shown.
 
 import type { SyncState } from "../../../frontend/protocol-client";
-import { createStore, type Readable } from "../../../frontend/store";
+import { createStore, type Readable } from "../../store";
 import { replyOf, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
 

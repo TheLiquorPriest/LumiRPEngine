@@ -21,7 +21,7 @@ import { sendChipChoice } from "./chips";
 import { Badge, Banner, Button, Disclosure, Empty, HostSwitch, IconButton, oddsSeries, Section, Seg, Tabs, tabPanel, useBusy } from "./components";
 import type { TabPanelProps } from "./components";
 import { formatCents, formatMinutes, formatOdds, humanize } from "./format";
-import { Icon } from "./icons";
+import { Icon } from "../ui/icons";
 import { MoneyInput } from "./money-input";
 import { paletteRequest, timelapseRequest, timeMarker } from "./requests";
 

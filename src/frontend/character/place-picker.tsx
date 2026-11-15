@@ -10,7 +10,7 @@ import type { PlaceRef } from "../../shared/character";
 import type { PlaceId } from "../../shared/ids";
 import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, IconButton, List, ListRow, Section } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { browseStart, pathLabel, placeIndex, SEARCH_LIMIT, searchPlaces, trailTo, type PlaceIndex } from "./places";
 
 /** A suggestion on top of the sheet: "Where they are", "Their home", "Where Sam is". */

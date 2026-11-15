@@ -12,7 +12,7 @@ import type { GmView } from "../../shared/state-view";
 import { listWords } from "../../shared/words";
 import { Badge, Banner, Button, Card, Empty, Field, List, ListRow, Section } from "../components";
 import { humanize } from "../format";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { entryDraft, EntryForm, entryOps, PremiseRows, type EntryDraft } from "../place-entry";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";

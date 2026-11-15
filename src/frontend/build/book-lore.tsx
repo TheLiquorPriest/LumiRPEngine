@@ -19,7 +19,7 @@ import type { StepPurpose, TrackDef, WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Banner, Button, IconButton, List, ListRow, Row, Section, useBusy } from "../components";
 import { ActionRow, ActionRows } from "../gm/ui";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { draftSend } from "./draft";
 import { CheckField, FormGroup, Issues } from "./form-kit";
 import { COLLECTION_SPECS, type FieldSpec } from "./schema";

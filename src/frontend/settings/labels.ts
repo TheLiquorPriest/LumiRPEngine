@@ -17,7 +17,7 @@ import type { RouteSource } from "../../shared/role-routes";
 import { TIMEOUT_KEYS, TIMEOUTS, type TimeoutKey } from "../../shared/timeouts";
 import type { SettingsPage } from "../app";
 import { HARNESS_MODE } from "../harness/mode";
-import type { IconName } from "../icons";
+import type { IconName } from "../../ui/icons";
 
 /** Settings → Agents' sections, each a page of its own under its name. */
 export type AgentsSub = "pipeline" | "review" | "system" | "budgets" | "compaction" | "recording" | "throttles" | "caching" | "acceptance";

@@ -28,7 +28,7 @@ import { DOMAIN_LABEL, LEVEL_LABEL } from "../../shared/ids";
 import { ClaimsControl, floorNote } from "../settings/realism";
 import { NarratorViewControl } from "../settings/narrator";
 import { NARRATOR_DEFAULTS, narratorViewOf } from "../../shared/settings";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor, ExprReadout } from "./expr-editor";
 import { ClassesInput, classesOf, FacetValuesInput, facetValuesOf } from "./facet-editor";

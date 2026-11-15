@@ -2,7 +2,7 @@
 // pages look like the rest of RPE. None holds state: what is open and what is pressed belongs to the page.
 
 import type { ComponentChildren } from "preact";
-import { Icon, type IconName } from "../frontend/icons";
+import { Icon, type IconName } from "./icons";
 
 export type Tone = "accent" | "warn" | "neg" | "pos" | "gm";
 

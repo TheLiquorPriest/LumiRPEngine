@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { render } from "preact";
 import { act } from "preact/test-utils";
-import { createStore } from "../../../src/frontend/store";
+import { createStore } from "../../../src/ui/store";
 import { AppContext, type Route, type UiApp } from "../../../src/ui/app";
 import type { RpeClient } from "../../../src/ui/client";
 import { PageFor } from "../../../src/ui/frame";

@@ -15,7 +15,7 @@ import type { SectionTemplate, WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { Banner, Button, Section, SaveBar, useBusy } from "../components";
 import type { EditorProps } from "../registry";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { ItemHeader } from "./chrome";
 import { useHeld } from "./held";
 import { lintAt, NumberInput, TextInput } from "./schema-form";

@@ -152,7 +152,7 @@ Shared helpers (pure, beside the contract files):
 - `shared/stores.ts`: the agent stores' shared formats: a blob's address (`blobHash`), a workspace file's path (`isWorkspacePath`), the learned area's (`LEARNED_DIR`, `isLearnedPath`), and the retention settings.
 
 Frontend layout:
-- `frontend/setup.tsx`, `frontend/app.ts`, `frontend/store.ts`: the entry (protocol client, UI registry, drawer, HUD, chips, palette, overlays), the app object every Preact tree shares, and the small observable store for UI state.
+- `frontend/setup.tsx`, `frontend/app.ts`, `ui/store.ts`: the entry (protocol client, UI registry, drawer, HUD, chips, palette, overlays), the app object every Preact tree shares, and the small observable store for UI state (which the new pages share, so it lives in `src/ui/`, beside `icons.tsx`, `markdown.tsx` and `styles/{components,tokens}.ts`).
 - `frontend/protocol-client.ts`, `frontend/delta.ts`, `frontend/requests.ts`, `frontend/decode.ts`: requests and the state view (a snapshot, then copy-on-write deltas, resync on a gap; a hello or resync lasts until its view, and `retry` asks again), one request per interaction, and defensive readers for panel view models.
 - `frontend/reconnect.ts`, `frontend/restart.ts`: when a page asks the engine again (Lumiverse acknowledged its socket, or its engine started again), and how a page starts a reply the engine prepared (claim, then Lumiverse's Regenerate or Continue, once).
 - `frontend/ui-registry.ts`, `frontend/packs.ts`: the `UiRegistry` implementation, and every UI pack in registration order.

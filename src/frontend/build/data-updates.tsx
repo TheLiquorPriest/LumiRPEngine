@@ -12,7 +12,7 @@ import type { TableRowChanges, TableUpdate } from "../../shared/protocol";
 import { useApp } from "../app";
 import { Badge, Button, List, ListRow, Section, useBusy } from "../components";
 import { humanize } from "../format";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { draftSend } from "./draft";
 import { FormGroup, FormSheet } from "./form-kit";
 

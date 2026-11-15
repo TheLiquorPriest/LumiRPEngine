@@ -12,11 +12,11 @@ import { PLACE_MARK_LABEL } from "../../../shared/maps";
 import { playAt, useApp } from "../../../frontend/app";
 import { Badge, Empty, IdText, List, ListRow, PageHeader, Section, useBusy } from "../../../frontend/components";
 import { formatCents, formatMinutes } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
-import { Icon } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
+import { Icon } from "../../../ui/icons";
 import type { SheetProps } from "../../../frontend/registry";
 import { travelRequest } from "../../../frontend/requests";
-import { createStore } from "../../../frontend/store";
+import { createStore } from "../../../ui/store";
 import type { MapPlaceView, MapScopeView, MapView } from "../core/view";
 import { decodeMapView } from "./view";
 

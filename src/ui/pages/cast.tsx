@@ -10,7 +10,7 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useSelect } from "../../frontend/store";
+import { useSelect } from "../store";
 import type { CastCharacter, CastEntryShown, CastKind, CastList, CastMemberShown, CastStruck, Casting, MemoryTier } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Empty, Fold, Gated, PageHeader, Pre, Row, Section } from "../atoms";

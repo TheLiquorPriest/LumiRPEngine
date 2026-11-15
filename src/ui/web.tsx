@@ -8,7 +8,7 @@
 
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { createStore, useSelect } from "../frontend/store";
+import { createStore, useSelect } from "./store";
 import { AppContext, chatOf, type Route, type UiApp, useApp } from "./app";
 import { Banner, Button, PageHeader } from "./atoms";
 import { createClient, type TokenStore, webConnector } from "./client";

@@ -16,7 +16,7 @@ import type { WhereChoice } from "../../shared/thing-view";
 import { whoseWords } from "../../shared/thing-view";
 import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, IconButton, List, ListRow, Section } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { cannotHold, pathText, searchWhere, WHERE_LIMIT, whereIndex, whereLabel, type WhereIndex } from "./where";
 
 /** What the picker holds: one of its choices, or one of the caller's extra choices ("On its owner"). */

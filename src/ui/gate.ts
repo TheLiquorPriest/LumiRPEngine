@@ -3,7 +3,7 @@
 // chat. It is never kept: a new page starts with every gate shut, and the shells shut it when the
 // player leaves the chat.
 
-import { createStore, type Readable } from "../frontend/store";
+import { createStore, type Readable } from "./store";
 
 export interface Gate extends Readable<ReadonlySet<string>> {
   open(chat: string): void;

@@ -9,7 +9,7 @@
 import type { HostBridge } from "../../frontend/app";
 import { createHost } from "../../frontend/host";
 import type { Viewport } from "../../frontend/layout";
-import { createStore } from "../../frontend/store";
+import { createStore } from "../store";
 
 /** Lumiverse's frontend context, as today's host bridge is made from it. */
 export type LumiverseContext = Parameters<typeof createHost>[0];

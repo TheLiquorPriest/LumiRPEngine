@@ -11,7 +11,7 @@ import type { Limit } from "../../shared/minds";
 import { formatMs } from "../../shared/timeouts";
 import { nounFor } from "../../shared/words";
 import { Badge, Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section } from "../components";
-import type { IconName } from "../icons";
+import type { IconName } from "../../ui/icons";
 
 /** The −/+ step of each unit, in what the stepper shows (seconds for "ms"): a convenience, not a limit; typing takes any value. */
 export const STEP: Readonly<Record<AgentLimitUnit, number>> = { tokens: 1000, ms: 5, count: 1, chars: 500, minutes: 60 };

@@ -9,7 +9,7 @@ import { VEHICLE_DOMAIN_LABEL, VEHICLE_DOMAINS, shortClassName, type VehicleClas
 import { FormSheet } from "../../../frontend/build/form-kit";
 import { Button, Empty, Field, List, ListRow, Section } from "../../../frontend/components";
 import { formatCents } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 
 /** How a class's domain draws. */
 export const DOMAIN_ICON: Readonly<Record<VehicleDomain, IconName>> = { road: "car", offroad: "car", marine: "boat", air: "plane" };

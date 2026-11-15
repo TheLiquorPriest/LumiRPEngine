@@ -25,10 +25,10 @@ import { playedKinds, type ScheduleSlot, type WorldDoc } from "../../shared/worl
 import { useApp, useUi } from "../app";
 import { Button, Disclosure, Empty, Field, HostSelect, IconButton, List, ListRow, NumberStepper, PageHeader, SaveBar, Section, Seg, useBusy, type SegOption } from "../components";
 import { humanize } from "../format";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import type { EditorProps } from "../registry";
 import type { Req } from "../requests";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { COLLECTION_INFO, deleteItem, go, ItemHeader, NewItem, newItemName, PART_INFO } from "./chrome";
 import { AddPicker, CheckField, Chip, FormGroup, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "./form-kit";
 import { useHeld } from "./held";

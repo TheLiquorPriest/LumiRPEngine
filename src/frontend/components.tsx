@@ -13,10 +13,10 @@ import type { OutcomeOdds } from "../shared/state-view";
 import { diffCounts, diffRows, lineDiff } from "../shared/text-diff";
 import { useApp, useUi } from "./app";
 import { formatOdds } from "./format";
-import type { IconName } from "./icons";
-import { Icon } from "./icons";
+import type { IconName } from "../ui/icons";
+import { Icon } from "../ui/icons";
 import { isMobile } from "./layout";
-import { useSelect } from "./store";
+import { useSelect } from "../ui/store";
 
 export interface SegOption<T extends string | number> {
   value: T;

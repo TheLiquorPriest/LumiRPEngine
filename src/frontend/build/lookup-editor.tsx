@@ -11,7 +11,7 @@ import { addToLoreIndex, loreIndexJson, loreTerm, termSuggestions, topicIdOf, to
 import type { LintIssue } from "../../shared/protocol";
 import type { LoreIndex, WorldDoc } from "../../shared/world";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, PageHeader, SaveBar, Seg, useBusy } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import type { RefOption } from "./form-kit";
 import { AddPicker, Chip, FormGroup, Issues, ItemRow, RefPicker } from "./form-kit";
 import { useHeld } from "./held";

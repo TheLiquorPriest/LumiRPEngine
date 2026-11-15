@@ -33,10 +33,10 @@ import { DEFAULT_CURRENCY, playedKinds, type WorldDoc } from "../../shared/world
 import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, Field, List, ListRow, PageHeader, SaveBar, Section, Seg, useBusy } from "../components";
 import { humanize } from "../format";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { MoneyInput } from "../money-input";
 import type { EditorProps } from "../registry";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { delegationDraft, delegationProblem, positionDraft, positionProblem, positionRecord, type DelegationDraft, type PositionDraft } from "../../packs/orgs/ui/edit";
 import { DelegationFields, PositionFields } from "../../packs/orgs/ui/rules";
 import { limitWords, powersText } from "../../packs/orgs/ui/words";

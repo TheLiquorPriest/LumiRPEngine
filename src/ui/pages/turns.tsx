@@ -9,7 +9,7 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useSelect } from "../../frontend/store";
+import { useSelect } from "../store";
 import { isRecord } from "../../shared/json";
 import type { SettleAnswer, TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../api";
 import { useApp, useNow } from "../app";

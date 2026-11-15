@@ -11,7 +11,7 @@ import { NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsSettingsOf, type NeedId, type
 import { useApp } from "../app";
 import { Button, NumberStepper, PageHeader, SaveBar, Seg, useBusy } from "../components";
 import { formatMinutes } from "../format";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { PART_INFO } from "./chrome";
 import { draftSend } from "./draft";
 import { FormGroup, Issues } from "./form-kit";

@@ -7,7 +7,7 @@ import type { JsonObject } from "../../shared/json";
 import { isItemKind, itemObjective, itemObjectiveLabel, revealScaffold, type ItemCheck } from "../../shared/items-build";
 import { playedKinds, type KindDef, type WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { Button, Seg } from "../components";
 import { CheckField, FormGroup, RefPicker, type RefOption } from "./form-kit";
 import { TextInput } from "./schema-form";

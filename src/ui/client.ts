@@ -8,7 +8,7 @@
 // page, and takes the relay when none answers, keeping why, so the page can say which road it is on and
 // why.
 
-import { createStore, type Readable } from "../frontend/store";
+import { createStore, type Readable } from "./store";
 import { type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent } from "../shared/api";
 import { isRecord } from "../shared/json";
 import { type MissingPermission, type RouteKey, SESSION_PATH } from "./api";

@@ -16,9 +16,9 @@ import type { WorldDoc } from "../../shared/world";
 import { EFFECT_ONLY_FUNCTIONS } from "../../shared/world";
 import { useApp } from "../app";
 import { Button, IconButton, IdText } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { isMobile } from "../layout";
-import { useSelect } from "../store";
+import { useSelect } from "../../ui/store";
 import { Chip, FormSheet, Issues } from "./form-kit";
 
 /** The word operators: they go in with a space either side. */

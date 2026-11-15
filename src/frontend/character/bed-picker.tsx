@@ -8,7 +8,7 @@ import { useId, useMemo, useState } from "preact/hooks";
 import type { CharacterBed, CharacterDTO, PlaceRef, ThingRef } from "../../shared/character";
 import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, List, ListRow, Section } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 import { PlaceBadge, PlacePath, PlaceSheet } from "./place-picker";
 import { bedOf, bedOptions, isBed, pathLabel, SEARCH_LIMIT, searchThings, type BedOption } from "./places";
 

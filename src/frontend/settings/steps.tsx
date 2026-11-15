@@ -29,7 +29,7 @@ import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Disclosure, Empty, Field, HostModelPicker, HostSwitch, List, ListRow, NumberStepper, Section, Seg } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 
 const PRESETS: { value: ModelUsePresetId; label: string }[] = [
   { value: "lean", label: "Lean" },

@@ -8,7 +8,7 @@ import type { ComponentChildren } from "preact";
 import type { PanelId, EntityId } from "../../../shared/ids";
 import { Empty, PageHeader, Stat } from "../../../frontend/components";
 import { GmPage } from "../../../frontend/gm/ui";
-import type { IconName } from "../../../frontend/icons";
+import type { IconName } from "../../../ui/icons";
 import type { SectionProps } from "./hub";
 
 /** Where a page sits: a segment's own page (every alert, the credit report), one thing in it, or an action's form. */

@@ -11,7 +11,7 @@ import { useApp } from "./app";
 import type { App } from "./app";
 import { serverLine, setupSection } from "./agents-view";
 import { Banner, Button, Empty, List, ListRow, Section } from "./components";
-import { useSelect } from "./store";
+import { useSelect } from "../ui/store";
 
 function copy(app: App, text: string): void {
   void navigator.clipboard.writeText(text).then(

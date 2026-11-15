@@ -23,7 +23,7 @@ import { SelectorEditor } from "../../../frontend/build/selector-editor";
 import { Badge, Banner, Button, Disclosure, Field, IconButton, IdText, SaveBar, Section, Seg, useBusy } from "../../../frontend/components";
 import { isMobile } from "../../../frontend/layout";
 import type { EditorProps } from "../../../frontend/registry";
-import { useSelect } from "../../../frontend/store";
+import { useSelect } from "../../../ui/store";
 import { objectiveFrom, objectiveParts, type ObjectiveParts } from "./objectives";
 
 export interface TrackNode {

@@ -11,7 +11,7 @@
 import type { ChatId, EntityId } from "../../../shared/ids";
 import type { PaletteEntry } from "../../../shared/state-view";
 import { Button, IdText } from "../../../frontend/components";
-import { Icon, type IconName } from "../../../frontend/icons";
+import { Icon, type IconName } from "../../../ui/icons";
 import type { Req } from "../../../frontend/requests";
 import type { GearItem, GearView } from "../core/view";
 import { AS_LABEL } from "./belongings";

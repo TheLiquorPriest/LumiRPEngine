@@ -14,7 +14,7 @@ import type { PromptVar } from "../../shared/prompts";
 import { placeholder } from "../../shared/prompts";
 import type { StepPurpose, StepTemplateDef } from "../../shared/world";
 import { Badge, Button, Disclosure, TextDiff } from "../components";
-import { Icon } from "../icons";
+import { Icon } from "../../ui/icons";
 
 /** Which step's placeholders: a purpose, or the skip plan. */
 export type VarsKey = StepPurpose | "skip_plan";
