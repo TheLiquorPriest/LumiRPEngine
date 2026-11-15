@@ -6,7 +6,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { check } from "../../../scripts/proof/route/check";
+import { check, wordFaults } from "../../../scripts/proof/route/check";
+import type { Mark } from "../../../scripts/proof/route/form";
 import { LIST } from "../../../scripts/proof/route/list";
 
 const RUN = resolve(import.meta.dir, "../../../scripts/proof/run.ts");
@@ -85,6 +86,14 @@ beforeAll(() => {
       parts: `[{ id: "range", words: "The briefing gives the range", mark: "code", on: [{ page: "Turn", check: sees }] }, { id: "records", words: "the Author records what matters", mark: "code", on: [{ page: "Story", check: sees }] }]`,
     }),
   );
+  // Gate ids: a number reads as a scenario's; a "/" cannot name a folder.
+  mkdirSync(join(root, "numbered"));
+  writeFileSync(join(root, "numbered/gate.ts"), `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: "38", waves: [1], parts: [{ id: "report", words: "the report", mark: "code", on: [{ page: "terminal", check: async () => ({ found: true as const, shows: ["report"] }) }] }], fixtures: [], bed: [], live: async () => {} });\n`);
+  mkdirSync(join(root, "phase0"));
+  writeFileSync(join(root, "phase0/gate.ts"), `import { gate } from ${JSON.stringify(FORM)};\nexport default gate({ id: "phase0/0.2-tags", waves: [0], parts: [{ id: "tags", words: "the tags kept", mark: "as shipped", measured: "turns whose tags were kept", wants: { hits: 28, of: 30 } }], fixtures: [], bed: [], live: async () => {} });\n`);
+  // What keeps the folder in git, and what a Mac leaves in it, are not scripts.
+  writeFileSync(join(root, "scenarios/.gitkeep"), "");
+  writeFileSync(join(root, "scenarios/.DS_Store"), "\u0000\u0001");
   all = mkdtempSync(join(tmpdir(), "proof-all-"));
   mkdirSync(join(all, "scenarios"));
   for (const row of LIST) {
@@ -151,4 +160,77 @@ test("a file whose wave or words differ from the list is a fault, as is a clause
   expect(text).toContain(`scenarios/17-preset-changes.ts: no part carries the plan's words "Nothing is blocked"`);
   expect(text).toContain(`scenarios/26-other-connection.ts: part records is marked "code", and the plan's row puts "the Author records what matters" under "as shipped"`);
   expect(text).not.toContain("scenarios/26-other-connection.ts: part range");
+});
+
+test("a gate's id is a name: one that is a number, or holds a \"/\", is refused, saying why", () => {
+  const { text } = runCheck();
+  expect(text).toContain("numbered/gate.ts: its id 38 has no letter, so it would read as a scenario's number: a gate's id is a name with a letter in it");
+  expect(text).toContain(`phase0/gate.ts: its id phase0/0.2-tags holds a "/": a gate's id names its folder in the bundle, so it is letters, digits, dots and hyphens (write it phase0-0.2-tags)`);
+});
+
+test("what keeps the scenarios folder in git, and a hidden file, are not read as scripts", () => {
+  const { text } = runCheck();
+  expect(text).not.toContain(".gitkeep");
+  expect(text).not.toContain(".DS_Store");
+});
+
+/** The faults of one row's parts, each part given as its words and its mark. */
+function marks(number: number, parts: [string, Mark][]): string[] {
+  const row = LIST.find((r) => r.number === number);
+  if (!row) throw new Error(`no row ${number}`);
+  return wordFaults(
+    row,
+    parts.map(([words, mark], i) => ({ id: `p${i + 1}`, words, mark })),
+  );
+}
+
+test("every clause an \"As shipped:\" opens is held to that mark, not only the first; row 62's means of code are left to the writer", () => {
+  const under = (id: string, words: string) => `part ${id} is marked "code", and the plan's row puts "${words}" under "as shipped"`;
+  expect(
+    marks(7, [
+      ["One reply", "code"],
+      ["the scene sheet lists the moments", "as shipped"],
+      ["the first has a perception for each", "code"],
+      ["the second's perception of the missed moment is none or told", "code"],
+      ["its memories and knowledge lack what happened", "code"],
+      ["asked next turn, it does not know", "code"],
+    ]),
+  ).toEqual([under("p3", "the first has a perception for each"), under("p4", "the second's perception of the missed moment is none or told"), under("p5", "its memories and knowledge lack what happened"), under("p6", "asked next turn, it does not know")]);
+  expect(
+    marks(13, [
+      ["the gap check and its empty result are in `queries/`", "as shipped"],
+      ["the Author's consent with bounds is on the Turn page", "code"],
+      ["the person is on the World page with source invented", "code"],
+    ]),
+  ).toEqual([under("p2", "the Author's consent with bounds is on the Turn page"), under("p3", "the person is on the World page with source invented")]);
+  expect(
+    marks(60, [
+      ["the Author asks the GM to set the map", "as shipped"],
+      ["the GM's `map_lay` and `map_place` are in the live view", "code"],
+      ["the world state and the map panel show a room grid with everyone and everything on squares, marked assumed", "code"],
+    ]),
+  ).toEqual([under("p2", "the GM's `map_lay` and `map_place` are in the live view"), under("p3", "the world state and the map panel show a room grid with everyone and everything on squares, marked assumed")]);
+  // Row 62: the grid's owner, its time step and the press that keeps it are code (plan l.964, l.1020).
+  expect(
+    marks(62, [
+      ["the GM lays a grid of 5 ft squares for it", "code"],
+      ["it shows on the Places page as belonging to the chat", "code"],
+      ["five rounds of the fight move the clock by seconds, not minutes", "code"],
+      ['"keep in the world" copies it into the world\'s draft', "code"],
+    ]),
+  ).toEqual([under("p1", "the GM lays a grid of 5 ft squares for it")]);
+  // "as shipped," holds its own clause; the next sentence or clause is the writer's to mark.
+  expect(
+    marks(1, [
+      ["The GM's session shows the list of what the time brought due", "code"],
+      ["each item's outcome is recorded", "code"],
+      ["the World page shows them", "code"],
+    ]),
+  ).toEqual([under("p2", "each item's outcome is recorded")]);
+  expect(
+    marks(12, [
+      ["its session shows the search and cites the entry", "as shipped"],
+      ["No question to the Author", "code"],
+    ]),
+  ).toEqual([]);
 });

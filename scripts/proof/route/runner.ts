@@ -1,6 +1,15 @@
 // Playing proof scripts (PlanScenarios-1 item 6): the forms asked are played one after another on a
 // host, each play on its own footing, every part looked for through its shared checks and every look
-// kept in the run's bundle; then the report is written from the bundle alone.
+// kept in the run's bundle; then the report is written from the bundle alone, whatever happened to
+// the host or the lock on the way out.
+//
+// What is played is what `run.ts check` passes, and nothing else. A script the check faults (a part of
+// its row no part carries, a wave or line that is not the list's, a fixture missing, a gate that does
+// not load) is refused by its fault and named as not played; one number with two files plays neither;
+// a gate is asked by its own id, never by a scenario's number. An id asked twice, or placed twice in
+// the round's order, refuses the run before anything plays: each id is played once in a run, so no
+// play's result can stand behind another's. A wave run, `--all` and the round ask every gate that
+// belongs to them, a faulty one included, so none drops out of the report.
 //
 // A live run is never started without PlanScenarios-5's cheap gate and the bed's lock: the lock is
 // taken before the run's first step (before the bed's host is opened) and given back after its last,
@@ -8,17 +17,17 @@
 // here waits a fixed time: the host's own waits are on what shows.
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
-import { findForms, fixturesDir, type Found } from "./check";
+import { check, fixturesDir, type Found } from "./check";
 import { Bundle, factFaults, lookAt, readBundle, runRecord, widthsOf } from "./evidence";
-import { formId, isMeasured, pageSlug, scenarioId, type Form, type GatePart, type Play, type ProofForm } from "./form";
-import type { Host, HostOptions, Kept, LiveGuard, Mode, RoundStage, Session } from "./host";
-import { LIST } from "./list";
-import { reportOf } from "./report";
-import { formResult, outcomeOf, type FormRecord, type Glance, type Instance, type PartRecord } from "./results";
+import { isMeasured, pageSlug, scenarioId, type Form, type GatePart, type Play, type ProofForm } from "./form";
+import type { Host, HostOptions, Kept, LiveGuard, Mode, RoundStage, RunFacts, Session } from "./host";
+import { LIST, listFaults } from "./list";
+import { exitCode, reportOf } from "./report";
+import { outcomeOf, type FormRecord, type Glance, type Instance, type PartRecord } from "./results";
 
-/** A run that may not go ahead, with why. */
+/** A run that may not go ahead, or that could not go on, with why. */
 export class RunRefused extends Error {}
 
 /** The runner's own settings (`scripts/proof/settings.json`). */
@@ -58,7 +67,7 @@ export interface RunOptions {
 export interface RunDone {
   dir: string;
   report: string;
-  /** 0 when everything played passed (or is a rate alone), nothing asked was refused, and the evidence has no fault. */
+  /** 0 when everything asked was played and passed or measured as a rate, and the evidence holds no fault (`exitCode`). */
   code: number;
 }
 
@@ -69,24 +78,51 @@ export function normalId(word: string): string {
   return /^\d{1,2}$/.test(word) ? scenarioId(Number(word)) : word;
 }
 
+/** Every script as `run.ts check` finds and faults it; refused outright when the list of the 68 itself is damaged. */
+async function checked(root: string): Promise<Found[]> {
+  const damaged = listFaults(LIST);
+  if (damaged.length > 0) throw new RunRefused(`the list of the 68 is damaged, so no run can be held to it: ${damaged.map((f) => `${f.where}: ${f.what}`).join("; ")}`);
+  return (await check(root)).found;
+}
+
+/** The gates found, by the id each is asked by (its own, or its file when that cannot be read), in the order found. */
+function gateIds(found: Found[], keep: (f: Found) => boolean = () => true): string[] {
+  return [...new Set(found.filter((f) => f.kind === "gate" && keep(f)).map((f) => f.id))];
+}
+
 /** Plays what was asked, in the order asked, and writes its bundle and report. */
 export async function play(options: RunOptions, selection: Selection): Promise<RunDone> {
-  const found = await findForms(options.root);
-  const playable = found.filter((f): f is Found & { form: ProofForm } => f.form !== null && f.faults.length === 0);
-  const gates = playable.filter((f) => f.form.kind === "gate" && ("all" in selection || ("wave" in selection && f.form.waves.includes(selection.wave))));
-  const asked = "ids" in selection ? selection.ids.map(normalId) : [...LIST.filter((row) => "all" in selection || row.wave === selection.wave).map((row) => scenarioId(row.number)), ...gates.map((f) => formId(f.form))];
+  const found = await checked(options.root);
+  let asked: string[];
+  if ("ids" in selection) {
+    asked = selection.ids.map(normalId);
+    const twice = asked.find((id, i) => asked.indexOf(id) !== i);
+    if (twice !== undefined) throw new RunRefused(`${twice} is asked twice: each id is played once in a run, so ask it once`);
+  } else {
+    // A gate whose waves cannot be read may be this wave's: it is asked, and named as faulty, rather than left out.
+    const inWave = (f: Found) => "all" in selection || f.waves === null || f.waves.includes(selection.wave);
+    asked = [...LIST.filter((row) => "all" in selection || row.wave === selection.wave).map((row) => scenarioId(row.number)), ...gateIds(found, inWave)];
+  }
   return run(options, found, asked, async (_host, playIds) => playIds(asked));
 }
 
 /** The formal round: every scenario and every gate, live, in the round's order, the bed restored from its golden copy where a stage says so. */
 export async function round(options: RunOptions, order: RoundStage[]): Promise<RunDone> {
-  const found = await findForms(options.root);
-  const gates = found.filter((f) => f.kind === "gate" && f.form !== null && f.faults.length === 0);
-  const known = [...LIST.map((row) => scenarioId(row.number)), ...gates.flatMap((f) => (f.form ? [formId(f.form)] : []))];
+  const found = await checked(options.root);
   const placed = order.flatMap((stage) => stage.ids.map(normalId));
+  const twice = placed.find((id, i) => placed.indexOf(id) !== i);
+  if (twice !== undefined) {
+    const stages = order.filter((stage) => stage.ids.map(normalId).includes(twice)).map((stage) => `"${stage.name}"`);
+    throw new RunRefused(`the round's order places ${twice} twice (${stages.join(", ")}): each id is played once in a run`);
+  }
+  const known = [...LIST.map((row) => scenarioId(row.number)), ...gateIds(found)];
   const asked = [...placed, ...known.filter((id) => !placed.includes(id))];
   return run(options, found, asked, async (host, playIds, unplayed) => {
-    for (const id of known) if (!placed.includes(id)) unplayed.push({ id, why: "the round's order does not place it" });
+    for (const id of known) {
+      if (placed.includes(id)) continue;
+      const refused = refusal(found, id);
+      unplayed.push({ id, why: refused === null ? "the round's order does not place it" : `the round's order does not place it, and ${refused}` });
+    }
     for (const stage of order) {
       if (stage.restoreGolden) {
         if (!("restoreGolden" in host) || typeof host.restoreGolden !== "function") throw new RunRefused(`the round's stage "${stage.name}" restores the bed from its golden copy, and the bed's host cannot`);
@@ -101,10 +137,11 @@ type Player = (host: Host, playIds: (ids: string[]) => Promise<void>, unplayed: 
 
 async function run(options: RunOptions, found: Found[], asked: string[], playAll: Player): Promise<RunDone> {
   const now = options.now ?? (() => new Date());
+  const ground = options.mode === "rig" ? "the rig" : "the bed's host";
   const bundle = Bundle.open(options.out, options.mode, now());
   let release: (() => Promise<void>) | null = null;
-  let broke: unknown = null;
-  let started = false;
+  let host: Host | null = null;
+  let facts: RunFacts;
   try {
     if (options.mode === "live") {
       if (!options.guard) throw new RunRefused("no live run starts without the cheap gate and the bed's lock (PlanScenarios-5, scripts/proof/gate/guard.ts)");
@@ -112,73 +149,101 @@ async function run(options: RunOptions, found: Found[], asked: string[], playAll
       if (lock.held) throw new RunRefused(`the bed is taken by ${lock.by}: one run at a time`);
       release = lock.release;
     }
-    const ground = options.mode === "rig" ? "the rig" : "the bed's host";
-    const host = await options.openHost({ root: options.root, run: bundle.run }).catch((error: unknown) => {
+    host = await options.openHost({ root: options.root, run: bundle.run }).catch((error: unknown) => {
       throw new RunRefused(`${ground} could not be opened: ${message(error)}`);
     });
-    try {
-      const facts = await host.facts().catch((error: unknown) => {
-        throw new RunRefused(`${ground} could not say what the run stands on: ${message(error)}`);
-      });
-      const missing = factFaults(facts);
-      if (missing.length > 0) throw new RunRefused(`${ground} does not report ${missing.join("; ")}, so the run would prove nothing`);
-      if (options.guard && options.mode === "live") {
-        const admitted = await options.guard.admit(facts);
-        if (!admitted.ok) throw new RunRefused(`the cheap gate does not admit this build: ${admitted.why}`);
-      }
-      const unplayed: Unplayed = [];
-      const known = {
-        scenarios: found.flatMap((f) => (f.form?.kind === "scenario" && f.faults.length === 0 ? [formId(f.form)] : [])),
-        gates: found.flatMap((f) => (f.form?.kind === "gate" && f.faults.length === 0 ? [formId(f.form)] : [])),
-      };
-      const record = runRecord(facts, { run: bundle.run, mode: options.mode, by: options.by, started: now().toISOString(), ended: null, asked, unplayed, known, repeats: options.repeats });
-      bundle.writeRun(record);
-      started = true;
-      const played = new Set<string>();
-      try {
-        await playAll(
-          host,
-          async (ids) => {
-            for (const id of ids) {
-              const why = await playOne(options, bundle, host, found, id);
-              if (why === null) played.add(id);
-              else if (!unplayed.some((u) => u.id === id)) unplayed.push({ id, why });
-            }
-          },
-          unplayed,
-        );
-        bundle.writeRun({ ...record, ended: now().toISOString(), unplayed });
-      } catch (error) {
-        // A run that breaks off keeps what it played, says why the rest was not, and is reported all the same.
-        broke = error;
-        for (const id of asked) if (!played.has(id) && !unplayed.some((u) => u.id === id)) unplayed.push({ id, why: `the run broke off: ${message(error)}` });
-        bundle.writeRun({ ...record, unplayed });
-      }
-    } finally {
-      await host.close();
+    const opened = host;
+    facts = await opened.facts().catch((error: unknown) => {
+      throw new RunRefused(`${ground} could not say what the run stands on: ${message(error)}`);
+    });
+    const missing = factFaults(facts);
+    if (missing.length > 0) throw new RunRefused(`${ground} does not report ${missing.join("; ")}, so the run would prove nothing`);
+    if (options.guard && options.mode === "live") {
+      const admitted = await options.guard.admit(facts);
+      if (!admitted.ok) throw new RunRefused(`the cheap gate does not admit this build: ${admitted.why}`);
     }
   } catch (error) {
-    if (!started) rmSync(bundle.dir, { recursive: true, force: true });
+    // Refused before it started: no bundle is left, the host is put away and the lock given back.
+    const also: string[] = [];
+    if (host) await host.close().catch((e: unknown) => void also.push(`${ground} could not be closed: ${message(e)}`));
+    if (release) await release().catch((e: unknown) => void also.push(`the bed's lock could not be given back: ${message(e)}`));
+    rmSync(bundle.dir, { recursive: true, force: true });
+    if (also.length > 0) throw new RunRefused(`${message(error)}; and ${also.join("; ")}`);
     throw error;
-  } finally {
-    await release?.();
   }
+  const unplayed: Unplayed = [];
+  const faults: string[] = [];
+  const known = { scenarios: [...new Set(found.filter((f) => f.kind === "scenario" && /^\d{2}$/.test(f.id)).map((f) => f.id))], gates: gateIds(found) };
+  const record = runRecord(facts, { run: bundle.run, mode: options.mode, by: options.by, started: now().toISOString(), ended: null, asked, unplayed, known, repeats: options.repeats, faults });
+  bundle.writeRun(record);
+  const played = new Set<string>();
+  let broke: unknown = null;
+  try {
+    await playAll(
+      host,
+      async (ids) => {
+        for (const id of ids) {
+          const why = await playOne(options, bundle, host, found, id);
+          if (why === null) played.add(id);
+          else if (!unplayed.some((u) => u.id === id)) unplayed.push({ id, why });
+        }
+      },
+      unplayed,
+    );
+  } catch (error) {
+    // A run that breaks off keeps what it played, says why the rest was not, and is reported all the same.
+    broke = error;
+    for (const id of asked) if (!played.has(id) && !unplayed.some((u) => u.id === id)) unplayed.push({ id, why: `the run broke off: ${message(error)}` });
+  }
+  // Putting the host away and giving the lock back can fail too: the run says so, and its report is written.
+  await host.close().catch((error: unknown) => void faults.push(`${ground} could not be closed after the run: ${message(error)}`));
+  if (release) await release().catch((error: unknown) => void faults.push(`the bed's lock could not be given back after the run: ${message(error)}`));
+  bundle.writeRun({ ...record, ended: broke === null ? now().toISOString() : null, unplayed, faults });
   const read = readBundle(bundle.dir);
   const report = reportOf(read);
   writeFileSync(join(bundle.dir, "report.md"), report);
+  if (broke instanceof RunRefused) throw new RunRefused(`${broke.message} (what was played, and the report, are in ${bundle.dir})`);
   if (broke !== null) throw broke;
-  const refused = read.run.unplayed.some((u) => u.why.startsWith("its file is refused"));
-  const bad = read.forms.some((f) => f.faults.length > 0 || f.record === null || formResult(f.record) === "failed" || formResult(f.record) === "not seen");
-  return { dir: bundle.dir, report, code: refused || bad || read.faults.length > 0 ? 1 : 0 };
+  return { dir: bundle.dir, report, code: exitCode(read) };
+}
+
+/** The files the runner would play for an id: a scenario's by its number, a gate's by its id (or its file, when its id cannot be read). */
+function filesOf(found: Found[], id: string): Found[] {
+  const scenario = /^\d{2}$/.test(id);
+  return found.filter((f) => (scenario ? f.kind === "scenario" : f.kind === "gate") && f.id === id);
+}
+
+/** Why the runner will not play an id, in plain words; null when it will. */
+function refusal(found: Found[], id: string): string | null {
+  const files = filesOf(found, id);
+  if (files.length === 0) {
+    if (/^\d{2}$/.test(id)) return LIST.some((row) => scenarioId(row.number) === id) ? "no file plays it" : "it is not one of the 68";
+    const unloaded = found.filter((f) => f.kind === "gate" && !f.loaded);
+    const own = unloaded.find((f) => basename(dirname(f.file)) === id);
+    if (own) return `it is a gate that does not load: ${own.file}: ${loadError(own)}`;
+    const unread = found.filter((f) => f.kind === "gate" && f.id === f.file);
+    if (unread.length > 0) return `no gate that can be read has this id, and the ids of these cannot be read: ${unread.map((f) => `${f.file} (${f.faults.join("; ")})`).join(", ")}`;
+    return "no script has this id";
+  }
+  if (files.length > 1) return `${files.length} ${/^\d{2}$/.test(id) ? "files play it" : "gates have this id"}, so ${files.length === 2 ? "neither" : "none"} is played: ${files.map((f) => f.file).join(", ")}`;
+  const [file] = files;
+  if (!file) return "no script has this id";
+  if (file.kind === "gate" && !file.loaded) return `it is a gate that does not load, so its id and waves cannot be read: ${file.file}: ${loadError(file)}`;
+  if (file.faults.length > 0 || !file.form) return `its script ${file.file} is refused: ${file.faults.join("; ")}`;
+  return null;
+}
+
+function loadError(file: Found): string {
+  return (file.faults[0] ?? "").replace(/^it does not load: /, "");
 }
 
 /** Plays one form as many times as its mode asks; returns why it was not played, or null. */
 async function playOne(options: RunOptions, bundle: Bundle, host: Host, found: Found[], id: string): Promise<string | null> {
-  const files = found.filter((f) => (f.form ? formId(f.form) === id : f.file.startsWith(`scenarios/${id}-`)));
-  if (files.length === 0) return /^\d{2}$/.test(id) ? (LIST.some((row) => scenarioId(row.number) === id) ? "no file plays it" : "it is not one of the 68") : "no script has this id";
-  const file = files.find((f) => f.form !== null && f.faults.length === 0);
-  if (!file?.form) return `its file is refused: ${files.flatMap((f) => f.faults).join("; ")}`;
-  const form = file.form;
+  const refused = refusal(found, id);
+  if (refused !== null) return refused;
+  const file = filesOf(found, id)[0];
+  const form = file?.form;
+  if (!file || !form) return "no script has this id";
   const fn: Form | undefined = options.mode === "rig" ? form.rig : form.live;
   if (!fn) return "the rig cannot play it: it has no rig form";
   const parts: GatePart[] = form.parts;
@@ -238,13 +303,13 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, file: Fo
           looked.get(partId)?.add(pageSlug(sighting.page));
           for (const width of widthsOf(sighting.page)) glances.push(await lookAt(browser, sighting, width, (shot) => bundle.saveScreen(id, n, shot.page, partId, shot)));
         }
-        add(partId, { ...outcomeOf(glances, part.mark, options.mode), glances });
+        add(partId, { ...outcomeOf(glances, part.mark, options.mode), page: null, glances });
       },
       async judge(partId, verdict) {
         const part = form.parts.find((p) => p.id === partId);
         if (!part || !isMeasured(part)) throw new Error(`the form judged ${partId}, which is not one of its measured parts`);
         looked.get(partId)?.add("");
-        add(partId, { outcome: verdict.pass ? "met" : "unmet", why: verdict.what, glances: [] });
+        add(partId, { outcome: verdict.pass ? "met" : "unmet", why: verdict.what, page: null, glances: [] });
       },
     };
     try {
@@ -259,13 +324,15 @@ async function onePlay(options: RunOptions, bundle: Bundle, host: Host, file: Fo
     }
   }
   if (stopped) record.stops.push({ play: n, why: stopped });
-  // What the play never looked for is not seen; where the play stopped first, the stop broke it.
+  // What the play never looked for is not seen; where the play stopped first, the stop broke it. Each is kept with the page it was owed on.
   for (const part of form.parts) {
     const done = looked.get(part.id) ?? new Set<string>();
-    const owed = isMeasured(part) ? (done.has("") ? [] : ["judged"]) : part.on.map((s) => s.page).filter((page) => !done.has(pageSlug(page)));
-    for (const page of owed) {
-      const what = page === "judged" ? "it was judged" : `it was looked for on the ${page} page`;
-      add(part.id, stopped ? { outcome: "broken", why: `${stopped}, before ${what}`, glances: [] } : { outcome: "unlooked", why: page === "judged" ? "its form never judged it" : `its form never looked for it on the ${page} page`, glances: [] });
+    if (isMeasured(part)) {
+      if (!done.has("")) add(part.id, stopped ? { outcome: "broken", why: `${stopped}, before it was judged`, page: null, glances: [] } : { outcome: "unlooked", why: "its form never judged it", page: null, glances: [] });
+      continue;
+    }
+    for (const page of part.on.map((s) => s.page).filter((p) => !done.has(pageSlug(p)))) {
+      add(part.id, stopped ? { outcome: "broken", why: `${stopped}, before it was looked for on the ${page} page`, page, glances: [] } : { outcome: "unlooked", why: `its form never looked for it on the ${page} page`, page, glances: [] });
     }
   }
 }

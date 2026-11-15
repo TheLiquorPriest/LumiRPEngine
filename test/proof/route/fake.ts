@@ -1,7 +1,8 @@
 // A host made up for the route's tests: pages held as text, a browser that reads them as the real
 // drivers do (a page or a control that is not there is an error naming it), and invented facts of a
 // run. Nothing here stands for Lumiverse; it stands for a host, so the runner can be shown playing,
-// saving screens and refusing without a rig or a bed.
+// saving screens and refusing without a rig or a bed. Its screens keep the host's contract
+// (`host.ts`, `Shot`): a screen's text is what the saved image shows, never what lies below the fold.
 
 import type { Browser, Control, Host, PlayStart, RunFacts, Session, Shot, Shown } from "../../../scripts/proof/route/host";
 
@@ -16,6 +17,8 @@ export interface FakeOptions {
   blank?: boolean;
   /** Every screen is saved this wide, whatever width the page was opened at. */
   width?: number;
+  /** Text a page holds below the fold: a check that reads the page finds it, and no screen shows it. */
+  fold?: Record<string, string>;
 }
 
 export class FakeBrowser implements Browser {
@@ -24,9 +27,16 @@ export class FakeBrowser implements Browser {
 
   constructor(private readonly options: FakeOptions) {}
 
+  /** What the window shows of the open page. */
   private text(): string {
     if (this.page === null) throw new Error("no page is open");
     return this.options.pages[this.page] ?? "";
+  }
+
+  /** The whole of the open page, what is below the fold included. */
+  private whole(): string {
+    const below = this.page === null ? undefined : this.options.fold?.[this.page];
+    return below === undefined ? this.text() : `${this.text()}\n${below}`;
   }
 
   async open(page: string, width?: number): Promise<void> {
@@ -37,7 +47,7 @@ export class FakeBrowser implements Browser {
 
   async find(control: Control): Promise<void> {
     const name = control.label ?? control.role ?? "";
-    if (!this.text().includes(name)) throw new Error(`no control labelled ${name}`);
+    if (!this.whole().includes(name)) throw new Error(`no control labelled ${name}`);
   }
 
   async press(control: Control): Promise<void> {
@@ -50,11 +60,11 @@ export class FakeBrowser implements Browser {
 
   async waitFor(shown: Shown): Promise<void> {
     const what = "text" in shown ? shown.text : (shown.control.label ?? shown.control.role ?? "");
-    if (!this.text().includes(what)) throw new Error(`never showed: ${what}`);
+    if (!this.whole().includes(what)) throw new Error(`never showed: ${what}`);
   }
 
   async read(): Promise<string> {
-    return this.text();
+    return this.whole();
   }
 
   async screen(): Promise<Shot> {

@@ -18,16 +18,26 @@ export interface Control {
 /** What a wait waits for: a text or a control to show. */
 export type Shown = { text: string } | { control: Control };
 
-/** What a page showed at one moment, as the browser saved it. */
+/**
+ * What a page showed at one moment, as the browser saved it. Whether a screen shows a part is judged
+ * from this record alone (`evidence.ts`), so a host keeps it true to the saved image:
+ * - `text` is the text visible in the saved image, and nothing else. It is not the page's whole text,
+ *   not what lies below the fold or outside the window, and not text that is hidden, covered or
+ *   clipped. A driver that saves only the window reads only the window's visible text. One that saves
+ *   the whole page reads the whole page's visible text. An image that shows nothing has empty text.
+ * - `page` is the page as the saved image names itself (its heading, its tab, the drawer's title),
+ *   read from the page and never echoed from what was asked.
+ * - `width` is the width the page was laid out at when the image was saved.
+ */
 export interface Shot {
   image: Uint8Array;
   /** `txt` for a terminal: the command as typed and every line it printed. */
   format: "png" | "webp" | "txt";
-  /** The page as it names itself at that moment, read from the page and never echoed from what was asked. */
+  /** The page as the saved image names itself, never echoed from what was asked. */
   page: string;
   /** Pixels wide for a page; columns for a terminal. */
   width: number;
-  /** The text the page showed, and the names of the controls on it, at that moment. */
+  /** The text visible in the saved image, the names of the controls in it included, and nothing outside it. */
   text: string;
 }
 
@@ -44,8 +54,9 @@ export interface Browser {
   type(control: Control, text: string): Promise<void>;
   /** Resolves once it shows; rejects, naming what never showed, at the host's own limit. */
   waitFor(shown: Shown): Promise<void>;
-  /** A section's text, or the whole page's when no section is named. */
+  /** A section's text, or the whole page's when no section is named: what a check reads, which may hold more than one screen shows. */
   read(section?: string): Promise<string>;
+  /** Saves what the page shows now, with the text visible in that image (see `Shot`). */
   screen(): Promise<Shot>;
 }
 

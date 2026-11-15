@@ -15,12 +15,22 @@
 // checkpoint items are a gate kept with the scenarios: `scripts/proof/scenarios/w<n>-checkpoint.ts`,
 // id `w<n>`, played at wave n.
 //
+// A gate's id names it on the command line, in `run.json`, and as its folder in the bundle. So it is
+// letters, digits, dots and hyphens, beginning with a letter or a digit, with at least one letter:
+// never a "/" (a gate PlanGates names `phase0/0.2-tags` is written `phase0-0.2-tags`), and never a
+// number, since a number names one of the plan's scenarios. A part's id is lowercase words joined by
+// hyphens.
+//
 // "A part that depends on an agent following a shipped file is 'as shipped' even where the row does
 // not say so": the mark is the script writer's, and where the plan's row says "as shipped" the check
-// holds the clause that follows it to that mark (`check.ts`).
+// holds the clauses it governs to that mark (`check.ts`).
+//
+// A check reads its page as a person would and answers with the words on the page that show the part
+// (`shows`). An answer that says the part was seen and names no words, or an empty or blank text, is
+// refused when it comes, as a fault of the script: the look counts as one the code could not make.
 //
 // `run.ts check` loads every script to read its form, so a script does nothing when it is loaded:
-// everything it does is in its forms and its checks.
+// everything it does is in its forms and its checks. The runner never plays a script `check` faults.
 
 import { isRecord } from "../../../src/shared/json";
 import type { Browser, Kept, Mode } from "./host";
@@ -169,6 +179,15 @@ export function pageSlug(page: string): string {
 const PART_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const GATE_ID = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 
+/** Why a value cannot be a gate's id, in plain words; null when it can. */
+export function gateIdFault(id: unknown): string | null {
+  if (typeof id !== "string" || id === "") return "it has no id";
+  if (id.includes("/")) return `its id ${id} holds a "/": a gate's id names its folder in the bundle, so it is letters, digits, dots and hyphens (write it ${id.replaceAll("/", "-")})`;
+  if (!GATE_ID.test(id)) return `its id ${id} is not letters, digits, dots and hyphens`;
+  if (!/[A-Za-z]/.test(id)) return `its id ${id} has no letter, so it would read as a scenario's number: a gate's id is a name with a letter in it`;
+  return null;
+}
+
 /**
  * Why a module's default export is not a proof form the runner can play: each reason in plain words.
  * Empty when it is one. `kind` says what the file's place asks for.
@@ -183,7 +202,8 @@ export function refusals(value: unknown, kind: "scenario" | "gate"): string[] {
     else if (!isWhole(value.wave, 1, 4)) out.push("its wave is not one of §18.3's waves 1 to 4");
     if (!isWhole(value.line, 1, Number.MAX_SAFE_INTEGER)) out.push("it has no plan line");
   } else {
-    if (typeof value.id !== "string" || !GATE_ID.test(value.id)) out.push("it has no id of letters, digits, dots and hyphens");
+    const idFault = gateIdFault(value.id);
+    if (idFault) out.push(idFault);
     if (value.waves === undefined) out.push("it has no waves");
     else if (!Array.isArray(value.waves) || value.waves.length === 0 || !value.waves.every((w) => isWhole(w, 0, 5))) out.push("its waves are not a list of waves 0 to 5");
     else if (new Set(value.waves).size !== value.waves.length) out.push("its waves name a wave twice");

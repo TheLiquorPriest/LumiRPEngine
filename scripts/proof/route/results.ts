@@ -7,9 +7,14 @@
 // look for. An "as shipped" part played live is a rate over its instances: hits and misses, each miss
 // listed beside its own screens. A miss of guidance never fails a code part, and an instance the code
 // broke (a page that would not open, a play that stopped, a page that shows it at one width and not the
-// other) is never counted into a rate: it is listed apart as a code failure. In the rig the agent is
-// scripted to follow its file, so an "as shipped" part there proves the code path only and is judged
-// as code, never reported as a rate.
+// other) is never counted into a rate: it is listed apart, and it fails the form as the code failure it
+// is. In the rig the agent is scripted to follow its file, so an "as shipped" part there proves the
+// code path only and is judged as code, never reported as a rate.
+//
+// A scenario with an "as shipped" part played live is reported as a rate ("the result is reported as a
+// rate over repeated runs", §17.4 l.1806), beside the pass or fail of its code parts: never as "passed",
+// whatever its rate. A gate's "as shipped" part that carries the plan's share ("in at least 9 of 10")
+// stands or falls by it, as the gate's own pass column says.
 
 import type { Mark, Share } from "./form";
 import type { Mode } from "./host";
@@ -17,7 +22,7 @@ import type { Mode } from "./host";
 /** One look at one page at one width, as the runner made it. */
 export interface Glance {
   page: string;
-  /** Pixels for a page, columns for the terminal; null when the page could not be opened. */
+  /** Pixels for a page, columns for the terminal; null when neither was known. */
   width: number | null;
   /** True: the check saw it; false: it looked and it was not there; null: it could not look. */
   found: boolean | null;
@@ -27,9 +32,9 @@ export interface Glance {
   shows: string[];
   /** The screen saved, from the form's folder (`play-01/world-1440-four-values.png`); null when none was. */
   screen: string | null;
-  /** The page as it named itself when the screen was saved. */
+  /** The page as the saved image named itself. */
   shotPage: string | null;
-  /** The text the page showed when the screen was saved. */
+  /** The text visible in the saved image. */
   shotText: string | null;
   /** Why the screen does not show what the check saw; null when it does, or when nothing was seen. */
   unshown: string | null;
@@ -42,12 +47,18 @@ export interface Glance {
  */
 export type Outcome = "shown" | "absent" | "unseen" | "broken" | "unlooked" | "met" | "unmet";
 
+/** The outcomes the runner writes for a part that is seen, and for one that is measured: nothing else is a record of it. */
+export const SEEN_OUTCOMES: readonly Outcome[] = ["shown", "absent", "unseen", "broken", "unlooked"];
+export const MEASURED_OUTCOMES: readonly Outcome[] = ["met", "unmet", "broken", "unlooked"];
+
 export interface Instance {
   play: number;
-  /** The how-manyth look at the part in its play, from 1; 0 for a look that never happened. */
+  /** The how-manyth look at the part in its play, from 1. */
   at: number;
   outcome: Outcome;
   why: string;
+  /** For a look never made on a seen part (`unlooked`, or `broken` by a stop), the page it was owed on; null otherwise. */
+  page: string | null;
   glances: Glance[];
 }
 
@@ -109,8 +120,9 @@ export function judgedAsCode(mark: Mark, mode: Mode): boolean {
   return mark === "code" || mode === "rig";
 }
 
-/** What one look at a part came to, from its glances: every page it is seen on, at every width. */
+/** What one look at a part came to, from its glances: every page it was looked at on, at every width. */
 export function outcomeOf(glances: Glance[], mark: Mark, mode: Mode): { outcome: Outcome; why: string } {
+  if (glances.length === 0) return { outcome: "unlooked", why: "no look was made" };
   const blind = glances.find((g) => g.found === null);
   if (blind) return { outcome: "broken", why: `could not look on the ${place(blind)}: ${blind.what}` };
   const seen = glances.filter((g) => g.found === true);
@@ -149,21 +161,40 @@ export function verdictOf(part: PartRecord, mode: Mode): Verdict {
   return { kind: "rate", hits, judged, misses, apart: of("broken", "unseen", "unlooked"), meets, wants };
 }
 
-export type FormResult = "passed" | "failed" | "not seen" | "rates only";
-
 /**
- * A scenario's or gate's own result. It fails on a code part (or in the rig an "as shipped" part's
- * code path) that failed, on a play that stopped, and on any instance of a rate the code broke: kept
- * out of the rate, a code failure is still a failure. It is not seen where a part, or an instance of a
- * rate, was never seen on screen. With no code part and nothing broken it is its rates alone.
+ * A scenario's or gate's own result:
+ * - `failed`: a play stopped; a code part (or in the rig an "as shipped" part's code path) failed; an
+ *   instance of a rate was broken by the code (kept out of the rate, still a code failure); or a gate's
+ *   share was not met.
+ * - `not seen`: a code part, or an instance of a rate, was never seen on screen; or too few of a
+ *   gate's plays were judged to decide its share.
+ * - `measured`: nothing failed and everything was seen, and an "as shipped" part with no share was
+ *   played live: its result is its rate, shown with every miss.
+ * - `passed`: every code part passed, and every share asked was met.
  */
+export type FormResult = "passed" | "failed" | "not seen" | "measured";
+
 export function formResult(record: FormRecord): FormResult {
   const verdicts = record.parts.map((p) => verdictOf(p, record.mode));
   const code = verdicts.filter((v): v is CodeVerdict => v.kind === "code");
-  const apart = verdicts.flatMap((v) => (v.kind === "rate" ? v.apart : []));
-  if (record.stops.length > 0 || code.some((v) => v.result === "failed") || apart.some((i) => i.outcome === "broken")) return "failed";
-  if (code.some((v) => v.result !== "passed") || apart.length > 0) return "not seen";
-  return code.length === 0 ? "rates only" : "passed";
+  const rates = verdicts.filter((v): v is RateVerdict => v.kind === "rate");
+  const apart = rates.flatMap((v) => v.apart);
+  if (record.stops.length > 0 || code.some((v) => v.result === "failed") || apart.some((i) => i.outcome === "broken") || rates.some((v) => v.meets === false)) return "failed";
+  if (code.some((v) => v.result !== "passed") || apart.length > 0 || rates.some((v) => v.wants !== null && v.meets === null)) return "not seen";
+  return rates.some((v) => v.wants === null) ? "measured" : "passed";
+}
+
+/** A form's result in plain words: a rate is given with its counts, and with every play missed said so. */
+export function headline(record: FormRecord): string {
+  const result = formResult(record);
+  if (result !== "measured") return result;
+  const rated = record.parts.flatMap((part) => {
+    const verdict = verdictOf(part, record.mode);
+    return verdict.kind === "rate" && verdict.wants === null ? [{ part, verdict }] : [];
+  });
+  const counts = rated.map(({ part, verdict }) => `${rated.length > 1 ? `${part.id} ` : ""}${verdict.hits} of ${verdict.judged}${verdict.hits === 0 && verdict.judged > 0 ? ", every play missed" : ""}`);
+  const code = record.parts.some((p) => verdictOf(p, record.mode).kind === "code") ? "its code passed; " : "";
+  return `measured as a rate: ${code}as shipped ${counts.join("; ")}`;
 }
 
 /** The screens of an instance, as named in the bundle. */

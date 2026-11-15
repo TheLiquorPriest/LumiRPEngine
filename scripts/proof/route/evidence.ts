@@ -9,19 +9,26 @@
 // screen shows it, and `internal/` for route answers, rows and logs, marked as supporting evidence.
 //
 // A screen counts only when it shows what its check saw: the page it names was the page showing, it is
-// not blank, and the texts the check said show the part are in the page's text when it was saved. A
-// part whose check found what it looks for and has no such screen is "not seen", never "pass". Reading
-// a bundle back re-checks all of it against the files themselves, so a screen taken away, misnamed or
-// blank, or notes naming a screen the folder lacks, is a fault of the evidence and never a pass.
+// not blank, and the texts the check said show the part are in the text visible in the saved image
+// (the host's contract, `host.ts`). A part whose check found what it looks for and has no such screen
+// is "not seen", never "pass".
+//
+// Reading a bundle back trusts nothing the record says that the folder can contradict. Every look of
+// every part is held to the runner's own way of recording it: an outcome word it writes, a look on
+// every page of the part at every width, every play accounted for, screens that are in the folder and
+// show what was seen, a record that is the folder's own scenario or gate and carries its row's words,
+// notes that name the record's screens. Anything else is a fault of the evidence, and a fault of the
+// evidence fails the result it concerns: it is never a pass.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { SettingsReply } from "../../../src/ui/api";
-import { pageSlug, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
+import { wordFaults } from "./check";
+import { gateIdFault, pageSlug, scenarioId, TERMINAL, WIDTHS, type Seen, type Sighting } from "./form";
 import type { AgentFacts, Browser, Kept, Mode, RunFacts, Shot } from "./host";
 import { LIST } from "./list";
-import { describeVerdict, type FormRecord, type Glance, type Instance, type Outcome } from "./results";
+import { describeVerdict, formResult, MEASURED_OUTCOMES, outcomeOf, SEEN_OUTCOMES, type FormRecord, type FormResult, type Glance, type Instance, type Outcome, type PartRecord } from "./results";
 
 /** `run.json`: what a run stood on, who started it, when, and what it was asked. */
 export interface RunRecord {
@@ -31,14 +38,16 @@ export interface RunRecord {
   started: string;
   /** Null while the run goes on, and in a run that broke off before its end. */
   ended: string | null;
-  /** Scenario numbers as two digits and gate ids, as asked. */
+  /** Scenario numbers as two digits and gate ids, as asked; a gate whose id cannot be read, by its file. */
   asked: string[];
   /** What was asked and not played, and why. */
   unplayed: { id: string; why: string }[];
-  /** The scripts the runner found when the run began. */
+  /** The scripts the runner found when the run began: scenarios by number, gates by id, a gate whose id cannot be read by its file. */
   known: { scenarios: string[]; gates: string[] };
   /** How many plays an "as shipped" part gets live. */
   repeats: number;
+  /** What went wrong in the run itself, outside any form (the host or the lock could not be put away). A record that has none may leave it out. */
+  faults?: string[];
   rpe: { commit: string; dirty: boolean };
   rph: { commit: string; pin: string | null; pinned: boolean };
   lumiverse: { version: string };
@@ -156,10 +165,20 @@ export function factFaults(facts: unknown): string[] {
   return out;
 }
 
+const NAMED_NOTHING = "the check said it saw the part and named no words, or an empty text, as what shows it: a check names the words the page shows";
+
+/** Why a check's answer cannot be taken as a sighting; null when it can. */
+function answerFault(answer: unknown): string | null {
+  if (!isRecord(answer) || typeof answer.found !== "boolean") return "the check's answer is not a sighting: it says found, and the words that show it or what is missing";
+  if (answer.found && (!Array.isArray(answer.shows) || answer.shows.length === 0 || answer.shows.some((text) => typeof text !== "string" || text.trim() === ""))) return NAMED_NOTHING;
+  return null;
+}
+
 /**
  * One look at a part on one page at one width: open the page, run the part's check, save a screen of
- * what shows, and keep whether that screen shows what the check saw. Nothing here waits a fixed time;
- * the host's own waits are on what shows.
+ * what shows, and keep whether that screen shows what the check saw. A check that answers it saw the
+ * part and names no words, or an empty text, is refused as a fault of its script: the look is one the
+ * code could not make. Nothing here waits a fixed time; the host's own waits are on what shows.
  */
 export async function lookAt(browser: Browser, sighting: Sighting, width: number | undefined, save: (shot: Shot) => string): Promise<Glance> {
   const page = sighting.page;
@@ -168,7 +187,10 @@ export async function lookAt(browser: Browser, sighting: Sighting, width: number
   try {
     await browser.open(page, width);
     try {
-      seen = await sighting.check(browser);
+      const answer: unknown = await sighting.check(browser);
+      blind = answerFault(answer);
+      // answerFault has checked the answer is a sighting.
+      if (blind === null) seen = answer as Seen;
     } catch (error) {
       blind = `the check could not look: ${message(error)}`;
     }
@@ -187,7 +209,7 @@ export async function lookAt(browser: Browser, sighting: Sighting, width: number
     page,
     width: width ?? shot?.width ?? null,
     found: blind !== null || seen === null ? null : seen.found,
-    what: blind ?? seen?.what ?? "",
+    what: blind ?? (seen?.found === false ? String(seen.what) : (seen?.what ?? "")),
     shows: seen?.found ? seen.shows : [],
     screen,
     shotPage: shot?.page ?? null,
@@ -202,11 +224,12 @@ export async function lookAt(browser: Browser, sighting: Sighting, width: number
   return glance;
 }
 
-/** Why a saved screen does not show what its check saw, from what the page named itself and showed then; null when it does. */
+/** Why a saved screen does not show what its check saw, from what the saved image named itself and showed; null when it does. */
 export function unshownBy(glance: Pick<Glance, "page" | "shows" | "shotPage" | "shotText">): string | null {
   if (glance.shotPage === null || pageSlug(glance.shotPage) !== pageSlug(glance.page)) return `the screen shows the ${glance.shotPage ?? "unnamed"} page, not the ${glance.page} page`;
   if (glance.shotText === null || glance.shotText.trim() === "") return "the screen is blank";
   if (glance.shows.length === 0) return "the check named nothing on the page that shows it";
+  if (glance.shows.some((text) => text.trim() === "")) return "the check named an empty text as what shows it";
   const missing = glance.shows.filter((text) => !(glance.shotText ?? "").includes(text));
   return missing.length === 0 ? null : `the screen does not show ${missing.map((m) => `"${m}"`).join(", ")}`;
 }
@@ -256,23 +279,27 @@ export function notesOf(record: FormRecord, run: string): string {
 
 function instanceLine(instance: Instance): string {
   const screens = instance.glances.flatMap((g) => (g.screen ? [g.screen] : []));
-  return `Play ${instance.play}${instance.at > 1 ? `, look ${instance.at}` : ""}: ${OUTCOME_WORDS[instance.outcome]}: ${instance.why}. ${screens.length === 0 ? "No screen." : `Screens: ${screens.join(", ")}`}`;
+  return `Play ${instance.play}${instance.at > 1 ? `, look ${instance.at}` : ""}: ${OUTCOME_WORDS[instance.outcome] ?? instance.outcome}: ${instance.why}. ${screens.length === 0 ? "No screen." : `Screens: ${screens.join(", ")}`}`;
 }
+
+// ---------------------------------------------------------------- reading a bundle back
 
 /** A scenario's or gate's folder as read back, its record re-checked against the files. */
 export interface ReadForm {
   id: string;
-  /** Null when `result.json` is missing or unreadable. */
+  /** The record as re-checked against the folder; null when `result.json` is missing, unreadable or not a record. */
   record: FormRecord | null;
   /** Faults of the evidence, in plain words. */
   faults: string[];
+  /** Its result: `failed` whenever the folder has a fault of the evidence or no record, otherwise the record's own. */
+  result: FormResult;
 }
 
 export interface ReadBundle {
   dir: string;
   run: RunRecord;
   forms: ReadForm[];
-  /** Faults of the run's own record. */
+  /** Faults of the run's own record, and what went wrong in the run outside any form. */
   faults: string[];
 }
 
@@ -290,14 +317,18 @@ export function readBundle(dir: string): ReadBundle {
   if (missing.length > 0) throw new BundleRefused(`${dir}/run.json lacks ${missing.join("; ")}`);
   // runFaults has checked every field this reader and the report use.
   const run = raw as RunRecord;
-  const forms: ReadForm[] = [];
-  const faults: string[] = [];
+  const faults: string[] = [...(run.faults ?? [])];
   const folders = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
-  for (const id of folders) {
-    if (!run.asked.includes(id)) faults.push(`a folder for ${id}, which the run did not ask for`);
-    forms.push(readForm(join(dir, id), id));
+  const forms = folders.map((id) => readForm(join(dir, id), id, run));
+  const seen = new Set<string>();
+  for (const id of run.asked) {
+    if (seen.has(id)) faults.push(`${id} is asked twice`);
+    seen.add(id);
+    const played = folders.includes(id);
+    const unplayed = run.unplayed.some((u) => u.id === id);
+    if (!played && !unplayed) faults.push(`${id} was asked, and neither played nor said why not`);
+    if (played && unplayed) faults.push(`${id} is both played and said not to be`);
   }
-  for (const id of run.asked) if (!folders.includes(id) && !run.unplayed.some((u) => u.id === id)) faults.push(`${id} was asked, and neither played nor said why not`);
   return { dir, run, forms, faults };
 }
 
@@ -312,8 +343,9 @@ function runFaults(raw: unknown): string[] {
   if (!(raw.ended === null || text(raw.ended))) out.push("when it ended");
   if (!Array.isArray(raw.asked) || !raw.asked.every(text)) out.push("what was asked");
   if (!Array.isArray(raw.unplayed) || !raw.unplayed.every((u) => isRecord(u) && text(u.id) && text(u.why))) out.push("what was not played, and why");
-  if (!isRecord(raw.known) || !Array.isArray(raw.known.scenarios) || !Array.isArray(raw.known.gates)) out.push("the scripts the runner found");
-  if (typeof raw.repeats !== "number") out.push("how many plays an \"as shipped\" part gets");
+  if (!isRecord(raw.known) || !Array.isArray(raw.known.scenarios) || !Array.isArray(raw.known.gates) || !raw.known.gates.every(text)) out.push("the scripts the runner found");
+  if (typeof raw.repeats !== "number" || !Number.isInteger(raw.repeats) || raw.repeats < 1) out.push("how many plays an \"as shipped\" part gets");
+  if (raw.faults !== undefined && (!Array.isArray(raw.faults) || !raw.faults.every(text))) out.push("what went wrong in the run, as a list");
   if (!isRecord(raw.rph) || typeof raw.rph.pinned !== "boolean") out.push("whether RPH is the pinned commit");
   return out;
 }
@@ -327,58 +359,224 @@ function filesUnder(dir: string, under = ""): string[] {
   });
 }
 
-function readForm(dir: string, id: string): ReadForm {
+const SCREEN_FILE = /\.(png|webp|txt)$/;
+
+function readForm(dir: string, id: string, run: RunRecord): ReadForm {
   const files = filesUnder(dir);
   const faults: string[] = [];
-  if (files.length === 0 && readdirSync(dir).length === 0) return { id, record: null, faults: ["the folder is empty"] };
+  if (!run.asked.includes(id)) faults.push("the run did not ask for it");
+  if (!/^\d{2}$/.test(id)) {
+    const fault = gateIdFault(id);
+    if (fault) faults.push(`its folder's name is neither one of the 68 nor a gate's id: ${fault}`);
+  } else if (!LIST.some((row) => scenarioId(row.number) === id)) faults.push(`its folder is named for scenario ${Number(id)}, which is not one of the 68`);
+  if (files.length === 0 && readdirSync(dir).length === 0) return finish(id, null, [...faults, "the folder is empty"]);
   let record: FormRecord | null = null;
   if (!files.includes("result.json")) faults.push("result.json is missing, so nothing played here can be counted");
   else {
     try {
       const raw: unknown = JSON.parse(readFileSync(join(dir, "result.json"), "utf8"));
-      record = isFormRecord(raw) ? raw : null;
-      if (record === null) faults.push("result.json is not a run's record of a form");
+      const shape = shapeFaults(raw);
+      if (shape.length > 0) faults.push(`result.json is not a run's record of a form: ${shape.join("; ")}`);
+      // shapeFaults has checked every field the re-check and the report read.
+      else record = raw as FormRecord;
     } catch (error) {
       faults.push(`result.json cannot be read: ${message(error)}`);
     }
   }
-  const screens = files.filter((f) => /\.(png|webp|txt)$/.test(f));
-  if (screens.length === 0) faults.push("the folder holds no screen");
+  const screens = files.filter((f) => SCREEN_FILE.test(f));
+  if (screens.length === 0 && (record === null || record.parts.some((p) => p.measured === null))) faults.push("the folder holds no screen");
   const parts = new Set(record?.parts.map((p) => p.id) ?? []);
   const pages = new Set(record?.parts.flatMap((p) => p.pages.map(pageSlug)) ?? []);
+  const named = new Set(record?.parts.flatMap((p) => p.instances.flatMap((i) => i.glances.flatMap((g) => (g.screen ? [g.screen] : [])))) ?? []);
   for (const file of screens) {
     const name = parseScreen(file);
     if (!name) faults.push(`${file}: its name does not say its play, the page, the width and what it shows`);
     else if (record && partOfScreen(name.what, parts) === null) faults.push(`${file}: named for "${name.what}", which is none of its parts`);
     else if (record && !pages.has(name.page)) faults.push(`${file}: named for the ${name.page} page, which none of its parts is seen on`);
+    else if (record && !named.has(file)) faults.push(`${file}: no look in result.json names it`);
     if (statSync(join(dir, file)).size === 0) faults.push(`${file} is empty`);
   }
   if (!files.includes("notes.md")) faults.push("notes.md is missing");
   else {
-    const notes = readFileSync(join(dir, "notes.md"), "utf8");
-    for (const named of new Set(notes.match(/play-\d{2}\/[^\s,)]+\.(?:png|webp|txt)/g) ?? [])) if (!files.includes(named)) faults.push(`notes.md names ${named}, which the folder lacks`);
+    const notes = new Set(readFileSync(join(dir, "notes.md"), "utf8").match(/play-\d{2}\/[^\s,)]+\.(?:png|webp|txt)/g) ?? []);
+    for (const screen of notes) if (!files.includes(screen)) faults.push(`notes.md names ${screen}, which the folder lacks`);
+    for (const screen of notes) if (record && !named.has(screen)) faults.push(`notes.md names ${screen}, which no look in result.json names`);
+    for (const screen of named) if (!notes.has(screen)) faults.push(`notes.md does not name ${screen}, which result.json names`);
   }
-  if (record) record = recheck(record, dir, files, faults);
-  return { id, record, faults };
+  if (record) {
+    faults.push(...identityFaults(record, id, run));
+    record = recheck(record, dir, files, faults);
+  }
+  return finish(id, record, faults);
 }
 
-/** The record with every instance it calls seen on screen held to its screens as they are in the folder. */
-function recheck(record: FormRecord, dir: string, files: string[], faults: string[]): FormRecord {
-  const parts = record.parts.map((part) => ({
-    ...part,
-    instances: part.instances.map((instance) => {
-      if (instance.outcome !== "shown") return instance;
-      for (const glance of instance.glances) {
-        const why = screenFault(glance, part.id, dir, files) ?? unshownBy(glance);
-        if (why !== null) {
-          if (glance.screen !== null && !files.includes(glance.screen)) faults.push(`result.json names ${glance.screen}, which the folder lacks`);
-          return { ...instance, outcome: "unseen" as const, why: `seen on the ${glance.page} page, and ${why}` };
-        }
+function finish(id: string, record: FormRecord | null, faults: string[]): ReadForm {
+  const unique = [...new Set(faults)];
+  return { id, record, faults: unique, result: record === null || unique.length > 0 ? "failed" : formResult(record) };
+}
+
+/** Why a value is not a record the runner writes, at the level of its fields; empty when it is one. */
+function shapeFaults(raw: unknown): string[] {
+  if (!isRecord(raw)) return ["it is not an object"];
+  const out: string[] = [];
+  const texts = (value: unknown) => Array.isArray(value) && value.every((v) => typeof v === "string");
+  const textOrNull = (value: unknown) => value === null || typeof value === "string";
+  const whole = (value: unknown, least: number) => typeof value === "number" && Number.isInteger(value) && value >= least;
+  if (typeof raw.id !== "string" || raw.id === "") out.push("it has no id");
+  if (raw.kind !== "scenario" && raw.kind !== "gate") out.push("it is neither a scenario's nor a gate's");
+  if (raw.mode !== "rig" && raw.mode !== "live") out.push("it was played neither in the rig nor live");
+  if (!(raw.number === null || whole(raw.number, 1))) out.push("its number is not a number");
+  if (!Array.isArray(raw.waves) || !raw.waves.every((w) => whole(w, 0))) out.push("its waves are not waves");
+  if (!(raw.line === null || whole(raw.line, 1))) out.push("its line is not a line");
+  if (!whole(raw.plays, 1)) out.push("its plays are not a count");
+  if (!Array.isArray(raw.stops) || !raw.stops.every((s) => isRecord(s) && whole(s.play, 1) && typeof s.why === "string")) out.push("its stops are not stops");
+  if (!Array.isArray(raw.parts) || raw.parts.length === 0) return [...out, "it has no parts"];
+  raw.parts.forEach((part, p) => {
+    if (!isRecord(part) || typeof part.id !== "string" || typeof part.words !== "string" || (part.mark !== "code" && part.mark !== "as shipped") || !texts(part.pages) || !textOrNull(part.measured) || !(part.wants === null || (isRecord(part.wants) && whole(part.wants.hits, 1) && whole(part.wants.of, 1))) || !Array.isArray(part.instances)) {
+      out.push(`part ${p + 1} is not a part`);
+      return;
+    }
+    part.instances.forEach((instance, i) => {
+      const where = `part ${part.id}'s look ${i + 1}`;
+      if (!isRecord(instance) || !whole(instance.play, 1) || !whole(instance.at, 1) || typeof instance.outcome !== "string" || typeof instance.why !== "string" || !(instance.page === undefined || textOrNull(instance.page)) || !Array.isArray(instance.glances)) {
+        out.push(`${where} is not a look`);
+        return;
       }
-      return instance;
-    }),
-  }));
+      instance.glances.forEach((glance, g) => {
+        const ok = isRecord(glance) && typeof glance.page === "string" && (glance.width === null || typeof glance.width === "number") && (glance.found === null || typeof glance.found === "boolean") && typeof glance.what === "string" && texts(glance.shows) && textOrNull(glance.screen) && textOrNull(glance.shotPage) && textOrNull(glance.shotText) && textOrNull(glance.unshown);
+        if (!ok) out.push(`${where}'s glance ${g + 1} is not a glance`);
+      });
+    });
+  });
+  const ids = raw.parts.flatMap((part) => (isRecord(part) && typeof part.id === "string" ? [part.id] : []));
+  for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) out.push(`part ${id} is named twice`);
+  return out;
+}
+
+/** Whether the record is the folder's own scenario or gate, played in this run's way, carrying its row's words. */
+function identityFaults(record: FormRecord, id: string, run: RunRecord): string[] {
+  const out: string[] = [];
+  const of = record.kind === "gate" ? `gate ${record.id}` : `scenario ${record.number}`;
+  if (/^\d{2}$/.test(id)) {
+    if (record.kind !== "scenario" || record.number !== Number(id) || record.id !== id) out.push(`its record is of ${of}, not of scenario ${Number(id)}`);
+  } else if (record.kind !== "gate" || record.id !== id) out.push(`its record is of ${of}, not of gate ${id}`);
+  if (record.mode !== run.mode) out.push(`its record was played ${record.mode === "rig" ? "in the rig" : "live"}, and this run was played ${run.mode === "rig" ? "in the rig" : "live"}`);
+  const shipped = record.parts.some((p) => p.mark === "as shipped");
+  const plays = run.mode === "live" && record.kind === "scenario" && shipped ? run.repeats : 1;
+  if (record.plays !== plays) out.push(plays === 1 ? `its record has ${record.plays} plays, and this run plays it once` : `its record has ${record.plays} plays, and this run played a scenario with an "as shipped" part ${plays} times`);
+  if (record.kind === "scenario") {
+    const row = LIST.find((r) => r.number === record.number);
+    if (!row) out.push(`its record is of scenario ${record.number}, which is not one of the 68`);
+    else {
+      if (record.waves.length !== 1 || record.waves[0] !== row.wave) out.push(`its record gives wave ${record.waves.join(", ")}, and §18.3's table lists scenario ${row.number} at wave ${row.wave}`);
+      if (record.line !== row.line) out.push(`its record gives line ${record.line}, and scenario ${row.number}'s row is at line ${row.line}`);
+      for (const fault of wordFaults(row, record.parts)) out.push(`its record: ${fault}`);
+    }
+    for (const part of record.parts) if (part.measured !== null) out.push(`part ${part.id} is measured, and only what is seen on screen counts as proof of a scenario`);
+  } else {
+    const fault = gateIdFault(record.id);
+    if (fault) out.push(`its record's gate ${fault.replace(/^its /, "")}`);
+    if (record.waves.length === 0 || record.waves.some((w) => w > 5)) out.push("its record's waves are not waves 0 to 5");
+  }
+  return out;
+}
+
+/**
+ * The record with every look held to the runner's own way of recording it, and to its screens as
+ * they are in the folder: each fault found is added to `faults`, and each look the folder does not
+ * bear out is changed to what its screens make it (never to a pass).
+ */
+function recheck(record: FormRecord, dir: string, files: string[], faults: string[]): FormRecord {
+  const parts = record.parts.map((part) => {
+    const seenPart = part.measured === null;
+    const allowed = seenPart ? SEEN_OUTCOMES : MEASURED_OUTCOMES;
+    if (seenPart && part.pages.length === 0) faults.push(`part ${part.id} is seen on no page`);
+    if (!seenPart && part.pages.length > 0) faults.push(`part ${part.id} is measured and names pages`);
+    const instances = part.instances.map((instance): Instance => {
+      const where = `part ${part.id}: look ${instance.at} of play ${instance.play}`;
+      const broken = (why: string): Instance => ({ ...instance, outcome: "broken", why: `its record is at fault: ${why}`, page: instance.page ?? null });
+      if (instance.play > record.plays) {
+        faults.push(`${where} is of a play the record does not have`);
+        return broken("a play the record does not have");
+      }
+      if (!allowed.includes(instance.outcome)) {
+        const why = `is recorded "${instance.outcome}", which the runner ${!(SEEN_OUTCOMES as readonly string[]).concat(MEASURED_OUTCOMES).includes(instance.outcome) ? "never writes" : seenPart ? "writes only for a measured part of a gate" : "writes only for a part that is seen"}`;
+        faults.push(`${where} ${why}`);
+        return broken(why);
+      }
+      if (!seenPart) {
+        if (instance.glances.length > 0) faults.push(`${where} is a measured verdict that names looks on pages`);
+        return instance;
+      }
+      if (instance.glances.length === 0) {
+        if (instance.outcome !== "unlooked" && instance.outcome !== "broken") {
+          const why = `is recorded "${instance.outcome}" and names no look on a page`;
+          faults.push(`${where} ${why}`);
+          return broken(why);
+        }
+        if (!instance.page || !part.pages.some((p) => pageSlug(p) === pageSlug(instance.page ?? ""))) faults.push(`${where} is recorded "${instance.outcome}" and names no page of its part it was owed on`);
+        return instance;
+      }
+      for (const fault of coverageFaults(instance, part)) faults.push(`${where} ${fault}`);
+      let missingScreen = false;
+      const glances = instance.glances.map((glance): Glance => {
+        if (glance.screen !== null && !files.includes(glance.screen)) {
+          faults.push(`result.json names ${glance.screen}, which the folder lacks`);
+          missingScreen = true;
+        }
+        if (glance.found !== true) return glance;
+        return { ...glance, unshown: screenFault(glance, part.id, dir, files) ?? unshownBy(glance) };
+      });
+      const again = outcomeOf(glances, part.mark, record.mode);
+      if (again.outcome === instance.outcome) return { ...instance, glances };
+      if (!missingScreen) faults.push(`${where} is recorded "${instance.outcome}", and its looks make it "${again.outcome}"`);
+      return { ...instance, outcome: again.outcome, why: again.why, glances };
+    });
+    for (let play = 1; play <= record.plays; play++) {
+      const ofPlay = instances.filter((i) => i.play === play);
+      if (ofPlay.length === 0) {
+        faults.push(`part ${part.id} has no look in play ${play}`);
+        continue;
+      }
+      if (!seenPart) continue;
+      for (const page of part.pages) {
+        const looked = ofPlay.some((i) => i.glances.some((g) => pageSlug(g.page) === pageSlug(page)) || (i.glances.length === 0 && pageSlug(i.page ?? "") === pageSlug(page)));
+        if (!looked) faults.push(`part ${part.id} in play ${play} was never looked for on the ${page} page, and its record does not say so`);
+      }
+    }
+    return { ...part, instances };
+  });
   return { ...record, parts };
+}
+
+/** Where a look's glances fall short of a look the runner makes: every page it names is a page of its part, at every width that page is looked at, once. */
+function coverageFaults(instance: Instance, part: PartRecord): string[] {
+  const out: string[] = [];
+  const byPage = new Map<string, Glance[]>();
+  for (const glance of instance.glances) {
+    if (!part.pages.some((p) => pageSlug(p) === pageSlug(glance.page))) {
+      out.push(`looks at the ${glance.page} page, which its part is not seen on`);
+      continue;
+    }
+    byPage.set(pageSlug(glance.page), [...(byPage.get(pageSlug(glance.page)) ?? []), glance]);
+  }
+  for (const glances of byPage.values()) {
+    const page = glances[0]?.page ?? "";
+    const wanted = widthsOf(page);
+    if (wanted[0] === undefined) {
+      if (glances.length !== 1) out.push(`looks at the ${page} page ${glances.length} times`);
+      continue;
+    }
+    const have = glances.map((g) => g.width);
+    const said = (widths: (number | null | undefined)[]) => widths.map((w) => (typeof w === "number" ? String(w) : "no width")).join(" and ");
+    const lacking = wanted.filter((w) => !have.includes(w ?? null));
+    if (lacking.length > 0) out.push(`looks at the ${page} page at ${said(have)} and not at ${said(lacking)}`);
+    const twice = have.filter((w, i) => have.indexOf(w) !== i);
+    if (twice.length > 0) out.push(`looks at the ${page} page at ${said(twice)} twice`);
+    const other = have.filter((w) => !wanted.includes(w ?? undefined));
+    if (other.length > 0) out.push(`looks at the ${page} page at ${said(other)}, a width it is not looked at`);
+  }
+  return out;
 }
 
 /** Why a glance's screen, as it is in the folder, cannot show its part: missing, empty, or named for another page, width or part. */
@@ -392,10 +590,4 @@ function screenFault(glance: Glance, part: string, dir: string, files: string[])
   if (glance.width !== null && name.width !== glance.width) return `its screen ${glance.screen} is named for ${name.width} wide, and it was looked at ${glance.width} wide`;
   if (partOfScreen(name.what, new Set([part])) === null) return `its screen ${glance.screen} is named for "${name.what}", not for this part`;
   return null;
-}
-
-function isFormRecord(raw: unknown): raw is FormRecord {
-  if (!isRecord(raw) || typeof raw.id !== "string" || (raw.kind !== "scenario" && raw.kind !== "gate") || (raw.mode !== "rig" && raw.mode !== "live")) return false;
-  if (!Array.isArray(raw.waves) || typeof raw.plays !== "number" || !Array.isArray(raw.stops) || !Array.isArray(raw.parts)) return false;
-  return raw.parts.every((p) => isRecord(p) && typeof p.id === "string" && typeof p.words === "string" && (p.mark === "code" || p.mark === "as shipped") && Array.isArray(p.pages) && Array.isArray(p.instances) && p.instances.every((i) => isRecord(i) && typeof i.play === "number" && typeof i.outcome === "string" && Array.isArray(i.glances)));
 }

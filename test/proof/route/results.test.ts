@@ -1,10 +1,12 @@
 // Two kinds of result, kept apart (PlanScenarios-1 item 3; plan §17.0 l.1753): a recorded live run in
 // which one code part fails once and an "as shipped" part is missed 3 times in 10 plays reports exactly
 // that, each miss with its own screens; a code failure is never counted into a rate and a miss never
-// fails a code part; the rig reports an "as shipped" part as its code path only, never as a rate.
+// fails a code part; a scenario with an "as shipped" part played live is a rate, never "passed", even
+// when every play missed; a gate stands or falls by the share the plan asks of it; the rig reports an
+// "as shipped" part as its code path only, never as a rate.
 
 import { expect, test } from "bun:test";
-import { describeVerdict, formResult, outcomeOf, verdictOf, type FormRecord, type Glance, type Instance, type Outcome, type PartRecord } from "../../../scripts/proof/route/results";
+import { describeVerdict, formResult, headline, outcomeOf, verdictOf, type FormRecord, type Glance, type Instance, type Outcome, type PartRecord } from "../../../scripts/proof/route/results";
 
 const play = (n: number) => `play-${String(n).padStart(2, "0")}`;
 
@@ -25,7 +27,7 @@ function glances(n: number, part: string, found: boolean): Glance[] {
 
 function instance(n: number, part: string, outcome: Outcome): Instance {
   const found = outcome === "shown";
-  return { play: n, at: 1, outcome, why: found ? "the list names Mirela" : "not on the Turn page: the list names nobody", glances: glances(n, part, found) };
+  return { play: n, at: 1, outcome, why: found ? "the list names Mirela" : "not on the Turn page: the list names nobody", page: null, glances: glances(n, part, found) };
 }
 
 function part(id: string, mark: "code" | "as shipped", outcomes: Record<number, Outcome>): PartRecord {
@@ -71,13 +73,33 @@ test("a code failure is never counted into a rate, and a miss of guidance never 
   ]);
   // Kept out of the rate, the code failure in play 6 still fails the scenario; the misses alone would not.
   expect(formResult(record("live", [part("missing", "code", {}), shipped]))).toBe("failed");
-  expect(formResult(record("live", [part("missing", "code", {}), part("written", "as shipped", { 3: "absent", 8: "absent" })]))).toBe("passed");
+  expect(formResult(record("live", [part("missing", "code", {}), part("written", "as shipped", { 3: "absent", 8: "absent" })]))).toBe("measured");
   expect(formResult(record("live", [part("missing", "code", {}), part("written", "as shipped", { 7: "unseen" })]))).toBe("not seen");
 
   // Seen at 1440 and not at 390: for an "as shipped" part the agent did it, and the page is at fault.
   const split = [...glances(1, "written", true).slice(0, 1), ...glances(1, "written", false).slice(1)];
   expect(outcomeOf(split, "as shipped", "live").outcome).toBe("broken");
   expect(outcomeOf(split, "code", "live")).toEqual({ outcome: "absent", why: "seen on the Turn page at 1440, not on the Turn page at 390" });
+});
+
+test("a scenario whose as-shipped part was missed in every play is measured as a rate, never counted passed", () => {
+  const missed = part("written", "as shipped", Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 1, "absent" as const])));
+  const run = record("live", [part("missing", "code", {}), missed]);
+  expect(formResult(run)).toBe("measured");
+  expect(headline(run)).toBe("measured as a rate: its code passed; as shipped 0 of 10, every play missed");
+  const kept = record("live", [part("missing", "code", {}), part("written", "as shipped", { 3: "absent" })]);
+  expect(headline(kept)).toBe("measured as a rate: its code passed; as shipped 9 of 10");
+  expect(headline(record("live", [part("written", "as shipped", {})]))).toBe("measured as a rate: as shipped 10 of 10");
+});
+
+test("a gate stands or falls by its share: met passes, not met fails, too few judged to say is not seen", () => {
+  const gate = (p: PartRecord): FormRecord => ({ id: "gate-17.3-intent", kind: "gate", number: null, waves: [3], line: null, mode: "live", plays: 1, parts: [p], stops: [] });
+  const wants = { hits: 9, of: 10 };
+  expect(formResult(gate({ ...part("written", "as shipped", { 1: "absent" }), wants }))).toBe("passed");
+  expect(formResult(gate({ ...part("written", "as shipped", { 1: "absent", 2: "absent" }), wants }))).toBe("failed");
+  expect(formResult(gate({ ...part("written", "as shipped", { 1: "absent", 2: "unseen" }), wants }))).toBe("not seen");
+  // With no share asked, a gate's rate is a measurement, as a scenario's is.
+  expect(formResult(gate(part("written", "as shipped", { 1: "absent", 2: "absent" })))).toBe("measured");
 });
 
 test("a gate's share is met or not only once as many were judged as the plan counts", () => {
@@ -95,6 +117,6 @@ test("the rig reports an as-shipped part as its code path only, never as a rate"
   expect(verdict).toMatchObject({ kind: "code", result: "failed" });
   expect(describeVerdict(shipped, "rig")[0]).toBe("The code path only (the rig plays the agent as its file asks): failed");
   expect(formResult(record("rig", [shipped]))).toBe("failed");
-  // Played live, the same part with no code part beside it is a rate alone.
-  expect(formResult(record("live", [part("written", "as shipped", { 1: "absent" })]))).toBe("rates only");
+  // Played live, the same part with no code part beside it is measured as a rate.
+  expect(formResult(record("live", [part("written", "as shipped", { 1: "absent" })]))).toBe("measured");
 });
