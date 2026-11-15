@@ -375,11 +375,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
       // The chat's path compared with the turn tree, what it found kept with the chat, and the turns that left it told (`#compare`). A
       // new reply's message is the turn at hand; a swipe or a regenerate writes a new swipe of the message its attempts were tied to.
+      const heardUpTo = this.#d.store.user(user).heardCount(chat);
       const steps = await reads.path(chat);
       if (steps === null) throw new Error(await turnErrorWords(this.#d.files, tag, "no_chat", { chat }));
       lap("path");
       const replaced = tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
-      await this.#compare(user, chat, steps, tag.kind === "new" ? tag.target.message : null, replaced);
+      await this.#compare(user, chat, steps, tag.kind === "new" ? tag.target.message : null, replaced, heardUpTo);
       lap("compare");
 
       // The chat's settings and texts, read before the turn is made: they are its levels' files, whatever session the turn plays in.
@@ -640,9 +641,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (intake.waiting || this.#d.runs.ofChat(user, chat).length > 0) return await refused("settle_running");
       await this.#chat(reads, user, chat);
       await this.#catchUp(reads, user, chat);
+      const heardUpTo = this.#d.store.user(user).heardCount(chat);
       const steps = await reads.path(chat);
       if (steps === null) return await refused("no_chat", { chat });
-      await this.#compare(user, chat, steps, null, null);
+      await this.#compare(user, chat, steps, null, null, heardUpTo);
       const store = this.#d.store.user(user);
       const onPath = store.line(chat).map((l) => l.turn);
       const newest = onPath.at(-1);
@@ -917,7 +919,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * comparison found is kept with the chat in the same write, under the turn then at the head of its path (`since.ts`): should the
    * intake end before the harness takes its request, the next turn is told it. Then the turns that left the path are told (`#left`).
    */
-  async #compare(user: string, chat: string, steps: readonly LvStep[], writing: string | null, replaced: string | null): Promise<void> {
+  async #compare(user: string, chat: string, steps: readonly LvStep[], writing: string | null, replaced: string | null, heardUpTo: number): Promise<void> {
     const store = this.#d.store.user(user);
     // The path as RPE last held it, for the player's own edits since (the store's comparison is of replies), and for the replies no turn
     // is tied to that it held already.
@@ -927,7 +929,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       .filter((s) => s.id !== writing)
       .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date, hidden: s.hidden } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date, hidden: s.hidden }));
     const report = await this.#d.writes.run((db) => {
-      const compared = store.sync(chat, shown);
+      const compared = store.sync(chat, shown, heardUpTo);
       const head = store.path(chat).findLast((e) => e.turn !== null)?.turn ?? null;
       this.#d.since.keep(db, user, chat, head, foundItems(compared, was, steps), this.#d.store.now());
       return compared;
@@ -1466,6 +1468,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    */
   async #deleted(user: string, chat: string, message: string): Promise<void> {
     const store = this.#d.store.user(user);
+    store.heardDeleted(chat, message);
     const tied = store.chat(chat) === null ? [] : store.swipes(chat, message);
     const running = this.#d.runs.ofChat(user, chat).filter((r) => r.target === message);
     const turns = new Set([...tied.map((t) => t.id), ...running.map((r) => r.turn)]);
