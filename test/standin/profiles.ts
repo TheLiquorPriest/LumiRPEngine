@@ -154,6 +154,9 @@ export class Profiles {
     if (found !== undefined) return found.user_id === user ? found : null;
     const lent = this.get(user, id);
     if (lent === null) return null;
+    // The connection a test put in the host holds its key there; made into a profile it keeps it as its secret, as Lumiverse keeps a key, so a change that names none leaves it (`updateConnection`, `:491-528`).
+    const held = this.host.connections.get(id)?.key ?? "";
+    if (held !== "") this.secrets.set(`${user}\0${connectionSecretKey(id)}`, held);
     this.made.set(id, lent);
     return lent;
   }

@@ -492,3 +492,21 @@ describe("a book attached to a chat, a message appended, a generation started, a
     expect(made.id).toBeDefined();
   });
 });
+
+describe("a connection a test put in the host, changed through the routes (`services/connections.service.ts:491-528`)", () => {
+  test("keeps its key where the change names none, as Lumiverse keeps a stored key, and lists it with a key", async () => {
+    const w = await weirChatOf(closing, LINES);
+    const mine = w.as(USER);
+    expect(w.host.connections.get("conn-model")!.key).toBe("model-key");
+    // Changing the metadata alone (the floor's write of a model's thinking binding) leaves the key.
+    const changed = await mine.put("/api/v1/connections/conn-model", { metadata: { reasoningBindings: { promptBias: "" } } });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({ id: "conn-model", has_api_key: true, metadata: { reasoningBindings: { promptBias: "" } } });
+    expect(w.host.connections.get("conn-model")).toMatchObject({ key: "model-key", metadata: { reasoningBindings: { promptBias: "" } } });
+    expect(w.server.profiles!.secrets.get(`${USER}\0connection_conn-model_api_key`)).toBe("model-key");
+    expect(((await (await mine.get("/api/v1/connections/conn-model")).json()) as { has_api_key: boolean }).has_api_key).toBe(true);
+    // A key named empty takes it away, as for a profile made through the routes.
+    await mine.put("/api/v1/connections/conn-model", { api_key: "" });
+    expect(w.host.connections.get("conn-model")!.key).toBe("");
+  });
+});

@@ -18,6 +18,7 @@ import type { GenerationType } from "./assembly";
 import { databankAnswer, macroAnswer, memoryAnswer, openCortex, tokenAnswer, type CortexState } from "./cortex";
 import { appendMessage, clamped, generationInput, patchChatMetadata, resolveGeneration, SERVER_ERROR, startRoute, type Env, type Reply } from "./chatwrites";
 import type { StandInDb } from "./db";
+import { embeddingConfig } from "./embeddings";
 import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
 import type { Installed, Outcome, StandIn } from "./lumiverse";
 import { Profiles } from "./profiles";
@@ -513,6 +514,20 @@ export class LumiverseServer {
       };
       const etag = `"wb-entries-${bookId}-${stamp}-${options.sortBy ?? ""}-${options.sortDir ?? ""}"`;
       return revalidated(request, etag, this.entriesPage(bookId, pagination, options, rows));
+    }
+
+    // `GET /api/v1/characters` (`routes/characters.routes.ts:525-535`; `listCharacters`, `services/characters.service.ts:728-736`): the user's own cards that are not being deleted, the most
+    // lately changed first, each as `GET /characters/:id` gives it, `extensions` among its fields; paged. Not served: `sort=discover`, `/index`, `/summary`, `/details`.
+    if (path === "/api/v1/characters") {
+      const total = Number(rows("SELECT COUNT(*) as count FROM characters WHERE user_id = ? AND deleting = 0", user)[0]!.count);
+      const list = rows("SELECT * FROM characters WHERE user_id = ? AND deleting = 0 ORDER BY updated_at DESC LIMIT ? OFFSET ?", user, pagination.limit, pagination.offset);
+      return json(200, pageOf(list.map(rowToCharacter), total, pagination));
+    }
+
+    // `GET /api/v1/embeddings/config` (`routes/embeddings.routes.ts:12-15`): the user's `embeddingConfig` setting over Lumiverse's defaults, and whether its primary connection has a key (`embeddings.ts`).
+    if (path === "/api/v1/embeddings/config") {
+      const stored = (owner: string): unknown => parsed(rows("SELECT value FROM settings WHERE key = 'embeddingConfig' AND user_id = ?", owner)[0]?.value, undefined);
+      return json(200, embeddingConfig(user, this.options.host?.firstUser ?? null, stored, (owner, name) => this.profiles?.secrets.has(`${owner}\0${name}`) === true));
     }
 
     // `GET /api/v1/characters/:id` (`routes/characters.routes.ts:860-865`).

@@ -134,6 +134,40 @@ describe("a dry run (`routes/generate.routes.ts:26-43`, `services/generate.servi
   });
 });
 
+describe("the user's characters and embeddings configuration (`routes/characters.routes.ts:525-535`, `routes/embeddings.routes.ts:12-15`)", () => {
+  const card = (id: string, user: string, at: number, extra: Record<string, string | number> = {}): Record<string, string | number | null> => ({ id, name: id, user_id: user, updated_at: at, extensions: json({}), ...extra });
+
+  test("the list is the user's own cards, not those being deleted, the most lately changed first, paged, each with its extensions", async () => {
+    const bed = await weir({ characters: [card("char-a", USER, 10, { extensions: json({ lumirpengine_floor_test: true }) }), card("char-b", USER, 30), card("char-c", USER, 20, { deleting: 1 }), card("char-d", OTHER, 40), card("char-e", USER, 20)] });
+    const mine = bed.as(USER);
+    const all = (await (await mine.get("/api/v1/characters")).json()) as { data: { id: string; extensions: Record<string, unknown> }[]; total: number; limit: number; offset: number };
+    expect(all.data.map((c) => c.id)).toEqual(["char-b", "char-e", "char-a"]);
+    expect([all.total, all.offset]).toEqual([3, 0]);
+    // Lumiverse's mapper adds the card's library scope to its extensions (`rowToCharacter`).
+    expect(all.data.find((c) => c.id === "char-a")!.extensions).toEqual({ lumirpengine_floor_test: true, _lumiverse_library_scope: "mine" });
+    const page = (await (await mine.get("/api/v1/characters?limit=1&offset=1")).json()) as { data: { id: string }[]; total: number; limit: number; offset: number };
+    expect([page.data.map((c) => c.id), page.total, page.limit, page.offset]).toEqual([["char-e"], 3, 1, 1]);
+    expect(await (await mine.get("/api/v1/characters/char-a")).json()).toMatchObject({ id: "char-a", extensions: { lumirpengine_floor_test: true } });
+  });
+
+  test("the embeddings configuration is Lumiverse's defaults where none is stored, the stored one over them, and has a key only where a secret is held", async () => {
+    const bed = await weir();
+    const mine = bed.as(USER);
+    const plain = (await (await mine.get("/api/v1/embeddings/config")).json()) as Record<string, unknown>;
+    expect(plain).toMatchObject({ enabled: false, provider: "openai-compatible", dimensions: null, vectorize_world_books: true, vectorize_chat_messages: false, retrieval_top_k: 4, hybrid_weight_mode: "balanced", similarity_threshold: 0, rerank_cutoff: 0, has_api_key: false, fallbackProfileIds: [] });
+    expect((plain.connectionProfiles as unknown[]).length).toBe(1);
+    bed.host.library.setSetting(USER, "embeddingConfig", { enabled: true, dimensions: 768, vectorize_world_books: false, retrieval_top_k: 7.9, similarity_threshold: 9 });
+    const stored = (await (await mine.get("/api/v1/embeddings/config")).json()) as { enabled: boolean; dimensions: number; vectorize_world_books: boolean; retrieval_top_k: number; similarity_threshold: number; has_api_key: boolean; primaryProfileId: string; connectionProfiles: { id: string; dimensions: number }[] };
+    expect(stored).toMatchObject({ enabled: true, dimensions: 768, vectorize_world_books: false, retrieval_top_k: 7, similarity_threshold: 2, has_api_key: false });
+    expect(stored.connectionProfiles[0]).toMatchObject({ id: stored.primaryProfileId, dimensions: 768 });
+    bed.server.profiles!.secrets.set(`${USER}\0embedding-profile/${stored.primaryProfileId}/apiKey`, "embedding-key");
+    expect(((await (await mine.get("/api/v1/embeddings/config")).json()) as { has_api_key: boolean }).has_api_key).toBe(true);
+    // The oldest account's configuration is served to another user while it is enabled, told as inherited.
+    const inherited = (await (await bed.as(OTHER).get("/api/v1/embeddings/config")).json()) as { enabled: boolean; inherited?: boolean; dimensions: number };
+    expect(inherited).toMatchObject({ enabled: true, inherited: true, dimensions: 768 });
+  });
+});
+
 /** A message row as Lumiverse stores it: the swipes, the shown one, and what is kept beside them. */
 function row(id: string, index: number, fields: Record<string, string | number | null> = {}): Record<string, string | number | null> {
   return { id, chat_id: CHAT, index_in_chat: index, is_user: index % 2, name: index % 2 ? "Mara" : "Ilsa", content: `text of ${id}`, send_date: 1_767_600_000 + index, swipe_id: 0, swipes: json([`text of ${id}`]), swipe_dates: json([1_767_600_000 + index]), extra: "{}", ...fields };
