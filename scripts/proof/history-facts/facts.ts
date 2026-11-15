@@ -2,412 +2,393 @@
 // window at 40 and the hold off ... In each, twenty facts are planted only in messages that have left
 // the window and in no lore entry: ten things that happened, ten things a principal witnessed. Each is
 // asked about in play." Written once, here, so that the chat made on today's build (PlanScenarios-7,
-// chat c) and the gate that asks (PlanGates-15 for chats a and b, PlanGates-40 for chat c) plant, ask
-// and check the same sixty facts. `reader.ts` is how they read them.
+// chat c) and the gate that asks (PlanGates-15 for chats a and b, PlanGates-40 for chat c) plant, ask,
+// check and grade the same facts. `reader.ts` is how they read them.
+//
+// Forty facts, twenty to a chat (READINGS R-199). Chat a is played to 300 and asked on a branch
+// Lumiverse makes there; chat b is chat a itself carried on, so it asks chat a's twenty again at its own
+// end, where they are the far past the story so far gives by its chapters' summaries (§8.1 l.918).
+// Chat c, migrated from today's build, plants its own twenty.
+//
+// The facts are what a story is made of, because the record they test stands in for a summary of the
+// story (§8.1's table: what happened, who the people are now, where things stand, what is still open),
+// and the owner's condition is that the agents "properly understand the story as it progresses as well
+// as faithfully curating cast perceptions for memory" (INTENT item 11). Each half of each chat's twenty
+// holds the same mix: three acts, two exchanges, two names or places, one time, one hurt, one word
+// given. Every answer is one invented name, or an amount or time no other line holds, so a reply is
+// right when the reader's one match finds it (`reader.ts`, `grade`).
+//
+// A fact keeps the age it was planted at unless the story says it again: sixteen of each chat's twenty
+// are closed off in their own line (the thing gone, the person left for good, the debt paid in full,
+// the promise kept or refused there and then), and the four that may come back are marked.
 //
 // The chats are the test instance's own (READINGS R-19): the Port Alder card and world, the player's
-// character Jordan Ellis, and the world's principals. A thing that happened has no principal there
-// (the line says so), so every principal is one who did not witness it; a witnessed thing has one
-// principal there, and names one who was not, with the question the player asks that one: "A
-// principal asked about what it witnessed remembers it; asked about what it did not, it does not
-// know." Every answer is one invented word or number, so a reply is right when it carries it and can
-// have it from nowhere but the planted line.
-//
-// Chat b is chat a carried on, so its twenty are planted in the stretch the two share, among chat a's
-// own: chat a's script plants all forty and asks only its own twenty at its 300th message; chat b asks
-// its twenty at its own end, once the story so far no longer fits whole, where they are the far past
-// that story compressed (the planner's reading, PlanGates, 15 Nov). No line is planted after 300.
+// character Jordan Ellis, the world's four principals, and strangers invented here, each of whom leaves.
 
 /** The three chats of the gate. */
 export type ChatName = "a" | "b" | "c";
 
 export const CHAT_NAMES: readonly ChatName[] = ["a", "b", "c"];
 
+/** The chats whose lines plant facts: chat b plants none, it is chat a carried on. */
+export type PlantChat = "a" | "c";
+
 /** The gate's window: "each with the window at 40 and the hold off" (§17.3 l.1799). */
 export const GATE_WINDOW = 40;
 
-/** Chats a and c are asked at their 300th message (§17.3 l.1799), so every place is outside the latest 40 of 300. */
+/** Chats a and c are asked at their 300th message (§17.3 l.1799): the first question is message 299, the window then holds 260 to 299. */
 export const GATE_LENGTH = 300;
 
-/** A principal asked about a fact, with the question as the player asks that one. */
-export interface Asked {
-  /** As the world names the principal. */
-  principal: string;
-  question: string;
+/** The latest place a line may take: it and its reply stand outside the window when the 300th message asks (258 and 259, below 260). */
+export const LAST_PLACE = GATE_LENGTH - GATE_WINDOW - 2;
+
+/** The values this data and its reader introduce, each for the owner's approval (§18.4, READINGS N-10). */
+export const OPTIONS = {
+  /** At most this many of a chat's twenty may come back in play: one act, one exchange, one name, one word given. */
+  mayReturn: 4,
+  /** A name of at least this many letters is still found with one letter added, dropped, swapped or changed. */
+  nameOneOffFrom: 7,
+  /** Numbers are found spelled out in words up to this many digits. */
+  spelledDigits: 4,
+} as const;
+
+export type PrincipalId = "dale_whitcomb" | "marcus_delgado" | "danny_okafor" | "priya_nair";
+
+/** A principal of the test world, by every name the starter world gives: first name, surname and role (`src/packs/starters/modern_slice_of_life.json`). */
+export interface Principal {
+  id: PrincipalId;
+  name: string;
+  first: string;
+  surname: string;
+  /** The starter's role, as it writes it, and the shorter phrases made of its words. */
+  roles: readonly string[];
 }
+
+export const PRINCIPALS: Readonly<Record<PrincipalId, Principal>> = {
+  dale_whitcomb: { id: "dale_whitcomb", name: "Dale Whitcomb", first: "Dale", surname: "Whitcomb", roles: ["Owner of Alder Harbor Marina", "owner of the marina", "marina owner", "marina's owner"] },
+  marcus_delgado: { id: "marcus_delgado", name: "Marcus Delgado", first: "Marcus", surname: "Delgado", roles: ["Owner of Alder Automotive", "owner of the shop", "shop owner", "shop's owner"] },
+  danny_okafor: { id: "danny_okafor", name: "Danny Okafor", first: "Danny", surname: "Okafor", roles: ["Senior mechanic at Alder Automotive", "senior mechanic"] },
+  priya_nair: { id: "priya_nair", name: "Priya Nair", first: "Priya", surname: "Nair", roles: ["Township accountant and Harbor Fest organizer", "township accountant", "Harbor Fest organizer", "festival organizer"] },
+};
+
+/** "Ten things that happened" have no principal there; "ten things a principal witnessed" have one. */
+export type Half = "event" | "witnessed";
+
+/** What the record must carry for a story (§8.1): acts (who did what to whom), exchanges (a price paid or a debt settled), names or places (someone met who leaves for good, a place gone to), a time, a hurt and who treated it, a word given. */
+export type Kind = "act" | "exchange" | "name" | "time" | "hurt" | "word";
+
+/** Each half of each chat's twenty holds this mix. */
+export const MIX: Readonly<Record<Kind, number>> = { act: 3, exchange: 2, name: 2, time: 1, hurt: 1, word: 1 };
+
+/** The kinds a story brings back: at most one of each may come back in play. */
+export const RETURNING: readonly Kind[] = ["act", "exchange", "name", "word"];
+
+/** The answer a reply must carry: an invented name, an amount in dollars, or a time on the 24-hour clock (`HH:MM`). */
+export type Answer = { type: "name"; name: string } | { type: "amount"; dollars: number } | { type: "time"; at: string };
+
+/** How a closed line closes its fact off, and the words that say so in the line. */
+export type Closing = "gone" | "left" | "paid" | "word";
+
+/** The words each closing is said in: a closed line holds one of them (item 3 of PlanGates-20-fix1). */
+export const CLOSINGS: Readonly<Record<Closing, RegExp>> = {
+  gone: /\b(?:sold|sells?|burn(?:s|ed)?|sank|sinks?|sunk|into the lake|wash(?:es|ed)? away|torn down)\b/i,
+  left: /\bfor good\b/i,
+  paid: /\bin full\b/i,
+  word: /\b(?:(?:keeps?|kept|breaks?|broke) (?:my|his|her|their) word|refuse[sd]?)\b/i,
+};
 
 export interface PlantedFact {
   /** `<chat>-<nn>`. */
   id: string;
-  chat: ChatName;
-  /** "event": a thing that happened, with no principal there; "witnessed": a thing one principal saw or heard. */
-  kind: "event" | "witnessed";
-  /** The principal who witnessed it, as the world names them; null for an event. */
-  witness: string | null;
+  /** The chat whose line plants it; chat b asks chat a's. */
+  chat: PlantChat;
+  half: Half;
+  kind: Kind;
+  /** The principal there, for a witnessed fact; null for a thing that happened with no principal there. */
+  witness: PrincipalId | null;
+  /** For a witnessed fact: a principal who was not there, with no tie to its place or people, and the question the player asks that one. */
+  absent: { principal: PrincipalId; question: string } | null;
+  /** The starter world's place the line happens at, or null for somewhere the world does not hold. */
+  where: string | null;
   /** The player's line that plants it. */
   line: string;
   /** Where the line goes: the message's index in the chat as Lumiverse counts it (`index_in_chat`, from 0), the card's first message at 0, so the player's lines are at odd indices. */
   place: number;
-  /** The question as the player asks it in play; to the witness, for a witnessed thing. */
+  /** The question as the player asks it in play; to the witness, for a witnessed fact. */
   question: string;
-  /** One invented name or number, found nowhere but the line that plants it. */
-  answer: string;
-  /** For a witnessed thing, a principal who was not there and the question the player asks that one; null for an event. */
-  absent: Asked | null;
+  answer: Answer;
+  /** How the line closes the fact off, and its words there; null for one of the few that may come back, whose age is its last statement. */
+  closed: { how: Closing; words: string } | null;
+  /** How the line names each person the world does not hold; every one of them leaves in the line. */
+  strangers: readonly string[];
 }
 
-const DALE = "Dale Whitcomb";
-const MARCUS = "Marcus Delgado";
-const DANNY = "Danny Okafor";
-const PRIYA = "Priya Nair";
+const DALE: PrincipalId = "dale_whitcomb";
+const MARCUS: PrincipalId = "marcus_delgado";
+const DANNY: PrincipalId = "danny_okafor";
+const PRIYA: PrincipalId = "priya_nair";
 
-/** The chat a fact's id names. */
-function chatOf(id: string): ChatName {
-  const chat = CHAT_NAMES.find((name) => id.startsWith(`${name}-`));
-  if (chat === undefined) throw new Error(`a fact's id begins with its chat's name: ${id}`);
-  return chat;
+const name = (text: string): Answer => ({ type: "name", name: text });
+const dollars = (amount: number): Answer => ({ type: "amount", dollars: amount });
+const clock = (at: string): Answer => ({ type: "time", at });
+
+type Common = Pick<PlantedFact, "id" | "kind" | "place" | "where" | "answer" | "line" | "question" | "closed" | "strangers">;
+
+function chatOf(id: string): PlantChat {
+  if (id.startsWith("a-")) return "a";
+  if (id.startsWith("c-")) return "c";
+  throw new Error(`a fact's id begins with the chat that plants it, a or c: ${id}`);
 }
 
-function event(id: string, place: number, answer: string, line: string, question: string): PlantedFact {
-  return { id, chat: chatOf(id), kind: "event", witness: null, line, place, question, answer, absent: null };
+function event(fact: Common): PlantedFact {
+  return { ...fact, chat: chatOf(fact.id), half: "event", witness: null, absent: null };
 }
 
-function witnessed(id: string, place: number, answer: string, witness: string, line: string, question: string, absent: Asked): PlantedFact {
-  return { id, chat: chatOf(id), kind: "witnessed", witness, line, place, question, answer, absent };
+function witnessed(witness: PrincipalId, absent: PrincipalId, absentQuestion: string, fact: Common): PlantedFact {
+  return { ...fact, chat: chatOf(fact.id), half: "witnessed", witness, absent: { principal: absent, question: absentQuestion } };
 }
 
-/** All sixty, chat by chat, each chat's in the order of their places. */
+/** All forty, chat by chat, each chat's in the order of their places. */
 export const FACTS: readonly PlantedFact[] = [
-  event(
-    "a-01", 7, "4817",
-    "Alone in the shop's back room before anyone else is in, I find an old brass padlock in the junk drawer, set its dials to 4817 and lock it onto my own toolbox. I say the number over to myself twice so I won't forget it.",
-    "I kneel by my toolbox and look at the old brass padlock from the junk drawer. What combination did I set it to?",
-  ),
-  witnessed(
-    "a-02", 19, "Quillmarrow", DALE,
-    "It is just Dale and me on the trailer ramp when the buyer from across the lake comes for the old skiff. He asks us to letter her new name on the stern before he tows her away, so Dale holds the paint can while I brush on Quillmarrow, and Dale reads it back out loud, shaking his head.",
-    "Dale, the old skiff the buyer from across the lake towed away, what name did he have me letter on her stern?",
-    { principal: MARCUS, question: "Marcus, do you know what name the buyer from across the lake had lettered on the stern of that old skiff from the marina?" },
-  ),
-  event(
-    "a-03", 33, "Ostravelle",
-    "On my evening walk along the shore, with nobody else in sight, I find a green glass bottle wedged between two rocks. The note rolled up inside is signed with a single name, Ostravelle, and nothing else. I roll it back up and push the cork in.",
-    "I think back to the note rolled up in that green glass bottle on the shore. What name was it signed with?",
-  ),
-  witnessed(
-    "a-04", 45, "6491", MARCUS,
-    "After closing, with just Marcus and me left in the shop, I scrape the grease off the engine block of the old green pickup someone towed in overnight. The stamped serial reads 6491; I read it out and Marcus copies it onto the work order himself.",
-    "Marcus, the old green pickup someone towed in overnight, what serial was stamped on its engine block?",
-    { principal: DALE, question: "Dale, do you know what serial was stamped on the engine block of the old green pickup that got towed in to the shop overnight?" },
-  ),
-  event(
-    "a-05", 59, "Corvane",
-    "In the laundromat at midnight, the only one there, I find a library card left in the drum of a dryer. The name on it is Corvane, from a library in a town I have never heard of. I drop it in the lost-and-found box by the door.",
-    "I think back to the library card I found in a dryer at the laundromat. What name was on it?",
-  ),
-  witnessed(
-    "a-06", 71, "3962", DANNY,
-    "Danny and I bet on how many steps it takes to walk from our doors to the end of the pier and back, just the two of us. I count out loud the whole way and it comes to 3962. Danny groans and says he owes me a coffee.",
-    "Danny, our bet about walking from our doors to the end of the pier and back, how many steps did I count?",
-    { principal: PRIYA, question: "Priya, do you know how many steps I counted walking from my door to the end of the pier and back?" },
-  ),
-  event(
-    "a-07", 85, "Halvensted",
-    "Alone in my apartment, I pull the bottom drawer out of the secondhand dresser I bought and find a name carved into the wood underneath: Halvensted. I run my thumb over the letters and slide the drawer back in.",
-    "I think about the bottom drawer of my secondhand dresser. What name is carved into the wood underneath it?",
-  ),
-  witnessed(
-    "a-08", 97, "5308", PRIYA,
-    "In the town hall's back office, just Priya and me, we find an old festival raffle stub stuck to the bottom of a filing cabinet drawer. The number on it is 5308, and Priya reads it out and says it must be the prize nobody ever came to claim.",
-    "Priya, the old festival raffle stub we found stuck in a filing cabinet drawer at the town hall, what number was on it?",
-    { principal: DALE, question: "Dale, do you know the number on the old festival raffle stub that turned up stuck in a filing cabinet drawer at the town hall?" },
-  ),
-  event(
-    "a-09", 111, "7154",
-    "Walking home alone along the lakefront road, I find a dented orange buoy washed up in the reeds with a number stenciled on it in black: 7154. I drag it up onto the grass so it can't foul anyone's propeller.",
-    "I think back to the dented orange buoy I dragged out of the reeds by the lakefront road. What number was stenciled on it?",
-  ),
-  witnessed(
-    "a-10", 123, "Morrowick", DALE,
-    "Just Dale and me in the marina office after dark, a stranger on a houseboat radios in for a slip for one night. Dale hands me the logbook and I write down the name he gives over the radio, Morrowick, while Dale says it back into the handset to be sure.",
-    "Dale, the stranger on the houseboat who radioed in for a slip for one night, what name did he give over the radio?",
-    { principal: PRIYA, question: "Priya, do you know the name of the stranger on a houseboat who radioed the marina for a slip for one night?" },
-  ),
-  event(
-    "a-11", 137, "Duskenhall",
-    "Waiting alone at the bus shelter on Harbor Street in the rain, I notice a word scratched deep into the green paint of the bench: Duskenhall. I trace it with a finger while I wait and wonder who carved it.",
-    "I think back to waiting in the rain at the bus shelter on Harbor Street. What word was scratched into the paint of the bench?",
-  ),
-  witnessed(
-    "a-12", 149, "8273", MARCUS,
-    "Only Marcus and me in the shop, he digs an old brass key out of the glovebox of the antique truck he has been restoring. The paper tag tied to it says 8273 in faded pencil, and he reads it out to me twice, puzzled.",
-    "Marcus, the old brass key you dug out of the glovebox of the antique truck you're restoring, what number was on its paper tag?",
-    { principal: PRIYA, question: "Priya, do you know what number was on the paper tag of the old brass key Marcus found in his antique truck's glovebox?" },
-  ),
-  event(
-    "a-13", 163, "2649",
-    "Alone on the dock at dawn, I find a soggy ferry ticket stuck to a piling, for a crossing I have never heard of, with the ticket number 2649 printed across it. I peel it off and drop it in the trash can by the bait shop.",
-    "I think back to the soggy ferry ticket stuck to a piling on the dock at dawn. What ticket number was printed on it?",
-  ),
-  witnessed(
-    "a-14", 175, "Galloran", DANNY,
-    "Sitting on the front steps of our building, just Danny and me, we listen to a busker play one song on a battered fiddle. When Danny asks what it's called, the busker says Galloran, tips his hat and walks off toward the ferry.",
-    "Danny, the busker with the battered fiddle who played for us on the front steps, what did he say the song was called?",
-    { principal: DALE, question: "Dale, do you know the name of the song the busker with the battered fiddle played on the front steps of my building?" },
-  ),
-  event(
-    "a-15", 189, "9136",
-    "Alone in the stockroom of the hardware store downstairs, helping out after hours, I find a crate stenciled with a shipping number, 9136, that matches nothing on the inventory list. I chalk a question mark on it and leave it by the back door.",
-    "I think back to the odd crate I found in the stockroom of the hardware store. What shipping number was stenciled on it?",
-  ),
-  witnessed(
-    "a-16", 201, "Sundervik", PRIYA,
-    "In the town hall archive, just Priya and me, we find a water-stained letter tucked inside an old ledger, signed by someone called Sundervik. Priya reads the name out twice and copies it onto her clipboard to look up later.",
-    "Priya, the water-stained letter we found tucked inside an old ledger in the town hall archive, who was it signed by?",
-    { principal: MARCUS, question: "Marcus, do you know who signed the water-stained letter found tucked inside an old ledger at the town hall?" },
-  ),
-  event(
-    "a-17", 215, "Wrenhallow",
-    "Alone in my apartment, I open a used paperback I bought at the church sale and a postcard falls out, addressed to nobody and signed Wrenhallow. I tuck it back between the pages and shelve the book.",
-    "I think back to the postcard that fell out of the used paperback from the church sale. What name was it signed with?",
-  ),
-  witnessed(
-    "a-18", 229, "5872", DALE,
-    "Just Dale and me on the fuel dock, he shows me the old brass depth marker he pulled out of the mud when the lake was low. The number cast into it is 5872; Dale reads it out to me twice before he hangs it on a nail in the bait shed.",
-    "Dale, the old brass depth marker you pulled out of the mud when the lake was low, what number was cast into it?",
-    { principal: DANNY, question: "Danny, do you know what number was cast into the old brass depth marker Dale pulled out of the mud?" },
-  ),
-  event(
-    "a-19", 243, "3415",
-    "The only passenger on the early bus, I find a locker key wedged down the side of my seat, its plastic tag stamped 3415. I hand it to the driver when I get off, and he drops it in a box under his seat.",
-    "I think back to the locker key I found wedged beside my seat on the early bus. What number was stamped on its tag?",
-  ),
-  witnessed(
-    "a-20", 257, "Brisbecke", MARCUS,
-    "Only Marcus and me in the shop when a man in a long coat comes in for a fan belt, pays cash and signs the receipt with one word, Brisbecke. Marcus reads the signature over my shoulder and says he has never seen him in town before.",
-    "Marcus, the man in the long coat who paid cash for a fan belt, what name did he sign on the receipt?",
-    { principal: DALE, question: "Dale, do you know what name the man in the long coat signed on his receipt when he bought a fan belt at the shop?" },
-  ),
+  event({
+    id: "a-01", kind: "act", place: 7, where: null, answer: dollars(2580),
+    line: "On the late bus back from Muskegon, riding alone, I doze off, and a man in a grey hoodie lifts $2,580 in cash out of my jacket; he gets off at the county line before I wake and is gone for good.",
+    question: "I think back to dozing off on the late bus from Muskegon. How much cash did the man in the grey hoodie take from my jacket?",
+    closed: { how: "left", words: "for good" }, strangers: ["a man in a grey hoodie"],
+  }),
+  witnessed(DALE, PRIYA, "Priya, do you know how much I got for my grandfather's old spare outboard when I sold it to a couple from Wisconsin?", {
+    id: "a-02", kind: "exchange", place: 19, where: "alder_harbor_marina", answer: dollars(3160),
+    line: "On the fuel dock, with Dale looking on, I sell my grandfather's old spare outboard to a couple from Wisconsin for $3,160, paid in full in cash, and they motor home across the lake for good.",
+    question: "Dale, the old spare outboard I sold on the fuel dock to the couple from Wisconsin, how much did they pay me for it?",
+    closed: { how: "paid", words: "in full" }, strangers: ["a couple from Wisconsin"],
+  }),
+  event({
+    id: "a-03", kind: "name", place: 33, where: null, answer: name("Wexlindor"),
+    line: "On my day off I drive two hours north, alone, to the lakeside flea market in a village called Wexlindor and spend the whole afternoon wandering its stalls.",
+    question: "I think back to my day off. What was the village two hours north where I spent the afternoon at the flea market?",
+    closed: null, strangers: [],
+  }),
+  witnessed(MARCUS, DALE, "Dale, do you know the name of the trucker who got pulled out of his overturned rig on County Road 12?", {
+    id: "a-04", kind: "act", place: 45, where: null, answer: name("Brennquist"),
+    line: "Out on County Road 12, Marcus and I pull a trucker named Brennquist out of his overturned rig before the cab fills with smoke; he thanks us from the ambulance and goes home to Ontario for good.",
+    question: "Marcus, the trucker we pulled out of his overturned rig on County Road 12, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a trucker named Brennquist"],
+  }),
+  event({
+    id: "a-05", kind: "hurt", place: 59, where: "dune_trails", answer: name("Sorvenna"),
+    line: "Alone on the dune trail I gash my forearm on a snapped fence wire, and a passing hiker named Sorvenna, a paramedic from Indiana, cleans and tapes it at the trailhead before she drives home to Indiana for good.",
+    question: "I think back to the forearm I gashed on the dune trail. What was the name of the hiker who cleaned and taped it?",
+    closed: { how: "left", words: "for good" }, strangers: ["a passing hiker named Sorvenna"],
+  }),
+  witnessed(PRIYA, DALE, "Dale, do you know the name of the developer who threw his rejected permit across the Township Hall lobby?", {
+    id: "a-06", kind: "act", place: 71, where: "township_hall", answer: name("Klestrevan"),
+    line: "In the Township Hall lobby a developer named Klestrevan throws his rejected permit at Priya and shoves her against the bulletin board; she shoves him straight back out the door, and he sells his lakefront lot and leaves Port Alder for good.",
+    question: "Priya, the developer who threw his rejected permit at you and shoved you in the Township Hall lobby, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a developer named Klestrevan"],
+  }),
+  event({
+    id: "a-07", kind: "act", place: 85, where: "lakefront_park", answer: name("Ombrecht"),
+    line: "Alone on the public beach at Lakefront Park, I swim out past the sandbar and drag the Ombrecht boy, a summer kid from Ohio, back to shore when the undertow takes him; his family drives home to Ohio that evening.",
+    question: "I think back to the boy I dragged out of the undertow off the public beach. What was his family's name?",
+    closed: null, strangers: ["the Ombrecht boy"],
+  }),
+  witnessed(DANNY, PRIYA, "Priya, do you know the name of the veterinary student who stitched my split lip on the landing at 114 Harbor Street?", {
+    id: "a-08", kind: "hurt", place: 97, where: "harbor_street_114", answer: name("Lannoweth"),
+    line: "Danny and I are carrying his old couch down the stairs at 114 Harbor Street when it slips and splits my lip; a veterinary student from Cornwall named Lannoweth, passing on the street, stitches it on the landing and flies home to England for good.",
+    question: "Danny, when your old couch slipped on the stairs and split my lip, what was the name of the veterinary student who stitched it?",
+    closed: { how: "left", words: "for good" }, strangers: ["a veterinary student from Cornwall named Lannoweth"],
+  }),
+  event({
+    id: "a-09", kind: "exchange", place: 111, where: "rusty_anchor", answer: dollars(853),
+    line: "After Thursday trivia at the Rusty Anchor, with none of my friends there, I pick up the whole bar's tab, $853, and settle it in full before I walk home alone.",
+    question: "I think back to the Thursday trivia night at the Rusty Anchor. How much was the whole bar's tab that I picked up?",
+    closed: { how: "paid", words: "in full" }, strangers: [],
+  }),
+  witnessed(DALE, MARCUS, "Marcus, do you know what time it was when lightning set the derelict houseboat past the marina's breakwall on fire?", {
+    id: "a-10", kind: "time", place: 123, where: "alder_harbor_marina", answer: clock("23:26"),
+    line: "From the harbor office window Dale and I watch lightning set the derelict houseboat past the breakwall ablaze; Dale reads the wall clock out loud, 11:26 at night, and she burns to the waterline before dawn.",
+    question: "Dale, the night lightning set the derelict houseboat past the breakwall on fire, what time did the wall clock in the harbor office say?",
+    closed: { how: "gone", words: "burns to the waterline" }, strangers: [],
+  }),
+  event({
+    id: "a-11", kind: "time", place: 137, where: "lakefront_park", answer: clock("21:17"),
+    line: "Walking the beach alone after dark, I watch an abandoned sailboat tear loose from its mooring off the point and sink; my watch says 9:17 p.m. as her mast goes under.",
+    question: "I think back to the abandoned sailboat I watched sink off the point. What time did my watch say when her mast went under?",
+    closed: { how: "gone", words: "sink" }, strangers: [],
+  }),
+  witnessed(PRIYA, DANNY, "Danny, do you know the name of the traveling organ tuner who fixed the old church organ?", {
+    id: "a-12", kind: "name", place: 149, where: "bluebird_coffee", answer: name("Dovrenhall"),
+    line: "At Bluebird Coffee Priya introduces me to a traveling organ tuner named Dovrenhall who has just finished the old church organ; he catches the noon bus out of Port Alder and is gone for good.",
+    question: "Priya, the traveling organ tuner you introduced me to at Bluebird Coffee, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a traveling organ tuner named Dovrenhall"],
+  }),
+  event({
+    id: "a-13", kind: "act", place: 163, where: "alder_market", answer: name("Gaskwerrin"),
+    line: "In the Alder Market parking lot, with nobody I know around, a drunk named Gaskwerrin punches a teenage bagger over a dropped carton of eggs, then staggers onto the evening bus and leaves town for good.",
+    question: "I think back to the punch thrown in the Alder Market parking lot. What was the name of the drunk who hit the bagger?",
+    closed: { how: "left", words: "for good" }, strangers: ["a drunk named Gaskwerrin"],
+  }),
+  witnessed(MARCUS, PRIYA, "Priya, do you know the name of the cyclist from Lyon who was given an old ten-speed on Birch Lane?", {
+    id: "a-14", kind: "act", place: 175, where: "birch_lane_12", answer: name("Hessenvaux"),
+    line: "On Birch Lane, Marcus gives the old ten-speed from his garage to a stranded cyclist from Lyon named Hessenvaux whose frame has cracked, and Hessenvaux rides it to the airport bus and flies home to France for good.",
+    question: "Marcus, the stranded cyclist from Lyon you gave your old ten-speed to on Birch Lane, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a stranded cyclist from Lyon named Hessenvaux"],
+  }),
+  event({
+    id: "a-15", kind: "word", place: 189, where: "shoreline_fuel", answer: name("Dessimond"),
+    line: "Alone at the pumps at Shoreline Fuel, a hitchhiker named Dessimond begs me to swear I'll drive him all the way to Chicago tonight; I refuse, and he climbs into a cattle truck heading south and is gone for good.",
+    question: "I think back to the hitchhiker at Shoreline Fuel who begged me for a ride to Chicago. What was his name?",
+    closed: { how: "word", words: "I refuse" }, strangers: ["a hitchhiker named Dessimond"],
+  }),
+  witnessed(DALE, DANNY, "Danny, do you know the name of the retired sea captain who sailed his ketch into the marina to fuel up?", {
+    id: "a-16", kind: "name", place: 201, where: "alder_harbor_marina", answer: name("Morrikvaal"),
+    line: "On the fuel dock Dale and I meet a retired sea captain named Morrikvaal sailing his ketch around the Great Lakes; he tops up his tanks, sails north out of the harbor and leaves the lakes for good.",
+    question: "Dale, the retired sea captain sailing his ketch around the Great Lakes who fueled up at your dock, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a retired sea captain named Morrikvaal"],
+  }),
+  event({
+    id: "a-17", kind: "exchange", place: 215, where: "community_clinic", answer: dollars(919),
+    line: "Alone at the Alder Community Clinic's pharmacy window, I pay off the $919 bill for last summer's broken finger in full and tear up the reminder notice.",
+    question: "I think back to settling my old bill at the clinic's pharmacy window. How much was the bill for my broken finger?",
+    closed: { how: "paid", words: "in full" }, strangers: [],
+  }),
+  witnessed(DANNY, DALE, "Dale, do you know the name of the summer kid who rolled his jeep drag-racing on the dune road?", {
+    id: "a-18", kind: "word", place: 227, where: "harbor_street_114", answer: name("Kesswalder"),
+    line: "On our landing at 114 Harbor Street Danny gives me his word, and shakes on it, that he will never again drag-race the dune road the way he did against a summer kid named Kesswalder, who rolled his jeep there before his family drove home to Toledo.",
+    question: "Danny, when you gave me your word never to drag-race the dune road again, what was the name of the summer kid who rolled his jeep racing you?",
+    closed: null, strangers: ["a summer kid named Kesswalder"],
+  }),
+  event({
+    id: "a-19", kind: "name", place: 241, where: "lakefront_park", answer: name("Evvenrith"),
+    line: "At the Saturday farmers' market in Lakefront Park, alone, I buy a coffee for a traveling glassblower named Evvenrith on her last day in town; she packs her van and leaves Michigan for good.",
+    question: "I think back to the traveling glassblower I bought a coffee for at the farmers' market. What was her name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a traveling glassblower named Evvenrith"],
+  }),
+  witnessed(PRIYA, DALE, "Dale, do you know how much I was paid for a weekend brake job I did on my own time?", {
+    id: "a-20", kind: "exchange", place: 255, where: "bluebird_coffee", answer: dollars(718),
+    line: "At Bluebird Coffee Priya pays me $718 in cash for the brake job I did on her hatchback on my own time over the weekend.",
+    question: "Priya, the brake job I did on your hatchback on my own time, how much did you pay me for it?",
+    closed: null, strangers: [],
+  }),
 
-  event(
-    "b-01", 3, "Ravelsby",
-    "Alone on the landing before work, I find an envelope slipped under my door by mistake, addressed to a Mr. Ravelsby at an apartment number this building doesn't have. I write 'not here' on it and leave it in the mailbox downstairs.",
-    "I think back to the envelope someone slipped under my door by mistake. Who was it addressed to?",
-  ),
-  witnessed(
-    "b-02", 13, "6039", DANNY,
-    "Just Danny and me in the shop's parking lot, a delivery van backs in and the driver asks us to check the crate number before he unloads. I read it off, 6039, and Danny checks it against the slip and shakes his head: wrong shop.",
-    "Danny, the delivery van that backed into the shop lot with the wrong crate, what number was on that crate?",
-    { principal: PRIYA, question: "Priya, do you know the number on the crate that a delivery van tried to drop at the shop by mistake?" },
-  ),
-  event(
-    "b-03", 25, "Tarrowind",
-    "Alone in the old cemetery on the hill at sunset, I find a small stone half hidden in the long grass with one name cut into it, Tarrowind, and no dates at all. I pull the grass back from it before I go.",
-    "I think back to the small stone half hidden in the long grass in the old cemetery on the hill. What name was cut into it?",
-  ),
-  witnessed(
-    "b-04", 39, "4581", PRIYA,
-    "In the empty township office, just Priya and me, she asks me to read out the permit number on the faded sign she pried off the old ice-fishing shack. It says 4581, and she writes it on her clipboard to check against the old records.",
-    "Priya, the faded sign you pried off the old ice-fishing shack, what permit number did I read off it for you?",
-    { principal: MARCUS, question: "Marcus, do you know the permit number on the faded sign Priya pried off the old ice-fishing shack?" },
-  ),
-  event(
-    "b-05", 51, "8317",
-    "Out alone in a rented canoe at first light, I find a plastic float tangled in the weeds with a number written on it in marker, 8317. I unhook it and leave it on the lost-and-found shelf at the public dock.",
-    "I think back to the plastic float I untangled from the weeds while out alone in the canoe. What number was written on it?",
-  ),
-  witnessed(
-    "b-06", 65, "Ilvermoor", DALE,
-    "Just Dale and me on the breakwater, a sailboat I have never seen ghosts past the harbor mouth. Dale lends me his binoculars and I read the name on her transom out loud, Ilvermoor, while he writes it in the margin of his tide chart.",
-    "Dale, the sailboat we watched ghost past the harbor mouth from the breakwater, what name was on her transom?",
-    { principal: DANNY, question: "Danny, do you know what name was on the transom of the sailboat that ghosted past the harbor mouth the other evening?" },
-  ),
-  event(
-    "b-07", 77, "2796",
-    "Alone in the alley behind the hardware store, I find a bicycle chained to the drainpipe with its combination lock hanging open on 2796. I snap it shut and spin the dials so nobody can walk off with the bike.",
-    "I think back to the bicycle chained to the drainpipe in the alley behind the hardware store. What number was its open lock left on?",
-  ),
-  witnessed(
-    "b-08", 91, "Lorrimand", MARCUS,
-    "After closing, just Marcus and me, he shows me a photograph he found under the seat of a trade-in: a man standing beside a tow truck with Lorrimand painted on its door. Marcus reads it out and says he can't remember any tow outfit by that name around here.",
-    "Marcus, the photograph you found under the seat of that trade-in, what name was painted on the tow truck's door?",
-    { principal: PRIYA, question: "Priya, do you know what name was painted on the tow truck's door in the photograph Marcus found under a trade-in's seat?" },
-  ),
-  event(
-    "b-09", 103, "Fallowmere",
-    "Alone at the library's free shelf, I pick up a cookbook with a bookplate inside the cover that reads 'From the kitchen of Fallowmere'. I put it back for someone who cooks more than I do.",
-    "I think back to the cookbook on the library's free shelf. Whose kitchen did its bookplate say it came from?",
-  ),
-  witnessed(
-    "b-10", 117, "Venterlow", DANNY,
-    "Just Danny and me at the laundromat, we find a yellowed flyer under all the others on the corkboard, for a band called Venterlow that played the fairgrounds years ago. Danny reads the name out and swears he has never heard of them.",
-    "Danny, the yellowed flyer we found under all the others on the laundromat corkboard, what was the band called?",
-    { principal: DALE, question: "Dale, do you know the name of the band on the yellowed flyer Danny and I found on the laundromat corkboard?" },
-  ),
-  event(
-    "b-11", 129, "9462",
-    "Alone on the trail above town, I come across an old survey stake with a metal tag nailed to it, stamped 9462. I look at it for a while and walk on to the overlook.",
-    "I think back to the old survey stake on the trail above town. What number was stamped on its metal tag?",
-  ),
-  witnessed(
-    "b-12", 143, "Kettlebrand", PRIYA,
-    "In the town hall basement, just Priya and me, we unroll an old festival banner and find a name stitched small in one corner, Kettlebrand. Priya reads it out and says it must be whoever sewed it, long before her time.",
-    "Priya, the old festival banner we unrolled in the town hall basement, what name was stitched in its corner?",
-    { principal: DALE, question: "Dale, do you know whose name is stitched in the corner of the old festival banner in the town hall basement?" },
-  ),
-  event(
-    "b-13", 155, "6374",
-    "Alone in the shop before opening, I find a page torn from a notebook under the lift with a number circled three times in red ink: 6374. I fold it up and drop it in the recycling bin.",
-    "I think back to the torn notebook page I found under the lift before opening. What number was circled on it?",
-  ),
-  witnessed(
-    "b-14", 169, "Strovane", DALE,
-    "Just Dale and me in the marina office, a woman phones asking for a slip for her late father's boat. Dale puts her on speaker, and when he asks her name she spells it out for us: Strovane. He scribbles it on the back of an envelope and says she sounded far away.",
-    "Dale, the woman who phoned the marina office asking for a slip for her late father's boat, what name did she spell out for us?",
-    { principal: MARCUS, question: "Marcus, do you know the name of the woman who phoned the marina asking for a slip for her late father's boat?" },
-  ),
-  event(
-    "b-15", 181, "Nolloway",
-    "Alone in the attic storage room Helen lets me use, I find an old leather suitcase with a luggage tag still tied to the handle, the name on it inked as Nolloway. I leave the suitcase where it is.",
-    "I think back to the old leather suitcase in the attic storage room. What name was inked on its luggage tag?",
-  ),
-  witnessed(
-    "b-16", 195, "5627", MARCUS,
-    "Only Marcus and me in the shop, we roll in a tired old motorcycle for a customer passing through, and Marcus asks me to read him the frame number while he fills out the ticket. I read it off the steering head: 5627.",
-    "Marcus, the tired old motorcycle we rolled in for the customer passing through, what frame number did I read off for you?",
-    { principal: DANNY, question: "Danny, do you know the frame number of the old motorcycle Marcus and I rolled into the shop for a customer passing through?" },
-  ),
-  event(
-    "b-17", 207, "7943",
-    "Alone at the gas station's air pump late at night, I find a used scratch card someone dropped, with a serial number printed along the bottom: 7943. I feed it into the trash bin by the pump.",
-    "I think back to the used scratch card I found by the air pump at the gas station. What serial number was printed along its bottom?",
-  ),
-  witnessed(
-    "b-18", 221, "Quennick", DANNY,
-    "Just Danny and me on the landing, a man in a delivery cap knocks asking for someone named Quennick who he says used to live in 2B. Danny tells him nobody by that name has lived here in six years, and the man thanks us and leaves.",
-    "Danny, the man in the delivery cap who knocked on our landing, who did he say he was looking for?",
-    { principal: PRIYA, question: "Priya, do you know who the man in the delivery cap was looking for when he knocked on our landing?" },
-  ),
-  event(
-    "b-19", 235, "6258",
-    "Alone on the pier at night, I watch a small boat with no lights slip past, and in the sweep of the harbor beacon I catch the registration on its bow, ending in 6258. It is gone into the dark before I see anything else.",
-    "I think back to the small boat with no lights that slipped past the pier at night. What number did the registration on its bow end in?",
-  ),
-  witnessed(
-    "b-20", 249, "Harrowgilt", PRIYA,
-    "In the township office, just Priya and me, we open a dusty box of old pie-contest scorecards and find that the top score one year went to someone called Harrowgilt. Priya reads the name out, laughs, and puts the card back in the box.",
-    "Priya, the dusty box of old pie-contest scorecards in the township office, who got the top score on the card we found?",
-    { principal: MARCUS, question: "Marcus, do you know who got the top score on the old pie-contest scorecard Priya and I found in the township office?" },
-  ),
-
-  event(
-    "c-01", 5, "4176",
-    "Alone in the stairwell on my way down, I find a gym locker tag on the bottom step with the number 4176 punched into it. I hang it on the key hook by the mailboxes for whoever lost it.",
-    "I think back to the gym locker tag I found on the bottom step of the stairwell. What number was punched into it?",
-  ),
-  witnessed(
-    "c-02", 17, "Saltriven", DALE,
-    "Just Dale and me at the end of the main dock, an empty canoe drifts in and Dale hooks it with a boat pole. Burned into the inside of its hull is a name, Saltriven, and Dale reads it out twice and says it isn't from any camp he knows.",
-    "Dale, the empty canoe that drifted up to the end of the main dock, what name was burned into its hull?",
-    { principal: PRIYA, question: "Priya, do you know what name was burned into the hull of the empty canoe that drifted up to the marina's main dock?" },
-  ),
-  event(
-    "c-03", 29, "Ambervane",
-    "Alone on the beach after the storm, I find a silver ring in the sand with a single word engraved inside the band: Ambervane. I drop it in the lost-and-found jar at the coffee shop on my way home.",
-    "I think back to the silver ring I found in the sand after the storm. What word was engraved inside the band?",
-  ),
-  witnessed(
-    "c-04", 43, "8539", MARCUS,
-    "After closing, just Marcus and me, he opens the old safe in the back office for the first time in years and lets me read off the number on the deed folder inside: 8539. He says he had forgotten that safe held anything at all.",
-    "Marcus, when you opened the old safe in the back office, what number was on the deed folder inside?",
-    { principal: DALE, question: "Dale, do you know the number on the deed folder Marcus found in the old safe at the shop?" },
-  ),
-  event(
-    "c-05", 55, "Gorsefell",
-    "Alone in the woods behind the school, I find a weathered wooden sign nailed to a pine that just says Gorsefell, pointing at nothing but more trees. I stand there a minute and then walk back to the road.",
-    "I think back to the weathered wooden sign nailed to a pine in the woods behind the school. What did it say?",
-  ),
-  witnessed(
-    "c-06", 69, "3721", PRIYA,
-    "In the township office, just Priya and me, she asks me to read the meter number off the old water bill she has been trying to trace. I read out 3721, and she circles it on her clipboard and says that meter should have been taken out years ago.",
-    "Priya, the old water bill you were trying to trace, what meter number did I read off it for you?",
-    { principal: DANNY, question: "Danny, do you know the meter number on the old water bill Priya was trying to trace at the township office?" },
-  ),
-  event(
-    "c-07", 81, "9685",
-    "Alone at the self-serve car wash, I find a token stuck in the coin slot that isn't from here, stamped with the number 9685 on one side. I work it loose, set it on the ledge and use quarters instead.",
-    "I think back to the odd token stuck in the coin slot at the self-serve car wash. What number was stamped on it?",
-  ),
-  witnessed(
-    "c-08", 95, "Cobbanish", DANNY,
-    "Just Danny and me with the hood of his car up on the parking strip behind our building, he finds an old sticker on the underside of the hood from a garage called Cobbanish. He reads it out, and neither of us has ever heard of the place.",
-    "Danny, the old sticker you found on the underside of your car's hood, what garage was it from?",
-    { principal: MARCUS, question: "Marcus, do you know what garage was named on the old sticker Danny found on the underside of his car's hood?" },
-  ),
-  event(
-    "c-09", 107, "2453",
-    "Alone in the post office lobby after hours, I find a parcel notice slipped into the wrong box, with a tracking number ending in 2453. I push it through the slot in the counter door.",
-    "I think back to the misplaced parcel notice in the post office lobby after hours. What did its tracking number end in?",
-  ),
-  witnessed(
-    "c-10", 121, "Ellandrine", DALE,
-    "Just Dale and me cleaning out the bait shed, we find an old life ring with a boat's name stenciled on it in red, Ellandrine. Dale reads it out and says no boat by that name has kept a slip here in his twenty-five years.",
-    "Dale, the old life ring we found cleaning out the bait shed, what boat's name was stenciled on it?",
-    { principal: DANNY, question: "Danny, do you know what boat's name was stenciled on the old life ring Dale and I found in the bait shed?" },
-  ),
-  event(
-    "c-11", 133, "Keswold",
-    "Alone in my apartment late at night, my radio drifts onto a station I've never caught before, and the announcer signs off as Keswold just before the signal fades to static. I switch it off and go to bed.",
-    "I think back to the radio station I caught late one night before it faded to static. What name did the announcer sign off with?",
-  ),
-  witnessed(
-    "c-12", 147, "6812", MARCUS,
-    "Only Marcus and me in the shop, he hands me the odometer out of a junked dashboard and asks me to read it. It shows 6812 miles, and he laughs and says that car must have spent its whole life in a garage.",
-    "Marcus, the odometer out of that junked dashboard, how many miles did it show?",
-    { principal: PRIYA, question: "Priya, do you know how many miles were on the odometer Marcus pulled out of a junked dashboard?" },
-  ),
-  event(
-    "c-13", 159, "Arbellow",
-    "Alone in the back booth of the coffee shop, I find a grocery list folded into the napkin dispenser, nothing on it but eggs, flour and lamp oil, signed at the bottom Arbellow. I fold it back where I found it.",
-    "I think back to the grocery list folded into the napkin dispenser at the coffee shop. What name was it signed with?",
-  ),
-  witnessed(
-    "c-14", 173, "5194", PRIYA,
-    "In the town hall lobby, just Priya and me, she shows me the old inventory sheet for the festival's folding chairs, which claims the town owns 5194 of them. I read the number out in disbelief, and she laughs and says someone added a digit years ago.",
-    "Priya, the old inventory sheet for the festival's folding chairs, how many chairs did it claim the town owns?",
-    { principal: DALE, question: "Dale, do you know how many folding chairs the old festival inventory sheet at the town hall claims the town owns?" },
-  ),
-  event(
-    "c-15", 185, "7369",
-    "Alone at the boat launch at dusk, I find a fishing license pinned under a rock on the picnic table, its number 7369 the only thing still readable. I leave it under the rock.",
-    "I think back to the fishing license pinned under a rock at the boat launch. What number was still readable on it?",
-  ),
-  witnessed(
-    "c-16", 199, "Mardrake", DANNY,
-    "Just Danny and me on the landing, we find yesterday's paper with one crossword answer already filled in, in pen: Mardrake. Danny reads it out and says that can't be a real word, and it isn't even the right length.",
-    "Danny, the crossword in yesterday's paper on the landing, what word had someone filled in in pen?",
-    { principal: DALE, question: "Dale, do you know what word someone filled in in pen on the crossword Danny and I found on the landing?" },
-  ),
-  event(
-    "c-17", 211, "4932",
-    "Alone in the shop's parts room, I find an old alternator tagged by a supplier I don't recognize, with part number 4932, which is in none of our catalogs. I set it on the shelf for returns.",
-    "I think back to the old alternator in the parts room tagged by a supplier I didn't recognize. What part number was on it?",
-  ),
-  witnessed(
-    "c-18", 225, "Hollisker", DALE,
-    "Just Dale and me on the fuel dock, a man pulls up in a rented runabout to ask the way to the north shore, and when Dale asks his name for the fuel log he says Hollisker. Dale writes it down and watches him go.",
-    "Dale, the man in the rented runabout who asked the way to the north shore, what name did he give for your fuel log?",
-    { principal: MARCUS, question: "Marcus, do you know the name of the man in a rented runabout who stopped at the marina to ask the way to the north shore?" },
-  ),
-  event(
-    "c-19", 239, "8647",
-    "Crossing the old bridge over the creek alone, I notice a number painted on one of its stones in faded yellow, 8647. I wonder who painted it there and keep walking.",
-    "I think back to the old bridge over the creek. What number was painted on one of its stones?",
-  ),
-  witnessed(
-    "c-20", 253, "Vossberrow", MARCUS,
-    "Only Marcus and me in the shop when the phone rings: a woman from out of state asking whether we ever serviced her late uncle's truck, and she spells her surname for us, Vossberrow. Marcus checks the old card files while I read the name back to her, and finds nothing.",
-    "Marcus, the woman from out of state who phoned about her late uncle's truck, what surname did she spell out?",
-    { principal: PRIYA, question: "Priya, do you know the surname of the woman from out of state who phoned the shop about her late uncle's truck?" },
-  ),
+  event({
+    id: "c-01", kind: "act", place: 5, where: "gull_island", answer: name("Stavrinelle"),
+    line: "Alone on the Gull Island trail, I carry a hiker named Stavrinelle with a twisted ankle two miles to the ranger station; she rides the evening ferry across and flies home to Toronto for good.",
+    question: "I think back to the hiker with the twisted ankle I carried on Gull Island. What was her name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a hiker named Stavrinelle"],
+  }),
+  witnessed(DALE, PRIYA, "Priya, do you know the name of the Scottish yachtsman who was given an old brass compass at the marina?", {
+    id: "c-02", kind: "act", place: 17, where: "alder_harbor_marina", answer: name("Gorrovanth"),
+    line: "On the fuel dock Dale gives his old brass compass to a Scottish yachtsman named Gorrovanth who lost his own in the storm, and Gorrovanth sets sail for home and leaves the lakes for good.",
+    question: "Dale, the Scottish yachtsman you gave your old brass compass to on the fuel dock, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a Scottish yachtsman named Gorrovanth"],
+  }),
+  event({
+    id: "c-03", kind: "exchange", place: 29, where: "lakefront_park", answer: dollars(381),
+    line: "Alone in the Lakefront Park lot after losing my keys in the sand, I pay a locksmith from Holland $381 to cut new ones for my pickup, and he drives home to Holland.",
+    question: "I think back to losing my pickup keys in the sand at Lakefront Park. How much did the locksmith from Holland charge me for new ones?",
+    closed: null, strangers: ["a locksmith from Holland"],
+  }),
+  witnessed(MARCUS, PRIYA, "Priya, do you know how much the long-haul trucker from Texas paid for his rebuilt transmission?", {
+    id: "c-04", kind: "exchange", place: 43, where: "alder_automotive", answer: dollars(3215),
+    line: "At the shop counter Marcus takes $3,215 in cash from a long-haul trucker from Texas for a rebuilt transmission, marks the ticket paid in full, and the trucker rolls out for Texas for good.",
+    question: "Marcus, the long-haul trucker from Texas who paid cash at the counter for a rebuilt transmission, how much did he pay?",
+    closed: { how: "paid", words: "in full" }, strangers: ["a long-haul trucker from Texas"],
+  }),
+  event({
+    id: "c-05", kind: "name", place: 55, where: "gull_island", answer: name("Qorrindale"),
+    line: "Alone on Gull Island I hike out to a hidden cove the old rangers call Qorrindale, and that night the storm surge washes away its sand spit, so the cove is gone.",
+    question: "I think back to the hidden cove I hiked out to on Gull Island before the storm took it. What did the old rangers call it?",
+    closed: { how: "gone", words: "washes away" }, strangers: [],
+  }),
+  witnessed(PRIYA, DALE, "Dale, do you know the name of the woman who was pulled out of her smoking sedan outside Township Hall?", {
+    id: "c-06", kind: "act", place: 69, where: "township_hall", answer: name("Druvenna"),
+    line: "Outside Township Hall, Priya and I pull a woman named Druvenna out of her smoking sedan after it jumps the curb; she thanks us and rides home to Lansing with her sister that evening.",
+    question: "Priya, the woman we pulled out of her smoking sedan outside Township Hall, what was her name?",
+    closed: null, strangers: ["a woman named Druvenna"],
+  }),
+  event({
+    id: "c-07", kind: "act", place: 81, where: "rusty_anchor", answer: name("Volkhavrin"),
+    line: "At the Rusty Anchor, among strangers, a freighter deckhand named Volkhavrin knocks a tourist off his barstool with one punch, then walks out to his ore boat and ships out of the lakes for good.",
+    question: "I think back to the punch at the Rusty Anchor that knocked a tourist off his barstool. What was the deckhand's name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a freighter deckhand named Volkhavrin"],
+  }),
+  witnessed(DANNY, DALE, "Dale, do you know the name of the off-duty medic who splinted a cracked wrist out on the dune trails?", {
+    id: "c-08", kind: "hurt", place: 95, where: "dune_trails", answer: name("Velkanrith"),
+    line: "On the dune trails Danny's rented ATV flips and cracks his wrist; an off-duty medic from Wisconsin named Velkanrith splints it on the spot and takes the car ferry home across the lake for good.",
+    question: "Danny, when your rented ATV flipped on the dune trails and cracked your wrist, what was the name of the medic who splinted it?",
+    closed: { how: "left", words: "for good" }, strangers: ["an off-duty medic from Wisconsin named Velkanrith"],
+  }),
+  event({
+    id: "c-09", kind: "hurt", place: 107, where: "lakefront_park", answer: name("Truvessil"),
+    line: "Alone at the Lakefront Park grills I burn my palm on a hot grate, and a camp nurse from Kentucky named Truvessil wraps it with burn gel from her kit before she drives home to Kentucky for good.",
+    question: "I think back to burning my palm on the grill grate at Lakefront Park. What was the name of the nurse who wrapped it?",
+    closed: { how: "left", words: "for good" }, strangers: ["a camp nurse from Kentucky named Truvessil"],
+  }),
+  witnessed(DALE, MARCUS, "Marcus, do you know what time it was when the old excursion boat moored off the point finally sank?", {
+    id: "c-10", kind: "time", place: 121, where: "alder_harbor_marina", answer: clock("15:38"),
+    line: "From the breakwall Dale and I watch the rotten old excursion boat moored off the point finally sink; Dale reads his watch out loud, 3:38 in the afternoon, as her stack goes under.",
+    question: "Dale, the afternoon we watched the old excursion boat sink off the point, what time did your watch say when her stack went under?",
+    closed: { how: "gone", words: "sink" }, strangers: [],
+  }),
+  event({
+    id: "c-11", kind: "time", place: 133, where: null, answer: clock("05:43"),
+    line: "Out alone on an early walk, I watch the abandoned fish shack at the end of the north pier catch fire and burn to the pilings; my phone says 5:43 in the morning when its roof falls in.",
+    question: "I think back to the abandoned fish shack that burned at the end of the north pier. What time did my phone say when its roof fell in?",
+    closed: { how: "gone", words: "burn to the pilings" }, strangers: [],
+  }),
+  witnessed(PRIYA, DANNY, "Danny, do you know the name of the photographer who was shooting every lake town for a book?", {
+    id: "c-12", kind: "name", place: 147, where: "bluebird_coffee", answer: name("Zarrenquist"),
+    line: "At Bluebird Coffee Priya and I meet a wandering photographer named Zarrenquist who is shooting every lake town for a book; he heads home to Duluth that evening.",
+    question: "Priya, the wandering photographer we met at Bluebird Coffee who was shooting every lake town for a book, what was his name?",
+    closed: null, strangers: ["a wandering photographer named Zarrenquist"],
+  }),
+  event({
+    id: "c-13", kind: "act", place: 159, where: "alder_market", answer: dollars(619),
+    line: "At Alder Market, the only customer in the store, I watch a woman in a yellow raincoat grab the church bake-sale cash box holding $619 off the counter and drive off; she leaves Port Alder for good.",
+    question: "I think back to the woman in the yellow raincoat at Alder Market. How much was in the church bake-sale cash box she grabbed?",
+    closed: { how: "left", words: "for good" }, strangers: ["a woman in a yellow raincoat"],
+  }),
+  witnessed(MARCUS, DALE, "Dale, do you know the name of the drunk who got laid out with one punch at Shoreline Fuel?", {
+    id: "c-14", kind: "act", place: 173, where: "shoreline_fuel", answer: name("Pazzandrel"),
+    line: "At Shoreline Fuel a drunk named Pazzandrel swings at Marcus over a parking spot, and Marcus lays him out with one punch; Pazzandrel limps to his car and drives back to Detroit for good.",
+    question: "Marcus, the drunk who swung at you over a parking spot at Shoreline Fuel, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a drunk named Pazzandrel"],
+  }),
+  event({
+    id: "c-15", kind: "word", place: 185, where: null, answer: name("Frovendahl"),
+    line: "On the ferry back from Gull Island, alone at the rail, I give my word to a retired lake captain named Frovendahl, who is moving to Arizona for good, that I will never take my boat out alone in a November gale.",
+    question: "I think back to the vow I made at the ferry rail coming back from Gull Island. What was the name of the retired lake captain I gave my word to?",
+    closed: null, strangers: ["a retired lake captain named Frovendahl"],
+  }),
+  witnessed(DALE, DANNY, "Danny, do you know the name of the lighthouse painter who has painted every light on the Great Lakes?", {
+    id: "c-16", kind: "name", place: 199, where: "alder_harbor_marina", answer: name("Ilvrandor"),
+    line: "In the harbor office Dale and I share coffee with a lighthouse painter named Ilvrandor who has painted every light on the Great Lakes; he finishes Gull Island's light and leaves the lakes for good.",
+    question: "Dale, the lighthouse painter we shared coffee with in the harbor office, what was his name?",
+    closed: { how: "left", words: "for good" }, strangers: ["a lighthouse painter named Ilvrandor"],
+  }),
+  event({
+    id: "c-17", kind: "exchange", place: 211, where: "dune_trails", answer: dollars(3470),
+    line: "At the dune trailhead, alone, I sell my old dirt bike to two brothers from Chicago for $3,470, paid in full in cash, and they trailer it home to Chicago for good that night.",
+    question: "I think back to selling my old dirt bike at the dune trailhead. How much did the two brothers from Chicago pay me for it?",
+    closed: { how: "paid", words: "in full" }, strangers: ["two brothers from Chicago"],
+  }),
+  witnessed(DANNY, PRIYA, "Priya, do you know the family name of the girl from Grand Rapids who got her bicycle chain fixed on the front steps of 114 Harbor Street?", {
+    id: "c-18", kind: "word", place: 225, where: "harbor_street_114", answer: name("Orvecchia"),
+    line: "On our front steps Danny swears to the crying Orvecchia girl from Grand Rapids that he will fix her bicycle chain before her bus leaves, and he keeps his word with a minute to spare; she rides the bus home to Grand Rapids for good.",
+    question: "Danny, the crying girl from Grand Rapids whose bicycle chain you swore to fix before her bus left, what was her family's name?",
+    closed: { how: "word", words: "keeps his word" }, strangers: ["the crying Orvecchia girl from Grand Rapids"],
+  }),
+  event({
+    id: "c-19", kind: "name", place: 239, where: "lakefront_park", answer: name("Kelsivane"),
+    line: "At a bonfire on the Lakefront Park beach, among strangers, I share a blanket with a folk singer from New Zealand named Kelsivane on her last night in the States before she flies home for good.",
+    question: "I think back to the bonfire on the Lakefront Park beach. What was the name of the folk singer from New Zealand I sat with?",
+    closed: { how: "left", words: "for good" }, strangers: ["a folk singer from New Zealand named Kelsivane"],
+  }),
+  witnessed(PRIYA, DANNY, "Danny, do you know how much I paid in fines for parking my pickup on Main Street all through the summer street fair?", {
+    id: "c-20", kind: "exchange", place: 253, where: "township_hall", answer: dollars(983),
+    line: "At the Township Hall counter I pay Priya the $983 in fines for parking my pickup on Main Street all through the summer street fair, in full, and she stamps the notices paid.",
+    question: "Priya, the fines for parking my pickup on Main Street all through the summer street fair, how much did I pay you?",
+    closed: { how: "paid", words: "in full" }, strangers: [],
+  }),
 ];
