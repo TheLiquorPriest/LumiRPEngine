@@ -5,9 +5,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { createStore } from "../../src/ui/store";
-import type { LiveEvent, TraceRecord } from "../../src/shared/api";
-import type { MissingPermission, RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
-import type { ClientState, LiveListener, RpeClient } from "../../src/ui/client";
+import type { LiveEvent, MissingPermissionShown, TraceRecord, TurnReply, TurnsReply } from "../../src/shared/api";
+import type { ClientState, LiveListener, RouteKey, RpeClient } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE, type RunNode } from "../../src/ui/live-model";
 import { watchChat, watchTurn, type Watched } from "../../src/ui/live-watch";
 import type { Timers } from "../../src/ui/roads";
@@ -55,7 +54,7 @@ function heldClient(): RpeClient & { asked: Asked[]; listener(): LiveListener; c
   let listener: LiveListener | null = null;
   return {
     state: createStore<ClientState>({ phase: "relay", why: "the test" }),
-    missing: createStore<readonly MissingPermission[] | null>(null),
+    missing: createStore<readonly MissingPermissionShown[] | null>(null),
     call(key, params, options) {
       const { promise, resolve } = Promise.withResolvers<never>();
       asked.push({ key, params: params as Record<string, string>, query: (options?.query ?? {}) as Record<string, unknown>, answer: (value) => resolve(value as never) });
@@ -109,7 +108,7 @@ describe("watching a chat", () => {
     const list = await client.call_(0);
     expect(list.key).toBe("GET /api/v1/chats/:chat/turns");
     expect(list.query).toEqual({ limit: 1 });
-    list.answer(turnListAt(40) satisfies TurnList);
+    list.answer(turnListAt(40) satisfies TurnsReply);
     const detail = await client.call_(1);
     expect(detail.key).toBe("GET /api/v1/chats/:chat/turns/:turn");
     expect(detail.params).toEqual({ chat: CHAT, turn: RUN });
@@ -117,7 +116,7 @@ describe("watching a chat", () => {
     // Following begins, and events after the 40th come while the read is out.
     client.listener().reset();
     client.listener().events(RECORDED.slice(40, 55), null);
-    detail.answer(turnAt(40) satisfies TurnDetail);
+    detail.answer(turnAt(40) satisfies TurnReply);
     await flush();
     expect(shape(seen.at(-1)?.model.runs[0])).toEqual(wholeAt(55));
     expect(seen.at(-1)?.loading).toBe(false);
@@ -140,7 +139,7 @@ describe("watching a chat", () => {
     const timers = manualTimers();
     const seen: Watched[] = [];
     const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), held(50));
-    (await client.call_(0)).answer({ turns: [], more: false } satisfies TurnList);
+    (await client.call_(0)).answer({ turns: [], more: false } satisfies TurnsReply);
     await flush();
     client.listener().events(RECORDED.slice(0, 30), null);
     // The hub dropped the 31st to 40th of the chat's events, and says so with the next batch.
@@ -164,7 +163,7 @@ describe("watching a chat", () => {
     const timers = manualTimers();
     const seen: Watched[] = [];
     const stop = watchChat(client, CHAT, timers, (w) => seen.push(w), held(100));
-    (await client.call_(0)).answer({ turns: [], more: false } satisfies TurnList);
+    (await client.call_(0)).answer({ turns: [], more: false } satisfies TurnsReply);
     await flush();
     const before = seen.length;
     for (const event of RECORDED.slice(0, 20)) client.listener().events([event], null);
@@ -187,7 +186,7 @@ describe("watching one turn, for its page", () => {
     const first = await client.call_(0);
     expect(first.key).toBe("GET /api/v1/chats/:chat/turns/:turn");
     expect(first.query).toEqual({ from: 1 });
-    first.answer(turnAt(30) satisfies TurnDetail);
+    first.answer(turnAt(30) satisfies TurnReply);
     await flush();
     expect(seen.at(-1)?.detail?.status).toBe("running");
     // Following begins: the turn is read on from what the page has.

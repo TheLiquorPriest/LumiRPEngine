@@ -5,8 +5,8 @@
 // the chat before the Author's closing calls. Every name, id and number here is made up.
 
 import type { AgentRef, TraceDelta, TraceEvent, TraceRecord, Usage } from "rp-harness/contract";
-import type { LiveEvent, ReplyPiece } from "../../src/shared/api";
-import type { ChatList, Reflection, TurnDetail, TurnList, TurnRun, TurnSummary, ValuesShown, WorldAnswer, WorldNode } from "../../src/ui/api";
+import type { ChatsReply, LevelNode, LevelReflection, LiveEvent, ReplyPiece, RunShown, TurnReply, TurnRow, TurnsReply, WorldReply } from "../../src/shared/api";
+import type { ValuesShown } from "../../src/ui/pages/world";
 
 export const USER = "user-1";
 export const CHAT = "chat-calder";
@@ -222,10 +222,10 @@ export function underRun(events: readonly LiveEvent[], run: string): LiveEvent[]
 }
 
 /** The recorded turn once continued, as a read of it answers: what its latest run (the continue) says, the records of both its runs in time order, and each run. */
-export function continuedTurn(): TurnDetail {
+export function continuedTurn(): TurnReply {
   const latest = turnOf(CONTINUED, { run: RUN, chat: CHAT, received: (CONTINUED_RECORDS[0]?.at ?? T0) - INTAKE_MS });
   const first = turnAt().runs;
-  const again = latest.runs.map((run): TurnRun => ({ ...run, id: `${RUN}.2`, nth: 2, kind: "continue" }));
+  const again = latest.runs.map((run): RunShown => ({ ...run, id: `${RUN}.2`, nth: 2, kind: "continue" }));
   return { ...latest, kind: "continue", trace: [...RECORDS, ...latest.trace], runs: [...first, ...again] };
 }
 
@@ -235,7 +235,7 @@ export function requestFile(agent: AgentRef, call: number): string {
 }
 
 /** A turn as a read of it answers, from the live events of its run heard so far, with its trace from record `from`. */
-export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat: string; received: number; from?: number }): TurnDetail {
+export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat: string; received: number; from?: number }): TurnReply {
   const records = seen.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
   const pieces = seen.filter((e) => e.kind === "reply").map((e) => e.data as unknown as ReplyPiece);
   const text = pieces.flatMap((p) => ("text" in p ? [p.text] : [])).join("");
@@ -250,7 +250,7 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
   const status = outcome?.status ?? "running";
   const timings = { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended"), intent: null, thinking: [] };
   const trace = records.filter((r) => r.seq >= (options.from ?? 1));
-  const run: TurnRun = {
+  const run: RunShown = {
     id: `${options.run}.1`,
     run: records[0]?.run ?? options.run,
     nth: 1,
@@ -260,6 +260,9 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
     usage: outcome?.usage ?? sum,
     reply: { text, progress },
     error: outcome?.error ?? null,
+    stoppedBy: null,
+    lastText: false,
+    notGiven: [],
     trace,
     requests: records.flatMap((r) => (r.event.kind === "call_started" ? [{ agent: r.agent.id, definition: r.agent.definition, call: r.event.call, file: requestFile(r.agent, r.event.call) }] : [])),
   };
@@ -282,17 +285,17 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
 }
 
 /** The recorded turn as a read of it answers once the hub had sent its first `count` events (all of them when absent), with its trace from record `from`. */
-export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): TurnDetail {
+export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): TurnReply {
   const detail = turnOf(RECORDED.slice(0, count), { run: RUN, chat, received: T0 - INTAKE_MS, from });
   return chat === CHAT ? detail : { ...detail, trace: detail.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })), runs: detail.runs.map((run) => ({ ...run, trace: run.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })) })) };
 }
 
-export function summaryOf(detail: TurnDetail): TurnSummary {
+export function summaryOf(detail: TurnReply): TurnRow {
   return { id: detail.id, kind: detail.kind, onPath: detail.onPath, message: detail.message, status: detail.status, timings: detail.timings, usage: detail.usage };
 }
 
 /** The chat's earlier turns: a swipe that stands, the attempt it replaced (off the path now), and one stopped by the player. */
-export const EARLIER: readonly TurnSummary[] = [
+export const EARLIER: readonly TurnRow[] = [
   { id: "turn-30", kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, intent: null, thinking: [] }, usage: usage(3, 24_100, 19_456, 512, 88) },
   { id: "turn-29", kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, intent: null, thinking: [] }, usage: usage(4, 30_870, 22_528, 640, 120) },
   { id: "turn-28", kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, intent: null, thinking: [] }, usage: usage(2, 11_920, 8_192, 301, 64) },
@@ -305,23 +308,23 @@ const EARLIER_WORDS: Readonly<Record<string, { intent: string; reply: string }>>
 };
 
 /** One of the earlier turns as a read of it answers: its record, without its trace. */
-export function earlierTurn(id: string, chat = CHAT): TurnDetail | null {
+export function earlierTurn(id: string, chat = CHAT): TurnReply | null {
   const summary = EARLIER.find((t) => t.id === id);
   const words = EARLIER_WORDS[id];
   if (summary === undefined || words === undefined) return null;
   const error = summary.status === "stopped" ? { code: "stopped" as const } : null;
   const reply = { text: words.reply, progress: [] };
   // The recording names a run by its turn, as RPH did before each run had an id of its own.
-  const run: TurnRun = { id: `${id}.1`, run: id, nth: 1, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
+  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
   return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run] };
 }
 
 /** A chat's list of turns, newest first: the recorded one as it stands after `count` events, then the earlier ones. */
-export function turnListAt(count: number = RECORDED.length, chat = CHAT): TurnList {
+export function turnListAt(count: number = RECORDED.length, chat = CHAT): TurnsReply {
   return { turns: [summaryOf(turnAt(count, 1, chat)), ...EARLIER], more: false };
 }
 
-export const CHATS: ChatList = {
+export const CHATS: ChatsReply = {
   chats: [
     { id: CHAT, name: "Calder Point", lastTurnAt: T0, running: false, played: true, world: true },
     { id: "chat-orchard", name: "The orchard war", lastTurnAt: T0 - 3 * 86_400_000, running: false, played: true, world: false },
@@ -329,10 +332,10 @@ export const CHATS: ChatList = {
   ],
 };
 
-const quiet = (over: Partial<Reflection> = {}): Reflection => ({ people: 0, things: 0, places: 0, groups: 0, records: 0, notable: [], open: 0, changed: null, note: null, ...over });
+const quiet = (over: Partial<LevelReflection> = {}): LevelReflection => ({ people: 0, things: 0, places: 0, groups: 0, records: 0, notable: [], open: 0, changed: null, note: null, ...over });
 
 /** The story's world as the store's tree holds it, every level with all its values (what it inherits among them). */
-export const WORLD: readonly WorldNode[] = [
+export const WORLD: readonly LevelNode[] = [
   {
     ref: "world",
     kind: "world",
@@ -386,10 +389,10 @@ export const WORLD: readonly WorldNode[] = [
 ];
 
 /** The world as its route answers for a level, to a depth, with the values asked for: the level, then each level below in order. */
-export function worldAt(at: string, depth: number, values: ValuesShown = "all"): WorldAnswer | null {
+export function worldAt(at: string, depth: number, values: ValuesShown = "all"): WorldReply | null {
   const byRef = new Map(WORLD.map((node) => [node.ref, node]));
   if (!byRef.has(at)) return null;
-  const nodes: WorldNode[] = [];
+  const nodes: LevelNode[] = [];
   const walk = (ref: string, down: number): void => {
     const node = byRef.get(ref);
     if (node === undefined) return;

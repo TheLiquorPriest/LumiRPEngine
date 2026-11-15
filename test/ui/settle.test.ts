@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { TurnDetail } from "../../src/ui/api";
+import type { TurnReply } from "../../src/shared/api";
 import { applyRead, EMPTY_LIVE, runsOf } from "../../src/ui/live-model";
 import { NO_FOLDER, NO_SETTLE, newestOnPath, type SettleShown, settleNow, TurnsView, type TurnsViewProps, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
 import { askingClient, settle } from "./asking";
@@ -23,7 +23,7 @@ function turns(over: Partial<TurnsViewProps>) {
   return { tree, text: textOf(tree), pressed };
 }
 
-function turnPage(turn: TurnDetail, over: Partial<TurnViewProps> = {}) {
+function turnPage(turn: TurnReply, over: Partial<TurnViewProps> = {}) {
   const pressed: unknown[] = [];
   const props: TurnViewProps = {
     turn,
@@ -49,7 +49,7 @@ function turnPage(turn: TurnDetail, over: Partial<TurnViewProps> = {}) {
 const button = (tree: unknown, words: string) => elements(tree).find((e) => e.type === "button" && textOf(e.props.children) === words);
 
 /** The recorded turn, its latest run a settle run that ended, as such runs do, with no reply. */
-function settledTurn(): TurnDetail {
+function settledTurn(): TurnReply {
   const turn = turnAt();
   const error = { code: "no-reply" as const, detail: "The lead's run wrote nothing to the chat." };
   const runs = turn.runs.map((run, i) => (i === turn.runs.length - 1 ? { ...run, kind: "settle" as const, status: "no-reply" as const, error } : run));

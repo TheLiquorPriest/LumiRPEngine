@@ -7,13 +7,13 @@ import type { ComponentChildren } from "preact";
 import type { PromptNotice, ReleaseForm, ReplyError, RunStatus, ToolResult, TraceRecord } from "rp-harness/contract";
 import { Icon, type IconName } from "./icons";
 import { markdown } from "./markdown";
-import type { RunKind } from "./api";
+import type { TurnRunKind } from "../shared/api";
 import { Badge, Fold, Pre, type Tone } from "./atoms";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
 import { counted, duration, json, num, tokenWords } from "./words";
 
-export const TURN_KIND_WORDS: Readonly<Record<RunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
+export const TURN_KIND_WORDS: Readonly<Record<TurnRunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
 
 const RUN_WORDS: Readonly<Record<"turn" | "job" | "talk", string>> = { turn: "Turn", job: "Job", talk: "Talk with an agent" };
 
@@ -27,7 +27,7 @@ export const STATUS_WORDS: Readonly<Record<RunStatus | "running", { words: strin
 };
 
 /** How a run of `kind` stands, in words: a settle run writes nothing to the chat, so its ending with no reply is how it is meant to end. */
-export function statusWords(kind: RunKind | undefined, status: RunStatus | "running"): { words: string; tone: Tone } {
+export function statusWords(kind: TurnRunKind | undefined, status: RunStatus | "running"): { words: string; tone: Tone } {
   return kind === "settle" && status === "no-reply" ? { words: "Settled, no reply: as a settle run ends", tone: "pos" } : STATUS_WORDS[status];
 }
 
@@ -77,7 +77,7 @@ export function runSpan(run: RunNode, now: number): number | null {
 }
 
 /** A run's head; `kind`, where the page knows it from RPE, names a settle run as one (the harness runs it as a continue) and its ending with no reply as normal. */
-export function RunHead(props: { run: RunNode; now: number; kind?: RunKind }) {
+export function RunHead(props: { run: RunNode; now: number; kind?: TurnRunKind }) {
   const { run, kind } = props;
   const outcome = run.outcome?.status ?? "running";
   const status = statusWords(kind, outcome);

@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { TurnList, TurnSummary } from "../../src/ui/api";
+import type { TurnsReply, TurnRow } from "../../src/shared/api";
 import type { Route } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
 import { applyLive, applyRead, EMPTY_LIVE, runOf, runsOf } from "../../src/ui/live-model";
@@ -261,10 +261,10 @@ describe("the Turns page", () => {
   });
 
   test("older turns asked for in one chat never show in the chat the page has moved to", async () => {
-    const asked: { chat: string; before: string | undefined; answer(list: TurnList): void }[] = [];
+    const asked: { chat: string; before: string | undefined; answer(list: TurnsReply): void }[] = [];
     const client: Pick<RpeClient, "call"> = {
       call: ((_key: string, params: { chat: string }, options?: { query?: { before?: string } }) => {
-        const { promise, resolve } = Promise.withResolvers<TurnList>();
+        const { promise, resolve } = Promise.withResolvers<TurnsReply>();
         asked.push({ chat: params.chat, before: options?.query?.before, answer: resolve });
         return promise;
       }) as RpeClient["call"],
@@ -290,16 +290,16 @@ describe("the Turns page", () => {
   });
 
   test("a run that begins or ends reads the newest turns again and puts them in front of those held: the list never empties while it reads, older turns read further back stay, a turn run again moves up, and a page that does not reach the turns held stands alone", async () => {
-    const asked: { before: string | undefined; answer(list: TurnList): void }[] = [];
+    const asked: { before: string | undefined; answer(list: TurnsReply): void }[] = [];
     const client: Pick<RpeClient, "call"> = {
       call: ((_key: string, _params: { chat: string }, options?: { query?: { before?: string } }) => {
-        const { promise, resolve } = Promise.withResolvers<TurnList>();
+        const { promise, resolve } = Promise.withResolvers<TurnsReply>();
         asked.push({ before: options?.query?.before, answer: resolve });
         return promise;
       }) as RpeClient["call"],
     };
-    const [t30, t29, t28] = EARLIER as [TurnSummary, TurnSummary, TurnSummary];
-    const t31: TurnSummary = { ...t30, id: "turn-31" };
+    const [t30, t29, t28] = EARLIER as [TurnRow, TurnRow, TurnRow];
+    const t31: TurnRow = { ...t30, id: "turn-31" };
     const shown: TurnsRead[] = [];
     const reader = readTurns(client, CHAT, 30, (read) => shown.push(read));
     asked[0]?.answer({ turns: [t30, t29], more: true });

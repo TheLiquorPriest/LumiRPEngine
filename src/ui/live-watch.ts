@@ -12,9 +12,8 @@
 // `keepRuns` runs: past that the oldest that ended is let go, and named, so its Turn page stays in reach.
 
 import type { RunStatus } from "rp-harness/contract";
-import type { LiveEvent } from "../shared/api";
+import type { LiveEvent, TurnReply } from "../shared/api";
 import { isRecord } from "../shared/json";
-import type { TurnDetail } from "./api";
 import { replyOf, type RpeClient } from "./client";
 import { applyLive, applyRead, EMPTY_LIVE, type EventOf, holeIn, type LiveModel, type RunNode, runOf } from "./live-model";
 import type { Timers } from "./roads";
@@ -36,7 +35,7 @@ export interface Watched {
   /** What could not be read, in RPE's words; null when all was. */
   problem: string | null;
   /** The last read of the turn watched, on the Turn page; null on the Live page, and until it has come. */
-  detail: TurnDetail | null;
+  detail: TurnReply | null;
   /** On the Live page: the runs let go, the one let go first first. */
   letGo: readonly LetGo[];
   /** How many events the hub dropped for this page because it fell behind, all told; 0 when none. */
@@ -120,7 +119,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
   let model: LiveModel = EMPTY_LIVE;
   let loading = true;
   let problem: string | null = null;
-  let detail: TurnDetail | null = null;
+  let detail: TurnReply | null = null;
   let letGo: readonly LetGo[] = [];
   let behind = 0;
   let alive = true;
@@ -171,7 +170,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
   async function read(turn: string, at: ReadFrom): Promise<void> {
     if (reading.has(turn)) return;
     reading.add(turn);
-    let got: TurnDetail | null = null;
+    let got: TurnReply | null = null;
     try {
       got = replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn }, { query: at }));
     } catch (error) {

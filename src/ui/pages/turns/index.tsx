@@ -9,9 +9,8 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { RequestReply } from "../../../shared/api";
+import type { FolderEntry, RequestReply, RunShown, SettleReply, TurnReply, TurnRow } from "../../../shared/api";
 import { useSelect } from "../../store";
-import type { SettleAnswer, TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../../api";
 import { useApp, useNow } from "../../app";
 import { replyOf, type RpeClient } from "../../client";
 import { Badge, Banner, Button, Empty, Gated, PageHeader, Pre, Row, Section } from "../../atoms";
@@ -25,7 +24,7 @@ import { bytesWords, clock, counted, duration, errorWords, tokenWords, when } fr
 import type { PageEntry } from "../../page-entry";
 import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "../jobs";
 
-function TurnLine(props: { turn: TurnSummary; onOpen: () => void }) {
+function TurnLine(props: { turn: TurnRow; onOpen: () => void }) {
   const { turn } = props;
   const status = statusWords(turn.kind, turn.status);
   const end = turn.timings.ended ?? turn.timings.released;
@@ -55,7 +54,7 @@ function TurnLine(props: { turn: TurnSummary; onOpen: () => void }) {
 /** Settle now as a page holds it: a request out, the run it began, or RPE's refusal in its own words. */
 export interface SettleShown {
   busy: boolean;
-  started: SettleAnswer | null;
+  started: SettleReply | null;
   problem: string | null;
 }
 
@@ -74,7 +73,7 @@ export function settleNow(client: Pick<RpeClient, "call">, chat: string, onChang
  * The newest turn on the chat's path, the one Settle now settles; null where the list holds none. The list is newest run first, and
  * after a swipe back to an earlier swipe its first turns are off the path: it is read a page at a time past them.
  */
-export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string, limit: number): Promise<TurnSummary | null> {
+export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string, limit: number): Promise<TurnRow | null> {
   let before: string | undefined;
   for (;;) {
     const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit, ...(before === undefined ? {} : { before }) } }));
@@ -116,7 +115,7 @@ export function SettleNotice(props: { shown: SettleShown; onOpen?(turn: string):
 }
 
 export interface TurnsViewProps {
-  turns: readonly TurnSummary[];
+  turns: readonly TurnRow[];
   more: boolean;
   loading: boolean;
   problem: string | null;
@@ -172,7 +171,7 @@ export function TurnsView(props: TurnsViewProps) {
 
 /** A chat's turns as read so far, newest first. */
 export interface TurnsRead {
-  turns: TurnSummary[];
+  turns: TurnRow[];
   /** Older turns remain to be read. */
   more: boolean;
   loading: boolean;
@@ -184,7 +183,7 @@ export interface TurnsRead {
  * stays. A page that does not reach back to the turns held (more turns came meanwhile than a page holds) leaves a gap between
  * them, so it stands alone, and older turns are read from it.
  */
-export function withNewest(held: TurnsRead, page: { turns: readonly TurnSummary[]; more: boolean }): Pick<TurnsRead, "turns" | "more"> {
+export function withNewest(held: TurnsRead, page: { turns: readonly TurnRow[]; more: boolean }): Pick<TurnsRead, "turns" | "more"> {
   const oldest = page.turns.at(-1);
   const reached = oldest === undefined ? -1 : held.turns.findIndex((t) => t.id === oldest.id);
   if (!page.more || reached < 0) return { turns: [...page.turns], more: page.more };
@@ -315,7 +314,7 @@ export interface OpenShown {
  * list could not be read, and the file open, with its text once read or RPE's reason it gave none.
  */
 export interface FolderShown {
-  files: TurnFileEntry[] | null;
+  files: FolderEntry[] | null;
   problem: string | null;
   open: OpenShown | null;
 }
@@ -372,7 +371,7 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
 
 /** What a part of the Turn page is drawn from: the turn as last read, its runs as the page holds them (the first first), now, and its folder. */
 export interface TurnParts {
-  turn: TurnDetail;
+  turn: TurnReply;
   runs: readonly RunNode[];
   now: number;
   folder: FolderShown;
@@ -403,7 +402,7 @@ function RunCaption(props: { nth: number; of: number; id: string | null; title: 
 }
 
 /** Each run's own part, under its caption where the turn has run more than once; a run no view of the turn names (a job the turn started) is captioned by what it is. */
-function EachRun(props: { runs: readonly RunNode[]; views: readonly TurnRun[]; part: (run: RunNode, view: TurnRun | undefined) => ComponentChildren }) {
+function EachRun(props: { runs: readonly RunNode[]; views: readonly RunShown[]; part: (run: RunNode, view: RunShown | undefined) => ComponentChildren }) {
   return (
     <div class="lre-stack">
       {props.runs.map((run) => {
@@ -419,7 +418,7 @@ function EachRun(props: { runs: readonly RunNode[]; views: readonly TurnRun[]; p
   );
 }
 
-function Timings(props: { turn: TurnDetail }) {
+function Timings(props: { turn: TurnReply }) {
   const moments = momentsOf(props.turn.timings);
   const spans = spansOf(props.turn.timings);
   return (
@@ -444,7 +443,7 @@ function Timings(props: { turn: TurnDetail }) {
 }
 
 /** What the turn spent, all its runs together, and each run's own where there are several. */
-function Tokens(props: { turn: TurnDetail }) {
+function Tokens(props: { turn: TurnReply }) {
   const { usage, runs } = props.turn;
   return (
     <div>
@@ -458,7 +457,7 @@ function Tokens(props: { turn: TurnDetail }) {
 }
 
 /** Each run of a turn run more than once, by its own id: how it went, and what it sent to the chat (the latest's is below, as it streams). */
-function Runs(props: { views: readonly TurnRun[]; runs: readonly RunNode[]; now: number }) {
+function Runs(props: { views: readonly RunShown[]; runs: readonly RunNode[]; now: number }) {
   const latest = props.views.at(-1);
   return (
     <div class="lre-stack">
@@ -505,8 +504,8 @@ function Given(props: { run: RunNode }) {
 }
 
 /** What each agent of a run was sent on its first model call, where the harness kept it: its request rebuilt exactly as sent, opened on demand. */
-function FirstCalls(props: { view: TurnRun | undefined; onOpenRequest(name: string): void }) {
-  const first = new Map<string, TurnRun["requests"][number]>();
+function FirstCalls(props: { view: RunShown | undefined; onOpenRequest(name: string): void }) {
+  const first = new Map<string, RunShown["requests"][number]>();
   for (const request of props.view?.requests ?? []) {
     const held = first.get(request.agent);
     if (held === undefined || request.call < held.call) first.set(request.agent, request);
@@ -527,7 +526,7 @@ function FirstCalls(props: { view: TurnRun | undefined; onOpenRequest(name: stri
 }
 
 /** The lore of the turn's prompt, by id, as its intake kept it: what Lumiverse activated for it, and what its lore map showed the Author. */
-function TurnLore(props: { lore: TurnDetail["lore"] }) {
+function TurnLore(props: { lore: TurnReply["lore"] }) {
   const { activated, map } = props.lore;
   return (
     <div class="lre-stack" data-lore>
@@ -691,7 +690,7 @@ function SectionsOf(props: { parts: TurnParts; sections: readonly TurnSection[] 
 }
 
 export interface TurnViewProps {
-  turn: TurnDetail;
+  turn: TurnReply;
   /** Its runs, the first first: more than one when it was continued. */
   runs: readonly RunNode[];
   now: number;
@@ -778,7 +777,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
   const [folder, setFolder] = useState<FolderShown>(NO_FOLDER);
   const reader = useRef<{ open(name: string): void; openRequest(name: string): void; close(): void } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
-  const [newest, setNewest] = useState<TurnSummary | null>(null);
+  const [newest, setNewest] = useState<TurnRow | null>(null);
   const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
   const notices = useNoticeLines(chat);
   const turnsAtATime = useUiSetting("turnsAtATime");

@@ -14,9 +14,8 @@
 // new objects only along its path (run, agent, step), so a view can tell what changed by identity.
 
 import type { AgentStatus, TodoItem } from "rp-harness/contract";
-import type { AgentRef, LiveEvent, Release, ReplyPiece, RunOutcome, Scope, ToolResult, TraceDelta, TraceEvent, TraceRecord, Usage } from "../shared/api";
+import type { AgentRef, LiveEvent, Release, ReplyPiece, RunOutcome, Scope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, Usage } from "../shared/api";
 import { isRecord } from "../shared/json";
-import type { TurnDetail } from "./api";
 
 export type EventOf<K extends TraceEvent["kind"]> = Extract<TraceEvent, { kind: K }>;
 
@@ -342,7 +341,7 @@ export function applyLive(model: LiveModel, event: LiveEvent): LiveModel {
  * turn's runs, by RPH's id for it; a run read before its first record is in goes under RPE's own id for
  * it, and gives way to RPH's once a read names that.
  */
-export function applyRead(model: LiveModel, detail: TurnDetail): LiveModel {
+export function applyRead(model: LiveModel, detail: TurnReply): LiveModel {
   let next = model;
   for (const record of detail.trace) next = applyRecord(next, record);
   const named = new Set(detail.runs.flatMap((view) => (view.run === null ? [] : [view.id])));

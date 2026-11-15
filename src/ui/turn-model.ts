@@ -3,16 +3,16 @@
 // the intent record costs before the reply begins (plan §10.3), shown beside the gate. And the turn as
 // its page shows it while it runs: its last read, with what the live road has said since.
 
-import type { TurnDetail, TurnRun, TurnTimings } from "./api";
+import type { TurnReply, RunShown, TurnMoments } from "../shared/api";
 import { addUsage, type RunNode, runTotals } from "./live-model";
 
 /** The turn's view of a run the page holds the records of: the run the read names by RPH's id for it (RPE's own id before its first record), none for a run it does not list (a job the turn started). */
-export function viewOf(views: readonly TurnRun[], run: RunNode): TurnRun | undefined {
+export function viewOf(views: readonly RunShown[], run: RunNode): RunShown | undefined {
   return views.find((view) => (view.run ?? view.id) === run.run);
 }
 
 /** The run the turn's head and reply are of: that of its latest view; the last the page holds where the read names none. */
-export function latestOf(detail: TurnDetail, runs: readonly RunNode[]): RunNode | undefined {
+export function latestOf(detail: TurnReply, runs: readonly RunNode[]): RunNode | undefined {
   const last = detail.runs.at(-1);
   return (last === undefined ? undefined : runs.find((run) => run.run === (last.run ?? last.id))) ?? runs.at(-1);
 }
@@ -22,7 +22,7 @@ export function latestOf(detail: TurnDetail, runs: readonly RunNode[]): RunNode 
  * since: how it stands, when it began, released and ended, and while it runs, what it has spent so far,
  * its earlier runs' spending added (a read gives what all its runs spent together).
  */
-export function liveTurn(detail: TurnDetail, run: RunNode | undefined): TurnDetail {
+export function liveTurn(detail: TurnReply, run: RunNode | undefined): TurnReply {
   if (run === undefined) return detail;
   const { timings } = detail;
   const live = run.outcome?.usage ?? runTotals(run).usage;
@@ -52,7 +52,7 @@ const MOMENTS: readonly { key: "received" | "started" | "firstWord" | "released"
 ];
 
 /** The moments that happened, in order. */
-export function momentsOf(timings: TurnTimings): Moment[] {
+export function momentsOf(timings: TurnMoments): Moment[] {
   const out: Moment[] = [];
   for (const { key, label } of MOMENTS) {
     const at = timings[key];
@@ -69,7 +69,7 @@ export interface Span {
 }
 
 /** Where the time went, for each span whose two ends both happened. */
-export function spansOf(timings: TurnTimings): Span[] {
+export function spansOf(timings: TurnMoments): Span[] {
   const span = (label: string, from: number | null, to: number | null): Span[] => (from === null || to === null ? [] : [{ label, ms: to - from }]);
   return [
     ...span("Before the lead began", timings.received, timings.started),
