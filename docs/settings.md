@@ -143,6 +143,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `files.diffCells` | `4000000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lines a difference compares: Line pairs the Files page's difference compares one by one; past it, the changed middle is shown removed, then added whole. |
 | `notes.listed` | `20` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Notes listed: Note files each of the Storage page's lists gives when the page asks for no number. |
 | `notes.most` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most notes listed: The most note files one of the Storage page's lists gives. |
+| `files.idChars` | `128` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest id that names a folder: Characters of a session's or a turn's id, which names its folder; RPE's own ids are 36, and an id is letters, digits, _ and - whatever this says. |
 
 ## The files in force
 

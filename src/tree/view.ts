@@ -7,11 +7,14 @@
 // level's chats) is told by what a folder is on disk, never by how a path spells it: on a disk that
 // folds case or Unicode, `@global/CHATS` or a name with a letter that folds to `s` reaches the same
 // folder as `chats`, so the first folder below a mount is compared with the hidden ones by its device
-// and inode.
+// and inode. So is every segment of a path on such a disk: it is taken as the name of the entry that is
+// there (`Persistent-Workspace/plan.md` is the note `persistent-workspace/plan.md`), so a file's kind and
+// where it may be written follow from what it is, and two spellings of one file are one file to its
+// writers' queue (`fileKey`).
 
 import { lstat, readdir } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { FileKind, Layer, LayerLevel, Places, RefusalReason, Scope, Writer } from "rp-harness/contract";
 import { CHARACTER_FOLDERS, CHAT_CONFIG, CHAT_FOLDERS, CHATS_FOLDER, GENERATED_FILES, GLOBAL_CONFIG, GLOBAL_FOLDERS, MOUNTS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, TURN_WRITABLE, TURNS_FOLDER } from "./layout";
 
@@ -25,11 +28,11 @@ export function treeLayers(): Layer[] {
   ];
 }
 
-/** An id that names a folder (a session's, a turn's): letters, digits, `_` and `-`, so it can reach nowhere else. */
-const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** An id that names a folder (a session's, a turn's): letters, digits, `_` and `-`, so it can reach nowhere else. How long one may be is a setting (`files.idChars`). */
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
 export function safeId(what: string, id: string): string {
-  if (!SAFE_ID.test(id)) throw new Error(`A ${what} id must be letters, digits, "_" and "-", at most 128: ${JSON.stringify(id)}.`);
+  if (!SAFE_ID.test(id)) throw new Error(`A ${what} id must be letters, digits, "_" and "-": ${JSON.stringify(id)}.`);
   return id;
 }
 
@@ -69,8 +72,9 @@ export interface Located {
 
 export type Lookup = { ok: true; at: Located } | { ok: false; path: string; reason: RefusalReason };
 
-/** A file's kind by its level and its segments below the level's folder (plan §5.1). */
+/** A file's kind by its level and its segments below the level's folder (plan §5.1): the global level's notes folder holds notes too (R-175). */
 export function kindOf(level: LayerLevel, rest: readonly string[]): FileKind {
+  if (level === "global") return rest[0] === NOTES_FOLDER ? "notes" : "yours";
   if (level !== "chat") return "yours";
   if (rest[0] === NOTES_FOLDER) return "notes";
   if (rest[0] === SESSIONS_FOLDER) return "generated";
@@ -107,6 +111,71 @@ async function stat(path: string): Promise<BigIntStats | null> {
 
 function same(a: BigIntStats, b: BigIntStats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
+}
+
+/** A name as a disk that folds case and Unicode compares it. */
+function fold(name: string): string {
+  return name.normalize("NFC").toLowerCase();
+}
+
+/** Whether the disk of each tree folder folds case, once it is known: the folder found again under its name in another case is itself. */
+const FOLDS = new Map<string, boolean>();
+
+async function foldsCase(files: string): Promise<boolean> {
+  const known = FOLDS.get(files);
+  if (known !== undefined) return known;
+  const name = basename(files);
+  const other = name.toUpperCase() === name ? name.toLowerCase() : name.toUpperCase();
+  const [own, again] = await Promise.all([stat(files), other === name ? null : stat(join(dirname(files), other))]);
+  // Not known until the folder is there: a tree not made yet is asked again.
+  if (own === null) return false;
+  const folds = again !== null && same(own, again);
+  FOLDS.set(files, folds);
+  return folds;
+}
+
+/** What the queue of a file's writers is keyed by: its place on disk, as the disk tells names apart. */
+export async function fileKey(files: string, disk: string): Promise<string> {
+  return (await foldsCase(files)) ? fold(disk) : disk;
+}
+
+/** The names a chat's folder holds at its top that RPE gives: one not there yet is that name however it is spelt, on a disk that folds. */
+const CHAT_TOP: readonly string[] = [NOTES_FOLDER, SESSIONS_FOLDER, CHAT_CONFIG, ...GENERATED_FILES, ...Object.values(CHAT_FOLDERS)];
+/** And the global level's. */
+const GLOBAL_TOP: readonly string[] = [NOTES_FOLDER, GLOBAL_CONFIG, ...Object.values(GLOBAL_FOLDERS)];
+
+/** The name of the entry of `parent` that `found` is: its own spelling where the disk folds case or Unicode. */
+async function nameOf(parent: string, name: string, found: BigIntStats): Promise<string> {
+  const names = await readdir(parent);
+  if (names.includes(name)) return name;
+  for (const other of names) {
+    const entry = await stat(join(parent, other));
+    if (entry !== null && same(entry, found)) return other;
+  }
+  return name;
+}
+
+/** A level's segments as the disk names what is there, on a disk that folds: each that exists by its own entry's name, the first that does not by RPE's name for it, when it is one. */
+async function asOnDisk(levelDisk: string, level: LayerLevel, rest: readonly string[]): Promise<string[]> {
+  const out: string[] = [];
+  let parent = levelDisk;
+  for (const [i, name] of rest.entries()) {
+    const found = await stat(join(parent, name));
+    if (found === null) {
+      const top = i === 0 ? (level === "chat" ? CHAT_TOP : level === "global" ? GLOBAL_TOP : []) : [];
+      out.push(top.find((known) => fold(known) === fold(name)) ?? name, ...rest.slice(i + 1));
+      return out;
+    }
+    const own = await nameOf(parent, name, found);
+    out.push(own);
+    // Links are not followed: what is below one is refused as it is found.
+    if (!found.isDirectory()) {
+      out.push(...rest.slice(i + 1));
+      return out;
+    }
+    parent = join(parent, own);
+  }
+  return out;
 }
 
 /**
@@ -146,11 +215,15 @@ export async function locate(loc: ChatLocation, path: string): Promise<Lookup> {
     segments.push(part);
   }
   const first = segments[0];
-  const level: LayerLevel = first === "@global" ? "global" : first === "@character" ? "character" : first === "@shipped" ? "shipped" : "chat";
-  const rest = level === "chat" ? segments : segments.slice(1);
+  // A mount is a name of the view, not a folder: on a disk that folds, it is named in any case.
+  const folds = await foldsCase(loc.files);
+  const mount = first === undefined ? undefined : folds ? first.toLowerCase() : first;
+  const level: LayerLevel = mount === "@global" ? "global" : mount === "@character" ? "character" : mount === "@shipped" ? "shipped" : "chat";
+  const spelt = level === "chat" ? segments : segments.slice(1);
+  const base = levelBase(loc, level);
+  const rest = folds && base !== null ? await asOnDisk(join(loc.files, ...base), level, spelt) : spelt;
   const normalized = viewPath(level, rest);
   const kind = kindOf(level, rest);
-  const base = levelBase(loc, level);
   if (base === null) return { ok: true, at: { path: normalized, level, rest, disk: null, kind, is: "none" } };
   const disk = join(loc.files, ...base, ...rest);
 

@@ -3,7 +3,7 @@
 
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import { type Area, NO_OWNER } from "../app";
-import { TREE_MIGRATIONS } from "./chats";
+import { TREE_TABLES } from "./chats";
 import { layDefaults } from "./defaults";
 import { treeRoutes, type TreeRoutesDeps } from "./routes";
 import { TREE_SETTINGS } from "./settings";
@@ -19,7 +19,7 @@ export type TreeTakes = Omit<TreeRoutesDeps, "files" | "db">;
 export function treeArea(takes: () => TreeTakes): Area {
   return {
     name: "tree",
-    tables: [{ area: "files", migrations: TREE_MIGRATIONS }],
+    tables: [TREE_TABLES],
     settings: TREE_SETTINGS,
     mount: async (at) => {
       // The record of what an update changed of the shipped files is the user's: the app opens only for one.

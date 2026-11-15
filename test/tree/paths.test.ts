@@ -79,7 +79,7 @@ describe("RPE's tree keeps a chat to its own view", () => {
     }
     // The character's level shows its own files and guidance folders only.
     const character = await tree.port.find(scope, { by: "list", path: "@character/" });
-    expect(character.status === "found" ? character.hits.map((h) => h.path) : character).toEqual(["@character/AGENTS.md"]);
+    expect(character.status === "found" ? character.hits.map((h) => h.path) : character).toEqual(["@character/AGENTS.md", "@character/agents", "@character/rules", "@character/skills"]);
     for (const disk of [sibling.disk, stranger.disk]) expect(await readFile(join(disk, "persistent-workspace", "vault.md"), "utf8")).toBe(SECRET);
     // The other chat keeps its secret to itself, and its own scope reads it.
     expect(await tree.port.read({ ...scope, chat: "kit-chat-2" }, "persistent-workspace/vault.md")).toMatchObject({ status: "read", text: SECRET });

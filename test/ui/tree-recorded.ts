@@ -14,6 +14,7 @@ export const STORAGE: StorageReply = {
     { chat: "chat-harbour", folder: "harbour-night-7b21e4d0", bytes: 902_114, areas: { notes: 2_048, turns: 880_066, sessions: 20_000, files: 0 } },
   ],
   global: 18_220,
+  globalNotes: 0,
   shipped: 209_715,
   database: 52_428_800,
 };

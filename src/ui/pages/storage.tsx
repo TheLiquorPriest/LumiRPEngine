@@ -134,6 +134,7 @@ export function StorageView(props: StorageViewProps) {
         <>
           <Section title="Apart from the chats" id="levels">
             <Row label="Your own level" value={bytesWords(storage.global)} />
+            <Row label="Your global notes, which every chat's agents read" value={bytesWords(storage.globalNotes)} />
             <Row label="The shipped level" value={bytesWords(storage.shipped)} />
             <Row label="RPE's database, with its write-ahead log" value={bytesWords(storage.database)} />
           </Section>

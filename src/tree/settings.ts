@@ -36,6 +36,8 @@ export const TREE_DEFAULTS = Object.freeze({
   notesListed: 20,
   /** The most note files each of those lists gives. */
   notesMost: 200,
+  /** The longest id that names a folder: a session's, a turn's. RPE's own are 36 (a UUID), so it takes no less. */
+  idChars: 128,
 });
 
 export type TreeSettings = { -readonly [K in keyof typeof TREE_DEFAULTS]: number };
@@ -59,6 +61,7 @@ export const TREE_SETTING_DEFS = {
   diffCells: { key: "files.diffCells", default: TREE_DEFAULTS.diffCells, takes: { type: "whole", least: 0 }, perConnection: false, name: "Lines a difference compares", about: "Line pairs the Files page's difference compares one by one; past it, the changed middle is shown removed, then added whole.", effect: "use" },
   notesListed: { key: "notes.listed", default: TREE_DEFAULTS.notesListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Notes listed", about: "Note files each of the Storage page's lists gives when the page asks for no number.", effect: "use" },
   notesMost: { key: "notes.most", default: TREE_DEFAULTS.notesMost, takes: { type: "whole", least: 1 }, perConnection: false, name: "Most notes listed", about: "The most note files one of the Storage page's lists gives.", effect: "use" },
+  idChars: { key: "files.idChars", default: TREE_DEFAULTS.idChars, takes: { type: "whole", least: 36, most: 240 }, perConnection: false, name: "Longest id that names a folder", about: "Characters of a session's or a turn's id, which names its folder; RPE's own ids are 36, and an id is letters, digits, _ and - whatever this says.", effect: "use" },
 } as const satisfies NumberSettings<keyof TreeSettings>;
 
 /** A name of a file in force as the files layer reads it: an instruction file by its own name, anything else by its folder and name. */

@@ -21,8 +21,10 @@ export interface ChatStorage {
 
 export interface TreeStorage {
   chats: ChatStorage[];
-  /** The user's own level, the chats' folders and the shipped level apart. */
+  /** The user's own level, the chats' folders, the shipped level and its notes apart. */
   global: number;
+  /** The global level's notes (R-175), which every chat's agents read. */
+  globalNotes: number;
   shipped: number;
   /** RPE's database file, with its write-ahead log. */
   database: number;
@@ -85,7 +87,8 @@ export async function treeStorage(deps: StorageDeps, user: string): Promise<Tree
     chats.push({ chat: row.chat, folder: join(row.character, row.folder), bytes: areas.notes + areas.turns + areas.sessions + areas.files, areas });
   }
   const database = deps.db.filename === "" || deps.db.filename === ":memory:" ? 0 : (await sizeOf(deps.db.filename)) + (await sizeOf(`${deps.db.filename}-wal`));
-  return { chats, global: await levelBytes(none, "@global/"), shipped: await levelBytes(none, "@shipped/"), database };
+  const globalNotes = await levelBytes(none, `@global/${NOTES_FOLDER}/`);
+  return { chats, global: (await levelBytes(none, "@global/")) - globalNotes, globalNotes, shipped: await levelBytes(none, "@shipped/"), database };
 }
 
 /** A chat's note files: the largest now, and those agents wrote most often in turns; `limit` of each. */

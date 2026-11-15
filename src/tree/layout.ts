@@ -5,12 +5,16 @@
 //
 //   files/RPE-global.yml        the user's global config (connections live in it too)
 //   files/ALL-AGENTS.md …       the user's own global files, beside .agents/ .rules/ .skills/ …
+//   files/persistent-workspace/ the global notes (R-175): every chat's agents read them, he writes them
 //   files/defaults/             every shipped file: RPH's own, with RPE's laid over them
 //   files/chats/<c>/            AGENTS.md, agents/, rules/, skills/ of a character
-//   files/chats/<c>/<chat>/     RPE.yml, the chat's files, persistent-workspace/, sessions/
+//   files/chats/<c>/<chat>/     RPE.yml, the chat's files, rules/ skills/ agents/ hooks/,
+//                               persistent-workspace/{story,engine,prose,notes}/, sessions/
 //
-// The folder names of a chat are chosen once, when RPE first meets the chat, and kept (`chats.ts`):
-// a character or chat renamed in Lumiverse keeps its folder.
+// Every folder the plan draws is made with its level: the global level's at every start, a character's
+// and a chat's when the chat is first placed (and again at each placing, should one have gone); no file
+// is made. The folder names of a chat are chosen once, when RPE first meets the chat, and kept
+// (`chats.ts`): a character or chat renamed in Lumiverse keeps its folder.
 
 import type { GuidanceKind, LayerLevel } from "rp-harness/contract";
 import { GLOBAL_CONFIG_FILE, SHIPPED_FOLDER } from "../app/config";
@@ -30,6 +34,8 @@ export const CHAT_CONFIG = "RPE.yml";
 export const FILE_KEYS = { off: "off", layered: "layered", added: "added", instructions: "instructions", pins: "pins" } as const;
 /** The chat's notes (plan §5 `persistent-workspace/`): agents read and write them. */
 export const NOTES_FOLDER = "persistent-workspace";
+/** The folders of a chat's notes (plan §5 `story/ engine/ prose/ notes/`), each of the notes kind. */
+export const NOTE_FOLDERS = ["story", "engine", "prose", "notes"] as const;
 /** The chat's sessions (plan §5 `sessions/<session-id>/`), each with its turns' folders. */
 export const SESSIONS_FOLDER = "sessions";
 /** A session's turn folders. */

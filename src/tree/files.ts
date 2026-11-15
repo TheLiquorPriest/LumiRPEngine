@@ -13,7 +13,7 @@ import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { MOUNTS } from "./layout";
 import { treeSettingsOf } from "./settings";
-import { type ChatLocation, entriesOf, kindOf, type Located, locate, type Lookup, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
+import { type ChatLocation, entriesOf, fileKey, kindOf, type Located, locate, type Lookup, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
 
 /** The levels every chat shares, which a scope that names only the user sees. */
 const SHARED: readonly LayerLevel[] = ["shipped", "global"];
@@ -177,8 +177,12 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     return found;
   }
 
+  /** The scope's places: its session's and its turn's ids name folders, each no longer than the setting `files.idChars` at the chat's levels. */
   async function places(scope: Scope): Promise<Places> {
-    check(scope);
+    const { idChars } = await treeSettingsOf(location(scope));
+    for (const [what, id] of [["session", scope.session], ["turn", scope.turn]] as const) {
+      if (id !== undefined && id.length > idChars) throw new Error(`A ${what} id names a folder, so it is at most ${idChars} characters (the setting files.idChars), and this one is ${id.length}.`);
+    }
     return placesOf(scope, scope.turn === undefined ? null : await deps.turnFolder(scope));
   }
 
@@ -322,7 +326,8 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
       const writable = writableFor(await places(scope), by);
       const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writable);
       if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", by);
-      return oneFileAtATime(lookup.at.disk, async () => {
+      // One queue for each file on disk, however its path is spelt: a disk that folds case or Unicode holds `a.md` and `A.md` as one.
+      return oneFileAtATime(await fileKey(deps.files, lookup.at.disk), async () => {
         // Found again in this file's turn, so a write that waited sees what the one before it left.
         const again = await locate(loc, path);
         if (!again.ok) return await refusal(scope, again.path, again.reason, by);

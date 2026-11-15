@@ -3,10 +3,10 @@
 // shipped folders with what an update changed of it, and the Files page's listing and routes.
 
 export { type TreeFileEntry, treeListing } from "./catalog";
-export { type ChatFolders, type ChatNames, TREE_MIGRATIONS, TreeChats, type TreeWrites } from "./chats";
+export { type ChatFolders, type ChatNames, TREE_MIGRATIONS, TREE_TABLES, TreeChats, type TreeWrites } from "./chats";
 export { type DefaultChange, defaultChanges, type DefaultsDeps, type DiffLine, layDefaults, lineDiff } from "./defaults";
 export { cut, type TreeFiles, type TreeFilesDeps, treeFiles } from "./files";
-export { CHAT_CONFIG, CHATS_FOLDER, FILE_KEYS, folderFor, GLOBAL_CONFIG, id8, MOUNTS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, slug, turnFolderName, TURNS_FOLDER } from "./layout";
+export { CHAT_CONFIG, CHATS_FOLDER, FILE_KEYS, folderFor, GLOBAL_CONFIG, id8, MOUNTS, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, slug, turnFolderName, TURNS_FOLDER } from "./layout";
 export { type NotesAt, type NotesDeps, type NotesMoved, TreeNotes } from "./notes";
 export { KEPT_IN_OLD_TURNS, type Pruned, pruneChat, pruneTurnFolders, type RetentionSettings, retentionOf } from "./retention";
 export { treeRoutes, type TreeRoutesDeps } from "./routes";

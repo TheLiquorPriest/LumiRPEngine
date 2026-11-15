@@ -24,7 +24,7 @@ const section = (tree: unknown, id: string) => elements(tree).find((e) => e.prop
 describe("the Storage page", () => {
   test("it shows what each chat takes, area by area, and the levels and the database apart", () => {
     const { tree } = view();
-    expect(textOf(section(tree, "levels")?.props.children)).toBe("Apart from the chatsYour own level17.8 KBThe shipped level204.8 KBRPE's database, with its write-ahead log50.0 MB");
+    expect(textOf(section(tree, "levels")?.props.children)).toBe("Apart from the chatsYour own level17.8 KBYour global notes, which every chat's agents read0 bytesThe shipped level204.8 KBRPE's database, with its write-ahead log50.0 MB");
     const calder = textOf(elements(tree).find((e) => e.props["data-chat"] === CHAT && e.type === "li")?.props.children);
     expect(calder).toBe("moira-calder-point-0f3a9c21chat-calder3.3 MBnotes 40.2 KB · turn folders 3.0 MB · sessions 172.4 KB · other files 4.1 KB");
     // Another chat offers its own notes and pruning.

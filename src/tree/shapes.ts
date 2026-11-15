@@ -131,8 +131,14 @@ type ChatStorageMirrored = Holds<Exactly<Infer<typeof chatStorageRow>, ChatStora
 
 export const storageReply = shape.named(
   "StorageReply",
-  "Each chat's folder; the user's own level and the shipped level; and RPE's database file, with its write-ahead log.",
-  shape.object({ chats: shape.list(chatStorageRow), global: field(N, "The user's own level, the chats' folders and the shipped level apart."), shipped: N, database: field(N, "RPE's database file, with its write-ahead log.") }),
+  "Each chat's folder; the user's own level, its notes and the shipped level; and RPE's database file, with its write-ahead log.",
+  shape.object({
+    chats: shape.list(chatStorageRow),
+    global: field(N, "The user's own level, the chats' folders, the shipped level and its notes apart."),
+    globalNotes: field(N, "The global level's notes, which every chat's agents read."),
+    shipped: N,
+    database: field(N, "RPE's database file, with its write-ahead log."),
+  }),
 );
 type StorageMirrored = Holds<Exactly<Infer<typeof storageReply>, TreeStorage>>;
 

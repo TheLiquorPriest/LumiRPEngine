@@ -6,8 +6,10 @@
 // user's file is never touched. Resetting is removing the user's file, after which the default is taken.
 
 import type { Database } from "bun:sqlite";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { TreeWrites } from "./chats";
-import { MOUNTS } from "./layout";
+import { GLOBAL_FOLDERS, MOUNTS, NOTES_FOLDER } from "./layout";
 import { layShippedChanges, type ShippedChange } from "./shipped";
 
 export interface DefaultsDeps {
@@ -35,8 +37,12 @@ export interface DiffLine {
   text: string;
 }
 
-/** Lays the shipped level (`layShippedChanges`) and keeps what it changed of the level laid out before. */
+/**
+ * Lays the global level's folders plan §5 draws (`.agents/ .skills/ .tools/ .hooks/ .prompts/ .rules/` and its notes folder, R-175),
+ * no file among them, and the shipped level (`layShippedChanges`), keeping what it changed of the level laid out before.
+ */
 export async function layDefaults(deps: DefaultsDeps): Promise<ShippedChange[]> {
+  await Promise.all([...Object.values(GLOBAL_FOLDERS), NOTES_FOLDER].map((folder) => mkdir(join(deps.files, folder), { recursive: true })));
   const changes = await layShippedChanges(deps.files, deps.scratch, deps.sources);
   if (changes.length > 0) {
     const at = deps.now();

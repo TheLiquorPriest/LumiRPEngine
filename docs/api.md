@@ -2857,13 +2857,15 @@ export interface StopReply {
 
 ### `StorageReply`
 
-Each chat's folder; the user's own level and the shipped level; and RPE's database file, with its write-ahead log.
+Each chat's folder; the user's own level, its notes and the shipped level; and RPE's database file, with its write-ahead log.
 
 ```ts
 export interface StorageReply {
   chats: ChatStorageRow[];
-  /** The user's own level, the chats' folders and the shipped level apart. */
+  /** The user's own level, the chats' folders, the shipped level and its notes apart. */
   global: number;
+  /** The global level's notes, which every chat's agents read. */
+  globalNotes: number;
   shipped: number;
   /** RPE's database file, with its write-ahead log. */
   database: number;

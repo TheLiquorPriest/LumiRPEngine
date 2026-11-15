@@ -8,8 +8,9 @@
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { AreaTables } from "../app/app";
 import type { Migration } from "../app/migrations";
-import { CHATS_FOLDER, folderFor } from "./layout";
+import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER } from "./layout";
 
 /** How RPE's database takes a write: the application's write queue. */
 export interface TreeWrites {
@@ -142,6 +143,17 @@ CREATE INDEX suggestion_chat ON suggestion (user, chat, state);
   },
 ];
 
+/** The tree's tables, under its one name among the migration areas: the application and the command line open them by this. */
+export const TREE_TABLES = { area: "files", migrations: TREE_MIGRATIONS } as const satisfies AreaTables;
+
+/** Lays every folder plan §5 draws at a chat's two levels: the character's guidance folders, and the chat's own, its sessions' and its notes' four. No file. */
+async function layLevels(files: string, at: ChatFolders): Promise<void> {
+  const character = join(files, CHATS_FOLDER, at.character);
+  const chat = join(character, at.chat);
+  const folders = [...Object.values(CHARACTER_FOLDERS).map((f) => join(character, f)), ...Object.values(CHAT_FOLDERS).map((f) => join(chat, f)), join(chat, SESSIONS_FOLDER), ...NOTE_FOLDERS.map((f) => join(chat, NOTES_FOLDER, f))];
+  await Promise.all(folders.map((folder) => mkdir(folder, { recursive: true })));
+}
+
 /** An id as a folder name keeps it whole: its letters and digits, lower case. */
 function wholeId(id: string): string {
   return id.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
@@ -183,15 +195,15 @@ export class TreeChats {
   }
 
   /**
-   * The chat's folders, chosen and made the first time it is placed. A character's level is chosen
-   * once and kept, so its chats sit together after a rename; a chat with no character sits in a level
-   * of its own, named for the chat. Two characters, or two chats of a character, whose names and ids'
+   * The chat's folders, chosen the first time it is placed, and laid with every folder its levels hold (again at each placing,
+   * should one have gone). A character's level is chosen once and kept, so its chats sit together after a rename; a chat with no
+   * character sits in a level of its own, named for the chat. Two characters, or two chats of a character, whose names and ids'
    * first letters agree are told apart by the whole id.
    */
   async place(user: string, chat: string, names: ChatNames): Promise<ChatFolders> {
     const known = this.folders(user, chat);
     if (known !== null) {
-      await mkdir(join(this.files, CHATS_FOLDER, known.character, known.chat), { recursive: true });
+      await layLevels(this.files, known);
       return known;
     }
     const level = names.character ?? { id: chat, name: names.chat.name };
@@ -208,7 +220,7 @@ export class TreeChats {
       db.run("INSERT INTO tree_chat (user, chat, character, folder, owner) VALUES (?, ?, ?, ?, ?)", [user, chat, character, folder, owner]);
       return { character, chat: folder };
     }, "placing a chat's folders");
-    await mkdir(join(this.files, CHATS_FOLDER, chosen.character, chosen.chat), { recursive: true });
+    await layLevels(this.files, chosen);
     return chosen;
   }
 }
