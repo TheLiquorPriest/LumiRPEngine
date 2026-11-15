@@ -38,6 +38,7 @@ import { riskyPattern } from "./pattern";
 import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
+import { RunTimes } from "./spans";
 import { globalConfig, numbersOf, turnSettings } from "./settings";
 import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
@@ -236,21 +237,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   });
   const overlay = overlayWrite(worlds, () => clock.now());
   const facts = new FactsRegistry();
-  // What RPE was told of a run is in its record once the writes queued so far have run (an intent record among them), and a turn of the
-  // event loop has let RPH pass on the reply it held for them.
-  const heard = async (): Promise<void> => {
-    await app.writes.settled();
-    const turned = Promise.withResolvers<void>();
-    setImmediate(turned.resolve);
-    await turned.promise;
-  };
-  facts.add(turnFacts(store, (user, turn) => runs.record(user, turn), heard));
+  facts.add(turnFacts(store, (user, turn) => runs.ofTurn(user, turn)));
   facts.add(loreIndex.facts());
   // Who was on stage at each turn the cast counts: the open scene there, as the story record holds it; a turn with none, nobody.
   facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: numbersOf(global, STORY_FACT_SETTING_DEFS, app.log) }));
-  const trace = turnTrace({ live: app.live, files, runStarted: (record) => runs.started(record), log: app.log });
+  const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs), log: app.log });
   // The chat port's reads of Lumiverse; one that cannot be made fails in the words of the turn-errors part in force for the chat.
   const chatNow = async (scope: Scope): Promise<ChatReads> => {
     const parts = options.lumiverse();

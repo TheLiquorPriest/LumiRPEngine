@@ -75,7 +75,7 @@ runKitPart("RPE's turn facts", "facts", async (_seed, place) => {
   const { db, close } = database(place);
   const facts = new FactsRegistry();
   // The kit's turns have no runs: what a turn recorded is counted whole, and none owes anything.
-  facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), () => null, async () => undefined));
+  facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), () => []));
   return { facts, close };
 });
 
@@ -88,7 +88,7 @@ runKitPart("RPE's trace", "trace", async (seed, place) => {
   const tree = await layTree(seed, place);
   const live = new LiveHub({ queueEvents: 100, now: () => 0 });
   const quiet = () => undefined;
-  const trace = turnTrace({ live, files: tree.port, runStarted: quiet, log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
+  const trace = turnTrace({ live, files: tree.port, runs: { record: quiet, delta: quiet }, log: { debug: quiet, info: quiet, warn: quiet, error: quiet } });
   return {
     trace,
     async close() {

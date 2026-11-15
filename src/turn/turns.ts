@@ -454,6 +454,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         firstWord: null,
         released: null,
         ended: null,
+        intent: null,
+        thinking: [],
+        withoutIntent: false,
         intake: null,
         wait: null,
         folder: null,
@@ -682,6 +685,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         firstWord: null,
         released: null,
         ended: null,
+        intent: null,
+        thinking: [],
+        withoutIntent: false,
         // A Settle now run has no intake of its own, and writes no folder.
         intake: null,
         wait: null,
@@ -1282,6 +1288,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const piece = (data: { from: number; text: string } | { line: number; progress: string }): void => {
       if (run.traceRun !== null) live.publish(run.chat, { kind: "reply", data: { run: run.traceRun, ...data } });
     };
+    // The reply began to go out (its first text reached the sink, or the harness released it, whichever came first): marked at that
+    // moment, with whether any intent record of the run had ended by then, and told live while the run may go on.
+    const released = (): void => {
+      if (run.released !== null) return;
+      run.released = clock.now();
+      run.withoutIntent = run.intent?.to == null;
+      if (run.traceRun !== null) live.publish(run.chat, { kind: "released", data: { run: run.traceRun, at: run.released } });
+    };
     const sink: ReplySink = {
       progress: (line) => {
         out.progress(line);
@@ -1290,12 +1304,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       },
       content: (delta) => {
         if (run.firstWord === null) run.firstWord = clock.now();
+        released();
         out.content(delta);
         piece({ from: run.reply.length, text: delta });
         run.reply += delta;
       },
       finish: (usage) => {
-        run.released ??= clock.now();
+        released();
         // What went out is kept before Lumiverse is told the reply ended: should RPE stop before the run does, the next intake ties it.
         void this.#d.runs.save(run, "keeping a released reply").catch((error: unknown) => this.#d.log.error("A released reply could not be kept.", { turn: run.turn, error: words(error) }));
         out.finish({ reason: "stop", usage: usageOut(usage) });

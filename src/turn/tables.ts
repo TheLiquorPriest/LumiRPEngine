@@ -250,4 +250,14 @@ ALTER TABLE turn_run ADD COLUMN folder TEXT;
 ALTER TABLE turn_run ADD COLUMN trace_run TEXT;
 `,
   },
+  {
+    version: 10,
+    name: "the intent record's own time and the thinking of each run, and whether its reply went out before its record",
+    // JSON, as `runs.ts` reads them: `intent_time` `{ from, to }`, `thinking` a list of them. A run kept before has neither, and no mark.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN intent_time TEXT;
+ALTER TABLE turn_run ADD COLUMN thinking TEXT;
+ALTER TABLE turn_run ADD COLUMN without_intent INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

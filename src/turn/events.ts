@@ -316,11 +316,8 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       await tell(scope, "suggestion", { agent, suggestion });
       await deps.suggestions.file(scope, agent, suggestion);
     },
-    async released(scope, release) {
-      const run = deps.runs.running(scope.user, turnOf(scope));
-      if (run !== undefined && run.released === null) run.released = deps.now();
-      await tell(scope, "released", release);
-    },
+    // The run was marked released the moment its reply reached RPE's sink, which the harness finishes before it tells this.
+    released: (scope, release) => tell(scope, "released", release),
     async ended(scope, outcome) {
       const turn = turnOf(scope);
       const run = deps.runs.running(scope.user, turn);

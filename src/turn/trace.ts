@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { Log, Scope, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
 import type { LiveHub } from "../app";
 import type { TreeFiles } from "../tree";
+import type { RunTimes } from "./spans";
 
 /** The turn folder's transcripts. */
 export const TRANSCRIPTS = "transcripts";
@@ -21,8 +22,8 @@ export function transcriptName(agent: { id: string; definition: string }): strin
 export interface TraceDeps {
   live: LiveHub;
   files: TreeFiles;
-  /** A run's `run_started`, its first record, as RPH gave it: the turn's runs learn RPH's own id for each of theirs from it. */
-  runStarted(record: TraceRecord): void;
+  /** The turn's runs, given every record and piece as it comes: they take RPH's own id for each of theirs, and the times of its lead's writing (`spans.ts`). */
+  runs: Pick<RunTimes, "record" | "delta">;
   log: Log;
 }
 
@@ -43,7 +44,6 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
   /** Follows which runs are going on, and where: a turn's run ends with its `run_ended`, a job's with the view that says it ended. */
   const follow = (record: TraceRecord): void => {
     const { event } = record;
-    if (event.kind === "run_started") deps.runStarted(record);
     if (event.kind === "run_ended") chats.delete(record.run);
     else if (event.kind === "job" && event.job.ended !== undefined) chats.delete(event.job.id);
     else chats.set(record.run, record.scope.chat);
@@ -79,10 +79,12 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
   return {
     event(record) {
       follow(record);
+      deps.runs.record(record);
       deps.live.publish(record.scope.chat, { kind: "trace", data: record });
       keep(record);
     },
     delta(delta: TraceDelta) {
+      deps.runs.delta(delta);
       const chat = chats.get(delta.run);
       if (chat !== undefined) deps.live.publish(chat, { kind: "delta", data: delta });
     },

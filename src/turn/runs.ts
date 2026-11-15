@@ -26,6 +26,15 @@ export interface IntakeStep extends Stretch {
   step: string;
 }
 
+/**
+ * A stretch of a model's own writing (plan §4.7, R-185), epoch milliseconds on the same clock: from its first token to its last; `to`
+ * null while it began and has not ended (a run stopped inside it).
+ */
+export interface Span {
+  from: number;
+  to: number | null;
+}
+
 /** How the turn's folder (plan §5.3) was written alongside the run. */
 export interface FolderWrite {
   /** When its writing began: once the lead's first model call had gone out, or the run had ended with none. */
@@ -59,8 +68,18 @@ export interface RunRecord {
   received: number;
   started: number | null;
   firstWord: number | null;
+  /** When its reply began to go out: its first text reached RPE's sink, or the harness released it, whichever came first. */
   released: number | null;
   ended: number | null;
+  /** The intent record's own time, from its first token to its last (R-185), kept as it arrives; null while no record began. */
+  intent: Span | null;
+  /**
+   * The thinking on the reply's path: for each of the lead's model calls that began before the release and thought before its first
+   * output, in call order, from its first thinking token to its last before that output; none when no call thought.
+   */
+  thinking: Span[];
+  /** Its reply began to go out before any intent record of it had ended, in the order the two arrived. */
+  withoutIntent: boolean;
   /**
    * Intake's own steps (plan §4.7: intake is timed "not counting any wait for the previous turn's work, which is reported on its
    * own"), in order, from `received` to the run's start, each beginning where the step or wait before it ended. Null for a run that
@@ -122,6 +141,9 @@ interface RunRow {
   first_word: number | null;
   released: number | null;
   ended: number | null;
+  intent_time: string | null;
+  thinking: string | null;
+  without_intent: number;
   intake: string | null;
   wait: string | null;
   folder: string | null;
@@ -155,6 +177,9 @@ function recordOf(user: string, r: RunRow): RunRecord {
     firstWord: r.first_word,
     released: r.released,
     ended: r.ended,
+    intent: r.intent_time === null ? null : (JSON.parse(r.intent_time) as Span),
+    thinking: r.thinking === null ? [] : (JSON.parse(r.thinking) as Span[]),
+    withoutIntent: r.without_intent === 1,
     intake: r.intake === null ? null : (JSON.parse(r.intake) as IntakeStep[]),
     wait: r.wait === null ? null : (JSON.parse(r.wait) as Stretch[]),
     folder: r.folder === null ? null : (JSON.parse(r.folder) as FolderWrite),
@@ -185,11 +210,11 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intake, wait, folder, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
-         intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
+         intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
          usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved,
          settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
       [
@@ -209,6 +234,9 @@ export class Runs {
         r.firstWord,
         r.released,
         r.ended,
+        r.intent === null ? null : JSON.stringify(r.intent),
+        JSON.stringify(r.thinking),
+        r.withoutIntent ? 1 : 0,
         r.intake === null ? null : JSON.stringify(r.intake),
         r.wait === null ? null : JSON.stringify(r.wait),
         r.folder === null ? null : JSON.stringify(r.folder),

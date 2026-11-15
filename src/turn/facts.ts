@@ -8,24 +8,17 @@
 //   session.turns              turns on that line since this session opened
 //   turn.recorded              what this turn has recorded so far in any lane: the store's changes and the story's and the cast's
 //                              rows it wrote; a continue's, since it began (the marks its run took, as its take-back uses them)
-//   turn.owes.reply            1 while the run owes the player a reply it has not released; 0 for a run that owes none (Settle now)
+//   turn.owes.reply            1 while the run owes the player a reply it has not released; 0 for a run that owes none (Settle now). A
+//                              release is marked on the run the moment its first text reaches RPE (`turns.ts`), so nothing waits for it
 //   turn.owes.record           1 while the run owes the player a reply and has recorded nothing (`turn.recorded` is 0); 0 for a run
 //                              that owes no reply
 //   turn.last.without.intent   1 when the last reply RPE released on the turn before on that line (a continue's: on its own turn)
-//                              went out with no intent record taken before it, as RPH told it (`TurnEvents.released`); else 0
+//                              began to go out before any intent record of its run had ended, in the order the two reached RPE; else 0
 
 import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
 import type { Store } from "../store";
 import { storyAt } from "../story/path";
 import type { RunRecord } from "./runs";
-
-/**
- * What the fact reads of a release RPE kept as RPH told it (`events.ts`, kind `released`): the field RPH set on one that went out with no
- * intent record taken before it, as it did until it stopped holding a reply for the record, so a release kept then still counts.
- */
-interface KeptRelease {
-  withoutIntent?: true;
-}
 
 /** Facts one area counts. */
 export interface FactSource {
@@ -78,16 +71,15 @@ function rowsAfter(store: Store, table: "cast_entry" | "story_entry", user: stri
   return store.db.query<{ n: number }, [string, string, number]>(`SELECT count(*) AS n FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`).get(user, turn, after)?.n ?? 0;
 }
 
-/** A turn's run as the facts read it: where its own writes begin, its kind, and when its reply went out. */
-export type FactsRun = Pick<RunRecord, "mark" | "castMark" | "storyMark" | "kind" | "released">;
+/** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, and whether that was before its intent record. */
+export type FactsRun = Pick<RunRecord, "mark" | "castMark" | "storyMark" | "kind" | "released" | "withoutIntent">;
 
 /**
- * The turn lane's own facts, counted from the store and, for what a turn recorded and owes, from the run it is in: `run` gives a scope's
- * turn's run as it stands (the one going on, else its latest), whose marks say where a continue's own writes begin. `heard` resolves
- * once what RPE was told of the runs so far has reached their records: a reply reaches its run only once the intent records told
- * before it are taken (RPH holds the reply until then, plan §10.3), so whether a reply went out is read after it.
+ * The turn lane's own facts, counted from the store and, for what a turn recorded and owes, from the runs it has: `runs` gives a turn's
+ * runs, oldest first, the one going on as it stands, whose marks say where a continue's own writes begin. Nothing is waited for: what a
+ * run was told is on it the moment it was told.
  */
-export function turnFacts(store: Store, run: (user: string, turn: string) => FactsRun | null, heard: () => Promise<void>): FactSource {
+export function turnFacts(store: Store, runs: (user: string, turn: string) => readonly FactsRun[]): FactSource {
   return {
     area: "turn",
     defs: [
@@ -106,7 +98,7 @@ export function turnFacts(store: Store, run: (user: string, turn: string) => Fac
       const line = known ? storyAt(user, scope.chat, scope.turn ?? null).turns : [];
       const turns = scope.turn !== undefined && user.turn(scope.turn)?.status === "open" ? line.filter((t) => t !== scope.turn) : line;
       const turn = known && scope.turn !== undefined && user.turn(scope.turn)?.chat === scope.chat ? scope.turn : null;
-      const runNow = turn === null ? null : run(scope.user, turn);
+      const runNow = turn === null ? null : (runs(scope.user, turn).at(-1) ?? null);
       // Every run owes the player a reply but one that writes nothing into the chat.
       const owes = runNow !== null && runNow.kind !== "settle";
       const recorded = (): number =>
@@ -132,15 +124,12 @@ export function turnFacts(store: Store, run: (user: string, turn: string) => Fac
       }
       if (names.includes("turn.recorded")) out["turn.recorded"] = { count: recorded() };
       if (names.includes("turn.owes.record")) out["turn.owes.record"] = { count: owes && recorded() === 0 ? 1 : 0 };
-      if (names.includes("turn.owes.reply")) {
-        if (owes && runNow.released === null) await heard();
-        out["turn.owes.reply"] = { count: owes && runNow.released === null ? 1 : 0 };
-      }
+      if (names.includes("turn.owes.reply")) out["turn.owes.reply"] = { count: owes && runNow.released === null ? 1 : 0 };
       if (names.includes("turn.last.without.intent")) {
-        // What RPH told of the turn's releases is kept with it (`events.ts`, kind `released`); the latest stands for the turn.
+        // The last of the turn's runs whose reply went out stands for the turn.
         const before = turns.at(-1);
-        const told = before === undefined ? null : store.db.query<{ body: string }, [string, string]>("SELECT body FROM turn_told WHERE user = ? AND turn = ? AND kind = 'released' ORDER BY id DESC LIMIT 1").get(scope.user, before);
-        out["turn.last.without.intent"] = { count: told !== null && (JSON.parse(told.body) as KeptRelease).withoutIntent === true ? 1 : 0 };
+        const last = before === undefined ? undefined : runs(scope.user, before).findLast((r) => r.released !== null);
+        out["turn.last.without.intent"] = { count: last?.withoutIntent === true ? 1 : 0 };
       }
       return out;
     },
