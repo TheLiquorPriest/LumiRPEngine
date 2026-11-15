@@ -50,6 +50,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   cut_pictures: { dropped: 1 },
   cut_uncut: { history: 3 },
   cut_joining_unread: { why: "the preset could not be read" },
+  cut_room_unknown: { why: "the model's window is not known" },
   cut_clipped_memory: { count: 4 },
   cut_clipped_message_limit: { count: 2 },
   cut_clipped_context_size: { count: 6 },

@@ -32,6 +32,7 @@ cut_unmatched: Messages the chat application listed were not found in the prompt
 cut_pictures: Pictures and other parts the chat application listed are not in the prompt it sent: {{dropped}}.
 cut_uncut: History messages before the start of the window are still in the prompt, where it could not be cut: {{history}}.
 cut_joining_unread: The chat application's joining settings could not be read ({{why}}), so how it joined the prompt's messages was found from the prompt.
+cut_room_unknown: The room the Author's model has for the prompt could not be told ({{why}}), so the prompt went as the history window left it, with nothing trimmed to fit the model's own window.
 cut_clipped_memory: {{count}} of the messages in the window are not in the prompt: the chat application's memory stands for them with its summary.
 cut_clipped_message_limit: {{count}} of the messages in the window are not in the prompt: the chat application's message limit keeps fewer than the window holds.
 cut_clipped_context_size: {{count}} of the messages in the window are not in the prompt: the preset's context size left out the oldest of them.
