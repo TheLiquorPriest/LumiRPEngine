@@ -108,6 +108,7 @@ describe("the live hub", () => {
       delta(1),
       { kind: "reply", data: { run: "turn-harbor", from: 0, text: "The door opens on a wet night." } },
       { kind: "reply", data: { run: "turn-harbor", line: 0, progress: "Weighing what the stranger wants." } },
+      { kind: "released", data: { run: "turn-harbor", at: 1_700 } },
       { kind: "state", data: {} },
       { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } },
     ];
@@ -175,6 +176,7 @@ describe("the live socket", () => {
       delta(1),
       { kind: "reply", data: { run: "turn-harbor", from: 0, text: "The door opens on a wet night." } },
       { kind: "reply", data: { run: "turn-harbor", line: 0, progress: "Weighing what the stranger wants." } },
+      { kind: "released", data: { run: "turn-harbor", at: 1_700 } },
       { kind: "state", data: {} },
       { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } },
     ];
