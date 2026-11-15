@@ -32,7 +32,7 @@ export interface Moment {
   since: number | null;
 }
 
-const MOMENTS: readonly { key: keyof TurnTimings; label: string }[] = [
+const MOMENTS: readonly { key: "received" | "started" | "firstWord" | "released" | "ended"; label: string }[] = [
   { key: "received", label: "Reached RPE" },
   { key: "started", label: "The lead began" },
   { key: "firstWord", label: "First words to the chat" },
