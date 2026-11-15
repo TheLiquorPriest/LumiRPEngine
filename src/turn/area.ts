@@ -16,11 +16,12 @@ import type { Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
 import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
+import { promptOf } from "./request";
 import { turnRoutes } from "./routes";
 import { passConnection, TURN_SETTINGS, turnSettings } from "./settings";
 import { namedStretches } from "./stage";
 import { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
-import { NO_SESSION, type MigratedSource } from "./turns";
+import { leadConnection, NO_SESSION, type MigratedSource } from "./turns";
 
 /** What the turn lane takes from the composition. */
 export interface TurnTakes {
@@ -101,6 +102,25 @@ export function turnArea(takes: TurnTakes): TurnArea {
           } catch {
             return key;
           }
+        },
+        // The Author's model's room for a chat's prompt (plan §4.2): its window as the model layer gives it, less the reply's room (the
+        // request's own, else RPH's room kept for the answer); the model layer's count of a prompt as the Author's model takes it; and
+        // whether the story record covers messages.
+        room: async (chat, reply) => {
+          const scope = { user: owner(), chat, session: NO_SESSION };
+          const settings = await chatSettings(chat);
+          const { models } = made().harness;
+          const connection = await leadConnection(loadGuidance(made().files, scope), settings.lead, models, owner());
+          const limits = await models.limits(owner(), connection);
+          const window = limits.contextWindow?.tokens ?? null;
+          return {
+            room: window === null ? null : window - (reply ?? settings.reserve),
+            count: async (prompt) => models.count(scope, connection, promptOf(prompt as Parameters<typeof promptOf>[0], limits.pictures?.takes === true).messages),
+            covered: async (ids) => {
+              const held = covered(chat);
+              return ids.every((id) => held.has(id));
+            },
+          };
         },
       },
     },

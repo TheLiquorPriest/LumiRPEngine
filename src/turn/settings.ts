@@ -40,6 +40,14 @@ import { STORY_DEFAULTS, STORY_SETTING_DEFS, STORY_SO_FAR_SETTING_DEFS, type Sto
 import { STORY_SO_FAR_DEFAULTS, type StorySoFarSettings } from "../story/sofar";
 import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
 import { sharedLevels } from "../tree";
+import { SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
+
+/** RPH's room kept for the answer (`compaction.reserve`), declared by RPH alone: the room the door's trim leaves a reply whose request names none. */
+const RESERVE =
+  RPH_SETTINGS.find((s) => s.key === "compaction.reserve") ??
+  (() => {
+    throw new Error("rp-harness declares no compaction.reserve setting.");
+  })();
 
 export interface TurnSettings {
   lead: string;
@@ -63,6 +71,8 @@ export interface TurnSettings {
   worldState: WorldStateSettings;
   /** The engine's tools, for the chat. */
   engine: IfaceSettings;
+  /** RPH's room kept for the answer, in tokens (`compaction.reserve`). */
+  reserve: number;
 }
 
 /** The defaults, where no level sets a value. */
@@ -88,6 +98,8 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   storySoFar: STORY_SO_FAR_DEFAULTS,
   worldState: WORLD_STATE_DEFAULTS,
   engine: IFACE_DEFAULTS,
+  // RPH's own default.
+  reserve: RESERVE.default as number,
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -231,6 +243,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     storySoFar: read.numbers(STORY_SO_FAR_SETTING_DEFS),
     worldState: read.numbers(WORLD_STATE_SETTING_DEFS),
     engine: read.numbers(IFACE_SETTING_DEFS),
+    reserve: read.value(RESERVE) as number,
   };
 }
 

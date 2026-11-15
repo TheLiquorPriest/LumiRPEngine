@@ -21,7 +21,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
-import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
+import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ModelsApi, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
@@ -126,6 +126,22 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
   }
 }
 
+/** The connection a lead's definition names for the user, by its id: null for his default (`default`, or none named). */
+export async function leadConnection(guidance: Pick<Guidance, "definition">, lead: string, models: Pick<ModelsApi, "list">, user: string): Promise<string | null> {
+  const named = (await guidance.definition(lead))?.model;
+  return named === undefined || named === "default" ? null : ((await models.list(user)).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
+}
+
+/**
+ * The first history message the prompt holds, on the chat's path: the window's cut, or past it, where the model's own window trimmed
+ * the oldest of what the window kept, the message after the newest it trimmed. Null where neither left anything out.
+ */
+function keptFirst(cut: TaggedTurn["cut"], steps: readonly LvStep[]): { id: string } | null {
+  if (cut.trimmed === null) return cut.keep;
+  const after = steps[steps.findIndex((s) => s.id === cut.trimmed?.to.id) + 1];
+  return after === undefined ? cut.keep : { id: after.id };
+}
+
 /** The notice that tells each way a job can end (plan §13.5): a job that did not finish is never told as finished. */
 const JOB_ENDS: Readonly<Partial<Record<JobState, string>>> = { done: "job_finished", failed: "job_failed", cancelled: "job_cancelled", interrupted: "job_interrupted", "off-path": "job_off_path" };
 
@@ -209,6 +225,7 @@ const CUT_LINES: Readonly<Record<PromptNotice["kind"], string>> = {
   pictures: "cut_pictures",
   uncut: "cut_uncut",
   "joining-unread": "cut_joining_unread",
+  "room-unknown": "cut_room_unknown",
 };
 
 /**
@@ -558,6 +575,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
+        const firstKept = keptFirst(tagged.cut, steps);
         request = {
           scope,
           // RPE keeps a tree, so a turn always says what it follows: null, for a chat's first turn and a swipe of it, is no earlier turn.
@@ -566,8 +584,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}),
           lead: settings.lead,
           prompt: messages,
-          // Each stretch the window left out, and whether the story record covers it, read at this turn along its own line.
-          leftOut: leftOutOf(tagged.cut.keep, steps.map((s) => s.id), tagged.cut.keep === null ? new Set() : storyCoverage({ store: this.#d.store, user, chat, turn: begun.id }).covered),
+          // Each stretch the window left out, with the oldest history the model's own window trimmed after it, and whether the story
+          // record covers each, read at this turn along its own line.
+          leftOut: leftOutOf(firstKept, steps.map((s) => s.id), firstKept === null ? new Set() : storyCoverage({ store: this.#d.store, user, chat, turn: begun.id }).covered),
           briefing,
           carry: settings.carry,
           since,
@@ -1244,10 +1263,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    */
   async #leadLimits(guidance: Guidance, lead: string, user: string, turn: string): Promise<ModelLimits | null> {
     try {
-      const named = (await guidance.definition(lead))?.model;
       const models = this.#d.harness().models;
-      const connection = named === undefined || named === "default" ? null : ((await models.list(user)).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
-      return await models.limits(user, connection);
+      return await models.limits(user, await leadConnection(guidance, lead, models, user));
     } catch (error) {
       this.#d.log.info("The lead's model's limits could not be read: its window is taken as unknown, and it is given no pictures.", { turn, lead, error: words(error) });
       return null;
