@@ -1,0 +1,14 @@
+{
+  "about": "Invented: an RPE turn in which Lumiverse also activated an entry of a global book that RPE's lore route does not list, so it has no lore-map id.",
+  "turn": {
+    "turn": "turn-06",
+    "line": "I pick up the brass spyglass from the sill and turn it over in my hands.",
+    "lore": {
+      "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "e5b90c14-6d2f-4e8b-9a37-4f1c8e2d7b05"],
+      "map": ["e-12", "w-3"]
+    },
+    "entries": [
+      { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" }
+    ]
+  }
+}

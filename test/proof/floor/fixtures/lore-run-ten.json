@@ -1,0 +1,88 @@
+{
+  "about": "Invented: the ten RPE turns of a floor run (the even lines), the floor's book coming in as designed. In turn-06 Lumiverse also activated an entry of a global book, which the lore route lists and the turn's lore map does not show.",
+  "turns": [
+    {
+      "turn": "turn-01",
+      "line": "I hang my coat near the stove and look around the room while she answers.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918"], "map": ["e-12", "e-14", "w-3"] },
+      "entries": [
+        { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" },
+        { "id": "e-14", "entry": "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The storm", "how": "sticky" }
+      ]
+    },
+    {
+      "turn": "turn-02",
+      "line": "I take the cup she offers and thank her.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918"], "map": ["e-12", "e-14", "w-3"] },
+      "entries": [
+        { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" },
+        { "id": "e-14", "entry": "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The storm", "how": "sticky" }
+      ]
+    },
+    {
+      "turn": "turn-03",
+      "line": "I walk to the window and watch the waves for a moment.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3"], "map": ["e-12", "w-3"] },
+      "entries": [{ "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" }]
+    },
+    {
+      "turn": "turn-04",
+      "line": "I sit down at the table and stretch my legs.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3"], "map": ["e-12", "w-3"] },
+      "entries": [{ "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" }]
+    },
+    {
+      "turn": "turn-05",
+      "line": "I tell her the tea is good and ask where she gets it.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3"], "map": ["e-12", "w-3"] },
+      "entries": [{ "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" }]
+    },
+    {
+      "turn": "turn-06",
+      "line": "I pick up the brass spyglass from the sill and turn it over in my hands.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "e5b90c14-6d2f-4e8b-9a37-4f1c8e2d7b05"], "map": ["e-12", "w-3"] },
+      "entries": [
+        { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" },
+        { "id": "e-31", "entry": "e5b90c14-6d2f-4e8b-9a37-4f1c8e2d7b05", "book": "6c3d9e2b-0f4a-4a71-b8e5-1d7c2a9f3b60", "title": "The Gull Shoals", "how": "keyword" }
+      ]
+    },
+    {
+      "turn": "turn-07",
+      "line": "I offer to carry the oil up the stairs for her.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "d4a8f2c6-9e31-4b07-8d5a-0c6e3f7b1a29"], "map": ["e-12", "e-15", "w-3"] },
+      "entries": [
+        { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" },
+        { "id": "e-15", "entry": "d4a8f2c6-9e31-4b07-8d5a-0c6e3f7b1a29", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The lamp", "how": "vector" }
+      ]
+    },
+    {
+      "turn": "turn-08",
+      "line": "I move my chair a little closer to the stove.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918"], "map": ["e-12", "e-14", "w-3"] },
+      "entries": [
+        { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" },
+        { "id": "e-14", "entry": "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The storm", "how": "sticky" }
+      ]
+    },
+    {
+      "turn": "turn-09",
+      "line": "I ask whether the shoals on her charts are written up in the logbook.",
+      "lore": {
+        "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "b7d24e81-3a9c-4c55-b2f0-6e1a8d93c470", "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918", "d4a8f2c6-9e31-4b07-8d5a-0c6e3f7b1a29"],
+        "map": ["e-12", "e-13", "e-14", "e-15", "w-3"]
+      },
+      "entries": [
+        { "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" },
+        { "id": "e-13", "entry": "b7d24e81-3a9c-4c55-b2f0-6e1a8d93c470", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The keeper's logbook", "how": "keyword" },
+        { "id": "e-14", "entry": "c90e5a37-1f4b-4d8a-a6c2-73b5f0e2d918", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The storm", "how": "sticky" },
+        { "id": "e-15", "entry": "d4a8f2c6-9e31-4b07-8d5a-0c6e3f7b1a29", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "The lamp", "how": "vector" }
+      ]
+    },
+    {
+      "turn": "turn-10",
+      "line": "I say I should check on my boat once the wind drops, and ask if the path down is safe.",
+      "lore": { "activated": ["a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3"], "map": ["e-12", "w-3"] },
+      "entries": [{ "id": "e-12", "entry": "a3f1c9d2-5b7e-4f10-8c64-91d2e7b0a6c3", "book": "4b1e6f0a-7c2d-4e59-9a83-2f6d0c1b5e74", "title": "Skerry Rock", "how": "constant" }]
+    }
+  ]
+}

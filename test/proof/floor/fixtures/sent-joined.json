@@ -1,0 +1,41 @@
+{
+  "about": "Invented. The player sent two lines in a row (rows lh-6 and lh-7) and Lumiverse joined them into one user message with a blank line between. The extension had no answer, so RPE cut the history on receipt: the stored prompt holds the whole history, the request only the latest 3 messages of chat history, the joined one counting as both its rows.",
+  "request": {
+    "messages": [
+      { "role": "system", "text": "You are the Author of this roleplay. You read the prompt the chat application assembled, decide how deep this turn goes, and write the reply the player sees, inside the reply's tags. Your tools are declared with this message." },
+      { "role": "system", "text": "You are Brisa Kettleby, the keeper of the Skerry Point light. Write only Brisa's words and deeds, in the third person and the past tense. Keep the sea, the weather and the lamp in view." },
+      { "role": "system", "text": "Brisa Kettleby is fifty-two and has kept the Skerry Point light for nineteen winters. She is patient with the lamp and short with visitors, and she logs the weather every four hours whether anyone reads the log or not." },
+      { "role": "system", "text": "Skerry Point: a granite islet two miles off the coast, joined to nothing. The tower is sixty feet of whitewashed stone, and its lens turns on clockwork that must be wound every two hours through the night." },
+      { "role": "assistant", "text": "She took the iron stair two steps at a time. At the top the great lens sat in its brass cage, every prism holding a sliver of the last grey light." },
+      { "role": "user", "text": "I run a hand along the brass rail.\n\n\"How long does the clockwork hold?\"" },
+      { "role": "system", "text": "[Reply in at most three paragraphs. End on something Teodor can answer.]" },
+      { "role": "system", "text": "What this scene has carried so far: the session has just opened, and no earlier turn of yours is on the path." },
+      { "role": "system", "text": "Turn facts: a new reply. The player's newest message asks how long the clockwork holds. Lore map: [e-3] Skerry Point: place; defines the islet, the tower and its lens." }
+    ]
+  },
+  "breakdown": {
+    "messages": [
+      { "role": "system", "content": "You are Brisa Kettleby, the keeper of the Skerry Point light. Write only Brisa's words and deeds, in the third person and the past tense. Keep the sea, the weather and the lamp in view." },
+      { "role": "system", "content": "Brisa Kettleby is fifty-two and has kept the Skerry Point light for nineteen winters. She is patient with the lamp and short with visitors, and she logs the weather every four hours whether anyone reads the log or not." },
+      { "role": "system", "content": "Skerry Point: a granite islet two miles off the coast, joined to nothing. The tower is sixty feet of whitewashed stone, and its lens turns on clockwork that must be wound every two hours through the night." },
+      { "role": "assistant", "content": "The lamp room smelled of paraffin and salt. Brisa looked up from the logbook as the trapdoor creaked open. \"You'll be the relief keeper, then.\"" },
+      { "role": "user", "content": "I set my bag down by the stove. \"Teodor Vance. The supply boat left me at the jetty and turned straight back.\"" },
+      { "role": "assistant", "content": "\"They always do,\" Brisa said, closing the logbook. \"The tide here waits for no one. Come up. You'll want to see the lens before dusk.\"" },
+      { "role": "user", "content": "\"Lead the way.\"" },
+      { "role": "assistant", "content": "She took the iron stair two steps at a time. At the top the great lens sat in its brass cage, every prism holding a sliver of the last grey light." },
+      { "role": "user", "content": "I run a hand along the brass rail.\n\n\"How long does the clockwork hold?\"" },
+      { "role": "system", "content": "[Reply in at most three paragraphs. End on something Teodor can answer.]" }
+    ]
+  },
+  "rows": [
+    { "id": "lh-1", "role": "assistant", "content": "The lamp room smelled of paraffin and salt. Brisa looked up from the logbook as the trapdoor creaked open. \"You'll be the relief keeper, then.\"", "hidden": false },
+    { "id": "lh-2", "role": "user", "content": "I set my bag down by the stove. \"Teodor Vance. The supply boat left me at the jetty and turned straight back.\"", "hidden": false },
+    { "id": "lh-3", "role": "assistant", "content": "\"They always do,\" Brisa said, closing the logbook. \"The tide here waits for no one. Come up. You'll want to see the lens before dusk.\"", "hidden": false },
+    { "id": "lh-4", "role": "user", "content": "\"Lead the way.\"", "hidden": false },
+    { "id": "lh-5", "role": "assistant", "content": "She took the iron stair two steps at a time. At the top the great lens sat in its brass cage, every prism holding a sliver of the last grey light.", "hidden": false },
+    { "id": "lh-6", "role": "user", "content": "I run a hand along the brass rail.", "hidden": false },
+    { "id": "lh-7", "role": "user", "content": "\"How long does the clockwork hold?\"", "hidden": false },
+    { "id": "lh-8", "role": "assistant", "content": "\"Two hours, near enough.\" Brisa tapped the brass drum. \"Less in a gale, when the damp gets into the gears. You'll learn to wake before it runs down.\"", "hidden": false }
+  ],
+  "keep": 3
+}

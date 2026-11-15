@@ -1,16 +1,43 @@
-// The floor test's fixture: an invented card, a persona and a preset of its own, all consistent with
-// one another, so that "a simple turn" asks nothing the chat cannot answer. The preset and the
-// persona are not made active: `floor.ts run` names them on every generation it starts, on both
+// The floor test's fixture: an invented card, a persona, a preset and a lore book of its own, all
+// consistent with one another, so that "a simple turn" asks nothing the chat cannot answer, and the
+// player's twenty lines (`LINES`), which the floor plays in order, one generation after each. The preset
+// and the persona are not made active: the floor names them on every generation it starts, on both
 // connections alike (`preset_id` with `force_preset_id`, and `persona_id`, as Lumiverse's
-// `POST /api/v1/generate` takes them), so no setting of the user's changes and no other chat plays
-// under them. Each is found again by a mark in its metadata, and `remove` deletes what `setup` made.
+// `POST /api/v1/generate` takes them), so no setting of the user's changes and no other chat plays under
+// them. The book is attached to the card, the first of the four places Lumiverse takes a one-character
+// chat's books from (character, persona, chat metadata, the user's global list: Lumiverse
+// `src/services/world-info-sources.service.ts:120-129`, `src/services/prompt-assembly.service.ts:2243-2260`).
+// Each made thing is found again by a mark: in the metadata of the preset, the persona and the book, and
+// in the extensions of the card, which has no metadata. `removeFixture` deletes what `setupFixture` made.
+//
+// The book (`LORE`) is made so the floor's row "Activated lore" (§17.1 l.1765) sees every way an entry
+// comes in (plan §4.2 l.216, READINGS N-5) on the floor's own lines, whichever connection plays which
+// line: the floor alternates them in one chat, and Lumiverse keeps that chat's sticky counts in its
+// metadata (`src/services/world-info-activation.service.ts:15-24`, read at
+// `src/services/prompt-assembly.service.ts:2272`), saved after every generation on any connection
+// (`src/services/generate.service.ts:2842-2865`):
+// - "Skerry Rock", constant: on every line.
+// - "The keeper's logbook", by keyword (`logbook`): on lines 9 and 18 (one odd, one even).
+// - "The storm", by keyword (`storm`) on lines 1 and 15, then still sticky by its count of 3 on lines 2-4
+//   and 16-18, which do not hold its key.
+// - "The lamp", by vector search only (it has no keys): made only when Lumiverse has an embedding
+//   connection it can search with (`embeddingBlockers`), and searched once Lumiverse has indexed it.
+// Lumiverse puts the activated entries just before the chat history, since the floor's preset has no
+// world-info block of its own (`src/services/prompt-assembly.service.ts:3731-3743`).
+//
+// Plain generation thinks at the Author's effort (R-92): `authorEffort` reads the effort the Author's
+// definition names, from the file as RPE serves it, and `setupFixture` sets the plain connection's own
+// reasoning binding to it (`setPlainThinking`).
 
+import type { Effort } from "rp-harness/contract";
+import { isRecord } from "../../src/shared/json";
+import type { BookDesign, LoreHow, PlannedEntry } from "../proof/lib/lore";
 import { guard, type TestbedEnv } from "./lib/env";
-import type { Lumiverse } from "./lib/lumiverse";
+import { HttpError, type Lumiverse } from "./lib/lumiverse";
 
-/** In the metadata of the preset and the persona `setup` makes: how `run` and `remove` know them. */
-const MARK = "lumirpengine_floor_test";
-/** The floor chats' name: `remove` deletes only the floor card's chats of this name. */
+/** The fixture's mark: in the metadata of the preset, the persona and the book `setupFixture` makes, and in the card's extensions. */
+export const MARK = "lumirpengine_floor_test";
+/** The floor chats' name: `removeFixture` deletes only the floor card's chats of this name. */
 export const CHAT_NAME = "Floor test";
 
 export const CARD = {
@@ -60,78 +87,438 @@ const PRESET = {
   metadata: { [MARK]: true, description: "Made by the floor test's setup (scripts/testbed/floor.ts). Not active; floor.ts names it on each generation it starts." },
 };
 
-/** What `run` names on every generation. */
+/**
+ * The player's lines, played in order: short, ordinary turns in one place, none of which needs a ruling
+ * or a roll. Lines 1 and 15 hold the storm's key and lines 9 and 18 the logbook's; no other line holds
+ * either (the book's design, above).
+ */
+export const LINES: readonly string[] = [
+  "I set my pack down by the door and ask how long the storm is likely to last.",
+  "I hang my coat near the stove and look around the room while she answers.",
+  "I ask whether the lamp upstairs has ever gone out on her watch.",
+  "I take the cup she offers and thank her.",
+  "I ask what she does out here when the weather keeps the boats away.",
+  "I walk to the window and watch the waves for a moment.",
+  "I ask if anyone else has come by this week.",
+  "I sit down at the table and stretch my legs.",
+  "I ask her what the logbook on the shelf is for.",
+  "I tell her the tea is good and ask where she gets it.",
+  "I ask whether she ever thinks of leaving the rock.",
+  "I pick up the brass spyglass from the sill and turn it over in my hands.",
+  "I ask how she came to keep the light.",
+  "I offer to carry the oil up the stairs for her.",
+  "I ask what the worst storm she remembers here was like.",
+  "I move my chair a little closer to the stove.",
+  "I ask if the gulls always make that much noise.",
+  "I ask whether the shoals on her charts are written up in the logbook.",
+  "I ask whether she would like a hand with supper.",
+  "I say I should check on my boat once the wind drops, and ask if the path down is safe.",
+];
+
+/** One entry of the floor's book as designed: its title, how it is made to come in, its keys, its sticky count, its text. */
+export interface LoreDesign {
+  /** Lumiverse's `comment`, which RPE shows as a book entry's title (RPE `src/lore/lore.ts:93-96`). */
+  title: string;
+  kind: LoreHow;
+  keys: readonly string[];
+  /** How many generations the entry stays after the last line that held its key (Lumiverse's `sticky`); 0 but for the sticky entry. */
+  sticky: number;
+  content: string;
+}
+
+export const BOOK = {
+  name: "Floor test lore (invented)",
+  description: "Made by the floor test's setup (scripts/testbed/floor.ts) and attached to its card. Its entries activate on the floor's lines: one constant, one by keyword, one that stays by its sticky count, and one by vector search when an embedding connection is set.",
+} as const;
+
+export const LORE: readonly LoreDesign[] = [
+  {
+    title: "Skerry Rock",
+    kind: "constant",
+    keys: [],
+    sticky: 0,
+    content: "Skerry Rock is a bare islet of black stone a day's sail from the nearest harbor. The lighthouse stands on its highest point; the keeper's kitchen is at the foot of the tower, and a path cut into the rock runs down to a small landing on the lee side.",
+  },
+  {
+    title: "The keeper's logbook",
+    kind: "keyword",
+    keys: ["logbook"],
+    sticky: 0,
+    content: "The logbook on the kitchen shelf holds nineteen years of Marta's entries: the hour the light was lit and put out each day, the weather at every watch, and each boat that passed or put in at the rock.",
+  },
+  {
+    title: "The storm",
+    kind: "sticky",
+    keys: ["storm"],
+    sticky: 3,
+    content: "The storm came up from the south-west in the afternoon. Marta reckons it will blow through the night and ease by morning; until then no boat can leave the landing.",
+  },
+  {
+    title: "The lamp",
+    kind: "vector",
+    keys: [],
+    sticky: 0,
+    content: "The lamp at the top of the tower burns paraffin oil behind a ring of glass prisms. Marta climbs the stairs at dusk to light it, trims the wick at midnight, and carries the oil up herself.",
+  },
+];
+
+/** The body of `POST /api/v1/world-books/:id/entries` (Lumiverse `src/routes/world-books.routes.ts:960-974`) for one designed entry, in the fields Lumiverse takes (`src/types/world-book.ts:260-299`). A type, not an interface, so it passes as the client's plain JSON object. */
+export type EntryBody = {
+  comment: string;
+  content: string;
+  key: string[];
+  constant: boolean;
+  vectorized: boolean;
+  sticky: number;
+  scan_depth?: number;
+  match_whole_words?: boolean;
+  prevent_recursion: boolean;
+  use_probability: boolean;
+};
+
+/**
+ * One designed entry as Lumiverse is asked to make it. Each field is stored as given, and a field left
+ * out takes its default (`src/services/world-books.service.ts:1786-1821`). Why the fields beyond the
+ * design's own:
+ * - `scan_depth: 1` on a keyed entry: Lumiverse matches its keys against the newest message only
+ *   (`src/services/world-info-activation.service.ts:744-752`), which for a send is the player's line, since
+ *   the reply it stages is left out of the scan (`src/services/generate.service.ts:1988-2006`,
+ *   `src/services/prompt-assembly.service.ts:1900-1904`). So what the model writes never decides what
+ *   activates, and the storm stays by its count, not by its key found again in an older line.
+ * - `match_whole_words`: a key is not found inside a longer word (`src/services/world-info-matcher.service.ts:187-188, 254-256`).
+ * - `prevent_recursion`: no entry's text is scanned for another's keys (`src/services/world-info-activation.service.ts:800-802, 856-858`).
+ * - `use_probability: false`: no entry activates by chance (`src/services/world-info-activation.service.ts:840-842`).
+ */
+export function entryBody(design: LoreDesign): EntryBody {
+  return {
+    comment: design.title,
+    content: design.content,
+    key: [...design.keys],
+    constant: design.kind === "constant",
+    vectorized: design.kind === "vector",
+    sticky: design.sticky,
+    ...(design.keys.length > 0 ? { scan_depth: 1, match_whole_words: true } : {}),
+    prevent_recursion: true,
+    use_probability: false,
+  };
+}
+
+/** The body of `POST /api/v1/world-books` (Lumiverse `src/routes/world-books.routes.ts:318-323`), which stores the metadata as given (`src/services/world-books.service.ts:1101-1113`) and gives it back on every list row (`:271-283`). */
+export function bookBody(): { name: string; description: string; metadata: { [key: string]: unknown } } {
+  return { name: BOOK.name, description: BOOK.description, metadata: { [MARK]: true } };
+}
+
+/** An entry the book holds as designed, with Lumiverse's id. */
+export interface MadeEntry extends PlannedEntry {
+  keys: readonly string[];
+  sticky: number;
+  /** Lumiverse's index state of the vector entry (`vector_index_status`), null for the others: its vector search reads only an "indexed" entry (`src/services/world-book-vector-state.ts:28-30`, `src/services/prompt-assembly.service.ts:5403-5407`). */
+  vectorIndex: string | null;
+}
+
+/**
+ * The book's entries, as Lumiverse lists them (its booleans and arrays already read back:
+ * `src/services/world-books.service.ts:343-375`), against the design: each designed entry found by its
+ * title and held to every field `entryBody` sets. A changed field, a doubled title or an entry the design
+ * does not have is a fault; a designed entry not there is not made.
+ */
+export function readBook(rows: readonly { id: string; [key: string]: unknown }[], design: readonly LoreDesign[] = LORE): { made: MadeEntry[]; notMade: LoreDesign[]; faults: string[] } {
+  const made: MadeEntry[] = [];
+  const notMade: LoreDesign[] = [];
+  const faults: string[] = [];
+  for (const d of design) {
+    const found = rows.filter((r) => r.comment === d.title);
+    const row = found[0];
+    if (row === undefined) {
+      notMade.push(d);
+      continue;
+    }
+    if (found.length > 1) faults.push(`it holds ${found.length} entries titled "${d.title}"`);
+    for (const [field, want] of Object.entries(entryBody(d))) {
+      if (JSON.stringify(row[field]) !== JSON.stringify(want)) faults.push(`"${d.title}" has ${field} ${JSON.stringify(row[field])} where the design has ${JSON.stringify(want)}`);
+    }
+    made.push({ entry: row.id, title: d.title, kind: d.kind, keys: d.keys, sticky: d.sticky, vectorIndex: d.kind === "vector" && typeof row.vector_index_status === "string" ? row.vector_index_status : null });
+  }
+  const titles = new Set(design.map((d) => d.title));
+  for (const r of rows) if (typeof r.comment !== "string" || !titles.has(r.comment)) faults.push(`it holds an entry the design does not have ("${String(r.comment)}", ${r.id})`);
+  return { made, notMade, faults };
+}
+
+/**
+ * Why Lumiverse would not search a vector entry now, in plain words; none when it would. These are
+ * Lumiverse's own four conditions, read from what `GET /api/v1/embeddings/config` answers
+ * (`src/routes/embeddings.routes.ts:12-15`, the same config the prompt's assembly reads:
+ * `src/services/prompt-assembly.service.ts:5664-5683`).
+ */
+export function embeddingBlockers(config: unknown): string[] {
+  const c = isRecord(config) ? config : {};
+  const out: string[] = [];
+  if (!c.enabled) out.push("embeddings are off in Lumiverse's settings");
+  if (!c.has_api_key) out.push("no embedding key is set in Lumiverse");
+  if (!c.dimensions) out.push("Lumiverse's embedding connection has not been tested, so its dimensions are not known");
+  if (!c.vectorize_world_books) out.push("Lumiverse's embedding settings do not vectorize world books");
+  return out;
+}
+
+/** The design's missing entries setup makes: all of them, but the vector entry only while Lumiverse would search it. */
+export function entriesToMake(notMade: readonly LoreDesign[], blockers: readonly string[]): LoreDesign[] {
+  return notMade.filter((d) => d.kind !== "vector" || blockers.length === 0);
+}
+
+/** A card's books as Lumiverse reads them: `world_book_ids`, or the older single `world_book_id` (`src/utils/character-world-books.ts:6-13`). */
+export function cardBooks(extensions: unknown): string[] {
+  if (!isRecord(extensions)) return [];
+  const ids = extensions.world_book_ids;
+  if (Array.isArray(ids)) return ids.filter((id): id is string => typeof id === "string" && id !== "");
+  const single = extensions.world_book_id;
+  return typeof single === "string" && single !== "" ? [single] : [];
+}
+
+/** The card's extensions with `ids` as its books, written as Lumiverse writes them (`src/utils/character-world-books.ts:15-22`). */
+function withBooks(extensions: Record<string, unknown>, ids: readonly string[]): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...extensions, world_book_ids: [...ids] };
+  delete next.world_book_id;
+  return next;
+}
+
+/**
+ * The card's extensions with the fixture's mark and the book among its books, everything else as it
+ * was; null when both are there already. Lumiverse replaces a card's extensions whole on
+ * `PUT /api/v1/characters/:id` (`src/db/character-operations.ts:140-143`), so the whole object is sent.
+ */
+export function markedCard(extensions: unknown, bookId: string): Record<string, unknown> | null {
+  const own = isRecord(extensions) ? extensions : {};
+  const books = cardBooks(own);
+  if (own[MARK] === true && books.includes(bookId)) return null;
+  return { ...withBooks(own, books.includes(bookId) ? books : [...books, bookId]), [MARK]: true };
+}
+
+/** The card's extensions without the given books, everything else as it was; null when it holds none of them. */
+export function detachBooks(extensions: unknown, bookIds: readonly string[]): Record<string, unknown> | null {
+  const own = isRecord(extensions) ? extensions : {};
+  const books = cardBooks(own);
+  const kept = books.filter((id) => !bookIds.includes(id));
+  return kept.length === books.length ? null : withBooks(own, kept);
+}
+
+/** Every effort an agent definition's `effort:` takes (RPH `src/contract/common.ts:68`, read at `src/files/definitions.ts:11, 41-45`): a record, so the compiler holds it to RPH's own list. */
+const EFFORTS: Readonly<Record<Effort, true>> = { off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true };
+
+const isEffort = (word: unknown): word is Effort => typeof word === "string" && Object.hasOwn(EFFORTS, word);
+
+/**
+ * The connection's metadata with its reasoning binding set to `effort`, and where the rest of the
+ * binding came from. Lumiverse takes a connection's reasoning from `metadata.reasoningBindings.settings`
+ * whole when it holds one, and from the user's global `reasoningSettings` when it does not
+ * (`src/services/generation/reasoning.ts:211-221`, `src/services/prompt-assembly.service.ts:7673-7693`);
+ * the binding is the connection's own (`src/services/connections.service.ts:539-541` drops it from a copy).
+ * So the new binding is the old one, or the global setting where there was none, with only reasoning
+ * switched on at the effort: every other field of it (prefix, suffix, display, custom body) applies as
+ * before, and so does every other key of the metadata and of the binding (its prompt bias:
+ * `src/spindle/worker-host.ts:959-971`). Every effort but "off" is a word Lumiverse's setting takes as it is
+ * (`src/spindle/worker-host.ts:905-914`) and puts on the request (`src/services/generation/reasoning.ts:255-268`);
+ * "off" is reasoning switched off, which Lumiverse sends as the provider's off switch (`:278-280`). An
+ * effort no agent definition takes is refused, never put in its place.
+ */
+export function thinkingMetadata(metadata: unknown, global: unknown, effort: string): { metadata: Record<string, unknown>; from: "connection" | "global" | "none" } {
+  if (!isEffort(effort)) throw new Error(`"${effort}" is not an effort an agent definition takes (${Object.keys(EFFORTS).join(", ")}), so plain generation cannot be set to it`);
+  const own = isRecord(metadata) ? metadata : {};
+  const binding = isRecord(own.reasoningBindings) ? own.reasoningBindings : {};
+  const bound = isRecord(binding.settings) ? binding.settings : null;
+  const base = bound ?? (isRecord(global) ? global : {});
+  const settings = effort === "off" ? { ...base, apiReasoning: false } : { ...base, apiReasoning: true, reasoningEffort: effort };
+  return { metadata: { ...own, reasoningBindings: { ...binding, settings } }, from: bound !== null ? "connection" : isRecord(global) ? "global" : "none" };
+}
+
+const FENCE = /^---[ \t]*$/;
+
+/**
+ * The effort an agent definition's text names in its header, read as RPH reads it: the YAML between two
+ * `---` lines at the top, by Bun's own parser, a byte-order mark and Windows line ends set aside (RPH
+ * `src/files/header.ts:27-33, 66-84`), and only an effort RPH takes (`src/files/definitions.ts:41-45`).
+ * Null when the text names none RPH would use: no header, one that does not parse (RPH then uses no
+ * definition at all), no `effort:`, or a word RPH does not take. Never a default.
+ */
+export function authorEffort(definitionText: string): string | null {
+  const lines = (definitionText.startsWith("\uFEFF") ? definitionText.slice(1) : definitionText).replace(/\r\n?/g, "\n").split("\n");
+  if (!FENCE.test(lines[0] ?? "")) return null;
+  const end = lines.findIndex((line, i) => i > 0 && FENCE.test(line));
+  if (end === -1) return null;
+  let header: unknown;
+  try {
+    header = Bun.YAML.parse(lines.slice(1, end).join("\n"));
+  } catch {
+    // A header that does not parse names no effort RPH would use.
+    return null;
+  }
+  const effort = isRecord(header) ? header.effort : undefined;
+  return isEffort(effort) ? effort : null;
+}
+
+/** The floor's book as `findFixture` found it: each entry it holds as designed, and why Lumiverse would not search its vector entry now (none when it would). */
+export interface FloorBook extends BookDesign {
+  entries: MadeEntry[];
+  vectorBlockers: string[];
+}
+
+/** What the floor names on every generation, the card it plays, and its book. */
 export interface Fixture {
   preset: { id: string; name: string };
   persona: { id: string; name: string };
+  card: { id: string; name: string };
+  book: FloorBook;
 }
 
-type Marked = { id: string; name: string; metadata?: { [key: string]: unknown } | null };
+type Row = { id: string; name: string; metadata?: unknown; extensions?: unknown };
 
 /** Every row of a paged list route (`{ data, total }`, or a bare array). */
-async function every(host: Lumiverse, path: string): Promise<Marked[]> {
-  const out: Marked[] = [];
+async function every(host: Lumiverse, path: string): Promise<Row[]> {
+  const out: Row[] = [];
+  const join = path.includes("?") ? "&" : "?";
   for (let offset = 0; ; offset += 100) {
-    const page = await host.call<{ data: Marked[]; total: number } | Marked[]>("GET", `${path}?limit=100&offset=${offset}`);
+    const page = await host.call<{ data: Row[]; total: number } | Row[]>("GET", `${path}${join}limit=100&offset=${offset}`);
     if (Array.isArray(page)) return page;
     out.push(...page.data);
     if (page.data.length < 100 || out.length >= page.total) return out;
   }
 }
 
-const marked = async (host: Lumiverse, path: string): Promise<Marked[]> => (await every(host, path)).filter((row) => row.metadata?.[MARK] === true);
+const isMarked = (row: Row, where: "metadata" | "extensions"): boolean => isRecord(row[where]) && (row[where] as Record<string, unknown>)[MARK] === true;
 
-/** The fixture `setup` made; throws when it is missing or doubled. */
-export async function findFixture(host: Lumiverse): Promise<Fixture> {
-  const [presets, personas] = await Promise.all([marked(host, "/api/v1/presets"), marked(host, "/api/v1/personas")]);
-  if (presets.length !== 1 || personas.length !== 1) throw new Error(`the floor fixture has ${presets.length} preset(s) and ${personas.length} persona(s), not one of each: run floor.ts setup (or remove, then setup)`);
-  const [preset, persona] = [presets[0] as Marked, personas[0] as Marked];
-  return { preset: { id: preset.id, name: preset.name }, persona: { id: persona.id, name: persona.name } };
+/** The rows of a list route that carry the mark: in their metadata, or for cards (whose list rows hold their extensions: Lumiverse `src/services/characters.service.ts:728-736`) in their extensions. */
+async function marked(host: Lumiverse, path: string, where: "metadata" | "extensions" = "metadata"): Promise<Row[]> {
+  return (await every(host, path)).filter((row) => isMarked(row, where));
 }
 
-/** Makes what is missing of the fixture and a new floor chat; prints what it set. */
-export async function setupFixture(host: Lumiverse): Promise<void> {
-  const presets = await marked(host, "/api/v1/presets");
-  const personas = await marked(host, "/api/v1/personas");
-  if (presets.length > 1 || personas.length > 1) throw new Error(`${presets.length} floor presets and ${personas.length} floor personas: run floor.ts remove first`);
-  const preset = presets[0] ?? (await host.call<Marked>("POST", "/api/v1/presets", PRESET));
-  const persona = personas[0] ?? (await host.call<Marked>("POST", "/api/v1/personas", PERSONA));
-  const existing = (await host.characters()).find((c) => c.name === CARD.name);
-  const character = existing ?? (await host.createCharacter(CARD));
-  const chat = await host.createChat(character.id, CHAT_NAME);
-  const was = (made: unknown) => (made ? " (already there)" : " (made)");
-  console.log(`card     ${character.id} "${CARD.name}"${was(existing)}
-persona  ${persona.id} "${persona.name}"${was(personas[0])}: the traveller of the card's scenario; not made default or active
-preset   ${preset.id} "${preset.name}"${was(presets[0])}: ${PRESET.prompt_order.map((b) => b.name).join(", ")}; third person, past tense, 120 to 200 words, names nobody; not made active
+const CARDS = "/api/v1/characters";
+const BOOKS = "/api/v1/world-books";
+
+/** The fixture `setupFixture` made; throws when any of it is missing, doubled, or not as designed. */
+export async function findFixture(host: Lumiverse): Promise<Fixture> {
+  const [presets, personas, cards, books] = await Promise.all([marked(host, "/api/v1/presets"), marked(host, "/api/v1/personas"), marked(host, CARDS, "extensions"), marked(host, BOOKS)]);
+  const [preset, persona, card, book] = [presets[0], personas[0], cards[0], books[0]];
+  if (presets.length !== 1 || personas.length !== 1 || cards.length !== 1 || books.length !== 1 || !preset || !persona || !card || !book) {
+    throw new Error(`the floor fixture has ${presets.length} preset(s), ${personas.length} persona(s), ${cards.length} card(s) and ${books.length} book(s), not one of each: run floor.ts setup (or remove, then setup)`);
+  }
+  if (!cardBooks(card.extensions).includes(book.id)) throw new Error(`the floor's card "${card.name}" does not hold its book "${book.name}": run floor.ts setup`);
+  const read = readBook(await host.bookEntries(book.id));
+  const missing = read.notMade.filter((d) => d.kind !== "vector").map((d) => `"${d.title}" is not there`);
+  if (read.faults.length > 0 || missing.length > 0) throw new Error(`the floor's book "${book.name}" is not as designed: ${[...read.faults, ...missing].join("; ")}. Run floor.ts remove, then setup`);
+  const vectorBlockers = embeddingBlockers(await host.call("GET", "/api/v1/embeddings/config"));
+  return {
+    preset: { id: preset.id, name: preset.name },
+    persona: { id: persona.id, name: persona.name },
+    card: { id: card.id, name: card.name },
+    book: { id: book.id, name: book.name, entries: read.made, vectorBlockers },
+  };
+}
+
+/**
+ * Sets the plain connection's own reasoning binding to `effort` (`thinkingMetadata`), keeping all else
+ * of the connection, and says what it set. Lumiverse replaces a connection's metadata whole on
+ * `PUT /api/v1/connections/:id` (`src/services/connections.service.ts:517`), so the whole object is sent;
+ * the global setting is read from `GET /api/v1/settings/reasoningSettings`, a 404 when the user has none
+ * (`src/routes/settings.routes.ts:20-25`).
+ */
+export async function setPlainThinking(host: Lumiverse, connectionId: string, effort: string): Promise<string> {
+  const connection = await host.call<{ id: string; name: string; metadata?: unknown }>("GET", `/api/v1/connections/${encodeURIComponent(connectionId)}`);
+  let global: unknown = null;
+  try {
+    global = (await host.call<{ value?: unknown }>("GET", "/api/v1/settings/reasoningSettings")).value ?? null;
+  } catch (error) {
+    if (!(error instanceof HttpError && error.status === 404)) throw error;
+  }
+  const next = thinkingMetadata(connection.metadata, global, effort);
+  await host.call("PUT", `/api/v1/connections/${encodeURIComponent(connectionId)}`, { metadata: next.metadata });
+  const rest = next.from === "connection" ? "the rest of its binding as it was" : next.from === "global" ? "the rest copied from the user's global reasoning setting, which applied to it before" : "the user has no global reasoning setting, so nothing else is set";
+  return `connection "${connection.name}": ${effort === "off" ? "reasoning off" : `reasoning on at ${effort}`}, on its own reasoning binding (${rest})`;
+}
+
+/**
+ * Makes what is missing of the fixture and a new floor chat, sets the plain connection to think at
+ * `effort` (the Author's, as `authorEffort` read it; setup never chooses one), prints what it set, and
+ * gives the fixture as `findFixture` then finds it, with the chat's id.
+ */
+export async function setupFixture(host: Lumiverse, effort: string, plainConnectionId: string): Promise<{ fixture: Fixture; chat: string }> {
+  // Refused before anything is made: an effort no definition takes is never set in its place.
+  if (!isEffort(effort)) throw new Error(`"${effort}" is not an effort an agent definition takes (${Object.keys(EFFORTS).join(", ")})`);
+  const [presets, personas, cards, books] = await Promise.all([marked(host, "/api/v1/presets"), marked(host, "/api/v1/personas"), marked(host, CARDS, "extensions"), marked(host, BOOKS)]);
+  if (presets.length > 1 || personas.length > 1 || cards.length > 1 || books.length > 1) throw new Error(`${presets.length} floor presets, ${personas.length} personas, ${cards.length} cards and ${books.length} books: run floor.ts remove first`);
+  const was = (found: unknown) => (found ? "already there" : "made");
+  const preset = presets[0] ?? (await host.call<Row>("POST", "/api/v1/presets", PRESET));
+  const persona = personas[0] ?? (await host.call<Row>("POST", "/api/v1/personas", PERSONA));
+  const book = books[0] ?? (await host.call<Row>("POST", BOOKS, bookBody()));
+
+  const blockers = embeddingBlockers(await host.call("GET", "/api/v1/embeddings/config"));
+  const read = readBook(await host.bookEntries(book.id));
+  if (read.faults.length > 0) throw new Error(`the floor's book "${book.name}" is not as designed: ${read.faults.join("; ")}. Run floor.ts remove first`);
+  const making = entriesToMake(read.notMade, blockers);
+  const entryLines: string[] = [];
+  for (const d of LORE) {
+    const how = d.kind === "constant" ? "constant" : d.kind === "keyword" ? `by keyword: ${d.keys.join(", ")}` : d.kind === "sticky" ? `by keyword: ${d.keys.join(", ")}, then still sticky for ${d.sticky} more generations` : "by vector search only";
+    let state: string;
+    if (!read.notMade.includes(d)) state = d.kind === "vector" && blockers.length > 0 ? `already there, and Lumiverse would not search it now: ${blockers.join("; ")}` : "already there";
+    else if (making.includes(d)) {
+      const made = await host.createEntry(book.id, entryBody(d));
+      state = d.kind === "vector" ? `made; Lumiverse is indexing it (${String(made.vector_index_status)}), and searches it once it is indexed` : "made";
+    } else state = `not made, since Lumiverse has no embedding connection it can search with: ${blockers.join("; ")}. Set one up in Lumiverse, then run floor.ts setup again to add it`;
+    entryLines.push(`           "${d.title}" (${how}): ${state}`);
+  }
+
+  // A card an earlier setup made, before cards carried the mark, is known by its name and marked now rather than made twice.
+  let card = cards[0];
+  let cardWas = "already there";
+  if (card === undefined) {
+    const earlier = (await every(host, CARDS)).filter((c) => c.name === CARD.name && !isMarked(c, "extensions"));
+    if (earlier.length > 1) throw new Error(`${earlier.length} cards are named "${CARD.name}" and none carries the floor's mark: delete the extra ones in Lumiverse first`);
+    card = earlier[0] ?? (await host.call<Row>("POST", CARDS, { ...CARD, extensions: markedCard({}, book.id) }));
+    cardWas = earlier[0] ? "an earlier setup's, now marked" : "made";
+  }
+  const extensions = markedCard(card.extensions, book.id);
+  if (extensions !== null) await host.call("PUT", `${CARDS}/${card.id}`, { extensions });
+
+  const chat = await host.createChat(card.id, CHAT_NAME);
+  const plain = await setPlainThinking(host, plainConnectionId, effort);
+  const fixture = await findFixture(host);
+  console.log(`card     ${card.id} "${card.name}" (${cardWas}), holding the book
+persona  ${persona.id} "${persona.name}" (${was(personas[0])}): the traveller of the card's scenario; not made default or active
+preset   ${preset.id} "${preset.name}" (${was(presets[0])}): ${PRESET.prompt_order.map((b) => b.name).join(", ")}; third person, past tense, 120 to 200 words, names nobody; not made active
+book     ${book.id} "${book.name}" (${was(books[0])}), attached to the card:
+${entryLines.join("\n")}
+plain    ${plain}
 chat     ${chat.id} "${CHAT_NAME}"
 
-floor.ts run starts every generation, plain and RPE alike, with this preset (forced past any preset binding) and this persona,
-and sends the player's lines under the persona's name. No setting changes; other chats keep their own preset and persona.
-Remove it all with: floor.ts remove
-
-export FLOOR_CHAT=${chat.id}`);
+The floor starts every generation, plain and RPE alike, with this preset (forced past any preset binding) and this persona,
+and sends the player's lines under the persona's name. No other setting changes; other chats keep their own preset and persona.
+Remove it all with: floor.ts remove`);
+  return { fixture, chat: chat.id };
 }
 
-/** Deletes the floor chats, the card when no other chat uses it, the preset and the persona; prints each. */
+/** Deletes the floor chats, the card when no other chat uses it (else takes the book off it), the preset, the persona and the book; prints each. */
 export async function removeFixture(host: Lumiverse, env: TestbedEnv): Promise<void> {
-  for (const card of (await host.characters()).filter((c) => c.name === CARD.name)) {
+  const books = await marked(host, BOOKS);
+  for (const card of await marked(host, CARDS, "extensions")) {
     const chats = await every(host, `/api/v1/chats?characterId=${encodeURIComponent(card.id)}`);
     const floor = chats.filter((c) => c.name === CHAT_NAME);
     for (const chat of floor) {
       await host.deleteChat(guard(env, chat.id));
       console.log(`deleted chat ${chat.id} "${chat.name}"`);
     }
-    if (chats.length > floor.length) console.log(`kept card ${card.id} "${card.name}": ${chats.length - floor.length} other chat(s) use it`);
-    else {
-      await host.call("DELETE", `/api/v1/characters/${card.id}`);
+    if (chats.length > floor.length) {
+      const extensions = detachBooks(card.extensions, books.map((b) => b.id));
+      if (extensions !== null) await host.call("PUT", `${CARDS}/${card.id}`, { extensions });
+      console.log(`kept card ${card.id} "${card.name}": ${chats.length - floor.length} other chat(s) use it${extensions !== null ? "; the floor's book is taken off it" : ""}`);
+    } else {
+      await host.call("DELETE", `${CARDS}/${card.id}`);
       console.log(`deleted card ${card.id} "${card.name}"`);
     }
   }
   for (const [kind, path] of [
     ["preset", "/api/v1/presets"],
     ["persona", "/api/v1/personas"],
+    ["book", BOOKS],
   ] as const) {
-    for (const row of await marked(host, path)) {
+    for (const row of kind === "book" ? books : await marked(host, path)) {
       await host.call("DELETE", `${path}/${row.id}`);
       console.log(`deleted ${kind} ${row.id} "${row.name}"`);
     }

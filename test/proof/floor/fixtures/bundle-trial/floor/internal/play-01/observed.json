@@ -1,0 +1,16 @@
+{
+  "shipped": [
+    { "path": ".agents/author.md", "sha256": "1f0e9d8c7b6a59483726150f1e2d3c4b5a69788796a5b4c3d2e1f00112233445" },
+    { "path": "RPE-global.yml", "sha256": "2a1b0c9d8e7f60514233241506f7e8d9cab0b1c2d3e4f5a6b7c8d9e0f1a2b3c4" },
+    { "path": "TURN.md", "sha256": "3b2c1d0e9f8a71625344352617a8f9e0dbc1c2d3e4f5a6b7c8d9e0f1a2b3c4d5" }
+  ],
+  "layers": [{ "level": "global", "files": [{ "path": "@global/RPE-global.yml", "sha256": "4c3d2e1f0a9b82736455463728b9a0f1ecd2d3e4f5a6b7c8d9e0f1a2b3c4d5e6" }] }],
+  "plain": {
+    "connection": "conn-plain-floor",
+    "preset": "preset-floor",
+    "source": "connection",
+    "apiReasoning": true,
+    "effort": "low",
+    "customBody": null
+  }
+}
