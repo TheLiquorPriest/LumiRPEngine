@@ -8,7 +8,7 @@ import { scriptedModel } from "rp-harness/testing/rig";
 import { type Chrome, launchChrome } from "../../../scripts/proof/browser/chrome";
 import { BrowserDriver } from "../../../scripts/proof/browser/driver";
 import { openRigBed, RIG_CHAT, RIG_CHAT_NAME, RIG_PRESET, RIG_RPE_CONNECTION, type RigBed } from "../../../scripts/proof/rig/bed";
-import { openWebPage, WEB_NAME_OF } from "../../../scripts/proof/rig/pages";
+import { openWebPage, WEB_NAME_OF } from "../../../scripts/proof/browser/web-shell";
 import { builtUi } from "../../../scripts/proof/rig/ui";
 
 let chrome: Chrome;

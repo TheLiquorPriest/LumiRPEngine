@@ -37,6 +37,9 @@ export interface Pages {
   nameOf: string;
 }
 
+/** A cookie as the browser gives it (`Network.Cookie`): what `cookies` reads and `setCookies` writes back. */
+export type Cookie = Record<string, unknown> & { name: string; value: string };
+
 export interface DriverOptions {
   chrome: Chrome;
   pages: Pages;
@@ -86,6 +89,16 @@ export class BrowserDriver implements Browser {
 
   private get cdp() {
     return this.options.chrome.cdp;
+  }
+
+  /** The cookies this window's browser context holds, as a person's sign-in leaves them. */
+  async cookies(): Promise<Cookie[]> {
+    return (await this.cdp.send<{ cookies: Cookie[] }>("Storage.getCookies", { browserContextId: this.context })).cookies;
+  }
+
+  /** Puts cookies into this window's context, as a sign-in made in another of this run's windows left them: a sign-in is made once for a run, so no window of it asks Lumiverse to sign in again. */
+  async setCookies(cookies: readonly Cookie[]): Promise<void> {
+    await this.cdp.send("Storage.setCookies", { cookies, browserContextId: this.context });
   }
 
   async close(): Promise<void> {
@@ -162,11 +175,27 @@ export class BrowserDriver implements Browser {
     await this.call<Found>("find", control);
   }
 
+  private async clickAt(x: number, y: number): Promise<void> {
+    await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, this.session);
+    await this.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 }, this.session);
+    await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 }, this.session);
+  }
+
   async press(control: Control): Promise<void> {
     const at = await this.call<Found>("find", control);
-    await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y }, this.session);
-    await this.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 }, this.session);
-    await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 }, this.session);
+    await this.clickAt(at.x, at.y);
+  }
+
+  /**
+   * Presses an element the page gives no words for (a button that is only an icon), found by `selector` and
+   * named `name` in the stop when it is not there: the one place a form names an element by its markup.
+   */
+  async pressSelector(selector: string, name: string): Promise<void> {
+    const at = await this.evaluate<{ x: number; y: number } | null>(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (el === null) return null; el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); const r = el.getBoundingClientRect(); return { x: Math.min(Math.max(r.left + r.width / 2, 1), window.innerWidth - 1), y: Math.min(Math.max(r.top + r.height / 2, 1), window.innerHeight - 1) }; })()`,
+    );
+    if (at === null) throw new Error(`no ${name} on the page (looked for ${selector})`);
+    await this.clickAt(at.x, at.y);
   }
 
   async type(control: Control, text: string): Promise<void> {

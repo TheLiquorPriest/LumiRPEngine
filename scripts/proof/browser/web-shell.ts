@@ -1,10 +1,11 @@
-// RPE's web shell as the driver's `Pages` knows it (PlanScenarios-2 items 1 and 2): a page is named as
-// the shell's own bar names it, its route is the address's fragment (`#/chats/<chat>/<page>`), and the
-// web UI's token is typed into the sign-in field by the driver as a person does, once for each browser
-// context. A page names itself by its heading, read from the page; a page is up when its heading is
-// the one its route is owed, so a page that is still the one before is never taken for the next.
+// RPE's web shell as the driver's `Pages` knows it, for the rig's host and the bed's (PlanScenarios-2 items 1
+// and 2, PlanScenarios-3 item 2): a page is named as the shell's own bar names it, its route is the address's
+// fragment (`#/chats/<chat>/<page>`), and the web UI's token is typed into the sign-in field by the driver as
+// a person does, once for each browser context. A page names itself by its heading, read from the page; a
+// page is up when its heading is the one its route is owed, so a page that is still the one before is never
+// taken for the next.
 
-import type { PageTab } from "../browser/driver";
+import type { PageTab } from "./driver";
 
 /** The heading the sign-in page has, and the field and button it is typed into and pressed on. */
 const SIGN_IN = "Sign in to RPE";
