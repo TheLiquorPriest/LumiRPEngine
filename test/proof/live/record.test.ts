@@ -8,8 +8,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ConnectionsShown, SettingsReply, SettingView } from "../../../src/shared/api";
-import type { TreeFileEntry } from "../../../src/ui/api";
+import type { ConnectionsShown, SettingsReply, SettingView, TreeFileRow } from "../../../src/shared/api";
 import { agentFacts, commitsOf, guidanceOf, headerOf, manifestPin, parseBuild, runningBuild } from "../../../scripts/proof/live/facts";
 import { RpeReader } from "../../../scripts/proof/lib/read";
 import { folderTree, gitTree, sha256, shippedOf, type Layer, type TreeFile } from "../../../scripts/proof/lib/record";
@@ -85,7 +84,7 @@ class Recorded extends RpeReader {
   override async trees(): Promise<{ shipped: TreeFile[]; layers: Layer[]; off: { path: string; offIn: ("global" | "character" | "chat")[] }[] }> {
     return { shipped: this.served, layers: this.chatLayer.length === 0 ? [] : [{ level: "chat", files: this.chatLayer }], off: [] };
   }
-  override async view(): Promise<TreeFileEntry[]> {
+  override async view(): Promise<TreeFileRow[]> {
     return [];
   }
 }
@@ -121,7 +120,7 @@ class Agents extends RpeReader {
   ) {
     super("http://127.0.0.1:1", "none");
   }
-  override async view(): Promise<TreeFileEntry[]> {
+  override async view(): Promise<TreeFileRow[]> {
     return Object.keys(this.definitions).map((name) => ({ path: `@shipped/.agents/${name}.md`, level: "shipped", kind: "yours", bytes: 1, item: `agents/${name}`, applies: true, replacedBy: null, off: false, offIn: [], editable: false, shipped: null, defaultChanged: null }));
   }
   override async viewFile(_chat: string, path: string): Promise<string> {

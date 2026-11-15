@@ -10,7 +10,7 @@
 
 import type { FileKind, LayerLevel, StackLeft } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { AgentStack, DiffLine, FileSwitch, FileWritten, SuggestionAccepted, SuggestionDismissed, SuggestionList, TreeFileDiff, TreeFileEntry, TreeFileText, TreeListing, TreeSuggestionView } from "../api";
+import type { StackReply, DiffRow, FileSwitchAsk, FileWrittenReply, SuggestionAcceptedReply, SuggestionDismissedReply, SuggestionsReply, TreeDiffReply, TreeFileRow, TreeFileReply, TreeListingReply, SuggestionShown } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, Fold, PageHeader, Pre, Section, type Tone } from "../atoms";
 import type { RpeClient } from "../client";
@@ -27,7 +27,7 @@ const KIND_WORDS: Readonly<Record<FileKind, string>> = { yours: "guidance", note
 const LEFT_WORDS: Readonly<Record<StackLeft, string>> = { missing: "no file at any level", off: "switched off", empty: "nothing in it but headings and comments", broken: "its header or text does not parse", needs: "a file its needs: names is not in force" };
 
 /** The agents the listing holds a definition of, by name (a definition is listed as `agents/<name>`). */
-export function agentsOf(files: readonly TreeFileEntry[]): string[] {
+export function agentsOf(files: readonly TreeFileRow[]): string[] {
   return [...new Set(files.flatMap((f) => (f.item?.startsWith("agents/") === true ? [f.item.slice("agents/".length)] : [])))].sort();
 }
 
@@ -51,7 +51,7 @@ export function suggestedLevel(path: string): WriteLevel {
  * is not markdown, as every markdown file there is loaded by its name) and what sits in a skill's folder
  * beside its SKILL.md, which the skill may send an agent to.
  */
-export function unreadFiles(files: readonly TreeFileEntry[]): Set<string> {
+export function unreadFiles(files: readonly TreeFileRow[]): Set<string> {
   const skills = files.flatMap((f) => (f.item?.startsWith("skills/") === true ? [f.path.slice(0, f.path.lastIndexOf("/") + 1)] : []));
   return new Set(
     files
@@ -63,7 +63,7 @@ export function unreadFiles(files: readonly TreeFileEntry[]): Set<string> {
 }
 
 /** Whether RPH takes a file, as the listing says, in words; a file no agent reads (`unreadFiles`) is said to be kept. */
-export function standingOf(entry: TreeFileEntry, unread: boolean): { words: string; tone: Tone | undefined } {
+export function standingOf(entry: TreeFileRow, unread: boolean): { words: string; tone: Tone | undefined } {
   if (unread) return { words: "kept, read by no agent", tone: undefined };
   if (entry.off) return { words: "switched off", tone: "warn" };
   if (entry.replacedBy !== null) return { words: `replaced by ${entry.replacedBy}`, tone: undefined };
@@ -74,19 +74,19 @@ export function standingOf(entry: TreeFileEntry, unread: boolean): { words: stri
 
 /** The Files page's calls to RPE, for the chat it shows. */
 export interface FilesCalls {
-  list(): Promise<TreeListing>;
-  read(path: string): Promise<TreeFileText>;
-  diff(path: string): Promise<TreeFileDiff>;
-  save(path: string, level: WriteLevel, text: string): Promise<FileWritten>;
+  list(): Promise<TreeListingReply>;
+  read(path: string): Promise<TreeFileReply>;
+  diff(path: string): Promise<TreeDiffReply>;
+  save(path: string, level: WriteLevel, text: string): Promise<FileWrittenReply>;
   remove(path: string): Promise<{ removed: string }>;
-  switchName(path: string, level: FileSwitch["level"], off: boolean): Promise<FileWritten>;
+  switchName(path: string, level: FileSwitchAsk["level"], off: boolean): Promise<FileWrittenReply>;
   /** The open suggestions: the chat's, or every chat's with none. */
-  suggestions(): Promise<SuggestionList>;
+  suggestions(): Promise<SuggestionsReply>;
   /** Accepts a suggestion at a level: its text as proposed, or as edited when `text` is given. */
-  accept(id: number, level: WriteLevel, text: string | null): Promise<SuggestionAccepted>;
-  dismiss(id: number): Promise<SuggestionDismissed>;
+  accept(id: number, level: WriteLevel, text: string | null): Promise<SuggestionAcceptedReply>;
+  dismiss(id: number): Promise<SuggestionDismissedReply>;
   /** The exact stack an agent gets in the chat, and where each part comes from. */
-  stack(agent: string): Promise<AgentStack>;
+  stack(agent: string): Promise<StackReply>;
 }
 
 /** The calls for `chat` (null: the shipped level and yours alone). */
@@ -112,16 +112,16 @@ export function filesCalls(client: Pick<RpeClient, "call">, chat: string | null)
 /** A file opened: its text once read, or RPE's reason it gave none; what is being done with it; the text being edited and where it is to be saved; and its difference from the shipped default once asked for. */
 export interface OpenFile {
   path: string;
-  file: TreeFileText | null;
+  file: TreeFileReply | null;
   problem: string | null;
   mode: "read" | "edit" | "delete";
   draft: { text: string; level: WriteLevel };
-  diff: { answer: TreeFileDiff | null; problem: string | null } | null;
+  diff: { answer: TreeDiffReply | null; problem: string | null } | null;
 }
 
 /** The open suggestions once read, or why they could not be; the one being edited before it is accepted, and the level each is to be written at where another than its own was chosen. */
 export interface SuggestionsShown {
-  list: TreeSuggestionView[] | null;
+  list: SuggestionShown[] | null;
   problem: string | null;
   editing: { id: number; text: string } | null;
   levels: Readonly<Record<number, WriteLevel>>;
@@ -130,7 +130,7 @@ export interface SuggestionsShown {
 /** An agent's stack, as asked for: the agent, and its parts once read, or why they could not be. */
 export interface StackShown {
   agent: string;
-  parts: AgentStack["parts"] | null;
+  parts: StackReply["parts"] | null;
   problem: string | null;
 }
 
@@ -140,7 +140,7 @@ export interface StackShown {
  * the file open or the suggestion it was asked for.
  */
 export interface FilesShown {
-  files: TreeFileEntry[] | null;
+  files: TreeFileRow[] | null;
   loading: boolean;
   problem: string | null;
   open: OpenFile | null;
@@ -159,7 +159,7 @@ export interface FilesControl {
   draft(draft: OpenFile["draft"]): void;
   save(): void;
   remove(): void;
-  switchName(path: string, level: FileSwitch["level"], off: boolean): void;
+  switchName(path: string, level: FileSwitchAsk["level"], off: boolean): void;
   diff(): void;
   /** Starts editing a suggestion's text before accepting it, from the text proposed; null stops. */
   edit(id: number | null): void;
@@ -333,10 +333,10 @@ export function filesControl(calls: FilesCalls, onChange: (shown: FilesShown) =>
 
 // ---------------------------------------------------------------- the view
 
-const MARKS: Readonly<Record<DiffLine["op"], string>> = { same: "  ", added: "+ ", removed: "- " };
+const MARKS: Readonly<Record<DiffRow["op"], string>> = { same: "  ", added: "+ ", removed: "- " };
 
 /** A difference, line by line: `+` only in the second text, `-` only in the first. */
-export function DiffLines(props: { lines: readonly DiffLine[] }) {
+export function DiffLines(props: { lines: readonly DiffRow[] }) {
   return (
     <pre class="rpe-pre rpe-diff">
       {props.lines.map((line, i) => (
@@ -392,7 +392,7 @@ export interface FilesViewProps {
   onDraft(draft: OpenFile["draft"]): void;
   onSave(): void;
   onRemove(): void;
-  onSwitch(path: string, level: FileSwitch["level"], off: boolean): void;
+  onSwitch(path: string, level: FileSwitchAsk["level"], off: boolean): void;
   onDiff(): void;
   onEdit(id: number | null): void;
   onEditText(text: string): void;
@@ -406,14 +406,14 @@ export interface FilesViewProps {
 const OFF_LIST_WORDS: Readonly<Record<LayerLevel, string>> = { shipped: "the shipped config", global: "your own config", character: "this character's config", chat: "this chat's config" };
 
 /** The levels whose `off:` list this page writes: the user's own, and the chat's with one open. */
-const switchLevels = (chat: string | null): FileSwitch["level"][] => (chat === null ? ["global"] : ["global", "chat"]);
+const switchLevels = (chat: string | null): FileSwitchAsk["level"][] => (chat === null ? ["global"] : ["global", "chat"]);
 
 /**
  * Switching a name off, in the user's own config with no chat open and in theirs or the chat's with one;
  * and on again where an `off:` list names it, and only there: at a level whose list does not name it,
  * the route writes nothing and the name stays off.
  */
-function SwitchButtons(props: { entry: TreeFileEntry; chat: string | null; busy: boolean; onSwitch: FilesViewProps["onSwitch"] }) {
+function SwitchButtons(props: { entry: TreeFileRow; chat: string | null; busy: boolean; onSwitch: FilesViewProps["onSwitch"] }) {
   const { entry } = props;
   const levels = entry.off ? switchLevels(props.chat).filter((level) => entry.offIn.includes(level)) : switchLevels(props.chat);
   const verb = entry.off ? "Switch on" : "Switch off";
@@ -429,7 +429,7 @@ function SwitchButtons(props: { entry: TreeFileEntry; chat: string | null; busy:
 }
 
 /** For a name switched off: which lists name it, where more than one does or one this page does not write does, so that a Switch on that leaves it off is not a surprise. */
-function OffWhere(props: { entry: TreeFileEntry; chat: string | null }) {
+function OffWhere(props: { entry: TreeFileRow; chat: string | null }) {
   const { offIn } = props.entry;
   const here = switchLevels(props.chat);
   const elsewhere = offIn.filter((level) => !here.some((l) => l === level));
@@ -443,7 +443,7 @@ function OffWhere(props: { entry: TreeFileEntry; chat: string | null }) {
 }
 
 /** The file open, under its row: its text, and what can be done with it; for a file no agent reads, how it comes into force. */
-function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntry | undefined; unread: boolean }) {
+function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileRow | undefined; unread: boolean }) {
   const { open, entry, shown } = props;
   const file = open.file;
   const levels = writeLevels(props.chat);
@@ -546,7 +546,7 @@ function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntr
   );
 }
 
-function FileRow(props: FilesViewProps & { entry: TreeFileEntry; unread: boolean }) {
+function FileRow(props: FilesViewProps & { entry: TreeFileRow; unread: boolean }) {
   const { entry, shown } = props;
   const standing = standingOf(entry, props.unread);
   const open = shown.open !== null && shown.open.path === entry.path ? shown.open : null;
@@ -567,7 +567,7 @@ function FileRow(props: FilesViewProps & { entry: TreeFileEntry; unread: boolean
 }
 
 /** A suggestion: its file, who filed it and when, why, and what it would change; accepted at a level as proposed or edited, or dismissed. */
-function SuggestionItem(props: FilesViewProps & { suggestion: TreeSuggestionView }) {
+function SuggestionItem(props: FilesViewProps & { suggestion: SuggestionShown }) {
   const { suggestion: s, shown } = props;
   const editing = shown.suggestions.editing?.id === s.id ? shown.suggestions.editing : null;
   const level = shown.suggestions.levels[s.id] ?? suggestedLevel(s.path);

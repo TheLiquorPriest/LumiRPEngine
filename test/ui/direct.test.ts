@@ -15,7 +15,7 @@ import type { LevelFile } from "../../src/app/config-read";
 import type { Setting } from "../../src/app/setting-list";
 import { settingsRoutes } from "../../src/app/settings-routes";
 import { type LiveEvent, LIVE_TOKEN_ENDED, type SettingsReply } from "../../src/shared/api";
-import { SESSION_PATH } from "../../src/ui/api";
+import { SESSION_PATH } from "../../src/ui/roads";
 import { createClient, isJoined, KEY_LET_GO, replyOf, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
 import type { JsonValue } from "../../src/shared/json";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";

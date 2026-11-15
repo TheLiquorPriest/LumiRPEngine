@@ -11,7 +11,7 @@ import { afterEach, expect, test } from "bun:test";
 import { gate } from "rp-harness/testing/rig";
 import type { TurnRow } from "../../src/store";
 import { sceneSession } from "../../src/story";
-import type { TurnList } from "../../src/ui/api";
+import type { TurnsReply } from "../../src/shared/api";
 import { CONTINUE_NUDGE } from "../standin/assembly";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
@@ -103,7 +103,7 @@ test("a continue in a branch of the reply it shares with the chat it was made fr
   expect(store.path(branch.chat).find((e) => e.message === branch.last)).toMatchObject({ turn: continued.id, node: continued.node });
   expect(b.requests[1]).toMatchObject({ kind: "continue", parent: shared.id, scope: { chat: branch.chat, turn: continued.id } });
   // Each chat's Turn page lists the runs played in it: the branch's, its continue, on its path at its message; the source's, the shared turn.
-  const listed = async (chat: string) => (await b.page<TurnList>("GET", `/api/v1/chats/${chat}/turns`)).body.turns.map((t) => [t.id, t.kind, t.onPath, t.message]);
+  const listed = async (chat: string) => (await b.page<TurnsReply>("GET", `/api/v1/chats/${chat}/turns`)).body.turns.map((t) => [t.id, t.kind, t.onPath, t.message]);
   expect(await listed(branch.chat)).toEqual([[continued.id, "continue", true, branch.last]]);
   expect(await listed(CHAT)).toEqual([[shared.id, "new", true, shared.message]]);
   // It plays in a session of the branch's own, as the shared turn left it, so the Author has what it did there.

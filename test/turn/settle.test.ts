@@ -8,7 +8,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type Answer, gate } from "rp-harness/testing/rig";
-import type { TurnList } from "../../src/ui/api";
+import type { TurnsReply } from "../../src/shared/api";
 import { world } from "../iface/rig";
 import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
@@ -102,7 +102,7 @@ test("Settle now runs on the newest turn after an edit: told the edit and the as
   ]);
   // Nothing of either reached the chat, and the Turn page lists the turn by its latest run.
   expect(b.db.rows("SELECT id, content FROM messages WHERE chat_id = ? ORDER BY rowid", CHAT)).toEqual(chatBefore);
-  expect((await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns.map((t) => [t.id, t.kind])).toEqual([[turn.id, "settle"]]);
+  expect((await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns.map((t) => [t.id, t.kind])).toEqual([[turn.id, "settle"]]);
 
   // The next turn is not told the edit again: the run on its turn was told it.
   const next = await settledTurn(b, await play(b, "I watch the sea."));

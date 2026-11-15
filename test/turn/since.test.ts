@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Gate, gate } from "rp-harness/testing/rig";
-import type { StopAnswer, TurnList } from "../../src/ui/api";
+import type { StopReply, TurnsReply } from "../../src/shared/api";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import { NO_SESSION } from "../../src/turn";
 import type { ChatMessage } from "../standin/lumiverse";
@@ -54,7 +54,7 @@ describe("the turn before, told and kept", () => {
       const run = b.turns.runs.ofChat(USER, CHAT)[0];
       return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
     });
-    expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
+    expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
     const out = await generating;
     expect(out.stopped).toBe(true);
     const cut = await settledTurn(b, out.generationId!);
@@ -74,7 +74,7 @@ describe("the turn before, told and kept", () => {
       const run = b.turns.runs.ofChat(USER, CHAT)[0];
       return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
     });
-    await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`);
+    await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`);
     const cut = await settledTurn(b, (await generating).generationId!);
     expect(cut.status).toBe("cut");
 
@@ -123,7 +123,7 @@ describe("the turn before, told and kept", () => {
     ]);
     expect(new Set(runs.map((r) => r.id)).size).toBe(2);
     expect(b.turns.runs.record(USER, turn.id)?.kind).toBe("continue");
-    const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+    const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.kind])).toEqual([[turn.id, "continue"]]);
   });
 

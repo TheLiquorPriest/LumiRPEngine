@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { h, render } from "preact";
 import { act } from "preact/test-utils";
-import type { WorldAnswer } from "../../src/ui/api";
+import type { WorldReply } from "../../src/shared/api";
 import { AppContext, type UiApp } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
 import { readWorld, WORLD_START, WorldPage, type WorldQuery, type WorldResult, WorldView, type WorldViewProps } from "../../src/ui/pages/world";
@@ -15,7 +15,7 @@ import { openPage, type PageElement } from "./kept/dom";
 import { CHAT, EARLIER, worldAt } from "./recorded";
 import { elements, expand, press, textOf } from "./vnodes";
 
-function worldView(answer: WorldAnswer | null, over: Partial<WorldViewProps> = {}): { text: string; tree: unknown; asked: WorldQuery[] } {
+function worldView(answer: WorldReply | null, over: Partial<WorldViewProps> = {}): { text: string; tree: unknown; asked: WorldQuery[] } {
   const asked: WorldQuery[] = [];
   const props: WorldViewProps = { query: { ...WORLD_START, at: answer?.at ?? "world" }, answer, loading: false, problem: null, turns: EARLIER, onQuery: (next) => asked.push(next), ...over };
   const tree = expand(h(WorldView, props));

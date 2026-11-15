@@ -31,7 +31,7 @@ let backend: Backend = "rpe";
 function migrate(db: Database, migrations: readonly Migration[]): void {
   for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
     if ("sql" in m) db.run(m.sql);
-    else m.up(db);
+    else m.up(db, USER);
   }
 }
 
@@ -52,7 +52,7 @@ function rpe(): Promise<Rpe> {
     const writes = new WriteQueue(db, CONFIG_DEFAULTS.database.sliceMs);
     const service = new BuildService({ db, writes, store, log: lineLog((line) => console.log(line)), guidance: resolve(import.meta.dir, "../../../guidance") });
     const [post] = buildRoutes(service);
-    const answer = async (message: FrontendToBackend): Promise<BuildAnswer> => post.handle({ params: {}, query: new URLSearchParams(), body: message, user: USER, request: new Request("http://preview/api/v1/build", { method: "POST" }), signal: new AbortController().signal });
+    const answer = async (message: FrontendToBackend): Promise<BuildAnswer> => post.handle({ params: {}, query: new URLSearchParams(), body: message, user: USER, auth: { user: USER, access: "page", listener: "tcp", credential: null }, signal: new AbortController().signal });
     await answer({ lre: 1, type: "lre.world", reqId: "preview-seed", op: "create", name: "Fernwick", template: "fantasy_town" });
     return { answer, store };
   })();

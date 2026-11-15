@@ -4,7 +4,7 @@
 // which asks first. What RPE refuses is shown in its words.
 
 import { useEffect, useState } from "preact/hooks";
-import type { NoteFile, NoteFiles, Pruned, TreeStorage } from "../api";
+import type { NoteRow, NotesReply, PrunedShown, StorageReply } from "../../shared/api";
 import { useApp } from "../app";
 import { Banner, Button, PageHeader, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
@@ -12,9 +12,9 @@ import { bytesWords, counted, errorWords } from "../words";
 import type { PageEntry } from "../page-entry";
 
 export interface StorageCalls {
-  storage(): Promise<TreeStorage>;
-  notes(chat: string): Promise<NoteFiles>;
-  prune(chat: string): Promise<{ pruned: Pruned }>;
+  storage(): Promise<StorageReply>;
+  notes(chat: string): Promise<NotesReply>;
+  prune(chat: string): Promise<{ pruned: PrunedShown }>;
 }
 
 export function storageCalls(client: Pick<RpeClient, "call">): StorageCalls {
@@ -31,13 +31,13 @@ export function storageCalls(client: Pick<RpeClient, "call">): StorageCalls {
  * RPE's refusal of it.
  */
 export interface StorageShown {
-  storage: TreeStorage | null;
+  storage: StorageReply | null;
   problem: string | null;
-  notes: NoteFiles | null;
+  notes: NotesReply | null;
   notesProblem: string | null;
   asking: boolean;
   busy: boolean;
-  pruned: Pruned | null;
+  pruned: PrunedShown | null;
   refusal: string | null;
 }
 
@@ -92,7 +92,7 @@ export function storageControl(calls: StorageCalls, chat: string | null, onChang
   };
 }
 
-function NoteList(props: { title: string; notes: readonly NoteFile[]; id: string }) {
+function NoteList(props: { title: string; notes: readonly NoteRow[]; id: string }) {
   return (
     <div class="lre-stack" data-notes={props.id}>
       <p class="rpe-caption">{props.title}</p>

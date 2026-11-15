@@ -8,7 +8,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
-import type { TurnList } from "../../src/ui/api";
+import type { TurnsReply } from "../../src/shared/api";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -63,7 +63,7 @@ describe("RPE restarted mid-turn", () => {
     expect(next.parent).toBe(run.turn);
     expect(b.turns.runs.ofTurn(USER, run.turn).map((r) => [r.status, r.released !== null, r.error?.code])).toEqual([["failed", true, "failed"]]);
     expect(sent(b, 2)).not.toContain("without a turn of yours");
-    const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+    const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([
       [next.id, "released", true],
       [run.turn, "failed", true],
@@ -91,7 +91,7 @@ describe("RPE restarted mid-turn", () => {
 
     // Before any turn of the chat: the run's own record and the pages say it ended, when, and how; the turn stays tied, on the path.
     expect(b.turns.runs.ofTurn(USER, run.turn).map((r) => [r.status, r.released !== null, r.ended !== null, r.error?.detail])).toEqual([["failed", true, true, "RPE stopped while this run was going on."]]);
-    const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+    const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([[run.turn, "failed", true]]);
     expect(b.turns.store.user(USER).turn(run.turn)).toMatchObject({ status: "done", hash: textHash("The lamp turns.") });
     const settling = await b.page<{ turn: string; run: string }>("POST", `/api/v1/chats/${CHAT}/settle`);
@@ -125,7 +125,7 @@ describe("RPE restarted mid-turn", () => {
     expect(b.turns.runs.ofTurn(USER, turn).map((r) => [r.status, r.released, r.error?.detail])).toEqual([["failed", null, "RPE went down in the middle of this one."]]);
     // The kept reply is on the path as a cut turn, which the next turn follows.
     expect(next.parent).toBe(turn);
-    const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+    const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([
       [next.id, "released", true],
       [turn, "failed", true],

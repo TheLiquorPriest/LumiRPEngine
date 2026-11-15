@@ -11,8 +11,7 @@
 //   default, so "Update now" is offered).
 
 import type { JobView } from "rp-harness/contract";
-import type { BuildsStatus } from "../../../src/shared/api";
-import type { BootstrapChat, CastCharacter, CastEntryShown, CastStrike, CastStruck, SettleAnswer, StoryAnswer, StoryItemShown, StoryStrike, StoryStruck } from "../../../src/ui/api";
+import type { BootstrapChatReply, BuildsStatus, CastStrikeAsk, CastStrikeReply, CharacterReply, EntryRow, SettleReply, StoryItemRow, StoryReply, StoryStrikeAsk, StoryStrikeReply } from "../../../src/shared/api";
 import { AGREE, BATCH, BOOT, buildsReply, job, NEWER } from "../../../test/ui/bootstrap-recorded";
 import { CHAT as PLAYED } from "../../../test/ui/recorded";
 import { CAST, ODILE_RECORD, OLDER_BEATS, STORY, TOBIN } from "../../../test/ui/records-recorded";
@@ -20,15 +19,15 @@ import { CAST, ODILE_RECORD, OLDER_BEATS, STORY, TOBIN } from "../../../test/ui/
 const answer = (status: number, body: unknown): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 const refuse = (status: number, error: string): Response => answer(status, { error });
 
-const record: CastCharacter = structuredClone(ODILE_RECORD);
-const story: StoryAnswer = structuredClone(STORY);
+const record: CharacterReply = structuredClone(ODILE_RECORD);
+const story: StoryReply = structuredClone(STORY);
 /** The older beats the route gives past the first read's. */
 const olderBeats = structuredClone(OLDER_BEATS.timeline.beat);
 let builds: BuildsStatus = NEWER;
 const DAY = 86_400_000;
 let ends: number | null = Date.now() + 90 * DAY;
 let jobsMade = 10;
-const boot: BootstrapChat = structuredClone(BOOT);
+const boot: BootstrapChatReply = structuredClone(BOOT);
 
 /** The user's jobs, newest started first: the recording's bootstrap jobs, and one of the Historian's, all of the chat the preview plays. */
 const jobs: JobView[] = [
@@ -37,7 +36,7 @@ const jobs: JobView[] = [
 ].map((j) => ({ ...j, scope: { ...j.scope, chat: PLAYED } }));
 
 /** The cast entries of the record, with the counts' kind each is under. */
-function castEntries(): { kind: keyof CastCharacter["character"]["counts"]; entry: CastEntryShown }[] {
+function castEntries(): { kind: keyof CharacterReply["character"]["counts"]; entry: EntryRow }[] {
   const kinds = ["growth", "mind", "memories", "relationships", "knowledge", "history", "perceptions", "files"] as const;
   return kinds.flatMap((kind) => record[kind].map((entry) => ({ kind, entry })));
 }
@@ -46,10 +45,10 @@ const inChat = <T extends { chat: string }>(value: T, chat: string): T => ({ ...
 
 async function castAnswer(request: Request, chat: string, character: string | undefined, strike: boolean): Promise<Response> {
   if (character === undefined) return request.method === "GET" ? answer(200, { ...CAST, chat, characters: [inChat(record.character, chat), inChat(TOBIN, chat)] }) : refuse(405, "The cast's list takes GET.");
-  if (character === TOBIN.id && !strike) return answer(200, { ...structuredClone(ODILE_RECORD), chat, character: inChat(TOBIN, chat), sources: [], base: [], castings: [], mind: [], memories: [], knowledge: [], perceptions: [], files: [] } satisfies CastCharacter);
+  if (character === TOBIN.id && !strike) return answer(200, { ...structuredClone(ODILE_RECORD), chat, character: inChat(TOBIN, chat), sources: [], base: [], castings: [], mind: [], memories: [], knowledge: [], perceptions: [], files: [] } satisfies CharacterReply);
   if (character !== record.character.id) return refuse(404, `Chat ${chat} knows no character ${character}.`);
   if (!strike) return answer(200, { ...record, chat, character: inChat(record.character, chat) });
-  const body = (await request.json().catch(() => null)) as CastStrike | null;
+  const body = (await request.json().catch(() => null)) as CastStrikeAsk | null;
   const found = castEntries().find((e) => e.entry.id === body?.id);
   if (body === null || found === undefined) return refuse(404, `${record.character.name}'s record has no entry ${body?.id ?? ""}.`);
   const changed = found.entry.struck !== body.struck;
@@ -59,7 +58,7 @@ async function castAnswer(request: Request, chat: string, character: string | un
     const step = body.struck ? 1 : -1;
     record.character.counts = { ...record.character.counts, [found.kind]: { ...held, held: held.held - step, struck: held.struck + step } };
   }
-  return answer(200, { changed, entry: found.entry, alsoStruck: [], letGo: [], alsoStood: [], heldAgain: [], notes: [] } satisfies CastStruck);
+  return answer(200, { changed, entry: found.entry, alsoStruck: [], letGo: [], alsoStood: [], heldAgain: [], notes: [] } satisfies CastStrikeReply);
 }
 
 async function storyAnswer(request: Request, url: URL, chat: string, strike: boolean): Promise<Response> {
@@ -67,19 +66,19 @@ async function storyAnswer(request: Request, url: URL, chat: string, strike: boo
     const older = url.searchParams.get("part") === "beat" && Number(url.searchParams.get("skip") ?? 0) > 0;
     return answer(200, { ...(older ? { ...story, timeline: { ...story.timeline, beat: olderBeats } } : story), chat });
   }
-  const body = (await request.json().catch(() => null)) as StoryStrike | null;
+  const body = (await request.json().catch(() => null)) as StoryStrikeAsk | null;
   const s = story;
   const lists = [s.timeline.chapter, s.timeline.scene, s.timeline.beat, olderBeats, s.model.thread, s.model.arc, s.model.player, s.model.canon, s.model.retcon, s.model.record, s.futures];
-  const items: StoryItemShown[] = [...(s.model.premise === null ? [] : [s.model.premise]), ...lists.flatMap((l) => l.items)];
+  const items: StoryItemRow[] = [...(s.model.premise === null ? [] : [s.model.premise]), ...lists.flatMap((l) => l.items)];
   const item = items.find((i) => i.id === body?.id);
   if (body === null || item === undefined) return refuse(404, `The story record of chat ${chat} has no item ${body?.id ?? ""}.`);
   const changed = item.struck !== body.struck;
   item.struck = body.struck;
-  return answer(200, { changed, item } satisfies StoryStruck);
+  return answer(200, { changed, item } satisfies StoryStrikeReply);
 }
 
 async function bootstrapAnswer(request: Request, chat: string): Promise<Response> {
-  if (request.method === "GET") return answer(200, { ...boot, chat, jobs: boot.jobs.map((j) => ({ ...j, view: jobs.find((v) => v.id === j.id) ?? j.view })) } satisfies BootstrapChat);
+  if (request.method === "GET") return answer(200, { ...boot, chat, jobs: boot.jobs.map((j) => ({ ...j, view: jobs.find((v) => v.id === j.id) ?? j.view })) } satisfies BootstrapChatReply);
   if (jobs.some((j) => j.brief === "the bootstrap skill" && (j.state === "running" || j.state === "queued"))) return refuse(409, "A bootstrap job of this chat is under way.");
   const body = (await request.json().catch(() => ({}))) as { relive?: string };
   const started = job(`job-${++jobsMade}`, "queued", { started: Date.now(), scope: { user: "user-1", chat, session: "s-1" } });
@@ -126,7 +125,7 @@ export function recordsAnswer(request: Request, url: URL, running: (chat: string
   const run = running(chat);
   if (run.going) return refuse(409, "A run of this chat is going on: settle it once that ends.");
   if (run.latest === null) return refuse(409, "This chat has no turn of RPE's to settle.");
-  return answer(200, { turn: run.latest, run: `${run.latest}.settle` } satisfies SettleAnswer);
+  return answer(200, { turn: run.latest, run: `${run.latest}.settle` } satisfies SettleReply);
 }
 
 /** `/preview/session` and `/preview/builds`, or null for another control. */

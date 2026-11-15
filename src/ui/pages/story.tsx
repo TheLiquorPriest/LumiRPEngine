@@ -9,7 +9,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSelect } from "../store";
-import type { StoryAnswer, StoryItemShown, StoryList, StoryListPart, StoryStruck } from "../api";
+import type { StoryReply, StoryItemRow, StoryItems, StoryPartName, StoryStrikeReply } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Gated, PageHeader, Row, Section } from "../atoms";
 import { replyOf, type RpeClient } from "../client";
@@ -19,25 +19,27 @@ import { counted, errorWords } from "../words";
 import { type BootstrapReader, type BootstrapShown, BootstrapView, type BootstrapViewProps, NO_BOOTSTRAP, readBootstrap } from "./bootstrap";
 import type { PageEntry } from "../page-entry";
 
-export type StoryLists = Record<StoryListPart, StoryList>;
+/** The parts the story route gives as bounded lists: every part but the one premise. */
+export type StoryListPart = Exclude<StoryPartName, "premise">;
+export type StoryLists = Record<StoryListPart, StoryItems>;
 
 /** What the page shows: the last read, each list with what was read further back of it, and the last strike with what came of it. */
 export interface StoryShown {
-  answer: StoryAnswer | null;
+  answer: StoryReply | null;
   lists: StoryLists | null;
   loading: boolean;
   problem: string | null;
   /** The list being read further back now. */
   further: StoryListPart | null;
   striking: string | null;
-  struck: { ask: StrikeAsk; answer: StoryStruck } | null;
+  struck: { ask: StrikeAsk; answer: StoryStrikeReply } | null;
   strikeProblem: string | null;
 }
 
 export const NO_STORY: StoryShown = { answer: null, lists: null, loading: true, problem: null, further: null, striking: null, struck: null, strikeProblem: null };
 
 /** Every list of an answer, by its part. */
-export function listsOf(answer: StoryAnswer): StoryLists {
+export function listsOf(answer: StoryReply): StoryLists {
   const { timeline: t, model: m } = answer;
   return { chapter: t.chapter, scene: t.scene, beat: t.beat, thread: m.thread, arc: m.arc, player: m.player, canon: m.canon, retcon: m.retcon, record: m.record, future: answer.futures };
 }
@@ -47,7 +49,7 @@ export function listsOf(answer: StoryAnswer): StoryLists {
  * first; a newest page that holds all of it, or that does not reach back to the items held (more came meanwhile than a page
  * holds), stands alone.
  */
-export function withNewest(held: StoryList, fresh: StoryList): StoryList {
+export function withNewest(held: StoryItems, fresh: StoryItems): StoryItems {
   const first = fresh.items[0];
   const reached = first === undefined ? -1 : held.items.findIndex((item) => item.id === first.id);
   if (fresh.before === 0 || reached <= 0) return fresh;
@@ -109,7 +111,7 @@ export function readStory(client: Pick<RpeClient, "call">, chat: string, onChang
           const lists = shown.lists;
           const premise = shown.answer?.model.premise;
           // The item as it stands now, in place, so what was read further back stays.
-          const swap = (list: StoryList): StoryList => ({ ...list, items: list.items.map((item) => (item.id === answer.item.id ? answer.item : item)) });
+          const swap = (list: StoryItems): StoryItems => ({ ...list, items: list.items.map((item) => (item.id === answer.item.id ? answer.item : item)) });
           show({
             striking: null,
             struck: { ask, answer },
@@ -142,14 +144,14 @@ const PART_WORDS: Readonly<Record<StoryListPart | "premise", string>> = {
 };
 
 /** Where an item lies in the chat. */
-export function spanWords(item: Pick<StoryItemShown, "from" | "to">): string | null {
+export function spanWords(item: Pick<StoryItemRow, "from" | "to">): string | null {
   if (item.from === null && item.to === null) return null;
   if (item.from === item.to) return `message ${item.from}`;
   return `messages ${item.from ?? "?"} to ${item.to ?? "open"}`;
 }
 
 /** The timeline in the chat's order: by where each starts, a chapter before the scene it opens and the scene before its first beat; what lies nowhere last. */
-export function timelineOf(lists: StoryLists): StoryItemShown[] {
+export function timelineOf(lists: StoryLists): StoryItemRow[] {
   const rank: Partial<Record<StoryListPart, number>> = { chapter: 0, scene: 1, beat: 2 };
   const items = [...lists.chapter.items, ...lists.scene.items, ...lists.beat.items];
   return items
@@ -169,7 +171,7 @@ export interface StoryViewProps {
   bootstrap?: BootstrapViewProps;
 }
 
-function Item(props: StoryViewProps & { item: StoryItemShown; current?: boolean }) {
+function Item(props: StoryViewProps & { item: StoryItemRow; current?: boolean }) {
   const { item, shown } = props;
   const span = spanWords(item);
   return (

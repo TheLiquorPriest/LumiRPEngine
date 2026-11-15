@@ -10,7 +10,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { type Answer, gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
-import type { StopAnswer, TurnList } from "../../src/ui/api";
+import type { StopReply, TurnsReply } from "../../src/shared/api";
 import { CONTINUE_NUDGE } from "../standin/assembly";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
@@ -66,7 +66,7 @@ test("a continue as Lumiverse announces and saves it extends the turn its reply 
   expect(b.turns.runs.byGeneration(USER, generation)).toMatchObject({ turn: turn.id, target: turn.message, saved: null });
   expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash("The lamp turns. And the sea calms.") });
   expect(store.changes(turn.id).slice(before.length).map((c) => [c.lane, c.applied])).toEqual([["engine", true]]);
-  const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+  const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
   expect(list.map((t) => [t.id, t.kind, t.onPath])).toEqual([[turn.id, "continue", true]]);
 
   const next = await settledTurn(b, await play(b, "normal", "I wait for the dawn."));
@@ -102,7 +102,7 @@ test("a continue stopped before its first word, which Lumiverse saved as the tex
   const before = store.changes(turn.id);
   const continuing = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
   await b.until("the continue to record its change on the turn", () => store.changes(turn.id).length > before.length);
-  expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
+  expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
   const out = await continuing;
   expect(out.stopped).toBe(true);
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, out.generationId!)?.settled ?? null) !== null);

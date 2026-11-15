@@ -4,13 +4,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { ExtensionStatus, MissingPermission } from "../../src/ui/api";
+import type { ExtensionStatusReply, MissingPermissionShown } from "../../src/shared/api";
 import { ExtensionNotice, type ExtensionWord, RoadLine } from "../../src/ui/frame";
 import { expand, press, textOf } from "./vnodes";
 
 const NOT_HEARD = "RPE has not heard from its extension in Lumiverse since it started.";
-const INTERCEPTOR: MissingPermission = { permission: "interceptor", why: "to tag each reply RPE plays with its chat and its turn" };
-const PROXY: MissingPermission = { permission: "cors_proxy", why: "to carry this page's requests when it cannot reach RPE itself" };
+const INTERCEPTOR: MissingPermissionShown = { permission: "interceptor", why: "to tag each reply RPE plays with its chat and its turn" };
+const PROXY: MissingPermissionShown = { permission: "cors_proxy", why: "to carry this page's requests when it cannot reach RPE itself" };
 
 function notice(word: Partial<ExtensionWord>): { text: string; tree: unknown; checks: number } {
   const out = { text: "", tree: null as unknown, checks: 0 };
@@ -19,7 +19,7 @@ function notice(word: Partial<ExtensionWord>): { text: string; tree: unknown; ch
   return out;
 }
 
-const held = (missing: MissingPermission[] | null): ExtensionStatus => ({ registered: true, why: null, missing });
+const held = (missing: MissingPermissionShown[] | null): ExtensionStatusReply => ({ registered: true, why: null, missing });
 
 describe("the notice of RPE's extension in Lumiverse", () => {
   test("when the extension does not hold RPE's registration, the page says chats are not played, and why, in RPE's words", () => {
@@ -50,7 +50,7 @@ describe("the notice of RPE's extension in Lumiverse", () => {
   });
 
   test("each missing permission is said with the extension's own reason for it, and nothing the page adds of its own about what follows", () => {
-    const panels: MissingPermission = { permission: "ui_panels", why: "to show RPE's pages in the drawer" };
+    const panels: MissingPermissionShown = { permission: "ui_panels", why: "to show RPE's pages in the drawer" };
     const { text } = notice({ own: [panels] });
     expect(text).toContain(`${panels.permission}: ${panels.why}`);
     expect(text).not.toContain("not played");

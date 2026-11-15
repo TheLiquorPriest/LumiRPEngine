@@ -4,11 +4,11 @@
 // preview. Every name, path, text and size here is made up.
 
 import type { LayerLevel } from "rp-harness/contract";
-import type { AgentStack, DiffLine, NoteFiles, TreeFileDiff, TreeFileEntry, TreeStorage, TreeSuggestionView } from "../../src/ui/api";
+import type { StackReply, DiffRow, NotesReply, TreeDiffReply, TreeFileRow, StorageReply, SuggestionShown } from "../../src/shared/api";
 import { AUTHOR, CHAT, GM, T0 } from "./recorded";
 
 /** What the tree takes: the lighthouse chat and an older one, with the levels apart and the database. */
-export const STORAGE: TreeStorage = {
+export const STORAGE: StorageReply = {
   chats: [
     { chat: CHAT, folder: "moira-calder-point-0f3a9c21", bytes: 3_412_330, areas: { notes: 41_200, turns: 3_190_420, sessions: 176_510, files: 4_200 } },
     { chat: "chat-harbour", folder: "harbour-night-7b21e4d0", bytes: 902_114, areas: { notes: 2_048, turns: 880_066, sessions: 20_000, files: 0 } },
@@ -19,7 +19,7 @@ export const STORAGE: TreeStorage = {
 };
 
 /** The lighthouse chat's notes: the largest, and those agents rewrote most. */
-export const NOTES: NoteFiles = {
+export const NOTES: NotesReply = {
   largest: [
     { path: "persistent-workspace/moira.md", bytes: 24_100, writes: 3 },
     { path: "persistent-workspace/ledger.md", bytes: 12_800, writes: 19 },
@@ -52,12 +52,12 @@ export const TEXTS: Readonly<Record<string, string>> = {
 
 const bytes = (path: string): number => new TextEncoder().encode(TEXTS[path] ?? "").length;
 
-function file(path: string, level: LayerLevel, over: Partial<TreeFileEntry> = {}): TreeFileEntry {
+function file(path: string, level: LayerLevel, over: Partial<TreeFileRow> = {}): TreeFileRow {
   return { path, level, kind: "yours", bytes: bytes(path), item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: level !== "shipped", shipped: null, defaultChanged: null, ...over };
 }
 
 /** The chat's view of the tree, as `GET /api/v1/files?chat=` lists it. */
-export const FILES: TreeFileEntry[] = [
+export const FILES: TreeFileRow[] = [
   file("@shipped/TURN.md", "shipped", { item: "TURN", applies: false, replacedBy: "@global/TURN.md" }),
   file("@shipped/WORLD.md", "shipped", { item: "WORLD", applies: false, replacedBy: "WORLD.md" }),
   file("@shipped/WRITING.md", "shipped", { item: "WRITING" }),
@@ -74,10 +74,10 @@ export const FILES: TreeFileEntry[] = [
 ];
 
 /** With no chat open: the shipped level and the user's own. */
-export const FILES_NO_CHAT: TreeFileEntry[] = FILES.filter((f) => f.level === "shipped" || f.level === "global");
+export const FILES_NO_CHAT: TreeFileRow[] = FILES.filter((f) => f.level === "shipped" || f.level === "global");
 
 /** The stacks of the two agents the tree defines, as `GET /api/v1/files-stack?chat=&agent=` gives them. */
-export const STACKS: Readonly<Record<string, AgentStack>> = {
+export const STACKS: Readonly<Record<string, StackReply>> = {
   author: {
     agent: "author",
     parts: [
@@ -104,12 +104,12 @@ export const STACKS: Readonly<Record<string, AgentStack>> = {
 };
 
 /** The lines of a difference, each written as its kind and its text. */
-function lines(...parts: [DiffLine["op"], string][]): DiffLine[] {
+function lines(...parts: [DiffRow["op"], string][]): DiffRow[] {
   return parts.map(([op, text]) => ({ op, text }));
 }
 
 /** How the user's TURN.md differs from the shipped one, and what the update changed of the shipped one under it. */
-export const TURN_DIFF: TreeFileDiff = {
+export const TURN_DIFF: TreeDiffReply = {
   path: "@global/TURN.md",
   shipped: "@shipped/TURN.md",
   lines: lines(
@@ -128,7 +128,7 @@ export const TURN_DIFF: TreeFileDiff = {
 };
 
 /** The agents' open suggestions in the chat, newest first. */
-export const SUGGESTIONS: TreeSuggestionView[] = [
+export const SUGGESTIONS: SuggestionShown[] = [
   {
     id: 7,
     chat: CHAT,

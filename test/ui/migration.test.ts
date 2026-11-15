@@ -9,7 +9,7 @@ import { PAGES } from "../../src/ui/page-list";
 import { type MigrationRead, MigrationView, readMigration } from "../../src/ui/pages/migration";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";
-import { MIGRATED, NOT_RUN } from "./migration-recorded";
+import { MIGRATED, NOT_RUN, REPORT } from "./migration-recorded";
 import { banners, elements, expand, textOf } from "./vnodes";
 
 function view(read: Partial<MigrationRead>) {
@@ -73,8 +73,8 @@ describe("the Migration page", () => {
     expect(worlds).toContain("w-moorreplaced by this run's files, as Build's copy was still the one a run put there");
     expect(worlds).toContain("The Isle (w-isle)kept as RPE has it, though changed on today's side too");
     expect(worlds).toContain("w-oldchanged or removed in RPE since a run put it there, so kept as RPE has it");
-    expect(section(view({ shown: { ...MIGRATED, report: { worldsInBuild: { copied: [], replaced: [], unchanged: [], kept: [] } } } }).tree, "worlds")).toContain("The run carried no world.");
-    expect(section(view({ shown: { ...MIGRATED, report: {} } }).tree, "worlds")).toBe("");
+    expect(section(view({ shown: { ...MIGRATED, report: { ...REPORT, worldsInBuild: { copied: [], replaced: [], unchanged: [], kept: [] } } } }).tree, "worlds")).toContain("The run carried no world.");
+    expect(section(view({ shown: { ...MIGRATED, report: REPORT } }).tree, "worlds")).toBe("");
   });
 
   test("it reads RPE's migration route once; RPE's refusal is said in its words; what comes after the page has left is let go; the page has its place in both shells and in the address", async () => {

@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { TreeFileEntry } from "../../src/ui/api";
+import type { TreeFileRow } from "../../src/shared/api";
 import { filesCalls, filesControl, type FilesShown, FilesView, type FilesViewProps, NO_FILES, type OpenFile } from "../../src/ui/pages/files";
 import { when } from "../../src/ui/words";
 import { askingClient, settle } from "./asking";
@@ -17,7 +17,7 @@ import { banners, elements, expand, press, textOf } from "./vnodes";
 
 const LISTED: FilesShown = { ...NO_FILES, files: FILES, loading: false };
 
-function entryAt(path: string): TreeFileEntry {
+function entryAt(path: string): TreeFileRow {
   const found = FILES.find((f) => f.path === path);
   if (found === undefined) throw new Error(`no file ${path}`);
   return found;
@@ -88,7 +88,7 @@ describe("the Files page", () => {
   });
 
   test("a file no agent reads, such as what the migration put under imported/, is said to be kept, and opened it says how it comes into force; a config, notes and a skill's own files are not", () => {
-    const file = (path: string, over: Partial<TreeFileEntry> = {}): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: 64, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null, ...over });
+    const file = (path: string, over: Partial<TreeFileRow> = {}): TreeFileRow => ({ path, level: "global", kind: "yours", bytes: 64, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null, ...over });
     const files = [
       ...FILES,
       file("@global/imported/.agents/lamplighter.md"),
@@ -159,7 +159,7 @@ describe("the Files page", () => {
 
   test("a name switched off is offered Switch on only at a level whose off: list names it, since anywhere else it changes nothing; where two lists name it, or one this page does not write, the page says so", () => {
     const PERCEPTIONS = "@shipped/rules/perceptions.md";
-    const offIn = (levels: TreeFileEntry["offIn"], chat: string | null = CHAT) => {
+    const offIn = (levels: TreeFileRow["offIn"], chat: string | null = CHAT) => {
       const files = (chat === null ? FILES_NO_CHAT : FILES).map((f) => (f.path === PERCEPTIONS ? { ...f, offIn: levels } : f));
       const shown = view({ files, open: opened(PERCEPTIONS) }, chat);
       const row = rowOf(shown.tree, PERCEPTIONS);

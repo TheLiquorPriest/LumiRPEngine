@@ -6,7 +6,7 @@
 // says none has.
 
 import { useEffect, useState } from "preact/hooks";
-import type { MigrationChat, MigrationShown, MigrationWaiting, WorldsInBuild } from "../api";
+import type { MigrationChatRow, MigrationReply, WaitingOnUser, WorldsInBuildShown } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Fold, PageHeader, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
@@ -16,7 +16,7 @@ import type { PageEntry } from "../page-entry";
 
 /** The page's one read: RPE's answer, or its refusal in its own words. */
 export interface MigrationRead {
-  shown: MigrationShown | null;
+  shown: MigrationReply | null;
   loading: boolean;
   problem: string | null;
 }
@@ -45,7 +45,7 @@ function andList(parts: readonly string[]): string {
 }
 
 /** One thing waiting on the user, in words. */
-export function waitingWords(w: MigrationWaiting): string {
+export function waitingWords(w: WaitingOnUser): string {
   if (w.kind === "guidance") return `Your GUIDANCE.md is at ${w.path}, switched off.`;
   if (w.kind === "connection") return `The setting ${w.setting} names ${w.connection}, a connection in Lumiverse: pick one of RPE's for it.`;
   if (w.kind === "own") return `Your own ${andList([counted(w.agents, "agent"), counted(w.skills, "skill"), counted(w.texts, "text")])} are attached and switched off.`;
@@ -62,7 +62,7 @@ export function waitingWords(w: MigrationWaiting): string {
 }
 
 /** What became of each world a run carried into Build, by name where today's index gives one, in the report's own words. */
-export function worldLines(w: WorldsInBuild): { world: string; words: string }[] {
+export function worldLines(w: WorldsInBuildShown): { world: string; words: string }[] {
   const named = (id: string): string => (w.names?.[id] === undefined ? id : `${w.names[id]} (${id})`);
   const newer = new Set(w.newer ?? []);
   return [
@@ -77,7 +77,7 @@ export function worldLines(w: WorldsInBuild): { world: string; words: string }[]
 }
 
 /** A chat as the last run left it: what came of it, and for one it imported, its turns and its check, each place it differed in the report's own words. */
-function ChatItem(props: { chat: MigrationChat }) {
+function ChatItem(props: { chat: MigrationChatRow }) {
   const c = props.chat;
   const imported = c.outcome === "imported" || c.outcome === "replaced";
   const m = c.check.matched;

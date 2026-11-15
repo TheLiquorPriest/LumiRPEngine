@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { textHash } from "../../src/adapter/lumiverse/wire";
-import type { ChatList, TurnDetail, TurnList } from "../../src/ui/api";
+import type { ChatsReply, TurnReply, TurnsReply } from "../../src/shared/api";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -57,16 +57,16 @@ describe("one normal turn, end to end", () => {
     expect(store.turn(turnId)).toMatchObject({ tokensIn: 900, tokensOut: 40 });
 
     // The Turn page: the chat with its name, its one turn on the path, and the turn with its intent, its reply and its trace.
-    const chats = await b.page<ChatList>("GET", "/api/v1/chats");
+    const chats = await b.page<ChatsReply>("GET", "/api/v1/chats");
     expect(chats.status).toBe(200);
     expect(chats.body.chats).toEqual([{ id: CHAT, name: "The lighthouse", lastTurnAt: expect.any(Number), running: false, played: true, world: false }]);
-    const list = await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`);
+    const list = await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`);
     expect(list.body.more).toBe(false);
     expect(list.body.turns).toHaveLength(1);
     expect(list.body.turns[0]).toMatchObject({ id: turnId, kind: "new", onPath: true, message, status: "released", usage: { calls: 1, input: 900, output: 40 } });
     const timings = list.body.turns[0]!.timings;
     for (const moment of [timings.started, timings.firstWord, timings.released, timings.ended]) expect(moment).toBeGreaterThanOrEqual(timings.received);
-    const detail = await b.page<TurnDetail>("GET", `/api/v1/chats/${CHAT}/turns/${turnId}`);
+    const detail = await b.page<TurnReply>("GET", `/api/v1/chats/${CHAT}/turns/${turnId}`);
     expect(detail.body).toMatchObject({ id: turnId, chat: CHAT, intent: INTENT, reply: { text: REPLY }, error: null });
     expect(detail.body.trace.length).toBeGreaterThan(0);
 

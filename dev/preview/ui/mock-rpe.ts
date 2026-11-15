@@ -21,8 +21,7 @@
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { ConnectionView, ModelLimit, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
-import type { ConnectionShown, LiveEvent, ReplyPiece, SaveConnection } from "../../../src/shared/api";
-import type { ExtensionStatus, TurnDetail, TurnRun } from "../../../src/ui/api";
+import type { ConnectionShown, ExtensionStatusReply, LiveEvent, ReplyPiece, RunShown, SaveConnection, TurnReply } from "../../../src/shared/api";
 import { buildAnswer, buildControl } from "./mock-build";
 import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
 import { migrationAnswer, migrationControl } from "./mock-migration";
@@ -58,12 +57,12 @@ const playing = new Map<string, Playing>();
 const played = new Map<string, Playing>();
 let runs = 30;
 
-const STANDINGS: Readonly<Record<string, ExtensionStatus>> = {
-  well: { registered: true, why: null, missing: [] },
-  unregistered: { registered: false, why: "RPE has not heard from its extension in Lumiverse since it started.", missing: null },
-  missing: { registered: true, why: null, missing: [{ permission: "interceptor", why: "to tag each reply RPE plays with its chat and its turn" }] },
+const STANDINGS: Readonly<Record<string, ExtensionStatusReply>> = {
+  well: { registered: true, why: null, missing: [], stopped: null },
+  unregistered: { registered: false, why: "RPE has not heard from its extension in Lumiverse since it started.", missing: null, stopped: null },
+  missing: { registered: true, why: null, missing: [{ permission: "interceptor", why: "to tag each reply RPE plays with its chat and its turn" }], stopped: null },
 };
-let standing: ExtensionStatus = STANDINGS.well as ExtensionStatus;
+let standing: ExtensionStatusReply = STANDINGS.well as ExtensionStatusReply;
 
 function publish(event: LiveEvent): void {
   const text = JSON.stringify({ type: "events", chat: event.chat, events: [event] });
@@ -137,10 +136,10 @@ function playContinue(chat: string): boolean {
 }
 
 /** The turn played in a chat as RPE's route answers it: what its latest run says, the records of all its runs from `from`, each run by its own id, and what all its runs spent. */
-function playedTurn(p: Playing, from = 1): TurnDetail {
+function playedTurn(p: Playing, from = 1): TurnReply {
   const runs = p.starts.map((start, i) => {
     const [run] = turnOf(p.events.slice(start, p.starts[i + 1]), { run: p.run, chat: p.chat, received: p.received, from }).runs;
-    return { ...(run as TurnRun), id: `${p.run}.${i + 1}`, nth: i + 1, kind: i === 0 ? ("new" as const) : ("continue" as const) };
+    return { ...(run as RunShown), id: `${p.run}.${i + 1}`, nth: i + 1, kind: i === 0 ? ("new" as const) : ("continue" as const) };
   });
   const latest = turnOf(p.events.slice(p.starts.at(-1) ?? 0), { run: p.run, chat: p.chat, received: p.received });
   const records = p.events.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
@@ -149,7 +148,7 @@ function playedTurn(p: Playing, from = 1): TurnDetail {
 }
 
 /** An invented turn folder, as RPE writes one (plan §5.3): the file's path below the folder, and its text. */
-function folderOf(detail: TurnDetail): Map<string, string> {
+function folderOf(detail: TurnReply): Map<string, string> {
   const files = new Map<string, string>(Object.entries(FOLDER));
   for (const run of detail.runs) {
     for (const request of run.requests) {
@@ -191,7 +190,7 @@ function stop(chat: string, run: string): boolean {
   return true;
 }
 
-function detailOf(chat: string, turn: string, from: number): TurnDetail | null {
+function detailOf(chat: string, turn: string, from: number): TurnReply | null {
   const p = playing.get(chat);
   const was = played.get(turn);
   if (was !== undefined && was.chat === chat) return playedTurn(was, from);
@@ -227,8 +226,8 @@ const PROVIDERS: ProviderOffer[] = [
   { id: "openai-compatible", name: "A compatible server", auth: ["key", "none"], apis: ["openai-completions"], needsBaseUrl: true },
 ];
 let connections: ConnectionView[] = [
-  { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", default: true, key: { set: true, last4: null } },
-  { id: "c-pro", name: "Pro", provider: "deepseek", auth: "key", model: "deepseek-v4-pro", default: false, key: { set: true, last4: null } },
+  { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", default: true, key: { set: true, waiting: false } },
+  { id: "c-pro", name: "Pro", provider: "deepseek", auth: "key", model: "deepseek-v4-pro", default: false, key: { set: true, waiting: false } },
 ];
 let madeConnections = 2;
 
@@ -243,7 +242,7 @@ function shown(c: ConnectionView): ConnectionShown {
   const own = c.model === undefined ? undefined : c.limits?.[c.model];
   const pi = c.model === undefined ? undefined : PI_LIMITS[c.model];
   const limit = (mine: number | undefined, theirs: number | undefined): ModelLimit | null => (mine !== undefined ? { tokens: mine, from: "user" } : theirs !== undefined ? { tokens: theirs, from: "pi" } : null);
-  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: c.model === undefined ? null : { contextWindow: limit(own?.contextWindow, pi?.contextWindow), maxTokens: limit(own?.maxTokens, pi?.maxTokens) } };
+  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: c.model === undefined ? null : { contextWindow: limit(own?.contextWindow, pi?.contextWindow), maxTokens: limit(own?.maxTokens, pi?.maxTokens), pictures: null, asked: [] } };
 }
 
 /** The connection routes, over the list in memory: what the pages send, answered in the shapes the routes answer in. A test answers at once: as the model the provider answers to (with that model's limits, as the route gives them) when a key is set, else as a provider that refuses. */
@@ -282,7 +281,7 @@ async function connectionsAnswer(request: Request, path: string): Promise<Respon
       ...(input.api ? { api: input.api } : {}),
       ...(input.limits ? { limits: input.limits } : {}),
       default: was?.default ?? connections.length === 0,
-      key: input.auth === "key" ? { set: keySet, last4: null } : null,
+      key: input.auth === "key" ? { set: keySet, waiting: false } : null,
       ...(input.auth === "signin" ? { signedIn: false } : {}),
     };
     connections = was === undefined ? [...connections, view] : connections.map((c) => (c.id === id ? view : c));

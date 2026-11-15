@@ -3,8 +3,7 @@
 // name and number here is made up.
 
 import type { JobView } from "rp-harness/contract";
-import type { BuildsReply, BuildsStatus } from "../../src/shared/api";
-import type { BootstrapBatch, BootstrapChat } from "../../src/ui/api";
+import type { BootstrapBatchReply, BootstrapChatReply, BuildsReply, BuildsStatus } from "../../src/shared/api";
 import { CHAT } from "./records-recorded";
 
 const usage = { calls: 4, input: 12_000, output: 900, cacheRead: 0, cacheWrite: 0 };
@@ -12,7 +11,7 @@ const usage = { calls: 4, input: 12_000, output: 900, cacheRead: 0, cacheWrite: 
 /** A job as RPH gives its view: the Author's, on the bootstrap skill, in `CHAT`. */
 export const job = (id: string, state: JobView["state"], over: Partial<JobView> = {}): JobView => ({ id, agent: "author", brief: "the bootstrap skill", state, scope: { user: "user-1", chat: CHAT, session: "s-1" }, startedBy: "user", started: 1_700_000_000_000, usage, ...over });
 
-export const BOOT: BootstrapChat = {
+export const BOOT: BootstrapChatReply = {
   chat: CHAT,
   facts: {
     lore: { known: true, entries: 12, indexed: 12, stale: 0 },
@@ -29,7 +28,7 @@ export const BOOT: BootstrapChat = {
   ],
 };
 
-export const BATCH: BootstrapBatch = { started: [{ chat: "chat-calder", job: job("job-9", "running") }], refused: [{ chat: "chat-harbour", why: "A bootstrap job of this chat is under way." }] };
+export const BATCH: BootstrapBatchReply = { started: [{ chat: "chat-calder", job: job("job-9", "running") }], refused: [{ chat: "chat-harbour", why: "A bootstrap job of this chat is under way." }] };
 
 export const AGREE: BuildsStatus = { running: "a1b2c3d4", disk: "a1b2c3d4", broken: null, extension: "a1b2c3d4", agree: true, restart: "none", words: "RPE runs build a1b2c3d4, the build of its app file on disk and of the extension." };
 export const NEWER: BuildsStatus = { ...AGREE, disk: "e5f6a7b8", agree: false, restart: "off", words: "RPE runs build a1b2c3d4; its app file on disk is build e5f6a7b8. update.restart is off, so RPE stays on a1b2c3d4." };

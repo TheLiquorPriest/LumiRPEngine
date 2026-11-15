@@ -4,8 +4,7 @@
 // trace keeps no record of when a call's text began. Address and token come from the environment.
 
 import type { TraceDelta } from "rp-harness/contract";
-import type { LiveBatch } from "../../../src/shared/api";
-import type { TurnDetail, TurnList, TurnSummary } from "../../../src/ui/api";
+import type { LiveBatch, TurnReply, TurnRow, TurnsReply } from "../../../src/shared/api";
 
 export class RpeApi {
   constructor(
@@ -20,16 +19,16 @@ export class RpeApi {
     return JSON.parse(text) as T;
   }
 
-  turns(chat: string, limit: number): Promise<TurnList> {
-    return this.get<TurnList>(`/api/v1/chats/${encodeURIComponent(chat)}/turns?limit=${limit}`);
+  turns(chat: string, limit: number): Promise<TurnsReply> {
+    return this.get<TurnsReply>(`/api/v1/chats/${encodeURIComponent(chat)}/turns?limit=${limit}`);
   }
 
-  turn(chat: string, turn: string): Promise<TurnDetail> {
-    return this.get<TurnDetail>(`/api/v1/chats/${encodeURIComponent(chat)}/turns/${encodeURIComponent(turn)}`);
+  turn(chat: string, turn: string): Promise<TurnReply> {
+    return this.get<TurnReply>(`/api/v1/chats/${encodeURIComponent(chat)}/turns/${encodeURIComponent(turn)}`);
   }
 
   /** The turn tied to Lumiverse's message `message`, once RPE has tied it (it does so when Lumiverse saves the reply); null if none is within `waitMs`. */
-  async tiedTo(chat: string, message: string, waitMs: number): Promise<TurnSummary | null> {
+  async tiedTo(chat: string, message: string, waitMs: number): Promise<TurnRow | null> {
     const until = Date.now() + waitMs;
     for (;;) {
       const found = (await this.turns(chat, 20)).turns.find((t) => t.message === message);
@@ -39,7 +38,7 @@ export class RpeApi {
   }
 
   /** The turn once its run has ended: the run can go on after the reply (plan §10.9). */
-  async ended(chat: string, turn: string, waitMs: number): Promise<TurnDetail> {
+  async ended(chat: string, turn: string, waitMs: number): Promise<TurnReply> {
     const until = Date.now() + waitMs;
     for (;;) {
       const detail = await this.turn(chat, turn);

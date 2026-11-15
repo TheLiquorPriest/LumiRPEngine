@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
-import type { TurnList } from "../../src/ui/api";
+import type { TurnsReply } from "../../src/shared/api";
 import { textOf } from "../standin/steps";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
@@ -30,7 +30,7 @@ async function play(b: TurnBed, type: "normal" | "swipe" | "regenerate" | "conti
 }
 
 async function turnList(b: TurnBed): Promise<[string, string, boolean][]> {
-  return (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns.map((t) => [t.id, t.kind, t.onPath]);
+  return (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns.map((t) => [t.id, t.kind, t.onPath]);
 }
 
 describe("the other kinds of turn", () => {

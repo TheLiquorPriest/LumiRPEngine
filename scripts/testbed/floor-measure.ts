@@ -49,7 +49,7 @@ import type { LoreEntry } from "../proof/lib/read";
 import type { PlainReasoning } from "../proof/lib/record";
 import { compareSent, sentFold, type ChatRow, type StoredMessage } from "../proof/lib/sent";
 import { callsBefore, callsOf, leadOf, leadStart, releaseOf, replyCall, spanMs, traceIntentMs, type Call, type KeptRequest, type LeadStart, type RecordTimes } from "../proof/lib/turn";
-import type { TurnTimings } from "../../src/ui/api";
+import type { TurnMoments } from "../../src/shared/api";
 
 /** The form RPE's connection replies in (plan §10.7): the tags in one call, or the record and the reply as two. */
 export type Form = "tag" | "two-step";
@@ -117,7 +117,7 @@ export type RpeRead = "request" | "stored" | "rows" | "lore";
 export interface RpeSide {
   turn: string;
   status: string;
-  timings: TurnTimings;
+  timings: TurnMoments;
   record: RecordTimes | "not served";
   trace: TraceRecord[];
   /** The turn's streamed pieces from RPE's live socket, and whether the socket dropped any while the turn ran. */

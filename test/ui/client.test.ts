@@ -6,8 +6,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { h } from "preact";
 import { pageRoad } from "../../src/ext/page";
-import type { LiveEvent } from "../../src/shared/api";
-import type { ExtensionStatus } from "../../src/ui/api";
+import type { ExtensionStatusReply, LiveEvent } from "../../src/shared/api";
 import { type ClientState, createClient, extensionConnector, isJoined, KEY_LET_GO, type LiveListener, pathOf, replyOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
 import { proofOf, sha256Hex } from "../../src/shared/page-proof";
@@ -435,7 +434,7 @@ describe("a chat's live updates", () => {
 
 describe("how RPE's extension stands, as the page hears it", () => {
   test("RPE's word on its extension is read again each time the page is told to read afresh, so a registration lost while the page is open shows", async () => {
-    let said: ExtensionStatus = { registered: true, why: null, missing: [] };
+    let said: ExtensionStatusReply = { registered: true, why: null, missing: [] };
     const channel = new Channel((sent) => (sent.path === "/api/v1/status/extension" ? { status: 200, body: said } : { status: 200, body: turnListAt() }));
     const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
     const heard: ExtensionHeard[] = [];

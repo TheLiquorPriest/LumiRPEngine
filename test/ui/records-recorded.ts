@@ -1,14 +1,14 @@
 // Recorded answers of the Cast and Story routes, in the shapes `test/ui/direct.test.ts` holds to the
 // routes themselves. Every name and every word is made up.
 
-import type { CastCharacter, CastCounts, CastEntryShown, CastList, CastMemberShown, StoryAnswer, StoryItemShown, StoryList } from "../../src/ui/api";
+import type { CharacterReply, EntryCounts, EntryRow, CastReply, CastMemberRow, StoryReply, StoryItemRow, StoryItems } from "../../src/shared/api";
 
 export const CHAT = "chat-lantern";
 
 const none = { held: 0, struck: 0 };
-const counts = (over: Partial<CastCounts>): CastCounts => ({ growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { ...none, filed: 0 }, ...over });
+const counts = (over: Partial<EntryCounts>): EntryCounts => ({ growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { ...none, filed: 0 }, ...over });
 
-export const ODILE: CastMemberShown = {
+export const ODILE: CastMemberRow = {
   id: "char-odile",
   name: "Odile Holt",
   chat: CHAT,
@@ -17,11 +17,11 @@ export const ODILE: CastMemberShown = {
   counts: counts({ mind: { held: 1, struck: 1 }, memories: { held: 2, struck: 0 }, knowledge: { held: 1, struck: 0 }, perceptions: { held: 1, struck: 0 }, files: { held: 2, struck: 0, filed: 1 } }),
 };
 
-export const TOBIN: CastMemberShown = { id: "char-tobin", name: "Tobin Reede", chat: CHAT, casting: null, from: { carried: false, played: false }, counts: counts({}) };
+export const TOBIN: CastMemberRow = { id: "char-tobin", name: "Tobin Reede", chat: CHAT, casting: null, from: { carried: false, played: false }, counts: counts({}) };
 
-export const CAST: CastList = { chat: CHAT, turn: null, characters: [ODILE, TOBIN] };
+export const CAST: CastReply = { chat: CHAT, turn: null, characters: [ODILE, TOBIN] };
 
-const entry = (id: string, part: CastEntryShown["part"], fields: CastEntryShown["fields"], over: Partial<CastEntryShown> = {}): CastEntryShown => ({
+const entry = (id: string, part: EntryRow["part"], fields: EntryRow["fields"], over: Partial<EntryRow> = {}): EntryRow => ({
   id,
   part,
   fields,
@@ -39,7 +39,7 @@ const entry = (id: string, part: CastEntryShown["part"], fields: CastEntryShown[
 export const MARKUP = "<b>Wants</b> the toll lifted";
 export const CARRIED_FILE = "# Odile\n\nKeeps the ferry's ledger in a tin under the bench.\n";
 
-export const ODILE_RECORD: CastCharacter = {
+export const ODILE_RECORD: CharacterReply = {
   chat: CHAT,
   turn: null,
   character: ODILE,
@@ -65,7 +65,7 @@ export const ODILE_RECORD: CastCharacter = {
   ],
 };
 
-const item = (id: string, part: StoryItemShown["part"], from: number | null, to: number | null, fields: StoryItemShown["fields"], over: Partial<StoryItemShown> = {}): StoryItemShown => ({
+const item = (id: string, part: StoryItemRow["part"], from: number | null, to: number | null, fields: StoryItemRow["fields"], over: Partial<StoryItemRow> = {}): StoryItemRow => ({
   id,
   part,
   fields,
@@ -81,11 +81,11 @@ const item = (id: string, part: StoryItemShown["part"], from: number | null, to:
   ...over,
 });
 
-const listOf = (items: StoryItemShown[], before = 0): StoryList => ({ items, total: items.length + before, before, after: 0 });
+const listOf = (items: StoryItemRow[], before = 0): StoryItems => ({ items, total: items.length + before, before, after: 0 });
 
 export const THREAD = "Who cut the ferry rope?";
 
-export const STORY: StoryAnswer = {
+export const STORY: StoryReply = {
   chat: CHAT,
   turn: null,
   now: "4 Thawmonth, evening",
@@ -113,7 +113,7 @@ export const STORY: StoryAnswer = {
 };
 
 /** What the story route gives for `part=beat&skip=2`: the three older beats. */
-export const OLDER_BEATS: StoryAnswer = {
+export const OLDER_BEATS: StoryReply = {
   ...STORY,
   timeline: { ...STORY.timeline, beat: { items: [item("bt-1", "beat", 1, 1, { text: "Odile checks the knots." }), item("bt-2", "beat", 2, 3, { text: "The wind turns." })], total: 5, before: 1, after: 2 } },
 };

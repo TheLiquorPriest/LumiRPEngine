@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { StoryStruck } from "../../src/ui/api";
+import type { StoryStrikeReply } from "../../src/shared/api";
 import { PAGES } from "../../src/ui/page-list";
 import { NO_STORY, listsOf, readStory, type StoryShown, StoryView } from "../../src/ui/pages/story";
 import { hashOf, routeOfHash } from "../../src/ui/web";
@@ -88,7 +88,7 @@ describe("the Story page", () => {
 
     reader.strike({ id: "bt-1", struck: true });
     expect(asked[2]).toMatchObject({ key: "POST /api/v1/chats/:chat/story/strike", body: { id: "bt-1", struck: true } });
-    const struck = { ...(OLDER_BEATS.timeline.beat.items[0] as StoryStruck["item"]), struck: true };
+    const struck = { ...(OLDER_BEATS.timeline.beat.items[0] as StoryStrikeReply["item"]), struck: true };
     asked[2]?.answer({ changed: true, item: struck });
     await settle();
     expect(shown.at(-1)?.lists?.beat.items.map((i) => [i.id, i.struck])).toEqual([
@@ -119,7 +119,7 @@ describe("the Story page", () => {
     expect(beats()?.items.map((i) => i.id)).toEqual(["bt-1", "bt-2", "bt-3", "bt-4"]);
 
     // A run wrote one beat more: the newest page now ends with it.
-    const held = STORY.timeline.beat.items as [StoryStruck["item"], StoryStruck["item"]];
+    const held = STORY.timeline.beat.items as [StoryStrikeReply["item"], StoryStrikeReply["item"]];
     const fifth = { ...held[1], id: "bt-5", from: 10, to: 10 };
     reader.refresh();
     asked[2]?.answer({ ...STORY, timeline: { ...STORY.timeline, beat: { items: [held[1], fifth], total: 6, before: 4, after: 0 } } });

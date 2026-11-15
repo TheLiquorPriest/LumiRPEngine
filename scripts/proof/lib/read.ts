@@ -15,8 +15,7 @@
 //   `POST /api/v1/tokenizers/count` (`src/routes/tokenizers.routes.ts:86-93`): `tokenizerSvc.countForModel`, the count Lumiverse's
 //   own speed figure takes of a response's visible text (`src/services/generate.service.ts:4340-4356`).
 
-import type { ConnectionsShown, SettingsReply, SettingsWrite } from "../../../src/shared/api";
-import type { TreeFileEntry, TreeFileText } from "../../../src/ui/api";
+import type { ConnectionsShown, SettingsReply, SettingsWrite, TreeFileReply, TreeFileRow } from "../../../src/shared/api";
 import { isRecord } from "../../../src/shared/json";
 import { HttpError, type Lumiverse } from "../../testbed/lib/lumiverse";
 import { plainReasoning, sha256, type Layer, type OffFile, type OwnLevel, type PlainReasoning, type TreeFile } from "./record";
@@ -73,12 +72,12 @@ export class RpeReader {
     return answer.entries as LoreEntry[];
   }
 
-  async view(chat: string): Promise<TreeFileEntry[]> {
-    return ((await this.get(`/api/v1/files?chat=${encodeURIComponent(chat)}`)) as { files: TreeFileEntry[] }).files;
+  async view(chat: string): Promise<TreeFileRow[]> {
+    return ((await this.get(`/api/v1/files?chat=${encodeURIComponent(chat)}`)) as { files: TreeFileRow[] }).files;
   }
 
   async viewFile(chat: string, path: string): Promise<string> {
-    return ((await this.get(`/api/v1/files/${segments(path)}?chat=${encodeURIComponent(chat)}`)) as TreeFileText).text;
+    return ((await this.get(`/api/v1/files/${segments(path)}?chat=${encodeURIComponent(chat)}`)) as TreeFileReply).text;
   }
 
   settings(chat: string): Promise<SettingsReply> {

@@ -3,7 +3,7 @@
 // the web shell's alone.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ChatSummary } from "../api";
+import type { ChatRow } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import { errorWords, when } from "../words";
@@ -11,7 +11,7 @@ import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "./
 import type { PageEntry } from "../page-entry";
 
 export interface ChatsViewProps {
-  chats: readonly ChatSummary[] | null;
+  chats: readonly ChatRow[] | null;
   problem: string | null;
   onOpen(chat: string): void;
   /** The chat's panels, on the Play page: offered beside every chat the list does not say has no world (Play says so of one that has none). */
@@ -69,7 +69,7 @@ export function ChatsView(props: ChatsViewProps) {
 
 export function ChatsPage() {
   const app = useApp();
-  const [state, setState] = useState<{ chats: ChatSummary[] | null; problem: string | null; reads: number }>({ chats: null, problem: null, reads: 0 });
+  const [state, setState] = useState<{ chats: ChatRow[] | null; problem: string | null; reads: number }>({ chats: null, problem: null, reads: 0 });
   useEffect(() => {
     let alive = true;
     app.client.call("GET /api/v1/chats", {}).then(

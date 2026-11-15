@@ -6,7 +6,7 @@
 // an invented migration put under `imported/` at the user's level, which RPH loads by no name.
 
 import type { LayerLevel } from "rp-harness/contract";
-import type { DiffLine, TreeFileDiff, TreeFileEntry, TreeStorage, TreeSuggestionView } from "../../../src/ui/api";
+import type { DiffRow, TreeDiffReply, TreeFileRow, StorageReply, SuggestionShown } from "../../../src/shared/api";
 import { FILES, NOTES, STACKS, STORAGE, SUGGESTIONS, TEXTS, TURN_DIFF } from "../../../test/ui/tree-recorded";
 
 const answer = (status: number, body: unknown): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -19,14 +19,14 @@ const IMPORTED: Readonly<Record<string, string>> = {
 };
 
 const texts = new Map([...Object.entries(TEXTS), ...Object.entries(IMPORTED)]);
-let storage: TreeStorage = structuredClone(STORAGE);
-let files: TreeFileEntry[] = [
+let storage: StorageReply = structuredClone(STORAGE);
+let files: TreeFileRow[] = [
   ...FILES.map((f) => ({ ...f })),
-  ...Object.entries(IMPORTED).map(([path, text]): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: new TextEncoder().encode(text).length, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null })),
+  ...Object.entries(IMPORTED).map(([path, text]): TreeFileRow => ({ path, level: "global", kind: "yours", bytes: new TextEncoder().encode(text).length, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null })),
 ];
 /** Each name switched off, with the levels whose `off:` list names it. */
 const offNames = new Map<string, LayerLevel[]>(FILES.flatMap((f) => (f.off && f.item !== null ? [[f.item, [...f.offIn]] as const] : [])));
-const suggestions: TreeSuggestionView[] = SUGGESTIONS.map((s) => ({ ...s }));
+const suggestions: SuggestionShown[] = SUGGESTIONS.map((s) => ({ ...s }));
 
 /** Where a level's files sit in the chat's view; the chat's own sit at its top. */
 const PREFIXES: Readonly<Record<LayerLevel, string>> = { shipped: "@shipped/", global: "@global/", character: "@character/", chat: "" };
@@ -50,12 +50,12 @@ function relist(): void {
 }
 
 /** Two texts line by line, by their longest run of lines in common. */
-function lineDiff(before: string, after: string): DiffLine[] {
+function lineDiff(before: string, after: string): DiffRow[] {
   const a = before.split("\n");
   const b = after.split("\n");
   const common: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) common[i]![j] = a[i] === b[j] ? common[i + 1]![j + 1]! + 1 : Math.max(common[i + 1]![j]!, common[i]![j + 1]!);
-  const out: DiffLine[] = [];
+  const out: DiffRow[] = [];
   let i = 0;
   let j = 0;
   while (i < a.length || j < b.length) {
@@ -69,7 +69,7 @@ function lineDiff(before: string, after: string): DiffLine[] {
 }
 
 /** Writes `text` as the user's at `level`, for the file at `path`: there, or the user's own file of its name at that level. */
-function writeAsUser(path: string, level: LayerLevel, text: string): TreeFileEntry | Response {
+function writeAsUser(path: string, level: LayerLevel, text: string): TreeFileRow | Response {
   const from = files.find((f) => f.path === path);
   if (from === undefined) return answer(404, { error: `The tree has no file ${path} that a page can reach.` });
   if (level === "shipped") return answer(403, { error: "The shipped files are read-only: write your own at the global, character or chat level." });
@@ -81,7 +81,7 @@ function writeAsUser(path: string, level: LayerLevel, text: string): TreeFileEnt
   if (was === undefined) files.push({ ...from, path: target, level, bytes, editable: true, applies: true, replacedBy: null, defaultChanged: null });
   else files = files.map((f) => (f.path === target ? { ...f, bytes, defaultChanged: null } : f));
   relist();
-  return files.find((f) => f.path === target) as TreeFileEntry;
+  return files.find((f) => f.path === target) as TreeFileRow;
 }
 
 /** The path a file route names, after `prefix`. */
@@ -113,7 +113,7 @@ export async function treeAnswer(request: Request, url: URL): Promise<Response |
     const at = pathAfter(path, "/api/v1/files-diff/");
     const entry = files.find((f) => f.path === at);
     if (entry === undefined) return answer(404, { error: `The tree has no file ${at}.` });
-    const diff: TreeFileDiff = {
+    const diff: TreeDiffReply = {
       path: at,
       shipped: entry.shipped,
       lines: entry.shipped === null ? [] : lineDiff(texts.get(entry.shipped) ?? "", texts.get(at) ?? ""),

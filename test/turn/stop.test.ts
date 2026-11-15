@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { type Answer, type Gate, gate } from "rp-harness/testing/rig";
-import type { StopAnswer } from "../../src/ui/api";
+import type { StopReply } from "../../src/shared/api";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -88,7 +88,7 @@ describe("Stop, from the Turn page", () => {
     const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
     const turn = await b.until("the turn's run to be at work", () => b.turns.runs.ofChat(USER, CHAT)[0]?.turn);
 
-    const stopped = await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`);
+    const stopped = await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`);
     expect(stopped).toEqual({ status: 200, body: { stopped: true } });
     const out = await generating;
     expect(out.stopped).toBe(true);
@@ -101,6 +101,6 @@ describe("Stop, from the Turn page", () => {
     expect(b.turns.runs.record(USER, turn)?.status).toBe("stopped");
     expect(b.turns.store.user(USER).path(CHAT).every((e) => e.turn === null)).toBe(true);
     // A turn no longer going is not stopped again.
-    expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: false });
+    expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: false });
   });
 });

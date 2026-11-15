@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { type Answer, gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import type { ChangeRow, TurnRow } from "../../src/store";
-import type { StopAnswer } from "../../src/ui/api";
+import type { StopReply } from "../../src/shared/api";
 import { CONTINUE_NUDGE } from "../standin/assembly";
 import type { Outcome } from "../standin/lumiverse";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
@@ -165,7 +165,7 @@ describe("what a continue recorded", () => {
 
   test("a continue stopped before it wrote anything saves nothing new, and what it recorded on its turn is taken back", async () => {
     const { b, turn, before, continuing } = await continued({ pieces: [{ hold: gate() }, { text: "<reply> Then it stops.</reply>" }] });
-    expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
+    expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
     const out = await continuing;
     expect(out.stopped).toBe(true);
     // Lumiverse keeps a stopped continue with a thinking block, here RPE's progress line: the text and the preset's postfix, here none,

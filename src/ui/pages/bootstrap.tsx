@@ -7,7 +7,7 @@
 // by itself.
 
 import type { JobView } from "rp-harness/contract";
-import type { BootstrapBatch, BootstrapChat, BootstrapFact, DoneEnough, NotKnown, Stretch } from "../api";
+import type { BootstrapBatchReply, BootstrapChatReply, DoneEnoughShown, FactNotKnown, MessageStretch } from "../../shared/api";
 import { Badge, Banner, Button, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { counted, errorWords, num, tokenWords, when } from "../words";
@@ -21,7 +21,7 @@ export type Relive = (typeof RELIVE_WORDS)[number] | null;
 
 /** A chat's bootstrap as the page holds it: the route's answer, whether a start is out, and what could not be read or was refused. */
 export interface BootstrapShown {
-  chat: BootstrapChat | null;
+  chat: BootstrapChatReply | null;
   loading: boolean;
   problem: string | null;
   starting: boolean;
@@ -72,15 +72,15 @@ export function readBootstrap(client: Pick<RpeClient, "call">, chat: string, onC
   };
 }
 
-const stretch = (s: Stretch | null): string => (s === null ? "none" : `messages ${s.from} to ${s.to}`);
+const stretch = (s: MessageStretch | null): string => (s === null ? "none" : `messages ${s.from} to ${s.to}`);
 
 /** Why a fact is not known, in the page's words for each code the route gives. */
-const NOT_KNOWN_WORDS: Record<NotKnown["why"], string> = {
+const NOT_KNOWN_WORDS: Record<FactNotKnown["why"], string> = {
   unreadable: "Its records could not be read; RPE's log says what failed.",
 };
 
 /** Each fact's title and its numbers, in the skill's order. */
-function factLines(facts: DoneEnough): { id: keyof DoneEnough; title: string; fact: BootstrapFact<object>; lines: () => string[] }[] {
+function factLines(facts: DoneEnoughShown): { id: keyof DoneEnoughShown; title: string; fact: DoneEnoughShown[keyof DoneEnoughShown]; lines: () => string[] }[] {
   const { lore, history, cast, story, horizon, principals } = facts;
   return [
     { id: "lore", title: "The lore index", fact: lore, lines: () => (lore.known ? [`${num(lore.entries)} entries, ${num(lore.indexed)} indexed as they stand, ${num(lore.stale)} indexed at an earlier revision`] : []) },
@@ -122,7 +122,7 @@ function factLines(facts: DoneEnough): { id: keyof DoneEnough; title: string; fa
 }
 
 /** One job of the chat's bootstrap: how it stands, what it was given, what it spent, and its report once it ended. */
-function JobLine(props: { job: BootstrapChat["jobs"][number] }) {
+function JobLine(props: { job: BootstrapChatReply["jobs"][number] }) {
   const { job } = props;
   const view = job.view;
   const state = view === null ? null : JOB_STATE_WORDS[view.state];
@@ -236,7 +236,7 @@ export function BootstrapView(props: BootstrapViewProps) {
 /** The Migration page's offer: what the batch start answered, or why it could not be asked. */
 export interface BatchShown {
   busy: boolean;
-  answer: BootstrapBatch | null;
+  answer: BootstrapBatchReply | null;
   problem: string | null;
 }
 

@@ -7,7 +7,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { JobView } from "rp-harness/contract";
 import { type Answer, gate } from "rp-harness/testing/rig";
-import type { StopAnswer } from "../../src/ui/api";
+import type { StopReply } from "../../src/shared/api";
 import { CHAT, CONNECTION, openTurnBed, PRESET, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -71,7 +71,7 @@ test("a turn stopped before its reply's first word is dropped, RPH is told it le
   const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
   const running = await b.until("the job to run", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.state === "running"));
   const turn = running.scope.turn!;
-  expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
+  expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
   expect((await generating).stopped).toBe(true);
 
   await b.until("the turn to be dropped", () => b.turns.store.user(USER).turn(turn)?.status === "dropped");

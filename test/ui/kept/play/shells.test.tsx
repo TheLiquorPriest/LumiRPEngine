@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { render } from "preact";
 import { act } from "preact/test-utils";
-import type { ChatSummary } from "../../../../src/ui/api";
+import type { ChatRow } from "../../../../src/shared/api";
 import { routeFor } from "../../../../src/ui/frame";
 import { PAGES } from "../../../../src/ui/page-list";
 import { ChatsView } from "../../../../src/ui/pages/chats";
@@ -29,7 +29,7 @@ describe("the Play page in the shells", () => {
   });
 
   test("the Chats page offers Play beside each chat the list does not say has no world, and Play goes to that chat", async () => {
-    const chats: ChatSummary[] = [
+    const chats: ChatRow[] = [
       { id: "chat-fernwick", name: "Fernwick", lastTurnAt: 1_700_000_000_000, running: false, played: true, world: true },
       { id: "chat-tea-room", name: "The tea room", lastTurnAt: 1_700_000_000_000, running: false, played: true, world: false },
       { id: "chat-old-road", name: "The old road", lastTurnAt: null, running: false, played: false, world: true },

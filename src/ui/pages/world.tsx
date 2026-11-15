@@ -5,7 +5,7 @@
 // which never overwrite it (plan §6.6). Everything shown is what RPE's world route answers.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { TurnSummary, ValueLine, ValueMark, ValuesShown, ValueSource, WorldAnswer, WorldFact, WorldNode, WorldNodeKind } from "../api";
+import type { ApiRoutes, TurnRow, LevelValue, LevelMark, FactSource, WorldReply, LevelFact, LevelNode, LevelKind } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, PageHeader, Row, Section } from "../atoms";
 import { replyOf, type RpeClient } from "../client";
@@ -14,6 +14,9 @@ import { useUiSetting } from "../ui-settings";
 import { TURN_KIND_WORDS } from "../trace-view";
 import { counted, errorWords, when } from "../words";
 import { readTurns } from "./turns";
+
+/** Which values each level carries: none, its own (with what game systems keep), or all (with what it inherits). */
+export type ValuesShown = NonNullable<ApiRoutes["GET /api/v1/chats/:chat/world"]["query"]["values"]>;
 
 /** Where the page looks: a level by its ref, how many levels below it, which values each carries, and the turn the world stood at (null: the chat's head). */
 export interface WorldQuery {
@@ -27,7 +30,7 @@ export interface WorldQuery {
 export const WORLD_START: WorldQuery = { at: "world", depth: 1, values: "all", turn: null };
 
 /** A read of the tree: RPE's answer, or its refusal in its own words. */
-export type WorldResult = { answer: WorldAnswer; problem: null } | { answer: null; problem: string };
+export type WorldResult = { answer: WorldReply; problem: null } | { answer: null; problem: string };
 
 /** Reads the tree as `query` asks; what comes back after the returned function is called (the page asked again, or left) is let go. */
 export function readWorld(client: Pick<RpeClient, "call">, chat: string, query: WorldQuery, onResult: (result: WorldResult) => void): () => void {
@@ -46,9 +49,9 @@ export function readWorld(client: Pick<RpeClient, "call">, chat: string, query: 
   };
 }
 
-const KIND_WORDS: Readonly<Record<WorldNodeKind, string>> = { world: "The world", place: "Place", entity: "Entity", groups: "The groups", elsewhere: "Elsewhere" };
+const KIND_WORDS: Readonly<Record<LevelKind, string>> = { world: "The world", place: "Place", entity: "Entity", groups: "The groups", elsewhere: "Elsewhere" };
 
-const SOURCE_WORDS: Readonly<Record<ValueSource, string>> = {
+const SOURCE_WORDS: Readonly<Record<FactSource, string>> = {
   prose: "from the prose",
   lore: "from the lore",
   author: "by the Author",
@@ -61,18 +64,18 @@ const SOURCE_WORDS: Readonly<Record<ValueSource, string>> = {
 };
 
 /** How exact and how sure a recorded value is, where it came from, and the turn that wrote it. */
-function markWords(mark: Pick<ValueMark, "n" | "precision" | "standing" | "source">): string {
+function markWords(mark: Pick<LevelMark, "n" | "precision" | "standing" | "source">): string {
   return [mark.precision, mark.standing, mark.source === null ? "unsourced" : SOURCE_WORDS[mark.source], `turn ${mark.n}`].filter((w) => w !== null).join(", ");
 }
 
 /** Where a value comes from, and the change that last wrote it. */
-function sourceWords(line: ValueLine): string {
+function sourceWords(line: LevelValue): string {
   const { from } = line;
   const where = from?.system !== undefined ? `kept by the ${from.system} system` : from?.ref !== undefined ? `inherited from ${from.name ?? from.ref}` : "its own";
   return line.mark === undefined ? where : `${where}; ${markWords(line.mark)}`;
 }
 
-function FactLine(props: { fact: WorldFact }) {
+function FactLine(props: { fact: LevelFact }) {
   const { fact } = props;
   return (
     <p class="rpe-line rpe-fact" data-fact={fact.id}>
@@ -82,7 +85,7 @@ function FactLine(props: { fact: WorldFact }) {
 }
 
 /** A value, with where it comes from, and the facts recorded beside it under the same key. */
-function ValueRow(props: { line: ValueLine; facts: readonly WorldFact[] }) {
+function ValueRow(props: { line: LevelValue; facts: readonly LevelFact[] }) {
   const { line } = props;
   return (
     <div class="rpe-value" data-key={line.key}>
@@ -95,7 +98,7 @@ function ValueRow(props: { line: ValueLine; facts: readonly WorldFact[] }) {
 }
 
 /** What is beneath a level, as recorded. */
-function ReflectionLine(props: { node: WorldNode }) {
+function ReflectionLine(props: { node: LevelNode }) {
   const r = props.node.reflection;
   const counts = [
     [r.people, counted(r.people, "person", "people")],
@@ -115,7 +118,7 @@ function ReflectionLine(props: { node: WorldNode }) {
 }
 
 /** One level: its name and kind, what is beneath it, its values with the facts beside them, and the facts on it under no value's key. */
-function NodeBox(props: { node: WorldNode; root: boolean; hidden: number; onOpen(): void; onBelow(): void }) {
+function NodeBox(props: { node: LevelNode; root: boolean; hidden: number; onOpen(): void; onBelow(): void }) {
   const { node } = props;
   const title = node.name ?? KIND_WORDS[node.kind];
   const apart = node.facts.filter((fact) => !node.values.some((line) => line.key === fact.key));
@@ -161,7 +164,7 @@ function NodeBox(props: { node: WorldNode; root: boolean; hidden: number; onOpen
 }
 
 /** A level and the levels below it the answer holds, nested; a level whose children it does not hold offers to open them. */
-function NodeTree(props: { node: WorldNode; byRef: ReadonlyMap<string, WorldNode>; root: boolean; query: WorldQuery; onQuery(next: WorldQuery): void }) {
+function NodeTree(props: { node: LevelNode; byRef: ReadonlyMap<string, LevelNode>; root: boolean; query: WorldQuery; onQuery(next: WorldQuery): void }) {
   const { node, query } = props;
   const below = node.children.flatMap((ref) => props.byRef.get(ref) ?? []);
   const open = (): void => props.onQuery({ ...query, at: node.ref });
@@ -187,12 +190,12 @@ const VALUE_CHOICES: readonly { values: ValuesShown; words: string }[] = [
 
 export interface WorldViewProps {
   query: WorldQuery;
-  answer: WorldAnswer | null;
+  answer: WorldReply | null;
   loading: boolean;
   /** RPE's refusal of the last read, in its words; null when it answered. */
   problem: string | null;
   /** The chat's turns on RPE, newest first, to see the world as it stood at one; null until read. */
-  turns: readonly TurnSummary[] | null;
+  turns: readonly TurnRow[] | null;
   /** Older turns remain to be read for "As it stood", and the way to read them. */
   moreTurns?: { more: boolean; onMore(): void };
   onQuery(next: WorldQuery): void;
@@ -290,8 +293,8 @@ export function WorldPage(props: { chat: string }) {
   const { chat } = props;
   const turnsAtATime = useUiSetting("turnsAtATime");
   const [query, setQuery] = useState<WorldQuery>(WORLD_START);
-  const [shown, setShown] = useState<{ answer: WorldAnswer | null; loading: boolean; problem: string | null }>({ answer: null, loading: true, problem: null });
-  const [turns, setTurns] = useState<readonly TurnSummary[] | null>(null);
+  const [shown, setShown] = useState<{ answer: WorldReply | null; loading: boolean; problem: string | null }>({ answer: null, loading: true, problem: null });
+  const [turns, setTurns] = useState<readonly TurnRow[] | null>(null);
   const [more, setMore] = useState(false);
   const reader = useRef<{ more(): void } | null>(null);
   useEffect(() => {

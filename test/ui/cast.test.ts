@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { CastStruck } from "../../src/ui/api";
+import type { CastStrikeReply } from "../../src/shared/api";
 import { PAGES } from "../../src/ui/page-list";
 import { type CastShown, CastView, NO_CAST, readCast } from "../../src/ui/pages/cast";
 import { hashOf, routeOfHash } from "../../src/ui/web";
@@ -87,12 +87,12 @@ describe("the Cast page", () => {
       { id: "mind-1", struck: true },
       { id: "mind-2", struck: false },
     ]);
-    const answer: CastStruck = { changed: true, entry: ODILE_RECORD.perceptions[0] as CastStruck["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: ["No one else holds it."] };
+    const answer: CastStrikeReply = { changed: true, entry: ODILE_RECORD.perceptions[0] as CastStrikeReply["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: ["No one else holds it."] };
     expect(banners(view({ open: ODILE.id, character: ODILE_RECORD, struck: { ask: { id: "perc-1", struck: true }, answer } }, true).tree)).toEqual([
       { title: "Struck", text: "StruckStruck with it, the knowledge it gave: know-1.Secrets it no longer holds: fact-toll.No one else holds it." },
     ]);
     // Its strike taken back: the knowledge it struck stands again, and the secrets it gives are held again.
-    const back: CastStruck = { ...answer, alsoStruck: [], letGo: [], alsoStood: ["know-1"], heldAgain: ["fact-toll"], notes: [] };
+    const back: CastStrikeReply = { ...answer, alsoStruck: [], letGo: [], alsoStood: ["know-1"], heldAgain: ["fact-toll"], notes: [] };
     expect(banners(view({ open: ODILE.id, character: ODILE_RECORD, struck: { ask: { id: "perc-1", struck: false }, answer: back } }, true).tree)).toEqual([
       { title: "Its strike was taken back", text: "Its strike was taken backStanding again with it, the knowledge its strike struck: know-1.Secrets it holds again: fact-toll." },
     ]);
@@ -111,7 +111,7 @@ describe("the Cast page", () => {
     press(list.tree, "Show them for this chat");
     expect(list.pressed).toEqual(["open gate"]);
 
-    const answer: CastStruck = { changed: true, entry: ODILE_RECORD.perceptions[0] as CastStruck["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: [] };
+    const answer: CastStrikeReply = { changed: true, entry: ODILE_RECORD.perceptions[0] as CastStrikeReply["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: [] };
     const opened = view({ list: CAST, open: ODILE.id, character: ODILE_RECORD, struck: { ask: { id: "perc-1", struck: true }, answer } });
     expect(opened.text).toContain("Odile Holt");
     for (const id of ["base", "castings", "memories", "mind", "knowledge", "relationships", "perceptions", "files", "sources"]) expect(section(opened.tree, id)).toBe("");
@@ -143,7 +143,7 @@ describe("the Cast page", () => {
     reader.strike({ id: "perc-1", struck: true });
     expect(shown.at(-1)?.striking).toBe("perc-1");
     expect(asked[2]).toMatchObject({ key: "POST /api/v1/chats/:chat/cast/:character/strike", params: { chat: CHAT, character: ODILE.id }, body: { id: "perc-1", struck: true } });
-    const answer: CastStruck = { changed: true, entry: { ...(ODILE_RECORD.perceptions[0] as CastStruck["entry"]), struck: true }, alsoStruck: ["know-1"], letGo: [], alsoStood: [], heldAgain: [], notes: [] };
+    const answer: CastStrikeReply = { changed: true, entry: { ...(ODILE_RECORD.perceptions[0] as CastStrikeReply["entry"]), struck: true }, alsoStruck: ["know-1"], letGo: [], alsoStood: [], heldAgain: [], notes: [] };
     asked[2]?.answer(answer);
     await settle();
     expect(shown.at(-1)).toMatchObject({ striking: null, struck: { ask: { id: "perc-1", struck: true }, answer } });

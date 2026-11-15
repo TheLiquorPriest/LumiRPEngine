@@ -11,7 +11,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSelect } from "../store";
-import type { CastCharacter, CastEntryShown, CastKind, CastList, CastMemberShown, CastStruck, Casting, MemoryTier } from "../api";
+import type { CharacterReply, EntryRow, EntryCounts, CastReply, CastMemberRow, CastStrikeReply, CastRole, MemoryBand } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Empty, Fold, Gated, PageHeader, Pre, Row, Section } from "../atoms";
 import { replyOf, type RpeClient } from "../client";
@@ -22,15 +22,15 @@ import type { PageEntry } from "../page-entry";
 
 /** What the page shows: the cast, the character open with its record, what is being read, and the last strike with what came of it. */
 export interface CastShown {
-  list: CastList | null;
+  list: CastReply | null;
   open: string | null;
-  character: CastCharacter | null;
+  character: CharacterReply | null;
   loading: boolean;
   /** What could not be read, in RPE's words. */
   problem: string | null;
   /** The entry whose strike is out now. */
   striking: string | null;
-  struck: { ask: StrikeAsk; answer: CastStruck } | null;
+  struck: { ask: StrikeAsk; answer: CastStrikeReply } | null;
   /** Why the last strike was not done, in the cast's words. */
   strikeProblem: string | null;
 }
@@ -103,9 +103,12 @@ export function readCast(client: Pick<RpeClient, "call">, chat: string, onChange
   };
 }
 
-const CASTING_WORDS: Readonly<Record<Casting, string>> = { principal: "principal", supporting: "supporting", extra: "extra" };
-const TIER_WORDS: Readonly<Record<MemoryTier, string>> = { top: "top of mind", short: "short term", long: "long term" };
+const CASTING_WORDS: Readonly<Record<CastRole, string>> = { principal: "principal", supporting: "supporting", extra: "extra" };
+const TIER_WORDS: Readonly<Record<MemoryBand, string>> = { top: "top of mind", short: "short term", long: "long term" };
 /** The kinds a character's record counts, in the order the page shows them. */
+/** The parts of a character's record that hold entries, as the cast counts them. */
+type CastKind = keyof EntryCounts;
+
 const KIND_WORDS: readonly [CastKind, string][] = [
   ["mind", "mind"],
   ["memories", "memories"],
@@ -118,7 +121,7 @@ const KIND_WORDS: readonly [CastKind, string][] = [
 ];
 
 /** "mind 3 · memories 2 (1 struck) · carried mind files 2 (1 filed)": every kind that holds anything. */
-export function countWords(member: CastMemberShown): string {
+export function countWords(member: CastMemberRow): string {
   return KIND_WORDS.flatMap(([kind, words]) => {
     const held = member.counts[kind];
     if (held.held === 0 && held.struck === 0) return [];
@@ -127,19 +130,19 @@ export function countWords(member: CastMemberShown): string {
   }).join(" · ");
 }
 
-function CastingBadge(props: { member: CastMemberShown }) {
+function CastingBadge(props: { member: CastMemberRow }) {
   const { casting } = props.member;
   if (casting === null) return <Badge>not cast</Badge>;
   return <Badge tone={casting.as === "principal" ? "accent" : undefined}>{casting.pinned ? `${CASTING_WORDS[casting.as]}, pinned by you` : CASTING_WORDS[casting.as]}</Badge>;
 }
 
 /** Where a character's record came from. */
-function originWords(member: CastMemberShown): string {
+function originWords(member: CastMemberRow): string {
   const { carried, played } = member.from;
   return carried && played ? "carried by the migration, and played on RPE" : carried ? "carried by the migration" : played ? "played on RPE" : "nothing written yet";
 }
 
-function MemberLine(props: { member: CastMemberShown; gateOpen: boolean; onOpen(): void }) {
+function MemberLine(props: { member: CastMemberRow; gateOpen: boolean; onOpen(): void }) {
   const { member } = props;
   return (
     <li class="lre-listrow">
@@ -161,7 +164,7 @@ function MemberLine(props: { member: CastMemberShown; gateOpen: boolean; onOpen(
 }
 
 /** What the last strike did, in the cast's own terms. */
-function StruckBanner(props: { struck: { ask: StrikeAsk; answer: CastStruck } }) {
+function StruckBanner(props: { struck: { ask: StrikeAsk; answer: CastStrikeReply } }) {
   const { ask, answer } = props.struck;
   const title = !answer.changed ? "Nothing changed: it already stood so" : ask.struck ? "Struck" : "Its strike was taken back";
   return (
@@ -180,7 +183,7 @@ function StruckBanner(props: { struck: { ask: StrikeAsk; answer: CastStruck } })
 interface EntryList {
   id: string;
   title: string;
-  entries: readonly CastEntryShown[];
+  entries: readonly EntryRow[];
 }
 
 export interface CastViewProps {
@@ -197,9 +200,9 @@ export interface CastViewProps {
 const GATE_WHY = "A character's mind, knowledge, memories, relationships and perceptions, and the Author's castings, hold its secrets and what the Author has in mind for it, and can give away what comes next.";
 
 /** One character's whole record. */
-function CharacterView(props: CastViewProps & { character: CastCharacter }) {
+function CharacterView(props: CastViewProps & { character: CharacterReply }) {
   const { character: c, shown } = props;
-  const card = (entry: CastEntryShown, title: string, extra: Partial<EntryCardProps> = {}) => (
+  const card = (entry: EntryRow, title: string, extra: Partial<EntryCardProps> = {}) => (
     <EntryCard
       key={entry.id}
       id={entry.id}
@@ -213,7 +216,7 @@ function CharacterView(props: CastViewProps & { character: CastCharacter }) {
       {...extra}
     />
   );
-  const plain = (entry: CastEntryShown) => card(entry, entry.date === null ? entry.part : `${entry.part}, ${entry.date}`);
+  const plain = (entry: EntryRow) => card(entry, entry.date === null ? entry.part : `${entry.part}, ${entry.date}`);
   const lists: readonly EntryList[] = [
     { id: "mind", title: "Mind", entries: c.mind },
     { id: "relationships", title: "Relationships", entries: c.relationships },

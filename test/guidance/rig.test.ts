@@ -9,7 +9,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceRecord } from "rp-harness/contract";
 import type { RecordedRequest } from "rp-harness/testing/rig";
-import type { TurnDetail } from "../../src/ui/api";
+import type { TurnReply } from "../../src/shared/api";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed } from "../turn/bed";
 import { shippedTexts } from "./set";
 
@@ -36,7 +36,7 @@ async function play(b: TurnBed, said: string): Promise<string> {
 
 /** What each agent of a turn was started with, by its definition: the records of `agent_started`. */
 async function started(b: TurnBed, turn: string): Promise<Record<string, { effort?: string; model: string }>> {
-  const detail = await b.page<TurnDetail>("GET", `/api/v1/chats/${CHAT}/turns/${turn}`);
+  const detail = await b.page<TurnReply>("GET", `/api/v1/chats/${CHAT}/turns/${turn}`);
   const out: Record<string, { effort?: string; model: string }> = {};
   for (const record of detail.body.trace as TraceRecord[]) if (record.event.kind === "agent_started") out[record.event.definition] = { model: record.event.model, ...(record.event.effort !== undefined ? { effort: record.event.effort } : {}) };
   return out;

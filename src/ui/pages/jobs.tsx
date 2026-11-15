@@ -6,7 +6,7 @@
 // nothing polls.
 
 import type { JobState, JobView } from "rp-harness/contract";
-import type { JobList } from "../api";
+import type { JobsReply } from "../../shared/api";
 import { Badge, Banner, Button, Pre, Section, type Tone } from "../atoms";
 import type { RpeClient } from "../client";
 import { errorWords, num, tokenWords, when } from "../words";
@@ -57,7 +57,7 @@ export function readJobs(client: Pick<RpeClient, "call">, chat: string | null, o
     onChange(shown);
   };
   const read = (): void => {
-    const asked: Promise<JobList> = chat === null ? client.call("GET /api/v1/jobs", {}) : client.call("GET /api/v1/chats/:chat/jobs", { chat });
+    const asked: Promise<JobsReply> = chat === null ? client.call("GET /api/v1/jobs", {}) : client.call("GET /api/v1/chats/:chat/jobs", { chat });
     asked.then(
       (list) => show({ jobs: list.jobs, loading: false, problem: null }),
       (error: unknown) => show({ loading: false, problem: errorWords(error) }),
