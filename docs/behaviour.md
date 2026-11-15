@@ -64,7 +64,7 @@ Shipped rules in force:
 | `guidance/.rules/reply-missing.md` | Catches a turn that is about to end without a reply. |
 | `guidance/.rules/save-before-compaction.md` | Gives the Author one call to save what matters before a session's earlier turns are summarized. |
 
-Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and two the build added, `intent-missing` (the last reply went out with no intent record before it) and `turn-unrecorded` (a turn is about to end with nothing recorded). `TURN.md` is the one home of both behaviours.
+Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and three the build added, `intent-missing` (the last reply went out with no intent record before it), `turn-unrecorded` (a turn is about to end with nothing recorded) and `limits-left` (the Author is about to end its run with two or fewer calls or tool rounds left; it names the fact `limits.left`). `TURN.md` is the one home of the first two behaviours.
 
 ### Skills
 
@@ -79,7 +79,7 @@ Each agent is a file in `.agents/` (yours and the shipped ones) or `agents/` (a 
 - `tools`: the tools it holds; with `tool_search` and `tool_use` it can reach the rest;
 - `reads`: which instruction files it reads;
 - `given`: what it is handed at the start of a run (the prompt or parts of it, the briefing, ranges of the chat, views of the world and of its character). The lead's names are found the same way a sub-agent's are, and laid out after its briefing by `files/defaults/.prompts/given.md`; a name nothing could be found for gets one line saying so;
-- `limits`: how many calls it may make.
+- `limits`: what it may spend, as `limits: { toolRounds: 12, calls: 12 }`, with any of `calls`, `toolRounds` (answers that call tools), `toolsPerAnswer`, `toolsAtOnce`, `messages` (a sub-agent's, after its first answer), `tokensIn`, `tokensOut`, `time`, `callTokensIn`, `callTokensOut` and `callTime` (times in seconds). Each shipped agent starts from the limits today's build gave its kind of work: tool rounds 24 for the Author and the assistant, 12 for the game master (with 12 calls), a character, the keeper, the indexer and the mapper, and 40 for the historian; one call for the narrator; none has a time limit, and the Author's calls are held by the turn's own limit.
 
 Its text is its instructions. The shipped agents are the Author, who leads (`guidance/.agents/author.md`); the game master (`guidance/.agents/gm.md`); a character, one run per principal character (`guidance/.agents/character.md`); the narrator (`guidance/.agents/narrator.md`); the keeper, for bookkeeping after the reply (`guidance/.agents/keeper.md`); the historian and the indexer, which run as jobs; the mapper, which the Author delegates within a turn; and the assistant you can talk to outside the story (`guidance/.agents/assistant.md`). The agent that leads a turn is the setting `lead`.
 
