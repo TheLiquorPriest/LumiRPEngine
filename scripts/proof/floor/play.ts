@@ -204,8 +204,13 @@ export async function playFloor(play: Play): Promise<void> {
   }
 }
 
-/** The floor's play over a reader: the pairs, the table kept, every part to the runner. Gives the run as the table read it. */
-export async function playWith(play: Play, acts: FloorActs, reader: FloorReader, option: { plain: string; rpe: string } | null, build: BuildReader | null): Promise<FloorRun> {
+/**
+ * The ten pairs of a floor, played and kept: the same chat, preset and model, each line sent through the
+ * chat page and read back, the run as the table reads it kept as `turns` (`observed` before it). The floor
+ * gate judges every row of the table over it; G0 (`scripts/proof/g0/`), the floor in miniature, judges the
+ * first four rows over the same play. Gives the run and the chat it was played in.
+ */
+export async function playPairs(play: Play, acts: FloorActs, reader: FloorReader, option: { plain: string; rpe: string } | null, build: BuildReader | null): Promise<{ run: FloorRun; chat: string }> {
   const fixture = await reader.fixture();
   const chat = await acts.chat(fixture.card.id);
   const plainConnection = option?.plain ?? acts.connections.plain;
@@ -247,13 +252,19 @@ export async function playWith(play: Play, acts: FloorActs, reader: FloorReader,
     turns,
   };
   await play.keep("turns", { ...run });
+  return { run, chat };
+}
+
+/** The floor's play over a reader: the pairs, the table kept, every part to the runner. Gives the run as the table read it. */
+export async function playWith(play: Play, acts: FloorActs, reader: FloorReader, option: { plain: string; rpe: string } | null, build: BuildReader | null): Promise<FloorRun> {
+  const { run, chat } = await playPairs(play, acts, reader, option, build);
   const rows = floorTable(run);
   const none = noVerdictKind(run, play.standing.is === "trial");
   await play.keep("table.txt", tableText(rows, [...standingLines(play.run), ...floorHead(run)], none, intentCrossCheck(run)));
   await judge(play, run, rows);
   // The parts seen on screen are looked at whatever the run's standing, for a gate's folder holds the screens of what was seen; each claims only what its screen shows.
   const messages = await reader.messages(chat);
-  const last = turns.filter((t) => t.arm === "rpe").at(-1);
+  const last = run.turns.filter((t) => t.arm === "rpe").at(-1);
   const reply = last?.socket.messageId === undefined || last.socket.messageId === null ? undefined : messages.find((m) => m.id === last.socket.messageId);
   shown.reply = reply?.content ?? "";
   shown.others = messages.filter((m) => m !== reply).map((m) => m.content);

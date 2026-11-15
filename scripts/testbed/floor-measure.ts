@@ -805,9 +805,9 @@ export function floorHead(run: FloorRun): string[] {
   ];
 }
 
-/** The table in words, after the run's standing; a run with no verdict (a trial, or a stop) prints its figures and no verdict, and a trial none of its reasons beside them. */
-export function tableText(rows: readonly Row[], head: readonly string[], none: "trial" | "stopped" | null, crossCheck: readonly CrossCheck[]): string {
-  const out = ["§17.1 The floor test", ...head];
+/** The table in words, after the run's standing, under its title (the floor's, unless a test such as G0's, which judges some of its rows, gives its own); a run with no verdict (a trial, or a stop) prints its figures and no verdict, and a trial none of its reasons beside them. */
+export function tableText(rows: readonly Row[], head: readonly string[], none: "trial" | "stopped" | null, crossCheck: readonly CrossCheck[], title = "§17.1 The floor test"): string {
+  const out = [title, ...head];
   for (const r of rows) {
     out.push("", `${r.measure}: ${none === null ? r.verdict.toUpperCase() : `no verdict (${none})`}`, `  pass:      ${r.pass}`, `  measured:  ${r.measured}`, `  stands on: ${r.stands}`);
     if (none !== "trial") for (const why of r.why) out.push(`  not judged: ${why}`);

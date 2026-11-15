@@ -38,6 +38,8 @@ export interface Replay {
   ground?: Partial<Ground>;
   /** The run's facts as the host gives them; by default a clean run on the build, the Author in the run's form. */
   facts?: RunFacts;
+  /** When the run starts, by the runner's clock (default: now): the run is named for it and says so in its record. */
+  at?: Date;
 }
 
 /** Each line the play sent, in order: the connection and the line. */
@@ -48,11 +50,27 @@ export interface Sent {
 
 let current: { acts: FloorActs; reader: FloorReader } | null = null;
 
+/** What the replayed gate plays over: the current replay's acts and reader. */
+export function replaying(): { acts: FloorActs; reader: FloorReader } {
+  if (current === null) throw new Error("no replay is set");
+  return current;
+}
+
 /** The form the replayed gate plays: the floor's own play over the current replay. */
 export async function replayed(play: Play): Promise<void> {
-  if (current === null) throw new Error("no replay is set");
-  await playWith(play, current.acts, current.reader, null, null);
+  const now = replaying();
+  await playWith(play, now.acts, now.reader, null, null);
 }
+
+/** The gate a replay plays: its id (and the bundle's folder), the module whose default export is the gate, and the module and name of the form that plays it over the replay. */
+export interface ReplayGate {
+  id: string;
+  gate: string;
+  form: { module: string; name: string };
+}
+
+/** The floor's own gate, played by the floor's own play. */
+export const FLOOR_GATE: ReplayGate = { id: "floor", gate: "scripts/proof/floor/gate.ts", form: { module: "test/proof/floor/replay.ts", name: "replayed" } };
 
 /** The facts of a clean run on the build, the Author in the form the run says. */
 export function factsOf(run: FloorRun, edit?: (facts: RunFacts) => void): RunFacts {
@@ -75,10 +93,10 @@ export function recordOf(facts: RunFacts): RunRecord {
 }
 
 /** What the chat holds of a turn: its reply's text, invented. */
-const replyText = (t: { pair: number; arm: "plain" | "rpe" }): string => `The invented reply of ${t.arm === "plain" ? "plain generation" : "RPE"} to line ${t.pair}${t.arm === "plain" ? "a" : "b"}, written whole.`;
+export const replyText = (t: { pair: number; arm: "plain" | "rpe" }): string => `The invented reply of ${t.arm === "plain" ? "plain generation" : "RPE"} to line ${t.pair}${t.arm === "plain" ? "a" : "b"}, written whole.`;
 
 /** The acts and reader of a recorded run: `send` answers with the next turn's page, `turn` with the rest of it; `played` is the turns sent so far. */
-function replayOf(replay: Replay, sent: Sent[]): { acts: FloorActs; reader: FloorReader; played: () => FloorRun["turns"] } {
+export function replayOf(replay: Replay, sent: Sent[]): { acts: FloorActs; reader: FloorReader; played: () => FloorRun["turns"] } {
   const turns = replay.run.turns;
   let at = 0;
   const acts: FloorActs = {
@@ -116,30 +134,38 @@ function replayOf(replay: Replay, sent: Sent[]): { acts: FloorActs; reader: Floo
   return { acts, reader, played: () => turns.slice(0, at) };
 }
 
-/** What the runner made of a replayed floor: its report, the gate's results and notes, the floor's kept table, and each line sent. */
+/** What the runner made of a replayed gate: its report, the gate's results and notes, what it kept of its play (`internal/play-01/`, by file name), each line sent, and the run's folder where the replay was asked to leave it. */
 export interface Played {
   report: string;
   code: number;
   result: { parts: { id: string; instances: { outcome: string; why: string }[] }[] };
   notes: string;
   table: string;
+  internal: Record<string, string>;
+  dir: string;
   sent: Sent[];
 }
 
-/** Plays the floor gate through the runner's own `main` over a recorded run, in a scratch folder removed afterwards. */
-export async function playReplay(replay: Replay): Promise<Played> {
-  const scratch = mkdtempSync(join(tmpdir(), "floor-replay-"));
+/**
+ * Plays a gate (the floor's by default) through the runner's own `main` over a recorded run, in a scratch
+ * folder removed afterwards, or in the one the caller names (`scratch`: left in place, for the caller to
+ * remove, so the bundle can be read back by a reader of bundles).
+ */
+export async function playReplay(replay: Replay, as: ReplayGate = FLOOR_GATE, scratch?: string): Promise<Played> {
+  const own = scratch === undefined;
+  const base = scratch ?? mkdtempSync(join(tmpdir(), "floor-replay-"));
+  mkdirSync(base, { recursive: true });
   try {
-    const root = join(scratch, "proof");
+    const root = join(base, "proof");
     mkdirSync(join(root, "scenarios"), { recursive: true });
-    mkdirSync(join(root, "floor"), { recursive: true });
+    mkdirSync(join(root, as.id), { recursive: true });
     writeFileSync(join(root, "settings.json"), JSON.stringify({ repeats: 10 }));
     writeFileSync(
-      join(root, "floor", "gate.ts"),
+      join(root, as.id, "gate.ts"),
       `import { gate } from ${JSON.stringify(join(REPO, "scripts/proof/route/form.ts"))};
-import floor from ${JSON.stringify(join(REPO, "scripts/proof/floor/gate.ts"))};
-import { replayed } from ${JSON.stringify(join(REPO, "test/proof/floor/replay.ts"))};
-export default gate({ ...floor, rig: replayed, live: replayed });
+import original from ${JSON.stringify(join(REPO, as.gate))};
+import { ${as.form.name} as played } from ${JSON.stringify(join(REPO, as.form.module))};
+export default gate({ ...original, rig: played, live: played });
 `,
     );
     const sent: Sent[] = [];
@@ -162,24 +188,27 @@ export default gate({ ...floor, rig: replayed, live: replayed });
       begin: async () => ({ acts: current?.acts, browser: new FakeBrowser({ pages }), guidance: async () => standing, close: async () => undefined }),
       close: async () => undefined,
     };
-    const out = join(scratch, "out");
+    const out = join(base, "out");
     const printed: string[] = [];
-    const code = await main(["rig", "floor", "--root", root, "--out", out, "--by", "a test"], { out: (text) => printed.push(text), openHost: async () => host });
+    const code = await main(["rig", as.id, "--root", root, "--out", out, "--by", "a test"], { out: (text) => printed.push(text), openHost: async () => host, now: () => replay.at ?? new Date() });
     const [name] = existsSync(out) ? readdirSync(out).filter((n) => existsSync(join(out, n, "run.json"))) : [];
     if (name === undefined) throw new Error(`the runner made no bundle: ${printed.join("")}`);
-    const dir = join(out, name, "floor");
-    const kept = join(dir, "internal", "play-01", "table.txt");
+    const dir = join(out, name, as.id);
+    const at = join(dir, "internal", "play-01");
+    const table = join(at, "table.txt");
     return {
       report: printed.join(""),
       code,
       result: JSON.parse(readFileSync(join(dir, "result.json"), "utf8")) as Played["result"],
       notes: readFileSync(join(dir, "notes.md"), "utf8"),
-      table: existsSync(kept) ? readFileSync(kept, "utf8") : "",
+      table: existsSync(table) ? readFileSync(table, "utf8") : "",
+      internal: existsSync(at) ? Object.fromEntries(readdirSync(at).map((file) => [file, readFileSync(join(at, file), "utf8")])) : {},
+      dir: join(out, name),
       sent,
     };
   } finally {
     current = null;
-    rmSync(scratch, { recursive: true, force: true });
+    if (own) rmSync(base, { recursive: true, force: true });
   }
 }
 
