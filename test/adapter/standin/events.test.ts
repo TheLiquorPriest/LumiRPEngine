@@ -148,4 +148,25 @@ describe("the breakdown", () => {
     await generate(refused);
     expect(refused.lv.events.some((e) => e.event === "GENERATION_BREAKDOWN_READY" || e.event === "GENERATION_METRICS_READY")).toBe(false);
   });
+
+  test("an interceptor's breakdown entries are in a dry run's breakdown and in the stored one", async () => {
+    const b = boat([{ words: ["Done."] }]);
+    b.lv.install(["interceptor"], "lumi-tide").registerInterceptor(
+      async (messages) => ({
+        messages: [...messages, { role: "system", content: "TIDE the tide is out" }],
+        // One entry names the message it marks by its place in the interceptor's own result, and one marks a place that is no message and is dropped.
+        breakdown: [{ messageIndex: messages.length, name: "Tide note" }, { messageIndex: 99, name: "Nowhere" }],
+      }),
+      {},
+    );
+    const entry = { type: "extension", name: "Tide note", role: "system", content: "TIDE the tide is out", extensionId: "lumi-tide", extensionName: "lumi-tide" };
+    // After the assembly's own entries, the chat history's left out of a dry run's.
+    const dry = await generate(b, { dryRun: true });
+    expect(dry.breakdown!.at(-1)).toEqual(entry);
+    expect(dry.breakdown!.filter((e) => e.type === "extension")).toHaveLength(1);
+    expect(dry.breakdown!.some((e) => e.type === "chat_history")).toBe(false);
+    const out = await generate(b);
+    expect(out.stored!.entries.at(-1)).toMatchObject({ ...entry, tokens: Math.ceil("TIDE the tide is out".length / 4) });
+    expect(rowOf(b, out.messageId!)).toBeDefined();
+  });
 });

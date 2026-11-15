@@ -49,7 +49,7 @@ export function boat(replies: PlainReply[], options: { preset?: Partial<Preset>;
 }
 
 /** A generation of the boat's chat, ended. */
-export function generate(b: Boat, input: { type?: "normal" | "swipe" | "regenerate" | "continue" | "impersonate"; parameters?: Record<string, unknown>; impersonateDraft?: boolean } = {}): Promise<Outcome> {
+export function generate(b: Boat, input: { type?: "normal" | "swipe" | "regenerate" | "continue" | "impersonate"; parameters?: Record<string, unknown>; impersonateDraft?: boolean; dryRun?: boolean } = {}): Promise<Outcome> {
   return b.lv.generate({ chat: CHAT, connection: "conn-model", preset: "preset-boat", ...input });
 }
 

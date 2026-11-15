@@ -377,7 +377,9 @@ export class StandIn extends ChatRows {
       context.presetId = preset.id;
       delete context.__spindlePresetMetadata;
       if (preset.metadata) context.__spindlePresetMetadata = preset.metadata;
-      const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context, chat.user, stop.signal) : { messages: prompt, parameters: undefined };
+      const intercepted = this.interceptors.length > 0 ? await this.interceptorPipeline(prompt, context, chat.user, stop.signal) : { messages: prompt, parameters: undefined, breakdown: [] };
+      // The breakdown is the assembly's and, after it, what each interceptor added (`appendInterceptorBreakdownEntries`, `services/generate.service.ts:565-583`, `:1431-1434`).
+      const whole: BreakdownEntry[] = [...breakdown, ...intercepted.breakdown];
       checkAborted();
       // After the interceptors: post-processing, the blank filter, collapse, then the parameters (`:1249-1256`, `:1414-1441`).
       sent = intercepted.messages;
@@ -385,7 +387,7 @@ export class StandIn extends ChatRows {
       sent = dropBlank(sent);
       if (preset.collapse === true) collapse(sent);
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
-      if (live === null) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, contextClipStats, breakdown: breakdown.filter((e) => e.type !== "chat_history") };
+      if (live === null) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo, contextClipStats, breakdown: whole.filter((e) => e.type !== "chat_history") };
       // A context anchor's tail that cannot fit ends the generation before the provider is called (`:2814-2826`); a dry run only reports it.
       if (contextClipStats.anchorOverflow === true) throw new Error(`Protected context anchor needs ${(contextClipStats.protectedHistoryTokens ?? 0).toLocaleString()} tokens, but only ${Math.max(0, contextClipStats.remainingHistoryBudget).toLocaleString()} fit after prompt overhead. Increase Context Size or lower Max Response.`);
       // The counts saved into the chat's metadata, then the lore told, before the provider is called (`:2827-2879`); a dry run saves none,
@@ -508,17 +510,17 @@ export class StandIn extends ChatRows {
         this.setSwipeScopedExtra(chat, messageId, target.swipe ?? undefined, metrics);
         this.emit("GENERATION_METRICS_READY", { generationId, chatId: chat.id, messageId, swipeId: target.swipe ?? undefined, ...metrics }, chat.user);
       }
-      if (messageId === undefined || this.tokenizerFails || breakdown.length === 0) return { generationId, ...(messageId !== undefined ? { messageId } : {}), error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo, contextClipStats };
+      if (messageId === undefined || this.tokenizerFails || whole.length === 0) return { generationId, ...(messageId !== undefined ? { messageId } : {}), error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo, contextClipStats };
       // Token counts are the stand-in's own.
       const tokens = (value: string): number => Math.ceil(value.length / 4);
       const historyTokens = history.reduce((n, m) => n + tokens(textOf(m)), 0);
-      const entriesStored = breakdown.map((e) => ({ name: e.name, type: e.type, tokens: e.type === "chat_history" ? historyTokens : tokens(e.tokenCountContent ?? e.content ?? ""), ...(e.role ? { role: e.role } : {}), ...(e.blockId ? { blockId: e.blockId } : {}), content: e.content }));
+      const entriesStored = whole.map((e) => ({ name: e.name, type: e.type, tokens: e.type === "chat_history" ? historyTokens : tokens(e.tokenCountContent ?? e.content ?? ""), ...(e.role ? { role: e.role } : {}), ...(e.blockId ? { blockId: e.blockId } : {}), ...(e.extensionId !== undefined ? { extensionId: e.extensionId, extensionName: e.extensionName } : {}), content: e.content }));
       const stored: Stored & { tokenizer_name: string } = {
         entries: entriesStored.filter((e) => e.type !== "chat_history"),
         chatHistoryTokens: historyTokens,
         messages: sent.map((m) => ({ role: m.role, content: textOf(m) })),
         // An entry whose text a block already holds is not counted twice (`services/tokenizer.service.ts:550-552`).
-        totalTokens: entriesStored.reduce((n, e, i) => (breakdown[i]!.excludeFromTotal === true ? n : n + e.tokens), 0),
+        totalTokens: entriesStored.reduce((n, e, i) => (whole[i]!.excludeFromTotal === true ? n : n + e.tokens), 0),
         maxContext: 0,
         model: connection.model,
         provider: "custom",

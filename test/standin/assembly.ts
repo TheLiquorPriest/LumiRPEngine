@@ -133,6 +133,9 @@ export interface BreakdownEntry {
   tokenCountContent?: string;
   /** Its block expanded `{{wi_marker}}`, so the "WI At Marker" rows count in the total and this entry counts only its wrapper (`attributeExpandedMarkerWorldInfoTokens`, `:1507-1520`). */
   attributesWorldInfoMarkerTokens?: boolean;
+  /** An entry an interceptor added (`type: "extension"`, `services/generate.service.ts:565-583`): the extension that made it. */
+  extensionId?: string;
+  extensionName?: string;
 }
 
 export interface Assembled {

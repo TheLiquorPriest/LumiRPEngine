@@ -98,7 +98,7 @@ describe("RPE restarted mid-turn", () => {
     expect(settling).toEqual({ status: 200, body: { turn: run.turn, run: expect.any(String) } });
   });
 
-  test("stopped while its reply was being written: Lumiverse keeps nothing, and the next turn ends the run, in the words of the user's turn-errors part, and drops the turn", async () => {
+  test("stopped while its reply was being written: Lumiverse keeps the words written before RPE went down, with the error, and the next turn ends the run, in the words of the user's turn-errors part", async () => {
     const hold = gate();
     const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, replying("Wren relights it.")] });
     // The user's own wording of the turn's failures, over the shipped part.
@@ -111,17 +111,24 @@ describe("RPE restarted mid-turn", () => {
       return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
     });
     await b.restart();
-    // Lumiverse's request failed with RPE gone, and the message it had made for the reply was removed.
-    expect((await generating).error).not.toBeNull();
+    // Lumiverse's request failed with RPE gone, and the message it had made for the reply keeps the words that were written before it, as Lumiverse keeps a reply that fails part way (`persistPartialContent`).
+    const failed = await generating;
+    expect(failed.error).not.toBeNull();
+    const kept = b.host.chats.get(CHAT)!.messages.at(-1)!;
+    expect(kept).toMatchObject({ role: "assistant", content: "The lamp turns, and" });
+    expect(failed.messageId).toBe(kept.id);
+    expect(b.db.rows("SELECT extra FROM messages WHERE id = ?", kept.id).map((r) => (JSON.parse(String(r.extra)) as { generationOutcomeBySwipe?: unknown[] }).generationOutcomeBySwipe?.length)).toEqual([1]);
 
     const next = await settledTurn(b, await play(b, "I wait in the dark."));
-    expect(b.turns.store.user(USER).turn(turn)).toMatchObject({ status: "dropped", message: null });
+    // RPE's half is as RPE behaves today, which the plan's ruling for a reply kept part way (§6.3) changes later: the turn is tied to the message Lumiverse kept, as cut.
+    expect(b.turns.store.user(USER).turn(turn)).toMatchObject({ status: "cut", message: kept.id });
     expect(b.turns.runs.ofTurn(USER, turn).map((r) => [r.status, r.released, r.error?.detail])).toEqual([["failed", null, "RPE went down in the middle of this one."]]);
-    expect(next.parent).toBeNull();
+    // The kept reply is on the path as a cut turn, which the next turn follows.
+    expect(next.parent).toBe(turn);
     const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([
       [next.id, "released", true],
-      [turn, "failed", false],
+      [turn, "failed", true],
     ]);
   });
 });

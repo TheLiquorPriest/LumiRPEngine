@@ -38,6 +38,9 @@ const PASS_TIME: Answer = { pieces: [{ text: "<intent>Then the storm.</intent>" 
 /** The kinds of what the harness was told had happened since the last turn, in its `n`th request. */
 const toldKinds = (b: TurnBed, n: number): string[] => b.requests[n]!.since.map((s) => s.kind);
 
+/** The thinking Lumiverse kept with a reply RPE wrote: its progress lines. */
+const KEPT_THINKING = "Reading the turn.\nWriting.\n";
+
 /** The last `n` messages of the request Lumiverse sent the connection. */
 const sentLast = (out: { body: Record<string, unknown> | null }, n: number): unknown[] => (out.body!.messages as unknown[]).slice(-n);
 
@@ -51,10 +54,11 @@ test("a continue as Lumiverse announces and saves it extends the turn its reply 
   const continuing = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
   expect(continuing.error).toBeNull();
   const generation = continuing.generationId!;
-  // The reply it goes on is sent last, out of the history, with the postfix on it, and the nudge after it (`prompt-assembly.service.ts:742-775`).
+  // The reply it goes on is sent last, out of the history, with the postfix on it and the thinking Lumiverse kept with it (RPE's progress lines, `reasoning_content`,
+  // `prompt-assembly.service.ts:3370-3394`), and the nudge after it (`:742-775`).
   expect(sentLast(continuing, 3)).toEqual([
     { role: "user", content: "I climb the stairs." },
-    { role: "assistant", content: "The lamp turns. " },
+    { role: "assistant", content: "The lamp turns. ", reasoning_content: KEPT_THINKING },
     { role: "system", content: CONTINUE_NUDGE },
   ]);
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, generation)?.settled ?? null) !== null && b.turns.runs.ofChat(USER, CHAT).length === 0);
@@ -79,9 +83,9 @@ test.each([
   const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
   const continuing = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
   expect(continuing.error).toBeNull();
-  // The same postfix, or none, on the reply in the prompt and between the two texts when it is saved (`generate.service.ts:1969-1978`).
+  // The same postfix, or none, on the reply in the prompt, with its kept thinking, and between the two texts when it is saved (`generate.service.ts:1969-1978`).
   expect(sentLast(continuing, 2)).toEqual([
-    { role: "assistant", content: `The lamp turns.${postfix ?? ""}` },
+    { role: "assistant", content: `The lamp turns.${postfix ?? ""}`, reasoning_content: KEPT_THINKING },
     { role: "system", content: CONTINUE_NUDGE },
   ]);
   await settledTurn(b, continuing.generationId!);

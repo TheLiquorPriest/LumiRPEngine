@@ -4,11 +4,12 @@
 // ten minutes, which the stand-in Lumiverse watches as it watches any generation (`test/standin/registry.ts`). Each response is read the way
 // Lumiverse reads it (`test/standin/steps.ts`).
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { PassRequest, PassSink } from "rp-harness/contract";
 import { modelsEndpoint, providerEndpoint, type ProviderDeps, type TurnPlayer } from "../../src/adapter/lumiverse/provider";
 import { TAG_FIELD, textHash, type Tag } from "../../src/adapter/lumiverse/wire";
 import { FakeClock } from "../standin/clock";
+import { StandInDb } from "../standin/db";
 import { StandIn, type Outcome } from "../standin/lumiverse";
 import { readStream } from "../standin/steps";
 
@@ -65,6 +66,28 @@ const messages = [
   { role: "user", content: "Hello." },
 ];
 
+/**
+ * The stand-in Lumiverse with RPE's endpoint on a turn the test plays as the connection's server, a chat of one line in a database, and the tag the extension would add given by the
+ * test as a parameter of each generation; every open database is closed after each test.
+ */
+const databases: StandInDb[] = [];
+afterEach(() => {
+  for (const db of databases.splice(0)) db.close();
+});
+function standIn(play: TurnPlayer["play"], clock = new FakeClock()): StandIn {
+  const lv = new StandIn();
+  lv.clock = clock;
+  const db = new StandInDb();
+  databases.push(db);
+  db.write({ user: [{ id: "user-a", name: "Ada", email: "ada@example.invalid", username: "ada" }], characters: [], chats: [], messages: [], world_books: [], world_book_entries: [], personas: [], presets: [], settings: [], message_breakdowns: [] });
+  lv.db = db;
+  lv.servers.set("http://rpe", endpoint(play, { clock }));
+  lv.connections.set("conn-rpe", { id: "conn-rpe", base: "http://rpe/v1", key: "rpe_key", model: "rpe" });
+  lv.presets.set("preset-a", { id: "preset-a", name: "A", blocks: [{ id: "b-rules", name: "Rules", role: "system", content: "Rules." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
+  lv.addChat({ id: "chat-a", user: "user-a", character: { id: "char-a", name: "Ilsa" }, messages: [{ id: "m1", role: "user", content: "Hello.", index: 1 }] });
+  return lv;
+}
+
 describe("the provider endpoint", () => {
   test("a reply asked for whole comes as one completion, its thinking beside it", async () => {
     const res = await endpoint(async (_turn, out) => {
@@ -108,14 +131,21 @@ describe("the provider endpoint", () => {
     expect(foreign.status).toBe(403);
   });
 
-  test("a turn that fails while it streams ends the reply with its error, and one that ends without saying so ends it cleanly", async () => {
-    const failed = await endpoint(async (_turn, out) => {
+  test("a turn that fails while it streams ends the reply with its error and Lumiverse keeps what it had, and one that ends without saying so ends it cleanly", async () => {
+    const failed = standIn(async (_turn, out) => {
       out.content("Half a ");
       throw new Error("the model went away");
-    })(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
-    await expect(readStream(failed)).rejects.toThrow("the model went away");
-    const quiet = await endpoint(async (_turn, out) => out.content("Done."))(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
-    expect(await readStream(quiet)).toMatchObject({ content: "Done.", finishReason: "stop" });
+    });
+    const out = await failed.generate({ chat: "chat-a", connection: "conn-rpe", preset: "preset-a", parameters: { [TAG_FIELD]: tag } });
+    expect(out.error).toBe("the model went away");
+    // The message Lumiverse made for the reply keeps the words that came, with the error beside them.
+    expect(failed.chats.get("chat-a")!.messages.map((m) => m.content)).toEqual(["Hello.", "Half a "]);
+    expect(failed.db!.rows("SELECT extra FROM messages WHERE id = ?", out.messageId!).map((r) => JSON.parse(String(r.extra)).generationOutcomeBySwipe)).toEqual([[{ error: "the model went away" }]]);
+    const quiet = standIn(async (_turn, out2) => out2.content("Done."));
+    const done = await quiet.generate({ chat: "chat-a", connection: "conn-rpe", preset: "preset-a", parameters: { [TAG_FIELD]: tag } });
+    expect(done.error).toBeNull();
+    expect(done.reply).toMatchObject({ content: "Done.", finishReason: "stop" });
+    expect(quiet.chats.get("chat-a")!.messages.map((m) => m.content)).toEqual(["Hello.", "Done."]);
   });
 
   // Lumiverse keeps a failed generation's message when it streamed any text or thinking and drops it
@@ -123,21 +153,25 @@ describe("the provider endpoint", () => {
   test("a turn that ends with no reply after its progress line puts its line for the kept message in the thinking too, so the empty message Lumiverse keeps says why; the detail goes in the error alone", async () => {
     const line = "The model's provider failed before a reply was written: the gateway answered 502.";
     const kept = "The model's provider failed before a reply was written.";
-    const res = await endpoint(async (_turn, out) => {
+    const lv = standIn(async (_turn, out) => {
       out.progress("Reading the scene.");
       out.error(line, kept);
-    })(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
-    const seen = { content: "", reasoning: "" };
-    await expect(readStream(res, seen)).rejects.toThrow(line);
-    expect(seen).toEqual({ content: "", reasoning: `Reading the scene.\n${kept}\n` });
+    });
+    const out = await lv.generate({ chat: "chat-a", connection: "conn-rpe", preset: "preset-a", parameters: { [TAG_FIELD]: tag } });
+    expect(out.error).toBe(line);
+    // The empty message Lumiverse keeps holds the thinking: the progress line and the kept line, and not the detail.
+    expect(lv.chats.get("chat-a")!.messages.map((m) => m.content)).toEqual(["Hello.", ""]);
+    expect(lv.db!.rows("SELECT extra FROM messages WHERE id = ?", out.messageId!).map((r) => JSON.parse(String(r.extra)).reasoningBySwipe)).toEqual([[`Reading the scene.\n${kept}\n`]]);
+    expect(JSON.stringify(lv.events.find((e) => e.event === "GENERATION_ENDED")!.payload)).toContain(line);
   });
 
   test("a turn that ends with no reply before anything was streamed ends with the error alone, and Lumiverse keeps no message", async () => {
     const line = "The turn could not be played: no connection.";
-    const res = await endpoint(async (_turn, out) => out.error(line))(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
-    const seen = { content: "", reasoning: "" };
-    await expect(readStream(res, seen)).rejects.toThrow(line);
-    expect(seen).toEqual({ content: "", reasoning: "" });
+    const lv = standIn(async (_turn, out) => out.error(line));
+    const out = await lv.generate({ chat: "chat-a", connection: "conn-rpe", preset: "preset-a", parameters: { [TAG_FIELD]: tag } });
+    expect(out.error).toBe(line);
+    expect(out.messageId).toBeUndefined();
+    expect(lv.chats.get("chat-a")!.messages.map((m) => m.content)).toEqual(["Hello."]);
   });
 });
 
@@ -157,12 +191,7 @@ describe("a long silent turn", () => {
       for (const handle of said) clock.clearTimeout(handle);
       out.content("At last the ferry docks.");
     };
-    const lv = new StandIn();
-    lv.clock = clock;
-    lv.servers.set("http://rpe", endpoint(play, { clock }));
-    lv.connections.set("conn-rpe", { id: "conn-rpe", base: "http://rpe/v1", key: "rpe_key", model: "rpe" });
-    lv.presets.set("preset-a", { id: "preset-a", name: "A", blocks: [{ id: "b-rules", name: "Rules", role: "system", content: "Rules." }, { id: "b-history", name: "Chat History", role: "system", content: "", marker: "chat_history" }] });
-    lv.addChat({ id: "chat-a", user: "user-a", character: { id: "char-a", name: "Ilsa" }, messages: [{ id: "m1", role: "user", content: "Hello.", index: 1 }] });
+    const lv = standIn(play, clock);
     const touches: number[] = [];
     const touch = lv.registry.touch.bind(lv.registry);
     lv.registry.touch = (id) => {
