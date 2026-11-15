@@ -2,7 +2,7 @@
 
 ## What RPE listens to
 
-RPE listens on `127.0.0.1` unless you set `address` in its `config.json`. It checks every request before any route runs: the `Host` it was sent to (its own address, or a name in `hosts`), a page's origin (its own, Lumiverse's, or one in `origins`), the key or token it carries, and its size.
+RPE listens on `127.0.0.1`, and on `server.address` as well where you set it in `files/RPE-global.yml`. It checks every request before any route runs: the `Host` it was sent to (its own address, or a name in `server.hosts`), a page's origin (its own, Lumiverse's, or one in `server.origins`), the key or token it carries, and its size.
 
 One route answers anyone who reaches RPE: its status, `/api/v1/status`, which says only that RPE answers and which build it runs. Which builds run and what RPE will do about a new one (`/api/v1/status/builds`) is told only with a page token or a web key.
 
@@ -23,7 +23,7 @@ RPE writes its database and its secrets file from one place at a time. While RPE
 
 While RPE is stopped, a command that writes takes the data folder's lock (lock.db, named by lock.holder) and is then the only writer, the changes to the database it applies included. `rpe serve` takes the same lock for as long as it runs: started while a command writes, it waits and says what it waits for; two commands at once write one after the other, each waiting up to `commandLine.waitMs` and saying which process it waits for.
 
-A page's live socket holds its key or token for as long as it is open: it is checked when the socket opens and at every message, and the socket is closed once the page token or the web key runs out, or the web key is replaced. One socket follows at most `live.follows` chats.
+A page's live socket holds its key or token for as long as it is open: it is checked when the socket opens and at every message, and the socket is closed once the page token or the web key runs out, or the web key is replaced. One socket follows at most `liveSocket.follows` chats.
 
 The extension takes RPE's registration only at a bare address on this machine (a scheme, a loopback host and a port, nothing more); any other is refused before a call goes out.
 
