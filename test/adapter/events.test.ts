@@ -183,7 +183,7 @@ describe("Lumiverse's changes to a chat", () => {
       { kind: "message-edited", chat: CHAT, message: "m2", hidden: false, shown },
       { kind: "message-swiped", chat: CHAT, message: "m4", swipe: 0, shown: messageFrom(m4).shown, updated: true },
       { kind: "message-swiped", chat: CHAT, message: "m4", swipe: 0, shown: messageFrom(m4).shown },
-      { kind: "generation-started", chat: CHAT, generation: "gen-8" },
+      { kind: "generation-started", chat: CHAT, generation: "gen-8", model: "m" },
     ]);
     expect(shown).toEqual({ date: 1_767_600_002, hash: expect.any(String) });
   });

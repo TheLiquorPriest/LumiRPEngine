@@ -73,10 +73,10 @@ export class Registrations {
     return [...this.byUser].flatMap(([user, r]) => (r === null ? [] : [user]));
   }
 
-  /** This user's road to RPE: its address, the key as the bearer and the user it is for; null where RPE does not belong to them. */
+  /** This user's road to RPE: its address, the key as the bearer and the user it is for, and RPE's values for it; null where RPE does not belong to them. */
   async road(user: string): Promise<Road | null> {
     const r = await this.of(user);
-    return r === null ? null : { base: r.base.replace(/\/+$/, ""), headers: { authorization: `Bearer ${r.key}`, [USER_HEADER]: user } };
+    return r === null ? null : { base: r.base.replace(/\/+$/, ""), headers: { authorization: `Bearer ${r.key}`, [USER_HEADER]: user }, waitMs: r.values.questionMs, logChars: r.values.logChars };
   }
 
   /** Whether a reply on this connection is RPE's to play. */

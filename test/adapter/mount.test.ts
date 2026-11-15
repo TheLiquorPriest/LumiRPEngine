@@ -235,7 +235,7 @@ describe("who the extension takes a registration from", () => {
   test("a page of RPE's own user cannot register in RPE's place: RPE does not confirm a key it did not make, the page is told, and RPE's registration stays", async () => {
     const b = await bed();
     const page = socketOf(b, USER, PAGE);
-    page.send({ rpe: "register", registration: { v: 1, base: b.listening.loopback, key: "rpx_made-up", connection: "conn-other", relay: PAGE, build: "build-7" } });
+    page.send({ rpe: "register", registration: { v: 1, base: b.listening.loopback, key: "rpx_made-up", connection: "conn-other", relay: PAGE, build: "build-7", values: { questionMs: 3_000, logChars: 200 } } });
     expect(await b.until("the page to be told", () => page.heard.find(said("refused")))).toMatchObject({ why: expect.stringContaining("did not confirm") });
     expect(b.kept()).toEqual(b.registration);
     harbor(b);
@@ -260,7 +260,7 @@ describe("who the extension takes a registration from", () => {
       return Response.json({ ok: true });
     });
     const page = socketOf(b, OTHER_USER, OTHER_PAGE);
-    page.send({ rpe: "register", registration: { v: 1, base: "http://127.0.0.1:11434", key: "anything", connection: null, relay: OTHER_PAGE, build: "x" } });
+    page.send({ rpe: "register", registration: { v: 1, base: "http://127.0.0.1:11434", key: "anything", connection: null, relay: OTHER_PAGE, build: "x", values: { questionMs: 3_000, logChars: 200 } } });
     expect(await b.until("the page to be told", () => page.heard.find(said("refused")))).toMatchObject({ why: expect.stringContaining("not RPE") });
     page.send({ rpe: "request", id: "r2", method: "DELETE", path: "/api/v1/models/x", headers: {} });
     expect(await b.until("the page's answer", () => page.heard.find(said("response")))).toMatchObject({ id: "r2", status: 403 });

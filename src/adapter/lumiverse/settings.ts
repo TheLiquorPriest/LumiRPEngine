@@ -23,8 +23,14 @@
 //       lease: 60                        seconds a page's follow lasts unless the page asks again
 //       hold: 1024                       KiB of characters a page may have waiting before its chats' events are held
 //       retry: 30                        seconds before registering again with an extension that did not take it
-//     question: { body: 8192, wait: 3 }  KiB the extension's question may carry; seconds RPE works its answer out in before a half not worked out is not known
+//     question: { body: 8192 }           KiB the extension's question may carry
+//     extension:                         the light extension's values, sent with RPE's registration and the page's start facts
+//       questionWait: 3                  seconds the extension waits for RPE's answer, and RPE works it out in
+//       logChars: 200                    characters of RPE's words the extension writes in its log
+//       requestWait: 35                  seconds a page's request through the extension waits for its answer
+//       followRenewal: 20                seconds between a page's renewals of a chat's follow
 //     search: { hits: 20, snippet: 80 }  a chat search's hits when the query names none; a hit's snippet in characters
+//     untagged: { whileAwaited: pass }   pass, or fail: a request with no tag while a reply RPE heard start awaits its tag
 
 import { type ConfigRead, readConfig } from "../../app/config-read";
 import type { Effect, NumberSettings, Setting, SettingTakes } from "../../app/setting-list";
@@ -37,6 +43,7 @@ import { KEEP_EVERY_MS } from "./session";
 import { SOCKET_DEFAULTS, type SocketSettings } from "./socket";
 import { COMMENT_MS } from "./stream";
 import { WHOLE_HOLD_MS } from "./provider";
+import { PAGE_ROAD_DEFAULTS } from "../../ext/page";
 
 /** The door's limits, as its parts use them. */
 export interface LumiverseSettings {
@@ -49,15 +56,18 @@ export interface LumiverseSettings {
   wholeHoldMs: number;
   relay: RelaySettings;
   questionBytes: number;
-  /** Appendix D.1 "How long the extension waits for RPE's answer before a generation": RPE answers within it. */
-  questionWaitMs: number;
+  /** The light extension's values (group "Lumiverse ▸ extension"): sent with RPE's registration (`questionMs`, `logChars`) and the page's start facts (`requestMs`, `renewMs`). */
+  extension: { questionMs: number; logChars: number; requestMs: number; renewMs: number };
   search: ChatSearchSettings;
+  untaggedWhileAwaited: "pass" | "fail";
 }
 
 /** Fixed: a question carries the chat's whole path and the marked lore's text, past the app's 1 MiB for other bodies. */
 export const QUESTION_BODY_BYTES = 8 * 1024 * 1024;
 /** Appendix D.1: the extension waits 3 seconds for RPE's answer. */
 export const QUESTION_WAIT_MS = 3_000;
+/** The characters of RPE's words the extension writes in its log. */
+export const EXTENSION_LOG_CHARS = 200;
 
 const KIB = 1024;
 const S = 1000;
@@ -107,13 +117,32 @@ export const LUMIVERSE_SETTING_DEFS = {
   relayRetry: setting("relay.retry", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Registration retry", "Seconds before RPE registers again with an extension that did not take its registration."),
   wholeHold: setting("reply.hold", WHOLE_HOLD_MS / S, { type: "number", least: 1, most: SILENT_GENERATION_S - 1 }, "Whole reply hold", "Seconds after a reply asked for whole arrives at which its turn stops with what it has; Lumiverse ends a generation that has had no text for ten minutes, and nothing reaches it while a whole reply is written."),
   questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
-  questionWait: { ...setting("question.wait", QUESTION_WAIT_MS / S, { type: "number", least: 0.1, most: INTERCEPTOR_S - 1 }, "Question wait", "Seconds RPE has to answer the extension's question before a generation; a half of the answer not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives."), row: "How long the extension waits for RPE's answer before a generation" },
+  questionWait: { ...setting("extension.questionWait", QUESTION_WAIT_MS / S, { type: "number", least: 0.1, most: INTERCEPTOR_S - 1 }, "Question wait", "Seconds the extension waits for RPE's answer to its question before a generation, and RPE works it out in; a half not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives."), row: "How long the extension waits for RPE's answer before a generation" },
+  logChars: setting("extension.logChars", EXTENSION_LOG_CHARS, { type: "whole", least: 0 }, "Extension log words", "Characters of RPE's words the extension writes in Lumiverse's log when RPE refuses its question."),
+  requestWait: setting("extension.requestWait", PAGE_ROAD_DEFAULTS.requestMs / S, { type: "number", least: 1 }, "Page request wait", "Seconds a page's request through the extension waits for its answer; Lumiverse's proxy gives up after its own 30."),
+  followRenewal: setting("extension.followRenewal", PAGE_ROAD_DEFAULTS.renewMs / S, { type: "number", least: 1 }, "Page follow renewal", "Seconds between a page's renewals of its follow of a chat; keep it well inside the relay lease."),
   searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }, "Chat search hits", "Hits a chat search gives when the query names no number."),
   searchSnippet: setting("search.snippet", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }, "Chat search snippet", "Characters of a chat search hit's snippet."),
 } as const satisfies NumberSettings<string>;
 
+/**
+ * `lumiverse.untagged.whileAwaited` (§4.2 l.246-258; READINGS N-18): a request with no tag on RPE's connection, while a generation RPE
+ * heard start on its connection (or answered the question for) has neither sent its tagged request nor ended, is passed on (`pass`,
+ * the plan's rule) or answered with the shipped file's error line (`fail`), which may fail an unrelated side request once.
+ */
+export const UNTAGGED_WHILE_AWAITED = {
+  key: "lumiverse.untagged.whileAwaited",
+  default: "pass",
+  takes: { type: "oneOf", values: ["pass", "fail"] },
+  levels: GLOBAL,
+  perConnection: false,
+  name: "Untagged request while a reply awaits its tag",
+  about: "pass: a request with no tag is passed on, as every other is. fail: while a reply RPE heard start on its connection has neither sent its tagged request nor ended, a request with no tag on its connection is answered with an error line; it may fail a title or summary asked meanwhile.",
+  effect: "use",
+} as const satisfies Setting;
+
 /** Every setting the door reads, as a config file writes it: the Settings page's group "Lumiverse". */
-export const LUMIVERSE_SETTINGS: readonly Setting[] = Object.values(LUMIVERSE_SETTING_DEFS);
+export const LUMIVERSE_SETTINGS: readonly Setting[] = [...Object.values(LUMIVERSE_SETTING_DEFS), UNTAGGED_WHILE_AWAITED];
 
 /** The door's limits as a read of the levels every chat shares sets them over the defaults; a value a setting does not take is logged by the read. */
 export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
@@ -128,8 +157,9 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     wholeHoldMs: v.wholeHold * S,
     relay: { flushMs: v.flush * S, frameChars: v.frame * KIB, leaseMs: v.lease * S, holdChars: v.hold * KIB, retryMs: v.relayRetry * S },
     questionBytes: v.questionBody * KIB,
-    questionWaitMs: v.questionWait * S,
+    extension: { questionMs: v.questionWait * S, logChars: v.logChars, requestMs: v.requestWait * S, renewMs: v.followRenewal * S },
     search: { limit: v.searchHits, snippetChars: v.searchSnippet },
+    untaggedWhileAwaited: read.value(UNTAGGED_WHILE_AWAITED) === "fail" ? "fail" : "pass",
   };
 }
 

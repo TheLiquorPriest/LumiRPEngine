@@ -4,16 +4,18 @@
 // and a scripted turn. Every name, chat and lore line is invented.
 
 import { questionRoute, type HistoryWindow, type SecrecyAsk, type TurnStarts, type WindowStep } from "../../src/adapter/lumiverse/answer";
+import { changeOf } from "../../src/adapter/lumiverse/events";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
 import { joiningOf } from "../../src/adapter/lumiverse/overlay";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
+import { EXTENSION_LOG_CHARS, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
 import { NEEDS } from "../../src/ext/permissions";
 import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
 import { textOf as textKey } from "../../src/secrecy/lore-secrets";
-import type { JsonObject } from "../../src/shared/json";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import { FakeClock, settle } from "../standin/clock";
 import type { StandInDb } from "../standin/db";
 import { ADMIN, installRpe } from "../standin/install";
@@ -205,6 +207,17 @@ export class Rig {
       passConnection: () => null,
       passWords: async (key) => key,
       holdMs: () => 540_000,
+      // Lumiverse's own list of the lore that activated for the chat's running generation, as RPE's event socket hears it.
+      heard: {
+        tagged: (chat) => {
+          const since = this.lv.events.findLastIndex((e) => e.event === "GENERATION_STARTED" && isRecord(e.payload) && e.payload.chatId === chat);
+          const said = this.lv.events.slice(Math.max(0, since)).findLast((e) => e.event === "WORLD_INFO_ACTIVATED" && isRecord(e.payload) && e.payload.chatId === chat);
+          const change = said === undefined ? null : changeOf(said.event, said.payload);
+          return change?.kind === "lore-activated" ? change.lore : [];
+        },
+        untagged: () => false,
+      },
+      untaggedWhileAwaited: () => "pass",
       modelNames: () => ["rpe"],
       turns: {
         play: async (turn, out) => {
@@ -281,7 +294,7 @@ export class Rig {
             options,
           ),
       };
-      this.running = await startExtension(slow, this.options.deadlineMs !== undefined ? { deadlineMs: this.options.deadlineMs } : {});
+      this.running = await startExtension(slow);
       return this.running;
     };
     const installed = await installRpe(this.lv, { granted: this.options.granted ?? ALL, code });
@@ -299,7 +312,7 @@ export class Rig {
       if (typeof m.payload === "object" && m.payload !== null && "rpe" in m.payload && (m.payload.rpe === "registered" || m.payload.rpe === "refused")) answered.resolve();
       return true;
     };
-    const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connection: "conn-rpe", relay: RELAY_SESSION, build: "test" };
+    const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connection: "conn-rpe", relay: RELAY_SESSION, build: "test", values: { questionMs: this.options.deadlineMs ?? QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS } };
     this.ext.fromFrontend({ rpe: "register", registration }, USER, RELAY_SESSION);
     // The worker's later task runs on the host's clock: where the test moves it, it runs now.
     await this.options.clock?.advance(0);

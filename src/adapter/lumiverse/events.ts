@@ -20,13 +20,14 @@ import { isRecord } from "../../shared/json";
 import type { LumiverseReads, LvStep } from "./reads";
 import { type LvMessage, messageFrom } from "./rows";
 import type { LumiverseSocket } from "./socket";
+import type { TagLore } from "./wire";
 
 /** A message's showing swipe as a change gives it: its date as `swipe_dates` holds it, and the hash of its text (`messageFrom`). */
 export type ShownSwipe = LvMessage["shown"];
 
 export type ChatChange =
-  /** A generation began in the chat: Lumiverse's own writes to the chat's messages for it come until its end is told. */
-  | { kind: "generation-started"; chat: string; generation: string }
+  /** A generation began in the chat, on the model Lumiverse names: Lumiverse's own writes to the chat's messages for it come until its end is told. */
+  | { kind: "generation-started"; chat: string; generation: string; model: string | null }
   /** A generation is over. `message`: the message it saved to; null when it saved none (it failed before writing, or the event did not say). */
   | { kind: "generation-ended"; chat: string; generation: string; message: string | null; error?: string; stopped?: true }
   /** A message's text, its hidden mark or its `extra` changed in the swipe it shows: its hidden mark and that swipe, as they are now. */
@@ -38,7 +39,13 @@ export type ChatChange =
    */
   | { kind: "message-swiped"; chat: string; message: string; swipe: number; shown: ShownSwipe; updated?: true }
   /** `chat` was made from `from`, each message of `from` up to the fork given a new id: old id to new. */
-  | { kind: "chat-forked"; from: string; chat: string; ids: Record<string, string> };
+  | { kind: "chat-forked"; from: string; chat: string; ids: Record<string, string> }
+  /**
+   * Lumiverse's own list of the lore that activated for the chat's running generation (`WORLD_INFO_ACTIVATED` `{chatId, entries,
+   * stats}`, sent after the interceptors and before the provider is called, and only when something activated,
+   * `generate.service.ts:2868-2879`): the turn's activated lore. None heard is none activated.
+   */
+  | { kind: "lore-activated"; chat: string; lore: TagLore[] };
 
 /** What the turn lane implements to hear Lumiverse's changes. */
 export interface ChatChanges {
@@ -65,7 +72,7 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
     case "GENERATION_STARTED": {
       const chat = str(payload.chatId);
       const generation = str(payload.generationId);
-      return chat === null || generation === null ? null : { kind: "generation-started", chat, generation };
+      return chat === null || generation === null ? null : { kind: "generation-started", chat, generation, model: str(payload.model) };
     }
     case "MESSAGE_EDITED": {
       const chat = str(payload.chatId) ?? str(message?.chat_id);
@@ -93,6 +100,16 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
       const ids: Record<string, string> = {};
       for (const [old, made] of Object.entries(payload.messageIdMap)) if (typeof made === "string") ids[old] = made;
       return { kind: "chat-forked", from, chat, ids };
+    }
+    case "WORLD_INFO_ACTIVATED": {
+      const chat = str(payload.chatId);
+      if (chat === null) return null;
+      const lore: TagLore[] = [];
+      for (const e of Array.isArray(payload.entries) ? payload.entries : []) {
+        if (!isRecord(e) || typeof e.id !== "string") continue;
+        lore.push({ id: e.id, book: str(e.bookId), title: typeof e.comment === "string" ? e.comment : "", how: str(e.source) });
+      }
+      return { kind: "lore-activated", chat, lore };
     }
     default:
       return null;

@@ -96,6 +96,10 @@ export interface Cut {
   /** Lumiverse's own clipping inside the window; null where the chat's rows could not be read to tell. */
   clipped: Clipped | null;
   notices: PromptNotice[];
+  /** Whose secrecy verdict the extension applied (RPE's answer, or its own fail-closed one and why), as the tag said. */
+  secrecy: Tag["secrecy"];
+  /** The question's time, asked to answered or given up at its wait, as the tag said: what row 0.4's median is measured from. */
+  question: Tag["question"];
 }
 
 export interface Received {
@@ -229,6 +233,6 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
   } catch {
     // Only told: a chat whose rows cannot be read now has its clipping not known.
   }
-  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe, joining: { ...laid.joining, from: joining === null ? "body" : "settings" }, told: laid.complete, clipped, notices };
+  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe, joining: { ...laid.joining, from: joining === null ? "body" : "settings" }, told: laid.complete, clipped, notices, secrecy: tag.secrecy, question: tag.question };
   return { tag, overlay: laid, messages: sent, cut };
 }

@@ -85,6 +85,11 @@ export class KeptAnswers {
     this.#byChat.delete(chat);
     return kept.answer;
   }
+
+  /** Whether RPE worked out an answer for this generation of the chat, not yet taken. */
+  answered(chat: string, generation: string): boolean {
+    return this.#byChat.get(chat)?.generation === generation;
+  }
 }
 
 export interface AnswerDeps {

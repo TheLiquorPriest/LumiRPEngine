@@ -4,7 +4,7 @@
 // chat history and which standalone lore; and where the blocks of Lumiverse's own breakdown of the
 // prompt are found in it, as a hint for names. The shape is RPH's contract's `RawLayout`.
 
-import type { RawBlock, RawLayout, RawMessage, RawPart, SliceKind } from "rp-harness/contract";
+import type { PromptRole, RawBlock, RawLayout, RawMessage, RawPart, SliceKind } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { LaidMessage } from "./overlay";
 import { textHash, type Role, type Tag } from "./wire";
@@ -17,8 +17,8 @@ export interface BlocksHint {
   blocks: RawBlock[];
 }
 
-function role(value: unknown): Role | undefined {
-  return value === "system" || value === "user" || value === "assistant" ? value : undefined;
+function role(value: unknown): PromptRole | undefined {
+  return value === "system" || value === "user" || value === "assistant" || value === "tool" ? value : undefined;
 }
 
 /** What Lumiverse's own structural markers say a block is (`PromptBlock.marker`, `prompt-assembly.service.ts:1255-1266`): the persona, or the character card. */
@@ -132,8 +132,9 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: bool
             blocks: [],
           };
         });
-    // A role Lumiverse's chat format has beyond these (a tool's result) is input to the model.
-    return { role: role(m.role) ?? "user", length: m.text.length, hash: textHash(m.text), ...(m.media > 0 ? { images: m.media } : {}), parts };
+    // A role Lumiverse's chat format does not have is read as input to the model. Thinking sent back with an earlier reply is told apart from the text.
+    const thinking = m.thinking === undefined ? {} : { thinking: { length: m.thinking.length, hash: textHash(m.thinking) } };
+    return { role: role(m.role) ?? "user", length: m.text.length, hash: textHash(m.text), ...(m.media > 0 ? { images: m.media } : {}), ...thinking, parts };
   });
   const blocks = hint?.blocks ?? [];
   placeBlocks(out, messages.map((m) => m.text), blocks);

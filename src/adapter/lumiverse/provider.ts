@@ -7,14 +7,15 @@
 // turn lane, which writes the reply to the response as the turn goes, streamed or whole as the request
 // asked; a reply asked for whole is given the hold, so its turn ends before Lumiverse's ten minutes.
 
-import type { Clock, PassError, PassRequest, PassSink, Usage as PassUsage } from "rp-harness/contract";
+import type { Clock, PassError, PassRequest, PassSink, PromptRole, Usage as PassUsage } from "rp-harness/contract";
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
+import type { HeardGenerations } from "./heard";
 import { rawLayout, type BlocksHint } from "./layout";
 import type { RawLayout } from "rp-harness/contract";
 import { receive, Refused, type Cut, type PromptReads } from "./receipt";
 import { streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
-import { readTag, TAG_FIELD, type Role, type Tag } from "./wire";
+import { readTag, TAG_FIELD, type Role, type Tag, type TagLore } from "./wire";
 
 /** A tagged chat reply, ready for a turn (§10.1). */
 export interface TaggedTurn {
@@ -23,7 +24,7 @@ export interface TaggedTurn {
    * The prompt the model is to read, in order, after the history window's cut; content as Lumiverse sent it (text, or a list of parts with
    * pictures). `thinking`: what Lumiverse sent back as an earlier reply's thinking (`reasoning_content`), read apart and no part of its text.
    */
-  prompt: { role: Role; content: string | unknown[]; thinking?: string }[];
+  prompt: { role: PromptRole; content: string | unknown[]; thinking?: string }[];
   layout: RawLayout;
   cut: Cut;
   /** The model the request names: the connection's model in Lumiverse. */
@@ -35,6 +36,8 @@ export interface TaggedTurn {
    * since Lumiverse cuts a generation that sent nothing for ten minutes. Absent: no hold.
    */
   hold?: number;
+  /** The lore Lumiverse activated for the generation, as its `WORLD_INFO_ACTIVATED` said before the request came (none heard: none activated); one heard after is told to the turn lane as a change. */
+  lore: TagLore[];
   /** The request's other fields as Lumiverse sent them: sampling, anything a preset or extension added. */
   parameters: JsonObject;
 }
@@ -72,6 +75,10 @@ export interface ProviderDeps {
   passWords(key: string, fields: { detail?: string }): Promise<string>;
   /** For a reply asked for whole: milliseconds after its arrival at which its turn is stopped with what it has, below Lumiverse's ten minutes (the door's settings). */
   holdMs(): number;
+  /** The generations the event socket heard (`heard.ts`): a tagged request's activated lore, and whether one on RPE's connection awaits its tag. */
+  heard: Pick<HeardGenerations, "tagged" | "untagged">;
+  /** `lumiverse.untagged.whileAwaited`, read at each untagged request. */
+  untaggedWhileAwaited(): "pass" | "fail";
   /** The model names `GET /v1/models` lists: those RPE's connection in Lumiverse may name. */
   modelNames(): string[];
   turns: TurnPlayer;
@@ -85,7 +92,8 @@ function error(status: number, message: string): Response {
   return new Response(JSON.stringify({ error: { message, type: status === 401 ? "authentication_error" : "invalid_request_error" } }), { status, headers: { "content-type": "application/json" } });
 }
 
-const ROLES: readonly string[] = ["system", "user", "assistant"];
+/** The roles of Lumiverse's chat format (`llm/types.ts`): a tool's result stays a tool message, which RPH places itself. */
+const ROLES: readonly string[] = ["system", "user", "assistant", "tool"];
 
 /**
  * The hold of a reply asked for whole: 9 minutes. Nothing reaches Lumiverse while a whole reply is written, and Lumiverse ends a
@@ -115,7 +123,11 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     if (!isRecord(body)) return error(400, "The request is not a chat completion.");
     const now = deps.clock.now();
     const read = readTag(body);
-    if ("absent" in read) return passThrough(deps, body as JsonObject, request.signal, now);
+    if ("absent" in read) {
+      // Counted against every generation that awaits its tag; failed only where the setting says so (N-18).
+      const awaited = deps.heard.untagged();
+      return awaited && deps.untaggedWhileAwaited() === "fail" ? failUntagged(deps, body as JsonObject, request.signal, now) : passThrough(deps, body as JsonObject, request.signal, now);
+    }
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {
@@ -132,11 +144,12 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     const { messages: _messages, model, stream, [TAG_FIELD]: _tag, ...parameters } = body;
     const turn: TaggedTurn = {
       tag: received.tag,
-      prompt: received.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as Role) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
+      prompt: received.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as PromptRole) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
       layout: rawLayout(received.tag, received.messages, received.cut.told, hint),
       cut: received.cut,
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),
+      lore: deps.heard.tagged(received.tag.chat, received.tag.generation),
       parameters: parameters as JsonObject,
     };
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };
@@ -144,6 +157,16 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     if (turn.whole === true) return await wholeReply(run, meta, request.signal);
     return streamedReply(run, meta, request.signal, { clock: deps.clock, turn: true, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) });
   };
+}
+
+/**
+ * A request with no tag while a reply RPE heard start awaits its tag, with `untagged.whileAwaited: fail`: answered with the shipped
+ * file's line (`reply-errors.md`, key `untagged-awaited`), the outcome §4.2 l.258 gives such a generation; nothing is passed on.
+ */
+function failUntagged(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, now: number): Promise<Response> | Response {
+  const meta = { id: `rpe-pass-${now.toString(36)}`, model: typeof body.model === "string" ? body.model : "rpe", created: Math.floor(now / 1000) };
+  const run = async (out: ReplyStream): Promise<void> => out.error(await deps.passWords("untagged-awaited", {}));
+  return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, turn: false, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) }) : wholeReply(run, meta, signal);
 }
 
 /** A request with no tag, passed on untouched through RPH's model layer and answered in kind. */

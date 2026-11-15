@@ -1,11 +1,11 @@
 // The light extension's backend, started on Spindle's API (STANDALONE-PLAN §4.3): the question before
 // lore activates, the listener that pairs a prompt with its generation, and the prompt interceptor, each
 // registered once its permission is granted; the pipe between RPE and the pages; and the permission
-// check, whose notice stays up until everything the extension needs is granted. It keeps no settings;
-// its one file is RPE's registration (`registration.ts`).
+// check, whose notice stays up until everything the extension needs is granted. It keeps no settings and
+// no memory between generations: its values come with RPE's registration, and its one file is that
+// registration (`registration.ts`).
 
 import type { MissingPermission } from "../adapter/lumiverse/pipe-wire";
-import { KeptOut } from "./fail-closed";
 import { Generations } from "./generations";
 import { missing } from "./permissions";
 import { startPipe } from "./pipe";
@@ -15,18 +15,10 @@ import { Registrations } from "./registration";
 import type { ExtSpindle, ModalItem } from "./spindle";
 
 export interface ExtensionOptions {
-  /** How long RPE's answer to the question is waited for; `DEADLINE_MS` when not said. */
-  deadlineMs?: number;
-  /** How many chats the extension follows at once; `CHATS_FOLLOWED` when not said. */
-  chats?: number;
   /** The extension's build, said to RPE at its registration: the one the build stamps when absent. */
   build?: string;
 }
 
-/** Fixed: the answer is waited for well inside the ten seconds Lumiverse gives a World Info interceptor (`worker-host.ts:4937-4943`). */
-export const DEADLINE_MS = 3_000;
-/** Fixed: how many chats are followed at once, each for one generation; past it the one heard from longest ago is dropped. */
-export const CHATS_FOLLOWED = 256;
 /** Last in Lumiverse's order, lowest first (`interceptor-pipeline.ts:87-90`, `world-info-interceptor.ts:192-194`): the prompt as it will be sent, and the last word on lore. */
 export const PRIORITY = Number.MAX_SAFE_INTEGER;
 /** The notice's name, so the extension can close it again (`worker-host-presentation-api.ts:500-502`, `:542`). */
@@ -46,10 +38,8 @@ function noticeItems(lacking: readonly MissingPermission[]): ModalItem[] {
 }
 
 export async function startExtension(spindle: ExtSpindle, options: ExtensionOptions = {}): Promise<RunningExtension> {
-  const chats = options.chats ?? CHATS_FOLLOWED;
   const log = (message: string): void => spindle.log.warn(`[RPE] ${message}`);
-  const generations = new Generations(chats);
-  const keptOut = new KeptOut(chats);
+  const generations = new Generations();
   const registrations = new Registrations(spindle.userStorage, (url, init) => spindle.cors(url, init));
   let granted: readonly string[] = await spindle.permissions.getGranted();
   const lacking = (): MissingPermission[] => missing(granted);
@@ -92,7 +82,7 @@ export async function startExtension(spindle: ExtSpindle, options: ExtensionOpti
     pipe.permissions();
   };
 
-  const question = worldInfoInterceptor({ road: (user) => registrations.road(user), proxy: (url, init) => spindle.cors(url, init), generations, keptOut, deadlineMs: options.deadlineMs ?? DEADLINE_MS, log });
+  const question = worldInfoInterceptor({ road: (user) => registrations.road(user), proxy: (url, init) => spindle.cors(url, init), generations, log });
   const prompt = promptInterceptor({ generations, isRpe: (connection, user) => registrations.isRpe(connection, user), granted: (permission) => spindle.permissions.has(permission), log });
   let listening: (() => void)[] = [];
   let unregister: (() => void) | null = null;

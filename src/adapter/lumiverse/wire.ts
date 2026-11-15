@@ -127,7 +127,10 @@ export interface TagMessage {
   media?: number;
 }
 
-/** A lore entry Lumiverse activated for the prompt (`activatedWorldInfo`, `world-info-capture.ts:17-29`). */
+/**
+ * A lore entry Lumiverse activated for the prompt, as its `WORLD_INFO_ACTIVATED` event lists it (`activatedWorldInfo`,
+ * `world-info-capture.ts:17-29`; `generate.service.ts:2868-2879`). RPE hears it on its event socket; the tag carries none.
+ */
 export interface TagLore {
   id: string;
   book: string | null;
@@ -136,11 +139,11 @@ export interface TagLore {
   how: string | null;
 }
 
-/**
- * The history cut the extension made: on RPE's answer; or, with no answer in time, where RPE last said
- * to cut this chat (`remembered`), if that message was still on the path, else nothing.
- */
-export type TagCut = { answered: true; keep: KeepPoint | null; removed: number } | { answered: false; remembered: KeepPoint | null; removed: number };
+/** The history cut the extension made: on RPE's answer, or none when it had no answer in time (RPE then cuts on receipt). */
+export type TagCut = { answered: true; keep: KeepPoint | null; removed: number } | { answered: false };
+
+/** Which secrecy verdict the extension applied: RPE's answer, or its own fail-closed one, and why. */
+export type TagSecrecy = { by: "rpe" } | { by: "extension"; why: string };
 
 export interface Tag {
   v: 1;
@@ -154,8 +157,10 @@ export interface Tag {
   preset: string | null;
   persona: string | null;
   cut: TagCut;
+  secrecy: TagSecrecy;
+  /** The question's time, from asked to answered or given up at its wait, in milliseconds; null where none was asked for this prompt. */
+  question: { ms: number; answered: boolean } | null;
   messages: TagMessage[];
-  lore: TagLore[];
 }
 
 /** A prompt message as the history window reads it: whether it is chat history, and its place in the chat where Lumiverse said. */
@@ -305,20 +310,23 @@ export function readTag(body: unknown): { tag: Tag } | { absent: true } | { inva
   if (!isRecord(v.target) || !strOrNull(v.target.message) || !intOrNull(v.target.swipe) || !isRecord(v.speaker) || !strOrNull(v.speaker.id) || !strOrNull(v.speaker.name)) return { invalid: "the tag's target or speaker is malformed" };
   if (!str(v.connection) || !strOrNull(v.preset) || !strOrNull(v.persona)) return { invalid: "the tag's connection, preset or persona is malformed" };
   if (!isRecord(v.cut)) return { invalid: "the tag does not say what was cut" };
-  const at = v.cut.answered === true ? keepPoint(v.cut.keep) : v.cut.answered === false ? keepPoint(v.cut.remembered) : undefined;
-  if (at === undefined || !int(v.cut.removed)) return { invalid: "the tag's cut is malformed" };
-  const cut: TagCut = v.cut.answered === true ? { answered: true, keep: at, removed: v.cut.removed } : { answered: false, remembered: at, removed: v.cut.removed };
-  if (!Array.isArray(v.messages) || !Array.isArray(v.lore)) return { invalid: "the tag lists no messages or no lore" };
+  let cut: TagCut;
+  if (v.cut.answered === false) cut = { answered: false };
+  else {
+    const at = v.cut.answered === true ? keepPoint(v.cut.keep) : undefined;
+    if (at === undefined || !int(v.cut.removed)) return { invalid: "the tag's cut is malformed" };
+    cut = { answered: true, keep: at, removed: v.cut.removed };
+  }
+  const secrecy: TagSecrecy | null = isRecord(v.secrecy) && v.secrecy.by === "rpe" ? { by: "rpe" } : isRecord(v.secrecy) && v.secrecy.by === "extension" && str(v.secrecy.why) ? { by: "extension", why: v.secrecy.why } : null;
+  if (secrecy === null) return { invalid: "the tag does not say whose secrecy verdict was applied" };
+  const question = v.question === null ? null : isRecord(v.question) && int(v.question.ms) && typeof v.question.answered === "boolean" ? { ms: v.question.ms, answered: v.question.answered } : undefined;
+  if (question === undefined) return { invalid: "the tag's question time is malformed" };
+  if (!Array.isArray(v.messages)) return { invalid: "the tag lists no messages" };
   const messages: TagMessage[] = [];
   for (const m of v.messages) {
     const read = tagMessage(m);
     if (read === null) return { invalid: `the tag's message ${messages.length} is malformed` };
     messages.push(read);
-  }
-  const lore: TagLore[] = [];
-  for (const l of v.lore) {
-    if (!isRecord(l) || !str(l.id) || !strOrNull(l.book) || !str(l.title) || !strOrNull(l.how)) return { invalid: "the tag's lore is malformed" };
-    lore.push({ id: l.id, book: l.book, title: l.title, how: l.how });
   }
   return {
     tag: {
@@ -333,8 +341,9 @@ export function readTag(body: unknown): { tag: Tag } | { absent: true } | { inva
       preset: v.preset,
       persona: v.persona,
       cut,
+      secrecy,
+      question,
       messages,
-      lore,
     },
   };
 }

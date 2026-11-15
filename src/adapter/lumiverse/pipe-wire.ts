@@ -43,6 +43,8 @@ export interface Registration {
   relay: string;
   /** RPE's build. */
   build: string;
+  /** The extension's values, RPE's settings (R-1): how long it waits for RPE's answer to its question, and how many characters of RPE's words it writes in its log. */
+  values: { questionMs: number; logChars: number };
 }
 
 /** What the extension asks RPE to confirm of a registration besides its key, which is the ask's bearer: the relay socket and the connection the extension would act on. */
@@ -58,11 +60,9 @@ export interface Confirmed {
   relay: string;
 }
 
-/** What a page is handed when it starts: where it may reach RPE directly, RPE's build, and a page token. */
+/** What a page is handed when it starts: where it may reach RPE directly, RPE's build, a page token, and the page road's values. */
 export interface StartFacts {
   token: string;
-  /** When the token stops working, in milliseconds since 1970, by RPE's clock. */
-  expiresAt: number;
   /**
    * How long the token still works, in milliseconds, as RPE answered: a page schedules its renewal
    * from when the facts reach it, so a page whose clock is not RPE's never renews too soon or too late.
@@ -71,6 +71,10 @@ export interface StartFacts {
   /** RPE's addresses a browser may try directly, best first. */
   addresses: string[];
   build: string;
+  /** The page road's values, RPE's settings: how long a request through the extension waits for its answer, and how often a followed chat's follow is renewed. */
+  road: { requestMs: number; renewMs: number };
+  /** The page's own settings group whole, as RPE holds it at the global level (`src/shared/page-settings.ts`), by each setting's config key; the page checks each value itself. */
+  pageSettings: Readonly<Record<string, number>>;
 }
 
 /** A permission the extension is missing, and why it needs it. */
@@ -156,7 +160,8 @@ function headersOf(v: unknown): Record<string, string> | null {
 /** A registration as RPE sends it and the extension keeps it, or null. */
 export function readRegistration(v: unknown): Registration | null {
   if (!isRecord(v) || v.v !== 1 || !str(v.base) || !str(v.key) || !(v.connection === null || str(v.connection)) || !str(v.relay) || typeof v.build !== "string") return null;
-  return { v: 1, base: v.base, key: v.key, connection: v.connection, relay: v.relay, build: v.build };
+  if (!isRecord(v.values) || !count(v.values.questionMs) || !count(v.values.logChars)) return null;
+  return { v: 1, base: v.base, key: v.key, connection: v.connection, relay: v.relay, build: v.build, values: { questionMs: v.values.questionMs, logChars: v.values.logChars } };
 }
 
 /** What the extension asks RPE to confirm, or null. */
@@ -266,8 +271,11 @@ export function readLiveAsk(v: unknown): LiveAsk | null {
 
 /** RPE's start-up facts as its route answers them, or null. */
 export function readStartFacts(v: unknown): StartFacts | null {
-  if (!isRecord(v) || !str(v.token) || typeof v.expiresAt !== "number" || !count(v.expiresInMs) || !Array.isArray(v.addresses) || !v.addresses.every(str) || typeof v.build !== "string") return null;
-  return { token: v.token, expiresAt: v.expiresAt, expiresInMs: v.expiresInMs, addresses: [...v.addresses], build: v.build };
+  if (!isRecord(v) || !str(v.token) || !count(v.expiresInMs) || !Array.isArray(v.addresses) || !v.addresses.every(str) || typeof v.build !== "string") return null;
+  if (!isRecord(v.road) || !count(v.road.requestMs) || !count(v.road.renewMs) || !isRecord(v.pageSettings)) return null;
+  const pageSettings: Record<string, number> = {};
+  for (const [key, value] of Object.entries(v.pageSettings)) if (typeof value === "number") pageSettings[key] = value;
+  return { token: v.token, expiresInMs: v.expiresInMs, addresses: [...v.addresses], build: v.build, road: { requestMs: v.road.requestMs, renewMs: v.road.renewMs }, pageSettings };
 }
 
 /**

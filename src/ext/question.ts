@@ -2,16 +2,17 @@
 // interceptor. Lumiverse runs it in every prompt assembly while one is registered, with or without
 // candidate entries (`prompt-assembly.service.ts:2282-2316`; `world-info-interceptor.ts:212-221` skips
 // the chain only when no interceptor is registered). It sends RPE the chat, the path as the context
-// gives it (message ids and swipes) and what RPE needs of each candidate entry; applies RPE's verdict
-// on the secrets; and holds RPE's answer on the history cut for the prompt interceptor of the same
-// generation. With no answer in time it applies the fail-closed verdict (`fail-closed.ts`) and holds
-// only the cut RPE last gave the chat; when RPE answers that it could not work the secrets out, it
-// applies the same verdict and holds RPE's cut. For a user it holds no registration of RPE's for, it
-// asks nothing and applies that verdict alone, which needs nothing but the entries and touches only
-// those that carry RPE's marks or fields. Lumiverse gives it ten seconds and then forwards the
-// entries unchanged (`worker-host.ts:4936-4943`), and does the same when it throws (`worker-runtime.ts:
-// 4979-4989`, `world-info-interceptor.ts:384-392`), so it never throws and its deadline is well inside
-// that.
+// gives it (each message's id, place, swipe, whether it is the player's and its shown text's hash) and
+// what RPE needs of each candidate entry; applies RPE's verdict on the secrets; and hands RPE's cut,
+// whose verdict it applied and the question's time to the prompt interceptor of the same generation.
+// With no answer within RPE's wait (sent with its registration) it applies the fail-closed verdict
+// (`fail-closed.ts`) and cuts nothing, and RPE cuts on receipt; when RPE answers that it could not work
+// the secrets out, it applies the same verdict and hands on RPE's cut. It remembers nothing from one
+// generation to the next. For a user it holds no registration of RPE's for, it asks nothing and applies
+// that verdict alone, which needs nothing but the entries and touches only those that carry RPE's marks
+// or fields. Lumiverse gives it ten seconds and then forwards the entries unchanged
+// (`worker-host.ts:4936-4943`), and does the same when it throws (`worker-runtime.ts:4979-4989`,
+// `world-info-interceptor.ts:384-392`), so it never throws and RPE's wait is held inside that.
 
 import type { WorldInfoCandidate } from "../shared/host";
 import { textOf } from "../secrecy/lore-secrets";
@@ -19,19 +20,16 @@ import { textHash, type PathStep, type Question, type QuestionEntry } from "../a
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { hasSecretMarks, unreadableMarks } from "../shared/secret-marks";
-import { failClosed, type KeptOut } from "./fail-closed";
-import type { Generations } from "./generations";
+import { failClosed } from "./fail-closed";
+import type { Generations, Handoff } from "./generations";
 import { ask, type Road } from "./road";
 import type { ExtSpindle, WorldInfoReturn } from "./spindle";
 
 export interface QuestionDeps {
-  /** This user's RPE; null where none is registered for them, and then the fail-closed verdict alone applies. */
+  /** This user's RPE, with its values; null where none is registered for them, and then the fail-closed verdict alone applies. */
   road(user: string): Promise<Road | null>;
   proxy: ExtSpindle["cors"];
   generations: Generations;
-  keptOut: KeptOut;
-  /** How long RPE's answer is waited for. */
-  deadlineMs: number;
   log(message: string): void;
 }
 
@@ -79,30 +77,36 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
   return async (raw) => {
     const ctx = contextOf(raw);
     if (ctx === null) return {};
-    const fallBack = (why: string): WorldInfoReturn => {
+    const generation = ctx.purpose === "prompt" ? deps.generations.pending(ctx.user, ctx.chat) : null;
+    /** What the prompt interceptor of this generation is handed, where a prompt is being built for one. */
+    const handOn = (handoff: Handoff): void => {
+      if (generation !== null) deps.generations.hold(ctx.user, ctx.chat, generation.id, handoff);
+    };
+    const fallBack = (why: string, question: Handoff["question"]): WorldInfoReturn => {
       deps.log(`chat ${ctx.chat}: ${why}, so its secrets stay out of this prompt`);
-      if (ctx.purpose === "prompt") {
-        // Where RPE last said to cut this chat, while that message is still on the path, at its place now.
-        const remembered = deps.keptOut.cutOf(ctx.user, ctx.chat);
-        const at = remembered === null ? undefined : ctx.path.find((s) => s.id === remembered.id);
-        deps.generations.hold(ctx.user, ctx.chat, deps.generations.pending(ctx.user, ctx.chat)?.id ?? null, at === undefined ? null : { keep: { id: at.id, index: at.index }, by: "memory" });
-      }
-      return failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
+      handOn({ cut: null, secrecy: { by: "extension", why }, question });
+      return failClosed(ctx.candidates);
     };
     try {
       const road = await deps.road(ctx.user);
-      // Before RPE first registers, or where it is not this user's: nothing to ask, and the marks still hold.
-      if (road === null) return failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
-      const generation = ctx.purpose === "prompt" ? deps.generations.pending(ctx.user, ctx.chat) : null;
+      // Before RPE first registers, or where it is not this user's: nothing to ask, nothing waits, and the marks still hold.
+      if (road === null) {
+        handOn({ cut: null, secrecy: { by: "extension", why: "RPE has not registered with the extension for this user" }, question: null });
+        return failClosed(ctx.candidates);
+      }
       const question: Question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(entryOf) };
-      const reply = await ask(deps.proxy, road, question, deps.deadlineMs);
-      if ("none" in reply) return fallBack(reply.none);
-      deps.keptOut.heard(ctx.user, ctx.chat, reply.answer);
-      if (ctx.purpose === "prompt") deps.generations.hold(ctx.user, ctx.chat, generation?.id ?? null, reply.answer.cut === null ? null : { keep: reply.answer.cut.keep, by: "answer" });
+      const reply = await ask(deps.proxy, road, question);
+      if ("none" in reply) return fallBack(reply.none, { ms: reply.ms, answered: false });
+      const time = { ms: reply.ms, answered: true };
       // RPE could not work the secrets out: they stay out as with no answer, and its cut stands. RPE's log says so, once for the chat.
-      return reply.answer.secrecy ?? failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
+      if (reply.answer.secrecy === null) {
+        handOn({ cut: reply.answer.cut, secrecy: { by: "extension", why: "RPE could not work out the secrets" }, question: time });
+        return failClosed(ctx.candidates);
+      }
+      handOn({ cut: reply.answer.cut, secrecy: { by: "rpe" }, question: time });
+      return reply.answer.secrecy;
     } catch (error) {
-      return fallBack(`the extension failed (${error instanceof Error ? error.message : String(error)})`);
+      return fallBack(`the extension failed (${error instanceof Error ? error.message : String(error)})`, null);
     }
   };
 }

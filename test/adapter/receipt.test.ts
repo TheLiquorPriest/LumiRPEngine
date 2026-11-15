@@ -51,7 +51,7 @@ describe("the window made on receipt", () => {
     const out = await rig.generate("conn-rpe");
     expect(out.error).toBeNull();
     const tag = tagOf(out);
-    expect(tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
+    expect(tag.cut).toEqual({ answered: false });
     // What reached the interceptor: m11's words inside m10's message, and m10 at the number Lumiverse stored for it.
     const listed = tag.messages.flatMap((m) => (m.history && m.source ? [m.source] : []));
     expect(listed.map((s) => s.id)).toEqual(["m0", "m2", "m3", "m4", "m6", "m7", "m8", "m9", "m10"]);
@@ -123,7 +123,7 @@ describe("the window made on receipt", () => {
     const out = await rig.generate("conn-rpe");
     const tag = tagOf(out);
     expect(tag.cut).toMatchObject({ answered: true, keep: { id: "m8", index: 8 } });
-    const unanswered = { ...tag, cut: { answered: false as const, remembered: null, removed: 0 } };
+    const unanswered = { ...tag, cut: { answered: false as const } };
     const received = await receive(unanswered, out.body!, { user: USER, window: windowOf(4, 2), reads: reads(async (chat) => rig.lv.rowsOf(chat)) }, new AbortController().signal);
     expect(received.cut.keep).toEqual({ id: "m8", index: 8 });
   });

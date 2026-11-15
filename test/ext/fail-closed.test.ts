@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { WorldInfoCandidate } from "../../src/shared/host";
 import { worldInfoVerdict, type WorldInfoGate } from "../../src/secrecy/verdict";
-import { failClosed, KeptOut } from "../../src/ext/fail-closed";
+import { failClosed } from "../../src/ext/fail-closed";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { ROOT } from "../removal/fates";
 import { readTree } from "../removal/imports";
@@ -66,7 +66,7 @@ describe("the fail-closed answer", () => {
       const verdict = await worldInfoVerdict(unreadable, { chatId: "chat-coast", userId: "user-coast", chatMetadata: {}, entries });
       return { disabled: verdict.disabled, enabled: verdict.enabled, mutated: verdict.mutated ?? [] };
     });
-    const extension = await leftByChain(async (entries) => failClosed(entries, new Set()));
+    const extension = await leftByChain(async (entries) => failClosed(entries));
     expect(extension.map((e) => [e.id, e.disabled === true, e.content])).toEqual(today.map((e) => [e.id, e.disabled === true, e.content]));
     // The verdict did something: a whole-entry secret is off, a marked passage is cut.
     expect(extension.find((e) => e.id === "tunnel")!.disabled).toBe(true);
@@ -74,7 +74,7 @@ describe("the fail-closed answer", () => {
   });
 
   test("is the answer recorded from today's interceptor before its rule moved, entry for entry on invented books, with no copy of the rule left in the extension", () => {
-    expect(failClosed(books().map(candidateOf), new Set())).toEqual(recorded.blind as never);
+    expect(failClosed(books().map(candidateOf))).toEqual(recorded.blind as never);
     const source = readFileSync(resolve(import.meta.dir, "../../src/ext/fail-closed.ts"), "utf8");
     for (const copy of ["function blind", "function usersOwn"]) expect(source).not.toContain(copy);
     const edges = readTree(ROOT).edges.filter((edge) => edge.from === "src/ext/fail-closed.ts" && edge.to !== null).map((edge) => edge.to);
@@ -83,40 +83,11 @@ describe("the fail-closed answer", () => {
   });
 
   test("keeps every marked passage and every copy of a whole-entry secret out, and leaves the rest of each entry in", async () => {
-    const left = await leftByChain(async (entries) => failClosed(entries, new Set()));
+    const left = await leftByChain(async (entries) => failClosed(entries));
     const text = left.filter((e) => e.disabled !== true).map((e) => e.content).join("\n");
     for (const kept of ["KEEPER-SECRET", "TUNNEL-SECRET", "ICE-SECRET", "COPY-SECRET", "BROKEN-A", "BROKEN-B"]) expect(text).not.toContain(kept);
     for (const stays of ["The lighthouse is white.", "The harbor freezes in winter.", "The pier is old.", "The gulls are loud."]) expect(text).toContain(stays);
     // The engine's own sections are no secret's, as today.
     expect(left.find((e) => e.id === "engine")!.disabled).not.toBe(true);
-  });
-
-  test("adds what RPE last kept out of the chat, and only for this chat", () => {
-    const kept = new KeptOut(8);
-    kept.heard("user-coast", "chat-coast", { secrecy: { disabled: ["plain"], enabled: [], mutated: [] }, cut: null });
-    expect(failClosed(ENTRIES, kept.of("user-coast", "chat-coast")).disabled).toContain("plain");
-    expect(failClosed(ENTRIES, kept.of("user-coast", "chat-other")).disabled).not.toContain("plain");
-    // The latest answer replaces the one before.
-    kept.heard("user-coast", "chat-coast", { secrecy: { disabled: [], enabled: [], mutated: [] }, cut: null });
-    expect(failClosed(ENTRIES, kept.of("user-coast", "chat-coast")).disabled).not.toContain("plain");
-  });
-
-  test("remembers where RPE last said to cut a chat, through an answer that could not say", () => {
-    const kept = new KeptOut(8);
-    const none = { disabled: [], enabled: [], mutated: [] };
-    kept.heard("u", "chat-coast", { secrecy: none, cut: { keep: { id: "m7", index: 7 } } });
-    kept.heard("u", "chat-coast", { secrecy: none, cut: null });
-    expect(kept.cutOf("u", "chat-coast")).toEqual({ id: "m7", index: 7 });
-    expect(kept.cutOf("u", "chat-other")).toBeNull();
-    kept.heard("u", "chat-coast", { secrecy: none, cut: { keep: null } });
-    expect(kept.cutOf("u", "chat-coast")).toBeNull();
-  });
-
-  test("remembers no more chats than it is given, forgetting the one answered longest ago", () => {
-    const kept = new KeptOut(2);
-    for (const chat of ["a", "b", "c"]) kept.heard("u", chat, { secrecy: { disabled: [`${chat}-entry`], enabled: [], mutated: [] }, cut: null });
-    expect([...kept.of("u", "a")]).toEqual([]);
-    expect([...kept.of("u", "b")]).toEqual(["b-entry"]);
-    expect([...kept.of("u", "c")]).toEqual(["c-entry"]);
   });
 });

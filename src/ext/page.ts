@@ -21,7 +21,10 @@ export interface PageRoadSettings {
   renewMs: number;
 }
 
-/** Fixed defaults: past the proxy's 30 s (`worker-host.ts:771`); a third of RPE's 60 s lease (`relay.ts`). */
+/**
+ * The road's values until RPE's start facts give its own (`StartFacts.road`, RPE's settings `lumiverse.extension.requestWait` and
+ * `followRenewal`): past the proxy's 30 s (`worker-host.ts:771`); a third of RPE's 60 s lease (`relay.ts`).
+ */
 export const PAGE_ROAD_DEFAULTS: PageRoadSettings = { requestMs: 35_000, renewMs: 20_000 };
 
 export interface StartAnswer {
@@ -112,6 +115,8 @@ export function pageRoad(channel: PageChannel, options: { timers?: Timers; setti
     if (message === null) return;
     switch (message.rpe) {
       case "start":
+        // RPE's values for the road, from each start on.
+        if (message.facts !== null) Object.assign(settings, message.facts.road);
         for (const settle of starting.splice(0)) settle({ facts: message.facts, ...(message.error !== undefined ? { error: message.error } : {}), missing: message.missing });
         for (const handler of permissions) handler(message.missing);
         return;

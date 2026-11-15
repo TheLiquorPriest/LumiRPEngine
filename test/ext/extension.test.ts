@@ -5,11 +5,11 @@
 import { describe, expect, test } from "bun:test";
 import { textOf as textKey } from "../../src/secrecy/lore-secrets";
 import { textHash } from "../../src/adapter/lumiverse/wire";
-import { KeptOut } from "../../src/ext/fail-closed";
 import { Generations } from "../../src/ext/generations";
 import { promptInterceptor } from "../../src/ext/prompt";
 import { worldInfoInterceptor } from "../../src/ext/question";
-import { DEADLINE_MS, PRIORITY } from "../../src/ext/start";
+import { PRIORITY } from "../../src/ext/start";
+import { QUESTION_WAIT_MS as DEADLINE_MS } from "../../src/adapter/lumiverse/settings";
 import { ALL, FERRY_SECRET, FERRY_SHOWN, harborBooks, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET, type RigOptions } from "./rig";
 import { FakeClock, settle } from "../standin/clock";
 import { WORLD_INFO_INTERCEPTOR_TIMEOUT_MS } from "../standin/lore";
@@ -57,7 +57,7 @@ describe("the question before lore activates", () => {
 
     const turn = rig.turns[0]!;
     expect(turn.tag).toMatchObject({ user: USER, chat: "chat-harbor", generation: out.generationId!, kind: "new", connection: "conn-rpe", preset: PRESET.id, target: { message: announced.targetMessageId, swipe: 0 }, speaker: { id: "char-ilsa", name: "Ilsa" } });
-    expect(turn.tag.lore.map((l) => l.id).sort()).toEqual(["e-ferry", "e-public"]);
+    expect(turn.lore.map((l) => l.id).sort()).toEqual(["e-ferry", "e-public"]);
     expect(turn.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0, told: true, notices: [] });
     expect(turn.layout.complete).toBe(true);
     // The player's last two lines, sent in a row, reach the interceptor as one message with the first one's id and number, the second
@@ -113,7 +113,7 @@ describe("the question before lore activates", () => {
     for (const kept of [FERRY_SECRET, VAULT_SECRET]) expect(bodyText(out.body)).not.toContain(kept);
 
     const turn = rig.turns[0]!;
-    expect(turn.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
+    expect(turn.tag.cut).toEqual({ answered: false });
     expect(turn.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byExtension: null, byRpe: 7, told: true, notices: [] });
     expect(historyOf(turn)).toEqual(["m8", "m9", "m10"]);
     const played = promptText(turn.prompt);
@@ -153,20 +153,22 @@ describe("the question before lore activates", () => {
     for (const shown of [PUBLIC_LORE, INDEXED_SECRET, "The ferry crosses the bay at dawn."]) expect(text).toContain(shown);
   });
 
-  test("what RPE last kept out of a chat stays out when RPE stops answering, though no mark says it is secret; a restarted extension knows only the marks", async () => {
+  test("nothing is kept from one generation to the next: with RPE stopped, a running worker and a restarted one answer the same, by the marks alone", async () => {
     const rig = await new Rig().start();
     await rig.generate("conn-rpe");
     rig.rpeDown();
     await rig.generate("conn-other");
-    const remembered = bodyText(rig.otherBodies[0]!);
-    for (const kept of [INDEXED_SECRET, VAULT_SECRET, FERRY_SECRET]) expect(remembered).not.toContain(kept);
-    expect(remembered).toContain(PUBLIC_LORE);
+    const running = bodyText(rig.otherBodies[0]!);
+    // Only RPE knows the indexed entry is secret, and nothing marks it: with no answer it goes in.
+    expect(running).toContain(INDEXED_SECRET);
+    for (const kept of [VAULT_SECRET, FERRY_SECRET]) expect(running).not.toContain(kept);
+    expect(running).toContain(PUBLIC_LORE);
 
     await rig.restart();
     await rig.generate("conn-other");
-    const fresh = bodyText(rig.otherBodies[1]!);
-    expect(fresh).toContain(INDEXED_SECRET);
-    for (const kept of [VAULT_SECRET, FERRY_SECRET]) expect(fresh).not.toContain(kept);
+    const restarted = bodyText(rig.otherBodies[1]!);
+    expect(restarted).toContain(INDEXED_SECRET);
+    for (const kept of [VAULT_SECRET, FERRY_SECRET]) expect(restarted).not.toContain(kept);
   });
 
   test("a swipe is tagged as one, aimed at the swipe Lumiverse made, and the message it replaces is not on the path RPE is asked about", async () => {
@@ -237,7 +239,7 @@ describe("the request's parts, told apart", () => {
           await cutByRpe.generate("conn-rpe");
           const [a, b] = [cutByExtension.turns[0]!, cutByRpe.turns[0]!];
           expect(a.tag.cut).toMatchObject({ answered: true });
-          expect(b.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
+          expect(b.tag.cut).toEqual({ answered: false });
           // Counted by the chat's rows (`receipt.ts`): m11, inside m10's message, counts as a message of the window.
           expect(b.cut).toMatchObject({ keep: { id: "m8", index: 8 }, byRpe: 7 });
           expect(b.prompt).toEqual(a.prompt);
@@ -280,7 +282,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
     await installRpe(rig.lv, {
       code: (ext) => {
         const road = { base: RPE, headers: { "x-rpe-extension": "rpe-extension-key" } };
-        ext.registerWorldInfoInterceptor(worldInfoInterceptor({ road: async () => road, proxy: (url, init) => ext.cors(url, init), generations, keptOut: new KeptOut(16), deadlineMs: 3_000, log: () => undefined }), PRIORITY);
+        ext.registerWorldInfoInterceptor(worldInfoInterceptor({ road: async () => ({ ...road, waitMs: 3_000, logChars: 200 }), proxy: (url, init) => ext.cors(url, init), generations, log: () => undefined }), PRIORITY);
         ext.on("GENERATION_STARTED", (payload, user) => generations.started(payload, user));
         ext.registerInterceptor(promptInterceptor({ generations, isRpe, granted: (p) => ext.permissions.has(p), log: () => undefined }), { priority: PRIORITY, required: true });
       },
@@ -294,7 +296,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
         throw new Error("the generation's facts were lost");
       }
     }
-    await handWired(rig, new Lost(16), (c) => c === "conn-rpe");
+    await handWired(rig, new Lost(), (c) => c === "conn-rpe");
     const stopped = await rig.generate("conn-rpe");
     expect(stopped.error).toBe("RPE stopped this reply before it was sent, because its extension failed: the generation's facts were lost");
     expect(stopped.body).toBeNull();
@@ -308,7 +310,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
 
   test("when the extension cannot tell whose connection a reply is on, the reply goes through untouched: another chat's is played as before, and one on RPE's connection arrives untagged and is passed on", async () => {
     const rig = new Rig();
-    await handWired(rig, new Generations(16), () => {
+    await handWired(rig, new Generations(), () => {
       throw new Error("the registration could not be read");
     });
     const other = await rig.generate("conn-other");
@@ -395,13 +397,13 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
 });
 
 describe("a reply asked for whole", () => {
-  test("with the preset's streaming switch off, a reply on RPE's connection still comes to RPE as a stream, so a long turn can be kept alive; one on another connection keeps the switch", async () => {
+  test("with the preset's streaming switch off, a reply on RPE's connection comes to RPE whole, as asked, and is held under ten minutes; one on another connection keeps the switch", async () => {
     const rig = await new Rig({ streaming: false }).start();
     const ours = await rig.generate("conn-rpe");
     expect(ours.error).toBeNull();
-    expect(ours.body?.stream).toBe(true);
-    expect(ours.body?._streaming).toBeUndefined();
-    expect(rig.turns[0]?.whole).toBeUndefined();
+    expect(ours.body?.stream).toBe(false);
+    expect(rig.turns[0]?.whole).toBe(true);
+    expect(rig.turns[0]?.hold).toBeLessThan(600_000);
     expect(ours.reply).toMatchObject({ content: "The tide turns.", reasoning: "Thinking about the bay." });
     const theirs = await rig.generate("conn-other");
     expect(theirs.body?.stream).toBe(false);

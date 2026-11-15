@@ -16,11 +16,13 @@
 import type { Clock, HistoryRange } from "rp-harness/contract";
 import { AuthRefused, bearerOf, rawRoute, route, type App, type Area } from "../../app";
 import type { SettingsReader } from "../../app/config-read";
+import { PAGE_SETTINGS } from "../../app/page-settings";
 import { isRecord } from "../../shared/json";
 import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
 import { createChatReads, type ChatReads } from "./chat";
 import { createDbReader, type DbReader } from "./db";
 import { followChanges, type ChatChanges } from "./events";
+import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
@@ -127,9 +129,34 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   let parts: Lumiverse | null = null;
   let key: string | null = null;
   let offChanges: (() => void) | null = null;
+  let offLifecycle: (() => void) | null = null;
+  /** Lumiverse's id for RPE's extension, once an event of its own names it: its grant changes name it by id alone. */
+  let ownId: string | null = null;
+  /**
+   * RPE's extension stopped, started again or failing, or its grants changed: Lumiverse's own events on the "system" topic every
+   * user's socket joins (`SPINDLE_EXTENSION_UNLOADED`, `_LOADED`, `_ERROR`, `spindle/lifecycle.ts:101-129`, `worker-host.ts:1321-1325`;
+   * `SPINDLE_PERMISSION_CHANGED`, `lifecycle.ts:157`), in the words RPE's log keeps; null for any other event.
+   */
+  const lifecycleOf = (event: string, payload: unknown): string | null => {
+    if (!isRecord(payload)) return null;
+    if (payload.identifier === EXTENSION_IDENTIFIER && typeof payload.extensionId === "string") ownId = payload.extensionId;
+    if (payload.identifier !== EXTENSION_IDENTIFIER && (ownId === null || payload.extensionId !== ownId)) return null;
+    if (event === "SPINDLE_EXTENSION_UNLOADED") return "Lumiverse stopped RPE's extension.";
+    if (event === "SPINDLE_EXTENSION_LOADED") return "Lumiverse started RPE's extension.";
+    if (event === "SPINDLE_EXTENSION_ERROR") return `RPE's extension is failing in Lumiverse: ${typeof payload.error === "string" ? payload.error : "it said no more"}`;
+    if (event === "SPINDLE_PERMISSION_CHANGED") return `RPE's extension was ${payload.granted === true ? "granted" : "refused"} the "${String(payload.permission)}" permission in Lumiverse.`;
+    return null;
+  };
   const relaySession = newFrontendSession();
   const answers = new KeptAnswers();
   const log = (message: string): void => app?.log.warn(`[lumiverse] ${message}`);
+  /** The generations the event socket hears: their activated lore, and the ones on RPE's connection whose tagged request never came. */
+  const heard = new HeardGenerations({
+    rpeModel: (model) => app?.config.lumiverse.models.includes(model) === true,
+    asked: (chat, generation) => answers.answered(chat, generation),
+    untaggedEnd: ({ chat, generation, untagged, stopped }) =>
+      log(`generation ${generation} of chat ${chat} on RPE's connection ${stopped ? "was stopped" : "ended"} with no tagged request; ${untagged} request${untagged === 1 ? "" : "s"} with no tag came on RPE's connection meanwhile.`),
+  });
   /** The door's limits as the shared levels set them now. */
   const settings = (): LumiverseSettings => (deps.settings === undefined ? LUMIVERSE_DEFAULTS : lumiverseSettings(deps.settings.shared()));
   /** How the extension stands with RPE: until it answers, RPE is not registered. */
@@ -145,7 +172,9 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   /** What RPE tells the extension of itself: its address for the extension's road, on loopback, where RPE listens whatever its address; null until the server listens. */
   const registration = (): Registration | null => {
     const listening = app?.listening() ?? null;
-    return app === null || listening === null || key === null ? null : { v: 1, base: listening.loopback, key, connection: app.config.lumiverse.connection, relay: relaySession, build: app.version };
+    if (app === null || listening === null || key === null) return null;
+    const { questionMs, logChars } = settings().extension;
+    return { v: 1, base: listening.loopback, key, connection: app.config.lumiverse.connection, relay: relaySession, build: app.version, values: { questionMs, logChars } };
   };
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
@@ -241,13 +270,15 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             passConnection: lanes.passConnection,
             passWords: lanes.passWords,
             holdMs: () => settings().wholeHoldMs,
+            heard,
+            untaggedWhileAwaited: () => settings().untaggedWhileAwaited,
             modelNames,
             turns: lanes.turns,
             clock: deps.clock,
             commentMs: () => settings().commentMs,
             log,
           }),
-          question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, start: lanes.start, waitMs: () => settings().questionWaitMs, clock: deps.clock, kept: answers, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
+          question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, start: lanes.start, waitMs: () => settings().extension.questionMs, clock: deps.clock, kept: answers, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
         };
       } else status.why = NOT_SET_UP;
       at.routes.add("lumiverse", [
@@ -298,7 +329,11 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           raw: forOwner(async (_body, owner) => {
             try {
               const minted = await at.auth.mintPageToken(owner, "extension");
-              const facts: StartFacts = { token: minted.token, expiresAt: minted.expires, expiresInMs: Math.max(0, minted.expires - at.now()), addresses: addresses(), build: at.version };
+              const { requestMs, renewMs } = settings().extension;
+              // The page's settings group whole, as the levels every chat shares set it now.
+              const shared = deps.settings?.shared();
+              const pageSettings = Object.fromEntries(PAGE_SETTINGS.map((s) => [s.key, Number(shared === undefined ? s.default : shared.value(s))]));
+              const facts: StartFacts = { token: minted.token, expiresInMs: Math.max(0, minted.expires - at.now()), addresses: addresses(), build: at.version, road: { requestMs, renewMs }, pageSettings };
               return json(200, facts);
             } catch (error) {
               if (error instanceof AuthRefused) return json(error.status, { error: error.message });
@@ -326,7 +361,17 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       if (parts === null) return;
       // A new key at each start, handed to the extension in the registration: the one before it is retired.
       key = (await at.auth.makeKey("extension")).key;
-      offChanges = followChanges(parts.events, lanes.changes);
+      offChanges = followChanges(parts.events, {
+        changed: (change) => {
+          heard.heard(change);
+          lanes.changes.changed(change);
+        },
+        reopened: () => lanes.changes.reopened(),
+      });
+      offLifecycle = parts.events.onEvent((event, payload) => {
+        const said = lifecycleOf(event, payload);
+        if (said !== null) log(said);
+      });
       parts.relay.start();
       parts.session.keep();
       parts.events.start();
@@ -335,6 +380,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     stopping() {
       offChanges?.();
       offChanges = null;
+      offLifecycle?.();
+      offLifecycle = null;
       if (parts === null) return;
       parts.relay.stop();
       parts.events.stop();

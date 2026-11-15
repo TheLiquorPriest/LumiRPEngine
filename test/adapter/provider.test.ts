@@ -29,7 +29,8 @@ const tag: Tag = {
     { role: "system", length: 6, hash: textHash("Rules.") },
     { role: "user", length: 6, hash: textHash("Hello."), history: true, source: { id: "m1", index: 1 } },
   ],
-  lore: [],
+  secrecy: { by: "rpe" },
+  question: null,
 };
 
 const usage = { calls: 1, input: 7, cacheRead: 0, cacheWrite: 0, output: 2 };
@@ -54,6 +55,8 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     passConnection: () => "conn-author",
     passWords: async (key, fields) => `${key}${fields.detail ? `: ${fields.detail}` : ""}`,
     holdMs: () => 540_000,
+    heard: { tagged: () => [], untagged: () => false },
+    untaggedWhileAwaited: () => "pass",
     modelNames: () => ["rpe"],
     turns: { play },
     clock,

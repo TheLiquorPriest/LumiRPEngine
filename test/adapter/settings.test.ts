@@ -11,7 +11,8 @@ import { BREAKDOWN_TRIES, REREADS } from "../../src/adapter/lumiverse/http-reads
 import { WHOLE_HOLD_MS } from "../../src/adapter/lumiverse/provider";
 import { RELAY_DEFAULTS } from "../../src/adapter/lumiverse/relay";
 import { KEEP_EVERY_MS } from "../../src/adapter/lumiverse/session";
-import { LUMIVERSE_DEFAULTS, LUMIVERSE_SETTING_DEFS, LUMIVERSE_SETTINGS, lumiverseSettings, QUESTION_BODY_BYTES, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
+import { EXTENSION_LOG_CHARS, LUMIVERSE_DEFAULTS, LUMIVERSE_SETTING_DEFS, LUMIVERSE_SETTINGS, lumiverseSettings, QUESTION_BODY_BYTES, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
+import { PAGE_ROAD_DEFAULTS } from "../../src/ext/page";
 import { SOCKET_DEFAULTS } from "../../src/adapter/lumiverse/socket";
 import { COMMENT_MS } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, type Question } from "../../src/adapter/lumiverse/wire";
@@ -47,8 +48,9 @@ describe("the door's settings", () => {
       wholeHoldMs: WHOLE_HOLD_MS,
       relay: RELAY_DEFAULTS,
       questionBytes: QUESTION_BODY_BYTES,
-      questionWaitMs: QUESTION_WAIT_MS,
+      extension: { questionMs: QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS, requestMs: PAGE_ROAD_DEFAULTS.requestMs, renewMs: PAGE_ROAD_DEFAULTS.renewMs },
       search: CHAT_SEARCH_DEFAULTS,
+      untaggedWhileAwaited: "pass",
     });
     // Each is declared under `lumiverse:`, read from the levels every chat shares, with its name and its line for the Settings page.
     for (const s of LUMIVERSE_SETTINGS) {
@@ -67,6 +69,7 @@ describe("the door's settings", () => {
       for (const part of path.slice(0, -1)) at = (at[part] ??= {}) as Record<string, JsonValue>;
       at[path.at(-1)!] = value;
     }
+    (config.lumiverse as Record<string, JsonValue>).untagged = { whileAwaited: "fail" };
     const set = leaves(lumiverseSettings(readConfig([{ level: "global", file: "RPE-global.yml", text: JSON.stringify(config) }], null)));
     const defaults = leaves(LUMIVERSE_DEFAULTS);
     expect([...set.keys()]).toEqual([...defaults.keys()]);

@@ -27,7 +27,8 @@ test("the tag marks a summary in place of history, with the last message it stan
     persona: null,
     cut: { answered: true, keep: null, removed: 0 },
     messages: [summary],
-    lore: [],
+    secrecy: { by: "rpe" },
+    question: null,
   };
   const read = readTag({ [TAG_FIELD]: tag });
   expect("tag" in read ? read.tag.messages[0]?.summary : null).toBe(true);
