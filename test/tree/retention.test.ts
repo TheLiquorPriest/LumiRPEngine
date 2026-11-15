@@ -4,7 +4,7 @@
 // Every name and text is invented.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { KIT_SEED } from "rp-harness/testing/kit";
@@ -53,8 +53,8 @@ describe("retention", () => {
         await mkdir(dirname(join(folder, f)), { recursive: true });
         await writeFile(join(folder, f), `${f} of turn ${n}\n`);
       }
-      const begun = new Date(start + n * 3_600_000);
-      await utimes(join(folder, "turn.json"), begun, begun);
+      // When the turn was received is its record's, never its files' times.
+      await writeFile(join(folder, "turn.json"), `${JSON.stringify({ received: start + n * 3_600_000 })}\n`);
       folders.push(folder);
     }
     for (const session of ["s-1", "s-2"]) {

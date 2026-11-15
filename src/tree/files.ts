@@ -41,6 +41,11 @@ export interface TreeFiles extends FilesPort {
   turnDisk(scope: Scope): Promise<string | null>;
   /** The scope's session folder on disk; null when the chat is not placed. */
   sessionDisk(scope: Scope): Promise<string | null>;
+  /**
+   * RPE's own change of a file it writes as the harness (a turn's `turn.json`): `change` is given what the file holds now (null: none)
+   * and gives what it is to hold, read and written in the file's one turn of its queue, so two changes never lose each other.
+   */
+  update(scope: Scope, path: string, change: (old: string | null) => string): Promise<Written | Refused>;
 }
 
 /** A text's SHA-256, lower-case hex: how a write records what a file held. */
@@ -353,6 +358,23 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
 
     async sessionDisk(scope) {
       return await disk(scope, (await places(scope)).session);
+    },
+
+    async update(scope, path, change) {
+      const loc = location(scope);
+      const lookup = await lookupIn(scope, loc, path);
+      if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, "harness");
+      const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writableFor(await places(scope), "harness"));
+      if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", "harness");
+      return oneFileAtATime(await fileKey(deps.files, lookup.at.disk), async () => {
+        const again = await locate(loc, path);
+        if (!again.ok) return await refusal(scope, again.path, again.reason, "harness");
+        if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", "harness");
+        const old = again.at.is === "file" ? await readFile(again.at.disk, "utf8") : null;
+        const { result } = await apply({ ...again.at, disk: again.at.disk }, { op: "write", text: change(old) });
+        if (result.status !== "written") throw new Error(`${again.at.path} could not be changed (${result.reason}).`);
+        return result;
+      });
     },
   };
 }

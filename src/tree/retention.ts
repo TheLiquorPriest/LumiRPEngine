@@ -4,17 +4,19 @@
 // be made again. Session files are not pruned here: they stay until the chat is deleted. How many turn
 // folders are kept whole is the setting `retention.turnFolders` (`settings.ts`). Pruning runs when
 // asked for and after a turn, never during one: the folders of turns going on are left alone, however
-// old.
+// old. Newest is by when the turn was received, as its record says, or RPE's record of the turn its
+// folder's name gives; never by file times, which a copy or a restore of the tree resets.
 
-import { lstat, readdir, rm, stat } from "node:fs/promises";
+import { readFile, lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { TreeChats } from "./chats";
 import { SESSIONS_FOLDER, TURNS_FOLDER } from "./layout";
 import { type TreeSettings, treeSettingsOf } from "./settings";
+import { receivedOf, TURN_RECORD } from "./turn-record";
 import { type ChatLocation, locate } from "./view";
 
 /** What an older turn folder keeps (plan §5.5): its record, what it released, and its transcripts. */
-export const KEPT_IN_OLD_TURNS: readonly string[] = ["turn.json", "output", "transcripts"];
+export const KEPT_IN_OLD_TURNS: readonly string[] = [TURN_RECORD, "output", "transcripts"];
 
 export type RetentionSettings = Pick<TreeSettings, "turnFolders">;
 
@@ -53,12 +55,15 @@ async function measure(disk: string): Promise<{ files: number; bytes: number }> 
   return { files, bytes };
 }
 
+/** The id letters a turn folder's name ends with (`turn-<n>-<id8>`, `turnFolderName`). */
+const TURN_FOLDER = /^turn-\d+-([a-z0-9]+)$/;
+
 /**
- * Prunes a chat's turn folders: all but the newest `settings.turnFolders` (newest by when each was
- * begun: its `turn.json`, or the folder itself without one) keep only what plan §5.5 keeps. `spare`:
- * the folder names of turns going on, left alone.
+ * Prunes a chat's turn folders: all but the newest `settings.turnFolders` keep only what plan §5.5 keeps. Newest by when each
+ * turn was received: its `turn.json`, or `begun` (RPE's record of each turn, by the id letters its folder's name gives) for a
+ * folder without one; a folder neither says is the oldest. `spare`: the folder names of turns going on, left alone.
  */
-export async function pruneTurnFolders(loc: ChatLocation, settings: RetentionSettings, spare: ReadonlySet<string> = new Set()): Promise<Pruned> {
+export async function pruneTurnFolders(loc: ChatLocation, settings: RetentionSettings, spare: ReadonlySet<string> = new Set(), begun: ReadonlyMap<string, number> = new Map()): Promise<Pruned> {
   const pruned: Pruned = { folders: 0, files: 0, bytes: 0 };
   const sessions = await locate(loc, SESSIONS_FOLDER);
   if (!sessions.ok || sessions.at.is !== "folder" || sessions.at.disk === null) return pruned;
@@ -67,11 +72,9 @@ export async function pruneTurnFolders(loc: ChatLocation, settings: RetentionSet
     const turns = join(sessions.at.disk, session, TURNS_FOLDER);
     for (const name of await folderNames(turns)) {
       const disk = join(turns, name);
-      const begun = await stat(join(disk, "turn.json")).then(
-        (s) => s.mtimeMs,
-        async () => (await stat(disk)).mtimeMs,
-      );
-      folders.push({ name, disk, begun });
+      const recorded = await readFile(join(disk, TURN_RECORD), "utf8").then(receivedOf, () => null);
+      const letters = TURN_FOLDER.exec(name)?.[1];
+      folders.push({ name, disk, begun: recorded ?? (letters === undefined ? undefined : begun.get(letters)) ?? 0 });
     }
   }
   folders.sort((a, b) => b.begun - a.begun);
@@ -97,5 +100,5 @@ export async function pruneChat(deps: { files: string; chats: TreeChats }, user:
   const folders = deps.chats.folders(user, chat);
   if (folders === null) return { folders: 0, files: 0, bytes: 0 };
   const loc: ChatLocation = { files: deps.files, character: folders.character, chat: folders.chat };
-  return await pruneTurnFolders(loc, await retentionOf(loc), spare);
+  return await pruneTurnFolders(loc, await retentionOf(loc), spare, deps.chats.turnsBegun(user, chat));
 }

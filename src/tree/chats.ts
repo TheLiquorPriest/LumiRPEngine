@@ -10,7 +10,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AreaTables } from "../app/app";
 import type { Migration } from "../app/migrations";
-import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER } from "./layout";
+import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, id8, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER } from "./layout";
 
 /** How RPE's database takes a write: the application's write queue. */
 export interface TreeWrites {
@@ -192,6 +192,13 @@ export class TreeChats {
   folders(user: string, chat: string): ChatFolders | null {
     const row = this.db.query<{ character: string; folder: string }, [string, string]>("SELECT character, folder FROM tree_chat WHERE user = ? AND chat = ?").get(user, chat);
     return row === null ? null : { character: row.character, chat: row.folder };
+  }
+
+  /** When RPE's record of each of the chat's turns says it began, by the id's first letters a turn folder's name holds (`id8`); none where the store keeps no turns here. */
+  turnsBegun(user: string, chat: string): Map<string, number> {
+    const stored = this.db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'turn'").get()?.n === 1;
+    if (!stored) return new Map();
+    return new Map(this.db.query<{ id: string; created: number }, [string, string]>("SELECT id, created FROM turn WHERE user = ? AND chat = ?").all(user, chat).map((t) => [id8(t.id), t.created]));
   }
 
   /**

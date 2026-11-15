@@ -15,4 +15,5 @@ export { FILE_SETTINGS, levelFiles, levelTexts, sharedLevels, TREE_DEFAULTS, TRE
 export { CHAT_DEFAULTS, layShipped, layShippedChanges, RPE_GUIDANCE, type ShippedChange } from "./shipped";
 export { type ChatStorage, type NoteFile, type NoteFiles, noteFiles, type StorageDeps, treeStorage, type TreeStorage } from "./storage";
 export { SUGGESTION_STATES, type SuggestionState, type SuggestionsDeps, type TreeSuggestion, TreeSuggestions } from "./suggestions";
+export { mergedTurnRecord, mergeTurnRecord, receivedOf, TURN_RECORD, type TurnRecordChange, type TurnRecordMessage, type TurnRecordRun, type TurnRecordTokens } from "./turn-record";
 export { type ChatLocation, locate, placesOf, treeLayers } from "./view";
