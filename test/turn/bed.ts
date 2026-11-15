@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonValue, Log, Scope, TurnRequest } from "rp-harness/contract";
 import { type Answer, scriptedModel, type ScriptedModel } from "rp-harness/testing/rig";
-import { dataPaths, openApp, SecretsFile, type App, type RunningServer } from "../../src/app";
+import { dataPaths, openApp, SecretsFile, type App, type Area, type RunningServer } from "../../src/app";
 import { compose, type Composition } from "../../src/app/compose";
 import { configOf, prepareDataFolder } from "../../src/app/config";
 import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE } from "../../src/adapter/lumiverse/pipe-wire";
@@ -78,6 +78,8 @@ export interface TurnBedOptions {
   off?: readonly string[];
   /** The chat's messages before the test plays: the character's greeting when not given. */
   messages?: ChatMessage[];
+  /** Areas a test adds after the composition's own, made from the composition (its door, its turn lane). */
+  areas?: (composition: Composition) => readonly Area[];
 }
 
 /** The Author's answer in one call: its intent record, then its reply. */
@@ -163,7 +165,7 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     const startRpe = async () => {
       // Each agent starts on the effort its definition names, as the model layer gives it: `auto` and `inherit` are the connection's own, which the one scripted model has none of.
       const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: { agentModel: async (choice) => model.agentModel(choice.effort === undefined || choice.effort === "inherit" || choice.effort === "auto" ? "off" : choice.effort) } } });
-      const app = await openApp({ paths, config, version: "build-9", areas: composition.areas, ui: null, log: recordingLog(logged) });
+      const app = await openApp({ paths, config, version: "build-9", areas: [...composition.areas, ...(options.areas?.(composition) ?? [])], ui: null, log: recordingLog(logged) });
       cleanups.push(() => app.close());
       const turns = composition.turns();
       if (turns === null) throw new Error("the turn lane did not mount");

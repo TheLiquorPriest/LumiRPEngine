@@ -24,7 +24,13 @@ export interface TaggedTurn {
   cut: Cut;
   /** The model the request names: the connection's model in Lumiverse. */
   model: string | null;
-  stream: boolean;
+  /** Asked for whole, not streamed (§4.2, READINGS N-1): answered as one whole completion, of which nothing reaches Lumiverse before its end. */
+  whole?: boolean;
+  /**
+   * For a reply asked for whole: milliseconds from its arrival at which its turn is stopped where it stands, what it has going out,
+   * since Lumiverse cuts a generation that sent nothing for ten minutes. Absent: no hold.
+   */
+  hold?: number;
   /** The request's other fields as Lumiverse sent them: sampling, anything a preset or extension added. */
   parameters: JsonObject;
 }
@@ -138,12 +144,12 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
       layout: rawLayout(received.tag, received.messages, received.overlay.complete, hint),
       cut: received.cut,
       model: typeof model === "string" ? model : null,
-      stream: stream === true,
+      ...(stream === true ? {} : { whole: true }),
       parameters: parameters as JsonObject,
     };
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };
     const run = (out: ReplyStream, signal: AbortSignal): Promise<void> => deps.turns.play(turn, out, signal);
-    if (!turn.stream) return await wholeReply(run, meta, request.signal);
+    if (turn.whole === true) return await wholeReply(run, meta, request.signal);
     return streamedReply(run, meta, request.signal, { clock: deps.clock, keepAlive: { everyMs: deps.keepAliveMs ?? KEEP_ALIVE_MS, line: deps.turns.standbyLine(turn) } });
   };
 }

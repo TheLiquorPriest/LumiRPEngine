@@ -6,7 +6,7 @@
 // earlier ones, and the turn as the pages show it is its latest run.
 
 import type { Database } from "bun:sqlite";
-import type { ReplyError, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { LimitHit, ReplyError, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { Writes } from "./kv";
 
 /** Where a run stands: going on, or how it ended. */
@@ -44,6 +44,12 @@ export interface FolderWrite {
   /** Why it could not be written in full, where it could not; null where it was. */
   error: string | null;
 }
+
+/**
+ * What stopped a run where it stood, its reply going out with what it had: one of RPH's limits (calls, tokens, time), or the hold of a
+ * reply asked for whole, in milliseconds from the request's arrival.
+ */
+export type StoppedBy = { limit: LimitHit } | { hold: number };
 
 /** A run as it is kept. */
 export interface RunRecord {
@@ -99,6 +105,10 @@ export interface RunRecord {
   /** The progress lines that went to the chat's thinking block, in order. */
   progress: string[];
   error: ReplyError | null;
+  /** What stopped it where it stood; null for neither a limit nor the hold. */
+  stoppedBy: StoppedBy | null;
+  /** What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line. */
+  lastText: boolean;
   /** What Lumiverse puts in front of the reply when it saves it: the preset's prefill, or for a continue the text the message held. */
   base: string;
   /** What Lumiverse saved, where it is not what was released (plan §10.8 "Saved against released"); null when it is, or not yet saved. */
@@ -151,6 +161,8 @@ interface RunRow {
   reply: string;
   progress: string;
   error: string | null;
+  stopped_by: string | null;
+  last_text: number;
   base: string;
   saved: string | null;
   settled: number | null;
@@ -187,6 +199,8 @@ function recordOf(user: string, r: RunRow): RunRecord {
     reply: r.reply,
     progress: JSON.parse(r.progress) as string[],
     error: r.error === null ? null : (JSON.parse(r.error) as ReplyError),
+    stoppedBy: r.stopped_by === null ? null : (JSON.parse(r.stopped_by) as StoppedBy),
+    lastText: r.last_text === 1,
     base: r.base,
     saved: r.saved,
     settled: r.settled,
@@ -210,12 +224,12 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, stopped_by, last_text, base, saved, settled, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
          intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
-         usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved,
+         usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, base = excluded.base, saved = excluded.saved,
          settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
       [
         r.user,
@@ -244,6 +258,8 @@ export class Runs {
         r.reply,
         JSON.stringify(r.progress),
         r.error === null ? null : JSON.stringify(r.error),
+        r.stoppedBy === null ? null : JSON.stringify(r.stoppedBy),
+        r.lastText ? 1 : 0,
         r.base,
         r.saved,
         r.settled,

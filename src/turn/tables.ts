@@ -260,4 +260,13 @@ ALTER TABLE turn_run ADD COLUMN thinking TEXT;
 ALTER TABLE turn_run ADD COLUMN without_intent INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 11,
+    name: "what stopped each run where it stood, and whether its reply was the Author's last plain text",
+    // `stopped_by` JSON, as `runs.ts` reads it: `{ limit }` or `{ hold }`. A run kept before has neither, and no mark.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN stopped_by TEXT;
+ALTER TABLE turn_run ADD COLUMN last_text INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

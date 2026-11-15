@@ -29,7 +29,7 @@ type StopAnswer = ApiRoutes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"
 const CHAT_FIELDS: Record<keyof ChatList["chats"][number], true> = { id: true, name: true, lastTurnAt: true, running: true, played: true, world: true };
 const SUMMARY_FIELDS: Record<keyof TurnList["turns"][number], true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
 const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true, runs: true };
-const RUN_FIELDS: Record<keyof TurnDetail["runs"][number], true> = { id: true, run: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, trace: true, requests: true };
+const RUN_FIELDS: Record<keyof TurnDetail["runs"][number], true> = { id: true, run: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, stoppedBy: true, lastText: true, trace: true, requests: true };
 const fields = (shape: object): string[] => Object.keys(shape).sort();
 
 describe("the Turn page's routes", () => {

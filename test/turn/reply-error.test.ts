@@ -4,7 +4,7 @@
 // prompt. Played through the stand-in Lumiverse on the scripted model. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
-import { CHAT, CONNECTION, openTurnBed, PRESET, type TurnBed } from "./bed";
+import { CHAT, CONNECTION, openTurnBed, PRESET, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -23,4 +23,47 @@ test("a provider that fails before the reply: the notice carries the provider's 
   expect(seen?.reasoning).toContain("The model's provider failed before a reply was written.");
   expect(seen?.reasoning).not.toContain("UPSTREAM-WORDS");
   expect(seen?.reasoning).not.toContain("relay-7");
+});
+
+// The Author ends with no reply after `reply-missing`'s one reminder: its plain text, with no reply contract's mark, both times.
+const UNMARKED = [{ pieces: [{ text: "The keeper waits by the lamp." }] }, { pieces: [{ text: "The keeper still waits; the tide is in." }] }];
+
+test("the last plain text, when set: it goes to Lumiverse in place of the error line, and the run says the setting sent it", async () => {
+  const b = await openTurnBed({ answers: UNMARKED, global: "reply:\n  lastText: true\n" });
+  beds.push(b);
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+
+  expect(out.error).toBeNull();
+  expect(out.reply?.content).toBe("The keeper still waits; the tide is in.");
+  await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+  const run = b.turns.runs.byGeneration(USER, out.generationId!);
+  expect(run).toMatchObject({ status: "no-reply", lastText: true, reply: "The keeper still waits; the tide is in." });
+  expect(b.model.requests.length).toBe(2);
+});
+
+test("the error line by default: a run with no reply after the reminder ends with reply-errors.md's line, and its last text stays RPE's", async () => {
+  const b = await openTurnBed({ answers: UNMARKED });
+  beds.push(b);
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+
+  expect(out.error).toBe("The Author ended this turn without writing a reply. RPE's Turn page shows what it did.");
+  await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+  const run = b.turns.runs.byGeneration(USER, out.generationId!);
+  expect(run).toMatchObject({ status: "no-reply", lastText: false, reply: "" });
+  expect(run?.error).toMatchObject({ code: "no-reply", text: "The keeper still waits; the tide is in." });
+});
+
+test("a run stopped at its call limit ends with what it has: no reply written, the limit's line, and the run says which limit ended it", async () => {
+  const b = await openTurnBed({ answers: [{ pieces: [{ text: "<intent>Look first.</intent>" }, { call: "world_query", args: { at: "world" } }] }], global: "limits:\n  turn:\n    calls: 1\n" });
+  beds.push(b);
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+
+  expect(out.error).toBe("The turn reached its limit of 1 on calls before a reply was written.");
+  await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+  const run = b.turns.runs.byGeneration(USER, out.generationId!);
+  expect(run).toMatchObject({ status: "limit", stoppedBy: { limit: { limit: "calls", per: "turn", max: 1 } }, reply: "" });
+  expect(b.model.requests.length).toBe(1);
 });

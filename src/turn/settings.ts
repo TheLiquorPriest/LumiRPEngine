@@ -19,6 +19,8 @@
 //   since:
 //     editedBudget: 4000         tokens the briefing's "Since the last turn" spends on replies edited after their
 //                                turns, told in full, the newest first; the rest named in one line; null tells all
+//   reply:
+//     lastText: false            a turn that ends with no reply sends the Author's last plain text in place of the error line
 //   passConnection: <name>       the connection a request with no tag is passed on to (global level only;
 //                                absent: the default connection)
 //
@@ -45,6 +47,8 @@ export interface TurnSettings {
   /** How long a turn waits for the previous turn's run, in milliseconds. */
   previousRunMs: number;
   hiddenReadable: boolean;
+  /** A turn that ends with no reply sends the Author's last plain text to Lumiverse in place of the error line (plan §10.7). */
+  lastText: boolean;
   /** Tokens the replies edited after their turns may take in full in a briefing; null for no bound. */
   editedBudget: number | null;
   /** The history window (`src/story/window`). */
@@ -71,6 +75,8 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   previousRunMs: 20_000,
   // Appendix D.1: as today's setting, which is off.
   hiddenReadable: false,
+  // Appendix D.1: "When the Author ends with no reply: a plain error line in Lumiverse".
+  lastText: false,
   // Plan §6.3 tells an edited reply with its old and new text. A carried chat may find hundreds at its first turn: the bound keeps that
   // block within what the world state is given (`worldState.budget`), room for about three ordinary replies with both their texts.
   editedBudget: 4000,
@@ -92,6 +98,7 @@ const DEFS = {
   carry: { key: "carry", default: TURN_DEFAULTS.carry, takes: { type: "oneOf", values: CARRIES }, perConnection: false },
   previousRun: { key: "limits.previousRun", default: TURN_DEFAULTS.previousRunMs / 1000, takes: { type: "number", least: 0 }, perConnection: false },
   hiddenReadable: { key: "chat.hiddenReadable", default: TURN_DEFAULTS.hiddenReadable, takes: { type: "yesNo" }, perConnection: false },
+  lastText: { key: "reply.lastText", default: TURN_DEFAULTS.lastText, takes: { type: "yesNo" }, perConnection: false },
   editedBudget: { key: "since.editedBudget", default: TURN_DEFAULTS.editedBudget, takes: { type: "whole", least: 0 }, orNone: true, none: "every one in full", perConnection: false },
   window: { key: "history.window", default: TURN_DEFAULTS.window.size, takes: { type: "whole", least: 1 }, orNone: true, none: "every message kept", perConnection: false },
   step: { key: "history.step", default: TURN_DEFAULTS.window.step, takes: { type: "whole", least: 1 }, orNone: true, none: "off", perConnection: false },
@@ -159,6 +166,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     carry: value(DEFS.carry) as Carry,
     previousRunMs: (value(DEFS.previousRun) as number) * 1000,
     hiddenReadable: value(DEFS.hiddenReadable) as boolean,
+    lastText: value(DEFS.lastText) as boolean,
     editedBudget: value(DEFS.editedBudget) as number | null,
     window: {
       size: value(DEFS.window) as number | null,

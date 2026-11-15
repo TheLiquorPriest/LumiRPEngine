@@ -349,7 +349,7 @@ describe("a reply asked for whole", () => {
     expect(ours.error).toBeNull();
     expect(ours.body?.stream).toBe(true);
     expect(ours.body?._streaming).toBeUndefined();
-    expect(rig.turns[0]?.stream).toBe(true);
+    expect(rig.turns[0]?.whole).toBeUndefined();
     expect(ours.reply).toMatchObject({ content: "The tide turns.", reasoning: "Thinking about the bay." });
     const theirs = await rig.generate("conn-other");
     expect(theirs.body?.stream).toBe(false);

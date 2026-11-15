@@ -102,6 +102,16 @@ export async function castLayouts(guidance: Pick<Guidance, "part">, names: reado
 export const NO_SESSION = "none";
 
 /**
+ * How a run's reply ends where none went out whole: the reply-errors part's lines; whether `reply.lastText` sends the Author's last
+ * plain text in their place; and, for a reply asked for whole, its hold in milliseconds from its arrival, null for none.
+ */
+interface Ending {
+  errors: LinesPart | undefined;
+  lastText: boolean;
+  hold: number | null;
+}
+
+/**
  * One of the turn's own failures, refusals and stops (a turn RPE cannot play, a run stopped, a read of Lumiverse it cannot make) in the
  * words of the turn-errors part in force for the chat; the case's name alone where the part has no line for it or cannot be read, so
  * that a stop is never held up by its words.
@@ -464,6 +474,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         reply: "",
         progress: [],
         error: null,
+        stoppedBy: null,
+        lastText: false,
         base: front,
         saved: null,
         settled: null,
@@ -569,7 +581,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
             .finally(() => over.resolve());
         },
       };
-      await this.#run(run, request, out, signal, lines(errors), afterFolder);
+      await this.#run(run, request, out, signal, { errors: lines(errors), lastText: settings.lastText, hold: tagged.whole === true ? (tagged.hold ?? null) : null }, afterFolder);
       const early = this.#early.get(tag.generation);
       if (early !== undefined) {
         this.#early.delete(tag.generation);
@@ -696,6 +708,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         reply: "",
         progress: [],
         error: null,
+        stoppedBy: null,
+        lastText: false,
         base: "",
         saved: null,
         settled: null,
@@ -746,7 +760,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         over.resolve();
         throw error;
       }
-      void this.#run(run, request, NO_CHAT, new AbortController().signal, lines(errors), over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
+      void this.#run(run, request, NO_CHAT, new AbortController().signal, { errors: lines(errors), lastText: settings.lastText, hold: null }, over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
       return { turn: turn.id, run: run.id };
     } finally {
       intake.done();
@@ -1274,9 +1288,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   // ---------------------------------------------------------------- the run
 
-  async #run(run: Run, request: TurnRequest, out: ReplyStream, signal: AbortSignal, errors: LinesPart | undefined, over: PromiseWithResolvers<void>): Promise<void> {
+  async #run(run: Run, request: TurnRequest, out: ReplyStream, signal: AbortSignal, ending: Ending, over: PromiseWithResolvers<void>): Promise<void> {
     const { live, clock } = this.#d;
     const replied = Promise.withResolvers<void>();
+    // Lumiverse was given the reply's end, its finish or its line: after it, the hold has nothing left to answer.
+    let answered = false;
     // Lumiverse stopping before the reply is out stops the turn; after it, the run goes on (plan §10.9).
     const onAbort = (): void => {
       if (run.released === null) run.stop.abort(signal.reason);
@@ -1311,6 +1327,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       },
       finish: (usage) => {
         released();
+        answered = true;
         // What went out is kept before Lumiverse is told the reply ended: should RPE stop before the run does, the next intake ties it.
         void this.#d.runs.save(run, "keeping a released reply").catch((error: unknown) => this.#d.log.error("A released reply could not be kept.", { turn: run.turn, error: words(error) }));
         out.finish({ reason: "stop", usage: usageOut(usage) });
@@ -1318,13 +1335,43 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       },
       error: (e: ReplyError) => {
         run.error = e;
+        answered = true;
+        if (e.code === "limit" && e.limit !== undefined) run.stoppedBy ??= { limit: e.limit };
+        // Stopped where it stood, at a limit or at the hold: what the Author had written of the reply goes out as the whole reply.
+        if (run.stoppedBy !== null && run.reply !== "") {
+          out.finish({ reason: "stop" });
+          replied.resolve();
+          return;
+        }
+        // With `reply.lastText` on, the Author's last plain text, as the harness gives it with no reply, goes out in place of the line.
+        if (ending.lastText && e.text !== undefined) {
+          run.lastText = true;
+          sink.content(e.text);
+          out.finish({ reason: "stop" });
+          replied.resolve();
+          return;
+        }
         // The message Lumiverse keeps shows the same line in its thinking, filled with no detail: a thrown error's or a provider's own
         // words go out as the error alone, since what is kept in the thinking can reach a later prompt.
         const { detail: _detail, ...plain } = e;
-        out.error(this.#errorWords(e, errors), this.#errorWords(plain, errors));
+        out.error(this.#errorWords(e, ending.errors), this.#errorWords(plain, ending.errors));
         replied.resolve();
       },
     };
+    // A reply asked for whole is stopped where it stands at its hold, counted from its arrival, unless the chat's limit on a turn's time
+    // ends it first: nothing of it reaches Lumiverse before its end, and Lumiverse cuts a generation that sent nothing for ten minutes.
+    const { hold } = ending;
+    const holding =
+      hold === null
+        ? undefined
+        : clock.setTimeout(
+            () => {
+              if (answered) return;
+              run.stoppedBy ??= { hold };
+              run.stop.abort();
+            },
+            Math.max(0, run.received + hold - clock.now()),
+          );
     run.started = clock.now();
     void this.#d.harness()
       .answer(request, sink, run.stop.signal)
@@ -1333,6 +1380,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           run.status = outcome.status;
           run.usage = outcome.usage;
           if (outcome.error !== undefined) run.error = outcome.error;
+          if (outcome.limit !== undefined) run.stoppedBy ??= { limit: outcome.limit };
         },
         (error: unknown) => {
           run.status = "failed";
@@ -1343,6 +1391,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       )
       .finally(async () => {
         signal.removeEventListener("abort", onAbort);
+        if (holding !== undefined) clock.clearTimeout(holding);
         run.ended ??= clock.now();
         replied.resolve();
         try {

@@ -160,6 +160,8 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         usage: run.usage ?? NO_USAGE,
         reply: { text: run.reply, progress: [...run.progress] },
         error: run.error,
+        stoppedBy: run.stoppedBy,
+        lastText: run.lastText,
         trace: trace.filter(within),
         requests,
       };

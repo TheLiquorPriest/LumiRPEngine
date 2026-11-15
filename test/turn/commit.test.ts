@@ -192,3 +192,48 @@ describe("what a continue recorded", () => {
     expect(store.changes(turn.id).slice(before.length).map((c) => [c.lane, c.applied])).toEqual([["engine", true]]);
   });
 });
+
+describe("every step of the commit (plan §10.8)", () => {
+  test("tied by the saved id: a new reply's turn is tied to the message id Lumiverse saved it under, with the saved text's hash", async () => {
+    const b = await bed({ answers: [replying("The lamp turns.")] });
+    const generation = await play(b, "normal", "I climb the stairs.");
+    const turn = await settledTurn(b, generation);
+    const saved = b.db.rows("SELECT id, content FROM messages WHERE chat_id = ? ORDER BY index_in_chat DESC LIMIT 1", CHAT)[0]!;
+    expect(String(saved.content)).toBe("The lamp turns.");
+    expect(turn).toMatchObject({ status: "done", message: String(saved.id), hash: textHash("The lamp turns.") });
+    expect(b.turns.runs.byGeneration(USER, generation)).toMatchObject({ saved: null });
+  });
+
+  test("a missed end tied at the next intake: a new reply whose end RPE never heard is tied to what Lumiverse saved when the next turn comes in", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren nods.")] });
+    const hear = missEnds(b);
+    const first = await play(b, "normal", "I climb the stairs.");
+    await b.until("the first run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    const store = b.turns.store.user(USER);
+    const firstTurn = b.turns.runs.byGeneration(USER, first)!.turn;
+    expect(store.turn(firstTurn)?.status).toBe("open");
+    hear();
+
+    await settledTurn(b, await play(b, "normal", "I wait for the light."));
+    const saved = b.db.rows("SELECT id FROM messages WHERE chat_id = ? AND content = ?", CHAT, "The lamp turns.")[0]!;
+    expect(store.turn(firstTurn)).toMatchObject({ status: "done", message: String(saved.id), hash: textHash("The lamp turns.") });
+    expect(b.turns.runs.byGeneration(USER, first)?.settled).not.toBeNull();
+  });
+
+  test("a missed continue end tied at the next intake: the continue's turn is tied to the joined text Lumiverse saved when the next turn comes in", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Then it stops."), replying("Wren nods.")] });
+    const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    b.host.presets.get(PRESET)!.continuePostfix = " ";
+    const hear = missEnds(b);
+    const goneOn = await play(b, "continue");
+    await b.until("the continue's run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    const store = b.turns.store.user(USER);
+    expect(b.turns.runs.byGeneration(USER, goneOn)?.settled).toBeNull();
+    expect(store.turn(turn.id)?.hash).toBe(textHash("The lamp turns."));
+    hear();
+
+    await settledTurn(b, await play(b, "normal", "I wait for the light."));
+    expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash("The lamp turns. Then it stops.") });
+    expect(b.turns.runs.byGeneration(USER, goneOn)?.settled).not.toBeNull();
+  });
+});

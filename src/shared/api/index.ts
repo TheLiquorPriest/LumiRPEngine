@@ -848,6 +848,10 @@ export interface RunShown {
   reply: ReplySoFar;
   /** Why the reply failed, when it did. */
   error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed"; limit?: LimitHit; detail?: string; text?: string } | null;
+  /** What stopped it where it stood; null for neither a limit nor the hold. */
+  stoppedBy: StoppedBy | null;
+  /** What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line. */
+  lastText: boolean;
   /** Its own trace records, numbered from 1 within the run, as far as the read reaches (the turn's `trace`). */
   trace: TraceRecord[];
   /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call, each named by its path below the folder. */
@@ -981,6 +985,9 @@ export interface Status {
   name: "rpe";
   version: string;
 }
+
+/** What stopped a run where it stood, its reply going out with what it had: one of RPH's limits (calls, tokens, time), or the hold of a reply asked for whole, in milliseconds from the request's arrival. */
+export type StoppedBy = { limit: LimitHit } | { hold: number };
 
 /** True when the turn was running and is being stopped, false when it had already ended. */
 export interface StopReply {

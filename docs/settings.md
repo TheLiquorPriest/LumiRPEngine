@@ -31,6 +31,7 @@ The files are read again at every turn, so a change holds from the next turn on.
 | `carry` | `continuing` | What a session carries from turn to turn: `continuing` (the conversation itself, summarized when it no longer fits), `records`, or `nothing`. |
 | `limits.previousRun` | `20` | Seconds a turn waits for the run of the turn before it to end; then that run is stopped. |
 | `chat.hiddenReadable` | `false` | Whether agents may read the messages you hid from the prompt. |
+| `reply.lastText` | `false` | When the Author ends a turn with no reply, even after the reminder, send its last plain text to the chat as the reply in place of the error line. The Turn page shows that the setting sent it. |
 | `history.window` | `40` | How many of the chat's latest messages stay in the prompt. `~` keeps them all. |
 | `history.step` | none (off) | Lets the window grow by this many messages before it is cut back to its size. |
 | `history.hold.on` | `false` | Keeps a message in the prompt past the window while the story record does not cover it. `hold: true` is short for this. |

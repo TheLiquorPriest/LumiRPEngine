@@ -4,10 +4,10 @@
 // says the same. Written once here, read by the routes (`routes.ts`) and by every page through the
 // generated types.
 
-import { type Exactly, type Holds, type Infer, jobView, type Mutually, replyError, shape, traceRecord, usage } from "../app";
+import { type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, replyError, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { PanelRequest } from "./player";
-import type { RunKind, RunState } from "./runs";
+import type { RunKind, RunState, StoppedBy } from "./runs";
 
 const T = shape.text();
 const N = shape.number();
@@ -24,6 +24,13 @@ const runState = shape.named("TurnState", "Where a turn or a run stands: running
 type RunStateMirrored = Holds<Exactly<Infer<typeof runState>, RunState>>;
 
 const span = shape.named("Span", "A stretch of a model's own writing, in milliseconds since 1970: from its first token to its last; `to` null while it began and has not ended (a run stopped inside it).", shape.object({ from: N, to: nullable(N) }));
+
+const stoppedBy = shape.named(
+  "StoppedBy",
+  "What stopped a run where it stood, its reply going out with what it had: one of RPH's limits (calls, tokens, time), or the hold of a reply asked for whole, in milliseconds from the request's arrival.",
+  shape.union(shape.object({ limit: limitHit }), shape.object({ hold: N })),
+);
+type StoppedByMirrored = Holds<Exactly<Infer<typeof stoppedBy>, StoppedBy>>;
 
 const moments = shape.named(
   "TurnMoments",
@@ -89,6 +96,8 @@ const runShown = shape.named(
     usage,
     reply: field(replySoFar, "What this run sent to the chat."),
     error: field(nullable(replyError), "Why the reply failed, when it did."),
+    stoppedBy: field(nullable(stoppedBy), "What stopped it where it stood; null for neither a limit nor the hold."),
+    lastText: field(shape.yesNo(), "What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line."),
     trace: field(shape.list(traceRecord), "Its own trace records, numbered from 1 within the run, as far as the read reaches (the turn's `trace`)."),
     requests: field(
       shape.list(shape.object({ agent: T, definition: T, call: N, file: T })),
