@@ -83,13 +83,20 @@ export function maxTokensOf(parameters: TaggedTurn["parameters"]): number | unde
 
 /**
  * The history the window left out of the prompt, by place on the chat's path (`path`, every message's
- * id in order): everything before the first message kept. None when the window kept it all, or when
- * the kept message is not on the path.
+ * id in order): everything before the first message kept, as stretches each wholly covered by the
+ * story record or wholly not (`covered`, the ids the record covers along the turn's own line), in
+ * order. None when the window kept it all, or when the kept message is not on the path.
  */
-export function leftOutOf(keep: { id: string } | null, path: readonly string[]): HistoryRange[] {
-  if (keep === null) return [];
-  const at = path.indexOf(keep.id);
-  return at > 0 ? [{ from: 0, to: at }] : [];
+export function leftOutOf(keep: { id: string } | null, path: readonly string[], covered: ReadonlySet<string>): HistoryRange[] {
+  const at = keep === null ? -1 : path.indexOf(keep.id);
+  const out: HistoryRange[] = [];
+  for (let i = 0; i < at; i++) {
+    const isCovered = covered.has(path[i] ?? "");
+    const last = out.at(-1);
+    if (last !== undefined && last.covered === isCovered) last.to = i + 1;
+    else out.push({ from: i, to: i + 1, covered: isCovered });
+  }
+  return out;
 }
 
 /**

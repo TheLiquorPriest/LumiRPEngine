@@ -83,7 +83,7 @@ describe("the turn's folder", () => {
 
     // The history the window left in, and no other message, by the chat's places and ids; the harness is given the stretch the window
     // left out, and its view says so.
-    expect(b.requests[1]!.leftOut).toEqual([{ from: 0, to: 2 }]);
+    expect(b.requests[1]!.leftOut).toEqual([{ from: 0, to: 2, covered: false }]);
     const history = await text(b, scope, `${folder}${HISTORY_VIEW}`);
     inOrder(history, [`#2 (${reply!.id})`, "The lamp turns.", `#3 (${asked!.id})`, "I ask where the oil is kept."]);
     expect(history).toContain("Messages #0 to #1 of the chat are not in this prompt.");
@@ -107,7 +107,7 @@ describe("the turn's folder", () => {
     expect(JSON.stringify(b.model.requests[1])).toContain(JSON.stringify(`## World state\n\n${state.trimEnd()}`).slice(1, -1));
 
     const data = JSON.parse(await text(b, scope, `${folder}${TURN_FILES.turn}`)) as { turn: string; kind: string; parent: string | null; files: string[]; prompt: { leftOut: unknown } };
-    expect(data).toMatchObject({ turn: turn.id, kind: "new", parent: turn.parent, prompt: { leftOut: [{ from: 0, to: 2 }] } });
+    expect(data).toMatchObject({ turn: turn.id, kind: "new", parent: turn.parent, prompt: { leftOut: [{ from: 0, to: 2, covered: false }] } });
     expect(data.files).toEqual([TURN_FILES.persona, TURN_FILES.character, TURN_FILES.worldState].map((f) => `${folder}${f}`));
 
     // Generated: an agent's write to any of them is refused, and changes nothing.

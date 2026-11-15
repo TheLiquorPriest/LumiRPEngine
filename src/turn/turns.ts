@@ -36,7 +36,7 @@ import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
 import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
-import { type SceneSession, sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
+import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
 import { storySoFar } from "../story/sofar";
 import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
@@ -536,7 +536,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}),
           lead: settings.lead,
           prompt: messages,
-          leftOut: leftOutOf(tagged.cut.keep, steps.map((s) => s.id)),
+          // Each stretch the window left out, and whether the story record covers it, read at this turn along its own line.
+          leftOut: leftOutOf(tagged.cut.keep, steps.map((s) => s.id), tagged.cut.keep === null ? new Set() : storyCoverage({ store: this.#d.store, user, chat, turn: begun.id }).covered),
           briefing,
           carry: settings.carry,
           since,
@@ -1165,7 +1166,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const point = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn };
     const [soFarPart, briefPart] = await Promise.all([guidance.part(PARTS.storySoFar), guidance.part(PARTS.storyBrief)]);
     if (soFarPart?.format === "template") {
-      const keptFrom = leftOutOf(at.keep === null ? null : { id: at.keep }, steps.map((s) => s.id))[0]?.to ?? null;
+      const kept = at.keep === null ? -1 : steps.findIndex((s) => s.id === at.keep);
+      const keptFrom = kept > 0 ? kept : null;
       const soFar =
         keptFrom === null
           ? null
