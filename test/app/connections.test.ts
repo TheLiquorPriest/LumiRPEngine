@@ -172,6 +172,32 @@ describe("connections", () => {
       expect(await readFile(app.paths.secrets, "utf8")).not.toContain(KEY);
     });
 
+    test("every connection route acts for the owner, and a call made in another user's scope finds none of his connections", async () => {
+      // Another user's connection and key, kept under his own name.
+      await app.models.saveConnections({ user: OTHER }, { v: 1, default: "theirs", connections: [{ id: "theirs", name: "Their server", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:1234/v1" }] } as unknown as ConnectionsDoc);
+      await app.models.saveSecrets({ user: OTHER }, { v: 1, keys: { theirs: "sk-theirs-invented-0000" } } as unknown as SecretsDoc);
+      const theirs = async () => [await app.models.loadConnections({ user: OTHER }), await app.models.loadSecrets({ user: OTHER })];
+      const before = await theirs();
+      const body = (connection: unknown) => JSON.stringify({ connection });
+      const answers = [
+        // A user named in the query or the body is no part of what a route takes.
+        await fetch(`${server.url}/api/v1/connections?user=${OTHER}`, { headers: page }),
+        await fetch(`${server.url}/api/v1/connections`, { method: "POST", headers: page, body: JSON.stringify({ user: OTHER, connection: { name: "Mine", provider: "deepseek", auth: "none" } }) }),
+        // His connection's id, asked for by the owner's credential: each route acts on the owner's connections alone.
+        await fetch(`${server.url}/api/v1/connections/theirs/default`, { method: "PUT", headers: page }),
+        await fetch(`${server.url}/api/v1/connections/theirs/test`, { method: "POST", headers: page }),
+        await fetch(`${server.url}/api/v1/connections/theirs`, { method: "PUT", headers: page, body: body({ name: "Mine", provider: "deepseek", auth: "none" }) }),
+        await fetch(`${server.url}/api/v1/connections/theirs`, { method: "DELETE", headers: page }),
+      ];
+      expect(answers[1]?.status).toBe(400);
+      for (const answer of answers) {
+        const text = await answer.text();
+        expect({ url: answer.url, his: text.includes("Their server") || text.includes("sk-theirs") }).toEqual({ url: answer.url, his: false });
+      }
+      expect(await (await fetch(`${server.url}/api/v1/connections`, { headers: page })).text()).not.toContain("Their server");
+      expect(await theirs()).toEqual(before);
+    });
+
     test("refuse what is not a connection, a new one with an id, and a caller without a page's token", async () => {
       const post = (body: unknown, headers = page) => fetch(`${server.url}/api/v1/connections`, { method: "POST", headers, body: JSON.stringify(body) });
       expect((await post({ connection: { provider: "deepseek", auth: "key" } })).status).toBe(400);
