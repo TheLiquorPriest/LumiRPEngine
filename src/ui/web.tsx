@@ -270,7 +270,7 @@ export function startWeb(root: HTMLElement, options: WebOptions): () => void {
     gate,
     route,
     timers: deps.timers,
-    keptHost: () => webHost({ revokeMs: () => settings.values.get().downloadRevokeMs }),
+    keptHost: () => webHost({ revokeMs: () => settings.values.get().downloadRevokeMs, connections: async () => (await client.call("GET /api/v1/connections", {})).connections.map((c) => ({ id: c.id, name: c.name, model: c.model ?? null })) }),
     go(next) {
       const hash = hashOf(next);
       if (location.hash === hash) onHash();
