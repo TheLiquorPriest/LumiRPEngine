@@ -67,10 +67,11 @@ export interface LinesPart extends PartBase {
 
 export type PromptPart = TemplatePart | LinesPart;
 
-/** A skill in force: its header's name and description, and its body as written. */
+/** A skill in force: its header's name and description, its whole header as read (fields a reader of it names, such as `relive:`), and its body as written. */
 export interface Skill {
   name: string;
   description: string;
+  header: Record<string, unknown>;
   body: string;
   source: { path: string; level: LayerLevel };
 }
@@ -194,7 +195,7 @@ export function loadGuidance(files: Pick<FilesPort, "layers" | "read">, scope: S
       if (found === undefined) return undefined;
       try {
         const { header, body } = splitFile(found.text, found.path);
-        return { name: typeof header.name === "string" ? header.name : name, description: typeof header.description === "string" ? header.description : "", body, source: { path: found.path, level: found.level } };
+        return { name: typeof header.name === "string" ? header.name : name, description: typeof header.description === "string" ? header.description : "", header, body, source: { path: found.path, level: found.level } };
       } catch {
         return undefined;
       }
