@@ -187,6 +187,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N, permission: opt(callPermission), refused: opt(callRefusal) }),
     shape.object({ kind: shape.literal("rule_fired"), firing: ruleFiring }),
     shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("time"), length: N }),
+    shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("command"), detail: T }),
     shape.object({
       kind: shape.literal("hook"),
       hook: T,

@@ -104,15 +104,25 @@ export function compose(options: ComposeOptions = {}): Composition {
     const character = lv.character === null ? null : await reads.character(lv.character);
     return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
   };
+  // Every session of a chat, page by page.
+  const sessionsOf = async (user: string, chat: string) => {
+    const all: Awaited<ReturnType<ReturnType<typeof made>["harness"]["sessions"]["list"]>>["sessions"] = [];
+    for (let after: string | undefined; ; ) {
+      const page = await made().harness.sessions.list(user, chat, after === undefined ? undefined : { after });
+      all.push(...page.sessions);
+      if (page.next === undefined) return all;
+      after = page.next;
+    }
+  };
   // "Apply now" (R-119): the chat's open session starts its opening block afresh; none open, nothing to renew.
   const apply = async (user: string, chat: string): Promise<{ session: string | null }> => {
-    const open = (await made().harness.sessions.list(user, chat)).find((s) => s.state === "open");
+    const open = (await sessionsOf(user, chat)).find((s) => s.state === "open");
     if (open === undefined) return { session: null };
     await made().harness.definitions.apply({ user, chat, session: open.id });
     return { session: open.id };
   };
   // The sessions of a chat that are open now: a prune of the chat's files leaves them.
-  const openSessions = async (user: string, chat: string): Promise<string[]> => (await made().harness.sessions.list(user, chat)).filter((s) => s.state === "open").map((s) => s.id);
+  const openSessions = async (user: string, chat: string): Promise<string[]> => (await sessionsOf(user, chat)).filter((s) => s.state === "open").map((s) => s.id);
 
   const areas: Area[] = [
     appArea({
