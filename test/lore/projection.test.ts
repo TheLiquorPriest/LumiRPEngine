@@ -62,7 +62,7 @@ describe("the projection book", () => {
 
     await t.play();
     const turn = await t.begin();
-    await t.writes.run(() => recordStory(t.store, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ entry: "e-1", note: "Its east wing burned tonight." }]));
+    await t.writes.run(() => recordStory(t.store, { user: USER, chat: CHAT, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ entry: "e-1", note: "Its east wing burned tonight." }]));
     await t.tie(turn);
 
     expect(await projection.refresh(USER, CHAT)).toEqual({ off: true, removed: null });
@@ -110,7 +110,7 @@ describe("the projection book", () => {
     } });
     await t.play();
     const turn = await t.begin();
-    await t.writes.run(() => recordStory(t.store, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ part: "canon", item: null, value: { text: "The inn has twelve rooms.", who: ["Bram"] } }]));
+    await t.writes.run(() => recordStory(t.store, { user: USER, chat: CHAT, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ part: "canon", item: null, value: { text: "The inn has twelve rooms.", who: ["Bram"] } }]));
     await t.tie(turn);
     expect(await projection.refresh(USER, CHAT)).toMatchObject({ written: true });
     expect([...books.held.values()].flat()).toEqual([{ comment: "Bram", content: "The inn has twelve rooms.", keys: ["Bram"] }]);
