@@ -31,7 +31,8 @@ import { type BookReader, CAST_PLAYER_MIND, castFacts, castTools, chatLine, find
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording } from "../iface";
 import { indexedSearch } from "../iface/search";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
+import { bindingsInForce, EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storedBindings, storePath, storeWorlds } from "../lore";
+import type { PlaceSourcesReader } from "../places";
 import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
 import { MeaningIndex } from "../search/meaning";
@@ -243,6 +244,8 @@ export interface Turns {
   given(scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment): Promise<{ ref: string; text: string | null }[]>;
   /** A character's sources as Lumiverse holds them now, the cast's reader: what the Cast page marks each bound source by. */
   sources: SourceReader;
+  /** A place's lore as it is bound and as Lumiverse holds it now, the places' reader: what a place shows as its sources and a base is drawn against. */
+  placeSources: PlaceSourcesReader;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -388,6 +391,14 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     return parts.stores;
   };
   const sources = liveSources(() => options.lumiverse(), lore, files);
+  // A place's bound entries in force (the lore's bindings to `place:<id>`), and each entry as the lore reads it now, by the revision `liveSources` gives it.
+  const placeSources: PlaceSourcesReader = {
+    bindings: (user, place) => [...storedBindings(app.db, user)].flatMap(([entry, rows]) => bindingsInForce(rows).filter((r) => r.record === `place:${place}`).map((r) => ({ entry, aspect: r.aspect, by: r.by }))),
+    entry: async (scope, entry) => {
+      const [e] = await lore.read({ user: scope.user, chat: scope.chat }, [entry]);
+      return e === undefined ? null : { title: e.title, revision: e.revision ?? hashJson([e.title, e.keys, e.text]) };
+    },
+  };
   // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
   // Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use.
   facts.add(
@@ -410,7 +421,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, placeSources, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
@@ -536,5 +547,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources };
 }
