@@ -6,6 +6,7 @@
 // of the contract's `Harness`): at a turn's start, and after the writes of a turn or of a job.
 
 import type { SessionRow, Store } from "../store";
+import { STORY_OPS } from "./fold";
 import { storyAt } from "./path";
 import { type StoryItem, StoryRecord } from "./record";
 
@@ -35,6 +36,21 @@ export function sceneSession(store: Store, user: string, chat: string, turn: str
   const before = open === null ? current : sceneBefore(record, open);
   const summary = before?.fields.summary;
   return { session, scene: open?.id ?? "", summary: typeof summary === "string" ? summary : null };
+}
+
+/**
+ * He closes the scene the story holds open at the chat's head (plan §6.3 l.632, R-22): `close: true` on it, as his own change, of no
+ * turn, applied at once and placed after the newest reply on the chat's own line (so a swipe of that reply keeps it), by `player`,
+ * source `player`, inside the caller's queued write. The scene's id and the change; null when no scene is open there. His undo of
+ * the change is the store's.
+ */
+export function closeOpenScene(store: Store, user: string, chat: string): { scene: string; change: number } | null {
+  const u = store.user(user);
+  if (u.chat(chat) === null) return null;
+  const scene = StoryRecord.read(store, user, storyAt(u, chat, null)).current("scene");
+  if (scene === null || scene.closedBy !== null) return null;
+  const { changes } = u.record(u.writeTarget({ chat }), [{ lane: "story", op: STORY_OPS.write, value: { part: "scene", item: scene.id, value: { close: true } }, by: "player", source: "player" }]);
+  return { scene: scene.id, change: changes[0]?.id ?? 0 };
 }
 
 /** The scene that starts last before `scene` does (the later made, where two start together); null when none. */

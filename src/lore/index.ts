@@ -8,7 +8,7 @@ export { type LoreChatSettings, type LoreScope, type LoreSettingsFor, loreSettin
 export { bookRead, HoldersAt, KNOWLEDGE_BY, KNOWLEDGE_LANE, knowledgeApplied, knowledgeChange, knowledgeRecorded, markWording, narratorOf, peopleOf, type QuestionEntryLike, SECRET_MARK_LINE, SECRET_MARKS, type SecrecyAnswer, type SecrecyDeps, type SecrecyQuestion, type SecretIds, type SecretIdsDeps, type SecretSettings, type SecretSettingsFor, type SecretWords, type SecretsFor, secrecyAt, secrecyRules, secretIds, secretMarkLines, secretSettings, secretSettingsFor, secretWords, secretsHeld, type ShownSecret } from "./secrets";
 export { isFieldName, LORE_ANSWERS, LORE_BATCH, LORE_INDEX_FAMILY, LORE_INDEX_WRITE, LORE_KNOWN, LORE_LANE, LORE_TOOLS, loreBatchBlock, loreKnownBlock, loreLines, LoreRefusal, type LoreToolDeps, loreTools, namedFields } from "./tools";
 export { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
-export { type OverlayInput, overlayNotes, type OverlayWrite, overlayWrite } from "./overlays";
+export { type OverlayCheck, overlayCheck, overlayNotes, overlayRows } from "./overlays";
 export { type HorizonRecord, horizonRecords } from "./horizon";
 export { type ApprovalEdit, type ApprovalOutcome, type LoreBookWrites, type LoreEntryFields, LoreProposals, type LoreProposalsDeps, type LoreProposalView, type LoreWriteView, type ProposalStatus, type PutBackOutcome, type Refusal } from "./proposals";
 export { LoreProjection, type LoreProjectionDeps, type ProjectionBooks, type ProjectionOutcome } from "./projection";

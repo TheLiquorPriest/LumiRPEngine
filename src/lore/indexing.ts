@@ -28,7 +28,7 @@ import { type BindingRow, inForce, type LoreLink, pinLinks, putBindings, recordN
 import type { Lore, LoreAt, LoreCatalogEntry, LoreMapAsk } from "./lore";
 import { loreLine } from "./tools";
 import type { LoreMap, LoreMapLine } from "./map";
-import { type OverlayRow, overlayNoted, overlayRows } from "./overlays";
+import { type OverlayRow, overlayNoted } from "./overlays";
 import type { LoreBookListing, LorePath } from "./sources";
 
 /** Every fixed value of the index, each a setting with this default. */
@@ -205,7 +205,7 @@ export interface LoreIndexDeps {
   lore: Lore;
   db: Database;
   writes: LoreWrites;
-  /** The turns each reading of the overlays sees. */
+  /** What each reading of the overlays sees: the story's overlays as the store folded them at its point. */
   path: LorePath;
   settings?: Partial<LoreIndexSettings>;
   /** Where the chat's readable index is written; absent, it is not written. */
@@ -270,7 +270,7 @@ export class LoreIndex {
    * A note travels with the entry to every reader, as it does to every part of the lore map.
    */
   private async noted(at: LoreAt, entries: LoreEntry[]): Promise<LoreEntry[]> {
-    const notes = overlayNoted(this.deps.db, at.user, this.deps.path.turns(at.user, at.chat, at.turn), entries.map((e) => e.id));
+    const notes = overlayNoted(this.deps.path.overlays(at.user, at.chat, at.turn), entries.map((e) => e.id));
     if (notes.size === 0) return entries;
     const lines = await this.lines(at);
     return entries.map((e) => {
@@ -281,7 +281,7 @@ export class LoreIndex {
 
   /** The overlays on the chat's path as the Lore page lists them: each with its entry (and the entry's title where the chat's lore holds it), its note, the turn that wrote it and who wrote it, in the path's order. */
   async overlays(at: LoreAt): Promise<(OverlayRow & { title: string | null })[]> {
-    const rows = overlayRows(this.deps.db, at.user, this.deps.path.turns(at.user, at.chat, at.turn));
+    const rows = this.deps.path.overlays(at.user, at.chat, at.turn);
     if (rows.length === 0) return [];
     const titles = new Map((await this.deps.lore.catalog(at)).map((e) => [e.id, e.title]));
     return rows.map((r) => ({ ...r, title: titles.get(r.entry) ?? null }));
@@ -318,7 +318,6 @@ export class LoreIndex {
         ...(e.indexed ? {} : e.stale ? { stale: true } : { keys: e.keys }),
       };
     };
-    const turns = this.deps.path.turns(ask.user, ask.chat, ask.turn);
     const first1 = first.inPrompt.map(described);
     const first3 = first.world.map(described);
 
@@ -341,7 +340,7 @@ export class LoreIndex {
       return e === undefined ? [] : [{ ...described({ id, title: e.title }), bound: to }];
     });
     // The story's notes travel with the entry: every part that shows an entry shows what the story has moved past in it, each note with the turn it was written on. So do its secrets, each by id with who holds it.
-    const notes = overlayNoted(this.deps.db, ask.user, turns, [...first1, ...first3, ...bound4].map((l) => l.id));
+    const notes = overlayNoted(this.deps.path.overlays(ask.user, ask.chat, ask.turn), [...first1, ...first3, ...bound4].map((l) => l.id));
     const secrets = new Map((await this.deps.lore.read(ask, [...new Set([...first1, ...first3, ...bound4].map((l) => l.id))])).flatMap((e) => (e.secrets === undefined || e.secrets.length === 0 ? [] : [[e.id, e.secrets.map((s) => ({ id: s.id, holders: s.heldBy }))] as const])));
     const noted = (l: LoreMapLine): LoreMapLine => {
       const n = notes.get(l.id);

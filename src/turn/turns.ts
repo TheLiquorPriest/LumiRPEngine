@@ -37,7 +37,7 @@ import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, t
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
 import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
-import { joinStory, type SceneSession, sceneSession, storyBrief, storyCoverage, storyMark, storyRecordParts, takeBackStory } from "../story";
+import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
 import { storySoFar } from "../story/sofar";
 import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
@@ -411,7 +411,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (row === null || row.status === "dropped" || row.joined !== null) return;
     const own = r.held !== null;
     takeBackCast(db, r.user, turn, own ? -1 : (r.castMark ?? -1));
-    takeBackStory(db, r.user, turn, own ? -1 : (r.storyMark ?? -1));
     store.takeBack(turn, own ? -1 : (r.mark ?? -1));
   }
 
@@ -587,7 +586,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         held: tag.kind === "continue" ? begun.id : null,
         mark: null,
         castMark: null,
-        storyMark: null,
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
@@ -937,7 +935,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // What it records is the turn's, counted from marks taken as a continue's are, in the write that keeps it and holds it.
         mark: null,
         castMark: null,
-        storyMark: null,
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
@@ -1885,7 +1882,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         }
         // The owners' take-backs of the held turn first, which leave a job's rows; then the joins, which move those.
         takeBackCast(db, user, heldTurn, -1);
-        takeBackStory(db, user, heldTurn, -1);
         store.takeBack(heldTurn, -1);
         this.#join(db, user, record, heldTurn, into.id);
         if (tiedAgain) store.tieTurn(into.id, { message: written.message.id, hash: textHash(written.text), date: written.date, status: into.status === "cut" ? "cut" : "done" });
@@ -1952,16 +1948,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   #join(db: Database, user: string, run: RunRecord, held: string, into: string): void {
     const store = this.#d.store.user(user);
     const castFrom = castMark(db, user, into);
-    const storyFrom = storyMark(db, user, into);
     const ownLast = store.changes(into).at(-1)?.ord ?? -1;
     joinCast(this.#d.store, user, held, into);
-    joinStory(this.#d.store, user, held, into);
     const moved = store.joinTurn(held, into);
     this.#d.since.told(db, user, into, [...this.#d.since.toldTo(user, held)]);
     this.#d.marks.join(db, user, held, into);
     run.mark = (moved[0]?.ord ?? ownLast + 1) - 1;
     run.castMark = castFrom;
-    run.storyMark = storyFrom;
     this.#d.runs.join(db, run, into);
     const spent = this.#d.runs.ofTurn(user, into).flatMap((r) => (r.usage === null ? [] : [r.usage]));
     if (spent.length > 0) store.updateTurn(into, { tokensIn: spent.reduce((n, u) => n + u.input, 0), tokensOut: spent.reduce((n, u) => n + u.output, 0) });

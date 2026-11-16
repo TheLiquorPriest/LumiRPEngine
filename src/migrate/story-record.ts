@@ -29,6 +29,7 @@ import type { Beat, CastStanding, Draft, Rec } from "../shared/ledger";
 import type { Store, TurnRow, UserStore } from "../store";
 import { type StoryWrite, writeStory } from "../story";
 import { type StoryClock, storyClock } from "../story/kit";
+import { refreshStoryBases } from "../story/upgrade";
 import { importedTurns, pathTurns, recordOf } from "./history";
 import { MIGRATION_WRITER } from "./minds";
 import type { People } from "./people";
@@ -177,7 +178,7 @@ export function carryStory(input: { db: Database; store: Store; s: UserStore; ch
         const character = people.of(turn, c.entity).id;
         return { character, part: "casting", item: castingItemId(character), value: { as: c.standing, why: c.why ?? null } };
       });
-      if (story.length > 0) writeStory(db, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, now: input.now }, story);
+      if (story.length > 0) writeStory(store, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, source: "import" }, story);
       if (cast.length > 0) writeCast(db, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, at: turn.storyTime, now: input.now }, cast);
       counts.beats += part.beats.length;
       counts.struck += part.struck.length;
@@ -190,6 +191,9 @@ export function carryStory(input: { db: Database; store: Store; s: UserStore; ch
     out.futures += counts.futures;
     out.castings += counts.castings;
   }
+  // The starting states the import set stand for every turn before theirs: they are given the story just written, and what the store held of them is let go.
+  refreshStoryBases(db, s.id);
+  store.dropCaches();
   const carried = new Set(input.chats);
   out.apart = apartBy([...input.inside].filter(([chat]) => !carried.has(chat)), input.fate);
   // The player's pins, as each chat shows them now: the latest casting on its path of each person whose character is the chat's, its standing where the player pinned it, none where they didn't or no casting of the person is on the path.

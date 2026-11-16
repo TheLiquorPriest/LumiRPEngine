@@ -13,6 +13,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import type { MigrationReport } from "../../src/migrate/report";
 import { ALL_PACKS } from "../../src/packs/index";
 import { openStore, type Store, storedWorlds, type UserStore } from "../../src/store";
+import { STORY_STORE_AREA } from "../../src/story";
 import { NOTES_FOLDER, TreeChats } from "../../src/tree";
 import { USER } from "./fixture";
 import { readable } from "./tree";

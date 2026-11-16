@@ -43,8 +43,6 @@ export interface StoryRoutesDeps {
   files(user: string, chat: string): GuidanceFiles;
   /** The story's settings for the chat, over `STORY_DEFAULTS`: `queryItems` bounds each list. */
   settings(user: string, chat: string): Promise<Partial<StorySettings>>;
-  /** Milliseconds since 1970, for the time of a strike's row; `Date.now` when absent. */
-  now?: () => number;
 }
 
 /** Why a page's request is not done: its status, and the line of the story's answers that says so. */
@@ -83,7 +81,7 @@ function readingAt(store: Store, user: string, chat: string, turn: string | null
   const known = new Map<string, boolean>();
   return {
     s,
-    record: StoryRecord.read(store.db, user, storyAt(s, chat, turn)),
+    record: StoryRecord.read(store, user, storyAt(s, chat, turn)),
     clock: storyClock(store, user, chat, turn),
     imported(t) {
       let was = known.get(t);
@@ -133,7 +131,7 @@ function strikeOf(body: StoryStrike): StrikeAsked {
  * change that chat as well.
  */
 function struck(deps: StoryRoutesDeps, user: string, chat: string, ask: StrikeAsked): Promise<boolean> {
-  return deps.writes.run((db) => {
+  return deps.writes.run(() => {
     if (deps.turning(user, chat)) throw new Refused(409, "page_turning");
     const r = readingAt(deps.store, user, chat, null);
     const item = r.record.items.get(ask.id);
@@ -143,7 +141,7 @@ function struck(deps: StoryRoutesDeps, user: string, chat: string, ask: StrikeAs
     const turn = r.record.at.turns.at(-1) as string;
     if (r.s.turn(turn)?.chat !== chat) throw new Refused(409, "page_branch_no_turn");
     const value: JsonObject = ask.struck ? { drop: true, ...(ask.why !== null ? { why: ask.why } : {}) } : { drop: false };
-    writeStory(db, { user, turn, by: PLAYER, agent: null, job: null, now: (deps.now ?? Date.now)() }, [{ part: item.part, item: item.id, value }]);
+    writeStory(deps.store, { user, turn, by: PLAYER, agent: null, job: null, source: "player" }, [{ part: item.part, item: item.id, value }]);
     return true;
   }, "striking an item of the story record from a page");
 }

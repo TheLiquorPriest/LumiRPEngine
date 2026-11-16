@@ -97,7 +97,7 @@ describe("what today's build recorded beside each turn", () => {
       expect(brief.fields.futures?.items.map((f) => f.text)).toEqual(["A ship comes in at dawn."]);
       expect(brief.text).toContain("A ship comes in at dawn.");
       // On the swipe not shown: the beat it struck dropped, its own beat with who and where by name, every field written, the draft it settled closed.
-      const record = StoryRecord.read(db, USER, storyAt(s, CHAT.harness, lit));
+      const record = StoryRecord.read(store, USER, storyAt(s, CHAT.harness, lit));
       expect(record.of("beat").map((b) => b.fields.text)).toEqual(["Ada lit the lamp."]);
       expect(record.items.get("b:b1")).toMatchObject({ dropped: true, fields: { text: "Fog came.", why: "The fog came after the lamp was lit." } });
       expect(record.items.get("b:b2")?.fields).toEqual({ text: "Ada lit the lamp.", who: [PEOPLE.ada.name, PEOPLE.bo.name], place: "Home", kind: "do", surface: "The lamp glows.", quotes: [], time: "Thu 1 Jan 2026, 12:30 AM" });

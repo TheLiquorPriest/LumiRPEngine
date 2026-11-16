@@ -32,7 +32,7 @@ export interface LoreProjectionDeps {
   db: Database;
   writes: LoreWrites;
   lore: Lore;
-  /** The turns on a chat's path, whose overlays the book holds. */
+  /** The chat's path, whose overlays the book holds. */
   path: LorePath;
   books: ProjectionBooks;
   /** The user's setting for the chat; off unless the user turns it on. */
@@ -67,7 +67,7 @@ export class LoreProjection {
   }
 
   async #refresh(user: string, chat: string): Promise<ProjectionOutcome> {
-    const { db, writes, books } = this.deps;
+    const { writes, books } = this.deps;
     const held = this.#held(user, chat);
     if (!(await this.deps.enabled(user, chat))) {
       if (held === null) return { off: true, removed: null };
@@ -75,7 +75,7 @@ export class LoreProjection {
       await writes.run((d) => d.run("DELETE FROM lore_projection WHERE user = ? AND chat = ?", [user, chat]), "taking away a projection book");
       return { off: true, removed: held.book };
     }
-    const notes = overlayNotes(db, user, this.deps.path.turns(user, chat), null);
+    const notes = overlayNotes(this.deps.path.overlays(user, chat), null);
     const lines = await this.deps.lines({ user, chat });
     const read = await this.deps.lore.read({ user, chat }, [...notes.keys()]);
     const entries = read.flatMap((e): LoreEntryFields[] => {

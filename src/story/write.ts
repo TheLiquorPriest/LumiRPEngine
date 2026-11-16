@@ -18,7 +18,7 @@ import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
 import { type Lane, STANDINGS } from "../store";
 import { allSpans, itemView, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, valueView } from "./kit";
-import { keyedItemId, type StoryPart, type StoryRecord, type StoryRow, storyMark, writeStory } from "./record";
+import { keyedItemId, recordStory, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
 
 /** The lane every operation of the tool writes to. */
 export const STORY_LANE: Lane = "story";
@@ -266,7 +266,7 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
     reports.push(due !== null && now !== null ? { line: "due_now", fields: { n, op, due, now } } : { line: "due_now_undated", fields: { n, op } });
   }
   if (typeof value.due === "string") reports.push({ line: r.clock === null ? "no_clock" : "unreadable_time", fields: { n, op, field: "due", value: JSON.stringify(value.due) } });
-  r.record.apply({ id: 0, turn: r.turn, ord: n, part: def.part, item: found.item, value, by: null, agent: null, job: null, created: 0 });
+  r.record.apply({ part: def.part, item: found.item, value, turn: r.turn });
   out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
   return out;
 }
@@ -305,37 +305,36 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   }
   const read = ops.flatMap((o) => (o.read === undefined ? [] : [o.read]));
 
-  const writer = { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, now: (call.deps.now ?? Date.now)() };
+  const writer = { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null };
   const overlay = call.deps.overlay;
-  let written: { rows: Map<number, StoryRow>; overlays: Map<number, JsonObject> };
+  let recorded: StoryRecorded[];
   try {
-    written = await writes.run((db) => {
-      const rows = new Map<number, StoryRow>();
-      const overlays = new Map<number, JsonObject>();
-      // A new item's stand-in id, as later operations of the call named it, becomes the id it is given.
-      const given = new Map<string, string>();
+    recorded = await writes.run((db) => {
+      // The lore lane's word on every overlay's entry comes first: one it does not know refuses the call whole, and nothing is recorded.
       for (const r of read) {
-        if (r.op === OVERLAY) {
-          const o = r as PlannedOverlay;
-          // An overlay is the writer's, as its rows are, and takes the next place among the turn's writes: a dropped sub-agent or a continue that saved nothing takes it back with them.
-          const out = overlay(db, { user: call.scope.user, chat: call.scope.chat, turn, entry: o.entry, note: o.note, by: writer.by, agent: writer.agent, job: writer.job, ord: storyMark(db, writer.user, turn) + 1 });
-          if ("unknown" in out) throw new OverlayRefused(o.n, out.unknown, out.near ?? []);
-          overlays.set(o.n, out.written);
-          continue;
-        }
-        const p = r as Planned;
-        const [row] = writeStory(db, writer, [{ part: p.part, item: p.fresh && !given.has(p.item) ? null : (given.get(p.item) ?? p.item), value: p.value }]);
-        if (row === undefined) continue;
-        if (p.fresh) given.set(p.item, row.item);
-        rows.set(p.n, row);
+        if (r.op !== OVERLAY) continue;
+        const o = r as PlannedOverlay;
+        const out = overlay(db, { user: call.scope.user, chat: call.scope.chat, turn, entry: o.entry });
+        if (out !== null) throw new OverlayRefused(o.n, out.unknown, out.near ?? []);
       }
-      return { rows, overlays };
+      // A new item's stand-in id, as later operations of the call named it, becomes the id its first write is given.
+      const made = new Set<string>();
+      const list = read.map((r): StoryWrite | StoryOverlayWrite => {
+        if (r.op === OVERLAY) return { entry: (r as PlannedOverlay).entry, note: (r as PlannedOverlay).note };
+        const p = r as Planned;
+        if (!p.fresh || made.has(p.item)) return { part: p.part, item: p.item, value: p.value };
+        made.add(p.item);
+        return { part: p.part, item: null, stand: p.item, value: p.value };
+      });
+      // One write of the store: the call's changes stand or fall together.
+      return recordStory(store, writer, list);
     }, call.tool);
   } catch (error) {
     if (!(error instanceof OverlayRefused)) throw error;
     reply.line("overlay_unknown", { n: error.n, entry: error.entry, near: textOf(error.near) });
     return reply.line("nothing_recorded", {}).fail();
   }
+  const written = new Map(read.map((r, i) => [r.n, recorded[i]] as const));
 
   // How each item now stands, read again as the turn sees it.
   const after = recordOr(call, reply);
@@ -351,13 +350,13 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     if (r === undefined) continue;
     if (r.op === OVERLAY) {
       const ov = r as PlannedOverlay;
-      const done = written.overlays.get(ov.n);
-      operations.push({ n: ov.n, op: ov.op, entry: ov.entry, wrote: { text: ov.note }, ...(done !== undefined ? { written: done } : { recorded: false }) });
+      const done = written.get(ov.n);
+      operations.push({ n: ov.n, op: ov.op, entry: ov.entry, wrote: { text: ov.note }, ...(done !== undefined ? { written: { overlay: done.change, entry: ov.entry, note: ov.note } } : { recorded: false }) });
       continue;
     }
     const p = r as Planned;
-    const row = written.rows.get(p.n);
-    const item = row === undefined ? undefined : after.items.get(row.item);
+    const row = written.get(p.n);
+    const item = row?.item == null ? undefined : after.items.get(row.item);
     for (const report of p.reports) reply.report(report.line, report.fields);
     operations.push({ n: p.n, op: p.op, id: row?.item ?? null, wrote: valueView(after, p.value, reading.clock), now: item === undefined ? null : itemView(after, item, reading.clock, spans) });
   }

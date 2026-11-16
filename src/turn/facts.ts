@@ -65,8 +65,6 @@ export class FactsRegistry implements FactsPort {
   }
 }
 
-/** Rows a turn wrote to the cast's or the story's record after `after` (its `ord`), its jobs' left out as the take-back leaves them. */
-function rowsAfter(store: Store, table: "cast_entry" | "story_entry", user: string, turn: string, after: number): number {
   return store.db.query<{ n: number }, [string, string, number]>(`SELECT count(*) AS n FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`).get(user, turn, after)?.n ?? 0;
 }
 
@@ -103,7 +101,6 @@ export function turnFacts(store: Store, runs: (user: string, turn: string) => re
         turn === null
           ? 0
           : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null).length +
-            rowsAfter(store, "story_entry", scope.user, turn, runNow?.storyMark ?? -1) +
             rowsAfter(store, "cast_entry", scope.user, turn, runNow?.castMark ?? -1);
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {

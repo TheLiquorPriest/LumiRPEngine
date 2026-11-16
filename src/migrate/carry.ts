@@ -14,7 +14,6 @@ import type { DataPaths } from "../app/config";
 import { SecretsFile } from "../app/secrets";
 import { dropLeftoverCast } from "../cast";
 import type { Store, UserStore } from "../store";
-import { dropLeftoverStory } from "../story";
 import { bookTrouble, carryConnections, type ConnectionsCarried } from "./connections";
 import { TurnAreas } from "./history";
 import { carryMinds, type MindsCarried } from "./minds";

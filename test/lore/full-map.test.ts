@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Lore, LoreIndex, loreLines, loreMapFields, type LoreWorlds, overlayWrite } from "../../src/lore/index";
+import { Lore, LoreIndex, loreLines, loreMapFields, type LoreWorlds } from "../../src/lore/index";
 import type { TurnLoreMap } from "../../src/lore/indexing";
 import { ATLAS, CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
@@ -38,8 +38,12 @@ describe("the lore map in full", () => {
       { id: "entry-gull", book: ATLAS.id, title: "", how: "keyword" },
     ]);
     const lore = new Lore({ books: new Shelf(), worlds, turns: tags, numbers: db.numbers });
-    // The chat's path: two turns. A third, swiped away, is on no path.
-    index = new LoreIndex({ lore, db: db.db, writes: db.writes, path: { turns: () => ["turn-0", "turn-1"] }, settings: { bound: 3 } });
+    // The chat's path as the store folded it: two turns' overlays. A third turn, swiped away, is on no path and has none here.
+    const overlays = [
+      { id: 1, entry: "e-2", note: "The lamp was relit after the wreck.", turn: "turn-0", number: 1, by: "author", agent: null },
+      { id: 2, entry: "e-2", note: "Its glass cracked in the storm.", turn: "turn-1", number: 2, by: "author", agent: null },
+    ];
+    index = new LoreIndex({ lore, db: db.db, writes: db.writes, path: { overlays: () => overlays }, settings: { bound: 3 } });
     // The books' entries are numbered as the index first reads them: the shanty e-1, the lamp room e-2, the gulls e-3, the tide bell e-4, the switched-off rumor e-5, the card's twin of the lamp room e-6.
     const read = await index.entries(AT);
     expect(read.filter((e) => e.book !== null).map((e) => e.id)).toEqual(["e-1", "e-2", "e-3", "e-4", "e-5", "e-6"]);
@@ -58,12 +62,6 @@ describe("the lore map in full", () => {
       ],
       "indexer",
     );
-    const write = overlayWrite(worlds, () => 5);
-    await db.writes.run((d) => {
-      write(d, { user: USER, chat: CHAT, turn: "turn-0", entry: "e-2", note: "The lamp was relit after the wreck.", by: "author", agent: "author-1", job: null, ord: 0 });
-      write(d, { user: USER, chat: CHAT, turn: "turn-1", entry: "e-2", note: "Its glass cracked in the storm.", by: "author", agent: "author-1", job: null, ord: 0 });
-      write(d, { user: USER, chat: CHAT, turn: "turn-swiped", entry: "e-3", note: "Gone with its turn.", by: "author", agent: "author-1", job: null, ord: 0 });
-    });
     horizon = ["fishmarket", "lighthouse", "sefa"];
     map = await index.loreMap({ ...AT, turn: "turn-1", messages: ["Nell counts out the TITHE on the harbor steps."] });
   });

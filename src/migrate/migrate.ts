@@ -25,7 +25,7 @@ import { LORE_MIGRATIONS } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import type { WorldDoc } from "../shared/world";
 import { openStore, STORE_MIGRATIONS } from "../store";
-import { STORY_MIGRATIONS } from "../story";
+import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
 import { carry } from "./carry";
 import { chatsToImport, importChats } from "./import-chats";

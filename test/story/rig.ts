@@ -10,9 +10,9 @@ import { WriteQueue } from "../../src/app/database";
 import { hashJson } from "../../src/shared/hash";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
-import { STORY_MIGRATIONS } from "../../src/story/schema";
+import { STORY_STORE_AREA } from "../../src/story/fold";
 import { storyAt } from "../../src/story/path";
-import { StoryRecord, type StoryRow, type StoryWrite, writeStory } from "../../src/story/record";
+import { StoryRecord, type StoryWrite, type StoryWritten, writeStory } from "../../src/story/record";
 import { hashOf, inventedWorld, registry } from "../store/fixtures";
 
 /**
@@ -48,7 +48,7 @@ export interface Table {
   removeIds(ids: readonly string[]): Promise<void>;
   /** A whole exchange: the player's message, a turn, `writes` recorded on it, its reply tied. */
   play(writes?: readonly StoryWrite[]): Promise<TurnRow>;
-  write(turn: TurnRow, writes: readonly StoryWrite[], by?: string): Promise<StoryRow[]>;
+  write(turn: TurnRow, writes: readonly StoryWrite[], by?: string): Promise<StoryWritten[]>;
   /** The record at a turn, or at the chat's head. */
   record(turn?: TurnRow | null): StoryRecord;
 }
@@ -63,9 +63,10 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
   const revision = hashJson(world);
   const db = new Database(":memory:");
   migrateStore(db);
-  // The lore's overlays are written through the story's own write and take their places among its rows.
-  for (const m of [...STORY_MIGRATIONS, ...LORE_MIGRATIONS]) if ("sql" in m) db.run(m.sql);
-  const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined) });
+  for (const m of LORE_MIGRATIONS) if ("sql" in m) db.run(m.sql);
+  // A clock that moves at every reading, so what one write stamps is before what the next one does.
+  let tick = 1_000_000;
+  const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined), areas: [STORY_STORE_AREA], now: () => tick++ });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
   await writes.run(() => s.createChat(options.world === false ? { id: CHAT } : { id: CHAT, world: world.id, revision }));
@@ -124,10 +125,10 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
       return table.tie(turn);
     },
     write(turn, list, by = "author") {
-      return writes.run((d) => writeStory(d, { user: USER, turn: turn.id, by, agent: `${by}-1`, job: null, now: 5 }, list));
+      return writes.run(() => writeStory(store, { user: USER, turn: turn.id, by, agent: `${by}-1`, job: null }, list));
     },
     record(turn = null) {
-      return StoryRecord.read(db, USER, storyAt(s, CHAT, turn?.id ?? null));
+      return StoryRecord.read(store, USER, storyAt(s, CHAT, turn?.id ?? null));
     },
   };
   return table;

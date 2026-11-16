@@ -54,7 +54,7 @@ describe("today's story record as RPE's", () => {
       () => undefined,
       (data) =>
         look(data, (db, s, store) => {
-          const beats = StoryRecord.read(db, USER, storyAt(s, CHAT.harness, null)).items;
+          const beats = StoryRecord.read(store, USER, storyAt(s, CHAT.harness, null)).items;
           const clock = storyClock(store, USER, CHAT.harness, null);
           // The fog came at the story's start, and the lamp stayed dark half an hour on: each beat its own time.
           expect(typeof beats.get("b:b1")?.fields.time).toBe("string");
@@ -72,8 +72,8 @@ describe("today's story record as RPE's", () => {
         editRecord(fixture, "m-h6", 1, (rec) => ({ ...rec, story: { ...rec.story, drafts: [{ ...SHIP, who: [] }], cast: [{ entity: PEOPLE.ada.entity, standing: "principal" }] } }));
       },
       (data) =>
-        look(data, (db, s) => {
-          const draft = StoryRecord.read(db, USER, storyAt(s, CHAT.harness, null)).items.get("fu:d1")?.fields;
+        look(data, (db, s, store) => {
+          const draft = StoryRecord.read(store, USER, storyAt(s, CHAT.harness, null)).items.get("fu:d1")?.fields;
           expect(draft).toMatchObject({ who: [], notes: null, place: "Home" });
           const ada = findCharacter(db, USER, chatLine(s, CHAT.harness), PEOPLE.ada.name);
           if (ada === null) throw new Error("Ada has no character");
@@ -86,7 +86,7 @@ describe("today's story record as RPE's", () => {
     const made: LedgerEvent = { type: "space.place", data: { place: "lamp-room", def: { id: "lamp-room", name: "The lamp room", parent: "home", fields: {}, made: { as: "room", by: "story", at: 0, why: "Where the lamp is kept." } } } } as LedgerEvent;
     await migrated(
       (fixture) => editRecord(fixture, "m-h6", 1, (rec) => withBeat({ id: "b-lamp", turn: "gen-3", at: 30, where: "lamp-room", by: PEOPLE.ada.entity, kind: "do", what: "Ada climbed to the lamp room.", surface: "", exposure: [], decidedBy: { agent: "author" } })({ ...rec, events: [...rec.events, made] })),
-      (data) => look(data, (db, s) => expect(StoryRecord.read(db, USER, storyAt(s, CHAT.harness, null)).items.get("b:b-lamp")?.fields.place).toBe("The lamp room")),
+      (data) => look(data, (_db, s, store) => expect(StoryRecord.read(store, USER, storyAt(s, CHAT.harness, null)).items.get("b:b-lamp")?.fields.place).toBe("The lamp room")),
     );
   });
 });

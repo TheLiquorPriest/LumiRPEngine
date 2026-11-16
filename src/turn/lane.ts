@@ -27,12 +27,12 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import type { StoreFailure } from "../store/store";
-import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
+import { STORY_FACT_SETTING_DEFS, STORY_STORE_AREA, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
@@ -268,7 +268,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       return view !== undefined && ["queued", "held", "running", "asking"].includes(view.state);
     },
   });
-  const overlay = overlayWrite(worlds, () => clock.now());
+  const overlay = overlayCheck(worlds);
   const facts = new FactsRegistry();
   facts.add(turnFacts(store, (user, turn) => runs.ofTurn(user, turn)));
   facts.add(loreIndex.facts());
@@ -298,7 +298,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, settings: settings.engine, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
-      storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now(), settings: settings.story }),
+      storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
     ]);
     return [...engine, ...cast, ...story, ...indexing];

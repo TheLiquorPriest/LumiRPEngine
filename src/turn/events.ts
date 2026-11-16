@@ -34,7 +34,7 @@ import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
-import { dropStoryStaged, storyBrief } from "../story";
+import { storyBrief } from "../story";
 import type { TreeNotes, TreeSuggestions } from "../tree";
 import { keepJob } from "./jobs";
 import type { Writes } from "./kv";
@@ -365,7 +365,6 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       await deps.writes.run(() => {
         deps.store.user(scope.user).dropStaged(turn, agent.id);
         dropCastStaged(deps.store, scope.user, turn, agent.id);
-        dropStoryStaged(deps.store, scope.user, turn, agent.id);
       }, "dropping a sub-agent's staged changes");
       // The notes queue writes of their own, so they are taken back after the block above, never inside it.
       await deps.notes.drop(scope.user, scope.chat, turn, agent.id);

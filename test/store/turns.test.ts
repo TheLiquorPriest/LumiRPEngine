@@ -11,15 +11,13 @@ import { castAt } from "../../src/cast/path";
 import { CAST_MIGRATIONS, dropCastStaged, joinCast, takeBackCast } from "../../src/cast/index";
 import { writeCast } from "../../src/cast/record";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
-import { overlayWrite } from "../../src/lore/overlays";
-import type { LoreWorlds } from "../../src/lore/sources";
 import { hashJson } from "../../src/shared/hash";
 import { swipeIndex } from "../../src/store/path";
 import { migrateStore, STORE_MIGRATIONS } from "../../src/store/schema";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
 import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage, type TurnRow } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
-import { dropStoryStaged, joinStory, STORY_MIGRATIONS, takeBackStory, writeStory } from "../../src/story/index";
+import { recordStory, STORY_MIGRATIONS } from "../../src/story/index";
 import { carried, engine, goTo, hand, hashOf, make, moveStoredClock, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
 
@@ -1262,7 +1260,7 @@ describe("one home for what a joined turn refuses", () => {
     }
   }
 
-  test("joinTurn, joinCast and joinStory refuse the same cases with the same errors, from one check", () => {
+  test("joinTurn and joinCast refuse the same cases with the same errors, from one check", () => {
     const ts = whole();
     const { s, store, revision, t1, t2 } = ts;
     s.createChat({ id: "d", revision });
@@ -1285,7 +1283,6 @@ describe("one home for what a joined turn refuses", () => {
       const byStore = refusal(() => s.joinTurn(held, into));
       expect([what, byStore === null]).toEqual([what, false]);
       expect([what, refusal(() => joinCast(store, USER, held, into))]).toEqual([what, byStore]);
-      expect([what, refusal(() => joinStory(store, USER, held, into))]).toEqual([what, byStore]);
     }
     expect(written(ts)).toBe(before);
     expect(s.turn(open.id)?.status).toBe("open");
@@ -1297,12 +1294,6 @@ describe("one home for what a joined turn refuses", () => {
     const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
     s.joinTurn(held.id, t2.id);
     const writer = { user: USER, turn: held.id, by: "gm", agent: "gm-1", job: null, now: 9 };
-    // The overlay write asks the chat's world only after the refusal: never here.
-    const worlds = {
-      at: () => {
-        throw new Error("the overlay write read the world of a joined turn");
-      },
-    } as unknown as LoreWorlds;
     const before = written(ts);
     const calls: [string, () => unknown][] = [
       ["the store's change", () => s.addChanges(held.id, engine(tick(1)))],
@@ -1311,10 +1302,8 @@ describe("one home for what a joined turn refuses", () => {
       ["the cast's write", () => writeCast(store.db, { ...writer, at: null }, [{ character: "bram", part: "knowledge", item: null, value: { text: "Wren went down to the cellar." } }])],
       ["the cast's take-back", () => takeBackCast(store.db, USER, held.id, -1)],
       ["the cast's staged rows", () => dropCastStaged(store, USER, held.id)],
-      ["the story's write", () => writeStory(store.db, writer, [{ part: "beat", item: null, value: { text: "Wren goes down with the lantern." } }])],
-      ["the story's take-back", () => takeBackStory(store.db, USER, held.id, -1)],
-      ["the story's staged rows", () => dropStoryStaged(store, USER, held.id)],
-      ["the lore's overlay", () => overlayWrite(worlds, () => 9)(store.db, { user: USER, chat: "c", turn: held.id, entry: "w:cellar", note: "The cellar is flooded now.", by: "author", agent: null, job: null, ord: 0 })],
+      ["the story's write", () => recordStory(store, writer, [{ part: "beat", item: null, value: { text: "Wren goes down with the lantern." } }])],
+      ["the lore's overlay", () => recordStory(store, writer, [{ entry: "w-1", note: "The cellar is flooded now." }])],
     ];
     for (const [what, call] of calls) expect([what, refusal(call)]).toEqual([what, ["JoinedTurnError", `turn ${held.id} was joined to turn ${t2.id}: address that turn instead`, [held.id, t2.id]]]);
     expect(written(ts)).toBe(before);

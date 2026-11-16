@@ -153,9 +153,7 @@ export interface RunRecord {
    * continue's, set when its held turn joins the turn it extended, so that turn's counts are of this run's changes. Null for any other run.
    */
   mark: number | null;
-  /** The same for the cast's rows (`castMark`) and the story's (`storyMark`) on the turn; null for any other run, or a run kept before they were. */
   castMark: number | null;
-  storyMark: number | null;
 }
 
 /** A run's lore lookups: its `lore_search` calls and its `lore_read` calls. */
@@ -208,7 +206,6 @@ interface RunRow {
   held: string | null;
   mark: number | null;
   cast_mark: number | null;
-  story_mark: number | null;
   // Its `usage` row, null where it has none.
   calls: number | null;
   input: number | null;
@@ -262,7 +259,6 @@ function recordOf(user: string, r: RunRow): RunRecord {
     held: r.held,
     mark: r.mark,
     castMark: r.cast_mark,
-    storyMark: r.story_mark,
   };
 }
 
@@ -326,7 +322,6 @@ export class Runs {
         r.held,
         r.mark,
         r.castMark,
-        r.storyMark,
       ],
     );
     const { usage } = r;

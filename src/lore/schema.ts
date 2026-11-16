@@ -18,6 +18,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { Migration } from "../app/migrations";
+import { moveStoryRows } from "../story/upgrade";
 import { giveWorldNumbers, worldEntryId, worldNumbersIn } from "./ids";
 
 export const LORE_MIGRATIONS: readonly Migration[] = [
@@ -230,6 +231,13 @@ CREATE INDEX lore_binding_record ON lore_binding (user, record)`,
     version: 11,
     name: "bindings out of the index and the cast",
     up: (db) => moveBindings(db),
+  },
+  {
+    version: 12,
+    name: "the story's rows and the overlays as changes of the store",
+    // The story's own table and the overlays above become changes of the story's area in the store's fold, each on its turn in its
+    // place (the story's migration of step 1 of its own area made the table; it is dropped here, once the overlays can go with it).
+    up: (db) => moveStoryRows(db),
   },
 ];
 

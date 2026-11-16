@@ -9,9 +9,9 @@ import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolRes
 import { calendarOf, clockOfStamp, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { resolveTarget, typedSpan } from "../engine/time";
-import { described, Reply, type Writes } from "../iface/kit";
+import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
-import { clockRecorded, type Store } from "../store";
+import { clockRecorded, JoinedTurnError, type Store, StoreInputError } from "../store";
 import { storyAt } from "./path";
 import { type Span, type StoryItem, StoryRecord } from "./record";
 
@@ -27,12 +27,11 @@ export type StorySettings = { -readonly [K in keyof typeof STORY_DEFAULTS]: numb
 export const STORY_ANSWERS = "story-answers";
 
 /**
- * The lore lane's (plan §9.3): an overlay, a note tied to the turn that the story has moved past part
- * of a lore entry, the entry itself untouched. It runs inside the story's queued write, on the same
- * database, so a call's writes stand or fall together. It answers with what it wrote, as data, or
- * with the entry it does not know and any near it.
+ * The lore lane's (plan §9.3): whether the lore entry an overlay is a note on is one the lore lane knows in the chat, asked inside
+ * the story's queued write, on the same database, before anything of the call is recorded. Null when it is known; else the entry it
+ * does not know and any near it. The overlay itself is a change of the story's area, written with the call's other writes.
  */
-export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string; entry: string; note: string; by: string | null; agent: string | null; job: string | null; ord: number }) => { written: JsonObject } | { unknown: string; near?: string[] };
+export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string; entry: string }) => { unknown: string; near?: string[] } | null;
 
 /** What the story tools are given by the host (the turn lane). */
 export interface StoryDeps {
@@ -42,7 +41,7 @@ export interface StoryDeps {
   writes: Writes;
   /** The guidance files in force for the chat: the tools' descriptions and the answers' lines. */
   files: GuidanceFiles;
-  /** The lore lane's overlay: what the story's `overlay` operation writes through. The live turn always gives it. */
+  /** The lore lane's check of an overlay's entry: what the story's `overlay` operation asks before it records. The live turn always gives it. */
   overlay: LoreOverlay;
   /** Settings over `STORY_DEFAULTS`. */
   settings?: Partial<StorySettings>;
@@ -99,14 +98,22 @@ export async function storyHostTool(spec: StoryToolSpec, lines: Lines, deps: Sto
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
       const call: StoryCall = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
-      return (await spec.run(given, call)).result();
+      try {
+        return (await spec.run(given, call)).result();
+      } catch (error) {
+        if (ctx.signal.aborted) throw error;
+        // A turn joined to another, met unresolved: told as the fact, nothing read or written. Input the store cannot read: told in the story's words.
+        if (error instanceof JoinedTurnError) return call.reply().line("turn_joined", { turn: error.turn, joined: error.joined }).fail().result();
+        if (error instanceof StoreInputError) return call.reply().line("store_unread", { why: error.message }).line("nothing_recorded", {}).fail().result();
+        return faultAnswer(lines, spec.name, error, deps.store.env.failed, ctx.scope.turn ?? "");
+      }
     },
   };
 }
 
 // ---------------------------------------------------------------- reading
 
-/** The record a call reads: at its turn, or at the chat's head when it has none. A line says what is missing when the scope names a chat or a turn the store does not have. */
+/** The record a call reads: at its turn (a job's own reading, with its own writes on top), or at the chat's head when it has none. A line says what is missing when the scope names a chat or a turn the store does not have. */
 export function recordOr(call: StoryCall, reply: Reply): StoryRecord | null {
   const user = call.deps.store.user(call.scope.user);
   if (user.chat(call.scope.chat) === null) {
@@ -118,7 +125,7 @@ export function recordOr(call: StoryCall, reply: Reply): StoryRecord | null {
     reply.line("no_turn", { id: turn }).fail();
     return null;
   }
-  return StoryRecord.read(call.deps.store.db, call.scope.user, storyAt(user, call.scope.chat, turn));
+  return StoryRecord.read(call.deps.store, call.scope.user, storyAt(user, call.scope.chat, turn), call.agent.job ?? null);
 }
 
 /** Story time, where the chat keeps a clock: now, a time read as the engine reads one, and a time as answers show it. */

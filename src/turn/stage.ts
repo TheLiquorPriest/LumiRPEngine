@@ -8,6 +8,7 @@ import type { HistoryRange } from "rp-harness/contract";
 import type { Store } from "../store";
 import { namesOf } from "../story/kit";
 import { storyAt } from "../story/path";
+import { storySliceOf } from "../story/fold";
 import { StoryRecord } from "../story/record";
 
 /** The open scene at a turn: who it has on stage, by the names the Author gave, and its place in the Author's words. */
@@ -25,7 +26,7 @@ function stageOf(record: StoryRecord): Stage | null {
 
 /** The stage at one reading of the chat: at `turn`, or at its head when null. Null when no scene is open there. */
 export function stageAt(store: Store, user: string, chat: string, turn: string | null): Stage | null {
-  return stageOf(StoryRecord.read(store.db, user, storyAt(store.user(user), chat, turn)));
+  return stageOf(StoryRecord.read(store, user, storyAt(store.user(user), chat, turn)));
 }
 
 /**
@@ -35,16 +36,15 @@ export function stageAt(store: Store, user: string, chat: string, turn: string |
  */
 export function namedStretches(store: Store, user: string, chat: string): Record<string, HistoryRange> {
   if (store.user(user).chat(chat) === null) return {};
-  const record = StoryRecord.read(store.db, user, storyAt(store.user(user), chat, null));
+  const record = StoryRecord.read(store, user, storyAt(store.user(user), chat, null));
   const scene = record.current("scene");
   const from = scene === null || scene.closedBy !== null ? null : record.startOf(scene);
   return from === null ? {} : { scene: { from, to: record.at.messages.length } };
 }
 
 /**
- * The stage at each of `turns`; a turn with none recorded is left out. The readings of turns on one
- * line of the chat are each a start of the deepest one's, so that one is read once and its rows laid
- * in again turn by turn, the scene noted after each turn asked for.
+ * The stage at each of `turns`; a turn with none recorded is left out. The readings of turns on one line of the chat are each read
+ * from the state the store folded at that turn, laid over the line of the deepest one, so the line's messages are worked out once.
  */
 export function stagesAt(store: Store, user: string, chat: string, turns: readonly string[]): Map<string, Stage> {
   const out = new Map<string, Stage>();
@@ -54,13 +54,9 @@ export function stagesAt(store: Store, user: string, chat: string, turns: readon
   for (const deepest of [...turns].reverse()) {
     if (!left.has(deepest)) continue;
     const at = storyAt(u, chat, deepest);
-    const rows = [...StoryRecord.read(store.db, user, at).items.values()].flatMap((item) => item.rows).sort((a, b) => (at.order.get(a.turn) ?? 0) - (at.order.get(b.turn) ?? 0) || a.ord - b.ord);
-    const record = new StoryRecord(at);
-    let next = 0;
     for (const turn of at.turns) {
-      for (let row = rows[next]; row !== undefined && row.turn === turn; row = rows[++next]) record.apply(row);
       if (!left.delete(turn)) continue;
-      const stage = stageOf(record);
+      const stage = stageOf(new StoryRecord(at, storySliceOf(u.stateAt(turn).state)));
       if (stage !== null) out.set(turn, stage);
     }
     // A turn asked for that its own reading does not hold (one the store has no line to) has no stage.

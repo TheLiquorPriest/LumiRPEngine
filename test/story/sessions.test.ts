@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionRow, TurnRow } from "../../src/store";
-import { sceneSession } from "../../src/story/index";
+import { closeOpenScene, sceneSession } from "../../src/story/index";
 import type { StoryWrite } from "../../src/story/record";
 import { CHAT, openTable, type Table, USER } from "./rig";
 
@@ -82,5 +82,22 @@ describe("scenes and sessions", () => {
     expect(at.scene).toBe(bank);
     expect(at.session).toMatchObject({ scene: bank, openedBy: closing.id });
     expect(at.summary).toBe("Wren crosses for one silver.");
+  });
+
+  test("he closes the open scene: his own change after the newest reply, which a swipe of that reply keeps, and none when no scene is open", async () => {
+    const t = await openTable();
+    expect(closeOpenScene(t.store, USER, CHAT)).toBeNull();
+    const first = await t.begin();
+    await played(t, first, [{ part: "scene", item: null, value: { title: "The ford" } }]);
+    await t.tie(first);
+    const ford = t.record().of("scene")[0]?.id ?? "";
+    const closed = await t.writes.run(() => closeOpenScene(t.store, USER, CHAT));
+    expect(closed).toMatchObject({ scene: ford });
+    expect(t.record().items.get(ford)?.closedBy).not.toBeNull();
+    expect(await t.writes.run(() => closeOpenScene(t.store, USER, CHAT))).toBeNull();
+    // A swipe of the newest reply keeps his close.
+    const again = await t.swipe();
+    await t.tie(again, "another reply");
+    expect(sceneSession(t.store, USER, CHAT, (await t.begin()).id).scene).toBe("");
   });
 });

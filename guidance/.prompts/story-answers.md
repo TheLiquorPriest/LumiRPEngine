@@ -26,6 +26,8 @@ already_closed: Operation {{n}} ({{op}}): {{id}} was already closed.
 due_now: Operation {{n}} ({{op}}): it falls due at {{due}}, which is not after now ({{now}}), so it is due at once.
 due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it is due at once.
 overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#near}} Near: {{near}}.{{/near}}
+store_unread: The story record could not read that call: {{why}}
+turn_joined: This turn, {{turn}}, was joined to turn {{joined}}, the turn the continue extended, so nothing was read or recorded here. Address turn {{joined}} instead.
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
 more: {{count}} more match. Ask again with a part, a range or a name to see them; the next is {{next}}.

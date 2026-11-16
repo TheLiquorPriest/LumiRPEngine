@@ -9,6 +9,7 @@ import type { JsonObject } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import type { Store } from "../store/store";
 import { StoreInputError } from "../store/types";
+import { type OverlayRow, overlayRows } from "./overlays";
 
 /** A Lumiverse book, as the lore names it. */
 export interface LoreBook {
@@ -144,34 +145,16 @@ export function storeWorlds(store: Store, castName?: LoreWorlds["castName"]): Lo
   };
 }
 
-/** Which turns a reading of what RPE keeps beside the lore sees: what a swipe or a delete takes off a chat's path goes with its turn. */
+/** What a reading of what RPE keeps beside the lore sees: the story's overlays as the store folded them at a point, so what a swipe or a delete takes off a chat's path goes with its turn. */
 export interface LorePath {
   /**
-   * The turns on the chat's path, oldest first: at its head, the turns on the path as the store last
-   * compared it; at `turn`, the turns it was made after and the turn itself, so a turn sees what it
-   * wrote before its reply is tied.
+   * The overlays on the chat's path, in the path's order: at its head, those of the turns on the path as the store last compared
+   * it; at `turn`, those of the turns it was made after and the turn itself, so a turn sees what it wrote before its reply is tied.
    */
-  turns(user: string, chat: string, turn?: string): readonly string[];
+  overlays(user: string, chat: string, turn?: string): readonly OverlayRow[];
 }
 
 /** The chats' paths as the store keeps them, read as the story record reads its own (plan §6.3). */
 export function storePath(store: Store): LorePath {
-  return {
-    turns(user, chat, turn) {
-      const s = store.user(user);
-      if (s.chat(chat) === null) return [];
-      const onPath = s.line(chat).map((l) => l.turn);
-      if (turn === undefined) return onPath;
-      const at = onPath.indexOf(turn);
-      if (at >= 0) return onPath.slice(0, at + 1);
-      // A turn not on the path (open, or left behind): the turns it was made after, back to one that is.
-      const chain: string[] = [];
-      let id: string | null = turn;
-      while (id !== null && !onPath.includes(id)) {
-        chain.push(id);
-        id = s.turn(id)?.parent ?? null;
-      }
-      return [...(id === null ? [] : onPath.slice(0, onPath.indexOf(id) + 1)), ...chain.reverse()];
-    },
-  };
+  return { overlays: (user, chat, turn) => overlayRows(store, user, chat, turn ?? null) };
 }

@@ -1,60 +1,27 @@
-// The story record (plan §8.1): the Author's understanding of the story, as items of eleven parts.
-// Every write is a row of the item it touches, tied to the turn that wrote it, holding only what that
-// write said. An item as it stands is its rows on the reading's path, merged in order; its history is
-// those rows. Code merges and counts; it never judges what an item says.
+// The story record (plan §8.1): the Author's understanding of the story, as items of eleven parts. Every write is a change of the
+// story's area in the store's fold (`./fold`), tied to the turn that wrote it, holding only what that write said. An item as it
+// stands is its changes on the reading's path, merged in order; its history is those changes. Code merges and counts; it never
+// judges what an item says.
 //
-// Where an item stands in the chat comes from the records alone: a beat lies at the message it names,
-// or at its turn's reply; a scene or a chapter runs from the message it names, or from the first
-// message its opening turn answered, to the message it names, or its closing turn's reply, and never
-// past the start of the next one.
+// Where an item stands in the chat comes from the records alone: a beat lies at the message it names, or at its turn's reply; a
+// scene or a chapter runs from the message it names, or from the first message its opening turn answered, to the message it names,
+// or its closing turn's reply, and never past the start of the next one.
 
-import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { joinable, refuseJoined, type Store, StoreInputError } from "../store";
+import type { ChangeInput, Source, Store } from "../store";
+import { mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
 import type { StoryAt } from "./path";
 
-/** The parts of the record, as the plan names them (§8.1). */
-export const STORY_PARTS = ["premise", "chapter", "scene", "beat", "thread", "arc", "player", "future", "canon", "retcon", "record"] as const;
-export type StoryPart = (typeof STORY_PARTS)[number];
+export { keyedItemId, nameKey, newItemId, STORY_PARTS, type StoryPart } from "./fold";
 
 /** The parts of the timeline that span messages. */
 export type SpanPart = "chapter" | "scene";
 
-/** What an item's id starts with, so that an id says its part. */
-const PREFIX: Readonly<Record<StoryPart, string>> = { premise: "premise", chapter: "ch", scene: "sc", beat: "b", thread: "th", arc: "arc", player: "pm", future: "fu", canon: "ca", retcon: "rc", record: "rec" };
-
-/** One write of an item, as stored. */
-export interface StoryRow {
-  id: number;
-  turn: string;
-  ord: number;
-  part: StoryPart;
-  item: string;
-  /** What this write said: the fields it set, `close` and `drop` among them. */
-  value: JsonObject;
-  /** The agent's definition that wrote it, or the player. */
-  by: string | null;
-  /** The agent's handle in its run. */
-  agent: string | null;
-  job: string | null;
-  created: number;
-}
+/** One write of an item as it is kept: its turn (and that turn's number on the path), who wrote it, and what it said (the fields it set, `close` and `drop` among them). */
+export type StoryRow = StoryRowDoc;
 
 /** An item as it stands on a path. */
-export interface StoryItem {
-  part: StoryPart;
-  id: string;
-  /** Every field its writes set, the latest of each. */
-  fields: JsonObject;
-  /** The turn that first wrote it, and the one that wrote it last. */
-  opened: string;
-  touched: string;
-  /** The turn whose write closed it; null while it is open. */
-  closedBy: string | null;
-  dropped: boolean;
-  /** Its writes on the path, oldest first. */
-  rows: StoryRow[];
-}
+export type StoryItem = StoryItemDoc;
 
 /** Messages by number, both ends kept; an end is null where the record cannot place it. */
 export interface Span {
@@ -62,50 +29,36 @@ export interface Span {
   to: number | null;
 }
 
-interface RowDb {
-  id: number;
-  turn: string;
-  ord: number;
-  part: string;
-  item: string;
-  value: string;
-  by: string | null;
-  agent: string | null;
-  job: string | null;
-  created: number;
-}
-
 /** The record as one reading sees it. */
 export class StoryRecord {
   readonly items = new Map<string, StoryItem>();
 
-  constructor(readonly at: StoryAt) {}
-
-  /** The record at `at`: the rows of the turns on its path, in the path's order. */
-  static read(db: Database, user: string, at: StoryAt): StoryRecord {
-    const rows = db
-      .query<RowDb, [string, string]>("SELECT * FROM story_entry WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2))")
-      .all(user, JSON.stringify(at.turns))
-      .sort((a, b) => (at.order.get(a.turn) ?? 0) - (at.order.get(b.turn) ?? 0) || a.ord - b.ord);
-    const record = new StoryRecord(at);
-    for (const r of rows) record.apply({ ...r, part: r.part as StoryPart, value: JSON.parse(r.value) as JsonObject });
-    return record;
+  constructor(
+    readonly at: StoryAt,
+    slice?: { items: Readonly<Record<string, StoryItem>> },
+  ) {
+    if (slice !== undefined) for (const [id, item] of Object.entries(slice.items)) this.items.set(id, item);
   }
 
-  /** Merges one write in: the item's fields, whether it is closed or dropped, and when it was touched. */
-  apply(row: StoryRow): StoryItem {
-    let item = this.items.get(row.item);
-    if (item === undefined) {
-      item = { part: row.part, id: row.item, fields: {}, opened: row.turn, touched: row.turn, closedBy: null, dropped: false, rows: [] };
-      this.items.set(row.item, item);
-    }
-    for (const [key, value] of Object.entries(row.value)) {
-      if (key === "close") item.closedBy = value === true ? row.turn : null;
-      else if (key === "drop") item.dropped = value === true;
-      else item.fields[key] = value;
-    }
-    item.touched = row.turn;
-    item.rows.push(row);
+  /**
+   * The record at `at`, as the store folded it there: at the chat's head, at a turn (inside an open turn, with what it has staged),
+   * or, for a job's own reading (`job`), at the turn it was started with its own writes on top. A turn joined to another is refused
+   * as the store refuses it, naming the turn it joined.
+   */
+  static read(store: Store, user: string, at: StoryAt, job: string | null = null): StoryRecord {
+    const u = store.user(user);
+    const folded = at.turn === null ? u.headState(at.chat) : job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
+    return new StoryRecord(at, storySliceOf(folded.state));
+  }
+
+  /**
+   * Merges one more write in, in this reading only (a call's own operations are read against the record with each earlier one of the
+   * call applied): the item's fields, whether it is closed or struck, and when it was touched. The store's items are never changed.
+   */
+  apply(write: { part: StoryPart; item: string; value: JsonObject; turn: string; by?: string | null }): StoryItem {
+    const row: StoryRow = { turn: write.turn, n: 0, by: write.by ?? null, value: write.value };
+    const item = mergeWrite(this.items.get(write.item), write.part, write.item, write.value, row);
+    this.items.set(write.item, item);
     return item;
   }
 
@@ -177,131 +130,81 @@ export class StoryRecord {
   }
 }
 
-/** One write a call asks for: of an item already there (`item`), or of a new one (`item` null). */
+/** One write a call asks for: of an item already there (`item`), or of a new one (`item` null, given its id from its first change). */
 export interface StoryWrite {
   part: StoryPart;
   item: string | null;
   value: JsonObject;
+  /**
+   * A stand-in for a new item, which later writes of the same call name for it (`item` is the stand-in there): given the id the
+   * item is made with, once its first write is recorded.
+   */
+  stand?: string;
 }
 
-/** Who writes, on which turn, and when. */
+/** One lore overlay a call asks for (plan §9.3): a note on a lore entry, written with the story's own writes. */
+export interface StoryOverlayWrite {
+  entry: string;
+  note: string;
+}
+
+/** Who writes, and on which turn: an agent's definition, `player` or the import; its handle in its run; the job it was started as. */
 export interface StoryWriter {
   user: string;
   turn: string;
   by: string | null;
   agent: string | null;
   job: string | null;
-  now: number;
+  /** Where what it wrote came from (§6.6): the player's strike, the import; none for an agent's own conclusion. */
+  source?: Source | null;
 }
 
-/** The id a new item of `part` is given from its first row's id. */
-export function newItemId(part: StoryPart, row: number): string {
-  return `${PREFIX[part]}-${row}`;
+/** What one write of a call came to: the change that holds it, and the item it wrote (null for an overlay). */
+export interface StoryRecorded {
+  change: number;
+  item: string | null;
 }
 
-/** A name as the record compares names: trimmed, spaces folded, case ignored. */
-export function nameKey(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-/** The id of the one item of a part there is per key: the premise, a person's arc, a turn's record. */
-export function keyedItemId(part: "premise" | "arc" | "record", key: string): string {
-  return part === "premise" ? PREFIX.premise : `${PREFIX[part]}:${nameKey(key)}`;
+/** The id the next change of the store's table is given, which the first write of a new item takes its id from. */
+function nextChange(store: Store): number {
+  return (store.db.query<{ seq: number }, []>("SELECT seq FROM sqlite_sequence WHERE name = 'change'").get()?.seq ?? 0) + 1;
 }
 
 /**
- * Records `writes` on the writer's turn, in order, inside the caller's queued write: the rows as
- * stored, a new item's id given from its first row. Each takes the place after the turn's last write,
- * the lore's overlays among them (`storyMark`). A turn joined to another is refused first, with the
- * typed error naming the turn it joined (`refuseJoined`).
+ * Records a call's writes on the writer's turn, in order, as one write of the store, inside the caller's queued write: each write of
+ * an item is a change of the story's area, an overlay another, the lane story, each keeping who wrote it and its run's handle. A new
+ * item is given its id from its first change (its part and that change's number). A turn joined to another is refused with the typed
+ * error naming the turn it joined; a job's writes take effect where the store places a job's.
  */
-export function writeStory(db: Database, writer: StoryWriter, writes: readonly StoryWrite[]): StoryRow[] {
-  refuseJoined(db, writer.user, writer.turn);
-  let ord = storyMark(db, writer.user, writer.turn) + 1;
-  const put = db.query<unknown, [string, string, number, string, string, string, string | null, string | null, string | null, number]>(
-    "INSERT INTO story_entry (user, turn, ord, part, item, value, by, agent, job, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  );
-  const name = db.query<unknown, [string, number]>("UPDATE story_entry SET item = ? WHERE id = ?");
-  return writes.map((w) => {
-    const id = Number(put.run(writer.user, writer.turn, ord, w.part, w.item ?? "", JSON.stringify(w.value), writer.by, writer.agent, writer.job, writer.now).lastInsertRowid);
-    const item = w.item ?? newItemId(w.part, id);
-    if (w.item === null) name.run(item, id);
-    return { id, turn: writer.turn, ord: ord++, part: w.part, item, value: w.value, by: writer.by, agent: writer.agent, job: writer.job, created: writer.now };
+export function recordStory(store: Store, writer: StoryWriter, list: readonly (StoryWrite | StoryOverlayWrite)[]): StoryRecorded[] {
+  const first = nextChange(store);
+  const given = new Map<string, string>();
+  const items: (string | null)[] = [];
+  const inputs = list.map((w, i): ChangeInput => {
+    const base = { lane: "story" as const, by: writer.by, handle: writer.agent, source: writer.source ?? null };
+    if ("entry" in w) {
+      items.push(null);
+      return { ...base, op: STORY_OPS.overlay, value: { entry: w.entry, note: w.note } };
+    }
+    const item = w.item === null ? newItemId(w.part, first + i) : (given.get(w.item) ?? w.item);
+    if (w.item === null && w.stand !== undefined) given.set(w.stand, item);
+    items.push(item);
+    return { ...base, op: STORY_OPS.write, value: { part: w.part, item, value: w.value } };
   });
+  const target = writer.job === null ? ({ kind: "turn", turn: writer.turn } as const) : ({ kind: "turn", turn: writer.turn, job: writer.job } as const);
+  const { changes } = store.user(writer.user).record(target, inputs);
+  return changes.map((c, i) => ({ change: c.id, item: items[i] ?? null }));
 }
 
-/**
- * Takes back one agent's story rows on an open turn (every agent's when none is named), by the
- * agent's handle, inside the caller's queued write, beside the store's `dropStaged`: the lead
- * dropping a sub-agent's writes. The overlays it wrote through the story's write go with them. How
- * many went. A turn that is not open has nothing staged, and is refused as the store refuses it: one
- * joined to another turn with the typed error naming the turn it joined.
- */
-export function dropStoryStaged(store: Store, user: string, turn: string, agent?: string): number {
-  refuseJoined(store.db, user, turn);
-  const row = store.user(user).turn(turn);
-  if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
-  if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged story rows can be taken back`);
-  let gone = 0;
-  for (const table of ["story_entry", "lore_overlay"]) gone += (agent === undefined ? store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ?`, [user, turn]) : store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND agent = ?`, [user, turn, agent])).changes;
-  return gone;
+/** What `writeStory` wrote for one write: its change, the item it wrote with its part, and what it said. */
+export interface StoryWritten {
+  change: number;
+  item: string;
+  part: StoryPart;
+  value: JsonObject;
 }
 
-/**
- * The story's mark on a turn now: the place of its last write, -1 when it has none. A continue takes
- * it as it begins, beside the store's mark. The lore's overlays are written through the story's own
- * write and take their places among its rows, so the mark covers them too.
- */
-export function storyMark(db: Database, user: string, turn: string): number {
-  return db.query<{ n: number | null }, [string, string]>("SELECT max(n) AS n FROM (SELECT max(ord) AS n FROM story_entry WHERE user = ?1 AND turn = ?2 UNION ALL SELECT max(ord) FROM lore_overlay WHERE user = ?1 AND turn = ?2)").get(user, turn)?.n ?? -1;
-}
-
-/**
- * Takes back a turn's story rows and overlays written after `after` (a `storyMark`), tied or not,
- * inside the caller's queued write, beside the store's `takeBack`: what a continue recorded when it
- * saved nothing. A job's are the job's and stay, as the store keeps a job's changes. How many went. A
- * turn joined to another is refused first, naming the turn it joined.
- */
-export function takeBackStory(db: Database, user: string, turn: string, after: number): number {
-  refuseJoined(db, user, turn);
-  let gone = 0;
-  for (const table of ["story_entry", "lore_overlay"]) gone += db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`, [user, turn, after]).changes;
-  return gone;
-}
-
-/**
- * A continue's held turn's story rows and the lore's overlays become the rows of the turn it extended (plan §10.10, "Continue:
- * the same turn, extended"; R-192 (e), (f)), inside the caller's queued write, before the store's `joinTurn` there, which marks
- * the held turn joined: every row of the held turn, a job's included, takes `into`, after that turn's own writes, in the order
- * they were made (their places, `storyMark`, the overlays among the story's rows), each as it was written (its id, value, writer,
- * agent, job and time), nothing worked out again. A job's rows keep their job: a job is recorded with the turn that started it
- * (§10.9), and after the end that is the turn the continue extended. What may be joined is the store's one check (`joinable`),
- * refused as the store refuses the join. How many moved.
- */
-export function joinStory(store: Store, user: string, held: string, into: string): number {
-  joinable(store.db, user, held, into);
-  const next = storyMark(store.db, user, into) + 1;
-  // The overlays share the story rows' places on a turn, so both tables are taken in one order.
-  const rows = store.db
-    .query<{ overlay: 0 | 1; id: number }, [string, string]>(
-      "SELECT 0 AS overlay, id, ord, created FROM story_entry WHERE user = ?1 AND turn = ?2 UNION ALL SELECT 1, id, ord, created FROM lore_overlay WHERE user = ?1 AND turn = ?2 ORDER BY ord, created, overlay, id",
-    )
-    .all(user, held);
-  const put = [store.db.query<unknown, [string, number, number]>("UPDATE story_entry SET turn = ?, ord = ? WHERE id = ?"), store.db.query<unknown, [string, number, number]>("UPDATE lore_overlay SET turn = ?, ord = ? WHERE id = ?")] as const;
-  rows.forEach((r, i) => put[r.overlay].run(into, next + i, r.id));
-  return rows.length;
-}
-
-/**
- * Removes the story rows of turns the store no longer holds, inside the caller's queued write, right
- * after the store removed them: a chat deleted (`UserStore.deleteChat` when it is not kept for a
- * branch), or an import forgotten (`UserStore.forgetImport`). Rows of a turn a branch still shares
- * stay with the turn. How many went.
- */
-export function dropLeftoverStory(store: Store, user: string): number {
-  const u = store.user(user);
-  const turns = store.db.query<{ turn: string }, [string]>("SELECT DISTINCT turn FROM story_entry WHERE user = ?").all(user);
-  const gone = turns.flatMap((r) => (u.turn(r.turn) === null ? [r.turn] : []));
-  if (gone.length === 0) return 0;
-  return store.db.run("DELETE FROM story_entry WHERE user = ? AND turn IN (SELECT value FROM json_each(?))", [user, JSON.stringify(gone)]).changes;
+/** `recordStory` for writes of items only. */
+export function writeStory(store: Store, writer: StoryWriter, writes: readonly StoryWrite[]): StoryWritten[] {
+  return recordStory(store, writer, writes).map((r, i) => ({ change: r.change, item: r.item as string, part: (writes[i] as StoryWrite).part, value: (writes[i] as StoryWrite).value }));
 }

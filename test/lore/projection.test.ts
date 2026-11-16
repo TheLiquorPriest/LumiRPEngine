@@ -6,7 +6,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EntryNumbers, Lore, type LoreEntryFields, LoreProjection, overlayWrite, type ProjectionBooks, storePath, storeWorlds } from "../../src/lore/index";
+import { EntryNumbers, Lore, type LoreEntryFields, LoreProjection, type ProjectionBooks, storePath, storeWorlds } from "../../src/lore/index";
+import { recordStory } from "../../src/story/record";
 import { CHAT, openTable, USER } from "../story/rig";
 import { Shelf, Tags } from "./fixtures";
 import { shippedGuidance } from "./shipped";
@@ -53,8 +54,7 @@ describe("the projection book", () => {
 
     await t.play();
     const turn = await t.begin();
-    const write = overlayWrite(storeWorlds(t.store));
-    await t.writes.run((d) => write(d, { user: USER, chat: CHAT, turn: turn.id, entry: "e-1", note: "Its east wing burned tonight.", by: "author", agent: "author-1", job: null, ord: 0 }));
+    await t.writes.run(() => recordStory(t.store, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ entry: "e-1", note: "Its east wing burned tonight." }]));
     await t.tie(turn);
 
     expect(await projection.refresh(USER, CHAT)).toEqual({ off: true, removed: null });

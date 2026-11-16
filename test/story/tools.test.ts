@@ -115,7 +115,7 @@ describe("story_record", () => {
 
     // All in the record, on this turn; the chat's head sees it once the reply is tied.
     const rows = b.t.record(turn).items.get(String(beat?.id));
-    expect(rows?.rows.map((x) => [x.turn, x.by, x.agent])).toEqual([[turn.id, "author", "author-1"]]);
+    expect(rows?.rows.map((x) => [x.turn, x.by])).toEqual([[turn.id, "author"]]);
     await b.t.tie(turn);
     const head = b.t.record();
     const tied = head.items.get(String(beat?.id));
@@ -217,20 +217,21 @@ describe("story_record", () => {
     expect(ops(named).map((o) => o.id)).toEqual([ford, expect.not.stringMatching(ford)]);
   });
 
-  test("an overlay is the lore lane's write, made in the same write; an entry it does not know refuses the whole call", async () => {
-    const written: JsonObject[] = [];
+  test("an overlay is a change made in the same write as the call's others; an entry the lore lane does not know refuses the whole call", async () => {
+    const asked: JsonObject[] = [];
     const overlay: LoreOverlay = (db, input) => {
       if (input.entry !== "e-112") return { unknown: input.entry, near: ["e-112"] };
-      written.push({ ...input, inWrite: db.query<{ query_only: number }, []>("PRAGMA query_only").get()?.query_only === 0 });
-      return { written: { overlay: "ov-1", entry: input.entry } };
+      asked.push({ ...input, inWrite: db.query<{ query_only: number }, []>("PRAGMA query_only").get()?.query_only === 0 });
+      return null;
     };
     const b = await bench({ overlay });
     const turn = await b.t.begin();
     const r = await b.call("story_record", { operations: [{ op: "beat", text: "The east wing burns." }, { op: "overlay", entry: "e-112", text: "The east wing burned on this turn." }] }, turn.id);
     wordsFromFiles(r);
-    expect(ops(r)[1]).toEqual({ n: 2, op: "overlay", entry: "e-112", wrote: { text: "The east wing burned on this turn." }, written: { overlay: "ov-1", entry: "e-112" } });
-    // The overlay is the writer's, as its rows are, and takes the place after the beat before it.
-    expect(written).toEqual([{ user: USER, chat: CHAT, turn: turn.id, entry: "e-112", note: "The east wing burned on this turn.", by: "author", agent: "author-1", job: null, ord: 1, inWrite: true }]);
+    expect(ops(r)[1]).toMatchObject({ n: 2, op: "overlay", entry: "e-112", wrote: { text: "The east wing burned on this turn." }, written: { entry: "e-112", note: "The east wing burned on this turn." } });
+    expect(asked).toEqual([{ user: USER, chat: CHAT, turn: turn.id, entry: "e-112", inWrite: true }]);
+    // The overlay is the writer's change, in its place after the beat before it, in the story lane.
+    expect(b.t.s.changes(turn.id).map((c) => [c.lane, c.op, c.by, c.handle])).toEqual([["story", "story.write", "author", "author-1"], ["story", "story.overlay", "author", "author-1"]]);
 
     const refused = await b.call("story_record", { operations: [{ op: "beat", text: "Smoke over the roofs." }, { op: "overlay", entry: "e-404", text: "Gone." }] }, turn.id);
     expect(refused.error).toBe(true);

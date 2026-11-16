@@ -34,7 +34,7 @@ interface Page {
 async function openPage(settings: Partial<StorySettings> = {}): Promise<Page> {
   const t = await openTable();
   const running = new Set<string>();
-  const deps: StoryRoutesDeps = { store: t.store, writes: t.writes, turning: (_user, chat) => running.has(chat), files: () => shippedTexts(), settings: async () => settings, now: () => 7 };
+  const deps: StoryRoutesDeps = { store: t.store, writes: t.writes, turning: (_user, chat) => running.has(chat), files: () => shippedTexts(), settings: async () => settings };
   const [storyRoute, strikeRoute] = storyRoutes(deps);
   return {
     t,

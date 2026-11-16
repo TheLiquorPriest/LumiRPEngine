@@ -8,8 +8,8 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRef, HostTool, ToolCtx } from "rp-harness/contract";
 import { shippedTexts } from "../../src/iface/texts";
-import { overlayNotes, overlayWrite, storePath, storeWorlds } from "../../src/lore/index";
-import { dropStoryStaged, storyMark, storyTools, takeBackStory } from "../../src/story/index";
+import { overlayCheck, overlayNotes, storePath, storeWorlds } from "../../src/lore/index";
+import { storyTools } from "../../src/story/index";
 import { giveWorldNumbers } from "../../src/lore/ids";
 import { CHAT as COAST_CHAT, startingWorlds, USER as COAST_USER } from "./fixtures";
 import { CHAT, openTable, type Table, USER } from "../story/rig";
@@ -21,14 +21,14 @@ async function table(): Promise<{ t: Table; record: HostTool; notes(turn?: strin
   const t = await openTable();
   // RPE has shown an agent one book entry, the inn: it is e-1.
   await t.writes.run((d) => d.run("INSERT INTO lore_entry_number (user, n, entry) VALUES (?, 1, 'entry-inn')", [USER]));
-  const tools = await storyTools({ store: t.store, writes: t.writes, files: shippedTexts(), overlay: overlayWrite(storeWorlds(t.store), () => 7) });
+  const tools = await storyTools({ store: t.store, writes: t.writes, files: shippedTexts(), overlay: overlayCheck(storeWorlds(t.store)) });
   const record = tools.find((tool) => tool.name === "story_record");
   if (record === undefined) throw new Error("story_record is not offered");
   const path = storePath(t.store);
   return {
     t,
     record,
-    notes: (turn, chat = CHAT) => overlayNotes(t.db, USER, path.turns(USER, chat, turn), ["e-1"]).get("e-1") ?? [],
+    notes: (turn, chat = CHAT) => overlayNotes(path.overlays(USER, chat, turn), ["e-1"]).get("e-1") ?? [],
     async overlay(turn, text, agent = AUTHOR) {
       const r = await record.run({ operations: [{ op: "overlay", entry: "e-1", text }] }, ctx(turn, agent));
       expect(r.error).toBeUndefined();
@@ -78,7 +78,7 @@ describe("overlays", () => {
     const kept = await record.run({ operations: [{ op: "beat", text: "Smoke over the roofs." }, { op: "overlay", entry: "e-1", text: "The keeper's note." }] }, ctx(turn.id, keeper));
     expect(kept.error).toBeUndefined();
     expect(notes(turn.id)).toEqual(["The Author's note.", "The keeper's note."]);
-    await t.writes.run(() => dropStoryStaged(t.store, USER, turn.id, keeper.id));
+    await t.writes.run(() => t.s.dropStaged(turn.id, keeper.id));
     expect(notes(turn.id)).toEqual(["The Author's note."]);
     expect(t.record(turn).items.size).toBe(0);
   });
@@ -90,17 +90,20 @@ describe("overlays", () => {
     await t.write(turn, [{ part: "beat", item: null, value: { text: "The bell rings." } }]);
     await overlay(turn.id, "Written by the turn.");
     await t.tie(turn);
-    // A continue begins: it takes the story's mark, then writes an overlay and nothing else; a job writes one meanwhile.
-    const mark = storyMark(t.db, USER, turn.id);
+    // A continue begins: it takes the store's mark, then writes an overlay and nothing else; a job writes one meanwhile.
+    const mark = t.s.changes(turn.id).at(-1)?.ord ?? -1;
     await overlay(turn.id, "Written by the continue.");
     await overlay(turn.id, "Written by a job.", { id: "keeper-2", definition: "keeper", job: "job-1" });
-    expect(notes()).toEqual(["Written by the turn.", "Written by the continue.", "Written by a job."]);
-    // A row written after an overlay takes the place after it.
-    const [row] = await t.write(turn, [{ part: "beat", item: null, value: { text: "Ash falls." } }]);
-    expect(row?.ord).toBe(storyMark(t.db, USER, turn.id));
-    await t.writes.run((d) => takeBackStory(d, USER, turn.id, mark));
-    expect(notes()).toEqual(["Written by the turn.", "Written by a job."]);
+    // The job's takes effect where the store places a job's: not before it has ended.
+    expect(notes()).toEqual(["Written by the turn.", "Written by the continue."]);
+    await t.write(turn, [{ part: "beat", item: null, value: { text: "Ash falls." } }]);
+    expect(await t.writes.run(() => t.s.takeBack(turn.id, mark))).toBe(2);
+    expect(notes()).toEqual(["Written by the turn."]);
     expect([...t.record().items.values()].map((i) => i.fields.text)).toEqual(["The bell rings."]);
+    // The job's stays, and is there from the first turn that begins after it ended.
+    await t.writes.run(() => t.s.endJob("job-1"));
+    const next = await t.begin();
+    expect(notes(next.id)).toEqual(["Written by the turn.", "Written by a job."]);
   });
 
   test("an entry RPE does not know is refused, and the call records nothing", async () => {
@@ -110,7 +113,7 @@ describe("overlays", () => {
     expect(result.error).toBe(true);
     const texts = result.content.flatMap((c) => (c.type === "text" ? [c.text] : []));
     expect(texts).toContain("Operation 2 (overlay): there is no lore entry e-9.");
-    expect(t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM lore_overlay").get()?.n).toBe(0);
+    expect(t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'story.overlay'").get()?.n).toBe(0);
     expect(t.record(turn).items.size).toBe(0);
   });
 
@@ -118,13 +121,12 @@ describe("overlays", () => {
     const { t } = await table();
     const turn = await t.begin();
     const coast = startingWorlds();
-    const write = overlayWrite({ ...coast, at: () => coast.at(COAST_USER, COAST_CHAT) }, () => 7);
-    const input = (entry: string) => ({ user: USER, chat: CHAT, turn: turn.id, entry, note: "The tithe was lifted.", by: null, agent: null, job: null, ord: 0 });
+    const check = overlayCheck({ ...coast, at: () => coast.at(COAST_USER, COAST_CHAT) });
+    const input = (entry: string) => ({ user: USER, chat: CHAT, turn: turn.id, entry });
     const answers = await t.writes.run((db) => {
       giveWorldNumbers(db, USER, "world-reed-coast", ["tithe_law"]);
-      return ["w-1", "w-2", "The harbor tithe", "cove route", "w-tithe_law"].map((entry) => write(db, input(entry)));
+      return ["w-1", "w-2", "The harbor tithe", "cove route", "w-tithe_law"].map((entry) => check(db, input(entry)));
     });
-    expect(answers.map((a) => ("written" in a ? "written" : a.near ?? [])).slice(0, 5)).toEqual(["written", [], ["w-1"], ["w-2"], []]);
-    expect(t.db.query("SELECT entry FROM lore_overlay").all()).toEqual([{ entry: "w-1" }]);
+    expect(answers.map((a) => (a === null ? "known" : (a.near ?? [])))).toEqual(["known", [], ["w-1"], ["w-2"], []]);
   });
 });
