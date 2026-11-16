@@ -20,7 +20,7 @@ export function playArea(takes: () => PlayTakes): Area {
     name: "play",
     mounted: (at) => {
       const taken = takes();
-      at.routes.add("play", playRoutes(new PlayService({ writes: at.writes, live: at.live, log: at.log, ...taken })));
+      at.routes.add("play", playRoutes(new PlayService({ writes: at.writes, live: at.live, log: at.log, db: at.db, ...taken })));
       at.routes.add("play-things", thingsRoutes(taken.store));
       at.routes.add("play-map-walk", mapWalkRoutes(taken.store));
     },

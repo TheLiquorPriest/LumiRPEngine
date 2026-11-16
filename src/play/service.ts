@@ -17,6 +17,7 @@
 // own choice, the things browser and the map's display are not served here, and say so. Every word is a line of
 // `.prompts/play-answers.md`. After each change the chat's followers are told its state changed.
 
+import type { Database } from "bun:sqlite";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Log } from "rp-harness/contract";
@@ -58,6 +59,7 @@ import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
 import { journalNotes } from "./journal";
+import { chipsOf, meterOf, pendingOf } from "./panel-reads";
 import { TIDY_SWITCH, type TapSettings } from "./settings";
 import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
@@ -104,6 +106,8 @@ export interface PlayDeps {
   lumiverse(): Pick<LumiverseWrites, "appendMessage" | "startGeneration">;
   /** Writes one setting at the chat's level of his config (null takes the key away there), as the Settings page writes it. */
   writeChatSetting(chat: string, key: string, value: JsonValue): Promise<void>;
+  /** The application's database: the runs' usage, the questions waiting on his word and the carried chips (`panel-reads.ts`). */
+  db: Database;
   log: Log;
 }
 
@@ -251,21 +255,39 @@ export class PlayService {
   }
 
   /**
-   * The chat's state view at its head, or at `turn`, one of its turns: its controls preset by the chat's out-of-play settings and its
-   * tidy-up switch, its map drawn at the chat's map settings, and the Journal's notes of its newest turns (`journal.ts`), a report's code
-   * in this area's words.
+   * The chat's state view at its head, or at `turn`, one of its turns: its controls preset by the chat's out-of-play settings, its
+   * knowledge choices and tidy-up switch, its map drawn at the chat's map settings, the Journal's notes of its newest turns
+   * (`journal.ts`, a report's code in this area's words), and the chips, meter, reply clocks and pending marks (`panel-reads.ts`).
    */
   async state(user: string, chat: string, turn: string | null): Promise<StateView> {
-    const row = turn === null ? null : this.deps.store.user(user).turn(turn);
+    const s = this.deps.store.user(user);
+    const row = turn === null ? null : s.turn(turn);
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
     const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
     const journal = journalNotes(this.deps.store, user, chat, taps.journalMost, (code) => own(keys, code) ?? code);
+    const turning = this.deps.turning(user, chat);
+    const { db } = this.deps;
+    const knowledge = { ...taps.choices, chat: { ...taps.choices.chat, ...(taps.tidy.on === null ? {} : { tidy: taps.tidy.on }) } };
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
-    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat), offstage: taps.tell, map, tidy: taps.tidy.on, journal });
+    return chatView({
+      store: this.deps.store,
+      user,
+      chat,
+      turn,
+      turning,
+      offstage: taps.tell,
+      map,
+      knowledge,
+      journal,
+      chips: chipsOf(db, s, user, chat),
+      meter: meterOf(db, user, chat, taps.meterTurns),
+      pending: turning ? pendingOf(db, s, user, chat) : [],
+      clocksMost: taps.clocksMost,
+    });
   }
 
   /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`). */

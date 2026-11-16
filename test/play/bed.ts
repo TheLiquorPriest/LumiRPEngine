@@ -18,6 +18,7 @@ import { TAP_DEFAULTS } from "../../src/play/settings";
 import { hashJson } from "../../src/shared/hash";
 import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
+import { MAP_DEFAULTS } from "../../src/shared/map-config";
 import type { WorldDoc } from "../../src/shared/world";
 import { migrateStore, openStore, readPart, type Store, storedWorlds, timeDue, type TurnRow } from "../../src/store";
 import { Requests } from "../../src/turn/requests";
@@ -82,8 +83,8 @@ let asked = 0;
 export function makeBed(): Bed {
   const db = new Database(":memory:");
   migrateStore(db);
-  // What he asks for beside his words, on the turn lane's own table.
-  db.run(HARNESS_MIGRATIONS.find((s) => s.version === 17)!.sql.split("INSERT INTO")[0]!);
+  // The turn lane's own tables (requests, runs and their usage, questions, carried chips), as the application has them.
+  for (const step of HARNESS_MIGRATIONS) db.run(step.sql);
   const store = openStore({ db, registry: registry(), worlds: storedWorlds(db) });
   // Made last: from here on the database takes writes only through the queue, as in the application.
   const writes = new WriteQueue(db, 10);
@@ -97,7 +98,7 @@ export function makeBed(): Bed {
   const lumiverse = () => {
     throw new Error("The play bed has no Lumiverse to put a message in.");
   };
-  const service = new PlayService({ store, writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), requests, lumiverse, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
+  const service = new PlayService({ store, writes, live, db, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse, writeChatSetting: async () => {}, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
   const [stateRoute, actionsRoute, undoRoute] = playRoutes(service);
   const call = { query: new URLSearchParams(), request: new Request("http://rpe.test/"), signal: new AbortController().signal };
 

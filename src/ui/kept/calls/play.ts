@@ -5,11 +5,17 @@
 // message is held as his request (or taken back, where the same tap is pressed again); one with words, a
 // chip or Send now is played now. An Undo goes by the id the answer gave, to
 // `POST /api/v1/chats/:chat/edits/:edit/undo`, not as today's Undo chip. RPE answers a tap it turns down
-// with `applied: false` and its words, which come back as the refusal they are.
+// with `applied: false` and its words, which come back as the refusal they are. His word on a question a
+// lane set to Confirm waits on (the chip under its reply) goes to the question's answer route. The chat's
+// own choices (GM → This chat: knowledge tracking, the narrator's view, the tidy-up switch) are read and
+// set as the chat's settings, at its level, through the settings routes (PlanChatUI-P4 item 2); the
+// engine choice goes with the old engines and is not offered.
 
 import type { RequestBody } from "../../../frontend/registry";
 import type { TapAsk } from "../../../shared/api";
 import type { JsonValue } from "../../../shared/json";
+import type { ResultBodies } from "../../../shared/protocol";
+import type { NarratorView } from "../../../shared/settings";
 import type { CallContext, CallFile, ServedBody } from "../client";
 import { Refusal } from "../client";
 
@@ -38,9 +44,42 @@ async function tap(ctx: CallContext, chat: string, body: TapAsk) {
   return reply;
 }
 
+/** The settings each of the chat's own choices is, as a config file writes it. */
+const CHOICE = { tracked: "secrets.tracked", knowledge: "secrets.narrator.knowledge", secrets: "secrets.narrator.secrets", tidy: "things.tidy" } as const;
+
+/** A question's chip carries the question's id after this. */
+const APPROVAL_CHIP = "approval:";
+
+/**
+ * The chat's own choices, set where the request names them (null takes the chat's own away, so it follows the world's or his own),
+ * then read back: each as the chat's own level sets it, none where it sets none.
+ */
+async function choices(ctx: CallContext, chat: string, request: Of<"lre.chat.knowledge">): Promise<ResultBodies["lre.chat.knowledge"]> {
+  const writes: [string, JsonValue][] = [];
+  if (request.knowledge !== undefined) writes.push([CHOICE.tracked, request.knowledge]);
+  if (request.narrator !== undefined) writes.push([CHOICE.knowledge, request.narrator?.knowledge ?? null], [CHOICE.secrets, request.narrator?.secrets ?? null]);
+  if (request.tidy !== undefined) writes.push([CHOICE.tidy, request.tidy]);
+  let read = null;
+  for (const [key, value] of writes) read = await ctx.client.call("PUT /api/v1/settings", {}, { body: { level: "chat", chat, key, value } });
+  read ??= await ctx.client.call("GET /api/v1/settings", {}, { query: { chat } });
+  const own = (key: string): JsonValue | undefined => read.settings.find((s) => s.key === key)?.set.find((l) => l.level === "chat")?.value;
+  const tracked = own(CHOICE.tracked);
+  const knows = own(CHOICE.knowledge);
+  const secrets = own(CHOICE.secrets);
+  const inForce = (key: string): JsonValue | undefined => read.settings.find((s) => s.key === key)?.value;
+  const narrator = knows === undefined && secrets === undefined ? null : ({ knowledge: knows ?? inForce(CHOICE.knowledge), secrets: secrets ?? inForce(CHOICE.secrets) } as NarratorView);
+  const tidy = own(CHOICE.tidy);
+  return { knowledge: typeof tracked === "boolean" ? tracked : null, narrator, ...(typeof tidy === "boolean" ? { tidy } : {}) };
+}
+
 export const calls: CallFile = {
   name: "play",
-  takes: (request) => request.type === "lre.action" || request.type === "lre.fix" || request.type === "lre.edit" || (request.type === "lre.chip" && request.choice === "undo"),
+  takes: (request) =>
+    request.type === "lre.action" ||
+    request.type === "lre.fix" ||
+    request.type === "lre.edit" ||
+    (request.type === "lre.chat.knowledge" && request.engine === undefined) ||
+    (request.type === "lre.chip" && (request.choice === "undo" || request.chip.startsWith(APPROVAL_CHIP))),
   async serve(request, ctx): Promise<ServedBody> {
     switch (request.type) {
       case "lre.action": {
@@ -60,9 +99,16 @@ export const calls: CallFile = {
       }
       case "lre.chip": {
         const chat = chatOf(request, ctx);
+        if (request.chip.startsWith(APPROVAL_CHIP)) {
+          const approval = request.chip.slice(APPROVAL_CHIP.length);
+          const answer = await ctx.client.call("POST /api/v1/chats/:chat/approvals/:approval/answer", { chat, approval }, { body: { go: request.choice === "go" } });
+          return { applied: answer.answered, pending: false };
+        }
         const reply = await ctx.client.call("POST /api/v1/chats/:chat/edits/:edit/undo", { chat, edit: request.chip });
         return { applied: reply.applied, pending: false, ...(reply.words === "" ? {} : { said: reply.words }) };
       }
+      case "lre.chat.knowledge":
+        return await choices(ctx, chatOf(request, ctx), request);
       default:
         throw new Refusal("internal", `The play calls do not take ${request.type}.`);
     }
