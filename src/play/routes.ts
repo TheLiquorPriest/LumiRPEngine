@@ -14,6 +14,51 @@ export const STATE_PATH = "/api/v1/chats/:chat/state";
 export const ACTIONS_PATH = "/api/v1/chats/:chat/actions";
 export const UNDO_PATH = "/api/v1/chats/:chat/actions/undo";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
+export const TAPS_PATH = "/api/v1/chats/:chat/taps";
+export const TAPS_UNDO_PATH = "/api/v1/chats/:chat/taps/undo";
+
+const T = shape.text();
+const opt = shape.optional;
+const tell = opt(shape.yesNo(), "Whether the next turn's briefing tells the Author of it (his \"Tell the story\" choice); left out, the tap's group decides.");
+const editOpAsk = shape.named(
+  "EditOpAsk",
+  "One field of the World page's edit: a value or a fact at a level (world, place:<id>, entity:<id>), set or removed, with how exact and how sure he says a fact is.",
+  shape.object({
+    op: shape.oneOf("set", "remove"),
+    at: T,
+    key: T,
+    as: shape.oneOf("value", "fact"),
+    value: opt(T),
+    precision: opt(shape.oneOf("exact", "approximate", "vague", "unknown")),
+    standing: opt(shape.oneOf("established", "proposed", "assumed")),
+  }),
+);
+const tapAsk = shape.named(
+  "TapAsk",
+  "A tap that manages, recorded at once as his own edit: one of the world's actions done at once (money, a group, gear, a vehicle); one ✎ form (a hint, the time, a thing, things with a label, or a field); the World page's edit of values and facts; or an edit of operations (\"Make this a property\").",
+  shape.union(
+    shape.object({ kind: shape.literal("action"), action: T, params: shape.record(shape.json()), source: T, text: opt(T), now: opt(shape.yesNo()), tell }),
+    shape.object({
+      kind: shape.literal("fix"),
+      fix: shape.union(
+        shape.object({ hint: T }),
+        shape.object({ time: T }),
+        shape.object({ thing: shape.json() }),
+        shape.object({ things: shape.list(shape.json()), label: T }),
+        shape.object({ entity: T, field: T, value: shape.json() }),
+      ),
+      tell,
+    }),
+    shape.object({ kind: shape.literal("edit"), ops: shape.list(editOpAsk), tell }),
+    shape.object({ kind: shape.literal("ops"), ops: shape.list(shape.json()), tell }),
+  ),
+);
+const tapReply = shape.named(
+  "TapReply",
+  "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words.",
+  shape.object({ applied: shape.yesNo(), reports: shape.list(T), undo: shape.nullable(T), words: T }),
+);
+const tapUndoAsk = shape.named("TapUndoAsk", "The Undo of an edit of his, by the id its answer gave.", shape.object({ undo: T }));
 
 const dueShown = shape.named(
   "DueShown",
@@ -107,6 +152,27 @@ export function playRoutes(play: PlayService) {
       reply: dueReply,
       joined: true,
       handle: ({ user, params, query }) => play.due(user, params.chat, query.turn ?? null),
+    }),
+    route({
+      method: "POST",
+      path: TAPS_PATH,
+      access: "page",
+      group: "state",
+      does: "A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed.",
+      body: tapAsk,
+      reply: tapReply,
+      handle: ({ user, params, body }) => play.tap(user, params.chat, body),
+    }),
+    route({
+      method: "POST",
+      path: TAPS_UNDO_PATH,
+      access: "page",
+      group: "state",
+      does: "The Undo of an edit of his, by the id its answer gave: all of it, or none and the answer says why.",
+      body: tapUndoAsk,
+      reply: tapReply,
+      joined: true,
+      handle: ({ user, params, body }) => play.undoEdit(user, params.chat, body.undo),
     }),
   ] as const;
 }

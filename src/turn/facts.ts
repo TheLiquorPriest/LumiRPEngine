@@ -5,7 +5,6 @@
 // The turn lane's own facts, counted along the scope turn's own line (the turns it was made after, and
 // itself once its reply is tied), or along the chat's path for a scope with no turn:
 //   turns.since.engine.change  turns on that line since the last one that recorded an engine-lane change
-//   session.turns              turns on that line since this session opened
 //   turn.recorded              what this turn has recorded so far in any lane: the store's changes and the story's and the cast's
 //                              rows it wrote; a continue's, since it began (the marks its run took, as its take-back uses them)
 //   turn.owes.reply            1 while the run owes the player a reply it has not released; 0 for a run that owes none (Settle now). A
@@ -84,7 +83,6 @@ export function turnFacts(store: Store, runs: (user: string, turn: string) => re
     area: "turn",
     defs: [
       { name: "turns.since.engine.change", counts: "Turns on this turn's own line, this one once its reply is saved, since the last one that recorded a change in the engine lane; every turn on it when none has." },
-      { name: "session.turns", counts: "Turns on this turn's own line, this one once its reply is saved, since this session opened, the turn that opened it among them." },
       { name: "turn.recorded", counts: "Things this turn has recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. A job's are its own." },
       { name: "turn.owes.reply", counts: "1 while this run owes the player a reply it has not released; 0 once it has, and for a run that owes none (a Settle now run)." },
       { name: "turn.owes.record", counts: "1 while this run owes the player a reply and has recorded nothing in any lane (turn.recorded is 0); 0 once it has, and for a run that owes no reply." },
@@ -116,11 +114,6 @@ export function turnFacts(store: Store, runs: (user: string, turn: string) => re
           count++;
         }
         out["turns.since.engine.change"] = { count };
-      }
-      if (names.includes("session.turns")) {
-        const opener = user.session(scope.session)?.openedBy;
-        const from = opener === undefined ? -1 : turns.indexOf(opener);
-        out["session.turns"] = { count: from < 0 ? 0 : turns.length - from };
       }
       if (names.includes("turn.recorded")) out["turn.recorded"] = { count: recorded() };
       if (names.includes("turn.owes.record")) out["turn.owes.record"] = { count: owes && recorded() === 0 ? 1 : 0 };

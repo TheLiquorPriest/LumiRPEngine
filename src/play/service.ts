@@ -1,22 +1,19 @@
 // A chat's play panels, served by RPE (plan §14: today's panels kept, re-pointed to RPE): the chat's
-// state view, read from RPE's store, and today's panel actions as a page sends them (plan §10.10). A
-// tap that manages (money, a group, gear, with no words: today's `lre.action` done off screen, and
-// each `lre.fix`) is resolved with today's pure resolvers and recorded in RPE's store as the player's
-// own changes on the chat's newest turn, the turn the next one follows: the next turn's world state
-// shows their values and lists them among what the turn before changed. A tap records what the player
-// did and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's tables; what the
-// world's defaults give with it is recorded apart from the player's own changes, from those defaults
-// and as assumed, as the engine's own tools record it: the accounts the world gave those it names,
-// opened first, each a change of its own, and the economy's bookkeeping for someone it keeps no
-// accounts for, in the unit it came in; and the clock's ✎ moves the clock without deciding what the
-// time between did. While a turn of the chat runs, a tap and an Undo wait for it to be over (plan
-// §10.9: no turn has its starting state changed under it). An Undo records the reversal of all of the
-// player's changes of a tap (`UserStore.undo`), or of none and says what has no undo; what the world's
-// defaults gave with it that the store keeps no reverse for stays, and its answer says so. A chat's own
-// choices (today's `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that goes with the
-// next message, a tap that plays now, setting a chat's own choice, the things browser and the map's
-// walk and display are not served here, and say so in words from `.prompts/play-answers.md`. After
-// each change the chat's followers are told its state changed.
+// state view, read from RPE's store; what a turn's time brought due; and the taps that manage (money, a
+// group, gear, with no words), each ✎ correction, an edit of operations ("Make this a property") and the
+// World page's edit of values and facts, each recorded as his own edit through the one owner's-edit path
+// (`owner-edits.ts`), on the typed route and on today's message tunnel alike. A tap records what he did
+// and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's tables, and the clock's ✎
+// moves the clock without deciding what the time between did. The world's rules advise rather than
+// refuse (plan §6.1): a requirement the world's action does not meet, or a payee who is not there, is
+// applied with what does not add up kept beside it and answered. What is still refused (§6.1: an id that
+// does not exist or that his character cannot know of, input that cannot be parsed) says its true reason,
+// case by case (`unfit.ts`). An Undo records the reversal of all of his changes of an edit
+// (`UserStore.undo`), or of none and says what has no undo. A chat's own choices (today's
+// `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that goes with the next message, a tap
+// that plays now, setting a chat's own choice, the things browser and the map's walk and display are not
+// served here, and say so. Every word is a line of `.prompts/play-answers.md`. After each change the
+// chat's followers are told its state changed.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -27,7 +24,7 @@ import { resolveEdit } from "../engine/edits";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalQuery, own } from "../engine/pack-kit";
-import { playedWorld } from "../engine/places-in-play";
+import { baseWorld } from "../engine/places-in-play";
 import type { Registry } from "../engine/registry-impl";
 import { resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
@@ -35,45 +32,37 @@ import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { clockFix } from "../engine/time";
 import { currentStage } from "../engine/tracks";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, shownTrackId, unrevealedSecrets } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, unrevealedSecrets } from "../engine/visibility";
 import { Working } from "../engine/working";
-import { FILLED_IN } from "../iface/source";
-import { bookkeeping } from "../iface/writing";
+import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { hasLedger } from "../packs/economy/core/model";
-import { hashParts } from "../shared/hash";
 import { FINANCE_EVENTS } from "../shared/finance";
-import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
+import { hashParts } from "../shared/hash";
+import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
 import type { FixOp, LedgerEvent } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
-import { type ErrorCode, type ErrorMessage, FIX_THINGS_MAX, type FrontendToBackend, PROTOCOL_VERSION, type ResultBodies, type ResultMessage } from "../shared/protocol";
+import type { ErrorCode, ErrorMessage, FrontendToBackend, ResultBodies, ResultMessage } from "../shared/protocol";
+import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import type { ParamDef, WorldDoc } from "../shared/world";
-import { type ChangeInput, type ChangeRow, JoinedTurnError, readPart, type Report, type Store } from "../store";
+import { type ChangeRow, factStore, JoinedTurnError, readPart, type Report, type Store } from "../store";
+import { FACT_ABOUT } from "../store/facts";
 import { type DueRead, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
+import { editId, type Head, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
+import type { TapSettings } from "./settings";
 import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
+import { unfitWords } from "./unfit";
 import { chatView, headTurn } from "./view";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
 export const PLAY_ANSWERS = "play-answers";
 
-/** Who a change from a panel is by, and where it came from. */
-const PLAYER = "player";
-
-/** What every draw of a tap is seeded from, with the chat and the tap: each tap draws on its own. */
-const SEED = "rpe.play";
-
-/** The id a tap's Undo takes: `tap:<turn>:<tap>`. */
-const UNDO_ID = /^tap:([^:]+):([^:]+)$/;
-
 /** The economy's domain, whose materializer opens the accounts the world gave a party that holds some. */
 const MONEY = "money";
-
-/** How what the world's defaults give with a tap is recorded: as the engine's own tools record what they fill in. */
-const DEFAULTS: Pick<ChangeInput, "source" | "standing" | "precision"> = { source: FILLED_IN.source?.from ?? null, standing: FILLED_IN.standing, precision: FILLED_IN.precision };
 
 /**
  * The line of this area's words that says a change of the world's stays after an Undo, by its operation: the accounts the world
@@ -84,6 +73,15 @@ const STAYS: Readonly<Record<string, string>> = { materialize: "opened_stay", [F
 
 /** What one answer says in more than one line of this area's words, those lines joined by this. */
 const SENTENCES = " ";
+
+/** The settings a chat's taps read, as the chat's levels set them. */
+export interface PlaySettings {
+  /** The most things falling due a list gives (`engine.dueItems`). */
+  dueItems: number;
+  /** The most operations one edit of operations carries (`engine.editOps`). */
+  editOps: number;
+  taps: TapSettings;
+}
 
 export interface PlayDeps {
   /** RPE's store, which holds each chat's state. */
@@ -96,54 +94,73 @@ export interface PlayDeps {
   guidance: string;
   /** Whether a turn of the user's chat runs now. */
   turning(user: string, chat: string): boolean;
-  /** The most things falling due a list gives for the chat (its `engine.dueItems`). */
-  dueItems(user: string, chat: string): Promise<number>;
+  /** The chat's settings the taps and reads take. */
+  settings(user: string, chat: string): Promise<PlaySettings>;
   log: Log;
 }
 
+/** Where a tap was made. */
+export type TapSource = "palette" | "map" | "panel" | "chip" | "send-now";
+
+/** A tap that does one of the world's actions at once (money, a group, gear, a vehicle). */
+export interface ActionAsk {
+  action: string;
+  params: JsonObject;
+  source: string;
+  /** Words typed with it, which a refusal quotes his name for something from. */
+  text?: string;
+  /** Asked to play now, as a message of its own. */
+  now?: boolean;
+}
+
+/** One of the ✎ forms: a hint opened, the time, a thing, things, or a field (place, cash, weather, scene type, a sheet row). */
+export type FixAsk = { hint: string } | { time: string } | { thing: JsonValue } | { things: JsonValue[]; label: string } | { entity: string; field: string; value: JsonValue };
+
+/** One field of the World page's edit: a value or a fact at a level, set or removed. */
+export interface EditOpAsk {
+  op: "set" | "remove";
+  at: string;
+  key: string;
+  as: "value" | "fact";
+  value?: string;
+  precision?: "exact" | "approximate" | "vague" | "unknown";
+  standing?: "established" | "proposed" | "assumed";
+}
+
+/** A tap on the typed route, with his "Tell the story" choice. */
+export type TapAsk =
+  | ({ kind: "action" } & ActionAsk & { tell?: boolean })
+  | { kind: "fix"; fix: FixAsk; tell?: boolean }
+  | { kind: "edit"; ops: EditOpAsk[]; tell?: boolean }
+  | { kind: "ops"; ops: JsonValue[]; tell?: boolean };
+
+/** What a tap on the typed route came to: applied or not, what the world's rules reported, the id its Undo takes, and the answer's words. */
+export interface TapAnswer {
+  applied: boolean;
+  reports: string[];
+  undo: string | null;
+  words: string;
+}
+
 type Request<T extends FrontendToBackend["type"]> = Extract<FrontendToBackend, { type: T }>;
-
-/**
- * Why a request is not done: today's error code, with the line of this area's words that says so, or the words today's own code
- * gives. `codes` are fields given as codes, each said in the words the file has for it (`keys`).
- */
-class Refused extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    readonly why: { line: string; fields?: Record<string, unknown>; codes?: Record<string, readonly string[]> } | { words: string },
-  ) {
-    super("line" in why ? why.line : why.words);
-  }
-}
-
-/** The chat's head as a tap is resolved on it: the world as its state plays it, and the seed of the tap's draws. */
-interface Head {
-  registry: Registry;
-  world: WorldDoc;
-  state: WorldState;
-  seed: string;
-}
-
-/** What a tap comes to: what the player did, and the accounts the world gave that opened for it first. */
-interface Tapped {
-  /** Each account's authored opening (`openGiven`): the world's, not the player's. */
-  opened: LedgerEvent[];
-  /** What the player did. */
-  events: LedgerEvent[];
-}
 
 function reply<K extends keyof ResultBodies>(r: FrontendToBackend, request: K, body: ResultBodies[K]): ResultMessage {
   return { lre: PROTOCOL_VERSION, type: "lre.result", reqId: r.reqId, request, body } as ResultMessage;
 }
 
-/** A tap of the player's alone, which opens nothing of the world's. */
-function played(events: LedgerEvent[]): Tapped {
+/** A tap of his alone, which opens nothing of the world's. */
+function played(events: LedgerEvent[]): Resolved {
   return { opened: [], events };
 }
 
 /** The unit a recorded change is undone with, as the store takes it: its group's, or its own when it has none. */
 function unitOf(c: ChangeRow): string {
   return isRecord(c.value) && typeof c.value.group === "string" ? `group:${c.value.group}` : `change:${c.id}`;
+}
+
+/** What the world's rules advised against an edit, as the answer lists them: each its words. */
+function adviceWords(advised: readonly Report[]): string[] {
+  return advised.flatMap((r) => (typeof r.values?.why === "string" ? [r.values.why] : []));
 }
 
 /**
@@ -189,6 +206,16 @@ function clockSet(registry: Registry, world: WorldDoc, state: Readonly<WorldStat
   return fixed.events;
 }
 
+/** A value as the World page typed it: JSON where it reads as JSON (a number, true, a list), else the text itself; removed, null. */
+function typedValue(op: EditOpAsk): JsonValue {
+  if (op.op === "remove" || op.value === undefined) return null;
+  try {
+    return JSON.parse(op.value) as JsonValue;
+  } catch {
+    return op.value;
+  }
+}
+
 export class PlayService {
   private readonly runEnds: RunEnds;
 
@@ -216,7 +243,47 @@ export class PlayService {
     const row = s.turn(at);
     if (row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${at}.`);
     if (row.joined != null) throw new JoinedTurnError(at, row.joined);
-    return turnDue(this.deps.store, user, at, await this.deps.dueItems(user, chat));
+    return turnDue(this.deps.store, user, at, (await this.deps.settings(user, chat)).dueItems);
+  }
+
+  /** A tap on the typed route, recorded as his own edit; a refusal answered in words with nothing changed. */
+  async tap(user: string, chat: string, ask: TapAsk): Promise<TapAnswer> {
+    try {
+      const settings = await this.deps.settings(user, chat);
+      const tell = ask.tell ?? null;
+      const { kind: _kind, tell: _tell, ...request } = ask;
+      const resolve = (head: Head): Resolved => {
+        switch (ask.kind) {
+          case "action":
+            return this.action(head, ask, settings);
+          case "fix":
+            return this.fix(head, ask.fix, settings);
+          case "edit":
+            return this.edit(head, ask.ops);
+          case "ops":
+            return this.ops(head, ask.ops, settings);
+        }
+      };
+      const { undo, advised } = await recordOwnerEdit(this.deps, user, chat, request as unknown as JsonObject, tell, resolve);
+      const reports = adviceWords(advised);
+      const words = undo === null ? await this.words("changes_nothing") : reports.length > 0 ? await this.words("applied_advised", { reports: reports.join(SENTENCES) }) : "";
+      return { applied: undo !== null, reports, undo, words };
+    } catch (error) {
+      if (!(error instanceof Refused)) throw error;
+      return { applied: false, reports: [], undo: null, words: await this.refusalWords(error) };
+    }
+  }
+
+  /** The Undo of an edit of his by the id its answer gave, on the typed route. */
+  async undoEdit(user: string, chat: string, undo: string): Promise<TapAnswer> {
+    try {
+      const { applied, stays } = await this.undone(user, chat, undo);
+      if (applied) stateChanged(this.deps.live, chat);
+      return { applied, reports: [], undo: null, words: await this.staysWords(stays) };
+    } catch (error) {
+      if (!(error instanceof Refused)) throw error;
+      return { applied: false, reports: [], undo: null, words: await this.refusalWords(error) };
+    }
   }
 
   /** Answers one of today's requests from a play page, as today's dispatcher answers it, or says it is not served. */
@@ -224,11 +291,16 @@ export class PlayService {
     try {
       switch (r.type) {
         case "lre.action": {
-          const undo = await this.action(user, chat, r);
+          const settings = await this.deps.settings(user, chat);
+          const { undo } = await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.action(head, r, settings));
           return reply(r, "lre.action", { applied: true, pending: false, undo });
         }
-        case "lre.fix":
-          return reply(r, "lre.fix", { pending: false, undo: await this.fix(user, chat, r) });
+        case "lre.fix": {
+          const settings = await this.deps.settings(user, chat);
+          const { reqId: _reqId, chatId: _chatId, lre: _lre, type: _type, ...fix } = r;
+          const { undo } = await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.fix(head, fix as FixAsk, settings));
+          return reply(r, "lre.fix", { pending: false, undo });
+        }
         case "lre.chat.knowledge": {
           // This chat's own choices, read as GM → This chat and the Engine page read them: RPE keeps none of today's, so each
           // follows what it follows, and no engine of today's is named, as the state view names none. Setting one is not served.
@@ -256,161 +328,170 @@ export class PlayService {
     try {
       const { applied, stays } = await this.undone(user, chat, r.chip);
       if (applied) stateChanged(this.deps.live, chat);
-      // Each kind of the world's change that stays, once, in the words of its own line.
-      const said = (await Promise.all([...new Set(stays.flatMap((c) => own(STAYS, c.op) ?? []))].map((line) => this.words(line)))).filter((s) => s !== "").join(SENTENCES);
+      const said = await this.staysWords(stays);
       return reply(r, "lre.chip", { applied, pending: false, ...(said === "" ? {} : { said }) });
     } catch (error) {
       return this.failed(r, error);
     }
   }
 
-  private action(user: string, chat: string, r: Request<"lre.action">): Promise<string | null> {
-    return this.tap(user, chat, r, ({ registry, world, state, seed }) => {
-      // From the palette, a panel or the map with no words, a tap goes with the next message; with words, Send now, a chip or a command, it plays at once.
-      const later = (r.source === "palette" || r.source === "map") && (r.text?.trim() ?? "") === "" && r.now !== true;
-      if (r.action === TIMELAPSE_ACTION) throw new Refused("unavailable", { line: later ? "next_message" : "plays_now" });
-      const action = own(world.actions, r.action) ?? registry.actions.get(r.action);
-      if (action === undefined) throw new Refused("not_found", { line: "unknown_action", fields: { action: r.action } });
-      if (!playsOffstage(r.action, r, action.mechanical === true)) throw new Refused("unavailable", { line: later ? "next_message" : "plays_now" });
-      // A request plays no id the player character can't know of (today's `requestRefusal` for the player's own surfaces), so a
-      // guessed id of someone hidden reads as one that names no one; a payment that pays no one for another reason says that reason.
-      const mayKnow = (id: string): boolean => id === world.pov || canSeeEntity(registry, world, state, world.pov, id);
-      const unfit = unfitRef(registry, action, r.params, world, state, mayKnow, undefined, false);
-      if (unfit !== null) {
-        const why = unfit.reason !== undefined && findLeaks(unfit.reason, unrevealedSecrets(registry, world, state)).length === 0 ? unfit.reason : null;
-        throw new Refused("validation", why === null ? { line: "not_known", fields: { action: action.label } } : { line: "not_payable", fields: { action: action.label, why } });
-      }
-      const w = new Working(registry, world, state);
-      const absent = optionalQuery(w.ctx, "economy.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? optionalQuery(w.ctx, "gear.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? null;
-      if (absent !== null) throw new Refused("validation", { words: absent });
-      // What the world gave those the action names opens first, so a sum starts from it. Nothing is drawn for anyone from the
-      // world's tables (filling in detail is the GM's and the Author's, plan §6.4), so the resolver is given no seed to draw with.
-      const opened = openGiven(registry, w, partiesOf(action.params, world.pov, r.params), seed);
-      const res = resolveAction(registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts(seed, r.action, JSON.stringify(r.params))));
-      if (!res.ok && res.failed) throw new Refused("validation", { words: playerReason(res.failed) });
-      const rejected = res.rejected[0];
-      if (rejected !== undefined) throw new Refused("validation", { words: rejected.rejection.reason });
-      if (res.events.length === 0) throw new Refused("validation", { line: "changes_nothing" });
-      // A standing payment set up here says, when it pays, that it was set up off screen.
-      return { opened, events: res.events.map((e) => (e.type === "spawn" && e.entity.kind === "flow" ? { ...e, entity: { ...e.entity, fields: { ...e.entity.fields, [ORIGIN_FIELD]: OFFSTAGE_ORIGIN } } } : e)) };
-    });
+  /** Today's message as the cite of the edit it asked for, without its envelope. */
+  private cited(r: FrontendToBackend): JsonObject {
+    const { lre: _lre, reqId: _reqId, chatId: _chatId, ...request } = r as FrontendToBackend & { chatId?: string };
+    return request as unknown as JsonObject;
   }
 
-  private fix(user: string, chat: string, r: Request<"lre.fix">): Promise<string | null> {
-    return this.tap(user, chat, r, ({ registry, world, state, seed }) => {
-      // Under the player's rules: a locked field is refused, as on today's ✎. A cash ✎ opens only what the world gave, here
-      // (`openGiven`), never drawing money for a holder it gave none.
-      const edited = (ops: FixOp[], on: Readonly<WorldState> = state): LedgerEvent[] => {
-        const edit = resolveEdit(registry, world, on, ops, { gm: false, runSeed: seed, opened: true });
+  /**
+   * One of the world's actions, done at once on the head. The world's rules advise (plan §6.1): a requirement the action does not
+   * meet, or a payee who is not there, is applied all the same and given back to be kept and answered. What is still refused is a
+   * pick that names nothing he may know of, or no one fit to pay, each with its true reason (`unfit.ts`).
+   */
+  private action({ registry, world, state, seed }: Head, r: ActionAsk, settings: PlaySettings): Resolved {
+    // From the palette, a panel or the map with no words, a tap goes with the next message; with words, Send now, a chip or a command, it plays at once.
+    const later = (r.source === "palette" || r.source === "map") && (r.text?.trim() ?? "") === "" && r.now !== true;
+    if (r.action === TIMELAPSE_ACTION) throw new Refused("unavailable", { line: later ? "next_message" : "plays_now" });
+    const action = own(world.actions, r.action) ?? registry.actions.get(r.action);
+    if (action === undefined) throw new Refused("not_found", { line: "unknown_action", fields: { action: r.action } });
+    if (!playsOffstage(r.action, r, action.mechanical === true)) throw new Refused("unavailable", { line: later ? "next_message" : "plays_now" });
+    // A request plays no id the player character can't know of, so a guessed id of someone hidden reads as one that names no one.
+    const mayKnow = (id: string): boolean => id === world.pov || canSeeEntity(registry, world, state, world.pov, id);
+    const unfit = unfitRef(registry, action, r.params, world, state, mayKnow, undefined, false);
+    if (unfit !== null) {
+      const why = unfitWords(registry, world, state, unfit, r.text ?? "", unrevealedSecrets(registry, world, state), mayKnow, settings.taps.nameMost);
+      throw new Refused("validation", { line: why.line, fields: { action: action.label, ...why.fields } });
+    }
+    const w = new Working(registry, world, state);
+    const advised: Report[] = [];
+    const absent = optionalQuery(w.ctx, "economy.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? optionalQuery(w.ctx, "gear.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? null;
+    if (absent !== null) advised.push({ code: "offstage", values: { why: absent } });
+    // What the world gave those the action names opens first, so a sum starts from it. Nothing is drawn for anyone from the
+    // world's tables (filling in detail is the GM's and the Author's, plan §6.4), so the resolver is given no seed to draw with.
+    const opened = openGiven(registry, w, partiesOf(action.params, world.pov, r.params), seed);
+    const res = resolveAction(registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts(seed, r.action, JSON.stringify(r.params))), { advise: true });
+    if (!res.ok && res.failed) throw new Refused("validation", { words: playerReason(res.failed) });
+    for (const unmet of res.advised ?? []) advised.push({ code: "requirement", values: { why: playerReason(unmet) } });
+    const rejected = res.rejected[0];
+    if (rejected !== undefined) throw new Refused("validation", { words: rejected.rejection.reason });
+    if (res.events.length === 0) throw new Refused("validation", { line: "changes_nothing" });
+    // A standing payment set up here says, when it pays, that it was set up off screen.
+    return { opened, advised, events: res.events.map((e) => (e.type === "spawn" && e.entity.kind === "flow" ? { ...e, entity: { ...e.entity, fields: { ...e.entity.fields, [ORIGIN_FIELD]: OFFSTAGE_ORIGIN } } } : e)) };
+  }
+
+  /** One of the ✎ forms, under his rules: a locked field is refused, as on today's ✎. A cash ✎ opens only what the world gave. */
+  private fix({ registry, world, state, seed }: Head, r: FixAsk, settings: PlaySettings): Resolved {
+    const edited = (ops: FixOp[], on: Readonly<WorldState> = state): LedgerEvent[] => {
+      const edit = resolveEdit(registry, world, on, ops, { gm: false, runSeed: seed, opened: true });
+      if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
+      return edit.events;
+    };
+    if ("hint" in r) {
+      // The next hint he has earned at a quest log row, opened: his own doing.
+      const id = typeof r.hint === "string" ? Object.keys(world.tracks).find((t) => shownTrackId(world, t) === r.hint) : undefined;
+      const shown = id === undefined ? null : playerTrack(registry, world, state, world.pov, id);
+      const stage = id === undefined ? null : currentStage(world, state, id);
+      if (id === undefined || shown === null || stage === null) throw new Refused("validation", { line: "no_quest" });
+      if (shown.opened >= shown.hints.length) throw new Refused("validation", { line: "no_hint" });
+      return played([{ type: ENGINE_EVENTS.hint, data: { track: id, stage, n: shown.opened + 1 } }]);
+    }
+    if ("time" in r) {
+      if (typeof r.time !== "string") throw new Refused("bad_request", { line: "bad_time" });
+      return played(clockSet(registry, world, state, r.time, seed));
+    }
+    if ("thing" in r) {
+      const change = parseItemFix(r.thing);
+      if (change === null) throw new Refused("bad_request", { line: "not_thing" });
+      return played(edited([{ op: "fix_item", change }]));
+    }
+    if ("things" in r) {
+      // Belongings' changes to his things: all or none, one unit with one Undo, as many as the setting `taps.thingsMost` allows.
+      const most = settings.taps.thingsMost;
+      const changes = Array.isArray(r.things) ? r.things.map(parseItemFix) : [];
+      if (changes.length === 0 || changes.length > most || changes.some((c) => c === null) || typeof r.label !== "string") throw new Refused("bad_request", { line: "things_count", fields: { most } });
+      return played(edited((changes as ItemFix[]).map((change): FixOp => ({ op: "fix_item", change }))));
+    }
+    // A field's ✎. A place fixed so is a real move, through the one move path, and leaves the activity behind; only a place the
+    // player character may know, for someone it can see: anything else reads as no place at all, as the ✎ never offered it.
+    if (r.field === "place" && (typeof r.value !== "string" || !canSeePlace(registry, world, state, world.pov, r.value) || !canSeeEntity(registry, world, state, world.pov, r.entity))) throw new Refused("validation", { line: "no_place" });
+    const set: FixOp = { op: "set", entity: r.entity, field: r.field, value: r.value };
+    const was = own(state.entities, r.entity);
+    const doing = was?.fields.activity;
+    const moved = r.field === "place" && r.value !== was?.fields.place;
+    const ops: FixOp[] = moved && doing !== undefined && doing !== "idle" ? [set, { op: "set", entity: r.entity, field: "activity", value: "idle" }] : [set];
+    if (r.field !== "cash") return played(edited(ops));
+    // Cash corrected is measured from what the world gave them, which opens first as the world's own, not inside his correction.
+    const w = new Working(registry, world, state);
+    const opened = openGiven(registry, w, [r.entity], seed);
+    return { opened, events: edited(ops, w.state) };
+  }
+
+  /**
+   * The World page's edit, all or none: a value set or removed on someone or something (through the engine's set), on a place of the
+   * chat's own world (as the chat's draft writes a place), or the world's time; a fact set at a level, with how exact and how sure he
+   * says it is. A fact is replaced by a newer one, never removed, and a level that names nothing he may know of is refused.
+   */
+  private edit({ registry, world, state, seed }: Head, asked: readonly EditOpAsk[]): Resolved {
+    const w = new Working(registry, world, state);
+    const store: NonNullable<Resolved["store"]> = [];
+    for (const op of asked) {
+      if (op.as === "fact") {
+        if (op.op === "remove") throw new Refused("validation", { line: "fact_remove", fields: { key: op.key } });
+        if (!FACT_ABOUT.test(op.at) || op.value === undefined) throw new Refused("validation", { line: "edit_at", fields: { at: op.at } });
+        const fact = factStore.change({ about: op.at, key: op.key, value: op.value });
+        store.push({ op: fact.op, value: fact.value, ...(op.precision !== undefined ? { precision: op.precision } : {}), ...(op.standing !== undefined ? { standing: op.standing } : {}) });
+        continue;
+      }
+      const value = typedValue(op);
+      let events: LedgerEvent[];
+      if (op.at === "world" && (op.key === "time" || op.key === "clock") && typeof value === "string") events = clockSet(registry, world, w.state, value, seed);
+      else if (op.at.startsWith("entity:") && canSeeEntity(registry, world, w.state, world.pov, op.at.slice(7))) {
+        const edit = resolveEdit(registry, world, w.state, [{ op: "set", entity: op.at.slice(7), field: op.key, value }], { gm: false, runSeed: seed, opened: true });
         if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
-        return edit.events;
-      };
-      if ("hint" in r) {
-        // The next hint the player has earned at a quest log row, opened: the player's own doing.
-        const id = typeof r.hint === "string" ? Object.keys(world.tracks).find((t) => shownTrackId(world, t) === r.hint) : undefined;
-        const shown = id === undefined ? null : playerTrack(registry, world, state, world.pov, id);
-        const stage = id === undefined ? null : currentStage(world, state, id);
-        if (id === undefined || shown === null || stage === null) throw new Refused("validation", { line: "no_quest" });
-        if (shown.opened >= shown.hints.length) throw new Refused("validation", { line: "no_hint" });
-        return played([{ type: ENGINE_EVENTS.hint, data: { track: id, stage, n: shown.opened + 1 } }]);
-      }
-      if ("time" in r) {
-        if (typeof r.time !== "string") throw new Refused("bad_request", { line: "bad_time" });
-        return played(clockSet(registry, world, state, r.time, seed));
-      }
-      if ("thing" in r) {
-        const change = parseItemFix(r.thing);
-        if (change === null) throw new Refused("bad_request", { line: "not_thing" });
-        return played(edited([{ op: "fix_item", change }]));
-      }
-      if ("things" in r) {
-        // Belongings' changes to the player's things: all or none, one unit with one Undo.
-        const changes = Array.isArray(r.things) ? r.things.map(parseItemFix) : [];
-        if (changes.length === 0 || changes.length > FIX_THINGS_MAX || changes.some((c) => c === null) || typeof r.label !== "string") throw new Refused("bad_request", { line: "things_count", fields: { most: FIX_THINGS_MAX } });
-        return played(edited((changes as ItemFix[]).map((change): FixOp => ({ op: "fix_item", change }))));
-      }
-      // A field's ✎. A place fixed so is a real move, through the one move path, and leaves the activity behind; only a place the
-      // player character may know, for someone it can see: anything else reads as no place at all, as the ✎ never offered it.
-      if (r.field === "place" && (typeof r.value !== "string" || !canSeePlace(registry, world, state, world.pov, r.value) || !canSeeEntity(registry, world, state, world.pov, r.entity))) throw new Refused("validation", { line: "no_place" });
-      const set: FixOp = { op: "set", entity: r.entity, field: r.field, value: r.value };
-      const was = own(state.entities, r.entity);
-      const doing = was?.fields.activity;
-      const moved = r.field === "place" && r.value !== was?.fields.place;
-      const ops: FixOp[] = moved && doing !== undefined && doing !== "idle" ? [set, { op: "set", entity: r.entity, field: "activity", value: "idle" }] : [set];
-      if (r.field !== "cash") return played(edited(ops));
-      // Cash corrected is measured from what the world gave them, which opens first as the world's own, not inside the player's correction.
-      const w = new Working(registry, world, state);
-      const opened = openGiven(registry, w, [r.entity], seed);
-      return { opened, events: edited(ops, w.state) };
-    });
+        events = edit.events;
+      } else if (op.at.startsWith("place:") && canSeePlace(registry, world, w.state, world.pov, op.at.slice(6)) && safeKey(op.key)) {
+        const id = op.at.slice(6);
+        const def = own(w.ctx.world.places, id);
+        if (def === undefined) throw new Refused("validation", { line: "edit_at", fields: { at: op.at } });
+        const fields: JsonObject = { ...def.fields };
+        if (value === null) delete fields[op.key];
+        else fields[op.key] = value;
+        events = [draftEvent(baseWorld(w.ctx.world), chatDraftOf(w.state), { collection: "places", id, value: { ...(def as unknown as JsonObject), fields } })];
+      } else throw new Refused("validation", { line: "edit_at", fields: { at: op.at } });
+      const bad = events.map((e) => w.apply(e)).find((r) => r !== null);
+      if (bad) throw new Refused("validation", { words: bad.reason });
+    }
+    return { opened: [], events: w.events, store };
+  }
+
+  /** An edit of operations, as the economy's "Make this a property" sends it: all or none, locked fields writable, as many as `engine.editOps` allows. */
+  private ops({ registry, world, state, seed }: Head, ops: readonly JsonValue[], settings: PlaySettings): Resolved {
+    if (ops.length === 0 || ops.length > settings.editOps) throw new Refused("bad_request", { line: "edit_ops_count", fields: { most: settings.editOps } });
+    const edit = resolveEdit(registry, world, state, ops as unknown as FixOp[], { gm: true, runSeed: seed, opened: true });
+    if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
+    return played(edit.events);
   }
 
   /**
-   * Records what a tap comes to on the chat's newest turn, in one write, so the state it is resolved on is the one it lands on:
-   * the accounts the world gave that opened for it, each a change of its own, then what the player did, in which the economy's
-   * bookkeeping for someone it keeps no accounts for (`bookkeeping`, `src/iface/writing.ts`) stays in the unit it came in. What
-   * the world's defaults gave is recorded from them and as assumed (`DEFAULTS`), and cites only the tap, so its Undo can tell it
-   * from the player's own changes. `resolve` gives both from the chat's head; when the player did nothing, nothing is recorded.
-   * Nothing is while a turn of the chat runs: that turn works on the state it started from, and a continue that saves nothing
-   * takes back what lands on its turn. The id its Undo takes; null when nothing was recorded.
+   * Records the reversal of his changes of an edit, each unit the last first, in one write: all of them or none, so an Undo never
+   * leaves half of what he did. A unit that would leave a part of his (one written since, or one the store keeps no reverse for) takes
+   * the whole write back, and the answer says which. What the world's defaults gave with the edit is reversed with his unit it is in,
+   * where the store keeps a reverse for it, and else stays. Whether anything was recorded (nothing once the edit is undone), and the
+   * world's changes that stay. Nothing is recorded while a turn of the chat runs.
    */
-  private async tap(user: string, chat: string, r: Request<"lre.action"> | Request<"lre.fix">, resolve: (head: Head) => Tapped): Promise<string | null> {
-    const s = this.deps.store.user(user);
-    const { env } = this.deps.store;
-    const tap = crypto.randomUUID();
-    const turn = await this.deps.writes.run(() => {
-      const row = s.chat(chat);
-      if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
-      if (this.deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
-      const state = s.headState(chat).state.world;
-      const doc = env.worlds(state.revision);
-      if (doc === undefined) throw new Refused("unavailable", { line: "no_revision" });
-      const { opened, events } = resolve({ registry: env.registry, world: playedWorld(doc, state), state, seed: hashParts(SEED, chat, tap) });
-      if (events.length === 0) return null;
-      const on = headTurn(s, chat);
-      if (on === null) throw new Refused("unavailable", { line: "no_turn" });
-      // A branch's newest turn may be the chat it was branched from's, whose state that chat shares (plan §6.3): kept there, the
-      // tap would change that chat too, and its Undo would not be this chat's.
-      if (s.turn(on)?.chat !== chat) throw new Refused("unavailable", { line: "branch_no_turn" });
-      // Events that came with no unit of their own are one unit, so the tap lands and is undone whole, as an operation of the engine's tools is.
-      const group = events.length > 1 && events.every((e) => e.group === undefined) ? `tap:${tap}` : undefined;
-      const { lre: _lre, reqId: _reqId, chatId: _chatId, ...request } = r;
-      const cite = { tap, request } as unknown as JsonValue;
-      s.addChanges(on, [
-        ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, ...DEFAULTS, cite: { tap } })),
-        ...events.map((e, i): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, ...(bookkeeping(events, i) ? { ...DEFAULTS, cite: { tap } } : { source: PLAYER, cite }) })),
-      ]);
-      return on;
-    }, "recording a tap on a panel");
-    if (turn === null) return null;
-    stateChanged(this.deps.live, chat);
-    return `tap:${turn}:${tap}`;
-  }
-
-  /**
-   * Records the reversal of the player's changes of a tap, each unit the last first, in one write: all of them or none, so an
-   * Undo never leaves half of what the player did. A unit that would leave a part of the player's (one written since, or one
-   * the store keeps no reverse for) takes the whole write back, and the answer says which. What the world's defaults gave with
-   * the tap is reversed with the player's unit it is in, where the store keeps a reverse for it, and else stays: the accounts it
-   * gave, opened, which are in no unit of the player's, and the economy's bookkeeping for someone it keeps no accounts for.
-   * Whether anything was recorded (nothing once the tap is undone), and the world's changes that stay. Nothing is recorded while
-   * a turn of the chat runs.
-   */
-  private undone(user: string, chat: string, chip: string): Promise<{ applied: boolean; stays: ChangeRow[] }> {
+  private undone(user: string, chat: string, undo: string): Promise<{ applied: boolean; stays: ChangeRow[] }> {
     const s = this.deps.store.user(user);
     return this.deps.writes.run(() => {
-      const [, turn = "", tap = ""] = UNDO_ID.exec(chip) ?? [];
-      // A tap of a turn joined to another is answered as a fact, naming the turn it joined.
+      const { turn = "", edit = "" } = editId(undo) ?? {};
+      // An edit of a turn joined to another is answered as a fact, naming the turn it joined.
       const held = s.turn(turn);
       if (held?.chat === chat && held.joined !== null) throw new JoinedTurnError(turn, held.joined);
-      const all = s.turn(turn)?.chat === chat ? s.changes(turn).filter((c) => isRecord(c.cite) && c.cite.tap === tap) : [];
+      const all = s.turn(turn)?.chat === chat ? s.changes(turn).filter((c) => isRecord(c.cite) && c.cite.tap === edit) : [];
       const mine = all.filter((c) => c.source === PLAYER);
       if (mine.length === 0) throw new Refused("not_found", { line: "no_undo" });
       if (this.deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
       const path = s.path(chat);
       const from = path.findIndex((e) => e.turn === turn);
       if (from < 0) throw new Refused("conflict", { line: "off_path" });
-      // Undone already where the chat's story now goes: a change from its turn on cites one of the tap's as the one it undoes.
+      // Undone already where the chat's story now goes: a change from its turn on cites one of the edit's as the one it undoes.
       const ids = new Set(mine.map((c) => c.id));
       const since = path.slice(from).flatMap((e) => (e.turn === null ? [] : s.changes(e.turn)));
       if (since.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return { applied: false, stays: [] };
@@ -431,14 +512,23 @@ export class PlayService {
       if (unreversed.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: unreversed.map((c) => c.op) } });
       const stays = all.filter((c) => !ids.has(c.id) && (!units.has(unitOf(c)) || leftIds.has(c.id)));
       return { applied: recorded > 0, stays: recorded > 0 ? stays : [] };
-    }, "undoing a tap on a panel");
+    }, "undoing an edit of his");
+  }
+
+  /** Each kind of the world's change that stays after an Undo, once, in the words of its own line. */
+  private async staysWords(stays: readonly ChangeRow[]): Promise<string> {
+    return (await Promise.all([...new Set(stays.flatMap((c) => own(STAYS, c.op) ?? []))].map((line) => this.words(line)))).filter((s) => s !== "").join(SENTENCES);
+  }
+
+  private async refusalWords(error: Refused): Promise<string> {
+    return "words" in error.why ? error.why.words : await this.words(error.why.line, error.why.fields, error.why.codes);
   }
 
   private async failed(r: FrontendToBackend, error: unknown): Promise<ErrorMessage> {
     // A turn joined to another is a fact the server answers in its one place, not a failure of this page's request.
     if (error instanceof JoinedTurnError) throw error;
     const fail = (code: ErrorCode, message: string): ErrorMessage => ({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: r.reqId, code, message });
-    if (error instanceof Refused) return fail(error.code, "words" in error.why ? error.why.words : await this.words(error.why.line, error.why.fields, error.why.codes));
+    if (error instanceof Refused) return fail(error.code, await this.refusalWords(error));
     const message = error instanceof Error ? error.message : String(error);
     this.deps.log.error("A play page's request failed inside RPE.", { request: r.type, error: message });
     return fail("internal", message);

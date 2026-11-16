@@ -14,6 +14,7 @@ import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, shippedTexts, stateScan } from "../../src/iface/index";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { playRoutes, PlayService } from "../../src/play";
+import { TAP_DEFAULTS } from "../../src/play/settings";
 import { hashJson } from "../../src/shared/hash";
 import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
@@ -87,7 +88,7 @@ export function makeBed(): Bed {
   const heard: LiveEvent[] = [];
   const logged: string[] = [];
   const log = (level: string) => (message: string) => void logged.push(`${level} ${message}`);
-  const service = new PlayService({ store, writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), dueItems: async () => 50, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
+  const service = new PlayService({ store, writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
   const [stateRoute, actionsRoute, undoRoute] = playRoutes(service);
   const call = { query: new URLSearchParams(), request: new Request("http://rpe.test/"), signal: new AbortController().signal };
 

@@ -37,7 +37,6 @@ import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, 
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser, storeUsers } from "./kv";
-import { riskyPattern } from "./pattern";
 import { PlayerSide } from "./player";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { Requests, REQUESTS_KIND } from "./requests";
@@ -53,9 +52,8 @@ import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./tur
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
  * be set after the lane is built: before one is set every call is refused, and the tree's own port
- * refuses a scope of anyone else, an empty user's included. A search pattern that could take time
- * without end on some text is refused as no pattern at all, which the harness words from its notice
- * line: it would hold every chat and every Stop while it ran (`pattern.ts`).
+ * refuses a scope of anyone else, an empty user's included. A pattern that parses is never refused for
+ * being slow (R-55): the tree's grep stops a slow one itself, under `files.grepMs`.
  */
 function servedFiles(owner: () => string | null, make: (user: string) => TreeFiles): TreeFiles {
   let made: { user: string; files: TreeFiles } | null = null;
@@ -68,10 +66,7 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
     layers: async (scope) => now().layers(scope),
     places: async (scope) => now().places(scope),
     read: async (scope, path, range) => now().read(scope, path, range),
-    find: async (scope, query) => {
-      if (query.by === "grep" && query.literal !== true && riskyPattern(query.pattern)) throw new SyntaxError(`The pattern ${query.pattern} could take time without end on some text.`);
-      return now().find(scope, query);
-    },
+    find: async (scope, query) => now().find(scope, query),
     write: async (scope, path, op, by) => now().write(scope, path, op, by),
     update: async (scope, path, change) => now().update(scope, path, change),
     turnDisk: async (scope) => now().turnDisk(scope),

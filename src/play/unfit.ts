@@ -30,7 +30,7 @@ export function unfitWords(reg: Registry, world: WorldDoc, state: Readonly<World
   const person = !place && (def.ref !== undefined ? kindIs(reg, world, def.ref, "person") : def.outside !== undefined || (def.of?.kind ?? []).some((k) => kindIs(reg, world, k, "person")));
   const what = place ? "place" : person ? "someone" : "something";
   if (value === undefined || value === null || value === "") return { line: `needs_${what}`, fields: {} };
-  const none: UnfitWords = { line: `names_no_${what}`, fields: {} };
+  const none: UnfitWords = { line: place ? "names_no_place" : person ? "names_no_one" : "names_nothing", fields: {} };
   if (unfit.reason !== undefined) return findLeaks(unfit.reason, secrets).length > 0 ? none : { line: "pays_no_one", fields: { why: unfit.reason } };
   const id = typeof value === "string" ? value : "";
   // Only a param of one kind, or one that pays, refuses a real thing he knows for being another.
@@ -49,5 +49,5 @@ export function unfitWords(reg: Registry, world: WorldDoc, state: Readonly<World
   const given = id.replace(/_+/g, " ").trim();
   const said = given === "" ? undefined : new RegExp(`(?<![\\p{L}\\p{N}])${given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").exec(typed)?.[0];
   if (said === undefined || said.length > nameMost) return none;
-  return { line: `unknown_${what}`, fields: { name: said } };
+  return { line: `not_known_${what}`, fields: { name: said } };
 }
