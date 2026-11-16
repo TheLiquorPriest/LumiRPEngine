@@ -390,7 +390,7 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     { path: ["transport", "connections", "oneToolAtATime"], value: ["conn-1"] },
   ];
   const definitions = {
-    agents: { scout: { id: "scout", name: "Scout", description: "Walks ahead and says what is there.", instructions: "Walk ahead of the party and report what you see.", given: "task", tools: ["lore_search", "chat_read"] } },
+    agents: { scout: { id: "scout", name: "Scout", description: "Walks ahead and says what is there.", instructions: "Walk ahead of the party and report what you see.", given: "task", tools: ["lore_search", "chat_read"], effort: "high", toolCalls: "text", budget: { toolTurns: 8, wallMs: 90_000, callTools: null } } },
     skills: { "tide-tables": { id: "tide-tables", name: "Tide tables", description: "When the pier floods.", body: "Read the harbour's tide table before any walk on the pier." } },
   };
   await user("harness/settings.json", JSON.stringify({ v: 1, rev: 3, own: lumiahOwn, texts: { "lumiah.writer": "Write short." }, definitions }));

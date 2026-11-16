@@ -56,7 +56,7 @@ function json(text: string | null): unknown {
 }
 
 /** LumiAH's settings as the user set them: each value they put whole at a path (`Own`), the nearer the root first, so a deeper one stands over it (`valuesOf`). */
-function lumiahOwn(raw: unknown): Record<string, JsonValue> {
+export function lumiahOwn(raw: unknown): Record<string, JsonValue> {
   const values: Record<string, JsonValue> = {};
   const own = isRecord(raw) && Array.isArray(raw.own) ? raw.own.filter((o: unknown): o is { path: string[]; value: JsonValue } => isRecord(o) && Array.isArray(o.path) && o.path.length > 0 && o.path.every((p: unknown) => typeof p === "string") && o.value !== undefined) : [];
   for (const o of [...own].sort((a, b) => a.path.length - b.path.length)) {
@@ -79,18 +79,6 @@ export async function lumiahSettings(today: Today): Promise<Record<string, JsonV
 function leaves(value: unknown, at: string, out: [string, unknown][]): [string, unknown][] {
   if (isRecord(value) && Object.keys(value).length > 0) for (const [key, v] of Object.entries(value)) leaves(v, at === "" ? key : `${at}.${key}`, out);
   else if (at !== "") out.push([at, value]);
-  return out;
-}
-
-/** Each setting that names a connection, by its dotted path: the engine's one name for a connection chosen for a kind of work (`connectionId`). */
-function connectionSettings(value: unknown, at: string, out: { setting: string; connection: string }[]): { setting: string; connection: string }[] {
-  if (Array.isArray(value)) value.forEach((v, i) => connectionSettings(v, `${at}.${i}`, out));
-  else if (isRecord(value))
-    for (const [key, v] of Object.entries(value)) {
-      const path = at === "" ? key : `${at}.${key}`;
-      if (key === "connectionId" && typeof v === "string" && v !== "") out.push({ setting: path, connection: v });
-      else connectionSettings(v, path, out);
-    }
   return out;
 }
 
@@ -158,7 +146,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
       for (const [path, fate] of inside) if (present.has(path)) settle(`settings.json: ${path}`, fate, present.get(path) as JsonValue);
       if ([...present.keys()].some((path) => !inside.some(([named]) => named === path))) settle(`settings.json: ${key}`, engineFate(key), value as JsonValue);
     }
-    out.lumiverseConnections.push(...connectionSettings(engine, "", []).map((c) => ({ ...c, setting: `settings.json: ${c.setting}` })));
+    // The connections these name are found and matched with RPE's by `model-choices.ts`.
   }
 
   const history: { from: string[]; keep: unknown; count: unknown } = { from: [], keep: LUMIAH_HISTORY.keep, count: LUMIAH_HISTORY.count };

@@ -36,12 +36,22 @@ import { keepWritten, type WrittenFile, writtenFiles } from "./tables";
 import type { Today } from "./today";
 import { agentMetaOf } from "./today/chat-agent-meta";
 import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
+import { type SetApartReason, sortPromptTexts } from "./today/prompt-texts";
+import type { Matcher } from "./model-choices";
+import { lumiahSettings } from "./settings";
 
 /** The folder, at the user's level, that his agents, skills, texts, GUIDANCE.md and prompt sets are written under, switched off: nothing is in force until he says. */
 export const IMPORTED = "imported";
 
 /** The folder, under `imported/` at the user's level, of the prompt sets today's turns recorded: each named by the hash a turn's record gives it (`Rec.prompts`). */
 export const PROMPT_SETS = "prompt-sets";
+
+/** The folders under `imported/` at the user's level of his agents and skills, where a file listing shows them: switching one on writes it where its kind is read from. */
+export const IMPORTED_AGENTS = "agents";
+export const IMPORTED_SKILLS = "skills";
+/** Under the texts' folder: LumiAH's own texts, and those of the engine's set apart, by reason. */
+export const LUMIAH_TEXTS = "lumiah";
+export const SET_APART = "set-apart";
 
 /** What a chat's folders are named for, as the file tree names them (`ChatNames`, `src/tree/chats.ts`): its character, and the chat itself. */
 export interface ChatNames {
@@ -67,6 +77,8 @@ export interface TreeLayout {
   recordVersion(db: Database, files: string, user: string, chat: string, turn: string, path: string, before: string | null, after: string | null, by: { id: string; definition: string }, at: number, stands: boolean): Promise<void>;
   /** Forgets the versions an earlier run recorded for a chat, those whose writer is `{ id: "carried" }` (`TreeNotes.forgetCarried`). */
   forgetVersions(db: Database, files: string, user: string, chat: string): Promise<void>;
+  /** Every tool name RPE's and RPH's shipped files and his own tool files give (`.tools/`); absent: the names of his agents' tools are not checked. */
+  toolNames?(files: string): Promise<readonly string[]>;
 }
 
 /** Where the user's own files go in this run: the tree's folder, its folder names, and each chat's own folder. */
@@ -85,11 +97,14 @@ export interface TreePlaces {
   recordVersion(chat: string, turn: string, path: string, before: string | null, after: string | null, definition: string, at: number, stands: boolean): Promise<void>;
   /** Forgets the versions an earlier run recorded for a chat. */
   forgetVersions(chat: string): Promise<void>;
+  /** Every tool name RPE's and RPH's shipped files and his own tool files give, to tell a tool name of his agents' that no longer exists; absent: tool names are not checked. */
+  toolNames?(): Promise<readonly string[]>;
 }
 
 export interface OwnFilesCarried {
   agents: number;
   skills: number;
+  /** Every text of his attached under `imported/`: his edits of the engine's, those set apart, and LumiAH's. */
   texts: number;
   /** The prompt sets today's turns recorded, under `prompt-sets/`. */
   promptSets: number;
@@ -121,6 +136,20 @@ export interface OwnFilesCarried {
   oldLayout: number;
   /** Files an earlier run wrote that today's side no longer has, changed in RPE since: left as they are, and no longer the migration's. */
   changed: number;
+  /** His edited texts of LumiAH's, as they are under `prompts/lumiah/`. */
+  textsLumiah: number;
+  /** Texts of the engine's that today's build would not send (a placeholder it needs missing, or blank where it may not be) or whose id no build had: attached under `prompts/set-apart/<reason>/`, each with its reason. */
+  textsSetApart: { id: string; reason: SetApartReason; missing: string[] }[];
+  /** Texts of the engine's word for word the shipped text: not his edit, kept in the backup only, and listed by id. */
+  textsShipped: string[];
+  /** Ids of either store whose stored value is not a text: kept in the backup only. */
+  textsNotText: string[];
+  /** What each of his own agents' model choice became: the connection it named, and RPE's it is carried to, or why none. */
+  agentModels: { agent: string; connection: string; carriedTo: string | null; why: string | null }[];
+  /** A tool name of his own agents' that no tool of RPE's or RPH's has, listed and left out of the header; the original keeps it. */
+  deadTools: { agent: string; tool: string }[];
+  /** Whether the tool names were checked at all: the run was given the tools' names. */
+  toolsChecked: boolean;
   /** Files pinned in today's build, to be written as pins (`pins.ts`). */
   pins: PinWanted[];
   /** The ids of his own agent definitions, which are carried switched off. */
@@ -199,13 +228,78 @@ async function agentsWorkspace(today: Today, history: NoteHistory, chat: string)
   return { files, changes };
 }
 
-/** A definition's header in the new format (`name`, `description`, `tools`), and its body. */
+/** A definition's header in the new format (`name`, `description`, and for an agent its `model`, `effort`, `tools`, what it is `given` and its `limits`), and its body. */
 function headed(header: Record<string, unknown>, body: string): string {
   const fields = Object.fromEntries(Object.entries(header).filter(([, v]) => v !== undefined));
   return `---\n${YAML.stringify(fields, null, 2).replace(/\n+$/, "")}\n---\n${body}${body.endsWith("\n") ? "" : "\n"}`;
 }
 
 const text = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+
+/** How one agent of his own runs, as the header of its definition in RPE says it. */
+interface Run {
+  connection: string | null;
+  model: string | null;
+  effort: string | null;
+  toolsAs: string | null;
+  tools: string[];
+  limits: Record<string, number>;
+}
+
+/** The efforts RPH's definitions take: today's `inherit` and `auto` have no counterpart there and leave the connection's own. */
+const EFFORTS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Today's agent budget (`AgentBudget`) as the limits of a definition's header, by name, and the divisor of a time in milliseconds. */
+const BUDGET_LIMITS: readonly (readonly [budget: string, limit: string, per: number])[] = [
+  ["callTokensIn", "callTokensIn", 1],
+  ["callTokensOut", "callTokensOut", 1],
+  ["callMs", "callTime", 1000],
+  ["callTools", "toolsPerAnswer", 1],
+  ["tokensIn", "tokensIn", 1],
+  ["tokensOut", "tokensOut", 1],
+  ["toolTurns", "toolRounds", 1],
+  ["wallMs", "time", 1000],
+  ["revisions", "messages", 1],
+  ["concurrency", "toolsAtOnce", 1],
+];
+
+const mapping = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+
+/**
+ * How his agent `id` runs: what he set for it in LumiAH's settings (`core.agents.<id>`) over what its definition holds, a field at a
+ * time (as `agentSettings` reads them). While it names no connection and follows another definition, that one's connection and,
+ * unless it names one, model are its own, one step as `resolveAgent` takes it.
+ */
+function runOf(id: string, definitions: Record<string, unknown>, settings: Record<string, unknown>): Run {
+  const def = mapping(definitions[id]);
+  const set = mapping(mapping(mapping(settings.core).agents)[id]);
+  const field = (key: string): unknown => (Object.hasOwn(set, key) ? set[key] : def[key]);
+  let connection = text(field("connectionId")) ?? null;
+  let model = text(field("model")) ?? null;
+  if (connection === null && typeof def.follows === "string" && def.follows !== id) {
+    const base = mapping(mapping(mapping(settings.core).agents)[def.follows]);
+    const upstream = mapping(definitions[def.follows]);
+    connection = text(Object.hasOwn(base, "connectionId") ? base.connectionId : upstream.connectionId) ?? null;
+    if (model === null) model = text(Object.hasOwn(base, "model") ? base.model : upstream.model) ?? null;
+  }
+  const effort = text(field("effort"));
+  const toolsAs = text(field("toolCalls"));
+  const budget = { ...mapping(def.budget), ...mapping(set.budget) };
+  const limits: Record<string, number> = {};
+  for (const [from, to, per] of BUDGET_LIMITS) {
+    const v = budget[from];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) limits[to] = Math.ceil(v / per);
+  }
+  const tools = field("tools");
+  return {
+    connection,
+    model,
+    effort: effort !== undefined && EFFORTS.includes(effort) ? effort : null,
+    toolsAs: toolsAs === "native" || toolsAs === "text" ? toolsAs : null,
+    tools: Array.isArray(tools) ? tools.filter((t): t is string => typeof t === "string") : [],
+    limits,
+  };
+}
 
 /** A path that stays inside the folder it is written under: no part of it empty, "." or "..". */
 const staysInside = (path: string): boolean => path.split("/").every((part) => part !== "" && part !== "." && part !== ".." && !part.includes("\0"));
@@ -231,8 +325,8 @@ async function pruneEmpty(file: string, base: string): Promise<void> {
  * side holds now (§15.3): a file it wrote that this run does not write again is removed, where it is
  * still as that run wrote it (`migration_file`).
  */
-export async function carryOwnFiles(today: Today, items: readonly Item[], places: TreePlaces, history: NoteHistory): Promise<OwnFilesCarried> {
-  const out: OwnFilesCarried = { agents: 0, skills: 0, texts: 0, promptSets: 0, guidance: 0, home: 0, global: 0, notes: 0, versions: 0, removals: 0, learned: 0, workspace: 0, untied: 0, leftOut: 0, heldAsHis: 0, leftAlone: 0, kept: 0, removed: 0, oldLayout: 0, changed: 0, pins: [], agentIds: [], byChat: [] };
+export async function carryOwnFiles(today: Today, items: readonly Item[], places: TreePlaces, history: NoteHistory, models: Matcher): Promise<OwnFilesCarried> {
+  const out: OwnFilesCarried = { agents: 0, skills: 0, texts: 0, textsLumiah: 0, textsSetApart: [], textsShipped: [], textsNotText: [], promptSets: 0, guidance: 0, home: 0, global: 0, notes: 0, versions: 0, removals: 0, learned: 0, workspace: 0, untied: 0, leftOut: 0, heldAsHis: 0, leftAlone: 0, kept: 0, removed: 0, oldLayout: 0, changed: 0, pins: [], agentIds: [], agentModels: [], deadTools: [], toolsChecked: false, byChat: [] };
   const wrote: WrittenFile[] = [];
   const earlier = new Map(writtenFiles(history.db, history.s.id).map((f) => [`${f.base}\u0000${f.path}`, f.sha256]));
   /**
@@ -252,7 +346,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       out.heldAsHis++;
       return false;
     }
-    if (heldAs === null) {
+    if (heldAs !== sha256(body)) {
       await mkdir(dirname(disk), { recursive: true });
       await writeWhole(disk, body);
     }
@@ -264,24 +358,49 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     for (const role of roles) out.pins.push({ config, file, role });
   };
 
-  // The user's own agents and skills, in the new header format with the original beside each; and their edited texts.
+  // The user's own agents and skills, under imported/agents and imported/skills in the new header format with the original beside each; and their texts, sorted by today's own reader.
   const harness = json(await today.userView.read("harness/settings.json"));
   const definitions = isRecord(harness) && isRecord(harness.definitions) ? harness.definitions : {};
-  for (const [id, def] of Object.entries(isRecord(definitions.agents) ? definitions.agents : {})) {
+  const ownAgents = isRecord(definitions.agents) ? definitions.agents : {};
+  const settings = await lumiahSettings(today);
+  const tools = places.toolNames === undefined ? null : new Set(await places.toolNames());
+  out.toolsChecked = tools !== null;
+  for (const [id, def] of Object.entries(ownAgents)) {
     if (!isRecord(def)) continue;
     out.agentIds.push(id);
-    const tools = Array.isArray(def.tools) ? def.tools.filter((t): t is string => typeof t === "string") : undefined;
-    if (await put("", IMPORTED, `${places.agents}/${id}.md`, headed({ name: id, description: text(def.description), tools }, text(def.instructions) ?? ""))) out.agents++;
-    await put("", IMPORTED, `${places.agents}/${id}.original.json`, `${JSON.stringify(def, null, 2)}\n`);
+    const run = runOf(id, ownAgents, settings);
+    const choice = run.connection === null ? null : models({ where: `agent ${id} of his own`, connection: run.connection, model: run.model });
+    if (choice !== null) out.agentModels.push({ agent: id, connection: choice.connection, carriedTo: choice.carried?.id ?? null, why: choice.why });
+    for (const tool of run.tools) if (tools !== null && !tools.has(tool)) out.deadTools.push({ agent: id, tool });
+    const given = def.given === "request" ? ["chat:history[-1:]"] : undefined;
+    const header = { name: id, description: text(def.description), model: choice?.carried?.id ?? "default", effort: run.effort ?? undefined, tools_as: run.toolsAs ?? undefined, tools: run.tools.filter((t) => tools === null || tools.has(t)), given, limits: Object.keys(run.limits).length > 0 ? run.limits : undefined };
+    if (await put("", IMPORTED, `${IMPORTED_AGENTS}/${id}.md`, headed(header, text(def.instructions) ?? ""))) out.agents++;
+    await put("", IMPORTED, `${IMPORTED_AGENTS}/${id}.original.json`, `${JSON.stringify(def, null, 2)}\n`);
   }
   for (const [id, def] of Object.entries(isRecord(definitions.skills) ? definitions.skills : {})) {
     if (!isRecord(def)) continue;
-    if (await put("", IMPORTED, `${places.skills}/${id}/SKILL.md`, headed({ name: id, description: text(def.description) }, text(def.body) ?? ""))) out.skills++;
-    await put("", IMPORTED, `${places.skills}/${id}/original.json`, `${JSON.stringify(def, null, 2)}\n`);
+    if (await put("", IMPORTED, `${IMPORTED_SKILLS}/${id}/SKILL.md`, headed({ name: id, description: text(def.description) }, text(def.body) ?? ""))) out.skills++;
+    await put("", IMPORTED, `${IMPORTED_SKILLS}/${id}/original.json`, `${JSON.stringify(def, null, 2)}\n`);
   }
+  // His edited texts of the engine: his edit as it is under imported/, one today's build would not send and one no build had set apart each under its reason, the shipped text word for word counted and listed. LumiAH's own texts as they are, each named for what it was.
   const engine = json(await today.userView.read("settings.json"));
-  const texts = { ...(isRecord(engine) && isRecord(engine.prompts) && isRecord(engine.prompts.texts) ? engine.prompts.texts : {}), ...(isRecord(harness) && isRecord(harness.texts) ? harness.texts : {}) };
-  for (const [id, body] of Object.entries(texts)) if (typeof body === "string" && (await put("", IMPORTED, `${places.prompts}/${id}.md`, body))) out.texts++;
+  const sorted = sortPromptTexts(isRecord(engine) && isRecord(engine.prompts) ? engine.prompts.texts : undefined);
+  for (const t of sorted.edits) if (await put("", IMPORTED, `${places.prompts}/${t.id}.md`, t.text)) out.texts++;
+  for (const t of sorted.setApart) {
+    if (!(await put("", IMPORTED, `${places.prompts}/${SET_APART}/${t.reason.replaceAll("_", "-")}/${t.id}.md`, t.text))) continue;
+    out.texts++;
+    out.textsSetApart.push({ id: t.id, reason: t.reason, missing: t.missing });
+  }
+  out.textsShipped = sorted.shipped.map((t) => t.id);
+  out.textsNotText = sorted.notText;
+  const lumiahTexts = isRecord(harness) && isRecord(harness.texts) ? harness.texts : {};
+  for (const [id, body] of Object.entries(lumiahTexts)) {
+    if (typeof body !== "string") out.textsNotText.push(id);
+    else if (await put("", IMPORTED, `${places.prompts}/${LUMIAH_TEXTS}/${id}.md`, body)) {
+      out.texts++;
+      out.textsLumiah++;
+    }
+  }
 
   // LumiAH's areas: `~/` (GUIDANCE.md apart), and each chat's learned/ and its area as the reply it shows left it; and the prompt sets turns recorded, word for word, each by the hash its turns' records name it by.
   const learned = new Map<string, string>();

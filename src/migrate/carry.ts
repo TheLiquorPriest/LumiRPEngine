@@ -20,12 +20,13 @@ import { carryChatSettings, type ChatSettingsCarried } from "./chat-settings";
 import { bookTrouble, carryConnections, type ConnectionsCarried } from "./connections";
 import { TurnAreas } from "./history";
 import { carryMinds, type MindsCarried } from "./minds";
-import { carryOwnFiles, IMPORTED as IMPORTED_FOLDER, type OwnFilesCarried, PROMPT_SETS, type TreePlaces } from "./own-files";
+import { carryOwnFiles, IMPORTED as IMPORTED_FOLDER, IMPORTED_AGENTS, IMPORTED_SKILLS, LUMIAH_TEXTS, type OwnFilesCarried, PROMPT_SETS, SET_APART, type TreePlaces } from "./own-files";
 import { carryPins, type PinsCarried } from "./pins";
 import { People } from "./people";
 import { apartText, type ChatFate, type Item, type MigrationReport } from "./report";
 import { NO_PLACE_YET, type RowId } from "./rows";
 import { carrySettings, lumiahSettings, oneToolAtATime, type SettingsCarried } from "./settings";
+import { connectionsOf, findChoices, type ModelChoice, matcherOf } from "./model-choices";
 import { carryStory, type StoryCarried } from "./story-record";
 import { keepPutPrints, putPrints } from "./tables";
 import type { Today } from "./today";
@@ -56,6 +57,8 @@ export interface CarryInput {
 export interface CarriedReport {
   worlds: WorldsCarried;
   settings: SettingsCarried;
+  /** Every place today's settings and agents of his own name a connection, each with the connection of RPE's it is carried to and how it was found, or why none. */
+  modelChoices: ModelChoice[];
   /** Null: the run took no runtime of today's build (none is this user's here), or it keeps no connections; `why`: its files can't be read, and nothing of them is carried. */
   connections: ConnectionsCarried | { why: string } | null;
   /** Null: the run was not given the file tree's places, and the user's own files are in the backup only. */
@@ -116,16 +119,28 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const earlier = putPrints(db, user);
   const runtime = today.runtime.runtimes[0]?.name ?? null;
   const serial = oneToolAtATime(await lumiahSettings(today));
-  const carriedConnections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets), () => user), user, runtime, today.runtime.files, serial, earlier);
+  const port = modelsPort(paths, new SecretsFile(paths.secrets), () => user);
+  const carriedConnections = runtime === null ? null : await carryConnections(port, user, runtime, today.runtime.files, serial, earlier);
   const connections = carriedConnections === null || "why" in carriedConnections ? carriedConnections : carriedConnections.carried;
   if (carriedConnections !== null && !("why" in carriedConnections)) keepPutPrints(db, user, carriedConnections.put, carriedConnections.drop);
   const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier, input.settings);
   keepPutPrints(db, user, carriedSettings.put, carriedSettings.drop);
-  const settings = carriedSettings.carried;
+  // Every place today's settings and definitions name a connection, matched with the connections RPE now holds (the runtime's carried under their own ids) or, for one of Lumiverse's, with RPE's of the same provider and model; those with none are listed.
+  const readJson = async (path: string): Promise<unknown> => {
+    try {
+      return JSON.parse((await today.userView.read(path)) ?? "null") as unknown;
+    } catch {
+      return null;
+    }
+  };
+  const matcher = matcherOf(today.db.connectionProfiles(), connectionsOf(await port.loadConnections({ user })));
+  const choices = findChoices(await readJson("settings.json"), await readJson("harness/settings.json")).map(matcher);
+  const listed = choices.filter((c) => c.carried === null);
+  const settings = { ...carriedSettings.carried, lumiverseConnections: listed.map((c) => ({ setting: c.where, connection: c.connection })) };
   // Each chat the import carried; and each chat's area as each turn left it, read once for its notes and its characters' mind files.
   const chats = (report.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId);
   const turnAreas = new TurnAreas(today, db, s, report.items);
-  const ownFiles = tree === null ? null : await carryOwnFiles(today, report.items, tree, { db, s, areas: turnAreas, carried: new Set(chats) });
+  const ownFiles = tree === null ? null : await carryOwnFiles(today, report.items, tree, { db, s, areas: turnAreas, carried: new Set(chats) }, matcher);
   // The files pinned in today's build as pins, each for the agent that is handed it (R-174).
   const pinned = tree === null || ownFiles === null ? null : await carryPins({ wanted: ownFiles.pins, globalConfig: paths.globalConfig, shipped: join(paths.files, SHIPPED_FOLDER, tree.agents), own: new Set(ownFiles.agentIds), earlier });
   if (pinned !== null) keepPutPrints(db, user, pinned.put);
@@ -155,7 +170,7 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     "world-contents": "Inside the world documents, as they were: RPE reads them with today's world store, so each world holds what it held",
     pins: "Inside the world documents they pin, carried with them",
     settings: `RPE-global.yml: ${settings.carried.length} setting(s) carried; ${(settings.notCarried ?? []).length > 0 ? `${(settings.notCarried ?? []).length} not carried, as RPE's like setting means something else or takes no such value; ` : ""}${(settings.archived ?? []).length > 0 ? `${(settings.archived ?? []).length} archived in the backup, as they steered only an old engine, each named with why; ` : ""}${settings.noHome.length} with no setting of the same meaning in RPE, listed by name`,
-    "model-choices": `Listed for you: ${settings.lumiverseConnections.length} setting(s) name a connection that lives in Lumiverse, which RPE can't use; that work uses RPE's default connection until you pick one of RPE's`,
+    "model-choices": `${choices.length} place(s) name a connection: ${choices.length - listed.length} carried to a connection RPE holds (the same id, or the same provider, model and address), ${listed.length} listed for you to pick a connection of RPE's, that work using RPE's default connection until you do`,
     "runtime-settings": "RPE-global.yml: the runtime's memory limit as service.memory, and each field of its tuning as the setting of the same meaning (the door's, the calls', the update's and the service's), a time in milliseconds as seconds; those with none are named, and the old link's are archived; its update choice is update.restart",
     "chat-switch": "On each chat's own record in RPE: its seed, when it started, whether the engine was switched on for it, and the engine that played it",
     loopback: "At the swap (rpe up): the hash of its key among RPE's provider keys, RPE answering at today's address under today's model name; the connection in Lumiverse is left as it is",
@@ -181,13 +196,13 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     const at = `The user's level of the file tree, under ${IMPORTED_FOLDER}/, switched off`;
     const inChat = `that chat's own notes folder, ${tree.notes}/`;
     const alone = `${ownFiles.leftAlone > 0 ? `; ${ownFiles.leftAlone} chat(s) played on RPE keep the notes they have` : ""}${ownFiles.kept > 0 ? `; ${ownFiles.kept} chat(s) this run did not import keep the notes an earlier run wrote` : ""}${ownFiles.heldAsHis > 0 ? `; ${ownFiles.heldAsHis} file(s) RPE already holds as something else (made or changed there since) were left as they are` : ""}`;
-    landed["own-agents"] = `${at}: ${ownFiles.agents} agent(s) in ${tree.agents}/ and ${ownFiles.skills} skill(s) in ${tree.skills}/, each in the new header format with the original beside it`;
-    landed.texts = `${at}: ${ownFiles.texts} edited text(s) in ${tree.prompts}/, each named for what it was; ${ownFiles.promptSets} prompt set(s) today's turns recorded, word for word, in ${PROMPT_SETS}/, each named by the hash the turns' records give it`;
+    landed["own-agents"] = `${at}: ${ownFiles.agents} agent(s) in ${IMPORTED_AGENTS}/ and ${ownFiles.skills} skill(s) in ${IMPORTED_SKILLS}/, each in the new header format with the model it is carried to, its effort, tools, limits and what it is given, and the original beside it${ownFiles.toolsChecked ? (ownFiles.deadTools.length > 0 ? `; ${ownFiles.deadTools.length} tool name(s) that no longer exist are left out of the headers and listed` : "; every tool name still exists") : "; the tool names were not checked, the run not being given them"}`;
+    landed.texts = `${at}: ${ownFiles.texts - ownFiles.textsLumiah - ownFiles.textsSetApart.length} edited text(s) of the engine's in ${tree.prompts}/, each named for what it was${ownFiles.textsSetApart.length > 0 ? `; ${ownFiles.textsSetApart.length} set apart in ${tree.prompts}/${SET_APART}/ under the reason, as today's build would not send them or had no text of that id` : ""}${ownFiles.textsShipped.length > 0 ? `; ${ownFiles.textsShipped.length} word for word the shipped text, not his edit, kept in the backup and listed` : ""}${ownFiles.textsLumiah > 0 ? `; ${ownFiles.textsLumiah} of LumiAH's in ${tree.prompts}/${LUMIAH_TEXTS}/` : ""}${ownFiles.textsNotText.length > 0 ? `; ${ownFiles.textsNotText.length} that are no text, in the backup only` : ""}; ${ownFiles.promptSets} prompt set(s) today's turns recorded, word for word, in ${PROMPT_SETS}/, each named by the hash the turns' records give it`;
     landed.guidance = `${at}: GUIDANCE.md (${ownFiles.guidance})`;
     landed["author-notes"] = `Each chat's notes as the reply it shows left them, in ${inChat} (${ownFiles.notes} file(s)); every change a turn made to them is recorded on that turn in RPE's own history of notes (${ownFiles.versions} version(s), ${ownFiles.removals} of them a note removed), so showing an earlier reply puts its notes back${ownFiles.untied > 0 ? `; ${ownFiles.untied} area(s) no imported turn ended with are in the backup only` : ""}${alone}`;
     landed["learned-and-home"] = `Your ~/ files in the global notes folder, ${tree.notes}/ at the user's level, which every chat's agents read and none writes (${ownFiles.home} file(s)); each chat's learned/ in ${inChat}, as learned/ (${ownFiles.learned} file(s))${ownFiles.oldLayout > 0 ? `; ${ownFiles.oldLayout} file(s) an earlier build's run left under ${IMPORTED_FOLDER}/chats/ at the user's level were taken out` : ""}${alone}`;
     landed["agents-workspace"] = `As notes: the agents engine's chat workspace in ${inChat} (${ownFiles.workspace} file(s)), each turn's writes and removals among its versions, and its global workspace in the global notes folder (${ownFiles.global} file(s))${alone}`;
     if (pinned !== null) landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in today's build as pins in \`pins:\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that today's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for his own definitions, which are carried switched off` : ""}`;
   }
-  return { landed, carried: { worlds, settings, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, chatSettings: chatSettings?.carried ?? null } };
+  return { landed, carried: { worlds, settings, modelChoices: choices, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, chatSettings: chatSettings?.carried ?? null } };
 }

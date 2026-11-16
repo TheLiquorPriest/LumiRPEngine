@@ -7,6 +7,7 @@
 
 import { isRecord } from "../shared/json";
 import type { MessageLedger, Rec } from "../shared/ledger";
+import { findChoices } from "./model-choices";
 import type { RowId } from "./rows";
 
 /** What each row's inside count counts. */
@@ -172,21 +173,10 @@ export function areaHead(text: string | null): string | null | undefined {
 /** A mind file's path in a chat's area (`backend/story/minds.ts:38-52`). */
 export const MIND_FILE = /^minds\/[^/]+\/(core|now|memory|beliefs|people|plans|outline|profile)\.md$/;
 
-/** Every `connectionId` a settings document holds that names a connection: the settings' one name for a connection chosen for a kind of work. */
-export function connectionChoices(value: unknown): number {
-  if (Array.isArray(value)) return value.reduce<number>((n, v) => n + connectionChoices(v), 0);
-  if (!isRecord(value)) return 0;
-  let n = 0;
-  for (const [key, v] of Object.entries(value)) n += key === "connectionId" && typeof v === "string" && v !== "" ? 1 : connectionChoices(v);
-  return n;
-}
-
-/** The parts of today's settings files the plan's other rows name: model choices and edited texts in the engine's, and LumiAH's texts and the user's own agents and skills (`definitions`). */
+/** The parts of today's settings files the plan's other rows name: model choices (the engine's and LumiAH's, `model-choices.ts`) and edited texts in the engine's, and LumiAH's texts and the user's own agents and skills (`definitions`). */
 export function countSettings(engine: unknown, harness: unknown, tally: Tally): void {
-  if (isRecord(engine)) {
-    tally.add("model-choices", connectionChoices(engine));
-    tally.add("texts", isRecord(engine.prompts) ? sizeOf(engine.prompts.texts) : 0);
-  }
+  tally.add("model-choices", findChoices(engine, harness).length);
+  if (isRecord(engine)) tally.add("texts", isRecord(engine.prompts) ? sizeOf(engine.prompts.texts) : 0);
   if (isRecord(harness)) {
     tally.add("texts", sizeOf(harness.texts));
     const defs = isRecord(harness.definitions) ? harness.definitions : {};

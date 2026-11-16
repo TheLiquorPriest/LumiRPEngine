@@ -153,10 +153,11 @@ describe("what the real run carries besides the chats", () => {
   test("the user's own files are at the user's level of the file tree under imported/, switched off, in the folders the tree's layout gives", async () => {
     const files = dataPaths(data).files;
     const at = (path: string): Promise<string> => readFile(join(files, "imported", path), "utf8");
-    expect(headed(await at(".agents/scout.md"))).toEqual({ header: { name: "scout", description: "Walks ahead and says what is there.", tools: ["lore_search", "chat_read"] }, body: "Walk ahead of the party and report what you see.\n" });
-    expect(JSON.parse(await at(".agents/scout.original.json"))).toMatchObject({ id: "scout", given: "task" });
-    expect(headed(await at(".skills/tide-tables/SKILL.md"))).toEqual({ header: { name: "tide-tables", description: "When the pier floods." }, body: "Read the harbour's tide table before any walk on the pier.\n" });
-    expect([await at(".prompts/classic.narrator.md"), await at(".prompts/lumiah.writer.md")]).toEqual(["Be terse.", "Write short."]);
+    expect(headed(await at("agents/scout.md"))).toEqual({ header: { name: "scout", description: "Walks ahead and says what is there.", model: "default", effort: "high", tools_as: "text", tools: ["lore_search", "chat_read"], limits: { toolRounds: 8, time: 90 } }, body: "Walk ahead of the party and report what you see.\n" });
+    expect(JSON.parse(await at("agents/scout.original.json"))).toMatchObject({ id: "scout", given: "task" });
+    expect(headed(await at("skills/tide-tables/SKILL.md"))).toEqual({ header: { name: "tide-tables", description: "When the pier floods." }, body: "Read the harbour's tide table before any walk on the pier.\n" });
+    // The engine's text whose id no build had is set apart under its reason; LumiAH's is attached as it is, under its own name.
+    expect([await at(".prompts/set-apart/unknown-id/classic.narrator.md"), await at(".prompts/lumiah/lumiah.writer.md")]).toEqual(["Be terse.", "Write short."]);
     // The prompt set today's turns recorded, word for word, by the hash its turns name it by; and its row has nothing in the backup only.
     expect(await at(`prompt-sets/${blobHash("set")}.json`)).toBe(await readFile(join(fixture.userFolder, `prompts/sets/${blobHash("set")}.json`), "utf8"));
     expect(report.rows.find((r) => r.row === "texts")?.count).toMatchObject({ found: 1, attached: 1, backup: 0 });

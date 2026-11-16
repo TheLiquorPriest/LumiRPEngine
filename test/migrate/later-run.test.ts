@@ -51,7 +51,7 @@ describe("a later run over today's data changed since", () => {
       await migrated(fixture, data, 9);
       const imported = join(dataPaths(data).files, "imported");
       // In RPE: the player rewrote the imported skill.
-      await writeFile(join(imported, ".skills/tide-tables/SKILL.md"), "My own tide tables.");
+      await writeFile(join(imported, "skills/tide-tables/SKILL.md"), "My own tide tables.");
       // On today's side since: the user deleted their agent and their skill, and the last reply's area no longer holds prepare.md.
       const settings = join(fixture.userFolder, "harness/settings.json");
       const lumiah = JSON.parse(await readFile(settings, "utf8")) as { definitions: { agents: Record<string, unknown>; skills: Record<string, unknown> } };
@@ -61,10 +61,10 @@ describe("a later run over today's data changed since", () => {
       await putArea(fixture, CHAT.harness, "gen-3", dark, 4);
 
       const second = await migrated(fixture, data, 10);
-      expect(existsSync(join(imported, ".agents/scout.md"))).toBe(false);
-      expect(existsSync(join(imported, ".agents/scout.original.json"))).toBe(false);
-      expect(existsSync(join(imported, ".skills/tide-tables/original.json"))).toBe(false);
-      expect(await readFile(join(imported, ".skills/tide-tables/SKILL.md"), "utf8")).toBe("My own tide tables.");
+      expect(existsSync(join(imported, "agents/scout.md"))).toBe(false);
+      expect(existsSync(join(imported, "agents/scout.original.json"))).toBe(false);
+      expect(existsSync(join(imported, "skills/tide-tables/original.json"))).toBe(false);
+      expect(await readFile(join(imported, "skills/tide-tables/SKILL.md"), "utf8")).toBe("My own tide tables.");
       const notes = await notesOf(data, CHAT.harness);
       expect(notes?.has("author/prepare.md")).toBe(false);
       // The first reply's version still holds it: its turn wrote it.

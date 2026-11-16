@@ -112,7 +112,7 @@ describe("migrate", () => {
     expect(out.join("")).toContain("Migration real run");
     const files = join(data, "files");
     expect(await readFile(join(files, "imported", "GUIDANCE.md"), "utf8")).toBe("Keep the fog grey.");
-    expect(existsSync(join(files, "imported", GLOBAL_FOLDERS.agents, "scout.md"))).toBe(true);
+    expect(existsSync(join(files, "imported", "agents", "scout.md"))).toBe(true);
     const db = new Database(join(data, "rpe.db"));
     try {
       const own = new TreeChats(db, { run: async (write) => write(db) }, files).folders(USER, CHAT.harness);
