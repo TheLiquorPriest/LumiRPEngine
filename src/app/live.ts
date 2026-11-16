@@ -58,7 +58,7 @@ const toolResult = shape.named("ToolResult", "A tool's answer: what the model is
 export const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
 const factValue = shape.object({ count: N, names: opt(shape.list(T)), by: opt(shape.record(N)), namesBy: opt(shape.record(shape.list(T))), fields: opt(shape.record(shape.json())) });
 const ruleThen = shape.union(shape.object({ did: shape.literal("called"), tools: shape.list(T) }), shape.object({ did: shape.literal("wrote") }), shape.object({ did: shape.literal("released") }), shape.object({ did: shape.literal("ended") }));
-const ruleFiring = shape.named(
+export const ruleFiring = shape.named(
   "RuleFiring",
   "A rule that fired: which, from where, at what moment, on what, what it did, and what the agent did next.",
   shape.object({
