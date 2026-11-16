@@ -89,7 +89,6 @@ export const ROW: Readonly<Record<RowId, Row>> = Object.fromEntries(ROWS.map((r)
  * only: where a run can't land its things, the gate refuses the run.
  */
 export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
-  "chat-switch": "the swap (`rpe up`): each chat on in RPE as it was on today, the engine it used on its record",
   "build-jobs": "the jobs lane",
   "panel-requests": "the pages lane: each request onto the turn that answered it",
   "assistant-threads": "the pages lane",

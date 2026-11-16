@@ -51,7 +51,7 @@ const chatRow = shape.named(
     check: shape.object({
       matched: shape.object({ head: shape.yesNo(), swipes: N, of: N }),
       differences: shape.list(difference),
-      placed: shape.object({ own: N, shown: N, lost: N, head: N }),
+      placed: shape.object({ own: N, shown: N, lost: N }),
     }),
     carried: field(nullable(json), "What the run that imported it carried of it, over its whole path (a document the migration kept as JSON); null for a chat no run of this build imported."),
   }),

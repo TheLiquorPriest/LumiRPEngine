@@ -48,8 +48,8 @@ It does what the rehearsal does, and this time writes, but only into RPE's data 
 
 - First it takes a backup: the extension's storage, the previous runtime's files and its installed copy, and the list of chats with engine records. Its path and checksum are in the report.
 - Then it carries your worlds, chats, connections, settings and your own files into RPE.
-- Each chat's history becomes RPE's turns, one for every reply and every swipe, so history, swipes and rewinds work on a migrated chat as on a new one.
-- **The check.** For every chat, RPE works out the world's state from what it carried and compares it with what the previous build gives, value for value, at the latest reply and at every swipe. A chat where anything differs is marked. RPE stores the previous build's state at that point as the start there, so that nothing is lost, and the report lists the differences.
+- Each chat's history becomes RPE's turns, one for every reply and every swipe, so history, swipes and rewinds work on a migrated chat as on a new one. A reply the previous build left unplayed (its generation was stopped, failed, or the engine restarted while it was written) has no turn: it stands on the chat's path as an unplayed stretch with that reason, which the chat's agents are told at its first turn on RPE. Each chat's own record in RPE holds its seed, when it started, whether the previous build's engine was switched on for it and which engine played it.
+- **The check.** For every chat, RPE works out the world's state from what it carried and compares it with what the previous build gives, value for value, at the latest reply and at every swipe. A chat where anything differs is marked. RPE stores the previous build's state at that point as the start there, whichever swipe or path it is (the latest reply of a chat whose head stands rebased included), so that nothing is lost, and the report lists the differences.
 
 The previous build is still installed and still plays your chats. Read the report at your leisure.
 
@@ -81,7 +81,6 @@ The rehearsal and the real run print the same report. It holds counts and checks
 
 Some kinds of thing have no place in RPE yet. The run counts them, keeps them in the backup, and does not carry them. They are not lost: they stay in the backup, and in the previous build's own storage, which nothing changes. A later run carries them once a build has a place for them. The report lists them last, by name, so that nobody reads a run as complete. In this build they are:
 
-- which chats the engine was switched on for, and the engine each used;
 - Build jobs and their proposals;
 - approvals and jobs;
 - what you asked for through a panel;

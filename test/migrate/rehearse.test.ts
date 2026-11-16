@@ -84,8 +84,8 @@ describe("the rehearsal, extension installed for everyone", () => {
     // The harness chat's area lands as notes at every turn: the latest as it stands, the ones before it as versions.
     // Its texts count with it: the index of each head and the body of each note it names are the row's too.
     expect(count("author-notes")).toEqual({ found: 12, carried: 12, attached: 0, archived: 0, backup: 0 });
-    expect(count("chat-switch")).toMatchObject({ carried: 0, attached: 0 });
-    expect(count("chat-switch")?.backup).toBeGreaterThan(0);
+    // The chat's record in RPE holds what the switch said, and the old note on where its engine was chosen is archived.
+    expect(count("chat-switch")).toMatchObject({ carried: 4, attached: 0, archived: 1, backup: 0 });
     expect(count("worlds")).toMatchObject({ backup: 0 });
     for (const row of report.rows) {
       if (row.count.backup > 0) expect({ row: row.row, later: Object.hasOwn(NO_PLACE_YET, row.row) }).toEqual({ row: row.row, later: true });
@@ -99,7 +99,7 @@ describe("the rehearsal, extension installed for everyone", () => {
     const from = lines.findIndex((l) => l.startsWith("The real run will keep these in the backup only"));
     expect(from).toBeGreaterThan(0);
     const tail = lines.slice(from + 1);
-    expect(tail).toContain(`  ${ROWS.find((r) => r.id === "chat-switch")?.what}: ${count("chat-switch")?.backup} thing(s)`);
+    expect(tail).toContain(`  ${ROWS.find((r) => r.id === "approvals-jobs")?.what}: ${count("approvals-jobs")?.backup} thing(s)`);
     expect(tail.at(-1)).toBe(`  In all: ${report.rows.reduce((n, r) => n + r.count.backup, 0)} thing(s), of ${tail.length - 1} row(s).`);
   });
 

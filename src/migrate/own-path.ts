@@ -27,13 +27,12 @@ export interface Pick {
  * Where one swipe is folded: the swipes the replies before it show (`picks`), and why there. `own`:
  * its own recorded path. `shown`: where it shows now, because it has no turn path of its own
  * (`lost` false) or because its own path can't be hashed again from today's data (`lost` true).
- * `head`: a reply's showing swipe placed on the chat as it stands by choice (`placements`' option).
  */
 export interface Placement {
   at: number;
   swipe: number;
   picks: Pick | null;
-  how: "own" | "shown" | "head";
+  how: "own" | "shown";
   lost: boolean;
 }
 
@@ -67,10 +66,9 @@ export function chainOf(chain: readonly ChainMessage[], placement: Pick | Placem
 
 /**
  * Every swipe of every reply in `chain` (the chat as it stands, the journal's records over the
- * messages'), with where it is folded. With `headShown`, the swipe each reply shows now is placed on
- * the chat as it stands, whatever its own path: the chat's head then stands on the turns' own paths.
+ * messages'), with where it is folded.
  */
-export function placements(chain: readonly ChainMessage[], tombstones: readonly Tombstone[], options: { headShown?: boolean } = {}): Placement[] {
+export function placements(chain: readonly ChainMessage[], tombstones: readonly Tombstone[]): Placement[] {
   const replies = chain.flatMap((m, i) => (m.isUser ? [] : [i]));
   const current = computePaths(chain, tombstones);
   // The picks of the chat as it stands, before each reply.
@@ -90,8 +88,7 @@ export function placements(chain: readonly ChainMessage[], tombstones: readonly 
     const asShown = shownBefore.get(r) ?? null;
     for (let swipe = 0; swipe < m.swipes.length; swipe++) {
       const rec = liveRecord(m, swipe, tombstones);
-      if (options.headShown && swipe === m.swipeId) out.push({ at: r, swipe, picks: asShown, how: "head", lost: false });
-      else if (rec !== null && known.has(rec.path)) out.push({ at: r, swipe, picks: known.get(rec.path) ?? null, how: "own", lost: false });
+      if (rec !== null && known.has(rec.path)) out.push({ at: r, swipe, picks: known.get(rec.path) ?? null, how: "own", lost: false });
       else out.push({ at: r, swipe, picks: asShown, how: "shown", lost: rec !== null });
     }
     const next = replies[q + 1];

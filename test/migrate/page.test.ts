@@ -47,7 +47,7 @@ describe("the Migration page's data", () => {
     expect(p.text).toBe(reportText(report));
     expect(p.chats.map((c) => c.chat).sort()).toEqual((report.imports ?? []).map((c) => c.chatId).sort());
     const harness = p.chats.find((c) => c.chat === CHAT.harness);
-    expect(harness).toMatchObject({ outcome: "imported", turns: 4, check: { matched: { head: true } } });
+    expect(harness).toMatchObject({ outcome: "imported", turns: 3, check: { matched: { head: true } } });
     expect(harness?.carried?.characters).toEqual([
       { name: PEOPLE.ada.name, files: ["core.md", "memory.md"] },
       { name: PEOPLE.bo.name, files: ["profile.md"] },

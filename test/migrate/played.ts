@@ -121,8 +121,6 @@ export interface PlayedSwipe {
   picks: Record<string, number>;
   /** Its own path can't be hashed again (an earlier message was edited or deleted since): it folds where it shows now. */
   lost?: true;
-  /** Expected to be placed where it shows now: its chat's head stands rebased and differs from what its own path gives (`placedWhereShown`). */
-  whereShown?: true;
 }
 
 /** One chat being played, message by message, as today's build records it. */
@@ -236,13 +234,6 @@ export class Play {
     const rec = m.ledger?.swipes[String(m.swipeId)];
     if (!rec) throw new Error(`no record on ${id}`);
     rec.keep = { ...(rec.keep ?? {}), [this.parentOf(id)]: { convert: [{ in: "events", index }] } };
-    return this;
-  }
-
-  /** What the test expects of the import: the swipe reply `id` shows is placed where it shows now. */
-  placedWhereShown(id: string): this {
-    const m = this.at(id);
-    for (const p of this.played) if (p.message === id && p.swipe === m.swipeId) p.whereShown = true;
     return this;
   }
 
@@ -401,8 +392,7 @@ export async function addPlayedChats(fixture: Fixture): Promise<Played> {
     .user("pr-u3", "To the inn.", 300)
     .reply("pr-a3", "The Gull.", 301, [goTo("inn"), tick(10)])
     .flip("pr-a2", 0)
-    .fix("pr-a3", [pay(60, "Fee at the door")])
-    .placedWhereShown("pr-a3");
+    .fix("pr-a3", [pay(60, "Fee at the door")]);
   plays.push({ play: rebased, name: "Saltmarsh (rebased)", prefs: {} });
 
   // The branch: the classic chat's messages copied up to its second reply as they stood when it was made, then a turn of its own.

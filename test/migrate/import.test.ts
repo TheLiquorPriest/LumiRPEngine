@@ -24,7 +24,7 @@ import { textHash } from "../../src/migrate/lumiverse-db";
 import type { ChatImportReport } from "../../src/migrate/report";
 import { MIGRATE_TABLES } from "../../src/migrate/tables";
 import { openToday, type Today } from "../../src/migrate/today";
-import { buildFixture, treeSums, USER, type Fixture } from "./fixture";
+import { buildFixture, CHAT, treeSums, USER, type Fixture } from "./fixture";
 import { addPlayedChats, PLAYED, POV, type Played, type PlayedSwipe } from "./played";
 
 const registry = createRegistry(ALL_PACKS);
@@ -71,7 +71,7 @@ function target(chats: readonly ChatToImport[]): { db: Database; store: Store; s
 function playedChain(chat: ChatToImport, swipe: PlayedSwipe): ChainMessage[] {
   const chain = chat.input.chain;
   const at = chain.findIndex((m) => m.id === swipe.message);
-  return chain.slice(0, at + 1).map((m, i) => (i === at ? { ...m, swipeId: swipe.swipe } : m.isUser || swipe.lost || swipe.whereShown || swipe.picks[m.id] === undefined ? m : { ...m, swipeId: swipe.picks[m.id] ?? m.swipeId }));
+  return chain.slice(0, at + 1).map((m, i) => (i === at ? { ...m, swipeId: swipe.swipe } : m.isUser || swipe.lost || swipe.picks[m.id] === undefined ? m : { ...m, swipeId: swipe.picks[m.id] ?? m.swipeId }));
 }
 
 describe("each chat into the store", () => {
@@ -81,6 +81,7 @@ describe("each chat into the store", () => {
   let today: Today;
   let chats: ChatToImport[];
   let s: UserStore;
+  let db: Database;
   let reports: ChatImportReport[];
   const chat = (id: string): ChatToImport => {
     const c = chats.find((x) => x.chatId === id);
@@ -104,6 +105,7 @@ describe("each chat into the store", () => {
     chats = read.chats;
     const t = target(chats);
     s = t.s;
+    db = t.db;
     reports = importChats({ store: t.store, s, db: t.db, registry, chats, notOpened: read.notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: [], run: "run-1" });
   });
 
@@ -118,12 +120,24 @@ describe("each chat into the store", () => {
         if (m.isUser) continue;
         const turns = s.swipes(c.chatId, m.id);
         const facts = c.swipes.get(m.id);
-        expect({ chat: c.chatId, message: m.id, turns: turns.length }).toEqual({ chat: c.chatId, message: m.id, turns: m.swipes.length });
-        for (const [swipe, text] of m.swipes.entries()) expect(turns.some((t) => t.hash === textHash(text) && t.date === (facts?.dates[swipe] ?? null) && t.imported)).toBe(true);
+        // A swipe the old engine says stood with no turn played has none here: it is an unplayed stretch of the chat's path.
+        const played = [...m.swipes.entries()].filter(([swipe]) => {
+          const harness = m.ledger?.swipes[String(swipe)]?.harness;
+          return !(harness?.unplayed !== undefined && (harness.turns ?? []).length === 0);
+        });
+        expect({ chat: c.chatId, message: m.id, turns: turns.length }).toEqual({ chat: c.chatId, message: m.id, turns: played.length });
+        for (const [swipe, text] of played) expect(turns.some((t) => t.hash === textHash(text) && t.date === (facts?.dates[swipe] ?? null) && t.imported)).toBe(true);
       }
     }
     expect(reports.filter((r) => r.outcome !== "imported").map((r) => [r.chatId, r.outcome, r.why ?? ""])).toEqual([]);
     expect(s.isPlayed(PLAYED.classic)).toBe(false);
+  });
+
+  test("a chat's record holds its seed, its start, whether the engine was on and the engine that played it; a reply left unplayed has no turn, and its reason is kept", () => {
+    for (const c of chats.filter((x) => x.branch === null)) expect(s.chat(c.chatId)).toMatchObject({ seed: c.run.runSeed, started: c.run.startedAt, wasOn: c.wasOn, engine: c.engine });
+    expect(chat(CHAT.harness).engine).toBe("harness");
+    expect(s.swipes(CHAT.harness, "m-h4")).toEqual([]);
+    expect(db.query<{ why: string }, [string, string]>("SELECT why FROM reply_reason WHERE chat = ? AND message = ?").get(CHAT.harness, "m-h4")?.why).toBe("stopped");
   });
 
   test("time, place, coin and inventory equal today's fold at every swipe, along the chain it was played on", () => {
@@ -168,14 +182,15 @@ describe("each chat into the store", () => {
     for (const id of [PLAYED.classic, PLAYED.paused, PLAYED.discarded, PLAYED.deleted, PLAYED.branch]) expect({ id, differences: report(id)?.differences }).toEqual({ id, differences: [] });
   });
 
-  test("a chat whose head stands rebased and differs is placed where it shows, and how going back differs is listed", () => {
+  test("a chat whose head stands rebased and differs keeps today's state as the start at its head, and each swipe on its own path", () => {
     const rebased = report(PLAYED.rebased);
-    expect(rebased?.placedAsShown).toBe(true);
-    expect(rebased?.matched.head).toBe(true);
-    // Going back to the brass lantern: RPE's fold carries the fee made on the tin lantern's path; today's leaves it there.
-    expect(rebased?.differences.map((d) => [d.at, d.kept])).toEqual([[{ message: "pr-a3", swipe: 0 }, false]]);
+    expect(rebased?.matched.head).toBe(false);
+    // The fee made on the tin lantern's path is today's head; RPE's fold of the reply's own path (the brass one) has none: today's state is the start there, kept.
+    expect(rebased?.differences.map((d) => [d.at, d.kept])).toEqual([["head", true]]);
     expect(rebased?.differences[0]?.values).toContain("accounts/acct_mara");
-    expect(s.headState(PLAYED.rebased).state.world.entities.lantern).toBeDefined();
+    const head = s.headState(PLAYED.rebased).state.world;
+    expect(head.entities.lantern).toBeDefined();
+    expect(head.accounts.acct_mara).toBe(-360);
   });
 
   test("a branch shares its source's turns for the messages it copied, and has its own after", () => {

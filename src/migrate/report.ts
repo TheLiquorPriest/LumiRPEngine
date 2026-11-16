@@ -148,14 +148,11 @@ export interface ChatImportReport {
   turns: number;
   /**
    * Where its swipes were folded: on their own recorded path (`own`); where they show now, having no
-   * turn path of their own (`shown`) or one an edit or a deletion made impossible to rebuild (`lost`);
-   * a showing reply placed where it stands (`head`, when `placedAsShown`).
+   * turn path of their own (`shown`) or one an edit or a deletion made impossible to rebuild (`lost`).
    */
-  placed: { own: number; shown: number; lost: number; head: number };
+  placed: { own: number; shown: number; lost: number };
   /** A branch's messages that share the turns of the chat it was made from. */
   shares: { chat: string; messages: number } | null;
-  /** Its head stood rebased and differed, so its showing replies were placed where they stand. */
-  placedAsShown: boolean;
   /** Whether RPE's fold matched today's before any starting state was kept: at the head, and at how many of its swipes. */
   matched: { head: boolean; swipes: number; of: number };
   /** Where it didn't: the chat is marked, and today's state there is the turn's starting state. */
@@ -346,10 +343,10 @@ export function reportText(report: MigrationReport): string {
         continue;
       }
       const p = c.placed;
-      const where = `${p.own} on their own path, ${p.shown} where they show (no turn path of their own), ${p.lost} where they show (their own path lost to an edit or a deletion)${p.head > 0 ? `, ${p.head} showing replies where they stand` : ""}`;
+      const where = `${p.own} on their own path, ${p.shown} where they show (no turn path of their own), ${p.lost} where they show (their own path lost to an edit or a deletion)`;
       const check = `matched at the head ${c.matched.head ? "yes" : "no"}, at ${c.matched.swipes} of ${c.matched.of} swipes`;
       lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
-      for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "going back differs (not kept)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
+      for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "differs (not kept: the turn is the chat it was made from's)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
       if ((c.edited ?? 0) > 0) lines.push(`    ${c.edited} swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
       if (c.own !== undefined) lines.push(`    ${c.own.placed} change(s) of his own and his jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
     }
