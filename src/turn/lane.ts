@@ -398,8 +398,11 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   };
   const sources = liveSources(() => options.lumiverse(), lore, files);
   // A place's bound entries in force (the lore's bindings to `place:<id>`), and each entry as the lore reads it now, by the revision `liveSources` gives it.
+  // The entries bound in force to a record by its full ref (`place:<id>`, `quest:<id>`).
+  const recordBindings = (user: string, record: string) => [...storedBindings(app.db, user)].flatMap(([entry, rows]) => bindingsInForce(rows).filter((r) => r.record === record).map((r) => ({ entry, aspect: r.aspect, by: r.by })));
   const placeSources: PlaceSourcesReader = {
-    bindings: (user, place) => [...storedBindings(app.db, user)].flatMap(([entry, rows]) => bindingsInForce(rows).filter((r) => r.record === `place:${place}`).map((r) => ({ entry, aspect: r.aspect, by: r.by }))),
+    bindings: (user, place) => recordBindings(user, `place:${place}`),
+    recordBindings,
     entry: async (scope, entry) => {
       const [e] = await lore.read({ user: scope.user, chat: scope.chat }, [entry]);
       return e === undefined ? null : { title: e.title, revision: e.revision ?? hashJson([e.title, e.keys, e.text]) };
@@ -427,7 +430,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, placeSources, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
