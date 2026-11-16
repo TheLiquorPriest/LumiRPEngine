@@ -18,6 +18,7 @@ import { type ConfigRead, portTexts, readConfig } from "../app/config-read";
 import { harnessSettings } from "../app/setting-list";
 import { toldRows } from "./events";
 import type { Turns } from "./lane";
+import { ownerJobRoutes } from "./owner-jobs";
 import { jobToldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
 
@@ -387,5 +388,6 @@ export function jobRoutes(deps: JobRoutesDeps) {
       reply: jobReply,
       handle: ({ user, params, body }) => control(jobs.answer(user, params.job, body)),
     }),
+    ...ownerJobRoutes(turns),
   ] as const;
 }

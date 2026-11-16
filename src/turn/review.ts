@@ -14,7 +14,7 @@ const N = shape.number();
 const opt = shape.optional;
 const nullable = shape.nullable;
 
-const report = shape.named(
+export const report = shape.named(
   "ReportShown",
   "What a change did not add up to, or why it did not apply: a code and its values, never words.",
   shape.object({ code: T, values: opt(shape.record(shape.json())) }),
@@ -63,7 +63,7 @@ const cardReply = shape.named(
   }),
 );
 
-const undoReply = shape.named(
+export const undoReply = shape.named(
   "UndoReply",
   "What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes: a part a later change has written since, or one with no reversal.",
   shape.object({ recorded: shape.list(T), left: shape.list(report) }),
