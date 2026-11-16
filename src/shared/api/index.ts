@@ -810,6 +810,8 @@ export interface LevelReflection {
   records: number;
   notable: string[];
   open: number;
+  /** What falls due beneath it in the time ahead: how many (null: more than one, uncounted), the minutes until the soonest, and its kind; null when nothing does, or the reading passed no due source. */
+  due: { n: number | null; after: number; kind: string } | null;
   /** The number of the last turn that changed something there. */
   changed: number | null;
   /** An agent's own line on the level. */
@@ -1861,11 +1863,6 @@ export interface TapReply {
   words: string;
 }
 
-/** The Undo of an edit of his, by the id its answer gave. */
-export interface TapUndoAsk {
-  undo: string;
-}
-
 /** A tool call a model made: the model's id for it, the tool, its arguments, and when the model began writing it, where the provider gave it in pieces. */
 export interface ToolCallView {
   id: string;
@@ -2320,6 +2317,16 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): all of it, the world's defaults given with it included, or none and the answer says why; at once, whatever runs. */
+  "POST /api/v1/chats/:chat/edits/:edit/undo": {
+    params: { chat: string; edit: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: TapReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** The user's jobs of one chat, as RPH last kept each, the newest started first. */
   "GET /api/v1/chats/:chat/jobs": {
     params: { chat: string };
@@ -2529,16 +2536,6 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: false;
-  };
-  /** The Undo of an edit of his, by the id its answer gave: all of it, or none and the answer says why. */
-  "POST /api/v1/chats/:chat/taps/undo": {
-    params: { chat: string };
-    query: Record<string, never>;
-    body: TapUndoAsk;
-    reply: TapReply;
-    paged: false;
-    long: false;
-    joined: true;
   };
   /** A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length. */
   "GET /api/v1/chats/:chat/turns": {
