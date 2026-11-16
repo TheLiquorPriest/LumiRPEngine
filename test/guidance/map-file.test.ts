@@ -26,6 +26,7 @@ const LAYOUT: RawLayout = {
   messages: [],
   complete: true,
   preset: { id: "preset-lamp", name: "Lamp" },
+  blocksFrom: "breakdown",
   blocks: [{ name: "Main", type: "preset", text: "You narrate.", kind: "instructions" }, { name: "Note", type: "preset", text: "Keep it short." }],
 };
 
