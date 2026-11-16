@@ -26,7 +26,7 @@ import { buildArea } from "../build/area";
 import { castArea } from "../cast/area";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
-import { EntryNumbers, type LoreBooks, LoreProposals } from "../lore";
+import { EntryNumbers, type LoreBooks, LoreProposals, type LoreWorldWrites, worldEntryWrites } from "../lore";
 import { LORE_PROPOSAL_SETTING_DEFS } from "../lore/settings";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
 import { migrateArea } from "../migrate/area";
@@ -119,6 +119,13 @@ export function compose(options: ComposeOptions = {}): Composition {
       return await now.list(user, chat);
     },
   };
+  // Build, whose world store is the one write path to his worlds: a proposal for a world's entry is approved through it, once Build is mounted.
+  const build = buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE }));
+  const worldWrites = (): LoreWorldWrites => {
+    const store = build.worlds();
+    if (store === null) throw new Error("Build is not mounted yet, so his worlds cannot be written.");
+    return worldEntryWrites(store);
+  };
   // The agents' suggestions about lore, kept as proposals and written to his books only on his approval: one queue, made when first asked for.
   let proposed: LoreProposals | null = null;
   const proposals = (): LoreProposals =>
@@ -131,6 +138,10 @@ export function compose(options: ComposeOptions = {}): Composition {
         update: (user, entry, fields, revision) => lumiverse().writes.update(user, entry, fields, revision),
         create: (user, book, fields) => lumiverse().writes.create(user, book, fields),
         remove: (user, entry, revision) => lumiverse().writes.remove(user, entry, revision),
+      },
+      worlds: {
+        entry: (user, world, key) => worldWrites().entry(user, world, key),
+        update: (user, world, key, fields, stamp) => worldWrites().update(user, world, key, fields, stamp),
       },
       settings: globalConfig(app().paths.files, app().log).numbers(LORE_PROPOSAL_SETTING_DEFS),
     }));
@@ -230,10 +241,11 @@ export function compose(options: ComposeOptions = {}): Composition {
       openSessions,
       // A deleted chat's turns, changes and snapshots go the store's own way: kept where a branch reads them.
       // The snapshots of a living chat's folds are derived: the fold makes them again when next due, every answer the same.
-      // The vectors of search by meaning are derived too: kept in the index file, made again from their sources when next searched.
+      // The vectors of search by meaning and the state search's tokens are derived too: kept in the index file, made again from their sources when next searched.
       derived: [
         { name: "snapshots", keeps: ["snapshot"], drop: async (user, chat) => void (await app().writes.run(() => made().store.user(user).dropSnapshots(chat), "dropping a chat's snapshots")) },
         { name: "search by meaning", keeps: [], held: (user, chat) => made().meaning.held(user, chat), drop: (user, chat) => made().meaning.dropChat(user, chat) },
+        { name: "state search", keeps: [], drop: async (user, chat) => void (await made().stateIndex.forget(user, chat)) },
       ],
       dropStored: (user, chat) => app().writes.run(() => made().store.user(user).deleteChat(chat), "removing a deleted chat's turns"),
       // What RPH itself makes of the files of a chat's view, for the Files page.
@@ -264,7 +276,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       window: (user, chat) => made().lane.windowOf(user, chat),
       soFar: (user, chat) => made().lane.soFarAt(user, chat),
     })),
-    buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE })),
+    build,
     playArea(() => ({
       store: made().store,
       turning,
