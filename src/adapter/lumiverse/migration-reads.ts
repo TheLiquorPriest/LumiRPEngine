@@ -97,6 +97,8 @@ export interface MigrationMessage {
   dates: unknown[];
   /** What the extensions put on it (`extra.spindle_metadata`); absent where there is none. */
   metadata: JsonObject | undefined;
+  /** The user hid it from the prompt (`extra.hidden`, as `db.ts` reads the mark); false where `extra` is not JSON. */
+  hidden: boolean;
 }
 
 /** A message that carries an extension's metadata, with that metadata whole. */
@@ -238,6 +240,7 @@ export function migrationReads(opened: OpenedDatabase, user: string): MigrationR
           swipes: Array.isArray(swipes) ? swipes : [r.content],
           dates: Array.isArray(dates) ? dates : [],
           metadata: isRecord(extra.spindle_metadata) ? (extra.spindle_metadata as JsonObject) : undefined,
+          hidden: extra.hidden === true,
         };
       });
     },
