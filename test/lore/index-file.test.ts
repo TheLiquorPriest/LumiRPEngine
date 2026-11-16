@@ -38,9 +38,11 @@ describe("LORE-INDEX.md", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("is written from the table when a run keeps lines, and again when the user edits them", async () => {
+  test("is there at the chat's first briefing, before any run, and is written again when a run keeps lines or the user edits them", async () => {
     const path = join(folder(), "LORE-INDEX.md");
     expect(existsSync(path)).toBe(false);
+    await index.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    expect(existsSync(path)).toBe(true);
     const entries = await index.entries(AT);
     const lamp = entries.find((e) => e.title === "The lamp room");
     const tithe = entries.find((e) => e.id === W.tithe_law);
@@ -56,7 +58,7 @@ describe("LORE-INDEX.md", () => {
     expect(lines.slice(0, 3)).toEqual([
       "# Lore index",
       "",
-      "The lore this chat reads: 9 entries, 7 of them not indexed yet. Each line gives the entry's id, its title, where it is from, how it comes into the prompt and its size, then what the index says of it.",
+      "The lore this chat reads: 11 entries, 9 of them not indexed yet. Each line gives the entry's id, its title, where it is from, how it comes into the prompt and its size, then what the index says of it.",
     ]);
     expect(lines).toContain(`- [${W.tithe_law}] The harbor tithe (The Reed Coast; keyword; 57 characters): rule. A tenth of every catch. Defines: The harbor steps (rules). Related: ${lamp?.id}.`);
     expect(lines).toContain(`- [${lamp?.id}] The lamp room (Reed Coast Atlas; keyword; 59 characters): place. Green glass and whale oil.`);

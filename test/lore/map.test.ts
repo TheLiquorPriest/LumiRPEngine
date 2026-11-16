@@ -54,10 +54,11 @@ describe("the lore map", () => {
         { id: W.drowned_crown, title: "The drowned crown" },
       ],
     });
-    expect(loreMapFields(map)).toEqual({
-      in_prompt: { lines: [`[${lamp?.id}] The lamp room`, `[${gull?.id}] ${gullTitle}`] },
-      world: { lines: [`[${W.tithe_law}] The harbor tithe`, `[${W.drowned_crown}] The drowned crown`] },
-    });
+    // With the lore's lines off, each part carries its entries' fields, and the layout lays each out itself: code words no line.
+    const off = loreMapFields(map);
+    expect(off.in_prompt?.entries?.map((e) => [e.id, e.title])).toEqual([[lamp?.id, "The lamp room"], [gull?.id, gullTitle]]);
+    expect(off.world?.entries?.map((e) => [e.id, e.title])).toEqual([[W.tithe_law, "The harbor tithe"], [W.drowned_crown, "The drowned crown"]]);
+    expect(off.in_prompt?.lines).toBeUndefined();
   });
 
   test("a part with nothing in it is left out of the layout's fields", async () => {

@@ -56,8 +56,11 @@ describe("one reader over the books and the world", () => {
     expect(await lore.search(AT, { text: "harbor", limit: 1 })).toHaveLength(1);
   });
 
-  test("a search leaves out what today's lore leaves out: the engine's own entries, entries switched off, a twin of a text read already, an earlier build's copy, and every other user's books", async () => {
-    expect((await lore.search(AT, { text: "lamp" })).map((h) => h.title)).toEqual(["The lamp room", "The Lamplighter's Shanty"]);
+  test("a search finds every entry of the books the chat reads, a switched-off one and a twin included, and leaves out the engine's own entries, an earlier build's copy and every other user's books", async () => {
+    const lamp = (await lore.search(AT, { text: "lamp" })).map((h) => h.title);
+    expect(lamp).toEqual(expect.arrayContaining(["The lamp room", "An old rumor", "Lamp room (card)", "The Lamplighter's Shanty"]));
+    expect(lamp).not.toContain("Scene slot");
+    expect(lamp).not.toContain("Inland lamp");
     // The world's copy of the gull entry is not read: the entry is, as the atlas has it now.
     expect((await lore.search(AT, { text: "gull" })).map((h) => h.title)).toEqual(["Gulls nest on the harbor wall every spring…"]);
     expect(await lore.read(AT, [W.gull_copy])).toEqual([]);

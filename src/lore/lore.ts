@@ -98,11 +98,6 @@ function bookTitle(row: LoreBookEntry, words: number): string {
   return all.length > words ? `${all.slice(0, words).join(" ")}…` : all.join(" ");
 }
 
-/** Whether a book entry is lore, as today's build reads books (`backend/book-lore.ts:179-183`): not one the engine wrote, not empty, and not one its author switched off without giving it fields of today's. */
-function isLore(row: LoreBookEntry): boolean {
-  return !engineWroteEntry(row.extensions) && row.content.trim() !== "" && !(row.disabled && bookLoreFieldsOf(row.extensions) === null);
-}
-
 /**
  * A book entry as today's search reads it (`backend/book-lore.ts:134-147`, less what holds it back,
  * which is the secrets'): its title, its keys, its secondary keys and today's aliases as other names,
@@ -155,9 +150,10 @@ function worldEntry(at: WorldAt, n: number, key: string, entry: LoreEntryDef, kn
   return { id: worldEntryId(n), source: at.world.name, title, keys, text: publicText(content), revision: hashJson([title, keys, content]), ...(knowing ? { knowing } : {}) };
 }
 
+/** A book entry as `lore_read` gives it: its revision is Lumiverse's own, the one the catalog, the batch, the index and the map give. */
 function bookEntry(n: number, row: LoreBookEntry, book: LoreBook, title: string): LoreEntry {
   const keys = row.keys.filter((k) => k.trim() !== "");
-  return { id: bookEntryId(n), source: book.name, title, keys, text: publicText(row.content), revision: hashJson([title, keys, row.secondaryKeys, row.content]) };
+  return { id: bookEntryId(n), source: book.name, title, keys, text: publicText(row.content), revision: String(row.revision) };
 }
 
 /** The words around the first of `words` in `text`, each side cut at a word; the start of the text where none of them is in it. */
@@ -311,6 +307,18 @@ export class Lore {
     return this.worlds.at(at.user, at.chat, at.turn);
   }
 
+  /**
+   * The text of one of the user's book entries as any reader may read it: by its id in Lumiverse, or RPE's (`e-12`). Null for no
+   * such entry, or one with no text. Used for his own lore index entry, whose text heads `LORE-INDEX.md`.
+   */
+  async bookText(at: LoreAt, id: string): Promise<string | null> {
+    const ref = loreRefOf(id);
+    const lumiverse = ref === null ? id : ref.kind === "book" ? this.numbers.entry(at.user, ref.n) : null;
+    const row = lumiverse === null ? null : await this.books.entry(at.user, lumiverse);
+    const text = row === null ? "" : publicText(row.content).trim();
+    return text === "" ? null : text;
+  }
+
   private async entries(at: LoreAt, ids: readonly string[], plays?: string): Promise<LoreEntry[]> {
     const refs = ids.map(loreRefOf);
     const world = plays !== undefined || refs.some((ref) => ref !== null) ? this.worlds.at(at.user, at.chat, at.turn) : null;
@@ -405,20 +413,18 @@ export class Lore {
 
   /**
    * The entries of the chat's lore of the sources `asked` names, as today's lore reads them: the
-   * world's own, then (with `books`) its books', each in its source's order. A book entry that is not
-   * lore is passed over, and a text read already is read once, where it first came
-   * (`backend/book-lore.ts:342-350`).
+   * world's own, then (with `books`) its books', each in its source's order. Every entry of a book the
+   * chat reads is one, a disabled one and an empty one included (a disabled entry is indexed and can be
+   * bound; an empty one shows its title and keys) and a copy of another entry as much as any: each is
+   * its own entry. Not the entries the engine itself wrote (an earlier build's own book of blank,
+   * disabled entries, `shared/lore.ts` `engineWroteEntry`).
    */
   private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, books: boolean): Promise<Gathered[]> {
     const out: Gathered[] = [];
-    const texts = new Set<string>();
     if (world !== null && asked(world.world.name)) {
       for (const [key, entry] of Object.entries(world.world.lore)) {
         if (!hasOwn(world.world.lore, key) || isCopy(entry)) continue;
-        const text = publicText(typeof entry.content === "string" ? entry.content : "");
-        out.push({ kind: "world", key, entry, source: world.world.name, title: worldTitle(entry, key), text });
-        // Twins are told apart as today's lore tells them (`backend/lore-secrets.ts:23-26`): white space aside.
-        texts.add(text.replace(/\s+/g, " ").trim());
+        out.push({ kind: "world", key, entry, source: world.world.name, title: worldTitle(entry, key), text: publicText(typeof entry.content === "string" ? entry.content : "") });
       }
     }
     if (!books) return out;
@@ -426,19 +432,16 @@ export class Lore {
     const rows = await Promise.all(read.map((book) => this.books.entries(at.user, book.id)));
     for (const [i, book] of read.entries()) {
       for (const row of rows[i] ?? []) {
-        if (!isLore(row)) continue;
-        const text = publicText(row.content);
-        const twin = text.replace(/\s+/g, " ").trim();
-        if (twin === "" || texts.has(twin)) continue;
-        texts.add(twin);
-        out.push({ kind: "book", book, row, title: bookTitle(row, this.settings.titleWords), text });
+        if (engineWroteEntry(row.extensions)) continue;
+        out.push({ kind: "book", book, row, title: bookTitle(row, this.settings.titleWords), text: publicText(row.content) });
       }
     }
     return out;
   }
 
   /**
-   * The books whose entries are the chat's lore, each once, in today's order (`backend/book-lore.ts:195-207`):
+   * The books whose entries are the chat's lore, each once, in today's order (`backend/book-lore.ts:195-207`),
+   * asked with the turn's speaker and persona where the turn has a tag (a group chat's speaker's books, a temporary chat reading no persona's):
    * those its world lists, those attached to the chat, then those an earlier build copied world entries
    * from, whose entries are read as their books have them now. A book the user has not is left out.
    */
@@ -448,7 +451,9 @@ export class Lore {
       const source = loreSourceOf(entry.source);
       return source.kind === "book" ? [source.bookId] : [];
     });
-    const ids = [...new Set([...listed, ...(await this.books.attached(at.user, at.chat)), ...copied])];
+    // The books of the turn's own generation: the speaker's in a group chat and the generation's persona, as Lumiverse decides them for it.
+    const generation = at.turn === undefined ? null : ((await this.turns.generation?.(at.user, at.chat, at.turn)) ?? null);
+    const ids = [...new Set([...listed, ...(await this.books.attached(at.user, at.chat, generation ?? undefined)), ...copied])];
     const books = await Promise.all(ids.map((id) => this.books.book(at.user, id)));
     return books.filter((book): book is LoreBook => book !== null);
   }

@@ -1,18 +1,25 @@
 // The lore index (plan §9.1): for every entry of a chat's lore, what the database holds at once (its
 // id, book, title, keys, size, how it activates and its revision: `Lore.catalog`) beside what an
-// indexing run wrote of it: its kind, one line saying what it is, what it defines and related entries.
-// The user may edit those lines; an edit stands over the run's and outlives a run that redoes the
-// entry. A run's lines are kept with the revision of the entry the run was given, so after the first
-// run only entries that have changed are handed out again.
+// indexing run wrote of it: its kind, one line saying what it is, what it defines, related entries and
+// any fields beside those that the indexer's file asks for. The user may edit the lines; an edit stands
+// over the run's and outlives a run that redoes the entry. A run's lines are kept by entry and by the
+// revision of the entry the run was given (two chats, or a branch, on different revisions of one entry
+// each keep their revision's and neither run replaces the other's), so after the first run only entries
+// that have changed are handed out again.
 //
 // Code never starts a run (plan §13.5). It hands the next batch to whatever run asks, keeps what the
 // run hands back, and counts what is left, as a fact the briefing shows and a rule may name.
+//
+// The chat's readable index, `LORE-INDEX.md`, is kept in step with what it shows: written at the chat's
+// first briefing from the database half alone, and again whenever the text it would hold differs from
+// the file (an entry changed in Lumiverse, or a run in another chat that changed lines this chat shares).
 
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ActivatedLore, FactDef, FactValue, LoreEntry, Scope } from "rp-harness/contract";
-import { writeWhole } from "../app/disk";
+import type { ActivatedLore, FactDef, FactValue, LoreEntry, Log, Scope } from "rp-harness/contract";
+import { readText, writeWhole } from "../app/disk";
+import type { LoreSettingsFor } from "./chat-settings";
 import type { LoreWrites } from "./ids";
 import { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
 import { horizonRecords } from "./horizon";
@@ -39,6 +46,12 @@ export interface LoreBinding {
   aspect: string;
 }
 
+/** A field of an index line beside the four the lore knows, as the indexer's file names it: a text, or a list of texts. */
+export type LoreNamedValue = string | string[];
+
+/** The fields beside kind, line, defines and related that `.agents/indexer.md` asks an index line to hold (plan D.2), by the names it gives them. */
+export type LoreNamedFields = Record<string, LoreNamedValue>;
+
 /** What the index holds of an entry. */
 export interface LoreIndexLines {
   kind: string | null;
@@ -47,8 +60,11 @@ export interface LoreIndexLines {
   defines: LoreBinding[];
   /** Related entries, by RPE's ids. */
   related: string[];
+  /** The fields beside those four, kept as the run sent them. */
+  fields: LoreNamedFields;
 }
 
+/** The four lines the user may edit, each with its column. */
 export const LORE_INDEX_FIELDS = ["kind", "line", "defines", "related"] as const satisfies readonly (keyof LoreIndexLines)[];
 export type LoreIndexField = (typeof LORE_INDEX_FIELDS)[number];
 
@@ -63,9 +79,10 @@ export interface IndexedEntry extends LoreCatalogEntry, LoreIndexLines {
 }
 
 /** One entry's lines as a run hands them back, with the revision of the entry it read them from, as its batch showed it. */
-export interface LoreIndexInput extends LoreIndexLines {
+export interface LoreIndexInput extends Omit<LoreIndexLines, "fields"> {
   id: string;
   revision: string;
+  fields?: LoreNamedFields;
 }
 
 /** What became of one entry a run handed back: kept, for the revision it was given at; or not, its id naming no entry of the chat's lore. */
@@ -74,14 +91,22 @@ export type LoreIndexOutcome = { id: string; kept: IndexedEntry } | { id: string
 /** The user's edit of an entry's lines: each field given is set as the user's own; null takes the user's own off, and the run's shows again. */
 export type LoreIndexEdit = { [F in LoreIndexField]?: LoreIndexLines[F] | null };
 
+/** A run's lines for one revision of an entry, as the table keeps them. */
 interface IndexRow {
   world: string;
   entry: string;
-  revision: string | null;
+  revision: string;
   kind: string | null;
   line: string | null;
   defines: string | null;
   related: string | null;
+  fields: string | null;
+}
+
+/** The user's own lines for an entry, whatever its revision. */
+interface OwnRow {
+  world: string;
+  entry: string;
   own_kind: string | null;
   own_line: string | null;
   own_defines: string | null;
@@ -108,24 +133,44 @@ function idsOf(raw: string | null): string[] | null {
   return list === null ? null : list.filter((id): id is string => typeof id === "string");
 }
 
+/** The named fields a row holds: the texts and lists of texts in its JSON object; nothing else. */
+function namedOf(raw: string | null): LoreNamedFields {
+  if (raw === null) return {};
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).flatMap(([name, v]): [string, LoreNamedValue][] => (typeof v === "string" ? [[name, v]] : Array.isArray(v) ? [[name, v.filter((i): i is string => typeof i === "string")]] : [])));
+  } catch {
+    return {};
+  }
+}
+
 /** Where the index keeps an entry's lines: a world entry's key is its world's own, a book entry's number the user's for good. */
 function placeOf(entry: Pick<LoreCatalogEntry, "world" | "id">): string {
   return `${entry.world}\u0000${entry.id}`;
 }
 
-/** An entry with its lines, the user's own over the run's. */
-function joined(entry: LoreCatalogEntry, row: IndexRow | undefined): IndexedEntry {
-  const own = { kind: row?.own_kind ?? null, line: row?.own_line ?? null, defines: bindingsOf(row?.own_defines ?? null), related: idsOf(row?.own_related ?? null) };
+/** What the table holds for one entry: a run's lines at each revision it was run at, newest first, and the user's own. */
+interface Held {
+  runs: IndexRow[];
+  own?: OwnRow;
+}
+
+/** An entry with its lines, the user's own over the run's; the run's at its revision as it stands now, else at the newest earlier one. */
+function joined(entry: LoreCatalogEntry, held: Held | undefined): IndexedEntry {
+  const own = { kind: held?.own?.own_kind ?? null, line: held?.own?.own_line ?? null, defines: bindingsOf(held?.own?.own_defines ?? null), related: idsOf(held?.own?.own_related ?? null) };
   const edited = LORE_INDEX_FIELDS.filter((f) => own[f] !== null);
-  const revision = row?.revision ?? null;
+  const current = held?.runs.find((r) => r.revision === entry.revision);
+  const row = current ?? held?.runs[0];
   return {
     ...entry,
     kind: own.kind ?? row?.kind ?? null,
     line: own.line ?? row?.line ?? null,
     defines: own.defines ?? bindingsOf(row?.defines ?? null) ?? [],
     related: own.related ?? idsOf(row?.related ?? null) ?? [],
-    indexed: revision === entry.revision,
-    stale: revision !== null && revision !== entry.revision,
+    fields: namedOf(row?.fields ?? null),
+    indexed: current !== undefined,
+    stale: current === undefined && row !== undefined,
     edited,
   };
 }
@@ -139,8 +184,12 @@ export interface LoreIndexDeps {
   settings?: Partial<LoreIndexSettings>;
   /** Where the chat's readable index is written; absent, it is not written. */
   file?: LoreIndexFile;
+  /** What a chat's levels set of the lore's settings (his own index entry); absent, none is set. */
+  settingsFor?: LoreSettingsFor;
   /** Milliseconds since 1970, for when lines were written; `Date.now` when absent. */
   now?: () => number;
+  /** Where a readable index that could not be kept is said. */
+  log?: Log;
 }
 
 /** An entry Lumiverse activated for a turn's prompt, as the lore map read it: what the turn's folder lays out, reading nothing again. */
@@ -158,6 +207,8 @@ const UNINDEXED = "lore.unindexed";
 
 export class LoreIndex {
   readonly settings: Readonly<LoreIndexSettings>;
+  /** The chats whose readable index this index has kept, which a run in another chat that changed lines they share brings up to date. */
+  readonly #kept = new Map<string, { user: string; chat: string }>();
 
   constructor(private readonly deps: LoreIndexDeps) {
     this.settings = Object.freeze({ ...LORE_INDEX_DEFAULTS, ...deps.settings });
@@ -169,14 +220,24 @@ export class LoreIndex {
    * outdated; and the entries bound to who and what is on the horizon, in the horizon's order, that
    * are not in the map's first parts, up to the setting's limit, with the count of any left out. With
    * it, the entries that activated as it read them, their text from its reading of the chat's lore.
+   * The chat's readable index is kept in step with what the entries now show.
    */
   async loreMap(ask: LoreMapAsk): Promise<TurnLoreMap> {
     const [first, entries] = await Promise.all([this.deps.lore.loreMap(ask), this.entries(ask)]);
+    await this.keepFile(ask, entries);
     const byId = new Map(entries.map((e) => [e.id, e]));
     const described = (l: LoreMapLine): LoreMapLine => {
       const e = byId.get(l.id);
       if (e === undefined) return l;
-      return { ...l, ...(e.kind !== null ? { kind: e.kind } : {}), ...(e.line !== null ? { line: e.line } : {}), ...(e.defines.length > 0 ? { defines: e.defines } : {}), ...(e.indexed ? {} : { keys: e.keys }) };
+      // An entry no run has indexed shows its keys in place of what it is; one indexed at an earlier revision shows what it was, marked as changed since.
+      return {
+        ...l,
+        ...(e.kind !== null ? { kind: e.kind } : {}),
+        ...(e.line !== null ? { line: e.line } : {}),
+        ...(e.defines.length > 0 ? { defines: e.defines } : {}),
+        ...(Object.keys(e.fields).length > 0 ? { fields: e.fields } : {}),
+        ...(e.indexed ? {} : e.stale ? { stale: true } : { keys: e.keys }),
+      };
     };
     const inPrompt = first.inPrompt.map(described);
     const world = first.world.map(described);
@@ -212,8 +273,8 @@ export class LoreIndex {
   /** Every entry of the chat's lore, in the catalog's order, with its index lines. */
   async entries(at: LoreAt): Promise<IndexedEntry[]> {
     const catalog = await this.deps.lore.catalog(at);
-    const rows = this.rows(at.user, catalog);
-    return catalog.map((entry) => joined(entry, rows.get(placeOf(entry))));
+    const held = this.rows(at.user, catalog);
+    return catalog.map((entry) => joined(entry, held.get(placeOf(entry))));
   }
 
   /** The next entries no run has indexed as they stand now, in the catalog's order: at most `size`, the setting's when absent. */
@@ -250,17 +311,17 @@ export class LoreIndex {
       return entry === undefined ? [] : [{ entry, lines: l }];
     });
     await this.deps.writes.run((db) => {
-      const put = db.query<unknown, [string, string, string, string, string | null, string | null, string, string, string, number]>(
-        `INSERT INTO lore_index (user, world, entry, revision, kind, line, defines, related, by, written) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (user, world, entry) DO UPDATE SET revision = excluded.revision, kind = excluded.kind, line = excluded.line, defines = excluded.defines, related = excluded.related, by = excluded.by, written = excluded.written`,
+      const put = db.query<unknown, [string, string, string, string, string | null, string | null, string, string, string, string, number]>(
+        `INSERT INTO lore_index (user, world, entry, revision, kind, line, defines, related, fields, by, written) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (user, world, entry, revision) DO UPDATE SET kind = excluded.kind, line = excluded.line, defines = excluded.defines, related = excluded.related, fields = excluded.fields, by = excluded.by, written = excluded.written`,
       );
-      for (const { entry, lines: l } of kept) put.run(at.user, entry.world, entry.id, l.revision, l.kind, l.line, JSON.stringify(l.defines), JSON.stringify(l.related), by, now);
+      for (const { entry, lines: l } of kept) put.run(at.user, entry.world, entry.id, l.revision, l.kind, l.line, JSON.stringify(l.defines), JSON.stringify(l.related), JSON.stringify(l.fields ?? {}), by, now);
     }, "keeping lore index lines");
-    await this.writeFile(at);
-    const rows = this.rows(at.user, kept.map((k) => k.entry));
+    await this.keepFiles(at);
+    const held = this.rows(at.user, kept.map((k) => k.entry));
     return lines.map((l): LoreIndexOutcome => {
       const entry = catalog.get(l.id);
-      return entry === undefined ? { id: l.id, unknown: true } : { id: l.id, kept: joined(entry, rows.get(placeOf(entry))) };
+      return entry === undefined ? { id: l.id, unknown: true } : { id: l.id, kept: joined(entry, held.get(placeOf(entry))) };
     });
   }
 
@@ -275,28 +336,23 @@ export class LoreIndex {
       return typeof given === "string" ? given : JSON.stringify(given);
     };
     await this.deps.writes.run((db) => {
-      db.query<unknown, [string, string, string]>("INSERT OR IGNORE INTO lore_index (user, world, entry) VALUES (?, ?, ?)").run(at.user, entry.world, entry.id);
+      db.query<unknown, [string, string, string]>("INSERT OR IGNORE INTO lore_index_own (user, world, entry) VALUES (?, ?, ?)").run(at.user, entry.world, entry.id);
       for (const field of LORE_INDEX_FIELDS) {
         if (!(field in edit)) continue;
-        db.query<unknown, [string | null, number, string, string, string]>(`UPDATE lore_index SET own_${field} = ?, edited = ? WHERE user = ? AND world = ? AND entry = ?`).run(value(field), now, at.user, entry.world, entry.id);
+        db.query<unknown, [string | null, number, string, string, string]>(`UPDATE lore_index_own SET own_${field} = ?, edited = ? WHERE user = ? AND world = ? AND entry = ?`).run(value(field), now, at.user, entry.world, entry.id);
       }
     }, "keeping the user's edit of the lore index");
-    await this.writeFile(at);
+    await this.keepFiles(at);
     return joined(entry, this.rows(at.user, [entry]).get(placeOf(entry)));
   }
 
   /**
    * Writes the chat's readable index, `LORE-INDEX.md` at the top of its folder, from the table as it
-   * stands; false when there is nowhere to write it (no file set up, or a chat with no folder yet).
+   * stands, when it differs from the file there; false when there is nowhere to write it (no file set
+   * up, or a chat with no folder yet). It is there from the chat's first briefing, before any run.
    */
   async writeFile(at: LoreAt): Promise<boolean> {
-    const file = this.deps.file;
-    const folder = file?.folder(at.user, at.chat) ?? null;
-    if (file === undefined || folder === null) return false;
-    const text = loreIndexText(await file.lines(at), await this.entries(at));
-    await mkdir(folder, { recursive: true });
-    await writeWhole(join(folder, LORE_INDEX_FILE), `${text}\n`);
-    return true;
+    return this.keepFile(at, await this.entries(at));
   }
 
   /** `lore.unindexed`, in the shape the turn lane's facts registry takes an area's. */
@@ -312,17 +368,61 @@ export class LoreIndex {
     };
   }
 
+  /**
+   * The chat's readable index kept as `entries` show it: the text of his own index entry where he has one, then the
+   * lines in force. Written only when it differs from the file. A file that cannot be kept never stops what called for it.
+   */
+  private async keepFile(at: LoreAt, entries: readonly IndexedEntry[]): Promise<boolean> {
+    const file = this.deps.file;
+    const folder = file?.folder(at.user, at.chat) ?? null;
+    if (file === undefined || folder === null) return false;
+    try {
+      const id = (await this.deps.settingsFor?.(at))?.indexEntry ?? null;
+      const [lines, head] = await Promise.all([file.lines(at), id === null ? null : this.deps.lore.bookText(at, id)]);
+      const text = `${loreIndexText(lines, entries, head)}\n`;
+      const path = join(folder, LORE_INDEX_FILE);
+      if ((await readText(path)) !== text) {
+        await mkdir(folder, { recursive: true });
+        await writeWhole(path, text);
+      }
+      this.#kept.set(`${at.user}\u0000${at.chat}`, { user: at.user, chat: at.chat });
+      return true;
+    } catch (error) {
+      this.deps.log?.warn("A chat's readable lore index could not be kept.", { chat: at.chat, error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  }
+
+  /** This chat's readable index, and every other chat's of the same user that this index has kept, brought up to date: a run in one chat changes lines the others share. */
+  private async keepFiles(at: LoreAt): Promise<void> {
+    await this.writeFile(at);
+    const others = [...this.#kept.values()].filter((k) => k.user === at.user && k.chat !== at.chat);
+    await Promise.all(others.map((k) => this.writeFile(k)));
+  }
+
   /** The index's rows for these entries, by where each is kept. */
-  private rows(user: string, entries: readonly Pick<LoreCatalogEntry, "world" | "id">[]): Map<string, IndexRow> {
+  private rows(user: string, entries: readonly Pick<LoreCatalogEntry, "world" | "id">[]): Map<string, Held> {
     const worlds = [...new Set(entries.map((e) => e.world))];
-    const out = new Map<string, IndexRow>();
+    const out = new Map<string, Held>();
     if (worlds.length === 0) return out;
     const wanted = new Set(entries.map(placeOf));
+    const marks = worlds.map(() => "?").join(", ");
     // Prepared rather than cached: the statement's shape changes with the number of worlds asked about.
-    const rows = this.deps.db.prepare<IndexRow, string[]>(`SELECT world, entry, revision, kind, line, defines, related, own_kind, own_line, own_defines, own_related FROM lore_index WHERE user = ? AND world IN (${worlds.map(() => "?").join(", ")})`).all(user, ...worlds);
-    for (const row of rows) {
+    const runs = this.deps.db.prepare<IndexRow, string[]>(`SELECT world, entry, revision, kind, line, defines, related, fields FROM lore_index WHERE user = ? AND world IN (${marks}) ORDER BY written DESC, rowid DESC`).all(user, ...worlds);
+    for (const row of runs) {
       const place = placeOf({ world: row.world, id: row.entry });
-      if (wanted.has(place)) out.set(place, row);
+      if (!wanted.has(place)) continue;
+      const held = out.get(place) ?? { runs: [] };
+      held.runs.push(row);
+      out.set(place, held);
+    }
+    const owns = this.deps.db.prepare<OwnRow, string[]>(`SELECT world, entry, own_kind, own_line, own_defines, own_related FROM lore_index_own WHERE user = ? AND world IN (${marks})`).all(user, ...worlds);
+    for (const row of owns) {
+      const place = placeOf({ world: row.world, id: row.entry });
+      if (!wanted.has(place)) continue;
+      const held = out.get(place) ?? { runs: [] };
+      held.own = row;
+      out.set(place, held);
     }
     return out;
   }

@@ -40,13 +40,21 @@ export interface LoreBookEntry {
   revision: number;
 }
 
+/** Who a generation is for, as the turn's tag says: the character speaking and the persona in use (their ids in Lumiverse). */
+export interface LoreGeneration {
+  speaker?: string | null;
+  persona?: string | null;
+}
+
 /** The user's Lumiverse books, read-only: every call reads that user's rows and no other's. */
 export interface LoreBooks {
   /**
    * The books attached to the chat, as Lumiverse scans them for it: its character's, its persona's,
    * the chat's own and the user's global ones; a group chat's members' too, by its setting and mutes.
+   * With `at`, as Lumiverse takes them for that generation: the speaker's books in a group chat, the
+   * generation's persona, and no persona's book in a temporary chat.
    */
-  attached(user: string, chat: string): Promise<string[]>;
+  attached(user: string, chat: string, at?: LoreGeneration): Promise<string[]>;
   /** One of the user's books; null when the user has none by that id. */
   book(user: string, id: string): Promise<LoreBook | null>;
   /** A book's entries, in Lumiverse's order; none for a book that is not the user's. */
@@ -94,6 +102,8 @@ export interface ActivatedEntry {
 export interface LoreTurns {
   /** The entries activated for the prompt of `turn`, in the tag's order; null when RPE holds no tag for that turn. */
   activated(user: string, chat: string, turn: string): Promise<readonly ActivatedEntry[] | null>;
+  /** Who the turn's generation was for, from its tag; null where RPE holds no tag for it. Absent where the host keeps none: the books are then those the chat has. */
+  generation?(user: string, chat: string, turn: string): Promise<LoreGeneration | null>;
 }
 
 /**

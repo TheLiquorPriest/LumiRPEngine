@@ -3,8 +3,10 @@
 //
 //   lore_entry_number  the short number of each book entry an agent has seen (`ids.ts`)
 //   lore_world_number  the short number of each world entry, by its user, world and key (`ids.ts`)
-//   lore_index         what an indexing run wrote of each entry, and the user's own edits over it,
-//                      with the entry's revision the run read (`indexing.ts`)
+//   lore_index         what an indexing run wrote of each entry, by entry and the revision the run read
+//                      (two chats on different revisions each keep their own), fields beside the four
+//                      the lore knows included (`indexing.ts`)
+//   lore_index_own     the user's own edits of an entry's lines, which stand over any revision's
 //   lore_overlay       the Author's notes that a chat's story has moved past part of an entry, each
 //                      tied to the turn that wrote it, the agent and the job that wrote it, and its
 //                      place among the turn's story rows (`overlays.ts`)
@@ -162,6 +164,48 @@ CREATE INDEX lore_overlay_turn ON lore_overlay (user, turn, ord);
     // The world ids RPE stored before world entries were numbered, in the form `w-<key>`, take their
     // numbers here, so nothing stored names an entry two ways.
     up: (db) => numberStoredWorldIds(db),
+  },
+  {
+    version: 9,
+    name: "the lore index by entry and revision",
+    // A run's lines are kept for the revision of the entry the run read, so two chats on different revisions of one entry
+    // each keep their own and neither run replaces the other's; `fields` is a JSON object of the named fields beside kind,
+    // line, defines and related that the indexer's file asks for (`indexer.md`). The user's own edits stand over any
+    // revision's lines, so they have a table of their own, by entry.
+    sql: `
+ALTER TABLE lore_index RENAME TO lore_index_before;
+CREATE TABLE lore_index (
+  user TEXT NOT NULL,
+  world TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  revision TEXT NOT NULL,
+  kind TEXT,
+  line TEXT,
+  defines TEXT,
+  related TEXT,
+  fields TEXT,
+  by TEXT,
+  written INTEGER,
+  PRIMARY KEY (user, world, entry, revision)
+);
+CREATE TABLE lore_index_own (
+  user TEXT NOT NULL,
+  world TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  own_kind TEXT,
+  own_line TEXT,
+  own_defines TEXT,
+  own_related TEXT,
+  edited INTEGER,
+  PRIMARY KEY (user, world, entry)
+);
+INSERT INTO lore_index (user, world, entry, revision, kind, line, defines, related, by, written)
+  SELECT user, world, entry, revision, kind, line, defines, related, by, written FROM lore_index_before WHERE revision IS NOT NULL;
+INSERT INTO lore_index_own (user, world, entry, own_kind, own_line, own_defines, own_related, edited)
+  SELECT user, world, entry, own_kind, own_line, own_defines, own_related, edited FROM lore_index_before
+  WHERE own_kind IS NOT NULL OR own_line IS NOT NULL OR own_defines IS NOT NULL OR own_related IS NOT NULL;
+DROP TABLE lore_index_before;
+`,
   },
 ];
 

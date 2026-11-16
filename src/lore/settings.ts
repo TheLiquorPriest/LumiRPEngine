@@ -22,5 +22,21 @@ export const LORE_INDEX_SETTING_DEFS = {
   bound: { key: "lore.index.bound", default: LORE_INDEX_DEFAULTS.bound, takes: { type: "whole", least: 0 }, levels: GLOBAL, perConnection: false, name: "Lore map, bound entries", about: "Entries bound to the horizon and not in the prompt that the lore map lists.", effect: "start", row: "Lore map, bound entries not in the prompt" },
 } as const satisfies NumberSettings<keyof LoreIndexSettings>;
 
+/**
+ * The book entry that is his own lore index (Settings → Lore, carried over from today's): by its id in Lumiverse. Its text, as written,
+ * heads `LORE-INDEX.md` in front of the lines RPE generates. Read for the chat, from the chat's level or the global one.
+ */
+export const LORE_INDEX_ENTRY_DEF = {
+  key: "lore.index.entry",
+  default: null,
+  takes: { type: "text" },
+  orNone: true,
+  none: "no index entry of his own",
+  perConnection: false,
+  name: "Your own lore index entry",
+  about: "A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse.",
+  effect: "turn",
+} as const satisfies Setting;
+
 /** Every setting the lore reads, as a config file writes it. */
-export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), ...Object.values(LORE_INDEX_SETTING_DEFS)];
+export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF];

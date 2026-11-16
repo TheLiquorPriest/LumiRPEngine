@@ -121,9 +121,9 @@ describe("lore ids", () => {
     migrate(db, upTo(LORE_MIGRATIONS.filter((m) => m.version < 7)), { user: USER, version: "before", backups, now: () => 0 });
     const world = "world-reed-coast";
     db.run("INSERT INTO chat (user, id, world, revision, created) VALUES (?, ?, ?, 'revision-1', 0)", [USER, CHAT, world]);
-    db.run("INSERT INTO lore_index (user, world, entry, kind, related) VALUES (?, ?, 'w-cove_route', 'rule', ?)", [USER, world, JSON.stringify(["w-tithe_law", "e-1"])]);
-    db.run("INSERT INTO lore_index (user, world, entry, kind) VALUES (?, ?, 'w-tithe_law', 'rule')", [USER, world]);
-    db.run("INSERT INTO lore_index (user, world, entry, kind, related) VALUES (?, '', 'e-1', 'place', ?)", [USER, JSON.stringify(["w-cove_route"])]);
+    db.run("INSERT INTO lore_index (user, world, entry, revision, kind, related) VALUES (?, ?, 'w-cove_route', 'r1', 'rule', ?)", [USER, world, JSON.stringify(["w-tithe_law", "e-1"])]);
+    db.run("INSERT INTO lore_index (user, world, entry, revision, kind) VALUES (?, ?, 'w-tithe_law', 'r1', 'rule')", [USER, world]);
+    db.run("INSERT INTO lore_index (user, world, entry, revision, kind, related) VALUES (?, '', 'e-1', '1', 'place', ?)", [USER, JSON.stringify(["w-cove_route"])]);
     db.run("INSERT INTO lore_overlay (user, chat, turn, entry, note, created) VALUES (?, ?, 'turn-1', 'w-tithe_law', 'The tithe was lifted.', 0)", [USER, CHAT]);
     db.run("INSERT INTO lore_proposal (user, chat, agent, target, text, reason, status, created) VALUES (?, ?, 'scribe', 'w-cove_route', 'Sefa runs brandy.', 'canon', 'open', 0)", [USER, CHAT]);
     migrate(db, upTo(LORE_MIGRATIONS), { user: USER, version: "after", backups, now: () => 0 });

@@ -62,7 +62,7 @@ describe("the lore index", () => {
     const entries = await index.entries(AT);
     const content = (id: string): number => coastEntries().find((e) => e.id === id)?.content.length ?? -1;
     expect(entries.map((e) => [e.id, e.source, e.book, e.title, e.keys, e.size, e.activation, e.indexed, e.kind, e.line])).toEqual([
-      // The world's own entries, but not its copy of a book entry; then the books the chat reads, each entry once.
+      // The world's own entries, but not its copy of a book entry; then the books the chat reads, every entry of them: one switched off and a twin of another too.
       [W.tithe_law, "The Reed Coast", null, "The harbor tithe", ["tithe", "harbor dues"], 57, ["keyword"], false, null, null],
       [W.cove_route, "The Reed Coast", null, "The cove route", ["cove route"], 50, ["keyword"], false, null, null],
       [W.drowned_crown, "The Reed Coast", null, "The drowned crown", ["crown"], 59, ["keyword"], false, null, null],
@@ -72,9 +72,11 @@ describe("the lore index", () => {
       ["e-2", "Reed Coast Atlas", "book-atlas", "The lamp room", ["lamp", "lantern"], content("entry-lamp"), ["keyword"], false, null, null],
       ["e-3", "Reed Coast Atlas", "book-atlas", "Gulls nest on the harbor wall every spring…", ["gull"], content("entry-gull"), ["keyword", "vector"], false, null, null],
       ["e-4", "Reed Coast Atlas", "book-atlas", "The tide bell", ["tide bell"], content("entry-tide"), ["keyword"], false, null, null],
+      ["e-5", "Reed Coast Atlas", "book-atlas", "An old rumor", ["lamp"], content("entry-off"), [], false, null, null],
+      ["e-6", "Nell's Card Book", "book-card", "Lamp room (card)", ["lamp"], content("entry-lamp-twin"), ["keyword"], false, null, null],
     ]);
     // A book entry's revision is Lumiverse's own; a world entry's changes whenever its title, keys or text do.
-    expect(entries.filter((e) => e.book !== null).map((e) => e.revision)).toEqual(["3", "1", "5", "1"]);
+    expect(entries.filter((e) => e.book !== null).map((e) => e.revision)).toEqual(["3", "1", "5", "1", "1", "1"]);
     expect(new Set(entries.filter((e) => e.book === null).map((e) => e.revision)).size).toBe(5);
     // A marked secret is in nobody's reading of the text.
     expect(entries.find((e) => e.id === "e-4")?.text).not.toContain("hammer");
@@ -84,13 +86,13 @@ describe("the lore index", () => {
     await fresh(4);
     const first = await index.batch(AT);
     expect(first.entries.map((e) => e.id)).toEqual([W.tithe_law, W.cove_route, W.drowned_crown, W.ferry_draft]);
-    expect(first.left).toBe(9);
+    expect(first.left).toBe(11);
 
     const outcomes = await index.write(AT, first.entries.map(linesFor), "indexer");
     expect(outcomes.every((o) => "kept" in o)).toBe(true);
     const second = await index.batch(AT);
     expect(second.entries.map((e) => e.id)).toEqual([W.keeper_log, "e-1", "e-2", "e-3"]);
-    expect(second.left).toBe(5);
+    expect(second.left).toBe(7);
     await index.write(AT, second.entries.map(linesFor), "indexer");
     await index.write(AT, (await index.batch(AT)).entries.map(linesFor), "indexer");
     expect(await index.batch(AT)).toEqual({ entries: [], left: 0 });
@@ -150,10 +152,10 @@ describe("the lore index", () => {
         { id: W.tithe_law, title: "The harbor tithe", kind: "rule", line: "The harbor tithe: a tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: ["e-2"] },
         { id: "e-2", title: "The lamp room", kind: "place", line: "The lamp room: green glass, whale oil.", defines: [], related: [] },
       ],
-      left: 7,
+      left: 9,
     });
-    expect(texts[4]).toBe("Kept the lines of 2 entries. 7 entries are not indexed yet.");
-    expect(texts[5]?.split("\n").slice(0, 3)).toEqual(["Entries to index: 3 of the 7 not indexed yet.", "", `### [${W.cove_route}] The cove route (from The Reed Coast; revision ${revision.get(W.cove_route)}; keys: cove route)`]);
+    expect(texts[4]).toBe("Kept the lines of 2 entries. 9 entries are not indexed yet.");
+    expect(texts[5]?.split("\n").slice(0, 3)).toEqual(["Entries to index: 3 of the 9 not indexed yet.", "", `### [${W.cove_route}] The cove route (from The Reed Coast; revision ${revision.get(W.cove_route)}; keys: cove route)`]);
     expect(texts[5]).toContain("Sefa runs brandy through the cove at the new moon.");
 
     const kept = (await index.entries(AT)).find((e) => e.id === W.tithe_law);
@@ -168,12 +170,12 @@ describe("the lore index", () => {
     await fresh(2);
     const facts = index.facts();
     const unindexed = async () => (await facts.read({ ...AT, session: "session-1" }, ["lore.unindexed"]))["lore.unindexed"]?.count;
-    expect(await unindexed()).toBe(9);
+    expect(await unindexed()).toBe(11);
     const block = await loreBatchBlock(index, AT, files.guidance(CHAT));
     // Each entry with the revision a run hands back with its lines.
     const revision = new Map((await index.entries(AT)).map((e) => [e.id, e.revision]));
     expect(block.split("\n\n")).toEqual([
-      "Entries to index: 2 of the 9 not indexed yet.",
+      "Entries to index: 2 of the 11 not indexed yet.",
       `### [${W.tithe_law}] The harbor tithe (from The Reed Coast; revision ${revision.get(W.tithe_law)}; keys: tithe, harbor dues)\nEvery boat pays a tenth of its catch at the harbor steps.`,
       `### [${W.cove_route}] The cove route (from The Reed Coast; revision ${revision.get(W.cove_route)}; keys: cove route)\nSefa runs brandy through the cove at the new moon.`,
     ]);

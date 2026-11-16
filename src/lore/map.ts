@@ -11,17 +11,17 @@
 // fields they lay out. `Lore.loreMap` gives the first form, parts 1 and 3 by id and title alone.
 
 import type { Fields, LinesPart } from "rp-harness";
-import type { ActivatedLore } from "rp-harness/contract";
-import type { LoreBinding } from "./indexing";
-import { listField, loreLine } from "./tools";
+import type { ActivatedLore, JsonObject } from "rp-harness/contract";
+import type { LoreBinding, LoreNamedFields } from "./indexing";
+import { listField, loreLine, namedFields } from "./tools";
 
 /** One entry of the map. */
 export interface LoreMapLine {
   id: string;
   title: string;
-  /** For an entry that activated: its book's name, '' where the book cannot be read. No line of the map shows it. */
+  /** For an entry that activated: its book's name, '' where the book cannot be read. */
   source?: string;
-  /** For an entry that activated: how, in the lore's own four words (`lore.ts` `HOWS`); absent where Lumiverse did not say. No line of the map shows it. */
+  /** For an entry that activated: how, in the lore's own four words (`lore.ts` `HOWS`); absent where Lumiverse did not say. Part 1's lines say it. */
   how?: ActivatedLore["how"];
   /** What the index says it is, where a run or the user has said. */
   kind?: string;
@@ -29,6 +29,10 @@ export interface LoreMapLine {
   defines?: LoreBinding[];
   /** For an entry no run has indexed as it stands: its keys, which stand in for what it is. */
   keys?: string[];
+  /** For an entry indexed at an earlier revision: what it was indexed as shows, marked as changed since (never with its keys, which stand in for what an entry no run has indexed is). */
+  stale?: boolean;
+  /** The fields beside kind, line and defines that the indexer's file asks an index line to hold, by name. */
+  fields?: LoreNamedFields;
   /** Changed by the story: the overlays' notes on it, oldest first. */
   notes?: string[];
   /** Bound to the horizon: the names of who and what on it the entry is bound to. */
@@ -50,47 +54,72 @@ export interface LoreMap {
   notIndexed?: number;
 }
 
+/**
+ * A part of the map as the layout `.prompts/lore-map.md` takes it. With the lore's lines in force, `lines`: each entry's line as a line of
+ * that part words it. With them off, `entries`: each entry's own fields, which the layout lays out itself (no line is made in code).
+ */
+export type LoreMapPart = {
+  lines?: string[];
+  entries?: JsonObject[];
+};
+
 /** The fields of `.prompts/lore-map.md` the map fills. A part with no entries is left out, so the layout shows nothing of it. */
 export interface LoreMapFields {
-  in_prompt?: { lines: string[] };
-  changed?: { lines: string[] };
-  world?: { lines: string[] };
-  bound?: { lines: string[]; left_out?: number };
+  in_prompt?: LoreMapPart;
+  changed?: LoreMapPart;
+  world?: LoreMapPart;
+  bound?: LoreMapPart & { left_out?: number };
   not_indexed?: number;
 }
 
-/** An entry's fields as the map's lines read them. */
-function lineFields(lines: LinesPart, l: LoreMapLine): Fields {
+/** An entry's fields as the map's lines, or the layout itself, read them. */
+function lineFields(lines: LinesPart | undefined, l: LoreMapLine): Fields {
   return {
+    ...namedFields(l.fields),
     id: l.id,
     title: l.title,
     kind: l.kind,
     line: l.line,
-    defines: listField((l.defines ?? []).map((b) => loreLine(lines, "binding", { what: b.what, aspect: b.aspect }) ?? b.what)),
+    defines: listField((l.defines ?? []).map((b) => (lines === undefined ? undefined : loreLine(lines, "binding", { what: b.what, aspect: b.aspect })) ?? b.what)),
     keys: l.keys === undefined ? undefined : listField(l.keys),
     notes: l.notes,
     bound: listField(l.bound ?? []),
+    // How an entry came into the prompt: the word, and a flag for each of the four, so a line can word each its own way.
+    how: l.how,
+    how_constant: l.how === "constant" ? true : undefined,
+    how_keyword: l.how === "keyword" ? true : undefined,
+    how_vector: l.how === "vector" ? true : undefined,
+    how_sticky: l.how === "sticky" ? true : undefined,
+    stale: l.stale,
   };
+}
+
+/** Each field of an entry that has a value, as the layout reads an entry. */
+function entryOf(fields: Fields): JsonObject {
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as JsonObject;
 }
 
 /**
  * The map's fields. With the lore's lines in force for the chat, each entry's line is that part's line
- * for it (`map_in_prompt`, `map_changed`, `map_world`, `map_bound`); without, the first form's line:
- * its id in brackets, then its title.
+ * for it (`map_in_prompt`, `map_changed`, `map_world`, `map_bound`); without them, each part carries its
+ * entries' fields and `lore-map.md` lays out each entry itself.
  */
 export function loreMapFields(map: LoreMap, lines?: LinesPart): LoreMapFields {
-  const part = (entries: readonly LoreMapLine[] | undefined, name: string): string[] =>
-    (entries ?? []).flatMap((l) => (lines === undefined ? [l.title === "" ? `[${l.id}]` : `[${l.id}] ${l.title}`] : (loreLine(lines, name, lineFields(lines, l)) ?? [])));
+  const part = (entries: readonly LoreMapLine[] | undefined, name: string): LoreMapPart => {
+    const list = entries ?? [];
+    return lines === undefined ? { entries: list.map((l) => entryOf(lineFields(undefined, l))) } : { lines: list.flatMap((l) => loreLine(lines, name, lineFields(lines, l)) ?? []) };
+  };
+  const shown = (p: LoreMapPart): boolean => (p.lines ?? p.entries ?? []).length > 0;
   const inPrompt = part(map.inPrompt, "map_in_prompt");
   const changed = part(map.changed, "map_changed");
   const world = part(map.world, "map_world");
   const bound = part(map.bound, "map_bound");
   const leftOut = map.leftOut ?? 0;
   return {
-    ...(inPrompt.length > 0 ? { in_prompt: { lines: inPrompt } } : {}),
-    ...(changed.length > 0 ? { changed: { lines: changed } } : {}),
-    ...(world.length > 0 ? { world: { lines: world } } : {}),
-    ...(bound.length > 0 || leftOut > 0 ? { bound: { lines: bound, ...(leftOut > 0 ? { left_out: leftOut } : {}) } } : {}),
+    ...(shown(inPrompt) ? { in_prompt: inPrompt } : {}),
+    ...(shown(changed) ? { changed } : {}),
+    ...(shown(world) ? { world } : {}),
+    ...(shown(bound) || leftOut > 0 ? { bound: { ...bound, ...(leftOut > 0 ? { left_out: leftOut } : {}) } } : {}),
     ...((map.notIndexed ?? 0) > 0 ? { not_indexed: map.notIndexed } : {}),
   };
 }

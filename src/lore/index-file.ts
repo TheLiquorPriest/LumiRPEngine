@@ -18,10 +18,13 @@ export interface LoreIndexFile {
   lines(at: LoreAt): Promise<LinesPart | undefined>;
 }
 
-/** The readable index of a chat's lore, as the lines in force word it: a head, a count, then a line for each entry in the index's order. */
-export function loreIndexText(lines: LinesPart | undefined, entries: readonly IndexedEntry[]): string {
+/**
+ * The readable index of a chat's lore, as the lines in force word it: his own index entry's text where he has one, as written,
+ * then a head, a count, then a line for each entry in the index's order.
+ */
+export function loreIndexText(lines: LinesPart | undefined, entries: readonly IndexedEntry[], own: string | null = null): string {
   const unindexed = entries.filter((e) => !e.indexed).length;
   const head = [loreLine(lines, "index_file_head"), loreLine(lines, "index_file_count", { count: entries.length, unindexed })].filter((l): l is string => l !== undefined);
   const each = entries.flatMap((e) => loreLine(lines, "index_file_entry", entryFields(lines, e)) ?? []);
-  return [...head, ...(each.length > 0 ? [each.join("\n")] : [])].join("\n\n");
+  return [...(own === null ? [] : [own]), ...head, ...(each.length > 0 ? [each.join("\n")] : [])].join("\n\n");
 }

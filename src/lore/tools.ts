@@ -12,8 +12,9 @@
 // definition's (`.agents/indexer.md`); nothing here starts one.
 
 import type { Fields, Guidance, LinesPart } from "rp-harness";
-import type { AgentRef, HostTool, JsonObject, JsonSchema, JsonValue, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
-import type { IndexedEntry, LoreBinding, LoreIndex, LoreIndexInput } from "./indexing";
+import type { AgentRef, HostTool, JsonObject, JsonSchema, JsonValue, Log, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
+import type { Lane } from "../store";
+import type { IndexedEntry, LoreBinding, LoreIndex, LoreIndexInput, LoreNamedFields } from "./indexing";
 import type { LoreAt } from "./lore";
 
 /** The prompt part every lore answer, the batch, the readable index and the lore map's lines are worded by. */
@@ -25,8 +26,27 @@ export const LORE_BATCH = "index:batch";
 /** The name a character's agent is given the lore its character knows by: a host's name, for the same reason. */
 export const LORE_KNOWN = "index:known-to-self";
 
-/** The lore's lane, under which the user's Auto / Confirm / Never applies to its writes. */
-export const LORE_LANE = "lore";
+/**
+ * The lane `lore_index_write` writes to, so the user's Auto / Confirm / Never for it applies: the story lane, one of the two the
+ * store has (`src/store/types.ts`). The lore has no lane of its own.
+ */
+export const LORE_LANE: Lane = "story";
+
+/** The family `lore_index_write` is in, apart from the `lore` family the Author finds by search, so a definition can keep it out of reach whole (`out_of_reach:`). */
+export const LORE_INDEX_FAMILY = "lore-index";
+
+/**
+ * A reason a lore tool cannot do what it was asked, which its caller can act on: answered as a refusal, in the words of the line of
+ * `.prompts/lore-answers.md` it names. Any other throw is a fault of RPE's own.
+ */
+export class LoreRefusal extends Error {
+  constructor(
+    readonly line: string,
+    readonly fields: Fields = {},
+  ) {
+    super(line);
+  }
+}
 
 /** The answers' lines in force for the chat; undefined when the part is off, so every answer is given with no words. */
 export async function loreLines(guidance: Guidance): Promise<LinesPart | undefined> {
@@ -53,9 +73,28 @@ export function listField(list: readonly string[]): { ".": string[] } {
   return { ".": [...list] };
 }
 
+/** The names an entry's own lines go by in every line of the index and the batch: a field of the indexer's file cannot take one of them. */
+const ENTRY_NAMES = ["id", "title", "source", "keys", "size", "activation", "kind", "line", "defines", "related", "indexed", "stale", "revision", "text", "extras", "fields", "how", "notes", "bound"] as const;
+
+/** Whether a field of the indexer's file can be named so: a name the lines can read, and not one the entry's own lines go by. */
+export function isFieldName(name: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(name) && !(ENTRY_NAMES as readonly string[]).includes(name);
+}
+
+/**
+ * The named fields of an index line, as the lines read them: each by its own name (a list as a list), and all of them in
+ * `extras` as "name: value", so one line can carry every field the indexer's file has added (plan D.2) without naming each.
+ */
+export function namedFields(fields: LoreNamedFields | undefined): Fields {
+  const named = Object.entries(fields ?? {}).filter(([name]) => isFieldName(name));
+  const texts = named.map(([name, value]) => `${name}: ${Array.isArray(value) ? value.join(", ") : value}`);
+  return { ...Object.fromEntries(named.map(([name, value]) => [name, Array.isArray(value) ? listField(value) : value])), ...(texts.length > 0 ? { extras: listField(texts) } : {}) };
+}
+
 /** An entry's fields as every line of the index and the batch reads them. */
 export function entryFields(lines: LinesPart | undefined, e: IndexedEntry): Fields {
   return {
+    ...namedFields(e.fields),
     id: e.id,
     title: e.title,
     source: e.source,
@@ -179,6 +218,17 @@ function described(properties: Readonly<Record<string, JsonObject>>, required: r
 
 const TEXT: JsonObject = { type: "string" };
 
+/** A field of the indexer's file as a run sent it: a text, a number or a list of them as texts, one line each; nothing for any other shape or an empty one. */
+function namedValue(value: unknown): string | string[] | null {
+  const one = (v: unknown): string | null => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : typeof v === "number" || typeof v === "boolean" ? String(v) : null);
+  if (Array.isArray(value)) {
+    const list = value.flatMap((v) => one(v) ?? []).filter((v) => v !== "");
+    return list.length > 0 ? list : null;
+  }
+  const text = one(value);
+  return text === null || text === "" ? null : text;
+}
+
 /** Reads one entry a run handed back: its lines and the revision it read them from, or what of it cannot be read. */
 function readInput(raw: unknown): { input: LoreIndexInput } | { needs: string[] } | { unreadable: string; value: string } {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { unreadable: "entry", value: JSON.stringify(raw ?? null) };
@@ -199,16 +249,22 @@ function readInput(raw: unknown): { input: LoreIndexInput } | { needs: string[] 
     return typeof what === "string" && what.trim() !== "" ? [{ what: what.trim(), aspect: typeof aspect === "string" ? aspect.trim() : "" }] : [];
   });
   const related = ((given.related as unknown[] | undefined) ?? []).filter((r): r is string => typeof r === "string" && r.trim() !== "").map((r) => r.trim());
-  return { input: { id, revision, kind, line, defines, related } };
+  // Every other field a run sent is a field of the indexer's file (plan D.2): kept by its name, whatever the file has added.
+  const fields: LoreNamedFields = {};
+  for (const [name, value] of Object.entries(given)) {
+    const kept = isFieldName(name) ? namedValue(value) : null;
+    if (kept !== null) fields[name] = kept;
+  }
+  return { input: { id, revision, kind, line, defines, related, fields } };
 }
 
 export const LORE_INDEX_WRITE: LoreToolSpec = {
   name: "lore_index_write",
-  family: "lore",
+  family: LORE_INDEX_FAMILY,
   tier: "write",
   lane: LORE_LANE,
-  // Nothing is held back by the schema: an entry that cannot be read is answered in the answers' words.
-  properties: { entries: { type: "array", items: { type: "object", properties: { id: TEXT, revision: TEXT, kind: TEXT, line: TEXT, defines: { type: "array", items: { type: "object", properties: { what: TEXT, aspect: TEXT } } }, related: { type: "array", items: TEXT } } } } },
+  // Nothing is held back by the schema: an entry that cannot be read is answered in the answers' words, and a field the indexer's file adds is carried as it is named.
+  properties: { entries: { type: "array", items: { type: "object", additionalProperties: true, properties: { id: TEXT, revision: TEXT, kind: TEXT, line: TEXT, defines: { type: "array", items: { type: "object", properties: { what: TEXT, aspect: TEXT } } }, related: { type: "array", items: TEXT } } } } },
   required: [],
   async run(args, { at, ctx, deps, answer }) {
     const list = args.entries;
@@ -225,7 +281,7 @@ export const LORE_INDEX_WRITE: LoreToolSpec = {
     const kept: JsonObject[] = [];
     for (const [i, outcome] of outcomes.entries()) {
       if ("unknown" in outcome) answer.line("unknown_entry", { n: inputs[i]?.n ?? 0, id: outcome.id });
-      else kept.push({ id: outcome.id, title: outcome.kept.title, kind: outcome.kept.kind, line: outcome.kept.line, defines: outcome.kept.defines.map((b) => ({ what: b.what, aspect: b.aspect })), related: outcome.kept.related });
+      else kept.push({ id: outcome.id, title: outcome.kept.title, kind: outcome.kept.kind, line: outcome.kept.line, defines: outcome.kept.defines.map((b) => ({ what: b.what, aspect: b.aspect })), related: outcome.kept.related, ...outcome.kept.fields });
     }
     const next = await deps.index.batch(at);
     answer.data({ kept, left: next.left });
@@ -240,6 +296,8 @@ export interface LoreToolDeps {
   index: LoreIndex;
   /** The guidance in force for the chat: each tool's words from its file, every answer's from `.prompts/lore-answers.md`. */
   guidance: Guidance;
+  /** Where a fault of a tool's own is logged. */
+  log?: Log;
 }
 
 export const LORE_TOOLS: readonly LoreToolSpec[] = [LORE_INDEX_WRITE];
@@ -262,7 +320,17 @@ export async function loreTools(deps: LoreToolDeps): Promise<HostTool[]> {
       async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
         const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
         const at: LoreAt = { user: ctx.scope.user, chat: ctx.scope.chat, ...(ctx.scope.turn !== undefined ? { turn: ctx.scope.turn } : {}) };
-        return (await spec.run(given, { at, ctx, deps, answer: new Answer(lines) })).result();
+        const call = { at, ctx, deps, answer: new Answer(lines) };
+        try {
+          return (await spec.run(given, call)).result();
+        } catch (error) {
+          // Never a bare failure: a reason the caller can act on is a refusal in the answers' words; anything else is a fault of RPE's own, logged, its error in the call's details.
+          const refused = new Answer(lines);
+          if (error instanceof LoreRefusal) return refused.data({ refused: error.line }).line(error.line, error.fields).fail().result();
+          const said = error instanceof Error ? error.message : String(error);
+          deps.log?.error("A lore tool failed.", { tool: spec.name, error: said });
+          return { ...refused.data({ fault: spec.name }).line("fault", { tool: spec.name }).fail().result(), details: { fault: spec.name, error: said } };
+        }
       },
     });
   }
