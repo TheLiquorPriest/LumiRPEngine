@@ -346,6 +346,11 @@ const READS: NonNullable<StoreArea["reads"]> = {
     Object.values(asSlice(slice).items)
       .filter((i) => i.part === "future" && i.closedBy === null && !i.dropped && typeof i.fields.due === "number")
       .map((i) => ({ id: i.id, due: i.fields.due as number, who: namesIn(i.fields.who), place: placeIn(i), text: typeof i.fields.text === "string" ? i.fields.text : "" })) as unknown as JsonValue,
+  /** The beats not struck, in the order they were recorded: `[{ id, text, time }]` (`text` empty where the beat has none, `time` its words for when, or null), for a record that links beats by id and may not import the story. */
+  beats: (slice) =>
+    Object.values(asSlice(slice).items)
+      .filter((i) => i.part === "beat" && !i.dropped)
+      .map((i) => ({ id: i.id, text: typeof i.fields.text === "string" ? i.fields.text : "", time: typeof i.fields.time === "string" ? i.fields.time : null })) as unknown as JsonValue,
 };
 
 /** The story's area, as the store opens with it. */

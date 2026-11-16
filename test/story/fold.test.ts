@@ -50,12 +50,14 @@ describe("the story area", () => {
     const set = (turn: string, list: unknown[]) => t.writes.run(() => t.s.record({ kind: "turn", turn }, [{ lane: "story", op: STORY_OPS.horizon, value: { list } as never, by: "author" }]));
     const first = await t.begin();
     await set(first.id, ["place:harbour", { at: "the old keep, past the marsh", depth: 1 }]);
-    await t.write(first, [{ part: "scene", item: null, value: { title: "The quay", place: "the quay" } }, { part: "thread", item: null, value: { text: "Who sealed the letter?", who: ["Bram"] } }]);
+    await t.write(first, [{ part: "scene", item: null, value: { title: "The quay", place: "the quay" } }, { part: "thread", item: null, value: { text: "Who sealed the letter?", who: ["Bram"] } }, { part: "beat", item: null, value: { text: "Bram shut the door.", time: "that night" } }]);
     await t.tie(first);
     const read = (name: string): unknown => t.store.readArea(t.s.headState(CHAT).state, "story", name);
     expect(read("horizon")).toEqual([{ at: "place:harbour", depth: "full" }, { at: "the old keep, past the marsh", depth: 1 }]);
     expect(read("scene")).toMatchObject({ place: "the quay" });
     expect(read("threads")).toMatchObject([{ who: ["Bram"], fields: { text: "Who sealed the letter?" } }]);
+    // The beats, for a record that links them by id and may not import the story: each not struck, in the order recorded.
+    expect(read("beats")).toMatchObject([{ text: "Bram shut the door.", time: "that night" }]);
     const second = await t.begin();
     await set(second.id, ["place:cellar"]);
     await t.tie(second);
