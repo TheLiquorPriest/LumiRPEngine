@@ -9,7 +9,7 @@ import type { HostTool, JsonObject } from "rp-harness/contract";
 import { WriteQueue } from "../../src/app/database";
 import { hashJson } from "../../src/shared/hash";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
-import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
+import { migrateStore, openStore, type ShownMessage, type Store, type StoreArea, type TurnRow, type UserStore } from "../../src/store";
 import { STORY_STORE_AREA } from "../../src/story/fold";
 import { storyAt } from "../../src/story/path";
 import { StoryRecord, type StoryWrite, type StoryWritten, writeStory } from "../../src/story/record";
@@ -56,6 +56,8 @@ export interface Table {
 export interface TableOptions {
   /** The chat starts on the invented world; false: it names none, and plays on the blank world. */
   world?: boolean;
+  /** Areas of the store beside the story's, as another area's tests register theirs. */
+  areas?: readonly StoreArea[];
 }
 
 export async function openTable(options: TableOptions = {}): Promise<Table> {
@@ -66,7 +68,7 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
   for (const m of LORE_MIGRATIONS) if ("sql" in m) db.run(m.sql);
   // A clock that moves at every reading, so what one write stamps is before what the next one does.
   let tick = 1_000_000;
-  const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined), areas: [STORY_STORE_AREA], now: () => tick++ });
+  const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined), areas: [STORY_STORE_AREA, ...(options.areas ?? [])], now: () => tick++ });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
   await writes.run(() => s.createChat(options.world === false ? { id: CHAT } : { id: CHAT, world: world.id, revision }));

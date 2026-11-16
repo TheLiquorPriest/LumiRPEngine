@@ -180,7 +180,7 @@ export interface StoryRecorded {
 }
 
 /** The id the next change of the store's table is given, which the first write of a new item takes its id from. */
-function nextChange(store: Store): number {
+export function nextChange(store: Store): number {
   return (store.db.query<{ seq: number }, []>("SELECT seq FROM sqlite_sequence WHERE name = 'change'").get()?.seq ?? 0) + 1;
 }
 
