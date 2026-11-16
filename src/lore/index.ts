@@ -5,7 +5,7 @@ export { Lore, type LoreActivation, type LoreAt, type LoreCatalogEntry, LORE_DEF
 export { type IndexedEntry, type LoreBinding, LORE_INDEX_DEFAULTS, LORE_INDEX_FIELDS, LoreIndex, type LoreIndexDeps, type LoreIndexEdit, type LoreIndexField, type LoreIndexInput, type LoreIndexLines, type LoreIndexOutcome, type LoreIndexSettings, type LoreNamedFields, type LoreNamedValue } from "./indexing";
 export { LORE_INDEX_ENTRY_DEF, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_SETTINGS, SECRETS_NARRATOR_KNOWLEDGE_DEF, SECRETS_NARRATOR_SECRETS_DEF, SECRETS_SETTINGS, SECRETS_THRESHOLD_DEF, SECRETS_TRACKED_DEF } from "./settings";
 export { type LoreChatSettings, type LoreScope, type LoreSettingsFor, loreSettingsFor } from "./chat-settings";
-export { KNOWLEDGE_BY, KNOWLEDGE_LANE, knowledgeChange, knowledgeRecorded, narratorOf, type SecretSettings, type SecretSettingsFor, type SecretsFor, secretSettings, secretSettingsFor, secretsHeld } from "./secrets/settings";
+export { KNOWLEDGE_BY, KNOWLEDGE_LANE, knowledgeApplied, knowledgeChange, knowledgeRecorded, markWording, narratorOf, type QuestionEntryLike, SECRET_MARKS, secretMarkLines, type SecrecyAnswer, type SecrecyDeps, type SecrecyQuestion, type SecretSettings, type SecretSettingsFor, type SecretsFor, secrecyAt, secrecyRules, secretSettings, secretSettingsFor, secretsHeld } from "./secrets";
 export { isFieldName, LORE_ANSWERS, LORE_BATCH, LORE_INDEX_FAMILY, LORE_INDEX_WRITE, LORE_KNOWN, LORE_LANE, LORE_TOOLS, loreBatchBlock, loreKnownBlock, loreLines, LoreRefusal, type LoreToolDeps, loreTools, namedFields } from "./tools";
 export { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
 export { type OverlayInput, overlayNotes, type OverlayWrite, overlayWrite } from "./overlays";

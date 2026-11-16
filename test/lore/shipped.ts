@@ -11,7 +11,7 @@ import { USER } from "./fixtures";
 const GUIDANCE = resolve(import.meta.dir, "../../guidance");
 
 /** The prompt parts and tool files the lore reads. */
-const SHIPPED = { prompts: ["lore-answers", "lore-map"], tools: ["lore_index_write"] } as const;
+const SHIPPED = { prompts: ["lore-answers", "lore-map", "secret-marks"], tools: ["lore_index_write"] } as const;
 
 export interface LoreGuidance {
   files: FilesPort;

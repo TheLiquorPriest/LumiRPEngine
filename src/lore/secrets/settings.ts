@@ -8,8 +8,8 @@
 import type { ConfigRead } from "../../app/config-read";
 import type { WorldState } from "../../engine/state";
 import { knowledgeSwitch } from "../../secrecy/knowledge-switch";
-import { readSlice } from "../../packs/minds/core/state";
-import type { JsonValue } from "../../shared/json";
+import { PACK, readSlice } from "../../packs/minds/core/state";
+import { isRecord, type JsonObject } from "../../shared/json";
 import { knowledgeThreshold, knowledgeTracked } from "../../shared/minds";
 import { type NarratorView, narratorViewOf } from "../../shared/settings";
 import type { WorldDoc } from "../../shared/world";
@@ -75,6 +75,22 @@ export const KNOWLEDGE_BY = "rpe";
 export function knowledgeChange(state: Readonly<WorldState>, set: Pick<SecretSettings, "tracked" | "threshold">): ChangeInput[] {
   const event = knowledgeSwitch(state, set.tracked, set.threshold);
   return event === null ? [] : [{ lane: KNOWLEDGE_LANE, op: event.type, value: { type: event.type, data: event.data }, by: KNOWLEDGE_BY }];
+}
+
+/**
+ * The state as it stands once the record `knowledgeChange` would make is applied, for a reader at a turn's start (today's interceptor
+ * read the state with its turn's planned events included): the held state itself where nothing would be recorded, else a copy that is
+ * new down to the minds' knowledge part alone and shares every other part with the held state, which is never changed.
+ */
+export function knowledgeApplied(state: Readonly<WorldState>, set: Pick<SecretSettings, "tracked" | "threshold">): Readonly<WorldState> {
+  const event = knowledgeSwitch(state, set.tracked, set.threshold);
+  const minds = state.packs[PACK];
+  if (event === null || !isRecord(minds) || !isRecord(minds.knowledge)) return state;
+  const knowledge: JsonObject = { ...minds.knowledge };
+  if (event.data.on === true) delete knowledge.off;
+  else knowledge.off = true;
+  if (event.data.threshold !== undefined) knowledge.threshold = event.data.threshold;
+  return { ...state, packs: { ...state.packs, [PACK]: { ...minds, knowledge } } };
 }
 
 /**

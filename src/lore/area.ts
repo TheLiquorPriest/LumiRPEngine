@@ -12,6 +12,7 @@ import { loreRoutes } from "./routes";
 import { LORE_MIGRATIONS } from "./schema";
 import { LORE_SETTINGS } from "./settings";
 import type { LoreTurns } from "./sources";
+import { type SecrecyDeps, secrecyRules } from "./secrets";
 
 /** What the lore's routes take from the turn lane: its store and the tags it keeps of each turn's prompt. */
 export interface LoreTakes {
@@ -22,9 +23,11 @@ export interface LoreTakes {
    * scope RPH asks a chat's in. Left out, the area adds the routes of the activated lore alone.
    */
   indexing?: { index: LoreIndex; jobs: Pick<JobsApi, "start">; definitions: Pick<DefinitionsApi, "list">; scope(user: string, chat: string): Scope };
+  /** What the secrecy lane needs besides the store: the secrecy settings of a chat, the lines that word a mark, and the log. Left out, the lane answers that the secrets are not known. */
+  secrecy?: Omit<SecrecyDeps, "store">;
 }
 
-/** `takes` is asked once the turn lane is mounted: the routes are made then; with none the area lists its tables and settings and adds no route. */
+/** `takes` is asked once the turn lane is mounted: the routes are made then, and the secrecy lane answers from it; with none the area lists its tables and settings and adds no route. */
 export function loreArea(takes?: () => LoreTakes): Area {
   return {
     name: "lore",
@@ -33,9 +36,19 @@ export function loreArea(takes?: () => LoreTakes): Area {
     ...(takes === undefined
       ? {}
       : {
+          // The door's secrecy lane: today's verdict at the point of the path the question carries, from RPE's own state.
+          fills: {
+            door: {
+              secrecy: async (ask, signal) => {
+                const { store, secrecy } = takes();
+                if (secrecy === undefined) throw new Error("RPE's secrecy lane is not given its settings and wording.");
+                return secrecyRules({ store, ...secrecy })(ask, signal);
+              },
+            },
+          },
           mounted: (at) => {
-            const { indexing, ...rest } = takes();
-            at.routes.add("lore", [...loreRoutes({ ...rest, numbers: new EntryNumbers(at.db, at.writes) }), ...(indexing === undefined ? [] : loreIndexRoutes(indexing))]);
+            const { store, turns, indexing } = takes();
+            at.routes.add("lore", [...loreRoutes({ store, turns, numbers: new EntryNumbers(at.db, at.writes) }), ...(indexing === undefined ? [] : loreIndexRoutes(indexing))]);
           },
         }),
   };
