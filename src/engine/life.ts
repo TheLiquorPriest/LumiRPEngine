@@ -22,10 +22,11 @@ import { labelOf, own } from "./pack-kit";
 import type { EventTypeDef, ProposalChannelDef, ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { isGone, kindIs, placeOfEntity } from "./scope";
-import { movesSomeone } from "./seen";
+import { movedBy, movesSomeone } from "./seen";
 import { selectEntities } from "./selector";
 import type { EntityState, WorldState } from "./state";
 import { knownBySelector } from "./visibility";
+import { entitiesAt } from "./whereabouts";
 
 const PACK = "engine";
 const SLICE = "life";
@@ -100,11 +101,11 @@ function learners(state: WorldState, subject: EntityId, base: LifeStateId): Json
   return by;
 }
 
-/** People in a place, in id order: who learns what they find there. */
+/** People in a place, in id order: who learns what they find there. Only those the state keeps at that place are looked at. */
 function peopleAt(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, place: PlaceId): EntityId[] {
-  return Object.keys(state.entities)
+  return entitiesAt(state, place)
     .sort()
-    .filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
+    .filter((id) => isPerson(reg, world, state, id));
 }
 
 /** The people with a subject as its state changes: who see it change. */
@@ -165,13 +166,6 @@ function learnIn(reg: Registry, world: WorldDoc, state: WorldState, place: Place
   }
 }
 
-/** The entity an event that moves someone moves (with whatever it holds). */
-function movedBy(e: LedgerEvent): EntityId | null {
-  if (e.type === "set") return e.entity;
-  if (e.type === "link" || e.type === "unlink") return e.from;
-  return e.type === "spawn" ? e.entity.id : null;
-}
-
 /** A core event type whose apply also teaches whoever it leaves in a place with a subject what became of them. */
 export function knowing(def: EventTypeDef): EventTypeDef {
   if (def.type !== "set" && def.type !== "link" && def.type !== "unlink" && def.type !== "spawn") return def;
@@ -208,11 +202,11 @@ function listeners(ctx: ReadContext, raw: JsonValue | undefined): EntityId[] | R
 export function lifeEffect(args: Record<string, JsonValue>, ctx: ReadContext): LedgerEvent[] | Rejection {
   const subject = typeof args.entity === "string" ? args.entity : "";
   if (!own(ctx.state.entities, subject)) return { code: "missing_entity", reason: `there's no ${labelOf(ctx, subject)}` };
-  if (isGone(ctx.state, subject)) return { code: "gone", reason: `${labelOf(ctx, subject)} has been removed` };
+  // Someone out of the world takes the state all the same: a state is the story's, not a rule's (`editFindings` says so).
   const given = args.to;
   if (given !== undefined && given !== null && typeof given !== "string") return { code: "bad_args", reason: "a life state is named by its id" };
   const to = typeof given === "string" && given !== "" ? given : null;
-  if (to !== null && !isLifeState(ctx.world, to)) return { code: "bad_life", reason: `there's no life state ${to}` };
+  if (to !== null && !isLifeState(ctx.world, to)) return { code: "bad_life", reason: `there's no life state ${to}`, choices: lifeStatesOf(ctx.world).map(([id]) => id), said: to };
   const who = listeners(ctx, args.tell);
   if (!Array.isArray(who)) return who;
   if (to === null && who.length === 0) return { code: "bad_args", reason: "a life change needs a state to set or someone to tell" };

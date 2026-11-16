@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { openStore, type Store } from "../../src/store/store";
 import type { SeenMessage, ShownMessage } from "../../src/store/types";
-import { carried, engine, goTo, hand, hashOf, play, POV, registry, testStore, tick, USER, type TestStore } from "./fixtures";
+import { carried, engine, goTo, hand, hashOf, moveStoredClock, play, POV, registry, testStore, tick, USER, type TestStore } from "./fixtures";
 
 const places = ["cellar", "market_square", "far_road", "common_room"];
 
@@ -48,11 +48,9 @@ describe("snapshots", () => {
     // Code with another fingerprint uses no snapshot and folds from the world's start: the same state.
     expect(hashJson(reopened(ts, "other-build").user(USER).headState("c").state)).toBe(warm);
     // What a cold start builds on is the snapshot: a state stored there is what it continues from.
-    const at8 = ts.store.db.query<{ node: string; state: string }, []>("SELECT s.node, s.state FROM snapshot s JOIN path_node n ON n.user = s.user AND n.key = s.node WHERE n.depth = 7").get();
+    const at8 = ts.store.db.query<{ node: string }, []>("SELECT s.node FROM snapshot s JOIN path_node n ON n.user = s.user AND n.key = s.node WHERE n.depth = 7").get();
     if (!at8) throw new Error("no snapshot at turn 8");
-    const doc = JSON.parse(at8.state) as { state: { world: { clock: number } } };
-    doc.state.world.clock += 1000;
-    ts.store.db.run("UPDATE snapshot SET state = ? WHERE node = ?", [JSON.stringify(doc), at8.node]);
+    moveStoredClock(ts.store.db, at8.node, 1000);
     expect(reopened(ts).user(USER).headState("c").state.world.clock - cold.headState("c").state.world.clock).toBe(1000);
   });
 

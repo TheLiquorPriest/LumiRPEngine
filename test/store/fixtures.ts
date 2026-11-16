@@ -121,6 +121,23 @@ export interface TestStore {
   worlds: Map<string, WorldDoc>;
 }
 
+/**
+ * Moves the clock of the world a stored snapshot at `node` holds by `minutes`, as stored: the snapshot names a new part for its
+ * world's own values. What a cold start then builds on shows whether it began at that snapshot.
+ */
+export function moveStoredClock(db: Store["db"], node: string, minutes: number): void {
+  const row = db.query<{ user: string; state: string }, [string]>("SELECT user, state FROM snapshot WHERE node = ?").get(node);
+  if (!row) throw new Error(`no snapshot at ${node}`);
+  const doc = JSON.parse(row.state) as { parts: Record<string, string> };
+  const body = db.query<{ body: string }, [string, string]>("SELECT body FROM snapshot_part WHERE user = ? AND hash = ?").get(row.user, doc.parts.w ?? "")?.body;
+  if (body === undefined) throw new Error(`no world part for the snapshot at ${node}`);
+  const world = JSON.parse(body) as { clock: number };
+  world.clock += minutes;
+  const hash = `moved.${node}.${minutes}`;
+  db.run("INSERT OR IGNORE INTO snapshot_part (user, hash, body, refs) VALUES (?, ?, ?, 0)", [row.user, hash, JSON.stringify(world)]);
+  db.run("UPDATE snapshot SET state = ? WHERE node = ?", [JSON.stringify({ ...doc, parts: { ...doc.parts, w: hash } }), node]);
+}
+
 /** A store in memory over the invented world (and any further revisions), with one user. */
 export function testStore(options: Partial<Omit<StoreOptions, "db" | "worlds">> & { db?: StoreOptions["db"]; world?: WorldDoc; more?: WorldDoc[] } = {}): TestStore {
   const { world: given, more, db, registry: reg, ...rest } = options;

@@ -26,7 +26,7 @@ import { optionalQuery, own } from "../engine/pack-kit";
 import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import type { EntityState } from "../engine/state";
-import { isGone, kindDef, kindIs } from "../engine/scope";
+import { isGone, kindDef, kindIs, WALK_SETTINGS, walkCuts } from "../engine/scope";
 import { isOpened } from "../packs/economy/core/journal";
 import { openerOf } from "../packs/economy/core/model";
 import { cashAccount } from "../packs/economy/core/pay";
@@ -603,7 +603,8 @@ export class TreeView {
   /**
    * The tree at `at`, to `depth` levels below it (`full`: all of them): the level itself with its
    * values (and what it inherits), each level above the depth with its values and its levels, and
-   * each level at the depth as its own line. Null when nothing in the tree is called `at`.
+   * each level at the depth as its own line. Null when nothing in the tree is called `at`. An engine
+   * walk cut short by its setting in this state or its world adds a line saying where it stopped.
    */
   query(at: string, depth: number | "full"): View | null {
     const ref = this.resolve(at);
@@ -620,6 +621,7 @@ export class TreeView {
       };
       walk(ref, 0);
     });
+    for (const cut of walkCuts(this.state.world, this.doc)) lines.push({ kind: "walk_stopped", depth: 0, fields: { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit } });
     return { lines };
   }
 

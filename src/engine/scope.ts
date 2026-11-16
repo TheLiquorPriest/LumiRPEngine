@@ -121,10 +121,80 @@ export function kindParent(reg: Registry, world: WorldDoc, kind: KindId): KindId
   return own(world.kinds, kind)?.extends ?? reg.kinds.get(kind)?.extends;
 }
 
+/**
+ * How far the engine's own walks go: up a kind's chain (`kindIs`, `fieldDef`, `kindFields`), up a thing's holders to find its place
+ * (`placeOfEntity`), and up the place tree as far as a visit of the POV counts (`seen.ts`). Settings read once when RPE starts
+ * (`engine.kindChain`, `engine.holderDepth`, `space.visitDepth`), 32 each by default, for every fold of every chat alike.
+ */
+export interface WalkLimits {
+  kindChain: number;
+  holderDepth: number;
+  visitDepth: number;
+}
+
+export const WALK_DEFAULTS: Readonly<WalkLimits> = Object.freeze({ kindChain: 32, holderDepth: 32, visitDepth: 32 });
+
+/** The setting each walk is read from. */
+export const WALK_SETTINGS: Readonly<Record<keyof WalkLimits, string>> = Object.freeze({ kindChain: "engine.kindChain", holderDepth: "engine.holderDepth", visitDepth: "space.visitDepth" });
+
+/** A walk cut short by its setting: which walk, where it began, the last step it took, and the setting. */
+export interface WalkCut {
+  walk: keyof WalkLimits;
+  from: string;
+  at: string;
+  limit: number;
+}
+
+let limits: Readonly<WalkLimits> = WALK_DEFAULTS;
+let reached: ((cut: WalkCut) => void) | null = null;
+/** The chains cut so far, each told once; and, by what was walked (a state, a world), its own, for the answers that show it. */
+const told = new Set<string>();
+const cutIn = new WeakMap<object, Map<string, WalkCut>>();
+
+/**
+ * Sets the engine's walks for every fold of the process (RPE sets them once, when it starts); a walk not given keeps what it was. Who
+ * is told of a chain one cuts (the log) is replaced when given.
+ */
+export function setWalkLimits(next: Partial<WalkLimits>, onReached?: (cut: WalkCut) => void): void {
+  const whole = (n: number | undefined, d: number): number => (n === undefined || !Number.isFinite(n) ? d : Math.max(1, Math.floor(n)));
+  limits = Object.freeze({ kindChain: whole(next.kindChain, limits.kindChain), holderDepth: whole(next.holderDepth, limits.holderDepth), visitDepth: whole(next.visitDepth, limits.visitDepth) });
+  if (onReached) reached = onReached;
+  told.clear();
+}
+
+export function walkLimits(): Readonly<WalkLimits> {
+  return limits;
+}
+
+/** A walk over `over` (a state, or a world for a kind's chain) cut short: kept with it, and told once for each chain. */
+export function walkCut(over: object, walk: keyof WalkLimits, from: string, at: string): void {
+  const cut: WalkCut = { walk, from, at, limit: limits[walk] };
+  const key = `${walk}\u0000${from}`;
+  let mine = cutIn.get(over);
+  if (!mine) {
+    mine = new Map();
+    cutIn.set(over, mine);
+  }
+  mine.set(key, cut);
+  if (told.has(key)) return;
+  if (told.size >= 10_000) told.clear();
+  told.add(key);
+  reached?.(cut);
+}
+
+/** The walks cut short over each of `over` (a state, its world), for an answer that depends on them to say where each stopped. */
+export function walkCuts(...over: object[]): WalkCut[] {
+  return over.flatMap((o) => [...(cutIn.get(o)?.values() ?? [])]);
+}
+
 /** True when `kind` is `ancestor` or inherits from it. */
 export function kindIs(reg: Registry, world: WorldDoc, kind: KindId, ancestor: KindId): boolean {
   let id: KindId | undefined = kind;
-  for (let guard = 0; id && guard < 32; guard++) {
+  for (let guard = 0; id; guard++) {
+    if (guard >= limits.kindChain) {
+      walkCut(world, "kindChain", kind, id);
+      return false;
+    }
     if (id === ancestor) return true;
     id = kindParent(reg, world, id);
   }
@@ -134,7 +204,11 @@ export function kindIs(reg: Registry, world: WorldDoc, kind: KindId, ancestor: K
 /** A field's definition, searched up the kind's inheritance chain, the world's kind before the pack's at each step. */
 export function fieldDef(reg: Registry, world: WorldDoc, kind: KindId, field: string): FieldDef | undefined {
   let id: KindId | undefined = kind;
-  for (let guard = 0; id && guard < 32; guard++) {
+  for (let guard = 0; id; guard++) {
+    if (guard >= limits.kindChain) {
+      walkCut(world, "kindChain", kind, id);
+      return undefined;
+    }
     const mine: KindDef | undefined = own(world.kinds, id);
     const pack: KindDef | undefined = reg.kinds.get(id);
     if (!mine && !pack) return undefined;
@@ -149,8 +223,12 @@ export function fieldDef(reg: Registry, world: WorldDoc, kind: KindId, field: st
 export function kindFields(reg: Registry, world: WorldDoc, kind: KindId): Record<string, FieldDef> {
   const chain: KindId[] = [];
   let id: KindId | undefined = kind;
-  for (let guard = 0; id && guard < 32; guard++) {
+  for (let guard = 0; id; guard++) {
     if (!own(world.kinds, id) && !reg.kinds.has(id)) break;
+    if (guard >= limits.kindChain) {
+      walkCut(world, "kindChain", kind, id);
+      break;
+    }
     chain.unshift(id);
     id = kindParent(reg, world, id);
   }
@@ -195,10 +273,14 @@ function num(v: Value | undefined): number {
   return 0;
 }
 
-/** The place an entity is at: its `place` field, else the place of what holds it (`in`). */
+/** The place an entity is at: its `place` field, else the place of what holds it (`in`), as many holders up as `engine.holderDepth` says. */
 export function placeOfEntity(state: { entities: Record<EntityId, EntityState> }, id: EntityId): string | null {
   let cur: EntityId | undefined = id;
-  for (let guard = 0; cur && guard < 32; guard++) {
+  for (let guard = 0; cur; guard++) {
+    if (guard >= limits.holderDepth) {
+      walkCut(state, "holderDepth", id, cur);
+      return null;
+    }
     const e: EntityState | undefined = own(state.entities, cur);
     if (!e) return null;
     const p = e.fields.place;

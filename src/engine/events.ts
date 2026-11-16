@@ -39,6 +39,7 @@ import type { Advice, EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { WorldState } from "./state";
 import { touch } from "./touched";
 import { migrate, type MarkerEnv } from "./upgrade";
+import { forgetWhereabouts } from "./whereabouts";
 
 /** Accounts outside the world: counterparties without numeric money (DESIGN §9.2). */
 export const EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
@@ -259,11 +260,16 @@ export function adviseEvent(types: EventTypes, event: LedgerEvent, ctx: ReadCont
   return types.get(event.type)?.advise?.(event, ctx) ?? null;
 }
 
+/** The core types that keep where everyone is as they apply: a move re-reads the one it moves (`observing`), the rest move nobody. */
+const KEEP_WHEREABOUTS = new Set(["set", "add", "post", "link", "unlink", "spawn", "stage", "clock", "timelapse", "materialize"]);
+
 export function applyEvent(types: EventTypes, event: LedgerEvent, state: WorldState, ctx: ReadContext): void {
   const def = types.get(event.type);
   if (def) def.apply(event, state, ctx);
   // What a read pass kept for the state no longer holds (DESIGN §9.6).
   dropPassMemo(state);
+  // A pack's event may move anyone, and a number added to a place moves its holder off it: where everyone is is read afresh.
+  if (!KEEP_WHEREABOUTS.has(event.type) || (event.type === "add" && event.field === "place")) forgetWhereabouts(state);
 }
 
 /**

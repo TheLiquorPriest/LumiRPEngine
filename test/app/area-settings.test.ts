@@ -114,7 +114,7 @@ test("an area's settings are read from a config through its list: a value it tak
   const config = { store: { snapshotEvery: 10, foldsKept: 0 }, cast: { faintBelow: 0.5, topOfMind: "nine" } };
   const told: string[] = [];
   const tell = (_key: string, _value: unknown, why: string): void => void told.push(why);
-  expect(numbersIn(config, STORE_SETTING_DEFS, tell)).toEqual({ snapshotEvery: 10, foldsKept: STORE_DEFAULTS.foldsKept, notable: STORE_DEFAULTS.notable });
+  expect(numbersIn(config, STORE_SETTING_DEFS, tell)).toEqual({ snapshotEvery: 10, foldsKept: STORE_DEFAULTS.foldsKept, notable: STORE_DEFAULTS.notable, kindChain: STORE_DEFAULTS.kindChain, holderDepth: STORE_DEFAULTS.holderDepth, visitDepth: STORE_DEFAULTS.visitDepth });
   expect(numbersIn(config, CAST_SETTING_DEFS, tell)).toEqual({ ...CAST_DEFAULTS, faintBelow: 0.5 });
   expect(told).toEqual(["store.foldsKept takes a whole number, at least 1, not 0.", 'cast.topOfMind takes a whole number, at least 0, not "nine".']);
 });

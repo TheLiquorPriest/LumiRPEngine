@@ -81,20 +81,16 @@ export function applyFact(state: StoreState, value: JsonValue, at: FactContext):
     n: at.n,
   };
   const reports: Report[] = [];
-  const retire = (f: Fact): void => {
-    f.replacedBy = fact.id;
-    f.replacedAt = at.n;
-  };
-  const list = state.facts[fact.about] ?? [];
-  for (const f of list) if (f.replacedBy === undefined && (f.key === fact.key || f.id === fact.id)) retire(f);
+  // A fact replaced is kept as a new record, marked: the old one may be another state's too.
+  const retired = (f: Fact): Fact => ({ ...f, replacedBy: fact.id, replacedAt: at.n });
+  const list = (state.facts[fact.about] ?? []).map((f) => (f.replacedBy === undefined && (f.key === fact.key || f.id === fact.id) ? retired(f) : f));
+  state.facts[fact.about] = list;
   const named = typeof v.replaces === "string" ? v.replaces : null;
   if (named !== null) {
-    const found = Object.values(state.facts)
-      .flat()
-      .find((f) => f.id === named && f.replacedBy === undefined);
-    if (found) retire(found);
+    const about = Object.keys(state.facts).find((a) => (state.facts[a] ?? []).some((f) => f.id === named && f.replacedBy === undefined));
+    if (about !== undefined) state.facts[about] = (state.facts[about] ?? []).map((f) => (f.id === named && f.replacedBy === undefined ? retired(f) : f));
     else if (!list.some((f) => f.id === named && f.replacedBy === fact.id)) reports.push({ code: "replaces_none", values: { id: named } });
   }
-  state.facts[fact.about] = [...list, fact];
+  state.facts[fact.about] = [...(state.facts[fact.about] ?? []), fact];
   return reports;
 }

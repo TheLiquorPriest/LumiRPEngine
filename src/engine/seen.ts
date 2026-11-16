@@ -17,15 +17,14 @@ import { mapSettingsOf } from "../shared/maps";
 import type { WorldDoc } from "../shared/world";
 import type { EventTypeDef, ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
-import { kindIs, placeOfEntity } from "./scope";
+import { kindIs, placeOfEntity, walkCut, walkLimits } from "./scope";
 import type { WorldState } from "./state";
 import { optionalService, own, sliceRecord } from "./pack-kit";
+import { entitiesAt, moved } from "./whereabouts";
 
 /** The slice lives in the space pack's state, beside its routes: the map reads it too. */
 const PACK = "space";
 const SLICE = "seen";
-/** How far up the place tree a visit is counted. */
-const PARENT_DEPTH = 32;
 /** The parts of the slice, each by id: places, people, and grids' seen cells by the place whose grid it is. */
 const PARTS = ["places", "people", "cells"] as const;
 type Part = (typeof PARTS)[number];
@@ -98,7 +97,6 @@ export function observeCells(state: WorldState, world: WorldDoc, sight: SightOf)
   writable(state, "cells")[stand.scope] = { width: stand.grid.width, bits: addCells(before ?? "", seen) };
 }
 
-/** A visit at `at` to a place and every place around it. */
 /** The squares of the grid of a place seen from a cell within a radius, by index: the space pack's sight, as play stands. */
 export type SightOf = (scope: PlaceId, from: Cell, radius: number) => number[];
 
@@ -108,26 +106,40 @@ export function sightOf(ctx: ReadContext): SightOf {
   return sight === null ? () => [] : (scope, from, radius) => sight(ctx, scope, from, radius);
 }
 
+/** A visit at `at` to a place and every place around it, as many places up as `space.visitDepth` says. */
 function visit(state: WorldState, world: WorldDoc, place: PlaceId, at: number): void {
   const places = writable(state, "places");
+  const limit = walkLimits().visitDepth;
   let cur: PlaceId | undefined = place;
-  for (let depth = 0; cur !== undefined && depth < PARENT_DEPTH && own(world.places, cur); depth++) {
+  for (let depth = 0; cur !== undefined && own(world.places, cur); depth++) {
+    if (depth >= limit) {
+      walkCut(state, "visitDepth", place, cur);
+      return;
+    }
     places[cur] = { first: placeVisit(state, cur)?.first ?? at, last: at };
     cur = own(world.places, cur)?.parent;
   }
 }
 
-/** The POV's place and the people there it can see. */
+/** The POV's place and the people there it can see: those the state keeps at that place, and nobody else looked at. */
 function company(state: Readonly<WorldState>, ctx: ReadContext, sees: SeesEntity): { here: PlaceId | null; people: EntityId[] } {
   const pov = ctx.world.pov;
   const here = placeOfEntity(state, pov);
   if (here === null) return { here, people: [] };
   const people: EntityId[] = [];
-  for (const [id, e] of Object.entries(state.entities)) {
-    if (id === pov || placeOfEntity(state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
+  for (const id of entitiesAt(state, here)) {
+    const e = own(state.entities, id);
+    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
     if (sees(ctx.registry, ctx.world, state, pov, id)) people.push(id);
   }
   return { here, people };
+}
+
+/** The entity an event that moves someone moves (with whatever it holds). */
+export function movedBy(e: LedgerEvent): EntityId | null {
+  if (e.type === "set") return e.entity;
+  if (e.type === "link" || e.type === "unlink") return e.from;
+  return e.type === "spawn" ? e.entity.id : null;
 }
 
 /** Whether an event can move someone: a `place` set, an `in` link or unlink, or a spawn. */
@@ -149,6 +161,7 @@ export function observing(def: EventTypeDef, sees: SeesEntity): EventTypeDef {
       if (!movesSomeone(e)) return def.apply(e, state, ctx);
       const before = company(state, ctx, sees);
       def.apply(e, state, ctx);
+      moved(state, movedBy(e));
       const after = company(state, ctx, sees);
       const at = state.clock;
       if (before.here !== after.here) {

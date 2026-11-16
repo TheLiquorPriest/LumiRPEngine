@@ -169,10 +169,37 @@ CREATE INDEX change_job ON change (user, job) WHERE job IS NOT NULL;
     // before any path its next comparison reads.
     sql: `ALTER TABLE chat ADD COLUMN heard_count INTEGER NOT NULL DEFAULT 0;`,
   },
+  {
+    version: 6,
+    // Snapshots by part (plan §6.3 l.619): a snapshot's row names the parts its state is made of, each by the hash of its text,
+    // and each part is stored once for the user, counted by the snapshots that name it and gone with the last of them. A snapshot
+    // stored before this holds its whole state and names no part.
+    sql: `
+CREATE TABLE snapshot_part (
+  user TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  body TEXT NOT NULL,
+  refs INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user, hash)
+);
+CREATE TRIGGER snapshot_parts_named AFTER INSERT ON snapshot BEGIN
+  UPDATE snapshot_part SET refs = refs + 1 WHERE user = NEW.user AND hash IN (SELECT value FROM json_each(NEW.state, '$.parts'));
+END;
+CREATE TRIGGER snapshot_parts_renamed AFTER UPDATE OF state ON snapshot BEGIN
+  UPDATE snapshot_part SET refs = refs + 1 WHERE user = NEW.user AND hash IN (SELECT value FROM json_each(NEW.state, '$.parts'));
+  UPDATE snapshot_part SET refs = refs - 1 WHERE user = OLD.user AND hash IN (SELECT value FROM json_each(OLD.state, '$.parts'));
+  DELETE FROM snapshot_part WHERE user = OLD.user AND refs <= 0 AND hash IN (SELECT value FROM json_each(OLD.state, '$.parts'));
+END;
+CREATE TRIGGER snapshot_parts_unnamed AFTER DELETE ON snapshot BEGIN
+  UPDATE snapshot_part SET refs = refs - 1 WHERE user = OLD.user AND hash IN (SELECT value FROM json_each(OLD.state, '$.parts'));
+  DELETE FROM snapshot_part WHERE user = OLD.user AND refs <= 0 AND hash IN (SELECT value FROM json_each(OLD.state, '$.parts'));
+END;
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
-export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_revision", "job_end"];
+export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_revision", "job_end", "snapshot_part"];
 
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {

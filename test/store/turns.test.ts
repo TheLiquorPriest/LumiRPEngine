@@ -20,7 +20,7 @@ import { openStore, type Store, type UserStore } from "../../src/store/store";
 import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage, type TurnRow } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
 import { dropStoryStaged, joinStory, STORY_MIGRATIONS, takeBackStory, writeStory } from "../../src/story/index";
-import { carried, engine, goTo, hand, hashOf, make, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
+import { carried, engine, goTo, hand, hashOf, make, moveStoredClock, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
 
 const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state.world.entities[POV]?.fields.place;
@@ -185,11 +185,7 @@ describe("the question's call", () => {
     expect(cold.startOf(swipe.id).state).toBe(atSwipe.state);
 
     // What a cold answer builds on is RPE's own snapshot: a state stored at the eighth turn is what both answers continue from.
-    const at8 = ts.store.db.query<{ state: string }, [string]>("SELECT state FROM snapshot WHERE node = ?").get(eighth.node);
-    if (!at8) throw new Error("no snapshot at the eighth turn");
-    const doc = JSON.parse(at8.state) as { state: { world: { clock: number } } };
-    doc.state.world.clock += 1000;
-    ts.store.db.run("UPDATE snapshot SET state = ? WHERE node = ?", [JSON.stringify(doc), eighth.node]);
+    moveStoredClock(ts.store.db, eighth.node, 1000);
     const again = reopened(ts).user(USER);
     expect(again.turnStart("c", now, { follows: "u11" }).state.world.clock - atHead.state.world.clock).toBe(1000);
     expect(again.turnStart("c", seen(...lines.slice(0, -1)), { replaces: "m10" }).state.world.clock - atSwipe.state.world.clock).toBe(1000);

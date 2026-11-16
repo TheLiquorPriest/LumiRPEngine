@@ -19,8 +19,11 @@ import { deepFreeze, isRecord } from "../shared/json";
 import type { RevisionId, WorldId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
+import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type StoredChange } from "./fold";
+import { draft } from "./working";
+import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
 import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
 import { chainOf, comparePaths, matchTurn, nodeKey, turnByHash, turnsShown, type ShowingTurn } from "./path";
@@ -55,13 +58,6 @@ import {
   type TurnStatus,
 } from "./types";
 
-/** What a snapshot keeps: the state after its node, with what did not apply and what stood rebased on the path to it. */
-interface SnapshotDoc {
-  state: StoreState;
-  notApplied: NotApplied[];
-  rebased: string[];
-}
-
 /** Defaults for the store's settings. */
 export const STORE_DEFAULTS = Object.freeze({
   /** Turns between snapshots on a path (plan §6.3). */
@@ -72,6 +68,10 @@ export const STORE_DEFAULTS = Object.freeze({
   ownOnly: Object.freeze(["description", "tags"]) as readonly string[],
   /** Names of note in each reflection. */
   notable: 3,
+  /** How far the engine's own walks go (`setWalkLimits`): up a kind's chain, up a thing's holders, up the places a visit counts for. */
+  kindChain: WALK_DEFAULTS.kindChain,
+  holderDepth: WALK_DEFAULTS.holderDepth,
+  visitDepth: WALK_DEFAULTS.visitDepth,
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
@@ -95,11 +95,29 @@ export interface StoreOptions {
   notable?: number;
   now?: () => number;
   /**
-   * Told when an engine handler throws while the store applies or checks a change: an error in the
-   * engine, not in the story. Its text is for people (the log, the live view) and never reaches a
-   * model, whose report says only that the handler failed. Unset, it is written to standard error.
+   * Told when an engine handler, or a pack's code a fold calls, throws while the store applies or checks a change: an error in the
+   * engine, not in the story, naming the user, the chat whose turn it is, the turn and the change (null before it is kept). Its text
+   * is for people (the log, the live view) and never reaches a model, whose report says only that the handler failed. Unset, it is
+   * written to standard error.
    */
-  handlerFailed?: (failure: { op: string; error: unknown }) => void;
+  handlerFailed?: (failure: StoreFailure) => void;
+  /** How far the engine's own walks go (`engine.kindChain`, `engine.holderDepth`, `space.visitDepth`); each 32 by default. */
+  kindChain?: number;
+  holderDepth?: number;
+  visitDepth?: number;
+  /** The log, for what the store and the engine say for people: a walk cut short by its setting, once for each chain. Unset: the log given before. */
+  log?: (message: string, data: Record<string, unknown>) => void;
+}
+
+/** A handler's failure, as the store tells it (`StoreOptions.handlerFailed`). */
+export interface StoreFailure {
+  op: string;
+  error: unknown;
+  user: string;
+  /** The chat the turn was played in; absent for a turn the store no longer holds. */
+  chat?: string;
+  turn: string;
+  change: number | null;
 }
 
 /** One turn on a chat's line (`UserStore.line`): its id, and the place on the chat's path of the reply it stands at. */
@@ -183,7 +201,7 @@ interface Cached {
 /** Snapshots a user's folds found worth storing, by node, kept for the user's next write while `mark` holds. */
 interface Held {
   mark: string;
-  rows: Map<string, { upto: number; state: string }>;
+  rows: Map<string, { upto: number; rows: SnapshotRows }>;
 }
 
 /** A chat's path as its last comparison took it, read from the text its row keeps, with its entries by message id. */
@@ -320,6 +338,8 @@ export class Store {
   private readonly held = new Map<string, Held>();
   private readonly compared = new Map<string, ComparedPath>();
   private readonly views = new WeakMap<StoreState, TreeView>();
+  private readonly envs = new Map<string, FoldEnv>();
+  private readonly handlerFailed: (failure: StoreFailure) => void;
 
   constructor(options: StoreOptions) {
     if (typeof options.db === "string") {
@@ -346,13 +366,43 @@ export class Store {
     }
     // A chat that names no world plays on the blank one, which the store answers for itself.
     const blank = blankWorld(options.registry);
-    const failed = options.handlerFailed ?? ((f: { op: string; error: unknown }) => console.error(`RPE's store: the handler for ${f.op} failed:`, f.error));
-    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)), failed };
+    this.handlerFailed = options.handlerFailed ?? ((f: StoreFailure) => console.error(`RPE's store: the handler for ${f.op} failed on turn ${f.turn}:`, f.error));
+    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)) };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
     this.foldsKept = Math.max(1, Math.floor(options.foldsKept ?? STORE_DEFAULTS.foldsKept));
-    this.fingerprint = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
+    // The engine's walks, read once for every fold: a store opened without them (a script's, the migration's) keeps the process's. A
+    // walk one cuts short goes to the log, once for each chain.
+    const log = options.log;
+    setWalkLimits(
+      { kindChain: options.kindChain, holderDepth: options.holderDepth, visitDepth: options.visitDepth },
+      log && ((cut) => log("An engine walk stopped at its setting; what lies past it is not counted.", { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit })),
+    );
+    // A state folded or a snapshot stored under other walk limits is not used: the limits join whatever fingerprint the store is given.
+    const walks = walkLimits();
+    const given = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
+    const usual = walks.kindChain === WALK_DEFAULTS.kindChain && walks.holderDepth === WALK_DEFAULTS.holderDepth && walks.visitDepth === WALK_DEFAULTS.visitDepth;
+    this.fingerprint = usual ? given : hashParts(given, "walks", String(walks.kindChain), String(walks.holderDepth), String(walks.visitDepth));
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)) };
     this.now = options.now ?? Date.now;
+  }
+
+  /**
+   * @internal The fold's environment for one user: a handler's failure is told naming the user, the chat its turn was played in,
+   * the turn and the change.
+   */
+  envOf(user: string): FoldEnv {
+    let env = this.envs.get(user);
+    if (!env) {
+      env = {
+        ...this.env,
+        failed: (f) => {
+          const chat = this.db.query<{ chat: string }, [string, string]>("SELECT chat FROM turn WHERE user = ? AND id = ?").get(user, f.turn)?.chat;
+          this.handlerFailed({ op: f.op, error: f.error, user, ...(chat === undefined ? {} : { chat }), turn: f.turn, change: f.change });
+        },
+      };
+      this.envs.set(user, env);
+    }
+    return env;
   }
 
   /** The store for one user: every call reads and writes that user's rows only. */
@@ -409,17 +459,17 @@ export class Store {
     }
   }
 
-  /** @internal Holds snapshots (node, upto, state as JSON) a fold under `mark` found worth storing, for the user's next write. */
-  hold(user: string, mark: string, rows: readonly [string, number, string][]): void {
+  /** @internal Holds snapshots (node, upto, the rows to store) a fold under `mark` found worth storing, for the user's next write. */
+  hold(user: string, mark: string, rows: readonly [string, number, SnapshotRows][]): void {
     if (rows.length === 0) return;
     let held = this.held.get(user);
     if (!held || held.mark !== mark) {
       held = { mark, rows: new Map() };
       this.held.set(user, held);
     }
-    for (const [node, upto, state] of rows) {
+    for (const [node, upto, snapshot] of rows) {
       held.rows.delete(node);
-      held.rows.set(node, { upto, state });
+      held.rows.set(node, { upto, rows: snapshot });
     }
     for (const oldest of held.rows.keys()) {
       if (held.rows.size <= this.foldsKept) break;
@@ -436,13 +486,51 @@ export class Store {
     if (!held) return;
     this.held.delete(user);
     if (held.mark !== this.markOf(user)) return;
-    const put = this.db.query<unknown, [string, string, string, number, string, number]>(
-      "INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) SELECT ?1, ?2, 'cache', ?3, ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM path_node WHERE user = ?1 AND key = ?2)",
-    );
-    const now = this.now();
-    const waiting = new Map<string, { upto: number; state: string }>();
-    for (const [node, row] of held.rows) if (put.run(user, node, this.fingerprint, row.upto, row.state, now).changes === 0) waiting.set(node, row);
+    for (const row of held.rows.values()) this.putParts(user, row.rows.parts);
+    const waiting = new Map<string, { upto: number; rows: SnapshotRows }>();
+    for (const [node, row] of held.rows) if (!this.putSnapshot(user, node, "cache", row.upto, row.rows.manifest)) waiting.set(node, row);
+    for (const row of held.rows.values()) this.dropUnheld(user, row.rows.parts);
     if (waiting.size > 0) this.held.set(user, { mark: held.mark, rows: waiting });
+  }
+
+  /** @internal Stores a snapshot at `node` (`kind` cache or base), its parts first; inside a write. */
+  storeSnapshot(user: string, node: string, kind: "cache" | "base", upto: number, rows: SnapshotRows): void {
+    this.putParts(user, rows.parts);
+    this.putSnapshot(user, node, kind, upto, rows.manifest);
+    this.dropUnheld(user, rows.parts);
+  }
+
+  private putParts(user: string, parts: readonly [string, string][]): void {
+    const put = this.db.query("INSERT OR IGNORE INTO snapshot_part (user, hash, body, refs) VALUES (?, ?, ?, 0)");
+    for (const [hash, body] of parts) put.run(user, hash, body);
+  }
+
+  /** A snapshot's row, where its node is stored and every part it names is: whether it was stored. Its parts count it (the triggers). */
+  private putSnapshot(user: string, node: string, kind: "cache" | "base", upto: number, manifest: string): boolean {
+    return (
+      this.db
+        .query<unknown, [string, string, string, string, number, string, number]>(
+          `INSERT INTO snapshot (user, node, kind, fingerprint, upto, state, created) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+           WHERE EXISTS (SELECT 1 FROM path_node WHERE user = ?1 AND key = ?2)
+             AND NOT EXISTS (SELECT 1 FROM json_each(?6, '$.parts') j WHERE NOT EXISTS (SELECT 1 FROM snapshot_part p WHERE p.user = ?1 AND p.hash = j.value))
+           ON CONFLICT (user, node, kind) DO UPDATE SET fingerprint = excluded.fingerprint, upto = excluded.upto, state = excluded.state, created = excluded.created`,
+        )
+        .run(user, node, kind, this.fingerprint, upto, manifest, this.now()).changes > 0
+    );
+  }
+
+  /** Parts put for snapshots that no stored snapshot names after all go. */
+  private dropUnheld(user: string, parts: readonly [string, string][]): void {
+    const drop = this.db.query("DELETE FROM snapshot_part WHERE user = ? AND hash = ? AND refs <= 0");
+    for (const [hash] of parts) drop.run(user, hash);
+  }
+
+  /** @internal A stored snapshot's row read whole, its parts read from the user's. */
+  readSnapshot(user: string, text: string): SnapshotDoc {
+    return readSnapshot(text, (hashes) => {
+      const rows = this.db.query<{ hash: string; body: string }, [string, string]>("SELECT p.hash, p.body FROM json_each(?2) j JOIN snapshot_part p ON p.user = ?1 AND p.hash = j.value").all(user, JSON.stringify(hashes));
+      return new Map(rows.map((r) => [r.hash, r.body]));
+    });
   }
 
   /**
@@ -743,7 +831,7 @@ export class UserStore {
       this.joinPath(t, { message: input.message, user: false, turn: id, node: t.node, own: true, hash: input.hash, date: input.date ?? null });
       if (keep) {
         const doc: SnapshotDoc = { state: keep.folded.state, notApplied: keep.folded.notApplied, rebased: keep.folded.rebased };
-        this.db.run("INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) VALUES (?, ?, 'cache', ?, ?, ?, ?)", [this.id, t.node, this.store.fingerprint, keep.upto, JSON.stringify(doc), this.store.now()]);
+        this.store.storeSnapshot(this.id, t.node, "cache", keep.upto, snapshotRows(doc));
       }
     });
     return this.turnOrThrow(id);
@@ -1102,14 +1190,15 @@ export class UserStore {
     if (ended !== undefined) throw new StoreInputError(`job ${ended} has ended: it records nothing more`);
     const inside = this.foldNode(turn.node);
     const own = jobs.length === 1 && inputs.every((c) => c.job === jobs[0]) ? (jobs[0] ?? null) : null;
-    const state = structuredClone((own === null ? inside.folded : this.stateFor(turnId, own)).state);
+    // A draft over the state inside the turn: what the changes write is copied, the rest stays the held state's.
+    const state = draft((own === null ? inside.folded : this.stateFor(turnId, own)).state);
     const existing = this.changes(turnId);
     // Groups that did not land earlier in the turn: a unit tied to one does not land either.
     const fell = new Set(existing.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
     // The engine's handlers put a change's own objects into the state, which is then held frozen: they apply the store's copy, so the
     // caller's values stay the caller's.
     const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: turnId, n: turn.depth + 1, by: c.by ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
-    const outcomes = applyChecked(this.store.env, state, items, fell);
+    const outcomes = applyChecked(this.store.envOf(this.id), state, items, fell);
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
     const ids = this.write(true, () => {
@@ -1199,21 +1288,22 @@ export class UserStore {
    * state with the job's rows that apply on top (`stateFor`). The groups that fell earlier in the turn fall with them.
    */
   private landing(into: TurnRow, own: readonly ChangeRow[], moved: readonly ChangeRow[]): Outcome[] {
-    const state = structuredClone(this.foldNode(into.node).folded.state);
+    const state = draft(this.foldNode(into.node).folded.state);
     const fell = new Set(own.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
-    const item = (c: ChangeRow): Item => ({ op: c.op, value: structuredClone(c.value), turn: into.id, n: into.depth + 1, by: c.by, precision: c.precision, standing: c.standing, source: c.source });
+    const item = (c: ChangeRow): Item => ({ op: c.op, value: structuredClone(c.value), turn: into.id, n: into.depth + 1, by: c.by, change: c.id, precision: c.precision, standing: c.standing, source: c.source });
+    const env = this.store.envOf(this.id);
     const out: Outcome[] = [];
     for (let i = 0; i < moved.length; ) {
       const job = moved[i]?.job ?? null;
       let end = i + 1;
       while (end < moved.length && (moved[end]?.job ?? null) === job) end++;
       const run = moved.slice(i, end).map(item);
-      if (job === null) out.push(...applyChecked(this.store.env, state, run, fell));
+      if (job === null) out.push(...applyChecked(env, state, run, fell));
       else {
-        const mine = structuredClone(state);
+        const mine = draft(state);
         const before = [...own.filter((c) => c.job === job && c.applied), ...moved.slice(0, i).filter((c, k) => c.job === job && out[k]?.applied === true)];
-        applyChecked(this.store.env, mine, before.map(item), new Set());
-        out.push(...applyChecked(this.store.env, mine, run, fell));
+        applyChecked(env, mine, before.map(item), new Set());
+        out.push(...applyChecked(env, mine, run, fell));
       }
       i = end;
     }
@@ -1258,8 +1348,8 @@ export class UserStore {
     const turn = this.turnOrThrow(turnId);
     const own = this.db.query<ChangeDb, [string, string, string]>("SELECT * FROM change WHERE user = ? AND turn = ? AND job = ? AND applied = 1 ORDER BY ord").all(this.id, turnId, job).map(changeOf);
     if (own.length === 0) return at;
-    const state = structuredClone(at.state);
-    applyChecked(this.store.env, state, own.map((c): Item => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by, precision: c.precision, standing: c.standing, source: c.source })), new Set());
+    const state = draft(at.state);
+    applyChecked(this.store.envOf(this.id), state, own.map((c): Item => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by, change: c.id, precision: c.precision, standing: c.standing, source: c.source })), new Set());
     return { ...at, state };
   }
 
@@ -1348,7 +1438,7 @@ export class UserStore {
     this.write(true, () => {
       // Every change of this user's recorded so far stands within the base or before it; ids only grow.
       const upto = this.db.query<{ n: number | null }, [string]>("SELECT max(id) AS n FROM change WHERE user = ?").get(this.id)?.n ?? 0;
-      this.db.run("INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) VALUES (?, ?, 'base', ?, ?, ?, ?)", [this.id, turn.node, this.store.fingerprint, upto, JSON.stringify(doc), this.store.now()]);
+      this.store.storeSnapshot(this.id, turn.node, "base", upto, snapshotRows(doc));
       this.dropSnapshotsThrough(turnId);
     });
   }
@@ -1400,7 +1490,7 @@ export class UserStore {
       const held = key === undefined ? null : this.store.cached(this.cacheKey(key), mark);
       if (!held) continue;
       from = i;
-      start = { state: structuredClone(held.folded.state), upto: held.upto, notApplied: [...held.folded.notApplied], rebased: [...held.folded.rebased] };
+      start = { state: draft(held.folded.state), upto: held.upto, notApplied: [...held.folded.notApplied], rebased: [...held.folded.rebased] };
       break;
     }
     const first = chain[0];
@@ -1412,18 +1502,16 @@ export class UserStore {
         .query<{ upto: number; state: string }, [string, string, string]>("SELECT upto, state FROM snapshot WHERE user = ?1 AND node = ?2 AND (kind = 'base' OR fingerprint = ?3) ORDER BY kind = 'base' DESC LIMIT 1")
         .get(this.id, first.key, this.store.fingerprint);
       if (snap) {
-        const doc = JSON.parse(snap.state) as SnapshotDoc;
-        // A starting state set before the store kept facts and marks holds none yet.
-        doc.state.marks ??= {};
-        doc.state.facts ??= {};
+        const doc = this.store.readSnapshot(this.id, snap.state);
         from = 0;
         stored = snap.upto;
-        start = { state: doc.state, upto: snap.upto, notApplied: doc.notApplied, rebased: doc.rebased };
+        // Read once and never changed: the fold works on a draft over it, and what it does not change stays shared.
+        start = { state: draft(deepFreeze(doc.state)), upto: snap.upto, notApplied: doc.notApplied, rebased: doc.rebased };
       }
     }
     if (!start) {
       const init = this.chatStartOf(first.turn);
-      start = { state: structuredClone(init.state), upto: 0, notApplied: [], rebased: [] };
+      start = { state: draft(init.state), upto: 0, notApplied: [], rebased: [] };
     }
     const rest = chain.slice(from + 1);
     const ids = (stored === null ? rest : [first, ...rest]).map((c) => c.turn);
@@ -1441,12 +1529,12 @@ export class UserStore {
     const late = (byTurn.get(first.turn) ?? []).filter((c) => c.id > (stored ?? Number.POSITIVE_INFINITY));
     if (late.length > 0) steps.unshift(stepOf(first, late));
     const every = this.store.snapshotEvery;
-    const snaps: [string, number, string][] = [];
-    const result = foldSteps(this.store.env, start, steps, (step, state, upto, notApplied, rebased) => {
+    const snaps: [string, number, SnapshotRows][] = [];
+    const result = foldSteps(this.store.envOf(this.id), start, steps, (step, state, upto, notApplied, rebased) => {
       // Every `snapshotEvery` turns along a path, once its turn is no longer open, where none is stored.
       if (step.n % every !== 0 || turns.get(step.turn)?.status === "open" || (stored !== null && step.node === first.key)) return;
       const doc: SnapshotDoc = { state, notApplied: [...(start?.notApplied ?? []), ...notApplied], rebased: [...(start?.rebased ?? []), ...rebased] };
-      snaps.push([step.node, upto, JSON.stringify(doc)]);
+      snaps.push([step.node, upto, snapshotRows(doc)]);
     });
     this.store.hold(this.id, mark, snaps);
     const folded: Folded = { node, state: result.state, notApplied: [...start.notApplied, ...result.notApplied], rebased: [...start.rebased, ...result.rebased] };
@@ -1489,12 +1577,12 @@ export class UserStore {
     const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 })));
     const steps = rest.map(([key, , turn, depth]): FoldStep => ({ node: key, turn, n: depth + 1, own: turns.get(turn)?.node === key, changes: byTurn.get(turn) ?? [], jobs: placed.get(key) ?? [] }));
     const every = this.store.snapshotEvery;
-    const snaps: [string, number, string][] = [];
-    const result = foldSteps(this.store.env, { state: structuredClone(base.folded.state), upto: base.upto }, steps, (step, state, upto, notApplied, rebased) => {
+    const snaps: [string, number, SnapshotRows][] = [];
+    const result = foldSteps(this.store.envOf(this.id), { state: draft(base.folded.state), upto: base.upto }, steps, (step, state, upto, notApplied, rebased) => {
       // Every `snapshotEvery` turns along the path, once its turn is no longer open, as `foldNode` keeps them.
       if (step.n % every !== 0 || turns.get(step.turn)?.status === "open") return;
       const doc: SnapshotDoc = { state, notApplied: [...base.folded.notApplied, ...notApplied], rebased: [...base.folded.rebased, ...rebased] };
-      snaps.push([step.node, upto, JSON.stringify(doc)]);
+      snaps.push([step.node, upto, snapshotRows(doc)]);
     });
     this.store.hold(this.id, mark, snaps);
     const folded: Folded = { node: end, state: result.state, notApplied: [...base.folded.notApplied, ...result.notApplied], rebased: [...base.folded.rebased, ...result.rebased] };
@@ -1696,9 +1784,9 @@ export class UserStore {
     const unit = group === null ? [c] : own.filter((x) => isRecord(x.value) && x.value.group === group);
     const first = unit[0]?.ord ?? c.ord;
     // The state just before the unit: the turn's start, and what the turn recorded before it.
-    const before = structuredClone(this.startOf(turn.id).state);
+    const before = draft(this.startOf(turn.id).state);
     const earlier = own.filter((x) => x.applied && x.job === null && x.ord < first);
-    applyUnchecked(this.store.env, before, earlier.map((x): Item => ({ op: x.op, value: x.value, turn: turn.id, n: turn.depth + 1, by: x.by, precision: x.precision, standing: x.standing, source: x.source })));
+    applyUnchecked(this.store.envOf(this.id), before, earlier.map((x): Item => ({ op: x.op, value: x.value, turn: turn.id, n: turn.depth + 1, by: x.by, change: x.id, precision: x.precision, standing: x.standing, source: x.source })));
     return { plan: reversal(unit, before, this.headState(chat.id).state), on: head };
   }
 
