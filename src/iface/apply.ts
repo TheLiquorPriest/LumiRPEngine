@@ -11,15 +11,15 @@
 import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
 import type { Rejection } from "../engine/registry";
 import { isRecord } from "../shared/json";
-import type { Lane, StoreState } from "../store/types";
-import { type Call, NUMBER, OBJECT, Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
+import { type Lane, PRECISIONS, STANDINGS, type StoreState } from "../store/types";
+import { type Call, NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { type OpContext, type OpDef, tellUnread, type Unread } from "./ops";
 import { THING_OPS } from "./ops-things";
 import { TIME_OPS } from "./ops-time";
 import { VALUE_OPS } from "./ops-values";
 import { readingOr, unreadable } from "./fixed";
 import { nearestOf, type Reading } from "./reading";
-import { MARKS, PROVENANCE_PROPERTIES, type Provenance, provenanceOf } from "./source";
+import { MARKS, PROVENANCE_PROPERTIES, type Provenance, provenanceOf, SOURCE_KINDS } from "./source";
 import { type Fields, textOf } from "./texts";
 import { answerDraft, commit, Draft } from "./writing";
 
@@ -35,9 +35,9 @@ export const OPERATIONS: readonly OpDef[] = OPERATION_NAMES.map((name) => {
   return def;
 });
 
-/** The arguments an operation may carry, each once, whichever operations read it: the file says what each is. */
+/** The arguments an operation may carry, each once, whichever operations read it: the file says what each is. The operation's name, the lane, and a fact's precision, standing and source are choices. */
 export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
-  op: TEXT,
+  op: oneOf(OPERATION_NAMES),
   who: TEXT,
   what: TEXT,
   to: TEXT,
@@ -85,8 +85,43 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   near: TEXT,
   zone: TEXT,
   why: TEXT,
-  lane: TEXT,
+  lane: oneOf([...new Set(OPERATIONS.flatMap((d) => d.lanes ?? []))]),
   ...PROVENANCE_PROPERTIES,
+  source: { anyOf: [...SOURCE_KINDS.map((from) => ({ const: from })), { type: "object", required: ["from"], properties: { from: oneOf(SOURCE_KINDS), lore: TEXT, message: TEXT, roll: TEXT, gap_check: TEXT, consent: TEXT } }] },
+  precision: oneOf(PRECISIONS),
+  standing: oneOf(STANDINGS),
+};
+
+/** What each kind of operation needs, as schema branches: kinds that need the same arguments share one (`place` and `store` both need `what`). */
+function needed(): JsonObject[] {
+  const by = new Map<string, string[]>();
+  for (const d of OPERATIONS) if (d.needs.length > 0) by.set(d.needs.join(","), [...(by.get(d.needs.join(",")) ?? []), d.name]);
+  return [...by].map(([needs, ops]): JsonObject => ({ if: { properties: { op: ops.length === 1 ? { const: ops[0] ?? "" } : { enum: ops } } }, then: { required: needs.split(",") } }));
+}
+
+/**
+ * One operation of a call as the schema holds it: its name is one of the thirteen and, once it has one, what its kind needs is there, so
+ * the check that runs before the tool does names the field and what it takes. An argument the operation does not read is not refused: the
+ * answer says it.
+ */
+const OPERATION_ITEM: JsonObject = {
+  type: "object",
+  required: ["op"],
+  properties: OPERATION_PROPERTIES,
+  dependentSchemas: { op: { allOf: needed() } },
+};
+
+/** A scene set from nothing in one call (an island, a kitchen on it, two people there, a lamp): the operation reference shows it, which the tool's own words no longer do. */
+export const SCENE_FROM_NOTHING: JsonObject = {
+  operations: (
+    [
+      { op: "spawn", kind: "place", name: "Gull Skerry" },
+      { op: "spawn", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry" },
+      { op: "spawn", kind: "person", name: "Ada Lorne", at: "Keeper's kitchen" },
+      { op: "spawn", kind: "person", name: "Tobin Lorne", at: "Keeper's kitchen" },
+      { op: "spawn", name: "Oil lamp", at: "Keeper's kitchen" },
+    ] as JsonObject[]
+  ).map((operation) => ({ ...operation, source: { from: "prose", message: "m-1" } })),
 };
 
 /** One operation a call asks for, read for its shape: its place in the call, what works it out, the lane it records in, its arguments and its provenance. */
@@ -342,9 +377,9 @@ export const WORLD_APPLY: ToolSpec = {
   name: "world_apply",
   family: "state",
   tier: "write",
-  // Nothing the code reads is held back by the schema (no required argument, no list of choices): a call it cannot read is answered in the answers' words, with what would work.
-  properties: { operations: { type: "array", items: { type: "object", properties: OPERATION_PROPERTIES } } },
-  required: [],
+  // The schema holds what the check before the tool can fail on: the list, each operation's name and what its kind needs, and the choices of precision, standing and source. An argument an operation does not read is said in the answer, never refused.
+  properties: { operations: { type: "array", minItems: 1, items: OPERATION_ITEM } },
+  required: ["operations"],
   example: { operations: [OPERATIONS[2]?.example ?? {}, OPERATIONS[5]?.example ?? {}] },
   run: applyOperations,
 };

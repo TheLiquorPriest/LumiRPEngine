@@ -10,11 +10,11 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { OPERATION_PROPERTIES, OPERATIONS } from "../src/iface/apply";
+import { OPERATION_PROPERTIES, OPERATIONS, SCENE_FROM_NOTHING } from "../src/iface/apply";
 import type { ToolSpec } from "../src/iface/kit";
 import { SEARCHABLE_TOOLS } from "../src/iface/searchable";
 import { PROVENANCE_PROPERTIES } from "../src/iface/source";
-import { shippedTexts, splitFile, type ToolText, toolText } from "../src/iface/texts";
+import { shippedTexts, type ToolText, toolText } from "../src/iface/texts";
 import type { JsonObject, JsonValue } from "../src/shared/json";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -25,7 +25,11 @@ const isObject = (v: JsonValue | undefined): v is JsonObject => typeof v === "ob
 /** An argument's shape in words a reader knows. */
 function shapeOf(schema: JsonObject): string {
   if (Array.isArray(schema.enum)) return `one of ${schema.enum.map(String).join(", ")}`;
-  if (Array.isArray(schema.anyOf)) return schema.anyOf.map((s) => (isObject(s) ? shapeOf(s) : "any value")).join(", or ");
+  if (Array.isArray(schema.anyOf)) {
+    const consts = schema.anyOf.filter((s): s is JsonObject => isObject(s) && "const" in s);
+    const others = schema.anyOf.filter((s) => !(isObject(s) && "const" in s)).map((s) => (isObject(s) ? shapeOf(s) : "any value"));
+    return [...(consts.length > 0 ? [`one of ${consts.map((s) => String(s.const)).join(", ")}`] : []), ...others].join(", or ");
+  }
   switch (schema.type) {
     case "string":
       return "text";
@@ -59,14 +63,10 @@ async function textsOf(names: readonly string[]): Promise<Map<string, ToolText>>
   return out;
 }
 
-/** The lines of `world_apply`'s file that say what each operation is (`- move: …`), by operation. */
-async function operationLines(): Promise<Map<string, string>> {
-  const text = (await shippedTexts().read("tools", "world_apply")) ?? "";
+/** What each operation is, by operation: the parenthesis after its name in `world_apply`'s `op` argument (`move (go somewhere, others along)`). */
+function operationLines(apply: ToolText): Map<string, string> {
   const out = new Map<string, string>();
-  for (const line of splitFile(text, "world_apply.md").body.split("\n")) {
-    const m = /^- ([a-z_]+): (.+)$/.exec(line.trim());
-    if (m?.[1] !== undefined && m[2] !== undefined) out.set(m[1], m[2]);
-  }
+  for (const m of (apply.arguments["operations.op"] ?? "").matchAll(/([a-z_]+) \(([^()]+)\)/g)) if (m[1] !== undefined && m[2] !== undefined) out.set(m[1], m[2]);
   return out;
 }
 
@@ -81,7 +81,13 @@ function everydaySection(apply: ToolText, said: ReadonlyMap<string, string>): st
     "",
     "| Argument | Shape | What it is |",
     "|---|---|---|",
-    ...Object.entries(PROVENANCE_PROPERTIES).map(([arg, schema]) => `| \`${arg}\` | ${cell(shapeOf(schema))} | ${cell(of[`operations.${arg}`] ?? "")} |`),
+    ...Object.entries(PROVENANCE_PROPERTIES).map(([arg, schema]) => `| \`${arg}\` | ${cell(shapeOf(OPERATION_PROPERTIES[arg] ?? schema))} | ${cell(of[`operations.${arg}`] ?? "")} |`),
+    "",
+    "A scene set from nothing in one call (an island, a kitchen on it, two people there, a lamp):",
+    "",
+    "```json",
+    JSON.stringify(SCENE_FROM_NOTHING, null, 2),
+    "```",
     "",
   ];
   for (const op of OPERATIONS) {
@@ -127,7 +133,7 @@ export async function buildOperations(): Promise<string> {
     "",
     `${OPERATIONS.length} everyday operations and ${SEARCHABLE_TOOLS.length} searchable tools.`,
     "",
-    ...everydaySection(texts.get("world_apply") as ToolText, await operationLines()),
+    ...everydaySection(texts.get("world_apply") as ToolText, operationLines(texts.get("world_apply") as ToolText)),
     ...searchableSection(texts),
   ];
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;

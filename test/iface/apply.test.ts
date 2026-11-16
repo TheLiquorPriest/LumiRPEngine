@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import { playedWorld } from "../../src/engine/places-in-play";
 import { gridMoves, mapLines, shippedTexts } from "../../src/iface/index";
+import { SCENE_FROM_NOTHING } from "../../src/iface/apply";
 import { compileMaps } from "../../src/shared/maps";
 import type { WorldDoc } from "../../src/shared/world";
 import { INN } from "./map/fixtures";
@@ -224,10 +225,9 @@ describe("answers that say what would work", () => {
 });
 
 describe("the tool's worked example", () => {
-  test("the scene its file shows is set from nothing in one call, as it says", async () => {
+  test("the scene the operation reference shows is set from nothing in one call, as it says", async () => {
     const t = await rig({}, "blank");
-    const line = t.tools.get("world_apply")?.description.split("\n").find((l) => l.startsWith('{"operations"'));
-    const r = await t.call("world_apply", JSON.parse(line ?? "{}") as JsonObject);
+    const r = await t.call("world_apply", SCENE_FROM_NOTHING);
     expect(r.error).toBeUndefined();
     expect(r.reports ?? []).toEqual([]);
     expect((dataOf(r).operations as JsonObject[]).every((o) => o.applied === true)).toBe(true);
