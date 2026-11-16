@@ -30,7 +30,7 @@ import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
 import { carry } from "./carry";
 import { checkConnectionsSteady } from "./connections";
-import { chatsToImport, importChats } from "./import-chats";
+import { type CarriedRuns, chatsToImport, importChats } from "./import-chats";
 import { type ChatNames, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
@@ -58,6 +58,8 @@ export interface MigrateOptions {
   tree?: TreeLayout;
   /** Every setting RPE's areas and RPH declare (the app's one registry), which takes each value the run carries as its own reader takes it. Absent: RPH's own and the update's only are known, and another key is written as it is. */
   settings?: readonly Setting[];
+  /** The turn lane's writer of a carried turn's run record (`keepCarriedRun`) and its tables, which the migration may not import: each imported turn's reply as released and its departures. Absent: no run record is kept. */
+  runs?: CarriedRuns;
 }
 
 export interface MigrateResult {
@@ -144,6 +146,8 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       migrations.add("build", BUILD_MIGRATIONS);
       // A chat's folders are chosen once and kept in the tree's tables, which the server reads as well.
       if (options.tree) migrations.add(options.tree.tables.area, options.tree.tables.migrations);
+      // Each carried turn's run record goes in the turn lane's table, which the server reads as well.
+      if (options.runs) migrations.add(options.runs.tables.area, options.runs.tables.migrations);
       migrateTables(db, migrations, { user: owner, version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
       step = "reading the chats as today's build does";
       const registry = createRegistry(ALL_PACKS);
@@ -159,7 +163,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       step = "importing the chats";
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();
-      report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run });
+      report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run, ...(options.runs ? { keepRun: options.runs.keep } : {}) });
       step = "carrying the worlds, files, settings and connections";
       const layout = options.tree;
       const tree = layout

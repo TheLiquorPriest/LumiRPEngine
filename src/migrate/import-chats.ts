@@ -29,6 +29,7 @@
 // the earlier run imported of it.
 
 import type { Database } from "bun:sqlite";
+import type { Migration, MigrationArea } from "../app/migrations";
 import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
 import { readRun } from "./today/run";
 import type { ChainMessage, FoldInput } from "../engine/ledger/chain";
@@ -223,8 +224,28 @@ interface Imported {
   edited: number;
 }
 
+/**
+ * Keeps the run record of a turn a migration carried (the turn lane's `keepCarriedRun`, which `migrate` may not import, so the
+ * command line hands it in): the reply as released and what the old engine saved otherwise than released (its departures), so the
+ * first turn RPE plays after it is told the reply as it tells any. Called inside the chat's write, once for every imported turn.
+ */
+export type KeepCarriedRun = (db: Database, run: { user: string; chat: string; turn: string; at: number; released: string; saved: string | null }) => void;
+
+/** The turn lane's writer of carried turns' run records, with the tables it writes (its area's migrations, which the run brings up to date first). */
+export interface CarriedRuns {
+  tables: { area: MigrationArea; migrations: readonly Migration[] };
+  keep: KeepCarriedRun;
+}
+
+/** The lines a swipe's record holds where its reply says something against its turn, joined; null where it holds none. */
+function savedOf(rec: unknown): string | null {
+  const lines = isRecord(rec) && isRecord(rec.harness) ? rec.harness.departures : undefined;
+  const kept = Array.isArray(lines) ? lines.filter((l): l is string => typeof l === "string") : [];
+  return kept.length > 0 ? kept.join("\n") : null;
+}
+
 /** Imports one chat into the store. */
-function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToImport, link: Link | null, turnOfShared: (link: Link, index: number, swipe: number) => string | null): Imported {
+function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToImport, link: Link | null, turnOfShared: (link: Link, index: number, swipe: number) => string | null, keepRun: KeepCarriedRun | undefined): Imported {
   const chain = chat.input.chain;
   const id = chat.chatId;
   if (link) s.branchChat({ id, from: link.from, map: link.map, at: link.at, seed: chat.run.runSeed, started: chat.run.startedAt, wasOn: chat.wasOn, engine: chat.engine });
@@ -275,6 +296,8 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
     own.set(`${p.at}:${p.swipe}`, turn.id);
     const rec = m.ledger?.swipes[String(p.swipe)];
     if (rec) keepRecord(db, s.id, { chat: id, turn: turn.id, message: m.id, swipe: p.swipe, record: rec });
+    // Every imported turn has its run record, one with nothing saved otherwise included: the telling reads the chat's newest kept run, so a turn without one would show an older turn's lines.
+    keepRun?.(db, { user: s.id, chat: id, turn: turn.id, at: dateOf(m, p.swipe) ?? 0, released: m.swipes[p.swipe] ?? "", saved: savedOf(rec) });
     out.turns++;
     out.placed[p.how === "shown" && p.lost ? "lost" : p.how]++;
     out.dropped += step.dropped;
@@ -323,7 +346,7 @@ function whyNot(error: unknown): string {
  * today's reader can't open, with why; `present` every chat Lumiverse has of the user's: only a chat
  * missing from it is gone.
  */
-export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly { chatId: string; why: string }[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string }): ChatImportReport[] {
+export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly { chatId: string; why: string }[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string; keepRun?: KeepCarriedRun }): ChatImportReport[] {
   const { store, s, db, registry, run } = input;
   const reports: ChatImportReport[] = [];
   const wasImported = new Set(input.earlier.map((e) => e.chat));
@@ -367,7 +390,7 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
         }
         const source = chat.branch ? byId.get(chat.branch.from) : undefined;
         const link = source && s.chat(source.chatId) ? linkOf(chat, source) : null;
-        return { done: db.transaction(() => importOne(s, db, registry, chat, link, turnOfShared))(), link, replaced: earlier || wasImported.has(id), own: restored() };
+        return { done: db.transaction(() => importOne(s, db, registry, chat, link, turnOfShared, input.keepRun))(), link, replaced: earlier || wasImported.has(id), own: restored() };
       })();
     } catch (error) {
       store.dropCaches();

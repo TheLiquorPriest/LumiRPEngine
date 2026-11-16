@@ -7,6 +7,7 @@
 
 import type { Setting } from "../app/setting-list";
 import { runtimeFoldersOf } from "./runtime-folders";
+import type { CarriedRuns } from "./import-chats";
 import { migrate } from "./migrate";
 import type { TreeLayout } from "./own-files";
 import { reportText } from "./report";
@@ -47,9 +48,10 @@ export interface CliIo {
 /**
  * Runs the migration from the command line's words; the exit code: 0 done, 1 refused or failed, 2
  * misused. `tree` is the file tree's layout, which says where the user's own files go; `settings` the
- * app's one registry of settings, which takes each value the run carries as its own reader takes it.
+ * app's one registry of settings, which takes each value the run carries as its own reader takes it;
+ * `runs` the turn lane's writer of a carried turn's run record, with its tables.
  */
-export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[]): Promise<number> {
+export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[], runs?: CarriedRuns): Promise<number> {
   const values: Record<string, string> = {};
   const folders: Record<string, "mine" | "theirs"> = {};
   const switches = new Set<string>();
@@ -85,7 +87,7 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
   const found = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
   try {
-    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}) });
+    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
     return switches.has("rehearse") || ran ? 0 : 1;
   } catch (error) {
