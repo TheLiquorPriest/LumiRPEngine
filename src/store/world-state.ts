@@ -24,7 +24,7 @@ import { standing } from "./facts";
 import { eventOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
 import { LANES, STORE_OPS, StoreInputError, type ChangeRow, type Mark, type StoreState } from "./types";
-import { factFields, markFields, type TreeView } from "./view";
+import { factFields, markFields, type TreeView, type ViewReading } from "./view";
 import { readPart, wordLine, type Part, type ViewLine } from "./words";
 
 /** Every fixed value of the world state, each a setting with this default (Appendix D.1). */
@@ -145,18 +145,20 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const nameOf = (ref: string): string => view.nameOf(ref) ?? ref.replace(/^(place|entity):/, "");
 
   const sections: Partial<Record<WorldStateSection, ViewLine[]>> = {};
+  // Each level's reflection says what falls due under it in the same span the due section lists, when the reading has a due source.
+  const reading: ViewReading | undefined = input.due === undefined ? undefined : { due: input.due, ahead: settings.dueAhead };
   if (want("horizon")) {
     const left = new Set<string>(horizon);
     const said = new Set<string>();
     sections.horizon = entries.flatMap((h): ViewLine[] => {
-      if (h.ref !== null) return left.delete(h.ref) ? horizonLines(view, h.ref, input.map) : [];
+      if (h.ref !== null) return left.delete(h.ref) ? horizonLines(view, h.ref, input.map, reading) : [];
       if (said.has(h.at)) return [];
       said.add(h.at);
       return [{ kind: "horizon_words", depth: 0, fields: { text: h.at } }];
     });
   }
-  if (want("above")) sections.above = chain.flatMap((ref) => view.level(ref, 0, "own") ?? []);
-  if (want("around")) sections.around = around(view, scenePlace, new Set([...within, ...chain])).flatMap((ref) => view.level(ref, 0, "none") ?? []);
+  if (want("above")) sections.above = chain.flatMap((ref) => view.level(ref, 0, "own", reading) ?? []);
+  if (want("around")) sections.around = around(view, scenePlace, new Set([...within, ...chain])).flatMap((ref) => view.level(ref, 0, "none", reading) ?? []);
   const before = turn.parent === null ? null : store.turn(turn.parent);
   const lastRows = before === null ? [] : store.changes(before.id);
   // How many more a section's span holds than its lines list (null: more, uncounted); its cut counts them with what it leaves out.
@@ -305,8 +307,8 @@ function dueShown(part: Part, source: DueSource, state: StoreState, span: { from
 }
 
 /** A horizon entry in full, with a place's map after its own values. */
-function horizonLines(view: TreeView, ref: string, map: MapText | undefined): ViewLine[] {
-  const lines = view.query(ref, "full")?.lines ?? [];
+function horizonLines(view: TreeView, ref: string, map: MapText | undefined, reading: ViewReading | undefined): ViewLine[] {
+  const lines = view.query(ref, "full", reading)?.lines ?? [];
   if (!ref.startsWith("place:")) return lines;
   const printed = map === undefined ? null : map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
   const text = printed === null ? null : printed.text;

@@ -17,25 +17,33 @@ const lines = (text: string): string[] => text.split("\n");
 const HEADER = /^( *)\S.* \[[^\]]+\] \([^)]+\)( — .+)?$/;
 const VALUE = /^( *)· [^:]+: /;
 
-/** Every line is a level's header or one of its values, each value right under its level, each level two spaces in from its parent, and no deeper than asked. */
+/**
+ * Every line is a level's header or one of its values, each value right under its level, each level two spaces in from its parent,
+ * and no deeper than asked: the groups heading adds no depth, its groups standing at its own.
+ */
 function shapeOf(text: string, depth: number): void {
   let header = -1;
   let deepest = 0;
   const levels: number[] = [];
+  // The indent of an open groups heading, while its groups are read.
+  let groups: number | null = null;
   for (const line of lines(text)) {
     const h = HEADER.exec(line);
     if (h) {
-      const level = (h[1] ?? "").length / 2;
-      expect(Number.isInteger(level)).toBe(true);
-      expect(level <= (levels.at(-1) ?? -1) + 1).toBe(true);
-      levels.push(level);
+      const indent = (h[1] ?? "").length / 2;
+      expect(Number.isInteger(indent)).toBe(true);
+      expect(indent <= (levels.at(-1) ?? -1) + 1).toBe(true);
+      levels.push(indent);
+      if (groups !== null && indent <= groups) groups = null;
+      const level = groups === null ? indent : indent - 1;
+      if (line.includes("[groups] (groups)") && indent > 0) groups = indent;
       header = level;
       deepest = Math.max(deepest, level);
       continue;
     }
     const v = VALUE.exec(line);
     expect(v).not.toBeNull();
-    expect((v?.[1] ?? "").length).toBe(header * 2 + 2);
+    expect((v?.[1] ?? "").length).toBe((levels.at(-1) ?? 0) * 2 + 2);
     // Values belong to levels above the cut, never to the levels at it.
     expect(header < depth || header === 0).toBe(true);
   }
@@ -53,6 +61,7 @@ describe("the tree view", () => {
       "  · currency: USD ($)",
       "  Hollow Vale [vale] (place) — 4 people (Bram, Wren, Odile), 6 things, 6 places, 1 record, 1 open",
       "  Groups [groups] (groups) — 1 group",
+      "    The Lamplighters [lamplighters] (Faction)",
       "  Elsewhere [elsewhere] (not in any place) — 1 record",
     ]);
     const wren = say(view, POV, "full");

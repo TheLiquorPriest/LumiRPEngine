@@ -44,6 +44,11 @@ export const STORE_OPS = {
    * ref. It replaces the standing fact of the same `about` and `key`, and the fact `replaces` names.
    */
   fact: "store.fact",
+  /**
+   * A value set at the world's own level (READINGS B-33): `{ at: "world", key, value }`, any JSON value, null taking it off. Every
+   * level below takes it unless it sets its own.
+   */
+  value: "store.value",
 } as const;
 
 /** Why a change did not apply, or what it did not add up to: a code and its values, never words. */
@@ -286,6 +291,8 @@ export interface StoreState {
   facts: Record<string, Fact[]>;
   /** Each area's slice (`StoreArea`), by the area's name; an area absent holds its starting slice. */
   areas?: Record<string, JsonObject>;
+  /** The world's own values (`store.value`), by key; absent: none set. */
+  values?: Record<string, JsonValue>;
 }
 
 /**

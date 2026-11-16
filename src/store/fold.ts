@@ -366,6 +366,15 @@ function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
       if (about !== "") state.touched[about] = { turn: item.turn, n: item.n };
       return { applied: true, reports };
     }
+    case STORE_OPS.value: {
+      const key = typeof v.key === "string" ? v.key : "";
+      const values = { ...state.values };
+      if (v.value === null || v.value === undefined) delete values[key];
+      else values[key] = v.value;
+      state.values = values;
+      markParts(state, [{ ref: "world", part: key }], item);
+      return { applied: true, reports: [] };
+    }
     default:
       return { applied: false, reports: [noHandler(item.op)] };
   }

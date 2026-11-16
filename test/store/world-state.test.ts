@@ -19,8 +19,8 @@ const HEADINGS = ["### At hand", "### Above it", "### Around it", "### The rest 
 
 /** The grid lane's map, as a test gives it: a map for the common room only. */
 const MAP: MapText = { text: ({ place }) => (place === "common_room" ? { grid: "grid_inn", drawn: "d1", text: "+---+\n|W.B|\n+---+" } : null) };
-/** What time brings due, as a test gives it: the market opening in the span asked for. */
-const DUE: DueSource = { due: (_state, span) => ({ items: [{ at: span.from + 90, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the market opens" }], more: 0 }) };
+/** What time brings due, as a test gives it: the market opening in the span asked for, for the whole world (a level's reflection asks of its own and finds none). */
+const DUE: DueSource = { due: (_state, span, at) => (at === null ? { items: [{ at: span.from + 90, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the market opens" }], more: 0 } : { items: [], more: 0 }) };
 
 function played() {
   const ts = testStore();

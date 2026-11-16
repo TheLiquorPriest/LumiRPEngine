@@ -81,6 +81,11 @@ function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState
     if ((now.notes[at]?.text ?? "") !== (typeof v.text === "string" ? v.text : "")) return leftOf("changed_since", c);
     return { op: c.op, value: { at, text: before.notes[at]?.text ?? "" } };
   }
+  if (c.op === STORE_OPS.value) {
+    const key = typeof v.key === "string" ? v.key : "";
+    if (!jsonEqual(now.values?.[key] ?? null, v.value ?? null)) return leftOf("changed_since", c);
+    return { op: c.op, value: { at: "world", key, value: before.values?.[key] ?? null } };
+  }
   return leftOf("not_reversible", c);
 }
 

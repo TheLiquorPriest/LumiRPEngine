@@ -3,15 +3,17 @@
 // inside what holds it (`in`), else at its place, else, for a group, inside the group it belongs
 // to, under the groups; anything else is elsewhere. Nothing here is inferred.
 //
-// Each level shows its values with where they come from: its own; for a place, those the places
-// above it set and it does not; for a member of a group, those its groups set and it does not, the
-// nearest group first (a level's own value always wins), except the fields that only describe a
-// level; and those a game system keeps its own way (time, weather, coin, entry), named by the
+// Each level shows its values with where they come from: its own; then what the levels above it set
+// and it does not, the nearest first: for a member of a group, its groups; for a person or a thing,
+// what holds it and the places above it; for a place, the places above it; and last the world's own
+// values (a level's own value always wins), except the fields that only describe a level; and those
+// a game system keeps its own way (time, weather, coin, entry, currency, prices), named by the
 // system, so what the tree shows is what the sums use. Beside each value stand the facts recorded
 // on that level with the same key (plan §6.6): neither overwrites the other, and each says how
 // exact it is and the turn it is from. Each level carries a reflection of what is beneath it, made
 // from recorded values whenever the state is read: how many people, things and places, who of
-// note, what is open, the last turn that changed something there, and an agent's own line.
+// note, what is open, what falls due there in the time ahead (when the reading passes what time
+// brings due), the last turn that changed something there, and an agent's own line.
 //
 // A query is a point and a depth. It returns data: lines, each with its kind and its values, the
 // same shape at every level. No word here reaches an agent: `renderView` words a view with a part.
@@ -35,6 +37,14 @@ import { standing } from "./facts";
 import type { FoldEnv } from "./fold";
 import type { Fact, Mark, StoreState, Touched } from "./types";
 import type { View, ViewLine } from "./words";
+import type { DueSource } from "./world-state";
+
+/** What a reading of the tree passes in beyond the state: what time brings due, and how far ahead a reflection counts it. */
+export interface ViewReading {
+  due: DueSource;
+  /** Minutes of story time ahead (`worldState.dueAhead`). */
+  ahead: number;
+}
 
 export interface ViewOptions {
   /** Fields that describe a level itself and never pass down to what is inside it. */
@@ -48,6 +58,9 @@ export interface ViewOptions {
 /** What a level of the tree is: the world, a place, an entity, or one of the two levels the tree adds (the groups, and what is elsewhere). */
 export type NodeKind = "world" | "place" | "entity" | "groups" | "elsewhere";
 type Category = "person" | "group" | "thing" | "record";
+
+/** A level whose values another takes: its tree ref, its name, and what it sets. */
+type Above = { ref: string; name: string; fields: Record<string, JsonValue> };
 
 interface Node {
   ref: string;
@@ -106,6 +119,11 @@ export type Reflection = {
   notable: string[];
   /** Tracks still in progress there. */
   open: number;
+  /**
+   * What falls due beneath it in the time ahead: how many (null: more than one, uncounted), and the soonest, with the minutes until
+   * it. Null when nothing does, or the reading passed no due source.
+   */
+  due: { n: number | null; after: number; kind: string } | null;
   /** The number of the last turn that changed something there. */
   changed: number | null;
   /** An agent's own line on the level. */
@@ -155,6 +173,7 @@ function reflectionPieces(r: Reflection): JsonObject[] {
   count("groups", r.groups);
   count("records", r.records);
   count("open", r.open);
+  if (r.due !== null) pieces.push({ kind: "reflection_due", fields: { ...(r.due.n !== null ? { n: r.due.n, one: r.due.n === 1 } : { more: true }), after: r.due.after, kind: r.due.kind } });
   if (r.changed !== null) pieces.push({ kind: "reflection_changed", fields: { turn: r.changed } });
   if (r.note !== null) pieces.push({ kind: "reflection_note", fields: { text: r.note } });
   return pieces;
@@ -200,6 +219,8 @@ export class TreeView {
   private readonly ctx: ReadContext;
   /** While a query runs: each place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
   private stopsSeen: Map<string, { place: string; at: string }> | null = null;
+  /** While a reading that passed one runs: what time brings due, for the reflections. */
+  private reading: ViewReading | null = null;
 
   constructor(
     readonly env: FoldEnv,
@@ -392,9 +413,20 @@ export class TreeView {
       records: node.records,
       notable: node.notable.map((x) => x.name),
       open: node.open,
+      due: this.dueUnder(node.ref),
       changed: node.changed?.n ?? null,
       note: this.notes.get(node.ref) ?? null,
     };
+  }
+
+  /** What falls due under a level in the reading's time ahead: how many and the soonest; null without a due source, or with none due. */
+  private dueUnder(ref: string): Reflection["due"] {
+    if (this.reading === null) return null;
+    const now = this.state.world.clock;
+    const listing = this.reading.due.due(this.state, { from: now, to: now + this.reading.ahead }, ref, 1);
+    const soonest = listing.items[0];
+    if (soonest === undefined) return null;
+    return { n: listing.more === null ? null : listing.items.length + listing.more, after: soonest.at - now, kind: soonest.kind };
   }
 
   /** A level's own line as data: what it is, its marks, and its reflection. */
@@ -452,7 +484,10 @@ export class TreeView {
     return out;
   }
 
-  /** What the game systems keep their own way, for a place: its local time (at the query's own point, where the clock is a recorded value), weather and entry. */
+  /**
+   * What the game systems keep their own way, for a place: its local time (at the query's own point, where the clock is a recorded
+   * value), weather and entry, and at the query's own point the prices the economy quotes there, each the number its sums use.
+   */
   private placeSystems(id: string, root: boolean): ValueLine[] {
     const out: ValueLine[] = [];
     const clock = this.state.world.clock;
@@ -461,6 +496,8 @@ export class TreeView {
     if (sky !== null) out.push({ key: "weather", value: sky, from: { system: "weather" } });
     const entry = setEntryOf(this.ctx, id);
     if (entry) out.push({ key: "entry", value: entry.entry, from: entry.at === id ? { system: "orgs" } : { system: "orgs", ref: `place:${entry.at}`, name: own(this.doc.places, entry.at)?.name ?? entry.at } });
+    const offers = root ? (optionalQuery(this.ctx, "economy.offers_at")?.(this.ctx, id) ?? []) : [];
+    if (offers.length > 0) out.push({ key: "prices", value: offers.map((o) => `${o.name} ${formatMoney(o.cents, this.doc.currency)}`).join(", "), from: { system: "economy" } });
     return out;
   }
 
@@ -499,13 +536,16 @@ export class TreeView {
       if (clockRecorded(this.state)) lines.push({ key: "time", value: formatClock(calendarOf(doc), this.state.world.clock), from: { system: "calendar" }, ...this.timeMark() });
       if (this.state.world.revision !== BLANK_REVISION) {
         lines.push({ key: "time_zone", value: doc.calendar.timeZone });
-        lines.push({ key: "currency", value: `${doc.currency.code} (${doc.currency.symbol})` });
+        lines.push({ key: "currency", value: this.worldCurrency() });
       }
+      // The world's own values (`store.value`), each with the change that set it.
+      const marks = this.state.marks.world ?? {};
+      const taken = new Set(lines.map((l) => l.key));
+      for (const [key, v] of Object.entries(this.state.values ?? {})) if (!taken.has(key)) lines.push({ key, value: show(v), ...(marks[key] ? { mark: marks[key] } : {}) });
       return lines;
     }
     const marks = this.state.marks[node.ref] ?? {};
-    let above: { id: string; name: string; fields: Record<string, JsonValue> }[] = [];
-    let aboveRef = (id: string): string => `place:${id}`;
+    let above: Above[] = [];
     if (node.kind === "place") {
       const p = own(doc.places, node.id);
       lines.push(...this.placeSystems(node.id, inherited));
@@ -517,7 +557,7 @@ export class TreeView {
         if (setter) lines.push({ key: "time_zone", value: zone, from: { ref: `place:${setter.id}`, name: setter.name } });
         else if (this.state.world.revision !== BLANK_REVISION) lines.push({ key: "time_zone", value: zone, from: { ref: "world", name: doc.name } });
       }
-      if (inherited) above = this.placeChain(p?.parent ?? null);
+      if (inherited) above = this.aboveOf(node);
     } else if (node.kind === "entity") {
       const e = this.state.world.entities[node.id] as EntityState;
       lines.push({ key: "tier", value: tierLabel(doc, e.tier), ...(marks.tier ? { mark: marks.tier } : {}) });
@@ -543,24 +583,51 @@ export class TreeView {
           .sort();
         if (members.length > 0) lines.push({ key: "members", value: members.join(", ") });
       }
-      if (inherited) {
-        above = this.groupChain(node.id);
-        aboveRef = (id) => `entity:${id}`;
-      }
+      if (inherited) above = this.aboveOf(node);
     }
     const taken = new Set(lines.map((l) => l.key));
     for (const [key, v] of Object.entries(ownFields)) if (!taken.has(key)) lines.push({ key, value: show(v), ...(marks[key] ? { mark: marks[key] } : {}) });
-    // What the levels above set and this one does not: for a place, the places above it; for a
-    // member, its groups. The nearest one's, named. Shown at the query's own point only.
+    // What the levels above set and this one does not, the nearest one's, named. Shown at the query's own point only.
     const kept = new Set([...taken, ...Object.keys(ownFields), ...this.options.ownOnly]);
     for (const p of above) {
       for (const [key, v] of Object.entries(p.fields)) {
         if (kept.has(key)) continue;
         kept.add(key);
-        lines.push({ key, value: show(v), from: { ref: aboveRef(p.id), name: p.name } });
+        lines.push({ key, value: show(v), from: { ref: p.ref, name: p.name } });
       }
     }
+    // The currency every place and person counts in, where none above sets its own: the economy's, the world's.
+    const counts = node.kind === "place" || node.category === "person";
+    if (inherited && counts && !kept.has("currency") && this.state.world.revision !== BLANK_REVISION) lines.push({ key: "currency", value: this.worldCurrency(), from: { system: "economy", ref: "world", name: doc.name } });
     return lines;
+  }
+
+  /** The world's currency as a value: its code and symbol. */
+  private worldCurrency(): string {
+    return `${this.doc.currency.code} (${this.doc.currency.symbol})`;
+  }
+
+  /**
+   * The levels whose values a level takes, nearest first: for a member of a group, its groups; then, for a person or a thing, what
+   * holds it, up to the place it is in, and the places above; for a place, the places above it; last the world's own values.
+   */
+  private aboveOf(node: Node): Above[] {
+    const out: Above[] = [];
+    const places = (id: string | null): Above[] => this.placeChain(id).map((p) => ({ ref: `place:${p.id}`, name: p.name, fields: p.fields }));
+    if (node.kind === "place") out.push(...places(own(this.doc.places, node.id)?.parent ?? null));
+    else if (node.kind === "entity") {
+      out.push(...this.groupChain(node.id).map((g) => ({ ref: `entity:${g.id}`, name: g.name, fields: g.fields })));
+      const seen = new Set<string>([node.ref]);
+      let at = node.parent === null ? undefined : this.nodes.get(node.parent);
+      for (; at?.kind === "entity" && !seen.has(at.ref); at = at.parent === null ? undefined : this.nodes.get(at.parent)) {
+        seen.add(at.ref);
+        // A person's own fields describe the person: what a person carries takes nothing from them, only from what holds them.
+        if (at.category !== "person" && !out.some((x) => x.ref === at?.ref)) out.push({ ref: at.ref, name: at.name ?? at.id, fields: (this.state.world.entities[at.id] as EntityState).fields });
+      }
+      if (at?.kind === "place") out.push(...places(at.id));
+    }
+    out.push({ ref: "world", name: this.doc.name, fields: this.state.values ?? {} });
+    return out;
   }
 
   /** A level's lines: its own line and, as asked, its values with the facts standing beside them, one level further in. */
@@ -601,37 +668,55 @@ export class TreeView {
 
   /**
    * One level's lines at `depth` in: its own line and, as asked, its values with its facts. For a
-   * view put together level by level (the world state). Null when nothing is called `at`.
+   * view put together level by level (the world state). Null when nothing is called `at`. With a
+   * reading, its reflection says what falls due under it.
    */
-  level(at: string, depth: number, shown: ValuesShown): ViewLine[] | null {
+  level(at: string, depth: number, shown: ValuesShown, reading?: ViewReading): ViewLine[] | null {
     const ref = this.resolve(at);
     const node = ref === null ? undefined : this.nodes.get(ref);
     if (!node) return null;
-    return readPass(() => this.levelLines(node, depth, shown));
+    return this.withReading(reading, () => readPass(() => this.levelLines(node, depth, shown)));
+  }
+
+  /** Runs `read` with the reading's due source (none: no reflection says anything of due). */
+  private withReading<T>(reading: ViewReading | undefined, read: () => T): T {
+    this.reading = reading ?? null;
+    try {
+      return read();
+    } finally {
+      this.reading = null;
+    }
   }
 
   /**
    * The tree at `at`, to `depth` levels below it (`full`: all of them): the level itself with its
    * values (and what it inherits), each level above the depth with its values and its levels, and
-   * each level at the depth as its own line. Null when nothing in the tree is called `at`. An engine
-   * walk cut short by its setting in this state or its world adds a line saying where it stopped.
+   * each level at the depth as its own line. The groups level is a heading: the groups in it stand
+   * at its own depth, so the world at depth 1 has a line for each region and each group. Null when
+   * nothing in the tree is called `at`. An engine walk cut short by its setting in this state or its
+   * world adds a line saying where it stopped. With a reading, each reflection says what falls due
+   * under its level in the time ahead.
    */
-  query(at: string, depth: number | "full"): View | null {
+  query(at: string, depth: number | "full", reading?: ViewReading): View | null {
     const ref = this.resolve(at);
     if (ref === null) return null;
     const max = depth === "full" ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(depth));
     const lines: ViewLine[] = [];
     this.stopsSeen = new Map();
-    readPass(() => {
-      const walk = (r: string, level: number): void => {
-        const node = this.nodes.get(r) as Node;
-        const atCut = level > 0 && level >= max;
-        lines.push(...this.levelLines(node, level, atCut ? "none" : level === 0 ? "all" : "own"));
-        if (level >= max) return;
-        for (const c of node.children) walk(c, level + 1);
-      };
-      walk(ref, 0);
-    });
+    this.withReading(reading, () =>
+      readPass(() => {
+        // `indent` is how far in a line stands; `level` how many levels down the query has gone, which the groups heading does not add to.
+        const walk = (r: string, indent: number, level: number): void => {
+          const node = this.nodes.get(r) as Node;
+          const heading = node.kind === "groups" && level > 0;
+          const atCut = level > 0 && level >= max && !heading;
+          lines.push(...this.levelLines(node, indent, atCut ? "none" : level === 0 ? "all" : heading ? "none" : "own"));
+          if (level >= max && !heading) return;
+          for (const c of node.children) walk(c, indent + 1, heading ? level : level + 1);
+        };
+        walk(ref, 0, 0);
+      }),
+    );
     const stops = this.stopsSeen;
     this.stopsSeen = null;
     for (const s of stops.values()) lines.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.placeDepth" } });

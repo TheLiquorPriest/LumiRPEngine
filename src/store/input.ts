@@ -49,6 +49,9 @@ export function checkChange(c: ChangeInput, index: number, areas?: Areas): void 
         throw new StoreInputError(`${at}: a fact is { id, about: a tree ref (world, place:<id>, entity:<id>), key, value, replaces? }`);
       }
       return;
+    case STORE_OPS.value:
+      if (!isRecord(v) || v.at !== "world" || typeof v.key !== "string" || v.key === "" || !("value" in v)) throw new StoreInputError(`${at}: a world value is { at: "world", key, value }`);
+      return;
     default:
       throw new StoreInputError(`${at}: the store has no operation ${c.op}`);
   }
