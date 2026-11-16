@@ -11,7 +11,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { renderTemplate } from "rp-harness/helpers";
+import { type renderTemplate, type TemplateRender, templateOf } from "rp-harness/helpers";
 
 /** The folder the shipped guidance lives in, in this repository: the lowest level of every chat's files. */
 export const SHIPPED_GUIDANCE = join(import.meta.dir, "..", "..", "guidance");
@@ -74,11 +74,14 @@ const TAG = /\{\{(.*?)\}\}/g;
 /** What a list put in with `{{name}}` is joined by. */
 export const LIST_JOIN = ", ";
 
-/** A template, parsed once and filled as often as asked. */
+/** The fields RPH's renderer takes (a host is given no name for them). */
+type RenderFields = NonNullable<Parameters<typeof renderTemplate>[1]>;
+
+/** A template, read once and filled as often as asked. */
 export class Template {
   private constructor(
     private readonly nodes: Node[],
-    private readonly source: string,
+    private readonly fill: (fields: RenderFields) => TemplateRender,
   ) {}
 
   /** Parses a template; a tag that is not one of the syntax's, or a block left open, throws. */
@@ -111,15 +114,15 @@ export class Template {
     }
     if (last < text.length) into().push({ type: "text", text: text.slice(last) });
     if (stack.length > 0) throw new Error(`${what}: {{#${stack.at(-1)?.path}}} is never closed`);
-    return new Template(root, source);
+    return new Template(root, templateOf(source));
   }
 
   /** The text filled from `contexts`, innermost last. */
   render(...contexts: readonly Fields[]): string {
-    // The one renderer of both repositories (R-44): the contexts merged, the innermost winning where it has a value.
+    // The one renderer of both repositories (R-44), its template read once: the contexts merged, the innermost winning where it has a value.
     const merged: Record<string, unknown> = {};
     for (const context of contexts) for (const [key, value] of Object.entries(context)) if (value !== undefined) merged[key] = value;
-    return renderTemplate(this.source, merged as Parameters<typeof renderTemplate>[1]).text ?? "";
+    return this.fill(merged as RenderFields).text ?? "";
   }
 
   /** A pattern every text this template can fill to matches: its words as written, anything where a field goes, a block any number of times. */

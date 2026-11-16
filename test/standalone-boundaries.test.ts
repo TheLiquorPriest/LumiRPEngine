@@ -6,7 +6,7 @@
 // What the rules keep true:
 //   - the light extension holds nothing of the application (it runs inside Lumiverse);
 //   - the pages hold nothing of the server;
-//   - the store knows nothing of Lumiverse, of the harness, or of who calls it;
+//   - the store knows nothing of Lumiverse, of the harness, or of who calls it (it words its lines by RPH's pure helpers' one renderer);
 //   - which zones may still import today's build at all; which of its files each still imports, and
 //     LumiAH, are the fence's (test/removal/): every file of today's build has a fate, nothing that
 //     stays imports one that goes but the imports listed as not yet moved, and LumiAH is reached
@@ -39,7 +39,7 @@ interface Rule {
   sandboxed?: true;
   /** May import the harness package. */
   harness?: true;
-  /** May import RPH's module of pure helpers (`HELPERS`) though not the harness: the migration, which carries today's settings into RPH's. */
+  /** May import RPH's module of pure helpers (`HELPERS`) though not the harness: the migration, which carries today's settings into RPH's, and the store, which words its lines by RPH's one renderer. */
   helpers?: true;
 }
 
@@ -47,7 +47,7 @@ const PURE: readonly Carried[] = ["shared", "engine", "packs"];
 
 /** The application's skeleton is what every server area plugs into, so each may import it. It imports none of them, but where it puts them together. */
 const RULES: Record<Zone, Rule> = {
-  store: { zones: [], carried: PURE },
+  store: { zones: [], carried: PURE, helpers: true },
   app: { zones: [], carried: ["shared"], harness: true },
   tree: { zones: ["app"], carried: ["shared"], harness: true },
   adapter: { zones: ["app"], carried: ["shared"], harness: true },
@@ -219,7 +219,8 @@ describe("the standalone application's boundaries", () => {
     expect(harnessImport(CONTRACT, true, "store", RULES.store)).toBeNull();
     expect(harnessImport(CONTRACT, false, "store", RULES.store)).toContain("not imported here");
     expect(harnessImport(HELPERS, false, "migrate", RULES.migrate)).toBeNull();
-    expect(harnessImport(HELPERS, false, "store", RULES.store)).toContain("not imported here");
+    expect(harnessImport(HELPERS, false, "store", RULES.store)).toBeNull();
+    expect(harnessImport(HELPERS, false, "play", RULES.play)).toContain("not imported here");
     expect(harnessImport("rp-harness", false, "migrate", RULES.migrate)).toContain("not imported here");
   });
 
