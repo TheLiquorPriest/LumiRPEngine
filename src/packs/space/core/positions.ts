@@ -18,6 +18,7 @@ import { selectorMatches } from "../../../engine/selector";
 import { canSeePlace, knownBySelector } from "../../../engine/visibility";
 import { between, sees, sightFrom } from "./grid-measure";
 import { groundAt, HOLD_DEPTH, spotData, spotOf, squareOf, standsAt, type GridSpot, type Ground, type GroundSource } from "./grid-model";
+import { WHERE_EVENT, whereOf } from "./grid-play";
 import { walk, type Walk } from "./grid-path";
 import { placePath } from "./map-scope";
 
@@ -32,6 +33,21 @@ function posEvent(entity: EntityId, at: GridSpot | null, from: GridSpot | null):
 /** A cell set without the grid system: the `set` events for whichever of x and y change. */
 function setCell(entity: EntityId, fields: JsonObject, cell: Cell): LedgerEvent[] {
   return [...(fields.x !== cell.x ? [{ type: "set" as const, entity, field: "x", value: cell.x }] : []), ...(fields.y !== cell.y ? [{ type: "set" as const, entity, field: "y", value: cell.y }] : [])];
+}
+
+/** The words of where something was said to be that `spawn` and `store` once kept as fields of its own. */
+const SAID_FIELDS: readonly string[] = ["said_on", "said_in", "said_by"];
+
+/**
+ * What a move leaves behind of where someone or something was within its place besides the square:
+ * its zone and words (`space.where`), and the words a thing still carries as fields from before. A
+ * position is of one place: a move to another, or into a holder, leaves none of it.
+ */
+function forgetEvents(ctx: ReadContext, entity: EntityId): LedgerEvent[] {
+  const fields = own(ctx.state.entities, entity)?.fields ?? {};
+  const out: LedgerEvent[] = whereOf(ctx.state, entity) !== null ? [{ type: WHERE_EVENT, data: { entity, zone: null, words: null } }] : [];
+  for (const field of SAID_FIELDS) if (typeof fields[field] === "string") out.push({ type: "set", entity, field, value: null });
+  return out;
 }
 
 /**
@@ -82,12 +98,14 @@ export function sightFor(source: GroundSource, scope: PlaceId, from: Cell, radiu
 export function arrivalEvents(ctx: ReadContext, entity: EntityId, to: PlaceId): LedgerEvent[] {
   const e = own(ctx.state.entities, entity);
   if (!e) return [];
+  const moved = placeOfEntity(ctx.state, entity) !== to;
+  const forgotten = moved ? forgetEvents(ctx, entity) : [];
   if (!mapSettingsOf(ctx.world).grid.movement && entity === ctx.world.pov && ctx.levelOf(entity, "space") >= 3) {
     const cell = own(ctx.world.places, to)?.cell;
-    if (cell) return setCell(entity, e.fields, cell);
+    if (cell) return [...setCell(entity, e.fields, cell), ...forgotten];
   }
   const had = typeof e.fields.x === "number" || typeof e.fields.y === "number";
-  return had && placeOfEntity(ctx.state, entity) !== to ? [posEvent(entity, null, spotOf(ctx.world, ctx.state, entity))] : [];
+  return [...(had && moved ? [posEvent(entity, null, spotOf(ctx.world, ctx.state, entity))] : []), ...forgotten];
 }
 
 /**
@@ -132,9 +150,10 @@ export function stepEvents(ctx: ReadContext, entity: EntityId, to: Cell): Ledger
 export function layEvents(ctx: ReadContext, thing: EntityId, place: PlaceId | null, by: EntityId | null): LedgerEvent[] {
   const e = own(ctx.state.entities, thing);
   if (!e) return [];
+  const forgotten = forgetEvents(ctx, thing);
   const spot = by !== null && place !== null && mapSettingsOf(ctx.world).grid.movement ? spotOf(ctx.world, ctx.state, by) : null;
-  if (spot && place !== null && standingGrid(ctx.world, place)?.scope === spot.scope) return [posEvent(thing, spot, null)];
-  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(thing, null, null)] : [];
+  if (spot && place !== null && standingGrid(ctx.world, place)?.scope === spot.scope) return [posEvent(thing, spot, null), ...forgotten];
+  return [...(typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(thing, null, null)] : []), ...forgotten];
 }
 
 /**

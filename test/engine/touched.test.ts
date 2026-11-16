@@ -17,7 +17,7 @@ import { touchedAspect, touchedField, touchedRelation } from "../../src/engine/t
 import { chatDraftOf, draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
-import { doorsAt, editedMap, shapeOf, squareEditsOf, type DoorState, type Shape } from "../../src/packs/space/core/grid-play";
+import { doorsAt, editedMap, shapeOf, squareEditsOf, type DoorState, type Shape, whereOf } from "../../src/packs/space/core/grid-play";
 import { baseWorld, fold, POV, startState } from "../packs/support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -206,10 +206,11 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "space.route", data: { route: "lane", open: false } },
   // A place made in play is the space slice's (ITEMS-SPEC §3.5), never an entity's definition.
   { type: "space.place", data: { place: "booth", def: { id: "booth", name: "Booth", parent: "taproom", fields: {}, made: { as: "spot", by: "story", at: 0, why: "A quiet corner" } } } },
-  // What play changes on a grid besides who stands where (plan §8.2) is the space slice's too, never an entity's definition: a door's state, a thing's footprint and what it blocks, and squares of a map drawn anew. An Upgrade carries each as play left it, as the test of what play changed on a grid shows below.
+  // What play changes on a grid besides who stands where (plan §8.2) is the space slice's too, never an entity's definition: a door's state, a thing's footprint and what it blocks, squares of a map drawn anew, and a zone or words for where someone or something is within its place (`space.where`, which writes the slice only and so declares nothing). An Upgrade carries each as play left it, as the test of what play changed on a grid shows below.
   { type: "space.door", data: { scope: "inn", x: 6, y: 2, state: "locked" } },
   { type: "space.shape", data: { entity: "table", size: [2, 1], way: true, view: false } },
   { type: "space.squares", data: { map: "inn_ground", squares: [{ x: 9, y: 3, symbol: "o" }], legend: { o: { terrain: "oven", blocked: true } } } },
+  { type: "space.where", data: { entity: "you", zone: "by the hearth", words: "behind the bar" } },
   // This chat's own change to the world's places, paths and maps is the engine's world slice (DEPTH2-PLAN §2), never an entity's definition: an Upgrade carries it to the new revision itself (`carryDraft`), as the last test here shows.
   { type: "engine.world", data: { collection: "routes", id: "back_way", value: { id: "back_way", from: "inn", to: "town", modes: { walk: { minutes: 5 } }, bidirectional: true }, over: null } },
   { type: "economy.anchor", data: { entity: "dev", band: "comfortable", typical: 3000, base: 2000 } },
@@ -400,11 +401,12 @@ describe("what play changed on a grid, across an Upgrade (plan §8.2)", () => {
       return migrateWorld(w);
     };
     const a = revision(["#########", "#.......#", "#.......+", "#########"], {}, "Long table");
-    // In play the east door is locked, the table is set out three squares long, blocking the way, and rubble falls on a square.
+    // In play the east door is locked, the table is set out three squares long, blocking the way, rubble falls on a square, and the table is said to stand under the window.
     const state = fold(reg, a, initialState(a, "ra", reg), [
       { type: "space.door", data: { scope: "inn", x: 8, y: 2, state: "locked" } },
       { type: "space.shape", data: { entity: "table", size: [3, 1], way: true, view: false } },
       { type: "space.squares", data: { map: "room", squares: [{ x: 3, y: 1, symbol: "x" }], legend: { x: rubble } } },
+      { type: "space.where", data: { entity: "table", zone: "under the window" } },
     ]);
     // The next revision is the user's own edit of the map in Build: a hearth in a corner, and a bench on the square the rubble covers.
     const b = revision(["#########", "#H.b....#", "#.......+", "#########"], { H: hearth, b: bench }, "Long table");
@@ -426,6 +428,8 @@ describe("what play changed on a grid, across an Upgrade (plan §8.2)", () => {
     applyMarker(state, { kind: "migrate", to: "rc", merge: {} }, env);
     expect(state.entities.table?.name).toBe("Trestle table");
     expect(room(c)).toEqual({ ...asPlayed, layout: ["####w####", "#H.x....#", "#.......+", "#########"], legend: { H: hearth, b: bench, w: pane, x: rubble } });
+    // Where it stands within its place is play's as it left it, through both.
+    expect(whereOf(state, "table")).toEqual({ zone: "under the window" });
   });
 });
 

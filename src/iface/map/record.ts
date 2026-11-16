@@ -12,7 +12,7 @@ import type { MapCellDef, WorldDoc } from "../../shared/world";
 import { baseWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { chatDraftOf, DRAFT_EVENT, draftEvent, type DraftEdit } from "../../engine/world-draft";
-import { DOOR_EVENT, SHAPE_EVENT, SQUARES_EVENT } from "../../packs/space/core/grid-play";
+import { DOOR_EVENT, SHAPE_EVENT, SQUARES_EVENT, WHERE_EVENT, type Whereabouts, whereOf } from "../../packs/space/core/grid-play";
 import { POS_EVENT } from "../../packs/space/core/positions";
 import type { ChangeInput } from "../../store/types";
 import { cellOf, type DoorState, type Drawn, type Moving, type Piece, type Square } from "../../packs/space/core/grid-model";
@@ -31,6 +31,16 @@ export function positionEvent(grid: Pick<Drawn, "scope">, id: EntityId, at: Squa
 /** That event as a change to record. */
 export function positionChange(grid: Pick<Drawn, "scope">, id: EntityId, at: Square | null, from: Square | null): ChangeInput {
   return { lane: "engine", op: POS_EVENT, value: positionEvent(grid, id, at, from) };
+}
+
+/** The `space.where` event that keeps where `id` is within its place besides a square, a zone or words, written whole (neither: none kept). */
+export function whereEvent(id: EntityId, where: Whereabouts | null): JsonObject {
+  return { type: WHERE_EVENT, data: { entity: id, zone: where?.zone ?? null, words: where?.words ?? null } };
+}
+
+/** Whether play has said anything of where `id` is within its place besides its square (a zone or words). */
+export function hasWhere(state: Readonly<WorldState>, id: EntityId): boolean {
+  return whereOf(state, id) !== null;
 }
 
 /**

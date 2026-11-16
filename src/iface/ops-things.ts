@@ -26,6 +26,7 @@ import { isThing, possessorOf, restOf, spotOf } from "../engine/things";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { bestiaryOf, bestiaryRow } from "./bestiary";
 import { find, findOptional, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, type OpDef, textArg, type Unread, unknownFields } from "./ops";
+import { hasWhere, whereEvent } from "./map/record";
 import type { Found, Want } from "./reading";
 import { PROVENANCE_PROPERTIES } from "./source";
 import { textOf } from "./texts";
@@ -88,36 +89,73 @@ function squareArg(o: OpContext, args: JsonObject = o.args): [number, number] | 
   return notAs(o, "square", v, "square");
 }
 
-/**
- * Puts someone or something at a square, beside someone, or in a zone of the place's map, through
- * the grid's own placing, as `args` say (the call's own, or a companion's entry of `with`). What the
- * grid says of it (the way taken and its time) is said in the answer, as the map's part words it;
- * what does not add up where it now stands (a square in a wall, over something that blocks, no way
- * there) is a report kept with the change; and a square code chose is recorded as an assumption.
- */
-function placeOnMap(o: OpContext, who: EntityId, place: string, args: JsonObject = o.args): Unread | undefined {
-  const square = squareArg(o, args);
-  if (isUnread(square)) return square;
-  const near = args.near === undefined || args.near === null ? undefined : find(o, "near", "entity", false, args.near);
-  if (near !== undefined && isUnread(near)) return near;
-  const zone = textArg(args, "zone");
-  if (square === undefined && near === undefined && zone === undefined) return undefined;
-  const grid = o.call.deps.grid;
-  const placed = grid.place({ state: { ...o.reading.state, world: o.draft.w.state }, env: o.call.deps.env, who, place, ...(square ? { square } : {}), ...(near ? { near: near.id } : {}), ...(zone !== undefined ? { zone } : {}) });
-  if ("problem" in placed) return { line: placed.problem, fields: { n: o.n, op: o.op, ...placed.fields } };
-  const events = placed.events as unknown as LedgerEvent[];
-  const bad = placed.filled === true ? o.draft.fillWith(events) : o.draft.applyAll(events);
-  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-  for (const said of placed.said ?? []) o.reply.line("on_map", { n: o.n, op: o.op, said });
-  for (const r of placed.reports ?? []) o.reply.reported(r.line, { n: o.n, op: o.op, ...r.fields }, r.words);
-  return undefined;
-}
-
 /** Words given for where something goes that name nothing there is, nor anything of another kind, with what says so. */
 interface SaidWhere {
   field: string;
   words: string;
   unread: Unread;
+}
+
+/**
+ * What a call says of where someone or something is within its place besides a square, gathered as the
+ * call goes: words that name nothing (`said`), a zone the map has no square for, words already worded
+ * (beside someone with no square to stand on), and whether it was put on a square, which leaves no
+ * old words behind.
+ */
+interface Soft {
+  said: SaidWhere[];
+  words: string[];
+  zone?: string;
+  squared: boolean;
+}
+
+const noSoft = (): Soft => ({ said: [], words: [], squared: false });
+
+/**
+ * Puts someone or something at a square, beside someone, or in a zone of the place's map, through
+ * the grid's own placing, as `args` say (the call's own, or a companion's entry of `with`). What the
+ * grid says of it (the way taken and its time) is said in the answer, as the map's part words it;
+ * what does not add up where it now stands (a square in a wall, a full room, no way there) is a
+ * report kept with the change; and a square code chose is recorded as an assumption. Where there is
+ * no square to give (no map, no such zone, no one to stand beside, or words that name nothing) the
+ * zone or the words are kept as its position (`soft`), never refused; only a square that does not
+ * exist is, answered with what does.
+ */
+function placeOnMap(o: OpContext, who: EntityId, place: string | null, args: JsonObject, soft: Soft): Unread | undefined {
+  const square = squareArg(o, args);
+  if (isUnread(square)) return square;
+  const saidNear = args.near;
+  let near: Found | undefined;
+  if (saidNear !== undefined && saidNear !== null) {
+    const r = find(o, "near", "entity", false, saidNear);
+    if (!isUnread(r)) near = r;
+    else if (r.line === "unknown" && r.fields.other === "" && typeof saidNear === "string") soft.said.push({ field: "near", words: saidNear.trim(), unread: r });
+    else return r;
+  }
+  const zone = textArg(args, "zone");
+  if (square === undefined && near === undefined && zone === undefined) return undefined;
+  // With no place there is no map: a zone or someone to stand beside stay as words until it is given a place.
+  if (place === null) {
+    if (square !== undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
+    if (zone !== undefined) soft.zone = zone;
+    if (near !== undefined) soft.words.push(`near ${o.reading.nameOf(near.id)}`);
+    return undefined;
+  }
+  const grid = o.call.deps.grid;
+  const placed = grid.place({ state: { ...o.reading.state, world: o.draft.w.state }, env: o.call.deps.env, who, place, ...(square ? { square } : {}), ...(near ? { near: near.id } : {}), ...(zone !== undefined ? { zone } : {}) });
+  if ("problem" in placed) return { line: placed.problem, fields: { n: o.n, op: o.op, ...placed.fields } };
+  if ("kept" in placed) {
+    if (placed.kept.zone !== undefined) soft.zone = placed.kept.zone;
+    if (placed.kept.words !== undefined) soft.words.push(placed.kept.words);
+  } else {
+    const events = placed.events as unknown as LedgerEvent[];
+    const bad = placed.filled === true ? o.draft.fillWith(events) : o.draft.applyAll(events);
+    if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+    soft.squared = true;
+    for (const said of placed.said ?? []) o.reply.line("on_map", { n: o.n, op: o.op, said });
+  }
+  for (const r of placed.reports ?? []) o.reply.reported(r.line, { n: o.n, op: o.op, ...r.fields }, r.words);
+  return undefined;
 }
 
 /**
@@ -133,12 +171,17 @@ function whereNamed(o: OpContext, field: string, want: Want, said: SaidWhere[]):
   return undefined;
 }
 
-/** Words of where something was said to be, kept on it (`said_<field>`) and said once in the answer. */
-function keepWords(o: OpContext, id: EntityId, said: readonly SaidWhere[]): Unread | undefined {
-  if (said.length === 0) return undefined;
-  const bad = o.draft.applyAll(said.map((s): LedgerEvent => ({ type: "set", entity: id, field: `said_${s.field}`, value: s.words })));
+/**
+ * What a call said of where `id` is within its place besides a square, kept as its position
+ * (`space.where`, written whole): words that name nothing, a zone, and words already worded. Put on a
+ * square with nothing else said, it leaves the words it had behind. Said once in the answer.
+ */
+function keepWhere(o: OpContext, id: EntityId, soft: Soft): Unread | undefined {
+  const words = [...soft.said.map((s) => `${s.field} ${s.words}`), ...soft.words];
+  if (words.length === 0 && soft.zone === undefined && !(soft.squared && hasWhere(o.draft.w.state, id))) return undefined;
+  const bad = o.draft.applyAll([whereEvent(id, { ...(soft.zone !== undefined ? { zone: soft.zone } : {}), ...(words.length > 0 ? { words: words.join(", ") } : {}) }) as unknown as LedgerEvent]);
   if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-  o.reply.line("said_where", { n: o.n, op: o.op, what: named(o.reading, id), said: textOf(said.map((s) => s.words)) });
+  if (soft.said.length > 0) o.reply.line("said_where", { n: o.n, op: o.op, what: named(o.reading, id), said: textOf(soft.said.map((s) => s.words)) });
   return undefined;
 }
 
@@ -190,9 +233,11 @@ const move: OpDef = {
       const failed = isThing(o.draft.w.ctx, one.found.id) ? putThing(o, one.found.id, { place: to.id }, textArg(o.args, "why") ?? "") : movePerson(o, one.found.id, to.id, i > 0);
       if (failed) return failed;
     }
+    // Where each stands there, as the call says: a square, a zone, beside someone, or words; with none given, no square and no old words.
     for (const one of [{ found: who, where: o.args }, ...company]) {
-      const mapped = placeOnMap(o, one.found.id, to.id, one.where);
-      if (mapped) return mapped;
+      const soft = noSoft();
+      const failed = placeOnMap(o, one.found.id, to.id, one.where, soft) ?? keepWhere(o, one.found.id, soft);
+      if (failed) return failed;
     }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
@@ -208,7 +253,8 @@ const place: OpDef = {
   run(o) {
     const w = o.draft.w;
     const from = w.events.length;
-    const said: SaidWhere[] = [];
+    const soft = noSoft();
+    const said = soft.said;
     const at = findOptional(o, "at", "place");
     if (isUnread(at)) return at;
     const on = whereNamed(o, "on", "thing", said);
@@ -224,22 +270,28 @@ const place: OpDef = {
       // Someone set down somewhere: out of what holds them (a vehicle), at the place, as the move path puts them.
       const to = at?.id ?? here;
       if (to === null) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
-      const failed = movePerson(o, what.id, to, false) ?? placeOnMap(o, what.id, to);
+      const failed = movePerson(o, what.id, to, false) ?? placeOnMap(o, what.id, to, o.args, soft);
       if (failed) return failed;
     } else {
       const spot: Spot | null = asked ?? (here !== null ? { place: here } : null);
-      if (spot === null) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
-      // Said to be on or with something that names nothing, and lying where it is set down already: only the words are new.
-      const now = spotOf(w.state, what.id);
-      const still = said.length > 0 && now !== null && ("place" in now ? "place" in spot && now.place === spot.place : "in" in spot && now.in === spot.in);
-      const failed = still ? undefined : putThing(o, what.id, spot, textArg(o.args, "why") ?? "");
-      if (failed) return failed;
-      if ("place" in spot) {
-        const mapped = placeOnMap(o, what.id, spot.place);
-        if (mapped) return mapped;
+      if (spot === null) {
+        // With no place to put it at, words or a zone for where it is stay as its position until a call gives it a place.
+        const unplaced = placeOnMap(o, what.id, null, o.args, soft);
+        if (unplaced) return unplaced;
+        if (soft.said.length === 0 && soft.words.length === 0 && soft.zone === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
+      } else {
+        // Said to be on or with something that names nothing, and lying where it is set down already: only the words are new.
+        const now = spotOf(w.state, what.id);
+        const still = said.length > 0 && now !== null && ("place" in now ? "place" in spot && now.place === spot.place : "in" in spot && now.in === spot.in);
+        const failed = still ? undefined : putThing(o, what.id, spot, textArg(o.args, "why") ?? "");
+        if (failed) return failed;
+        if ("place" in spot) {
+          const mapped = placeOnMap(o, what.id, spot.place, o.args, soft);
+          if (mapped) return mapped;
+        }
       }
     }
-    const kept = keepWords(o, what.id, said);
+    const kept = keepWhere(o, what.id, soft);
     if (kept) return kept;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
@@ -388,7 +440,7 @@ const store: OpDef = {
       const failed = isPlace ? (thing ? putThing(o, what.id, { place: into.id }, why) : movePerson(o, what.id, into.id, false)) : thing ? putThing(o, what.id, { in: into.id }, why) : putPerson(o, what.id, into.id, o.args.driving === true);
       if (failed) return failed;
     }
-    const kept = keepWords(o, what.id, said);
+    const kept = keepWhere(o, what.id, { ...noSoft(), said });
     if (kept) return kept;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;

@@ -95,3 +95,8 @@ grid_no_map: {{#op}}{{op}}: {{/op}}{{place}} has no map drawn row by row to chan
 grid_bad_symbol: {{#op}}{{op}}: {{/op}}{{symbol}} is not one character.
 grid_not_in_legend: {{#op}}{{op}}: {{/op}}no legend names {{symbol}}, so it reads as floor.
 grid_nothing_drawn: {{#op}}{{op}}: {{/op}}nothing was drawn on the map of {{place}}.
+grid_kept_no_map: {{#op}}{{op}}: {{/op}}{{what}} could not be put on a square: {{place}} has no map of squares. It is kept as where {{what}} is: {{kept}}.
+grid_kept_no_zone: {{#op}}{{op}}: {{/op}}{{what}} could not be put in {{zone}}: the map of {{place}} has no zone by that name. It is kept as where {{what}} is.
+grid_kept_nowhere: {{#op}}{{op}}: {{/op}}{{what}} could not be put beside {{near}}, who stands on no square of the map of {{place}}. It is kept as where {{what}} is: {{kept}}.
+no_square_no_map: {{what}} cannot be put on square {{square}}: no square exists at {{place}}, which has no map of squares. map_lay lays one. Until then it can be put by a zone or by words{{#soft}}, as these are: {{soft}}{{/soft}}.
+no_square_off: {{what}} cannot be put on square {{square}}: no such square exists on the map of {{place}}, which is {{width}} by {{height}} squares.{{#zones}} Its zones: {{zones}}.{{/zones}}{{#soft}} Kept there by words or a zone: {{soft}}.{{/soft}}

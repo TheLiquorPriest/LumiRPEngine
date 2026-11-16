@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Working } from "../../../src/engine/working";
 import { initialState } from "../../../src/engine/world-state";
 import { parseLayout } from "../../../src/iface/map/layout";
-import { doorEvent, positionEvent, squaresEvent } from "../../../src/iface/map/record";
+import { doorEvent, positionEvent, squaresEvent, whereEvent } from "../../../src/iface/map/record";
 import { mapView, type MapWording } from "../../../src/iface/map/words";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import type { LedgerEvent } from "../../../src/shared/ledger";
@@ -41,5 +41,20 @@ describe("the map's two layers", () => {
     expect(text.startsWith("Who and what is where:")).toBe(true);
     expect(text).not.toContain("   2  #");
     expect(MAP_DEFAULTS.picture).toBe(true);
+  });
+
+  test("the list gives a piece's words and activity beside its square, and those with no square their words alone", () => {
+    const set = (entity: string, value: string): LedgerEvent => ({ type: "set", entity, field: "activity", value });
+    const state = after(
+      positionEvent({ scope: "common_room" }, "wren", [6, 5], null) as unknown as LedgerEvent,
+      positionEvent({ scope: "common_room" }, "bram", [4, 3], null) as unknown as LedgerEvent,
+      set("wren", "standing"),
+      whereEvent("bram", { words: "behind the bar" }) as unknown as LedgerEvent,
+      whereEvent("cask", { zone: "by the barrels" }) as unknown as LedgerEvent,
+    );
+    const text = mapView(wording).text({ state, env, place: "common_room" })?.text ?? "";
+    expect(text).toContain("you, Wren [wren] (6,5), standing");
+    expect(text).toContain("Bram [bram] (4,3), behind the bar");
+    expect(text).not.toContain("by the barrels");
   });
 });

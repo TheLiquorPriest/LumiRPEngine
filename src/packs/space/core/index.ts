@@ -48,7 +48,7 @@ import { buildMapView } from "./view";
 import { placeLines, sceneLines, trespassLines } from "./feed";
 import { placeLoreLines } from "../../../engine/place-lore";
 import { makePlaceEffect, placeEventDef, placeMakeChannel } from "./places";
-import { doorEventDef, shapeEventDef, squaresEventDef } from "./grid-play";
+import { doorEventDef, shapeEventDef, squaresEventDef, whereEventDef } from "./grid-play";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
 export type RouteQuery = (ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode) => TravelPlan | null;
@@ -329,6 +329,7 @@ export const spacePack: PackDef = {
     r.event<PackEvent>(doorEventDef);
     r.event<PackEvent>(shapeEventDef);
     r.event<PackEvent>(squaresEventDef);
+    r.event<PackEvent>(whereEventDef);
 
     r.formula("travel_minutes", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.minutes ?? 0);
     r.formula("distance_km", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.distanceKm ?? 0);

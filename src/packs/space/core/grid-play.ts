@@ -1,6 +1,7 @@
 // What play changes on a grid besides who stands where (plan §8.2), as the space pack's own events,
 // each writing its record whole into the pack's slice: a door's state (`space.door`: open, closed or
-// locked), a thing's footprint and what it blocks (`space.shape`), and a change to some squares of a
+// locked), a thing's footprint and what it blocks (`space.shape`), where someone or something is
+// within its place besides its square, a zone or words (`space.where`), a change to some squares of a
 // map and to its legend (`space.squares`), kept as that change over the map so that a later edit of
 // the map shows through wherever the change did not touch it. None writes an entity's definition, so
 // none declares `touches`: an Upgrade to a new revision carries each record as it stands, to play
@@ -23,6 +24,7 @@ import type { WorldState } from "../../../engine/state";
 export const DOOR_EVENT = "space.door";
 export const SHAPE_EVENT = "space.shape";
 export const SQUARES_EVENT = "space.squares";
+export const WHERE_EVENT = "space.where";
 
 export const DOOR_STATES = ["open", "closed", "locked"] as const;
 export type DoorState = (typeof DOOR_STATES)[number];
@@ -197,6 +199,49 @@ export const squaresEventDef: EventTypeDef<PackEvent> = {
     for (const s of Array.isArray(e.data.squares) ? e.data.squares : []) if (isRecord(s)) cells[cellKey(Number(s.x), Number(s.y))] = strOf(s.symbol);
     all[map] = { cells, legend: { ...objOf(was.legend), ...structuredClone(objOf(e.data.legend)) } };
     slice.squares = all;
+  },
+  describe: () => "",
+};
+
+/** Where someone or something is within its place besides its square: a named zone the map has no square for, words ("by the window"), or both. */
+export interface Whereabouts {
+  zone?: string;
+  words?: string;
+}
+
+/** What play said of where `entity` is within its place besides a square; null when it said nothing (or it has moved on since). */
+export function whereOf(state: Readonly<WorldState>, entity: EntityId): Whereabouts | null {
+  const all = record(state, "where");
+  const w = hasOwn(all, entity) ? all[entity] : undefined;
+  if (!isRecord(w)) return null;
+  const zone = typeof w.zone === "string" ? w.zone : undefined;
+  const words = typeof w.words === "string" ? w.words : undefined;
+  return zone !== undefined || words !== undefined ? { ...(zone !== undefined ? { zone } : {}), ...(words !== undefined ? { words } : {}) } : null;
+}
+
+/**
+ * Where someone or something is within its place besides its square (`{entity, zone?, words?}`), written
+ * whole; neither takes the record away. A person's position and a thing's are the same: a square, a
+ * named zone or words, any of them, and the world state prints whichever is known.
+ */
+export const whereEventDef: EventTypeDef<PackEvent> = {
+  type: WHERE_EVENT,
+  validate(e, ctx) {
+    const entity = strOf(e.data.entity);
+    if (!safeKey(entity) || !own(ctx.state.entities, entity)) return reject("missing_entity", `no entity ${labelOf(ctx, entity)}`);
+    const text = (v: unknown): boolean => v === undefined || v === null || (typeof v === "string" && v.trim() !== "");
+    return text(e.data.zone) && text(e.data.words) ? null : reject("bad_where", "a zone or words are text");
+  },
+  apply(e, state) {
+    const entity = strOf(e.data.entity);
+    const slice = mutableSlice(state, "space");
+    const all = { ...objOf(slice.where) };
+    const zone = typeof e.data.zone === "string" ? e.data.zone.trim() : "";
+    const words = typeof e.data.words === "string" ? e.data.words.trim() : "";
+    if (zone === "" && words === "") delete all[entity];
+    else all[entity] = { ...(zone !== "" ? { zone } : {}), ...(words !== "" ? { words } : {}) };
+    if (Object.keys(all).length > 0) slice.where = all;
+    else delete slice.where;
   },
   describe: () => "",
 };

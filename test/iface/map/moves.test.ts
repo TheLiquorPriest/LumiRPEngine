@@ -54,11 +54,18 @@ describe("placing on squares for the everyday operations", () => {
     expect(inFountain).toContainEqual(zoned);
   });
 
-  test("a place with no grid, a zone it has not, or a square off it, is said so", () => {
+  test("what the map lacks keeps the position instead of refusing; only a square that does not exist is refused, with what does", async () => {
     const { env, state } = stateOf(innWorld());
     expect(gridMoves().place({ state, env, who: "odile", place: "cellar", square: [1, 1] })).toEqual({ problem: "not_applicable", fields: { code: "no_map" } });
-    expect(gridMoves().place({ state, env, who: "wren", place: "common_room", zone: "cellar_stairs" })).toEqual({ problem: "not_applicable", fields: { code: "no_zone" } });
     expect(gridMoves().place({ state, env, who: "wren", place: "common_room", square: [13, 1] })).toEqual({ problem: "not_applicable", fields: { code: "off_grid" } });
+    expect(gridMoves().place({ state, env, who: "wren", place: "common_room", zone: "cellar_stairs" })).toEqual({ kept: { zone: "cellar_stairs" }, reports: [] });
+    const g = gridMoves(await mapLines(shippedTexts()));
+    const noMap = g.place({ state, env, who: "odile", place: "cellar", square: [1, 1] });
+    expect(noMap).toMatchObject({ problem: "on_map" });
+    expect(JSON.stringify(noMap)).toContain("map_lay");
+    expect(g.place({ state, env, who: "odile", place: "cellar", zone: "by the hearth" })).toMatchObject({ kept: { zone: "by the hearth" }, reports: [{ line: "grid_kept_no_map" }] });
+    expect(g.place({ state, env, who: "wren", place: "common_room", zone: "cellar_stairs" })).toMatchObject({ kept: { zone: "cellar_stairs" }, reports: [{ line: "grid_kept_no_zone" }] });
+    expect(JSON.stringify(g.place({ state, env, who: "wren", place: "common_room", square: [13, 1] }))).toContain("12 by");
   });
 
   test("a square in a wall is put there all the same and said, and one who stood on the map is given the way and its time", async () => {

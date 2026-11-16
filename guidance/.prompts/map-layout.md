@@ -18,9 +18,9 @@ lines:
   legend_room_door: '{{symbol}} door to {{name}}'
   legend_zone: '{{symbol}} {{zone}}'
   map_who: 'Who and what is where:'
-  map_you: '   you, {{name}} [{{id}}] ({{column}},{{row}})'
-  map_piece: '   {{name}} [{{id}}]{{#on}}, on {{on}}{{/on}} ({{column}},{{row}}){{#size}}, {{columns}} by {{rows}} squares{{/size}}{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}{{#activity}}, {{activity}}{{/activity}}{{#condition}}, {{condition}}{{/condition}}{{#facts}}, {{value}}{{/facts}}{{#far}}, {{far}} from you{{/far}}{{^shown}}, outside the part shown{{/shown}}'
-  map_unplaced: '   {{name}} [{{id}}], here with no square yet'
+  map_you: '   you, {{name}} [{{id}}] ({{column}},{{row}}){{#activity}}, {{activity}}{{/activity}}{{#words}}, {{words}}{{/words}}'
+  map_piece: '   {{name}} [{{id}}]{{#on}}, on {{on}}{{/on}} ({{column}},{{row}}){{#size}}, {{columns}} by {{rows}} squares{{/size}}{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}{{#activity}}, {{activity}}{{/activity}}{{#words}}, {{words}}{{/words}}{{#condition}}, {{condition}}{{/condition}}{{#facts}}, {{value}}{{/facts}}{{#far}}, {{far}} from you{{/far}}{{^shown}}, outside the part shown{{/shown}}'
+  map_unplaced: '   {{name}} [{{id}}], here with no square yet{{#words}}, {{words}}{{/words}}'
   map_doors: '   {{doors}}'
   map_door: 'door ({{column}},{{row}}) {{state}}'
 ---

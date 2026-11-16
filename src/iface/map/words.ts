@@ -21,6 +21,7 @@ import { kindFields } from "../../engine/scope";
 import type { Fact } from "../../store/types";
 import { drawnOf, movingOf, standsAt, type Drawn, type Moving, type Square, type Took } from "../../packs/space/core/grid-model";
 import { between } from "../../packs/space/core/grid-measure";
+import { whereOf } from "../../packs/space/core/grid-play";
 import { layoutLine, MAP_LAYOUT, NO_LAYOUT, parseLayout, type MapLayout } from "./layout";
 import type { MapLayer, MapView } from "./ports";
 import { printMap, type LegendEntry, type Printed } from "./print";
@@ -166,6 +167,9 @@ function recordedOf(layers: Layers, state: Readonly<WorldState>, facts: Readonly
   if (!e) return {};
   const fields = kindFields(layers.registry, layers.world, e.kind);
   const out: Record<string, unknown> = {};
+  const where = whereOf(state, id);
+  const said = where === null ? [] : [where.zone, where.words].filter((t): t is string => t !== undefined);
+  if (said.length > 0) out.words = said.join(", ");
   const activity = e.fields.activity;
   if (typeof activity === "string" && activity.trim() !== "" && activity !== fields.activity?.default) out.activity = activity;
   const condition = e.fields.condition;
@@ -226,9 +230,10 @@ export function mapWords(wording: MapWording, layers: Layers, state: Readonly<Wo
       continue;
     }
     const fields = { id: p.id, name: nameIn(world, state, p.id), column: p.at[0], row: p.at[1], shown: p.shown };
+    const recorded = recordedOf(layers, state, opts.facts ?? {}, layout.facts, p.id);
     const said =
       p.id === pov
-        ? sayAs("map_you", fields)
+        ? sayAs("map_you", { ...fields, ...recorded })
         : (() => {
             const apart = povAt ? between(drawn, moving, pov, p.id) : null;
             const size = p.size && (p.size[0] > 1 || p.size[1] > 1) ? { columns: p.size[0], rows: p.size[1] } : null;
@@ -238,14 +243,14 @@ export function mapWords(wording: MapWording, layers: Layers, state: Readonly<Wo
               ...(size ? { size } : {}),
               blocksWay: p.blocks?.way === true,
               blocksView: p.blocks?.view === true,
-              ...recordedOf(layers, state, opts.facts ?? {}, layout.facts, p.id),
+              ...recorded,
               ...(apart !== null ? { squares: apart, far: farText(lines, drawn, apart) } : {}),
             });
           })();
     if (said !== undefined) listed.push(said);
   }
   for (const id of noSquare) {
-    const said = sayAs("map_unplaced", { id, name: nameIn(world, state, id) });
+    const said = sayAs("map_unplaced", { id, name: nameIn(world, state, id), ...recordedOf(layers, state, opts.facts ?? {}, layout.facts, id) });
     if (said !== undefined) listed.push(said);
   }
   const doors = printed.doors.map((d) => sayAs("map_door", { column: d.at[0], row: d.at[1], state: d.state }) ?? "").filter((t) => t.trim() !== "");
