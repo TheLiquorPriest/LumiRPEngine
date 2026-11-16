@@ -1,0 +1,118 @@
+// The Files page: a folder read a page at a time with a search across levels, a file read in pieces, what RPH
+// does with each file in its words, a new file at a level, and a file of his under imported/ moved to where its
+// kind is read from.
+
+import { describe, expect, test } from "bun:test";
+import { h } from "preact";
+import type { TreeFileRow, TreeListed } from "../../../src/shared/api";
+import { FilesView, type FilesViewProps, NO_FILES, startOf, addressOf } from "../../../src/ui/pages/files";
+import { importedTarget, KINDS, viewPathAt } from "../../../src/ui/pages/files/kinds";
+import { filesControl, type FilesShown } from "../../../src/ui/pages/files/model";
+import { standingOf, unreadIn } from "../../../src/ui/pages/files/standing";
+import { askingClient, settle } from "../asking";
+import { elements, expand, press, textOf } from "../vnodes";
+import { filesCalls } from "../../../src/ui/pages/files";
+
+function row(path: string, over: Partial<TreeFileRow> = {}): TreeFileRow {
+  return { path, level: "global", kind: "yours", bytes: 100, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null, ...over };
+}
+const listed = (entry: TreeFileRow): TreeListed => ({ name: entry.path.split("/").at(-1) ?? entry.path, path: entry.path, folder: false, level: entry.level, entry });
+
+function view(shown: Partial<FilesShown>, chat: string | null = "chat-calder") {
+  const calls: string[] = [];
+  const noop = (name: string) => () => void calls.push(name);
+  const props: FilesViewProps = {
+    chat,
+    shown: { ...NO_FILES, ...shown },
+    onFolder: (p) => void calls.push(`folder:${p}`),
+    onSearch: (w) => void calls.push(`search:${w}`),
+    onMore: noop("more"),
+    onOpen: (p) => void calls.push(`open:${p}`),
+    onClose: noop("close"),
+    onPiece: noop("piece"),
+    onMode: (m) => void calls.push(`mode:${m}`),
+    onDraft: noop("draft"),
+    onSave: noop("save"),
+    onRemove: noop("remove"),
+    onSwitch: noop("switch"),
+    onDiff: noop("diff"),
+    onEdit: noop("edit"),
+    onEditText: noop("edit-text"),
+    onLevel: noop("level"),
+    onAccept: noop("accept"),
+    onDismiss: noop("dismiss"),
+    onStack: noop("stack"),
+    onApply: noop("apply"),
+    onMake: (path, level) => void calls.push(`make:${level}:${path}`),
+    onMakeFolder: (p) => void calls.push(`make-folder:${p}`),
+    onMove: (from, to) => void calls.push(`move:${from}>${to}`),
+    onCopy: noop("copy"),
+  };
+  const tree = expand(h(FilesView, props));
+  return { tree, text: textOf(tree), calls };
+}
+
+describe("the Files page", () => {
+  test("a folder opens a page at a time and the search goes across the levels; the address names a folder or a file", async () => {
+    const { client, asked } = askingClient();
+    const seen: FilesShown[] = [];
+    const control = filesControl(filesCalls(client, "chat-calder"), () => ({ entries: 2, bytes: 100 }), (s) => seen.push(s));
+    // The first page of the chat's top, two entries, and the next after "b".
+    expect(asked[0]).toMatchObject({ key: "GET /api/v1/files-list", query: { chat: "chat-calder", folder: "", limit: 2 } });
+    asked[0]?.answer({ folder: "", items: [listed(row("@global/a.md")), listed(row("@global/b.md"))], next: "b", levels: ["global", "chat"], stopped: null });
+    await settle();
+    control.more();
+    expect(asked.at(-1)).toMatchObject({ query: { folder: "", after: "b", limit: 2 } });
+    control.search("lamp");
+    expect(asked.at(-1)).toMatchObject({ key: "GET /api/v1/files-list", query: { search: "lamp", limit: 2 } });
+    control.stop();
+    expect(seen.at(-1)?.browse.search).toBe("lamp");
+    expect(startOf(["@global/rules/"])).toEqual({ folder: "@global/rules", file: null });
+    expect(startOf(["@global/rules/x.md"])).toEqual({ folder: "@global/rules", file: "@global/rules/x.md" });
+    expect(addressOf("@global/rules", null)).toEqual(["@global/rules/"]);
+  });
+
+  test("a file opens its first piece, and the next piece goes behind it", async () => {
+    const { client, asked } = askingClient();
+    let last: FilesShown = NO_FILES;
+    const control = filesControl(filesCalls(client, null), () => ({ entries: 5, bytes: 10 }), (s) => (last = s));
+    control.open("@global/TURN.md");
+    const read = asked.find((a) => a.key === "GET /api/v1/files/*");
+    expect(read).toMatchObject({ query: { offset: 0, length: 10 } });
+    read?.answer({ path: "@global/TURN.md", level: "global", kind: "yours", bytes: 25, editable: true, text: "0123456789", from: 0, to: 10, more: true });
+    await settle();
+    control.piece();
+    const next = asked.filter((a) => a.key === "GET /api/v1/files/*").at(-1);
+    expect(next).toMatchObject({ query: { offset: 10, length: 10 } });
+    next?.answer({ path: "@global/TURN.md", level: "global", kind: "yours", bytes: 25, editable: true, text: "abcdefghij", from: 10, to: 20, more: true });
+    await settle();
+    expect(last.open?.file?.text).toBe("0123456789abcdefghij");
+    control.stop();
+  });
+
+  test("each file says in RPH's words what it does with it: held out, an example, read by no agent, a config", () => {
+    expect(standingOf(row("@global/rules/a.md", { item: "rules/a", applies: false, held: "needs" }), false).words).toContain("held out: a file its needs: names is not in force");
+    expect(standingOf(row("@global/rules/b.md", { item: "rules/b", applies: false, held: "broken", problems: ["no agents"] }), false).words).toContain("its header does not parse");
+    expect(standingOf(row("@shipped/rules/examples/c.md", { level: "shipped", item: "rules/c", applies: false }), false).words).toBe("an example, never in force");
+    expect(standingOf(row("@global/imported/GUIDANCE.md"), true).words).toBe("kept, read by no agent");
+    expect(standingOf(row("@global/RPE-global.yml", { isConfig: true }), false).words).toBe("a level's config file");
+    expect(unreadIn([listed(row("@global/imported/GUIDANCE.md")), listed(row("@global/TURN.md", { item: "TURN" }))]).has("@global/imported/GUIDANCE.md")).toBe(true);
+  });
+
+  test("a file of his under imported/ offers to be moved to where its kind is read from, and a new file is made at a level that holds its kind", () => {
+    expect(importedTarget("@global/imported/agents/x.md")).toBe("@global/agents/x.md");
+    expect(importedTarget("imported/agents/x.md")).toBe("agents/x.md");
+    expect(importedTarget("@global/rules/x.md")).toBeNull();
+    const opened = { path: "@global/imported/agents/x.md", file: { path: "@global/imported/agents/x.md", level: "global" as const, kind: "yours" as const, bytes: 3, editable: true, text: "abc" }, piece: false, problem: null, mode: "read" as const, draft: { text: "abc", level: "global" as const }, diff: null };
+    const entry = row("@global/imported/agents/x.md");
+    const page = view({ open: opened, browse: { ...NO_FILES.browse, loading: false, items: [listed(entry)] } });
+    press(page.tree, "Move it to where its kind is read from");
+    expect(page.calls).toContain("move:@global/imported/agents/x.md>@global/agents/x.md");
+    // A rule is made at the chat's own level at its top, at yours under its own folder; AGENTS.md has a place only in a chat's levels.
+    const rule = KINDS.find((k) => k.id === "rule");
+    expect(viewPathAt("chat", rule?.at("engine-silent") ?? "")).toBe("rules/engine-silent.md");
+    expect(viewPathAt("global", rule?.at("engine-silent") ?? "")).toBe("@global/rules/engine-silent.md");
+    expect(KINDS.find((k) => k.id === "agents-md")?.levels(null)).toEqual([]);
+    expect(elements(page.tree).some((e) => e.props["data-open"] === "@global/imported/agents/x.md")).toBe(true);
+  });
+});

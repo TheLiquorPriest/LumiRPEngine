@@ -72,6 +72,13 @@ const OWN_CSS = `
 .rpe-field{display:flex;flex-wrap:wrap;gap:0 var(--lre-s2);min-width:0}
 .rpe-field>dt{flex:none;color:var(--lre-muted);font-weight:600}
 .rpe-field>dd{margin:0;flex:1 1 12em;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.rpe-files-split{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s3);min-width:0}
+.rpe-files-split>*{min-width:0}
+.rpe-files-split[data-open=yes]>.rpe-files-browser{display:none}
+@media (min-width:1000px){
+.rpe-files-split[data-open=yes]{grid-template-columns:minmax(260px,2fr) minmax(0,3fr);align-items:start}
+.rpe-files-split[data-open=yes]>.rpe-files-browser{display:flex}
+}
 
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}
