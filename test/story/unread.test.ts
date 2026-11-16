@@ -116,7 +116,7 @@ describe("story_record, as the Author met it live", () => {
       "premise reads text, tone, rules, role.",
       "chapter reads id, new, title, place, time, summary, from, to, close, drop, why.",
       "scene reads id, new, title, place, time, who, purpose, tension, wants, ends, summary, from, to, close, drop, why.",
-      "beat reads id, text, who, place, time, message, from, to, drop, why, and a new one needs text.",
+      "beat reads id, text, who, place, quests, time, message, from, to, drop, why, and a new one needs text.",
       "thread reads id, text, kind, state, stakes, who, payoff, hot, close, drop, why, and a new one needs text.",
       "arc reads who, began, stands, next, drop, why, and needs who.",
       "player reads id, text, kind, drop, why, and a new one needs text.",

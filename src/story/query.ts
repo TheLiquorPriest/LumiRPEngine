@@ -5,6 +5,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
+import { questRefOf } from "../quests/read";
 import { allSpans, itemView, namesOf, nearIds, placeRefOf, recordOr, type StoryCall, storyClock, type StoryToolSpec, treeOf } from "./kit";
 import { nameKey, STORY_PARTS, type Span, type StoryItem, type StoryPart, type StoryRecord } from "./record";
 
@@ -15,6 +16,7 @@ const QUERY_PROPERTIES: Record<string, JsonObject> = {
   to: WHOLE,
   who: TEXT,
   place: TEXT,
+  quest: TEXT,
   open: YES_NO,
   due: YES_NO,
   hot: YES_NO,
@@ -70,10 +72,13 @@ async function query(args: JsonObject, call: StoryCall): Promise<Reply> {
   const who = typeof args.who === "string" ? nameKey(args.who) : null;
   // A place asked by words is read as the world's own place where one goes by them; beats tied to its ref and beats that name it in words both match.
   const place = typeof args.place === "string" ? { words: nameKey(args.place), ref: placeRefOf(treeOf(call), args.place) ?? null } : null;
+  // A quest asked by its name, id or ref is read as the quest of this world that goes by it; the beats that moved it are those tied to its ref or that name it in words.
+  const quest = typeof args.quest === "string" ? { words: nameKey(args.quest), ref: questRefOf(treeOf(call).world.tracks, record.quests, args.quest) } : null;
   const matches: StoryItem[] = [];
   for (const p of part === undefined ? STORY_PARTS : [part as StoryPart]) {
     for (const item of record.of(p)) {
       if (place !== null && !(item.fields.place_ref === place.ref || nameKey(typeof item.fields.place === "string" ? item.fields.place : "") === place.words)) continue;
+      if (quest !== null && !(Array.isArray(item.fields.quest_refs) ? item.fields.quest_refs.includes(quest.ref ?? "") : Array.isArray(item.fields.quests) && item.fields.quests.some((w) => typeof w === "string" && nameKey(w) === quest.words))) continue;
       if (args.open === true && (CLOSABLE[item.part] !== true || item.closedBy !== null)) continue;
       if (args.hot === true && !(item.part === "thread" && item.fields.hot === true)) continue;
       if (args.due === true) {

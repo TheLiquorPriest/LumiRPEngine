@@ -24,6 +24,8 @@ export interface EntryNow {
 /** What a place's record reads of the lore: the entries bound to a place, and each entry as it stands now (null when Lumiverse holds none). */
 export interface PlaceSourcesReader {
   bindings(user: string, place: string): PlaceBinding[];
+  /** The entries bound to any record of the tree by its ref (`quest:<id>`), each with the aspect it defines. Absent: none is bound. */
+  recordBindings?(user: string, record: string): PlaceBinding[];
   entry(scope: { user: string; chat: string }, entry: string): Promise<EntryNow | null>;
 }
 

@@ -8,6 +8,7 @@ arguments:
   operations.text: "beat: what happened, as fact. thread: the open question, the promise or the setup. player: what you learned about the player. future: what is to happen. canon: what was established. retcon: what changed. premise: what this story is. overlay: what the story has changed in the entry."
   operations.title: "chapter, scene: its name."
   operations.summary: "chapter, scene: its summary."
+  operations.quests: "beat: the quests this beat moved, by name or id. A quest of the world is tied to it; other words are kept as written."
   operations.who: "Names. beat, thread, future, canon: who is involved. scene: who is on stage. arc: the one name whose arc it is, or plot."
   operations.place: "beat, scene, future: where. A place of the world, by its name or id, is tied to it; other words are kept as written. chapter: where, in words."
   operations.time: "beat, scene, chapter: when, in story time, in words."

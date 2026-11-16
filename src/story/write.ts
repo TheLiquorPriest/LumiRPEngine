@@ -18,6 +18,7 @@ import { type Fields, type Lines, textOf } from "../iface/texts";
 import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
 import { type Lane, STANDINGS, type Standing, type TreeView } from "../store";
+import { questRefOf } from "../quests/read";
 import { allSpans, itemView, nearIds, placeRefOf, recordOr, STORY_DEFAULTS, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, treeOf, valueView } from "./kit";
 import { keyedItemId, recordStory, type StoryItem, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
 
@@ -57,7 +58,7 @@ const OPS: readonly OpDef[] = [
     finds: "span",
     args: { title: "text", place: "text", time: "text", who: "names", purpose: "text", tension: "text", wants: "text", ends: "text", summary: "text", from: "message", to: "message", close: "flag", ...DROP },
   },
-  { name: "beat", part: "beat", finds: "new-or-id", args: { text: "text", who: "names", place: "text", time: "text", message: "message", from: "message", to: "message", ...DROP }, needs: ["text"] },
+  { name: "beat", part: "beat", finds: "new-or-id", args: { text: "text", who: "names", place: "text", quests: "names", time: "text", message: "message", from: "message", to: "message", ...DROP }, needs: ["text"] },
   { name: "thread", part: "thread", finds: "new-or-id", args: { text: "text", kind: THREAD_KINDS, state: "text", stakes: "text", who: "names", payoff: "text", hot: "flag", close: "flag", ...DROP }, needs: ["text"] },
   { name: "arc", part: "arc", finds: "arc", args: { began: "text", stands: "text", next: "text", ...DROP } },
   { name: "player", part: "player", finds: "new-or-id", args: { text: "text", kind: PLAYER_KINDS, ...DROP }, needs: ["text"] },
@@ -76,7 +77,7 @@ export const STORY_OPERATIONS: readonly string[] = [...OPS.map((o) => o.name), O
 const BY_NAME: ReadonlyMap<string, OpDef> = new Map(OPS.map((o) => [o.name, o]));
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "source", "precision", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "turn", "entry", "close", "drop", "why"] as const;
+const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "quests", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "source", "precision", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "turn", "entry", "close", "drop", "why"] as const;
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -140,6 +141,8 @@ interface Reading {
   agent?: AgentRef;
   /** The ref of the place a name or id names in the world the turn stands in; null when it names none there, undefined when that world has no place to name. */
   placeRef(words: string): string | null | undefined;
+  /** The ref of the quest, the world's or one opened in play, a name or id names; null when it names none. Absent: quests are not tied to refs. */
+  questRef?(words: string): string | null;
   /** What an answer about an id the record does not hold adds: the near ids of that part (of any part with none), or that the record holds none. */
   near(said: string, part: StoryPart | null): Fields;
 }
@@ -319,6 +322,16 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
     if (typeof ref === "string") value.place_ref = ref;
     else if (ref === null) reports.push({ line: "place_unresolved", fields: { n, op, place: value.place } });
   }
+  // The quests a beat moved are tied to their refs, the words kept beside them; words that name none stay words, and the answer says so.
+  if (Array.isArray(value.quests) && def.part === "beat" && r.questRef !== undefined) {
+    const refs: string[] = [];
+    for (const words of value.quests as string[]) {
+      const ref = r.questRef(words);
+      if (ref === null) reports.push({ line: "quest_unresolved", fields: { n, op, quest: words } });
+      else if (!refs.includes(ref)) refs.push(ref);
+    }
+    if (refs.length > 0) value.quest_refs = refs;
+  }
   const before = r.record.items.get(found.item);
   if (value.close === true && before !== undefined && before.closedBy !== null) reports.push({ line: "already_closed", fields: { n, op, id: found.item } });
   // Said with both times; on a clock play has not set, which shows no date, said with neither: the future is due all the same.
@@ -391,6 +404,7 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     lines: call.lines,
     agent: call.agent,
     placeRef: (words) => placeRefOf((view ??= treeOf(call)), words),
+    questRef: (words) => questRefOf((view ??= treeOf(call)).world.tracks, record.quests, words),
     near: (said, part) => nearIds(call.lines, call.settings, record, said, part),
   };
   const ops = list.map((raw, i) => readOp(reading, i + 1, raw));

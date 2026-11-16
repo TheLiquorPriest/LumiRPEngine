@@ -359,6 +359,19 @@ describe("story_record", () => {
   });
 });
 
+describe("a beat and the quests it moved", () => {
+  test("is tied to the quest's ref, one that names no quest keeps its words and says so, and story_query finds the beats by quest", async () => {
+    const b = await bench();
+    await b.t.play([]);
+    const r = await b.call("story_record", { operations: [{ op: "beat", text: "Wren takes the letter.", quests: ["The sealed letter"], message: 1 }, { op: "beat", text: "A bargain.", quests: ["The lost cow"], message: 1 }] });
+    expect(r.error).toBeFalsy();
+    expect((r.reports ?? []).join(" ")).toContain("the quest The lost cow names no quest of this world");
+    const found = dataOf(await b.call("story_query", { quest: "errand" }));
+    expect((found.beat as { text: string }[]).map((x) => x.text)).toEqual(["Wren takes the letter."]);
+    expect(dataOf(await b.call("story_query", { quest: "The lost cow" })).beat).toEqual([expect.objectContaining({ text: "A bargain." })]);
+  });
+});
+
 describe("story_query", () => {
   test("finds any part by range, by who is involved, by what is open, hot or due", async () => {
     const b = await bench();

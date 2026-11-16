@@ -33,6 +33,7 @@ due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it
 overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#near}} Near: {{near}}.{{/near}}
 store_unread: The story record could not read that call: {{why}}
 turn_joined: This turn, {{turn}}, was joined to turn {{joined}}, the turn the continue extended, so nothing was read or recorded here. Address turn {{joined}} instead.
+quest_unresolved: Operation {{n}} ({{op}}): the quest {{quest}} names no quest of this world, so it is kept as the words you wrote and tied to none.
 place_unresolved: Operation {{n}} ({{op}}): the place {{place}} names no place of this world, so it is kept as the words you wrote and tied to none.
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
