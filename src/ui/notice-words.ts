@@ -8,6 +8,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "./app";
 import { replyOf } from "./client";
+import type { PromptNotice } from "../shared/api";
 
 /** The file's lines by name, each a template. */
 export type NoticeLines = ReadonlyMap<string, string>;
@@ -117,4 +118,18 @@ export function useNoticeLines(chat: string): NoticeLines {
     };
   }, [chat]);
   return lines;
+}
+
+/**
+ * A notice of the prompt's shape in the notices file's words (`notice_<kind>`); where the file holds no line for it, the notice
+ * drawn as it came.
+ */
+export function promptNoticeWords(lines: NoticeLines, notice: PromptNotice): string {
+  const fields: Record<string, unknown> = notice.kind === "unclaimed" ? { message: notice.message, length: notice.end - notice.start } : { ...notice };
+  return noticeLine(lines, `notice_${notice.kind}`, fields) ?? `${notice.kind}: ${JSON.stringify(notice)}`;
+}
+
+/** What Lumiverse's own clipping left out of RPE's window, in the notices file's words (`cut_clipped_<reason>`); the facts as they came where the file holds no line. */
+export function clippedWords(lines: NoticeLines, clipped: { left: number; reason: string }): string {
+  return noticeLine(lines, `cut_clipped_${clipped.reason}`, { count: clipped.left }) ?? `${clipped.left} of the window's messages were left out: ${clipped.reason}`;
 }

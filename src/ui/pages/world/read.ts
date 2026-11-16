@@ -1,10 +1,10 @@
 // What the World page reads and sends: the tree at a level, a value's history, a level's typed systems,
 // what a turn's time brought due, what no longer applies on another swipe, and the owner's own edit.
 
-import type { ApiRoutes, TurnId, WorldReply } from "../../../shared/api";
+import type { ApiRoutes, DueReply, TurnId, WorldReply } from "../../../shared/api";
 import { replyOf, type RpeClient } from "../../client";
 import type { PageOf } from "../../reading";
-import { callWanted, type DueReply, type EditOpAsk, type EditReply, type NotAppliedReply, type SystemsReply, type ValueChangeShown } from "../../wanted";
+import { callWanted, type EditOpAsk, type EditReply, type NotAppliedReply, type SystemsReply, type ValueChangeShown } from "../../wanted";
 import { errorWords } from "../../words";
 
 /** Which values each level carries: none, its own (with what game systems keep), or all (with what it inherits). */
@@ -54,7 +54,7 @@ export function readSystems(client: Pick<RpeClient, "call">, chat: string, at: s
 
 /** What a turn's time brought due (the chat's newest turn when none is named). */
 export function readDue(client: Pick<RpeClient, "call">, chat: string, turn: TurnId | null): Promise<DueReply> {
-  return callWanted(client, "GET /api/v1/chats/:chat/state/due", { chat }, { query: turn === null ? {} : { turn } });
+  return client.call("GET /api/v1/chats/:chat/state/due", { chat }, { query: turn === null ? {} : { turn } }).then(replyOf);
 }
 
 /** What no longer applies on the swipe an earlier reply now shows. */

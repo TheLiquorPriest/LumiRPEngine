@@ -3,12 +3,12 @@
 // and read the level's typed systems. The page fills the parts' slots with these (parts.tsx).
 
 import { useState } from "preact/hooks";
-import type { FactPrecision, LevelNode, TurnId } from "../../../shared/api";
+import type { DueShown, FactPrecision, LevelNode, TurnId } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Row } from "../../atoms";
 import { marksWords, PRECISIONS } from "../../marks";
 import { usePaged, useRead } from "../../reading";
-import type { DueShown, EditOpAsk, EditReply, ValueChangeShown } from "../../wanted";
+import type { EditOpAsk, EditReply, ValueChangeShown } from "../../wanted";
 import { errorWords, when } from "../../words";
 import { readHistory, readSystems, sendEdit, sendUndo } from "./read";
 

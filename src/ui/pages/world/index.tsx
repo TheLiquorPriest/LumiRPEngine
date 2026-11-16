@@ -10,7 +10,7 @@
 // (`at: [level, key]`), so a link from a panel lands there.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { LevelNode, TurnRow, WorldReply } from "../../../shared/api";
+import type { DueReply, LevelNode, TurnRow, WorldReply } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Gated, PageHeader } from "../../atoms";
 import type { PageEntry } from "../../page-entry";
@@ -19,7 +19,7 @@ import { useSelect } from "../../store";
 import { TURN_KIND_WORDS } from "../../trace-view";
 import { thingsBrowser } from "../../things-slot";
 import { useUiSetting } from "../../ui-settings";
-import type { DueReply, NotAppliedReply } from "../../wanted";
+import type { NotAppliedReply } from "../../wanted";
 import { counted, when } from "../../words";
 import { readTurns } from "../turns";
 import { NodeTree, type WorldSlots } from "./parts";
@@ -75,6 +75,7 @@ export function DueSection(props: { read: DueReply | null }) {
           </li>
         ))}
       </ul>
+      {read.more === 0 ? null : <p class="rpe-meta lre-section-body">{read.more === null ? "More fell due than this list holds." : `${counted(read.more, "more item")} fell due than this list holds.`}</p>}
     </section>
   );
 }
