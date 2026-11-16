@@ -1217,7 +1217,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const statePart = await guidance.part(PARTS.worldState);
     const layout = statePart === undefined ? null : await this.#d.files.read(scope, statePart.source.path);
     if (layout?.status === "read") {
-      const maps = mapView(await mapLines(guidanceTexts(this.#d.files, scope, this.#d.log)));
+      const maps = mapView(await mapLines(guidanceTexts(this.#d.files, scope, this.#d.log)), settings.map);
       try {
         const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });

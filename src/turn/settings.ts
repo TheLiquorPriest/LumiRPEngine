@@ -36,6 +36,7 @@ import { type ConfigRead, diskTextsNow, portTexts, readConfig } from "../app/con
 import type { Setting } from "../app/setting-list";
 import { CAST_DEFAULTS, CAST_SETTING_DEFS, type CastSettings } from "../cast";
 import { IFACE_DEFAULTS, IFACE_SETTING_DEFS, type IfaceSettings } from "../iface";
+import { MAP_DEFAULTS, MAP_SETTINGS, type MapConfig, mapConfigRead } from "../iface/map";
 import { WORLD_STATE_DEFAULTS, WORLD_STATE_SETTING_DEFS, type WorldStateSettings } from "../store";
 import { STORY_DEFAULTS, STORY_SETTING_DEFS, STORY_SO_FAR_SETTING_DEFS, type StorySettings } from "../story";
 import { STORY_SO_FAR_DEFAULTS, type StorySoFarSettings } from "../story/sofar";
@@ -73,8 +74,12 @@ export interface TurnSettings {
   worldState: WorldStateSettings;
   /** The engine's tools, for the chat. */
   engine: IfaceSettings;
+  /** The map's settings, for the chat. */
+  map: MapConfig;
   /** RPH's room kept for the answer, in tokens (`compaction.reserve`). */
   reserve: number;
+  /** The turns a chat's list gives when the page names no limit (`turns.page`), and the most one page may ask (`turns.pageMost`). */
+  turnsPage: { size: number; most: number };
 }
 
 /** The defaults, where no level sets a value. */
@@ -100,8 +105,11 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   storySoFar: STORY_SO_FAR_DEFAULTS,
   worldState: WORLD_STATE_DEFAULTS,
   engine: IFACE_DEFAULTS,
+  map: MAP_DEFAULTS,
   // RPH's own default.
   reserve: RESERVE.default as number,
+  // The first build's fixed page sizes, made settings.
+  turnsPage: { size: 50, most: 500 },
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -229,10 +237,30 @@ const DEFS = {
     about: "The connection a request with no tag is passed on to.",
     effect: "use",
   },
+  turnsPage: {
+    key: "turns.page",
+    default: 50,
+    takes: { type: "whole", least: 1 },
+    levels: ["shipped", "global"],
+    perConnection: false,
+    name: "Turns on a page",
+    about: "The turns a chat's list on the Turn page gives when the page names no number.",
+    effect: "use",
+  },
+  turnsPageMost: {
+    key: "turns.pageMost",
+    default: 500,
+    takes: { type: "whole", least: 1 },
+    levels: ["shipped", "global"],
+    perConnection: false,
+    name: "Most turns on a page",
+    about: "The most turns one page of a chat's list may ask for.",
+    effect: "use",
+  },
 } as const satisfies Record<string, Setting>;
 
-/** Every setting the turn lane reads, as a config file writes it. */
-export const TURN_SETTINGS: readonly Setting[] = Object.values(DEFS);
+/** Every setting the turn lane reads, as a config file writes it: its own, and the map's. */
+export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS), ...MAP_SETTINGS];
 
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
@@ -255,7 +283,9 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     storySoFar: read.numbers(STORY_SO_FAR_SETTING_DEFS),
     worldState: read.numbers(WORLD_STATE_SETTING_DEFS),
     engine: read.numbers(IFACE_SETTING_DEFS),
+    map: mapConfigRead(read),
     reserve: read.value(RESERVE) as number,
+    turnsPage: { size: read.value(DEFS.turnsPage) as number, most: read.value(DEFS.turnsPageMost) as number },
   };
 }
 

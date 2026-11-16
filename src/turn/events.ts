@@ -112,7 +112,8 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   const layout = await deps.files.read(scope, statePart.source.path);
   if (layout.status !== "read") return null;
   const part = readPart(layout.text, "world-state");
-  const [settings, map] = await Promise.all([turnSettings(deps.files, scope, deps.log), maps ? mapLines(guidanceTexts(deps.files, scope, deps.log)).then(mapView) : undefined]);
+  const settings = await turnSettings(deps.files, scope, deps.log);
+  const map = maps ? mapView(await mapLines(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
   return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState }) };
 }
 
