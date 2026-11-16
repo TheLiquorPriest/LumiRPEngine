@@ -15,7 +15,7 @@ export const ACTIONS_PATH = "/api/v1/chats/:chat/actions";
 export const UNDO_PATH = "/api/v1/chats/:chat/actions/undo";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
 export const TAPS_PATH = "/api/v1/chats/:chat/taps";
-export const TAPS_UNDO_PATH = "/api/v1/chats/:chat/taps/undo";
+export const EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo";
 
 const T = shape.text();
 const opt = shape.optional;
@@ -58,7 +58,6 @@ const tapReply = shape.named(
   "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words.",
   shape.object({ applied: shape.yesNo(), reports: shape.list(T), undo: shape.nullable(T), words: T }),
 );
-const tapUndoAsk = shape.named("TapUndoAsk", "The Undo of an edit of his, by the id its answer gave.", shape.object({ undo: T }));
 
 const dueShown = shape.named(
   "DueShown",
@@ -165,14 +164,12 @@ export function playRoutes(play: PlayService) {
     }),
     route({
       method: "POST",
-      path: TAPS_UNDO_PATH,
+      path: EDIT_UNDO_PATH,
       access: "page",
       group: "state",
-      does: "The Undo of an edit of his, by the id its answer gave: all of it, or none and the answer says why.",
-      body: tapUndoAsk,
+      does: "The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): all of it, the world's defaults given with it included, or none and the answer says why; at once, whatever runs.",
       reply: tapReply,
-      joined: true,
-      handle: ({ user, params, body }) => play.undoEdit(user, params.chat, body.undo),
+      handle: ({ user, params }) => play.undoEdit(user, params.chat, params.edit),
     }),
   ] as const;
 }

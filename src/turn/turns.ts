@@ -86,7 +86,6 @@ export const ON_STAGE_VIEWS = "on_stage_views";
 export function tokenCount(charsPerToken: number): (text: string) => number {
   return (text) => Math.ceil(text.length / charsPerToken);
 }
-
 /** The first `count` words of a text, joined by single spaces. */
 function firstWords(text: string, count: number): string {
   return text.trim().split(/\s+/).slice(0, count).join(" ");

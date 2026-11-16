@@ -14,7 +14,7 @@ import { definitionsLag } from "../engine/upgrade";
 import type { PackId, PanelId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
-import { OFFSTAGE_DEFAULTS } from "../shared/offstage";
+import type { OffstageSettings } from "../shared/offstage";
 import { NARRATOR_DEFAULTS } from "../shared/settings";
 import type { StateView } from "../shared/state-view";
 import type { Store, UserStore } from "../store";
@@ -38,6 +38,8 @@ export interface ChatViewInput {
   turn: string | null;
   /** Whether a turn of the chat runs now. */
   turning: boolean;
+  /** The chat's out-of-play settings (`taps.tell.*`), which preset the controls' Tell switch. */
+  offstage: OffstageSettings;
 }
 
 /** The turn at the head of a chat's path; null before its first. */
@@ -94,7 +96,7 @@ export function chatView(input: ChatViewInput): StateView {
       pending: [],
       panels,
       palette: palette(world, state, registry),
-      controls: controls(world, state, shown.sceneType, registry, KNOWLEDGE, OFFSTAGE_DEFAULTS),
+      controls: controls(world, state, shown.sceneType, registry, KNOWLEDGE, input.offstage),
       meter: null,
       packs,
       currency: world.currency,

@@ -42,7 +42,7 @@ import { CAST_DEFAULTS, CAST_SETTING_DEFS, type CastSettings } from "../cast";
 import { IFACE_DEFAULTS, IFACE_SETTING_DEFS, type IfaceSettings } from "../iface";
 import { MAP_DEFAULTS, MAP_SETTINGS, type MapConfig, mapConfigRead } from "../iface/map";
 import { WORLD_STATE_DEFAULTS, WORLD_STATE_SETTING_DEFS, type WorldStateSettings } from "../store";
-import { TAP_DEFAULTS, TAP_SETTING_DEFS, TAP_SETTINGS, type TapSettings } from "../play/settings";
+import { TAP_DEFAULTS, TAP_SETTINGS, type TapSettings, tapSettingsRead } from "../play/settings";
 import { STORY_DEFAULTS, STORY_SETTING_DEFS, STORY_SO_FAR_SETTING_DEFS, type StorySettings } from "../story";
 import { STORY_SO_FAR_DEFAULTS, type StorySoFarSettings } from "../story/sofar";
 import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
@@ -358,7 +358,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     charsPerToken: read.value(CHARS_PER_TOKEN) as number,
     turnsPage: { size: read.value(DEFS.turnsPage) as number, most: read.value(DEFS.turnsPageMost) as number },
     requestsTextMost: read.value(DEFS.requestsTextMost) as number,
-    taps: read.numbers(TAP_SETTING_DEFS),
+    taps: tapSettingsRead(read),
   };
 }
 

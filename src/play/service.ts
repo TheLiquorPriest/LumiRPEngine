@@ -8,8 +8,8 @@
 // refuse (plan §6.1): a requirement the world's action does not meet, or a payee who is not there, is
 // applied with what does not add up kept beside it and answered. What is still refused (§6.1: an id that
 // does not exist or that his character cannot know of, input that cannot be parsed) says its true reason,
-// case by case (`unfit.ts`). An Undo records the reversal of all of his changes of an edit
-// (`UserStore.undo`), or of none and says what has no undo. A chat's own choices (today's
+// case by case (`unfit.ts`). An Undo, by the edit's own id, records the reversal of all of an edit's
+// changes, the world's defaults given with it included (`UserStore.undo`), or of none and says why. A chat's own choices (today's
 // `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that goes with the next message, a tap
 // that plays now, setting a chat's own choice, the things browser and the map's walk and display are not
 // served here, and say so. Every word is a line of `.prompts/play-answers.md`. After each change the
@@ -36,7 +36,6 @@ import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, unrevealedSecrets
 import { Working } from "../engine/working";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { hasLedger } from "../packs/economy/core/model";
-import { FINANCE_EVENTS } from "../shared/finance";
 import { hashParts } from "../shared/hash";
 import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
 import type { FixOp, LedgerEvent } from "../shared/ledger";
@@ -63,13 +62,6 @@ export const PLAY_ANSWERS = "play-answers";
 
 /** The economy's domain, whose materializer opens the accounts the world gave a party that holds some. */
 const MONEY = "money";
-
-/**
- * The line of this area's words that says a change of the world's stays after an Undo, by its operation: the accounts the world
- * gave, opened, and what the economy takes someone it keeps no accounts for to be worth (the rest of its bookkeeping, the band a
- * payment moved them to, is reversed with the payment).
- */
-const STAYS: Readonly<Record<string, string>> = { materialize: "opened_stay", [FINANCE_EVENTS.anchor]: "worth_stays" };
 
 /** What one answer says in more than one line of this area's words, those lines joined by this. */
 const SENTENCES = " ";
@@ -223,15 +215,16 @@ export class PlayService {
     this.runEnds = new RunEnds(deps.live);
   }
 
-  /** The chat's state view at its head, or at `turn`, one of its turns. */
-  state(user: string, chat: string, turn: string | null): StateView {
+  /** The chat's state view at its head, or at `turn`, one of its turns, its controls preset by the chat's out-of-play settings. */
+  async state(user: string, chat: string, turn: string | null): Promise<StateView> {
     const row = turn === null ? null : this.deps.store.user(user).turn(turn);
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
+    const { taps } = await this.deps.settings(user, chat);
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
-    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat) });
+    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat), offstage: taps.tell });
   }
 
   /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`). */
@@ -274,12 +267,12 @@ export class PlayService {
     }
   }
 
-  /** The Undo of an edit of his by the id its answer gave, on the typed route. */
-  async undoEdit(user: string, chat: string, undo: string): Promise<TapAnswer> {
+  /** The Undo of an edit of his by its own id, on the typed route: at once, whatever runs. */
+  async undoEdit(user: string, chat: string, edit: string): Promise<TapAnswer> {
     try {
-      const { applied, stays } = await this.undone(user, chat, undo);
+      const applied = await this.undone(user, chat, edit);
       if (applied) stateChanged(this.deps.live, chat);
-      return { applied, reports: [], undo: null, words: await this.staysWords(stays) };
+      return { applied, reports: [], undo: null, words: "" };
     } catch (error) {
       if (!(error instanceof Refused)) throw error;
       return { applied: false, reports: [], undo: null, words: await this.refusalWords(error) };
@@ -323,13 +316,12 @@ export class PlayService {
     }
   }
 
-  /** Undoes a tap this area recorded, by the id its answer gave, as today's Undo chip is sent; what the world's defaults gave with it that stays, the answer says (`said`). */
+  /** Undoes an edit of his, by the id its answer gave, as today's Undo chip is sent. */
   async undo(user: string, chat: string, r: Request<"lre.chip">): Promise<ResultMessage | ErrorMessage> {
     try {
-      const { applied, stays } = await this.undone(user, chat, r.chip);
+      const applied = await this.undone(user, chat, r.chip);
       if (applied) stateChanged(this.deps.live, chat);
-      const said = await this.staysWords(stays);
-      return reply(r, "lre.chip", { applied, pending: false, ...(said === "" ? {} : { said }) });
+      return reply(r, "lre.chip", { applied, pending: false });
     } catch (error) {
       return this.failed(r, error);
     }
@@ -471,53 +463,31 @@ export class PlayService {
   }
 
   /**
-   * Records the reversal of his changes of an edit, each unit the last first, in one write: all of them or none, so an Undo never
-   * leaves half of what he did. A unit that would leave a part of his (one written since, or one the store keeps no reverse for) takes
-   * the whole write back, and the answer says which. What the world's defaults gave with the edit is reversed with his unit it is in,
-   * where the store keeps a reverse for it, and else stays. Whether anything was recorded (nothing once the edit is undone), and the
-   * world's changes that stay. Nothing is recorded while a turn of the chat runs.
+   * Records the reversal of every change of an edit (his own, and what the world's defaults gave with it), each unit the last first,
+   * in one write: all of it or none, so an Undo never leaves half of what he did. A unit a later change has written a part of since
+   * takes the whole write back, and the answer says so. Whether anything was recorded: nothing, for an edit undone already. It finds
+   * the edit among his own changes of the chat, which keep their place whatever turns left the path since, and waits for no run.
    */
-  private undone(user: string, chat: string, undo: string): Promise<{ applied: boolean; stays: ChangeRow[] }> {
+  private undone(user: string, chat: string, undo: string): Promise<boolean> {
     const s = this.deps.store.user(user);
+    const edit = editId(undo);
     return this.deps.writes.run(() => {
-      const { turn = "", edit = "" } = editId(undo) ?? {};
-      // An edit of a turn joined to another is answered as a fact, naming the turn it joined.
-      const held = s.turn(turn);
-      if (held?.chat === chat && held.joined !== null) throw new JoinedTurnError(turn, held.joined);
-      const all = s.turn(turn)?.chat === chat ? s.changes(turn).filter((c) => isRecord(c.cite) && c.cite.tap === edit) : [];
-      const mine = all.filter((c) => c.source === PLAYER);
-      if (mine.length === 0) throw new Refused("not_found", { line: "no_undo" });
-      if (this.deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
-      const path = s.path(chat);
-      const from = path.findIndex((e) => e.turn === turn);
-      if (from < 0) throw new Refused("conflict", { line: "off_path" });
-      // Undone already where the chat's story now goes: a change from its turn on cites one of the edit's as the one it undoes.
-      const ids = new Set(mine.map((c) => c.id));
-      const since = path.slice(from).flatMap((e) => (e.turn === null ? [] : s.changes(e.turn)));
-      if (since.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return { applied: false, stays: [] };
+      const own = s.ownerChanges(chat);
+      const all = own.filter((c) => isRecord(c.cite) && c.cite.tap === edit);
+      if (all.length === 0) throw new Refused("not_found", { line: "no_undo" });
+      // Undone already: a change of his cites one of the edit's as the one it undoes.
+      const ids = new Set(all.map((c) => c.id));
+      if (own.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return false;
       // The store undoes a change with the rest of its unit: one change of each unit is enough.
       const units = new Map<string, number>();
-      for (const c of mine) if (!units.has(unitOf(c))) units.set(unitOf(c), c.id);
-      let recorded = 0;
-      const left: Report[] = [];
-      for (const id of [...units.values()].reverse()) {
-        const out = s.undo(id, PLAYER);
-        recorded += out.changes.length;
-        left.push(...out.left);
-      }
+      for (const c of all) if (!units.has(unitOf(c))) units.set(unitOf(c), c.id);
+      const { changes, left } = s.undo([...units.values()].reverse(), PLAYER);
       // Refused inside the write, which takes back what the units before recorded.
       if (left.some((l) => l.code === "changed_since")) throw new Refused("conflict", { line: "changed_since" });
-      const leftIds = new Set(left.map((l) => l.values?.change));
-      const unreversed = mine.filter((c) => leftIds.has(c.id));
+      const unreversed = all.filter((c) => left.some((l) => l.values?.change === c.id));
       if (unreversed.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: unreversed.map((c) => c.op) } });
-      const stays = all.filter((c) => !ids.has(c.id) && (!units.has(unitOf(c)) || leftIds.has(c.id)));
-      return { applied: recorded > 0, stays: recorded > 0 ? stays : [] };
+      return changes.length > 0;
     }, "undoing an edit of his");
-  }
-
-  /** Each kind of the world's change that stays after an Undo, once, in the words of its own line. */
-  private async staysWords(stays: readonly ChangeRow[]): Promise<string> {
-    return (await Promise.all([...new Set(stays.flatMap((c) => own(STAYS, c.op) ?? []))].map((line) => this.words(line)))).filter((s) => s !== "").join(SENTENCES);
   }
 
   private async refusalWords(error: Refused): Promise<string> {

@@ -2,16 +2,15 @@
 // a correction made on any page (a token dragged on the map, squares edited, a value or a fact set on the
 // World page): resolved on the chat's head, recorded as his own changes in one write, cited by the edit's
 // id and the request that made it, with his "Tell the story" choice and what the world's rules advised
-// against it kept beside, and answered with the id its Undo takes. What the world's defaults gave with it
-// (the accounts the world gave those it names, opened first; the economy's bookkeeping for someone it
-// keeps no accounts for) is recorded from those defaults and as assumed, citing only the edit, so its Undo
-// tells it from his own changes.
+// against it kept beside, and answered with the edit's id, which its Undo takes. What the world's defaults
+// gave with it (the accounts the world gave those it names, opened first; the economy's bookkeeping for
+// someone it keeps no accounts for) is recorded from those defaults and as assumed, citing only the edit,
+// so its Undo tells it from his own changes.
 //
-// Where his change lands is the store's one call for it (PlanStore-2, O6Store's `writeTarget`/`record`:
-// no turn, at the head at once, before the next turn, never under a run going on; a fresh branch's own
-// line). Until that call is in, it lands on the chat's newest turn, and the three cases that place cannot
-// hold (a run going on, no turn yet, a branch with no turn of its own) are answered in the play answers'
-// words and change nothing.
+// Where his change lands is the store's one call for it (`writeTarget`, `record`): of no turn, kept with the
+// chat, applied at once and shown at its head, taking effect before the next turn that begins and never
+// under a run going on; in a branch that has played no turn of its own, on the branch's own line; before a
+// chat's first turn, the same. Nothing about where the chat stands refuses it.
 
 import type { LiveHub, WriteQueue } from "../app";
 import { playedWorld } from "../engine/places-in-play";
@@ -26,7 +25,6 @@ import type { ErrorCode } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
 import type { ChangeInput, Report, Store } from "../store";
 import { stateChanged } from "./live";
-import { headTurn } from "./view";
 
 /** Who an edit of his is by, and where it came from. */
 export const PLAYER = "player";
@@ -74,20 +72,17 @@ export interface OwnerEditDeps {
   store: Store;
   writes: WriteQueue;
   live: Pick<LiveHub, "publish">;
-  /** Whether a turn of the user's chat runs now. */
-  turning(user: string, chat: string): boolean;
 }
 
-/** What recording an edit came to: the id its Undo takes (null when it changed nothing), and what the world's rules advised. */
+/** What recording an edit came to: the edit's id, which its Undo takes (null when it changed nothing), and what the world's rules advised. */
 export interface OwnerEdited {
   undo: string | null;
   advised: Report[];
 }
 
-/** The id an edit's Undo takes, `tap:<turn>:<edit>`, read back; null for one that is not such an id. */
-export function editId(undo: string): { turn: string; edit: string } | null {
-  const m = /^tap:([^:]+):([^:]+)$/.exec(undo);
-  return m === null ? null : { turn: m[1] ?? "", edit: m[2] ?? "" };
+/** The edit an Undo names: its own id, or the `tap:<turn>:<edit>` an edit recorded on a turn before his changes were his own was given. */
+export function editId(undo: string): string {
+  return /^tap:[^:]+:([^:]+)$/.exec(undo)?.[1] ?? undo;
 }
 
 /**
@@ -101,29 +96,23 @@ export async function recordOwnerEdit(deps: OwnerEditDeps, user: string, chat: s
   const s = deps.store.user(user);
   const { env } = deps.store;
   const edit = crypto.randomUUID();
-  const out = await deps.writes.run((): OwnerEdited & { turn: string | null } => {
+  const out = await deps.writes.run((): OwnerEdited => {
     const row = s.chat(chat);
     if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
-    if (deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
     const state = s.headState(chat).state.world;
     const doc = env.worlds(state.revision);
     if (doc === undefined) throw new Refused("unavailable", { line: "no_revision" });
     const { opened, events, store = [], advised = [] } = resolve({ registry: env.registry, world: playedWorld(doc, state), state, seed: hashParts(SEED, chat, edit) });
-    if (events.length === 0 && store.length === 0) return { turn: null, undo: null, advised };
-    const on = headTurn(s, chat);
-    if (on === null) throw new Refused("unavailable", { line: "no_turn" });
-    // A branch's newest turn may be the chat it was branched from's, whose state that chat shares (plan §6.3): kept there, the edit
-    // would change that chat too, and its Undo would not be this chat's.
-    if (s.turn(on)?.chat !== chat) throw new Refused("unavailable", { line: "branch_no_turn" });
+    if (events.length === 0 && store.length === 0) return { undo: null, advised };
     const group = events.length > 1 && events.every((e) => e.group === undefined) ? `tap:${edit}` : undefined;
     const cite = { tap: edit, request, ...(tell !== null ? { tell } : {}), ...(advised.length > 0 ? { advised } : {}) } as unknown as JsonValue;
-    s.addChanges(on, [
+    s.record(s.writeTarget({ chat }), [
       ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, ...DEFAULTS, cite: { tap: edit } })),
       ...events.map((e, i): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, ...(bookkeeping(events, i) ? { ...DEFAULTS, cite: { tap: edit } } : { source: PLAYER, cite }) })),
       ...store.map((c): ChangeInput => ({ lane: "engine", op: c.op, value: c.value, by: PLAYER, source: PLAYER, cite, precision: c.precision ?? null, standing: c.standing ?? null })),
     ]);
-    return { turn: on, undo: `tap:${on}:${edit}`, advised };
+    return { undo: edit, advised };
   }, "recording an edit of his");
-  if (out.turn !== null) stateChanged(deps.live, chat);
-  return { undo: out.undo, advised: out.advised };
+  if (out.undo !== null) stateChanged(deps.live, chat);
+  return out;
 }
