@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChatPort } from "rp-harness/contract";
 import { runKitPart, type KitSeed } from "rp-harness/testing/kit";
-import { createChatReads, NoSuchChat, type ChatReads } from "../../src/adapter/lumiverse/chat";
+import { createChatReads, NoSuchChat, type ChatReads, type MeaningNearest } from "../../src/adapter/lumiverse/chat";
 import { createDbReader } from "../../src/adapter/lumiverse/db";
 import { createHttpReads } from "../../src/adapter/lumiverse/http-reads";
 import type { LumiverseReads } from "../../src/adapter/lumiverse/reads";
@@ -82,7 +82,7 @@ for (const source of ["database", "http"] as const) {
   const where = source === "database" ? "database file" : "HTTP routes";
 
   describe(`the chat port over Lumiverse's ${where}`, () => {
-    async function port(options: { hiddenReadable?: boolean; summarized?: string[]; stretches?: (turn: string | null) => Record<string, { from: number; to: number }> } = {}): Promise<ChatReads> {
+    async function port(options: { hiddenReadable?: boolean; summarized?: string[]; stretches?: (turn: string | null) => Record<string, { from: number; to: number }>; meaning?: MeaningNearest } = {}): Promise<ChatReads> {
       const db = new StandInDb();
       closing.push(() => db.close());
       db.write(chatRows("user-tamsin", "chat-coast", COAST, 1));
@@ -97,6 +97,7 @@ for (const source of ["database", "http"] as const) {
         ranges: async (_chat, turn) => options.stretches?.(turn) ?? { scene: { from: 3, to: 5 } },
         summarized: async () => new Set(options.summarized ?? []),
         feed: bed.feed,
+        ...(options.meaning !== undefined ? { meaning: options.meaning } : {}),
       });
     }
     const scope = { user: "user-tamsin", chat: "chat-coast", session: "s-1" };
@@ -153,6 +154,34 @@ for (const source of ["database", "http"] as const) {
       const readable = await port({ hiddenReadable: true });
       expect((await readable.search(scope, { text: "bell drown" })).map((h) => h.id)).toEqual(["c2"]);
       expect((await readable.read(scope, { from: 2, to: 3 }))[0]).toMatchObject({ hidden: true, text: COAST[2]!.text });
+    });
+
+    test("after the words' hits and within the limit, the messages nearest in meaning follow as hits of that kind; none while no embedding connection is set, and a hidden message is never sent to it", async () => {
+      const asked: { text: string; limit: number; docs: { id: string; text: string }[] }[] = [];
+      const nearest = (answer: string[] | null) => async (_chat: string, text: string, limit: number, docs: () => Promise<readonly { id: string; revision: string; text: string }[]>) => {
+        if (answer === null) return null;
+        asked.push({ text, limit, docs: (await docs()).map((d) => ({ id: d.id, text: d.text })) });
+        return answer;
+      };
+      // The words find c0 and c4; the meaning lane names c3 first, then c4 (already a hit), then c2 (hidden), then c1.
+      const chat = await port({ meaning: nearest(["c3", "c4", "c2", "c1"]) });
+      const hits = await chat.search(scope, { text: "lighthouse", limit: 3 });
+      expect(hits.map((h) => [h.id, h.how])).toEqual([["c0", "words"], ["c4", "words"], ["c3", "meaning"]]);
+      expect(hits[2]).toMatchObject({ index: 3, snippet: COAST[3]!.text.slice(0, 80) });
+      // The hidden message's text was not offered to the embedding.
+      expect(asked[0]!.docs.map((d) => d.id)).toEqual(["c0", "c1", "c3", "c4"]);
+      expect(asked[0]!.limit).toBe(5);
+      // Room for more: the rest follow, the hidden one still left out; within the words' limit, the meaning lane is not asked.
+      expect((await chat.search(scope, { text: "lighthouse" })).map((h) => [h.id, h.how])).toEqual([["c0", "words"], ["c4", "words"], ["c3", "meaning"], ["c1", "meaning"]]);
+      const before = asked.length;
+      expect((await chat.search(scope, { text: "lighthouse", limit: 2 })).map((h) => h.how)).toEqual(["words", "words"]);
+      expect(asked).toHaveLength(before);
+      // A hidden message agents may read is offered, and found.
+      const readable = await port({ hiddenReadable: true, meaning: nearest(["c2"]) });
+      expect((await readable.search(scope, { text: "lighthouse" })).map((h) => [h.id, h.how])).toEqual([["c0", "words"], ["c4", "words"], ["c2", "meaning"]]);
+      expect(asked.at(-1)!.docs.map((d) => d.id)).toContain("c2");
+      // No embedding connection: the words alone.
+      expect((await (await port({ meaning: nearest(null) })).search(scope, { text: "lighthouse" })).map((h) => h.how)).toEqual(["words", "words"]);
     });
 
     test("another user's chat is no chat of this RPE's, by any read", async () => {

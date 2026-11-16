@@ -22,7 +22,7 @@ import { isRecord } from "../../shared/json";
 import { lumiverseAccounts } from "./accounts";
 import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
 import { promptReads, type ModelRooms } from "./receipt";
-import { createChatReads, type ChatReads } from "./chat";
+import { createChatReads, type ChatReads, type MeaningNearest } from "./chat";
 import { createDbReader, type DbReader } from "./db";
 import { Activations } from "./activation";
 import { IndexFeed } from "./index-feed";
@@ -79,6 +79,8 @@ export interface AdapterLanes {
    * apart from the prompt (`feedback.ts`); null where there is no prompt of RPE's own for it.
    */
   replaced(tag: Tag): Promise<EarlierPrompt | null>;
+  /** The turn lane's meaning index: the ids of a chat's messages nearest a text in meaning, nearest first, or null while no embedding connection is set (nothing is embedded or sent then); `docs` is read only once one is. For `chat_search`. */
+  meaning: MeaningNearest;
 }
 
 export interface AdapterDeps {
@@ -235,7 +237,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     activations = new Activations(reads, log);
     feed = new IndexFeed({ index: at.index, reads, user, log });
     const fed = feed;
-    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search, feed: fed });
+    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search, feed: fed, meaning: lanes.meaning });
     const sockets = (): LumiverseSettings["socket"] => settings().socket;
     const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), settings: sockets });
     const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, settings: sockets });

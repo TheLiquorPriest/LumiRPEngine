@@ -11,7 +11,8 @@
 //
 // The search is answered from the messages index of the index file, which holds the tokens of each message and its id, never its text
 // (`index-feed.ts`; §4.2, "No copy"): a message is found when every word asked for begins one of its words, in any letter case, and only
-// the hits' texts are read from Lumiverse; hits come oldest first. Search by meaning is not here.
+// the hits' texts are read from Lumiverse; hits come oldest first. After the words' hits, and within the limit, come the messages nearest the query in meaning (`how: "meaning"`), where an
+// embedding connection is set.
 
 import type { ChatHit, ChatInfo, ChatMessage, ChatPort, ChatQuery, ChatRole, HistoryRange, Scope } from "rp-harness/contract";
 import type { IndexFeed } from "./index-feed";
@@ -52,6 +53,16 @@ export interface ChatSearchSettings {
 /** The defaults of `lumiverse.search`: as many hits as a lore search gives, and a snippet of a line's length (`src/lore/lore.ts`, `LORE_DEFAULTS`). */
 export const CHAT_SEARCH_DEFAULTS: ChatSearchSettings = { limit: 20, snippetChars: 80 };
 
+/** One message as the meaning index is given it: its id, its revision (a changed one is embedded again) and its text, which is sent to be embedded and never kept. */
+export interface MeaningDoc {
+  id: string;
+  revision: string;
+  text: string;
+}
+
+/** The ids of the chat's messages nearest `text` in meaning, at most `limit`, nearest first; null while no embedding connection is set. `docs` is read only once one is. */
+export type MeaningNearest = (chat: string, text: string, limit: number, docs: () => Promise<readonly MeaningDoc[]>) => Promise<string[] | null>;
+
 export interface ChatDeps {
   reads: LumiverseReads;
   /** The Lumiverse user this RPE belongs to: no other user's chat is read. */
@@ -69,6 +80,8 @@ export interface ChatDeps {
   search?: () => ChatSearchSettings;
   /** The messages index of the index file, fed from Lumiverse's rows (`index-feed.ts`): a search is answered from it. */
   feed: Pick<IndexFeed, "searchChat">;
+  /** The meaning index (the turn lane's): the ids of the chat's messages nearest a text in meaning, nearest first, or null while no embedding connection is set. Absent: a search is by words alone. */
+  meaning?: MeaningNearest;
 }
 
 /** Why a chat cannot be read, in words an agent and the user can read. */
@@ -95,6 +108,15 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     ...(summarized.has(m.id) ? { summarized: true as const } : {}),
     at: m.sentAt,
   });
+
+  /**
+   * Every message of the chat the embedding may be asked about, as it stands now: the path's messages less the hidden ones where agents may not read them. Read only when an embedding
+   * connection is set. A message's revision is Lumiverse's own with the hash of the text showing, so an edit and a swipe flip both embed it again.
+   */
+  async function meaningDocs(chat: string, path: readonly { id: string; hidden?: boolean }[], readable: boolean): Promise<MeaningDoc[]> {
+    const messages = await deps.reads.messages(chat, { from: 0, to: path.length });
+    return messages.filter((m) => readable || !m.hidden).map((m) => ({ id: m.id, revision: `${m.revision}:${m.shown.hash}`, text: m.text }));
+  }
 
   return {
     async info(scope): Promise<ChatInfo> {
@@ -125,7 +147,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
       const readable = await deps.hiddenReadable(chat);
       const places = new Map(path.map((s, i) => [s.id, i] as const));
       // The index says which messages hold the words; what is read of Lumiverse is the text of the hits alone, oldest first.
-      const hits = ids
+      const word = ids
         .flatMap((id) => {
           const i = places.get(id);
           const step = i === undefined ? undefined : path[i];
@@ -133,10 +155,21 @@ export function createChatReads(deps: ChatDeps): ChatReads {
         })
         .sort((a, b) => a.i - b.i)
         .slice(0, limit);
+      // Beyond the words' hits and within the limit: the messages nearest the query in meaning, where the lane has an embedding connection set (none: no word of the chat is sent anywhere).
+      const nearest = word.length >= limit || deps.meaning === undefined ? null : await deps.meaning(chat, query.text, to - from < path.length ? path.length : limit + word.length, () => meaningDocs(chat, path, readable));
+      const taken = new Set(word.map((h) => h.id));
+      const near = (nearest ?? [])
+        .flatMap((id) => {
+          const i = places.get(id);
+          const step = i === undefined ? undefined : path[i];
+          return taken.has(id) || i === undefined || step === undefined || i < from || i >= to || (step.hidden && !readable) ? [] : [{ id, i }];
+        })
+        .slice(0, limit - word.length);
+      const hits = [...word.map((h) => ({ ...h, how: "words" as const })), ...near.map((h) => ({ ...h, how: "meaning" as const }))];
       const texts = new Map((await deps.reads.messagesById(chat, hits.map((h) => h.id))).map((m) => [m.id, m] as const));
-      return hits.flatMap(({ id, i }): ChatHit[] => {
+      return hits.flatMap(({ id, i, how }): ChatHit[] => {
         const m = texts.get(id);
-        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, matchAt(m.text, wanted) ?? 0, settings.snippetChars), how: "words" }];
+        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, how === "words" ? (matchAt(m.text, wanted) ?? 0) : 0, settings.snippetChars), how }];
       });
     },
     async position(scope, id): Promise<number | undefined> {
