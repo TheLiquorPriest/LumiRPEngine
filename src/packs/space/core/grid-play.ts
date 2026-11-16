@@ -36,6 +36,10 @@ export type DoorState = (typeof DOOR_STATES)[number];
  */
 export const MAP_SIDE_MAX: number = Math.min(mapFormat.properties.layout.maxItems, mapFormat.properties.layout.items.maxLength);
 
+/** What the format holds as an id (a map's, and a place's inside a map): its pattern, and the most characters it allows, both read from the schema so the three cannot part. */
+export const MAP_ID_PATTERN = new RegExp(mapFormat.$defs.id.pattern);
+export const MAP_ID_MAX: number = Number(/\{0,(\d+)\}\$$/.exec(mapFormat.$defs.id.pattern)?.[1]) + 1;
+
 /** A thing's footprint in squares, [columns, rows], and whether it blocks the way and the view. */
 export interface Shape {
   size: [number, number];
