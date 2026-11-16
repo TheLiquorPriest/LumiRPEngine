@@ -38,6 +38,7 @@ export const PAGE_SETTING_DEFS = {
   errorToastMs: { key: "pages.errorToastMs", default: 6000, least: 500, most: 120_000, name: "An error toast shows for", about: "Milliseconds an error toast shows in the kept views." },
   toastMs: { key: "pages.toastMs", default: 3500, least: 500, most: 120_000, name: "Any other toast shows for", about: "Milliseconds any other toast shows in the kept views." },
   downloadRevokeMs: { key: "pages.downloadRevokeMs", default: 1000, least: 100, most: 60_000, name: "A download link is kept for", about: "Milliseconds the kept views keep a download's link before the browser lets it go." },
+  previewWaitMs: { key: "pages.previewWaitMs", default: 300, least: 50, most: 10_000, name: "Wait after typing before a prompt part is rendered again", about: "Milliseconds the Files page waits after he stops typing in a prompt part before it asks RPH to render the draft again for its preview." },
 } as const satisfies Record<string, PageSettingDef>;
 
 /** The page's settings by the name the page reads each under; every value is a whole number: milliseconds, or a count where the setting's words say so. */

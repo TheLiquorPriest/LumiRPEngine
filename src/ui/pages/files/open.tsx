@@ -9,6 +9,7 @@ import { bytesWords, counted, LEVEL_WORDS, when } from "../../words";
 import type { FilesShown, OpenFile, WriteLevel } from "./model";
 import { writeLevels } from "./model";
 import { PinPanel } from "./pins";
+import { isPart, PartPreview } from "./preview";
 import { standingOf } from "./standing";
 
 export const WRITE_WORDS: Readonly<Record<WriteLevel, string>> = { global: "Yours, for every chat", character: "This character's", chat: "This chat's" };
@@ -181,6 +182,7 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
             <span class="label">{open.path}</span>
             <textarea class="lre-input rpe-editor" spellcheck={false} value={open.draft.text} onInput={(event) => props.onDraft({ ...open.draft, text: event.currentTarget.value })} />
           </label>
+          {isPart(open.path) ? <PartPreview chat={props.chat} path={open.path} text={open.draft.text} /> : null}
           <label class="lre-field">
             <span class="label">Save it as</span>
             {/* A select's starting choice is its option marked selected: Preact gives a select no defaultValue. */}
