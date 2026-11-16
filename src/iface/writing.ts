@@ -223,7 +223,12 @@ export class Draft {
 
   /** Keeps with each recorded operation the reports its work made (`Reply.report`): data, with its words, for the store to list with the change. */
   keepReports(reply: Reply): void {
-    for (const rec of this.recorded) rec.reports = reply.kept.filter((r) => r.n === rec.n);
+    for (const rec of this.recorded) {
+      rec.reports = reply.kept.filter((r) => r.n === rec.n);
+      // The store lists a report once with its operation: on its first change only, never once per change of a unit.
+      const first = this.inputs[rec.inputs[0] ?? -1];
+      if (first !== undefined && rec.reports.length > 0) first.reports = rec.reports.map((r) => ({ code: r.line, values: JSON.parse(JSON.stringify(r.fields)) }));
+    }
   }
 
   /** Records one of the store's own operations (the horizon), or a change the store's fact store applies (a fact, `src/store/facts.ts`). */
