@@ -2773,4 +2773,26 @@ export class UserStore {
   viewFor(turn: string, job: string | null): TreeView {
     return this.store.viewOf(this.stateFor(turn, job).state);
   }
+
+  /**
+   * A chat's current state as a job of his (no turn) sees it (R-26): his job's own changes so far on top of the chat's head, in the
+   * order recorded, each checked again there, as `addOwnerChanges` checks a job's next ones; nobody else sees them until the job ends.
+   * With no job, or none of its changes applied, the head's state.
+   */
+  headFor(chat: string, job: string | null): Folded {
+    const base = this.headState(chat);
+    if (job === null) return base;
+    const mine = this.db.query<ChangeDb, [string, string, string]>("SELECT * FROM change WHERE user = ? AND chat = ? AND job = ? AND applied = 1 ORDER BY ord").all(this.id, chat, job).map(changeOf);
+    if (mine.length === 0) return base;
+    const head = this.chatOrThrow(chat).head;
+    const n = head === null ? 1 : (this.db.query<{ depth: number }, [string, string]>("SELECT depth FROM path_node WHERE user = ? AND key = ?").get(this.id, head)?.depth ?? -1) + 2;
+    const state = draft(base.state);
+    applyChecked(this.store.envOf(this.id), state, mine.map((c): Item => ({ op: c.op, value: c.value, turn: "", n, by: c.by, cite: c.cite, change: c.id, precision: c.precision, standing: c.standing, source: c.source })), new Set());
+    return { ...base, state };
+  }
+
+  /** The tree as a job of his sees the chat now (`headFor`). */
+  viewHeadFor(chat: string, job: string | null): TreeView {
+    return this.store.viewOf(this.headFor(chat, job).state);
+  }
 }
