@@ -289,6 +289,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       soFar: (user, chat) => made().lane.soFarAt(user, chat),
       // The places' settings for the chat, and the lore a place is bound to, each entry as Lumiverse holds it now.
       places: { settings: async (user, chat) => (await settings(user, chat)).places, sources: made().placeSources },
+      // The quests' settings for the chat: how many records a page of them holds.
+      quests: async (user, chat) => (await settings(user, chat)).quests,
     })),
     worlds,
     build,
