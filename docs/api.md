@@ -1171,6 +1171,136 @@ One quest of the chat in full, by its id or its name: its record, and every writ
 
 ## Lore
 
+### `GET /api/v1/build/lore/books`
+
+His World Info books a pin may name an entry of, the engine's own left out: those the chat has first, then by name, each with whether a character brought it and when it was made, which tells books of one name apart.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, The chat whose books come first |
+| Body | none |
+| Reply | `{ books: JsonValue }` |
+
+### `GET /api/v1/build/lore/books/:book/entries`
+
+One of his books' entries, for the pin picker and the lore editor: in the book's order, each with its LRE fields, its secret marks and the revision a write must name.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `book` |
+| Query | none |
+| Body | none |
+| Reply | `{ entries: BookEntries }` |
+
+### `POST /api/v1/build/lore/books/:book/entries/:entry/fields`
+
+Sets one entry's own LRE fields (its visibility, links and aliases; null takes them off) on his press, checked against the revision the page read: the rest of its extension data and an earlier build's secrecy fields stay as they are, and nothing else of the entry is written. A write on an entry that changed since is refused as a conflict. Kept with the entry before and after, so it can be put back.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `book`, `entry` |
+| Query | none |
+| Body | `{ fields: JsonValue; revision: number }` |
+| Reply | `{ entries: BookEntries }` |
+
+### `POST /api/v1/build/lore/books/:book/entries/:entry/mark`
+
+Make secret and Make public on one entry, on his press, checked against the revision the page read: the change is written as secret marks into the entry's text and nothing else of it. A write on an entry that changed since is refused as a conflict. Kept with the entry before and after, so it can be put back.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `book`, `entry` |
+| Query | none |
+| Body | `{ change: JsonValue; revision: number }` |
+| Reply | `{ entries: BookEntries }` |
+
+### `GET /api/v1/build/lore/pins`
+
+Every pin of a world's draft (with `world`) or of the revision a chat plays (with `chat`), read now: by character, by place and by step, each with its entry's or book's title, where it comes from and whether it reads.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `world` (may be left out): `string`, A world: its draft's pins<br>`chat` (may be left out): `string`, A chat: the pins of the revision it plays |
+| Body | none |
+| Reply | `{ pins: JsonValue }` |
+
+### `GET /api/v1/build/secrecy/books`
+
+His books (the engine's own left out) and where each one's move from LRE's old secrecy fields to secret marks stands: never moved or put back, moved and waiting for his check, confirmed, or put back in part.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | `{ books: JsonValue }` |
+
+### `GET /api/v1/build/secrecy/books/:book`
+
+One book read now, with what moving it to secret marks would do, entry by entry, or what its move did; writes nothing.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `book` |
+| Query | none |
+| Body | none |
+| Reply | `{ book: JsonValue }` |
+
+### `POST /api/v1/build/secrecy/books/:book/apply`
+
+Apply: the undo copy of every entry the move lists is kept first, then each secret and each twin of one is written as its mark, with the old fields left on; each write is checked against the revision read. Refused as a conflict once the book or its move changed since the page read it, and while a move is under way.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `book` |
+| Query | none |
+| Body | `{ version: string }` |
+| Reply | `{ book: JsonValue }` |
+
+### `POST /api/v1/build/secrecy/books/:book/confirm`
+
+Confirm: once the book reads right, LRE's old secrecy fields come off every moved entry; the undo copy stays.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `book` |
+| Query | none |
+| Body | `{ version: string }` |
+| Reply | `{ book: JsonValue }` |
+
+### `POST /api/v1/build/secrecy/books/:book/restore`
+
+Restore secrecy as it was: every entry in the undo copy goes back as it stood before the move, byte for byte, after what he changed since is kept in the copy.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `book` |
+| Query | none |
+| Body | `{ version: string }` |
+| Reply | `{ book: JsonValue }` |
+
 ### `GET /api/v1/chats/:chat/lore/books`
 
 Every book of the user's by its id and name, for the Settings page's choice of the books the lore reads (`lore.books`): whether the chat has it attached, whether a character brought it, and when Lumiverse made it.
@@ -1274,6 +1404,19 @@ Applies the chat's `lore.projection` setting now: on, the chat's own book of wha
 | Query | none |
 | Body | none |
 | Reply | [`LoreProjectionRefreshed`](#loreprojectionrefreshed) |
+
+### `POST /api/v1/chats/:chat/lore/save`
+
+Saves the chat's latest reply, or an excerpt of its messages (found whatever its spacing and case; text it does not hold word for word is saved at its latest reply), as a draft lore entry of the world the chat plays, with the message it came from. The title is its first words; nothing is committed; the same title twice gets a fresh id. A chat that plays no world is refused.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | `{ text?: string }` |
+| Reply | `{ world: string; id: string }` |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/lore`
 
@@ -3702,6 +3845,14 @@ export interface BaseVersionRow {
   by: string | null;
   created: number;
 }
+```
+
+### `BookEntries`
+
+A book's entries in its order: each with its title, whether it is switched off, its length, the revision a write must name, LRE's fields, its secret marks and what starts like one that can't be read.
+
+```ts
+export type BookEntries = JsonValue;
 ```
 
 ### `BootstrapAnswerAsk`

@@ -127,6 +127,9 @@ export interface BaseVersionRow {
   created: number;
 }
 
+/** A book's entries in its order: each with its title, whether it is switched off, its length, the revision a write must name, LRE's fields, its secret marks and what starts like one that can't be read. */
+export type BookEntries = JsonValue;
+
 /** His word to a bootstrap job that waits for it: go on, asking again after `more` tokens (its token limit again when left out), or end with what it has. */
 export type BootstrapAnswerAsk = { go: "on"; more?: number } | { go: "end" };
 
@@ -4006,6 +4009,106 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** His World Info books a pin may name an entry of, the engine's own left out: those the chat has first, then by name, each with whether a character brought it and when it was made, which tells books of one name apart. */
+  "GET /api/v1/build/lore/books": {
+    params: Record<string, never>;
+    query: { chat?: string };
+    body: undefined;
+    reply: { books: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One of his books' entries, for the pin picker and the lore editor: in the book's order, each with its LRE fields, its secret marks and the revision a write must name. */
+  "GET /api/v1/build/lore/books/:book/entries": {
+    params: { book: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { entries: BookEntries };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Sets one entry's own LRE fields (its visibility, links and aliases; null takes them off) on his press, checked against the revision the page read: the rest of its extension data and an earlier build's secrecy fields stay as they are, and nothing else of the entry is written. A write on an entry that changed since is refused as a conflict. Kept with the entry before and after, so it can be put back. */
+  "POST /api/v1/build/lore/books/:book/entries/:entry/fields": {
+    params: { book: string; entry: string };
+    query: Record<string, never>;
+    body: { fields: JsonValue; revision: number };
+    reply: { entries: BookEntries };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Make secret and Make public on one entry, on his press, checked against the revision the page read: the change is written as secret marks into the entry's text and nothing else of it. A write on an entry that changed since is refused as a conflict. Kept with the entry before and after, so it can be put back. */
+  "POST /api/v1/build/lore/books/:book/entries/:entry/mark": {
+    params: { book: string; entry: string };
+    query: Record<string, never>;
+    body: { change: JsonValue; revision: number };
+    reply: { entries: BookEntries };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Every pin of a world's draft (with `world`) or of the revision a chat plays (with `chat`), read now: by character, by place and by step, each with its entry's or book's title, where it comes from and whether it reads. */
+  "GET /api/v1/build/lore/pins": {
+    params: Record<string, never>;
+    query: { world?: string; chat?: string };
+    body: undefined;
+    reply: { pins: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** His books (the engine's own left out) and where each one's move from LRE's old secrecy fields to secret marks stands: never moved or put back, moved and waiting for his check, confirmed, or put back in part. */
+  "GET /api/v1/build/secrecy/books": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: { books: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One book read now, with what moving it to secret marks would do, entry by entry, or what its move did; writes nothing. */
+  "GET /api/v1/build/secrecy/books/:book": {
+    params: { book: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { book: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Apply: the undo copy of every entry the move lists is kept first, then each secret and each twin of one is written as its mark, with the old fields left on; each write is checked against the revision read. Refused as a conflict once the book or its move changed since the page read it, and while a move is under way. */
+  "POST /api/v1/build/secrecy/books/:book/apply": {
+    params: { book: string };
+    query: Record<string, never>;
+    body: { version: string };
+    reply: { book: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Confirm: once the book reads right, LRE's old secrecy fields come off every moved entry; the undo copy stays. */
+  "POST /api/v1/build/secrecy/books/:book/confirm": {
+    params: { book: string };
+    query: Record<string, never>;
+    body: { version: string };
+    reply: { book: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Restore secrecy as it was: every entry in the undo copy goes back as it stood before the move, byte for byte, after what he changed since is kept in the copy. */
+  "POST /api/v1/build/secrecy/books/:book/restore": {
+    params: { book: string };
+    query: Record<string, never>;
+    body: { version: string };
+    reply: { book: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** The chats RPE played, the most recently played first, then the chats its store holds that it has not played (a migration's), by name. */
   "GET /api/v1/chats": {
     params: Record<string, never>;
@@ -4332,6 +4435,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: LoreProjectionRefreshed;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Saves the chat's latest reply, or an excerpt of its messages (found whatever its spacing and case; text it does not hold word for word is saved at its latest reply), as a draft lore entry of the world the chat plays, with the message it came from. The title is its first words; nothing is committed; the same title twice gets a fresh id. A chat that plays no world is refused. */
+  "POST /api/v1/chats/:chat/lore/save": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { text?: string };
+    reply: { world: string; id: string };
     paged: false;
     long: false;
     joined: false;
