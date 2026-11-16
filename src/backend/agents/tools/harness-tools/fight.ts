@@ -139,8 +139,8 @@ function optionWords(view: ToolReadView, ctx: ReadContext, o: FightOption): { la
   return { label: `${o.action.label}${o.target ? ` ${nameIn(view, ctx, o.target)}` : ""}`, ...(odds ? { odds: Object.fromEntries(Object.entries(odds).map(([outcome, p]) => [outcome, percent(p)])) } : {}) };
 }
 
-/** The pack's Encounter card as an answer gives it: without whose view it is, which the tool says, and without the palette's own options, which these tools give by key. */
-function cardOf(card: EncounterView | null): Omit<EncounterView, "gm" | "actions"> | null {
+/** The pack's Encounter card as an answer gives it: without whose view it is, which the tool says, without the fight's id and place, and without the palette's own options, which these tools give by key. */
+function cardOf(card: EncounterView | null): Omit<EncounterView, "id" | "place" | "gm" | "actions"> | null {
   return card ? { round: card.round, turn: card.turn, yours: card.yours, order: card.order, economy: card.economy, log: card.log } : null;
 }
 
@@ -200,7 +200,7 @@ function decisionsFor(view: ToolReadView, args: JsonObject, due: readonly DueTur
  * which draws as any played attempt does (`rollSeed`).
  */
 export function roundSeed(turnSeed: string, state: Readonly<WorldState>): string {
-  return hashParts("lre.harness.fight", turnSeed, hashJson(sliceOf(state, PACK).encounter ?? null));
+  return hashParts("lre.harness.fight", turnSeed, hashJson(sliceOf(state, PACK).fights ?? null));
 }
 
 /** Who is down once `events` have played, by name: those the fight had down before, with each fall and each rise since. */

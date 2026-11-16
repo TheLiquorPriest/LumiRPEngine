@@ -284,7 +284,7 @@ describe("records and swipes", () => {
     const elsewhere = plan(world, started(world, ["goblin", "bandit"], "other").state, "strike", { target: "goblin" }, "swipe-a");
     const w = new Working(reg, world, parent);
     w.applyAll(elsewhere.events);
-    expect(w.dropped.map((d) => d.rejection.code)).toContain("other_fight");
+    expect(w.dropped.map((d) => d.rejection.code)).toContain("no_fight");
   });
 
   test("a world without combat rules plans exactly as before", () => {

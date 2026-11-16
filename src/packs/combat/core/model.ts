@@ -94,9 +94,8 @@ function numbers(v: JsonValue | undefined): Record<string, number> {
   return out;
 }
 
-/** The fight under way, or null. */
-export function encounterOf(state: Readonly<WorldState>): Encounter | null {
-  const raw = sliceOf(state, PACK).encounter;
+/** One recorded fight as the pack reads it, or null when what is there is not one. */
+function readEncounter(raw: JsonValue | undefined): Encounter | null {
   if (!isRecord(raw) || typeof raw.id !== "string" || !Array.isArray(raw.order)) return null;
   const order: Fighter[] = [];
   for (const f of raw.order) {
@@ -112,15 +111,48 @@ export function encounterOf(state: Readonly<WorldState>): Encounter | null {
   return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
 }
 
-/** Writes the fight back inside an event reducer; null ends it (and its recorded decisions). */
-export function writeEncounter(state: WorldState, enc: Encounter | null): void {
+/** Every fight under way, in the order they began. */
+export function fightsOf(state: Readonly<WorldState>): Encounter[] {
+  return Object.values(objOf(sliceOf(state, PACK).fights)).flatMap((raw) => readEncounter(raw) ?? []);
+}
+
+/** One fight under way by its id, or null. */
+export function fightById(state: Readonly<WorldState>, id: string): Encounter | null {
+  return readEncounter(own(objOf(sliceOf(state, PACK).fights), id));
+}
+
+/**
+ * The fight a reader that wants "the fight" reads: the one the POV is in when one is, else the first to begin
+ * (the pack keeps which, as fights begin and end), or null when none is on.
+ */
+export function encounterOf(state: Readonly<WorldState>): Encounter | null {
+  const slice = sliceOf(state, PACK);
+  return fightById(state, strOf(slice.main)) ?? fightsOf(state)[0] ?? null;
+}
+
+/** Writes a fight back inside an event reducer. The first fight, or one the POV is in when the one read as "the fight" has not the POV, becomes the one readers read. */
+export function writeEncounter(state: WorldState, enc: Encounter, pov: EntityId | null = null): void {
   const slice = mutableSlice(state, PACK);
+  const held = fightById(state, strOf(slice.main));
   // An Encounter is plain JSON data; the cast only restates it as JSON.
-  if (enc) slice.encounter = enc as unknown as JsonObject;
-  else {
-    delete slice.encounter;
+  slice.fights = { ...objOf(slice.fights), [enc.id]: enc as unknown as JsonObject };
+  if (held === null || (pov !== null && fighterOf(enc, pov) !== undefined && fighterOf(held, pov) === undefined)) slice.main = enc.id;
+}
+
+/** Ends one fight inside an event reducer, with its recorded decisions when it is the one read as "the fight"; the next one the POV is in, else the first left, is read then. */
+export function removeEncounter(state: WorldState, id: string, pov: EntityId | null): void {
+  const slice = mutableSlice(state, PACK);
+  const rest = { ...objOf(slice.fights) };
+  delete rest[id];
+  const left = Object.values(rest).flatMap((raw) => readEncounter(raw) ?? []);
+  if (strOf(slice.main) === id || left.length === 0) {
     delete slice.decisions;
+    const next = left.find((e) => pov !== null && fighterOf(e, pov) !== undefined) ?? left[0];
+    if (next) slice.main = next.id;
+    else delete slice.main;
   }
+  if (left.length > 0) slice.fights = rest;
+  else delete slice.fights;
   if (Object.keys(slice).length === 0) delete state.packs[PACK];
 }
 
@@ -145,12 +177,12 @@ export function standing(at: FightRead, enc: Encounter, f: Fighter): boolean {
 }
 
 /**
- * Whether someone is in the fight under way and still where it is fought, down or not, while the
- * POV is there too (one it has left is over): day plans and schedules leave them where they are.
+ * Whether someone is in a fight under way and still where it is fought, down or not: day plans and
+ * schedules leave them where they are. A fight the POV is in is over once it has left it, and holds
+ * no one then; one between others is the story's to end.
  */
 export function engaged(state: Readonly<WorldState>, world: Pick<WorldDoc, "pov">, id: EntityId): boolean {
-  const enc = encounterOf(state);
-  return enc !== null && !povLeft(state, world, enc) && fighterOf(enc, id) !== undefined && !isGone(state, id) && placeOfEntity(state, id) === enc.place;
+  return fightsOf(state).some((enc) => fighterOf(enc, id) !== undefined && !isGone(state, id) && placeOfEntity(state, id) === enc.place && (fighterOf(enc, world.pov) === undefined || !povLeft(state, world, enc)));
 }
 
 /** Whether the POV has left the fight: it isn't where the fight is, so the fight is over for it. */

@@ -17,7 +17,7 @@ import { isGone, scopeEnv } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, storyLocked } from "../../../engine/visibility";
 import { combatActions, hpSeen, targetParam } from "./flow";
-import { budgetCount, DOWN_CONDITION, encounterOf, fighterOf, povLeft, rulesOf, standing, type Encounter, type Side } from "./model";
+import { budgetCount, DOWN_CONDITION, encounterOf, fightById, fighterOf, povLeft, rulesOf, standing, type Encounter, type Side } from "./model";
 
 export interface EncounterRow {
   /** Null for someone the POV can't see. */
@@ -38,6 +38,10 @@ export interface EncounterRow {
 }
 
 export interface EncounterView {
+  /** The fight's id, which the tools that name one by it take. */
+  id: string;
+  /** Where it is fought; null for a fight recorded at no place. */
+  place: string | null;
   gm: boolean;
   round: number;
   /** Whose turn it is, as the POV names them ("you", a name, or "someone"). */
@@ -134,9 +138,9 @@ function logLines(ctx: ReadContext, enc: Encounter, gm: boolean): string[] {
  * fight, and for the player once the POV has left it. Down reads the fight itself, at any Sheets
  * level; the down condition the Sheets pack shows from Sheets 4 isn't listed beside it again.
  */
-export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}): EncounterView | null {
+export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean; fight?: string } = {}): EncounterView | null {
   const rules = rulesOf(ctx.world);
-  const enc = encounterOf(ctx.state);
+  const enc = opts.fight === undefined ? encounterOf(ctx.state) : fightById(ctx.state, opts.fight);
   const gm = opts.gm === true;
   // The game master reads a fight a world with no combat rules recorded as well: its sides and order, no budgets or hit points.
   if (!enc || (!gm && (!rules || povLeft(ctx.state, ctx.world, enc)))) return null;
@@ -162,12 +166,14 @@ export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}
   });
   const current = enc.order[enc.turn]?.id;
   return {
+    id: enc.id,
+    place: enc.place,
     gm,
     round: enc.round,
     turn: current ? (nameOf(ctx, current, gm) ?? "someone") : "no one",
     yours: current === ctx.world.pov,
     order,
-    economy: head?.economy ?? [],
+    economy: enc.id === encounterOf(ctx.state)?.id ? (head?.economy ?? []) : [],
     actions: gm ? [] : combatEntries(ctx),
     log: logLines(ctx, enc, gm),
   };

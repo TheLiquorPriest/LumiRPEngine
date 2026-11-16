@@ -19,12 +19,12 @@
 // {winner?}`, `combat.end_turn {who?}` and `combat.spend {who?, cost}`. The pack also defines the `hostile`
 // relation type the default sides rule reads (symmetric, so both sides hold it).
 
-import type { JsonValue } from "../../../shared/json";
+import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { ActionDef } from "../../../shared/world";
+import type { ActionDef, CombatDef } from "../../../shared/world";
 import { checkOf, readyCheck, rollCheck } from "../../../engine/checks";
 import type { Value } from "../../../engine/expr";
 import { labelOf, mutableSlice, numOf, objOf, own, sliceRecord, strOf } from "../../../engine/pack-kit";
@@ -35,7 +35,7 @@ import { selectorMatches } from "../../../engine/selector";
 import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { breakOff, fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
-import { attacks, canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, rulesOf, sameHp, stalemateRounds, stalledHolds, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
+import { attacks, canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fightById, fightsOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, removeEncounter, rulesOf, sameHp, stalemateRounds, stalledHolds, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
 import { buildEncounterView, fightOffers, type EncounterView } from "./view";
 
 declare module "../../../engine/registry" {
@@ -45,13 +45,15 @@ declare module "../../../engine/registry" {
     /** Opens a fight's part of a turn before the POV's action; its `after` runs the rest. Null without combat rules. */
     "combat.round": (w: Working, rng: Rng) => FightRound | null;
     /** Ends the fight under way before a time skip the player asked for (`seed`: the run's), with the narrator's line for it; none without a fight. */
-    "combat.break_off": (w: Working, seed: string) => string[];
+    "combat.break_off": (w: Working, seed: string, fight?: string) => string[];
   }
   interface QueryMap {
     /** The `npc.choose` questions before the POV's next turn: each participant acting first, with its legal options by key and their labels. */
     "combat.choices": (ctx: ReadContext) => { key: string; agent: EntityId; options: string[]; labels: Record<string, string> }[];
     /** The fight as the GM sees it; null without one. */
     "combat.gm": (ctx: ReadContext) => EncounterView | null;
+    /** Every fight under way as the GM sees it, in the order they began; none without one. */
+    "combat.fights": (ctx: ReadContext) => EncounterView[];
     /** A player's line for a change to someone else's HP that the POV sees as a wound band (`hpLine`): no number; undefined for any other event. */
     "combat.hp_line": (ctx: ReadContext, e: LedgerEvent) => string | null | undefined;
     /** Whether someone is in the fight under way, where it is fought: no day plan or schedule moves them, and the clock waits. */
@@ -67,11 +69,9 @@ function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }
 
-/** The fight an event names, when it is the one under way. */
+/** The fight an event names, when it is under way. */
 function current(e: PackEvent, ctx: Pick<ReadContext, "state">): Encounter | Rejection {
-  const enc = encounterOf(ctx.state);
-  if (!enc) return reject("no_fight", "no fight is under way");
-  return enc.id === strOf(e.data.encounter) ? enc : reject("other_fight", "that was another fight");
+  return fightById(ctx.state, strOf(e.data.encounter)) ?? reject("no_fight", "that fight is not under way");
 }
 
 function counts(v: JsonValue | undefined): Record<string, number> | null {
@@ -128,7 +128,6 @@ function namedFoes(ctx: ReadContext, v: JsonValue | undefined, here: readonly En
  * `with` (the POV is the one side) and may name its foes by a selector or none (everyone here hostile to them).
  */
 function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
-  if (encounterOf(ctx.state)) return reject("in_fight", "a fight is already under way");
   const rules = rulesOf(ctx.world);
   const pov = ctx.world.pov;
   const given = idsOf(a.with);
@@ -136,6 +135,7 @@ function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEve
   let foes: EntityId[];
   if (given.length > 0) foes = idsOf(a.foes);
   else {
+    if (fightsOf(ctx.state).some((f) => fighterOf(f, pov))) return reject("in_fight", "a fight is already under way");
     const place = placeOfEntity(ctx.state, pov);
     if (place === null) return reject("nowhere", "there's nowhere to fight");
     if (rules && !canFight(ctx, rules, pov)) return reject("cannot_fight", "you can't fight here");
@@ -147,13 +147,30 @@ function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEve
     foes = named ?? here.filter((id) => hostile(ctx, rules?.sides?.hostile, id, pov));
   }
   if (foes.length === 0) return reject("no_foes", "there's no one to fight here");
+  const sides = sidesOf(ctx, party, foes);
+  if ("code" in sides) return sides;
+  const places = new Set(sides.fighters.map((id) => placeOfEntity(ctx.state, id)));
+  const place = typeof a.at === "string" && own(ctx.world.places, a.at) ? a.at : places.size === 1 ? ([...places][0] ?? null) : null;
+  const order = rankedOrder(a, ctx, rules, party, sides.fighters);
+  if ("code" in order) return order;
+  return [{ type: "combat.start", data: { encounter: hashParts(ctx.rng.seed, "encounter").slice(0, 12), place, order } }];
+}
+
+/** The fighters of two sides, each once; the refusal when someone is on both sides or is no one in the world. */
+function sidesOf(ctx: ReadContext, party: readonly EntityId[], foes: readonly EntityId[]): { fighters: EntityId[] } | Rejection {
   const both = party.find((id) => foes.includes(id));
   if (both !== undefined) return { code: "bad_args", reason: `${labelOf(ctx, both)} is named on both sides`, said: both };
   const absent = [...party, ...foes].find((id) => !own(ctx.state.entities, id));
   if (absent !== undefined) return reject("missing_entity", `no ${labelOf(ctx, absent)}`);
-  const fighters = [...new Set([...party, ...foes])];
-  const places = new Set(fighters.map((id) => placeOfEntity(ctx.state, id)));
-  const place = typeof a.at === "string" && own(ctx.world.places, a.at) ? a.at : places.size === 1 ? ([...places][0] ?? null) : null;
+  return { fighters: [...new Set([...party, ...foes])] };
+}
+
+/**
+ * The fighters as a fight records them, in the order the call ranks them (`order`, then the rest as the call lists
+ * them), each with its budgets full. The world's initiative check is rolled for each only when `roll_initiative`
+ * asks, and then it sets the order and is recorded; a world with no initiative check is answered with its checks.
+ */
+function rankedOrder(a: Record<string, JsonValue>, ctx: EffectContext, rules: CombatDef | null, party: readonly EntityId[], fighters: readonly EntityId[]): JsonObject[] | Rejection {
   const ranked = [...new Set([...idsOf(a.order).filter((id) => fighters.includes(id)), ...fighters])];
   const rolls = new Map<EntityId, { init: number; tie: number }>();
   if (a.roll_initiative === true) {
@@ -166,10 +183,30 @@ function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEve
       const tie = rules.tieBreak !== undefined ? Number(readFor(ctx, rules.tieBreak, { self: id }, 0)) : ready.modifier;
       rolls.set(id, { init: roll.total, tie: Number.isFinite(tie) ? tie : 0 });
     }
+    const pov = ctx.world.pov;
     ranked.sort((x, y) => (rolls.get(y)?.init ?? 0) - (rolls.get(x)?.init ?? 0) || (rolls.get(y)?.tie ?? 0) - (rolls.get(x)?.tie ?? 0) || Number(y === pov) - Number(x === pov) || Number(party.includes(y)) - Number(party.includes(x)) || (x < y ? -1 : x > y ? 1 : 0));
   }
-  const order = ranked.map((id) => ({ id, side: party.includes(id) ? "party" : "foes", init: rolls.get(id)?.init ?? null, left: rules ? fullEconomy(ctx, rules, id) : {} }));
-  return [{ type: "combat.start", data: { encounter: hashParts(ctx.rng.seed, "encounter").slice(0, 12), place, order } }];
+  return ranked.map((id): JsonObject => ({ id, side: party.includes(id) ? "party" : "foes", init: rolls.get(id)?.init ?? null, left: rules ? fullEconomy(ctx, rules, id) : {} }));
+}
+
+/**
+ * The `combat.join` effect: the fighters a call names, on the sides it gives (`with`, `foes`), join the fight `fight`
+ * names that is under way. No one else is added, none already in it is added again, and initiative is rolled for
+ * them only when `roll_initiative` asks (they take their place among those who have one, else the end).
+ */
+function joinFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
+  const enc = fightById(ctx.state, strOf(a.fight));
+  if (!enc) return { code: "no_fight", reason: "that fight is not under way", choices: fightsOf(ctx.state).map((f) => f.id), said: strOf(a.fight) };
+  const party = idsOf(a.with);
+  const foes = idsOf(a.foes);
+  if (party.length + foes.length === 0) return reject("no_foes", "no one is named to join");
+  const sides = sidesOf(ctx, party, foes);
+  if ("code" in sides) return sides;
+  const already = sides.fighters.find((id) => fighterOf(enc, id));
+  if (already !== undefined) return { code: "bad_args", reason: `${labelOf(ctx, already)} is in that fight already`, said: already };
+  const add = rankedOrder(a, ctx, rulesOf(ctx.world), party, sides.fighters);
+  if ("code" in add) return add;
+  return [{ type: "combat.join", data: { encounter: enc.id, add } }];
 }
 
 function describeSide(e: PackEvent, side: Side): string {
@@ -181,7 +218,7 @@ const events: EventTypeDef<PackEvent>[] = [
   {
     type: "combat.start",
     validate(e, ctx) {
-      if (encounterOf(ctx.state)) return reject("in_fight", "a fight is already under way");
+      if (fightById(ctx.state, strOf(e.data.encounter))) return reject("in_fight", "that fight is already under way");
       const order = orderOf(e.data.order);
       if (strOf(e.data.encounter) === "" || !order) return reject("bad_event", "a fight needs an id and an order");
       if (new Set(order.map((f) => f.id)).size !== order.length) return reject("bad_event", "someone is in the fight twice");
@@ -190,12 +227,44 @@ const events: EventTypeDef<PackEvent>[] = [
       return null;
     },
     apply(e, state, ctx) {
-      delete mutableSlice(state, PACK).decisions;
+      // Fights already under way keep what was decided for them.
+      if (encounterOf(state) === null) delete mutableSlice(state, PACK).decisions;
       const order = orderOf(e.data.order) ?? [];
       const rules = rulesOf(ctx.world);
-      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } });
+      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } }, ctx.world.pov);
     },
     describe: (e) => `A fight: ${describeSide(e, "party")} against ${describeSide(e, "foes")}`,
+  },
+  {
+    type: "combat.join",
+    validate(e, ctx) {
+      const enc = current(e, ctx);
+      if ("code" in enc) return enc;
+      const add = orderOf(e.data.add);
+      if (!add || add.length === 0) return reject("bad_event", "a join names who joins and on which side");
+      const twice = add.find((f, i) => fighterOf(enc, f.id) !== undefined || add.findIndex((g) => g.id === f.id) !== i);
+      if (twice) return reject("bad_event", `${labelOf(ctx, twice.id)} is in the fight twice`);
+      const missing = add.find((f) => !own(ctx.state.entities, f.id));
+      return missing ? reject("missing_entity", `no ${labelOf(ctx, missing.id)}`) : null;
+    },
+    apply(e, state, ctx) {
+      const enc = fightById(state, strOf(e.data.encounter));
+      const added = orderOf(e.data.add) ?? [];
+      if (!enc) return;
+      const order = [...enc.order];
+      let turn = enc.turn;
+      for (const f of added) {
+        const init = f.init;
+        // One who rolled stands before the first who rolled lower; one who did not, last.
+        const before = init === null ? -1 : order.findIndex((g) => g.init !== null && g.init < init);
+        const index = before < 0 ? order.length : before;
+        order.splice(index, 0, f);
+        if (index <= turn) turn += 1;
+      }
+      const rules = rulesOf(ctx.world);
+      writeEncounter(state, { ...enc, order, turn, calm: { ...enc.calm, hp: { ...enc.calm.hp, ...(rules ? hpByFighter(ctx, rules, added) : {}) } } });
+    },
+    describe: (e) => `${(Array.isArray(e.data.add) ? e.data.add : []).flatMap((f) => (isRecord(f) && typeof f.id === "string" ? [f.id] : [])).join(", ")} joined the fight`,
   },
   {
     type: "combat.turn",
@@ -212,7 +281,7 @@ const events: EventTypeDef<PackEvent>[] = [
       return null;
     },
     apply(e, state, ctx) {
-      const enc = encounterOf(state);
+      const enc = fightById(state, strOf(e.data.encounter));
       if (!enc) return;
       const round = numOf(e.data.round, enc.round);
       const reset = objOf(e.data.reset);
@@ -247,7 +316,7 @@ const events: EventTypeDef<PackEvent>[] = [
       return fits(cost, f.left) ? null : reject("spent", `${labelOf(ctx, who)} has nothing like that left`);
     },
     apply(e, state) {
-      const enc = encounterOf(state);
+      const enc = fightById(state, strOf(e.data.encounter));
       const cost = counts(e.data.cost) ?? {};
       if (enc) writeEncounter(state, { ...enc, order: enc.order.map((f) => (f.id !== strOf(e.data.who) ? f : { ...f, left: Object.fromEntries(Object.entries(f.left).map(([b, n]) => [b, n - (cost[b] ?? 0)])) })) });
     },
@@ -261,7 +330,7 @@ const events: EventTypeDef<PackEvent>[] = [
       return fighterOf(enc, strOf(e.data.actor)) ? null : reject("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
     },
     apply(e, state, ctx) {
-      const enc = encounterOf(state);
+      const enc = fightById(state, strOf(e.data.encounter));
       if (!enc) return;
       const target = typeof e.data.target === "string" ? e.data.target : null;
       const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null };
@@ -283,7 +352,7 @@ const events: EventTypeDef<PackEvent>[] = [
       return downHolds(ctx, rules, who) === e.data.down ? null : reject("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
     },
     apply(e, state) {
-      const enc = encounterOf(state);
+      const enc = fightById(state, strOf(e.data.encounter));
       if (enc) writeEncounter(state, { ...enc, order: enc.order.map((f) => (f.id === strOf(e.data.entity) ? { ...f, down: e.data.down === true } : f)) });
     },
     describe: (e) => `${strOf(e.data.entity)}: ${e.data.down === true ? "down" : "back up"}`,
@@ -300,7 +369,7 @@ const events: EventTypeDef<PackEvent>[] = [
       if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc))) return reject("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
       return null;
     },
-    apply: (_e, state) => writeEncounter(state, null),
+    apply: (e, state, ctx) => removeEncounter(state, strOf(e.data.encounter), ctx.world.pov),
     describe: (e) => (e.data.reason === "left" ? "You left the fight" : e.data.reason === "stalemate" ? "The fight petered out" : e.data.reason === "skip" ? "The fight broke off as time moved on" : `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`),
   },
   {
@@ -329,12 +398,13 @@ export const combatPack: PackDef = {
     for (const def of events) r.event<PackEvent>(def);
 
     r.effect({ type: "combat.start", args: ["with?", "foes?", "at?", "order?", "roll_initiative?"], resolve: (a, ctx) => startFight(a, ctx) });
+    r.effect({ type: "combat.join", args: ["fight", "with?", "foes?", "order?", "roll_initiative?"], resolve: (a, ctx) => joinFight(a, ctx) });
     r.effect({
       type: "combat.end",
-      args: ["winner?"],
+      args: ["winner?", "fight?"],
       resolve(a, ctx) {
-        const enc = encounterOf(ctx.state);
-        if (!enc) return reject("no_fight", "no fight is under way");
+        const enc = a.fight === undefined ? encounterOf(ctx.state) : fightById(ctx.state, strOf(a.fight));
+        if (!enc) return { code: "no_fight", reason: "no fight is under way", choices: fightsOf(ctx.state).map((f) => f.id), said: strOf(a.fight) };
         // The winner is the call's; none given, none is recorded, though only one side stands.
         const winner = a.winner === "party" || a.winner === "foes" ? a.winner : null;
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
@@ -360,6 +430,7 @@ export const combatPack: PackDef = {
     r.service("combat.break_off", breakOff);
     r.query("combat.choices", fightChoices);
     r.query("combat.gm", (ctx) => buildEncounterView(ctx, { gm: true }));
+    r.query("combat.fights", (ctx) => fightsOf(ctx.state).flatMap((f) => buildEncounterView(ctx, { gm: true, fight: f.id }) ?? []));
     r.query("combat.hp_line", hpLine);
     r.query("combat.engaged", (ctx, id) => engaged(ctx.state, ctx.world, id));
     r.query("combat.offers", (ctx, action) => fightOffers(ctx.world, ctx.state, action));

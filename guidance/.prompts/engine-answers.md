@@ -180,3 +180,6 @@ not_here: Operation {{n}} ({{op}}): {{who}} does not stand at {{place}}, where t
 cannot_fight: Operation {{n}} ({{op}}): {{who}} cannot take part by the world's combat rules (no hit points to fight on, or unable to act); they are in the fight all the same.
 fight_broke_off: Operation {{n}} ({{op}}): the fight under way was ended as the story moved on; no winner was recorded.
 fight_still_on: Operation {{n}} ({{op}}): the fight under way is still on; nothing was recorded.
+joined: Operation {{n}} ({{op}}): {{who}} joined the fight {{fight}}, which was under way; no one else was added.
+which_fight: {{#n}}Operation {{n}} ({{op}}): {{/n}}more than one fight is under way ({{fights}}); name the one with fight, by its id.
+unknown_fight: {{#n}}Operation {{n}} ({{op}}): {{/n}}no fight {{fight}} is under way; the fights under way are: {{fights}}.

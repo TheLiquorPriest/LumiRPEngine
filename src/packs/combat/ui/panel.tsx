@@ -35,6 +35,8 @@ function decodeOption(o: Record<string, unknown>): PaletteOption | null {
 export function decodeEncounterView(value: unknown): EncounterView | null {
   if (!isRecord(value) || !Array.isArray(value.order) || typeof value.round !== "number") return null;
   return {
+    id: str(value.id),
+    place: optStr(value.place) ?? null,
     gm: bool(value.gm),
     round: value.round,
     turn: str(value.turn),

@@ -303,6 +303,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "orgs.ask", data: { org: "shop", request: { id: "r_1", by: "dev", power: "money.spend", cents: 60000, text: "Pay Dev $600.00", why: "over the $500.00 a payment limit", what: { type: "economy.transfer", args: { from: "acct", to: "dev", cents: 60000, by: "dev" } }, approvers: ["you"], at: 0, until: 10080, status: "asked" }, visibility: "secret" } },
   { type: "orgs.answer", data: { org: "shop", id: "r_1", status: "denied", by: "you", at: 0, visibility: "secret" } },
   { type: "combat.start", data: { encounter: "e1", place: "taproom", order: [{ id: "you", side: "party", init: 15, left: { action: 1 } }, { id: "rat", side: "foes", init: 5, left: { action: 1 } }] } },
+  { type: "combat.join", data: { encounter: "e1", add: [{ id: "dev", side: "foes", init: null, left: { action: 1 } }] } },
   { type: "combat.spend", data: { encounter: "e1", who: "you", cost: { action: 1 } } },
   { type: "combat.act", data: { encounter: "e1", actor: "you", action: "strike", label: "Strike", target: "rat", outcome: "hit" } },
   { type: "set", entity: "rat", field: "hp", value: 0 },

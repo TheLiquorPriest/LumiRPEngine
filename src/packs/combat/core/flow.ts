@@ -33,7 +33,7 @@ import { bandOf, fieldDef, placeOfEntity, truthy } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
-import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, stalemateRounds, stalledHolds, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
+import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fightById, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, stalemateRounds, stalledHolds, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
 
 /** How many actions anyone but the POV takes in one turn, at most. */
 const ACTS_PER_TURN = 4;
@@ -257,13 +257,12 @@ function stalled(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boo
 }
 
 /**
- * Ends the fight under way because the player moved the story past it with a time skip (DESIGN
- * §11): its rounds take no clock time, so no skip runs inside one. No winner is recorded: none
- * is the call's. It words nothing (the lines the narrator and the tools say are the files'); what
- * it recorded is read from the state after it: the fight is no longer under way.
+ * Ends the fight under way (the one named by id, else the one readers read as "the fight") because the player moved the story past it
+ * with a time skip (DESIGN §11): its rounds take no clock time, so no skip runs inside one. No winner is recorded: none is the call's.
+ * It words nothing (the lines the narrator and the tools say are the files'); what it recorded is read from the state after it.
  */
-export function breakOff(w: Working, seed: string): string[] {
-  const enc = encounterOf(w.state);
+export function breakOff(w: Working, seed: string, fight?: string): string[] {
+  const enc = fight === undefined ? encounterOf(w.state) : fightById(w.state, fight);
   if (enc) record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "skip", winner: null, rounds: enc.round } }], seed);
   return [];
 }
