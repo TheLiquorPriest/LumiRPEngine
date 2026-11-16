@@ -6,7 +6,7 @@ This is how the table usually runs a new turn. It is guidance: follow it unless 
 
 The player is waiting for the reply, and for nothing else. So a turn's first message holds, in this order:
 
-1. your intent record (section 1): this is where you think the turn through, a line each;
+1. your intent record (section 1), a line each;
 2. the reply;
 3. the calls that settle the turn (section 7), the ones your record's `After:` line names.
 
