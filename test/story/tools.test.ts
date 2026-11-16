@@ -342,7 +342,7 @@ describe("story_record", () => {
 
   test("a call that belongs to no turn records as its own change, and has no record of a turn to write", async () => {
     const b = await bench();
-    await b.t.play([{ part: "beat", item: null, value: { text: "Wren arrives." } }]);
+    const first = await b.t.play([{ part: "beat", item: null, value: { text: "Wren arrives." } }]);
     const r = await b.call("story_record", { operations: [{ op: "beat", text: "Late.", message: 1 }] });
     expect(r.error).toBeFalsy();
     expect(dataOf(await b.call("story_query", { part: "beat" })).beat).toEqual([
@@ -352,6 +352,10 @@ describe("story_record", () => {
     const refused = await b.call("story_record", { operations: [{ op: "record", decided: "Bram stalls." }] });
     expect(refused.error).toBe(true);
     expect(texts(refused)[0]).toBe("Operation 1 (record) is your record of a turn, and this call belongs to no turn, so it was not made.");
+    // Naming the turn it is the record of, a job's call writes it as its own change.
+    const named = await b.call("story_record", { operations: [{ op: "record", turn: first.id, decided: "Bram stalls." }] });
+    expect(named.error).toBeFalsy();
+    expect(dataOf(await b.call("story_query", { part: "record" })).record).toEqual([expect.objectContaining({ id: `rec:${first.id}`, decided: "Bram stalls." })]);
   });
 });
 

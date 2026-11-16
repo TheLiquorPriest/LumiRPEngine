@@ -123,7 +123,7 @@ describe("story_record, as the Author met it live", () => {
       "future reads id, text, tier, due, standing, who, place, close, drop, why, and a new one needs text.",
       "canon reads id, text, who, message, drop, why, and a new one needs text.",
       "retcon reads id, text, why, of, drop, and a new one needs text.",
-      "record reads intent, decided, why, rulings, consents, next.",
+      "record reads intent, decided, why, rulings, consents, next, turn.",
       "overlay reads entry, text, and needs entry, text.",
       "Nothing was recorded. Send the call again with that put right.",
     ]);

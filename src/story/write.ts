@@ -64,7 +64,7 @@ const OPS: readonly OpDef[] = [
   { name: "future", part: "future", finds: "new-or-id", args: { text: "text", tier: "tier", due: "due", standing: STANDINGS, who: "names", place: "text", close: "flag", ...DROP }, needs: ["text"] },
   { name: "canon", part: "canon", finds: "new-or-id", args: { text: "text", who: "names", message: "message", ...DROP }, needs: ["text"] },
   { name: "retcon", part: "retcon", finds: "new-or-id", args: { text: "text", why: "text", of: "item", drop: "flag" }, needs: ["text"] },
-  { name: "record", part: "record", finds: "record", args: { intent: "text", decided: "text", why: "text", rulings: "text", consents: "text", next: "text" } },
+  { name: "record", part: "record", finds: "record", args: { intent: "text", decided: "text", why: "text", rulings: "text", consents: "text", next: "text", turn: "text" } },
 ];
 
 /** The operation that writes no story item: it hands the lore lane's overlay its note. */
@@ -76,7 +76,7 @@ export const STORY_OPERATIONS: readonly string[] = [...OPS.map((o) => o.name), O
 const BY_NAME: ReadonlyMap<string, OpDef> = new Map(OPS.map((o) => [o.name, o]));
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "source", "precision", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "entry", "close", "drop", "why"] as const;
+const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "source", "precision", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "turn", "entry", "close", "drop", "why"] as const;
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -239,10 +239,16 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
     }
     case "premise":
     case "record": {
-      if (Object.keys(value).length === 0) return { line: "needs_one", fields: { n, op: def.name, fields: Object.keys(def.args) } };
-      // A turn's record is that turn's own: a call that belongs to no turn has none to write.
-      if (def.finds === "record" && r.turn === null) return { line: "turn_needed", fields: { n, op: def.name } };
-      return { item: def.finds === "premise" ? keyedItemId("premise", "") : keyedItemId("record", r.turn ?? ""), fresh: false };
+      // The turn whose record it is: the one a call names (a job of his own writes the record of a turn it was told of), else the call's own.
+      const named = def.finds === "record" ? value.turn : undefined;
+      if (def.finds === "record") delete value.turn;
+      if (Object.keys(value).length === 0) return { line: "needs_one", fields: { n, op: def.name, fields: Object.keys(def.args).filter((f) => f !== "turn") } };
+      if (def.finds === "premise") return { item: keyedItemId("premise", ""), fresh: false };
+      const turn = typeof named === "string" && named.trim() !== "" ? named.trim() : r.turn;
+      // A call that belongs to no turn and names none has no record to write.
+      if (turn === null) return { line: "turn_needed", fields: { n, op: def.name } };
+      if (!r.record.at.turns.includes(turn)) return { line: "no_turn", fields: { id: turn } };
+      return { item: keyedItemId("record", turn), fresh: false };
     }
   }
 }
