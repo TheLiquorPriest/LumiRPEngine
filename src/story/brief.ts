@@ -14,6 +14,7 @@ import type { PathEntry, Store } from "../store";
 import { coverageOf } from "./cover";
 import { allSpans, itemView, namesOf, storyClock } from "./kit";
 import { storyAt } from "./path";
+import { arcsOnStage } from "./stage";
 import { nameKey, type SpanPart, type StoryItem, StoryRecord } from "./record";
 import type { StoryBeat, StoryRecordParts, StorySoFarInput, StorySummary } from "./sofar/index";
 
@@ -25,6 +26,8 @@ export interface StoryPoint {
   turn: string | null;
   /** The messages of the line the reading goes along, where it is not the chat's own (the path a generation was made on); the chat's path when left out. */
   messages?: readonly PathEntry[];
+  /** Who is on stage, by name, as the turn lane reads it (`stageAt`: the open scene's people and whoever the state places in its place); the open scene's people when left out. */
+  stage?: readonly string[];
 }
 
 /** A list the layout shows under one heading: the heading's block is the object, its lines the items. */
@@ -67,9 +70,10 @@ export function storyBrief(point: StoryPoint & { layout: StorySoFarInput["layout
   const view = (item: StoryItem): JsonObject => laidOut(itemView(record, item, clock, spans));
   const current = record.current("scene");
   const scene = current !== null && current.closedBy === null ? current : null;
-  const onStage = new Set((scene === null ? [] : namesOf(scene)).map(nameKey));
+  // Who is on stage as the turn lane reads it (R-56); with none given, the open scene's people.
+  const stage = point.stage ?? (scene === null ? [] : namesOf(scene));
   const threads = record.of("thread").filter((t) => t.fields.hot === true && t.closedBy === null);
-  const arcs = record.of("arc").filter((a) => namesOf(a).some((n) => onStage.has(nameKey(n))));
+  const arcs = arcsOnStage(point.store, point.user, point.chat, point.turn, record.of("arc"), stage);
   const futures = clock === null ? [] : record.of("future").filter((f) => f.closedBy === null && typeof f.fields.due === "number" && f.fields.due <= clock.now);
   const player = record.of("player");
   const list = (items: StoryItem[]): BriefList | undefined => (items.length > 0 ? { items: items.map(view) } : undefined);

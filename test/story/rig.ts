@@ -8,6 +8,7 @@ import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { HostTool, JsonObject } from "rp-harness/contract";
 import { WriteQueue } from "../../src/app/database";
 import { hashJson } from "../../src/shared/hash";
+import { CAST_MIGRATIONS } from "../../src/cast/schema";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import { migrateStore, openStore, type ShownMessage, type Store, type StoreArea, type TurnRow, type UserStore } from "../../src/store";
 import { STORY_STORE_AREA } from "../../src/story/fold";
@@ -66,6 +67,10 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
   const db = new Database(":memory:");
   migrateStore(db);
   for (const m of LORE_MIGRATIONS) if ("sql" in m) db.run(m.sql);
+  for (const m of CAST_MIGRATIONS) {
+    if ("sql" in m) db.run(m.sql);
+    else m.up(db, USER);
+  }
   // A clock that moves at every reading, so what one write stamps is before what the next one does.
   let tick = 1_000_000;
   const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined), areas: [STORY_STORE_AREA, ...(options.areas ?? [])], now: () => tick++ });

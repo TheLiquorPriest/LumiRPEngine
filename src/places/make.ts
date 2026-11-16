@@ -10,13 +10,26 @@ import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { PLACE_KINDS, type PlaceKind } from "../shared/things";
 import { baseWorld, findPlaces, placeOp } from "../engine/places-in-play";
+import { own } from "../engine/pack-kit";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { find, findOptional, isUnread, notAs, type OpContext, refusedAs, textArg, type Unread } from "../iface/ops";
-import { freshId } from "../iface/ops-things";
 import { PROVENANCE_PROPERTIES } from "../iface/source";
 import { textOf } from "../iface/texts";
 import { PLACE_OPS } from "./fold";
 import { namedEntries } from "./prepare";
+
+/** A fresh id for a place made, from its name: never one the state has for someone, something or a place. */
+function freshId(o: OpContext, base: string): string {
+  const slug =
+    base
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 40) || "made";
+  const taken = (id: string): boolean => own(o.draft.w.state.entities, id) !== undefined || own(o.draft.w.ctx.world.places, id) !== undefined;
+  if (!taken(slug)) return slug;
+  for (let i = 2; ; i++) if (!taken(`${slug}_${i}`)) return `${slug}_${i}`;
+}
 
 /** The kinds a place is made as: `place`, a place of the chat's own world; a room, a spot or a venue, made in play inside a place. */
 export const PLACE_MAKE_KINDS: readonly string[] = ["place", ...PLACE_KINDS];
