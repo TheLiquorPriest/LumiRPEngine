@@ -15,8 +15,8 @@ const SHIPPED = shippedTexts();
 /** Words that ask an agent to do something: a part that lays things out holds none of them. */
 const ASKS = /\b(must|should|always|never|please|make sure|remember to)\b/i;
 
-/** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), and the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`); `path`, `id` and `title` are the fields of the items of the cache's lists. */
-const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract", "cache", "session_unreadable", "reason", "lines", "path", "id", "title"];
+/** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`) and the facts it names (`story`, `previous`, `lore`, `cast` and `history`, read by their dotted names); `path`, `id`, `title`, `who`, `kind`, `gone` and `defines` are the fields of the items of the cache's lists and of a base's older sources. */
+const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract", "cache", "session_unreadable", "reason", "lines", "path", "id", "title", "story", "previous", "lore", "cast", "history", "who", "kind", "gone", "defines"];
 
 /** The notices of `notices.md`, by name, and the fields a use of each fills. Each is a fact; none asks. */
 const NOTICES: Record<string, Record<string, unknown>> = {
@@ -177,6 +177,28 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(tagged).not.toContain("intent file");
     expect(tagged).toContain("sessions/s-1/turns/t-1/");
     expect(written(part)).not.toMatch(ASKS);
+  });
+
+  test("briefing.md shows the facts it names, each only when it is not 0: the chat's story choice, a stopped previous run, lore not indexed, a base older than its source, growth proposed and messages with no summary", async () => {
+    const part = await template("briefing");
+    const facts = {
+      turn: { kind: "reply" },
+      story: { from: { ".": 1, names: ["replies"] }, newest: { ".": 1, names: ["leave_out"] } },
+      previous: { run: { stopped: { ".": 1 } } },
+      lore: { unindexed: { ".": 4 } },
+      cast: { base: { older: { ".": 1, names: ["Wren"], sources: [{ who: "Wren", kind: "lore", id: "e-12", title: "Wren the ferrywoman", defines: "background" }, { who: "Wren", kind: "card", id: "c-1", gone: true }] } }, growth: { proposed: { ".": 2 } } },
+      history: { unsummarized: { ".": 3, range: { ".": [4, 9], from: 4, to: 9 } } },
+    };
+    const text = part.render(facts as never).text;
+    expect(text).toContain("- The chat's story choice: story.from is replies, story.newest is leave_out.");
+    expect(text).toContain("- The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.");
+    expect(text).toContain("- Lore entries no indexing run has written lines for yet: 4.");
+    expect(text).toContain("- A principal's base is older than a source bound to it:\n  - Wren: lore e-12 (\"Wren the ferrywoman\"), which defines their background\n  - Wren: card c-1, gone");
+    expect(text).toContain("- 2 character(s) have growth a reflection proposed that you have not accepted.");
+    expect(text).toContain("- 3 message(s), 4 to 9, are out of the prompt with beats recorded and lie in no scene with a summary.");
+    const none = part.render({ turn: { kind: "reply" }, story: facts.story, previous: { run: { stopped: { ".": 0 } } }, lore: { unindexed: { ".": 0 } }, cast: { growth: { proposed: { ".": 0 } } } } as never).text;
+    expect(none).toContain("story.from is replies");
+    for (const gone of ["last turn's work", "no indexing run", "older than a source", "growth a reflection", "no scene with a summary"]) expect(none).not.toContain(gone);
   });
 
   test("world-state.md and lore-map.md are the layouts of §6.9 and §9.2: each part of them appears only when there is something in it", async () => {

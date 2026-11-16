@@ -1,5 +1,5 @@
 ---
-description: The layout of the briefing the Author is given at the start of every turn. Each part appears only when there is something to show. Take a part out and it is no longer shown. Its last part is the reply contract again, as the files stand now (the opening block holds it as it stood when the session opened), so that it is the last thing read before the reply is written, with the intent file's whole path where the Author writes its intent record to a file itself; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing. Its header's on_stage_views names which of the cast's views of the characters on stage are shown under On stage, in that order - a view by its name (history), or a view of one casting (history:principal); take a name out and that view is no longer given.
+description: The layout of the briefing the Author is given at the start of every turn. Each part appears only when there is something to show. Take a part out and it is no longer shown. Its last part is the reply contract again, as the files stand now (the opening block holds it as it stood when the session opened), so that it is the last thing read before the reply is written, with the intent file's whole path where the Author writes its intent record to a file itself; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing. The counts under the turn's own lines are facts the template names - the chat's story choice (story.from, story.newest), a previous run stopped (previous.run.stopped), lore entries not indexed (lore.unindexed), a base older than its source (cast.base.older), growth proposed (cast.growth.proposed) and messages left out of the prompt with no summary (history.unsummarized). A count of 0 is not shown, and a line taken out is a count that is no longer read. Its header's on_stage_views names which of the cast's views of the characters on stage are shown under On stage, in that order - a view by its name (history), or a view of one casting (history:principal); take a name out and that view is no longer given.
 on_stage_views:
   - history:principal
   - imported:supporting
@@ -13,6 +13,27 @@ on_stage_views:
 {{#turn_facts}}
 {{turn_facts}}
 {{/turn_facts}}
+{{#story.from}}
+- The chat's story choice: story.from is {{story.from.names}}, story.newest is {{story.newest.names}}.
+{{/story.from}}
+{{#previous.run.stopped}}
+- The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.
+{{/previous.run.stopped}}
+{{#lore.unindexed}}
+- Lore entries no indexing run has written lines for yet: {{lore.unindexed}}.
+{{/lore.unindexed}}
+{{#cast.base.older}}
+- A principal's base is older than a source bound to it:
+{{#cast.base.older.sources}}
+  - {{who}}: {{kind}} {{id}}{{#title}} ("{{title}}"){{/title}}{{#gone}}, gone{{/gone}}{{#defines}}, which defines their {{defines}}{{/defines}}
+{{/cast.base.older.sources}}
+{{/cast.base.older}}
+{{#cast.growth.proposed}}
+- {{cast.growth.proposed}} character(s) have growth a reflection proposed that you have not accepted.
+{{/cast.growth.proposed}}
+{{#history.unsummarized}}
+- {{history.unsummarized}} message(s), {{history.unsummarized.range.from}} to {{history.unsummarized.range.to}}, are out of the prompt with beats recorded and lie in no scene with a summary.
+{{/history.unsummarized}}
 {{#asked}}
 - The player asked for: {{.}}
 {{/asked}}
