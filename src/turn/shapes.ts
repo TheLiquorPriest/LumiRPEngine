@@ -4,7 +4,7 @@
 // says the same. Written once here, read by the routes (`routes.ts`) and by every page through the
 // generated types.
 
-import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices, PromptMapEdit, ShownSlice } from "rp-harness/contract";
+import type { ConsentGrant, FindStopped, GapCheck, LocatedSlices, PromptMapEdit, RebuiltMessage, ShownSlice } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { AskedLine } from "./requests";
@@ -383,19 +383,19 @@ export const folderReply = shape.named(
 );
 export const fileReply = shape.named("FileReply", "One file of a turn's folder, by its path below the folder, as text.", shape.object({ name: T, text: T }));
 
-const keptMessage = shape.named(
-  "KeptMessage",
-  "One message of a model call's request as it was sent: its role, its text, and the block the harness placed it as (`opening`, `frame`, `prompt`, `session:carry`, `briefing`, a given name, `brief`); none for the run's own conversation.",
-  shape.object({ role: T, text: T, block: opt(T, "The block it was placed as; absent for the run's own conversation.") }),
+const rebuiltMessage = shape.named(
+  "RebuiltMessage",
+  "One message of a rebuilt request as it was sent, with the file of the turn's folder its text points into, as a path in the agents' view (`<turn folder>/briefing.md`); none for text kept inline (the opening, the frame, the run's own conversation).",
+  shape.object({ role: T, text: T, block: opt(T, "The block it was placed as; absent for the run's own conversation."), file: opt(T, "The file of the turn's folder its text points into; absent for text kept inline.") }),
 );
-type KeptMessageMirrored = Holds<Exactly<Infer<typeof keptMessage>, KeptMessage>>;
+type RebuiltMessageMirrored = Holds<Exactly<Infer<typeof rebuiltMessage>, RebuiltMessage>>;
 export const requestReply = shape.named(
   "RequestReply",
   "One model call's request, by its file below the turn's folder, rebuilt from the pointers the harness kept into the turn's files: every message as it was sent, in order, and each tool declared with the file its words came from. Where what is rebuilt is not what was sent, it says so and shows nothing.",
   shape.object({
     name: T,
     same: field(shape.yesNo(), "What was rebuilt is what was sent, by the hash the file keeps; false where it is not, and nothing is shown."),
-    messages: field(shape.list(keptMessage), "Every message as it was sent, in order; none where `same` is false."),
+    messages: field(shape.list(rebuiltMessage), "Every message as it was sent, in order, each with the file its text points into; none where `same` is false."),
     tools: field(shape.list(shape.object({ name: T, file: opt(T, "The file its description came from; absent for a host's own tool.") })), "Each tool declared, in order; none where `same` is false."),
   }),
 );

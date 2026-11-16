@@ -62,7 +62,7 @@ export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: 
 }
 
 
-/** A request rebuilt exactly as it was sent, laid out as its messages: each by its role and block, and whether it is text of the turn's files (the prompt, the briefing, a part given by name) or was added to them: the agent's opening block, the line that introduces the prompt, a brief, and the run's own conversation (a message with no block). */
+/** A request rebuilt exactly as it was sent, laid out as its messages: each by its role and block, the file of the turn's folder its text comes from where it comes from one, and whether it is text of the turn's files (the prompt, the briefing, a part given by name) or was added to them: the agent's opening block, the line that introduces the prompt, a brief, and the run's own conversation (a message with no block). */
 export function RequestView(props: { request: RequestShown }) {
   const { request } = props;
   if (!request.same) {
@@ -82,6 +82,11 @@ export function RequestView(props: { request: RequestShown }) {
               <span class="rpe-caption">{m.role}</span>
               <Badge tone={added ? "gm" : undefined}>{added ? "added" : "the turn's files"}</Badge>
               {m.block === undefined ? <span class="rpe-meta">its own conversation</span> : <span class="rpe-meta">{m.block}</span>}
+              {m.file === undefined ? null : (
+                <span class="rpe-meta" data-request-file>
+                  from {m.file}
+                </span>
+              )}
             </span>
             <Pre text={m.text} mono={false} />
           </div>
