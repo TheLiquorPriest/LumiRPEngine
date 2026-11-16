@@ -25,6 +25,7 @@ import type { AdapterDeps, LumiverseDoor } from "../adapter/lumiverse/mount";
 import { agentsArea } from "../agents/area";
 import { buildArea } from "../build/area";
 import { worldsArea } from "../worlds/area";
+import type { WorldService } from "../worlds/service";
 import { castArea } from "../cast/area";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
@@ -91,6 +92,14 @@ export function compose(options: ComposeOptions = {}): Composition {
     migrated: (app, store) => ({ part: MIGRATED_PART, notice: MIGRATED_NOTICE, fields: (user, chat) => migratedChat({ db: app.db, store, user, chat }) }),
     // The earlier engine's record of a carried turn, as the migration kept it, for the engine's tools: the turn lane may not import the migration.
     carried: (app) => ({ record: (user, turn) => oldRecord(app.db, user, turn) }),
+    // His worlds for the engine's world tools, through the worlds area's service. The turn lane is made before that area is mounted, so each call asks for the service when it is made.
+    worlds: () => ({
+      list: (...a: Parameters<WorldService["list"]>) => worlds.service().list(...a),
+      read: (...a: Parameters<WorldService["read"]>) => worlds.service().read(...a),
+      draft: (...a: Parameters<WorldService["draft"]>) => worlds.service().draft(...a),
+      commit: (...a: Parameters<WorldService["commit"]>) => worlds.service().commit(...a),
+      lint: (...a: Parameters<WorldService["lint"]>) => worlds.service().lint(...a),
+    }),
     proposals: () => proposals(),
     // The projection book is written to his books through the door's writes, once it is set up for a Lumiverse.
     projectionBooks: {
