@@ -107,6 +107,9 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `pages.folderEntries` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Files shown per page of a folder: Entries of a folder the Files page reads from RPE at a time; more are read on request. |
 | `pages.filePieceBytes` | `65536` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Bytes of a file read per piece: Bytes of a file the Files page reads from RPE at a time, so a file of any size opens its first piece at once and goes on when asked. |
 | `pages.chatsAtATime` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chats read at a time on Storage: Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take. |
+| `pages.logLines` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Log lines shown per page on Runtime: Lines of RPE's own log the Runtime page reads at a time, the newest first; older lines are read on request (RPE keeps service.logLines of them). |
+| `pages.sessionsAtATime` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Sessions and their turns read at a time: Sessions of a chat, and turns of one session, the Sessions page reads from RPE at a time (the list goes on until every session is read, since the newest are shown first). |
+| `pages.lorePerPage` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore proposals and writes read at a time: Proposals and writes to his lore the Lore page reads from RPE at a time; more are read on request. |
 
 ## The store
 
@@ -121,6 +124,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `store.notable` | `3` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Names of note in a reflection: Names of note each reflection of the world lists. |
 | `store.workerFoldAt` | `500` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Changes a fold runs over before it goes to a worker: A fold over more changes than this runs on a worker thread, so a long chat's fold, fresh or after a swipe flipped on an early message, never stalls another chat's turn, the extension's question or a page. |
 | `store.worldsKept` | `8` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World revisions held in memory: Revisions of world documents held in memory once read, the least recently used going first. |
+| `store.searchCandidates` | `64` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Candidates a world search takes from its index: Things the state index gives back for each word asked, before the search puts them in order by what the world says of them; a world with a very common word in many names may need more. |
+| `store.searchSettle` | `300` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Quiet time before the state index follows a chat: Milliseconds a chat's writes stay quiet before its search index follows its head: the many writes of one turn are followed once. |
 
 ## The engine's tools
 
@@ -180,7 +185,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `secrets.tracked` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Track who knows what: Whether a chat tracks who holds which secret. Off, no holding counts and every secret stays kept; what was recorded stays for when it is switched on again. Each new turn records the value in force, so a swipe or a branch judges a secret by what held there. |
 | `secrets.threshold` | `0.7` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | How sure a holding must be: How sure a holding of a secret must be, from 0 to 1, before it counts as the holder knowing it. Each new turn records the value in force, so a swipe or a branch judges a secret by what held there. |
 
-## `migration`
+## The migration
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
@@ -423,6 +428,12 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `story.soFar.share` | `0.05` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: share of the window: The share of the Author's window the briefing's story so far may fill. |
 | `story.soFar.floor` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: fewest tokens: The fewest tokens the briefing's story so far may fill, however small the window. |
 
+## `gap`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `gap.snippet` | `240` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Gap check hit length: The most characters of a gap check's hit in the world state or the story record that the agent reads and the evidence keeps. |
+
 ## `map`
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -435,6 +446,12 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `map.diagonal` | `one` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | How a diagonal counts: one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins. |
 | `map.distances` | `feet` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Distances told in: feet or metres. A world's ruleset that says otherwise wins. |
 | `map.picture` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | World state prints the map's picture: The world state prints the map's picture with its legend; off, it gives the title and the legend and the list of who and what is where carries the load. |
+| `map.areaStart` | `corner` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Where an area starts: corner: at a point where squares meet, as D&D's grid rule has it; middle: at the middle of a square. Every area (a radius, a cone, a line, a cube) follows it. A world's ruleset that says otherwise wins. |
+| `map.areaShare` | `0.5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Share of a square an area must cover: From 0 to 1: the share of a square an area must cover for the square to count; 0.5 is D&D's half, and 0 counts any square the area covers any of. A world's ruleset that says otherwise wins. |
+| `map.coverHalf` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lines blocked for half cover: Of the four lines from a corner of the attacker's square to the corners of the target's, how many blocked give half cover (D&D: one or two). A world's ruleset that says otherwise wins. |
+| `map.coverThreeQuarters` | `3` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lines blocked for three-quarters cover: How many of the four lines, blocked, give three-quarters cover (D&D: three). A world's ruleset that says otherwise wins. |
+| `map.coverTotal` | `4` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lines blocked for total cover: How many of the four lines, blocked, give total cover (D&D: four). A world's ruleset that says otherwise wins. |
+| `map.coverCreatures` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Creatures give cover: Whether other people and things standing between an attacker and a target obstruct the lines, as D&D has it. A world's ruleset that says otherwise wins. |
 
 ## `taps`
 
@@ -478,7 +495,6 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `cast.memoryWeight` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Weight of a memory given none: The weight a memory has when it is written with none. |
 | `cast.weightMax` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Highest weight of a memory: The highest weight a memory can have; weights run from 1. |
 | `cast.comesToMindTokens` | `2000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: What comes to mind | What comes to mind: Tokens of a character's memories that come to mind for a scene. |
-| `cast.charsPerToken` | `3.2` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Characters per token, for the cast: Characters counted as one token in the cast's budgets, where the model gives no count of its own. |
 | `cast.recallItems` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Memories one recall brings back: The most memories one recall brings back; the answer says how many more touch the cue. |
 
 ## Lumiverse
