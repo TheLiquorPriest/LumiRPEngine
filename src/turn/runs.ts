@@ -1,9 +1,10 @@
 // Each turn's run, as the Turn page shows it and the next turn waits on it: where it stands, when its
 // moments happened, what it spent, and what went to the chat (its reply's text and the progress lines
 // of the thinking block). A run going on now is held in memory, with what stops it; every run is kept
-// in RPE's database (`turn_run`), written when it begins, when its reply is released and when it ends.
-// A turn has one run, or more when it is continued: each continue is a run of its own, kept beside the
-// earlier ones, and the turn as the pages show it is its latest run.
+// in RPE's database (`turn_run`), written when it begins, when its reply is released and when it ends,
+// and what it spent, once it has ended, as a row of `usage` (plan Appendix B), which the Runtime page and
+// the day's caps read. A turn has one run, or more when it is continued: each continue is a run of its
+// own, kept beside the earlier ones, and the turn as the pages show it is its latest run.
 
 import type { Database } from "bun:sqlite";
 import type { LimitHit, ReplyError, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
@@ -119,6 +120,8 @@ export interface RunRecord {
   /** How the turn's folder was written alongside the run; null before its writing began, for a run that writes none, or one kept before. */
   folder: FolderWrite | null;
   usage: Usage | null;
+  /** Its agents' `lore_search` and `lore_read` calls, counted from its trace as they began (`spans.ts`); none for a run kept before they were. */
+  lookups: Lookups;
   /** What went to the chat as the reply. */
   reply: string;
   /** The progress lines that went to the chat's thinking block, in order. */
@@ -155,6 +158,12 @@ export interface RunRecord {
   storyMark: number | null;
 }
 
+/** A run's lore lookups: its `lore_search` calls and its `lore_read` calls. */
+export interface Lookups {
+  searches: number;
+  reads: number;
+}
+
 /** A run going on now: its record, what stops it, and when it is over. */
 export interface Run extends RunRecord {
   readonly stop: AbortController;
@@ -187,7 +196,6 @@ interface RunRow {
   intake: string | null;
   wait: string | null;
   folder: string | null;
-  usage: string | null;
   reply: string;
   progress: string;
   error: string | null;
@@ -201,7 +209,19 @@ interface RunRow {
   mark: number | null;
   cast_mark: number | null;
   story_mark: number | null;
+  // Its `usage` row, null where it has none.
+  calls: number | null;
+  input: number | null;
+  cache_read: number | null;
+  cache_write: number | null;
+  output: number | null;
+  reasoning: number | null;
+  lore_searches: number | null;
+  lore_reads: number | null;
 }
+
+/** A run's row with its usage beside it: every query of runs reads through this, `r` being the run and `WHERE` left to it. */
+const RUN_ROWS = "SELECT r.*, u.calls, u.input, u.cache_read, u.cache_write, u.output, u.reasoning, u.lore_searches, u.lore_reads FROM turn_run r LEFT JOIN usage u ON u.user = r.user AND u.run = r.id";
 
 function recordOf(user: string, r: RunRow): RunRecord {
   return {
@@ -228,7 +248,8 @@ function recordOf(user: string, r: RunRow): RunRecord {
     intake: r.intake === null ? null : (JSON.parse(r.intake) as IntakeStep[]),
     wait: r.wait === null ? null : (JSON.parse(r.wait) as Stretch[]),
     folder: r.folder === null ? null : (JSON.parse(r.folder) as FolderWrite),
-    usage: r.usage === null ? null : (JSON.parse(r.usage) as Usage),
+    usage: r.calls === null ? null : { calls: r.calls, input: r.input ?? 0, cacheRead: r.cache_read ?? 0, cacheWrite: r.cache_write ?? 0, output: r.output ?? 0, ...(r.reasoning !== null ? { reasoning: r.reasoning } : {}) },
+    lookups: { searches: r.lore_searches ?? 0, reads: r.lore_reads ?? 0 },
     reply: r.reply,
     progress: JSON.parse(r.progress) as string[],
     error: r.error === null ? null : (JSON.parse(r.error) as ReplyError),
@@ -256,15 +277,18 @@ export class Runs {
     private readonly writes: Writes,
   ) {}
 
-  /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
+  /**
+   * Keeps a run's record as it stands, and once it has ended what it spent; inside a queued write. An end once recorded stays recorded,
+   * whatever copy is written after it.
+   */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, usage, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
          intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
-         usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, not_given = excluded.not_given, base = excluded.base, saved = excluded.saved,
+         reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, not_given = excluded.not_given, base = excluded.base, saved = excluded.saved,
          settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
       [
         r.user,
@@ -290,7 +314,6 @@ export class Runs {
         r.intake === null ? null : JSON.stringify(r.intake),
         r.wait === null ? null : JSON.stringify(r.wait),
         r.folder === null ? null : JSON.stringify(r.folder),
-        r.usage === null ? null : JSON.stringify(r.usage),
         r.reply,
         JSON.stringify(r.progress),
         r.error === null ? null : JSON.stringify(r.error),
@@ -306,6 +329,12 @@ export class Runs {
         r.storyMark,
       ],
     );
+    const { usage } = r;
+    if (usage === null) return;
+    into.run(
+      `INSERT OR REPLACE INTO usage (user, run, turn, chat, at, calls, input, cache_read, cache_write, output, reasoning, lore_searches, lore_reads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [r.user, r.id, r.turn, r.chat, r.ended ?? r.received, usage.calls, usage.input, usage.cacheRead, usage.cacheWrite, usage.output, usage.reasoning ?? null, r.lookups.searches, r.lookups.reads],
+    );
   }
 
   /**
@@ -314,6 +343,7 @@ export class Runs {
    */
   join(into: Database, r: RunRecord, to: string): void {
     into.run("UPDATE turn_run SET turn = ? WHERE user = ? AND id = ?", [to, r.user, r.id]);
+    into.run("UPDATE usage SET turn = ? WHERE user = ? AND run = ?", [to, r.user, r.id]);
     const live = this.#running.get(key(r.user, r.turn));
     if (live?.id === r.id) {
       this.#running.delete(key(r.user, r.turn));
@@ -326,13 +356,13 @@ export class Runs {
   /** The continue's run that held its changes on `turn` (`RunRecord.held`), as it stands; null where none did. */
   byHeld(user: string, turn: string): RunRecord | null {
     for (const r of this.#running.values()) if (r.user === user && r.held === turn) return r;
-    const row = this.db.query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND held = ? ORDER BY received DESC LIMIT 1").get(user, turn);
+    const row = this.db.query<RunRow, [string, string]>(`${RUN_ROWS} WHERE r.user = ? AND r.held = ? ORDER BY r.received DESC LIMIT 1`).get(user, turn);
     return row === null ? null : recordOf(user, row);
   }
 
   /** Writes a run's record as it stands now. */
   async save(r: RunRecord, label: string): Promise<void> {
-    const copy: RunRecord = { ...r, progress: [...r.progress] };
+    const copy: RunRecord = { ...r, progress: [...r.progress], lookups: { ...r.lookups } };
     await this.writes.run((into) => this.put(into, copy), label);
   }
 
@@ -371,7 +401,7 @@ export class Runs {
   record(user: string, turn: string): RunRecord | null {
     const live = this.running(user, turn);
     if (live !== undefined) return live;
-    const row = this.db.query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND turn = ? ORDER BY received DESC, rowid DESC LIMIT 1").get(user, turn);
+    const row = this.db.query<RunRow, [string, string]>(`${RUN_ROWS} WHERE r.user = ? AND r.turn = ? ORDER BY r.received DESC, r.rowid DESC LIMIT 1`).get(user, turn);
     return row === null ? null : recordOf(user, row);
   }
 
@@ -379,7 +409,7 @@ export class Runs {
   ofTurn(user: string, turn: string): RunRecord[] {
     const live = this.running(user, turn);
     return this.db
-      .query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND turn = ? ORDER BY received, rowid")
+      .query<RunRow, [string, string]>(`${RUN_ROWS} WHERE r.user = ? AND r.turn = ? ORDER BY r.received, r.rowid`)
       .all(user, turn)
       .map((r) => (live !== undefined && live.id === r.id ? live : recordOf(user, r)));
   }
@@ -392,7 +422,7 @@ export class Runs {
   /** The run a generation was played by, as kept. */
   byGeneration(user: string, generation: string): RunRecord | null {
     for (const r of this.#running.values()) if (r.user === user && r.generation === generation) return r;
-    const row = this.db.query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND generation = ? ORDER BY received DESC LIMIT 1").get(user, generation);
+    const row = this.db.query<RunRow, [string, string]>(`${RUN_ROWS} WHERE r.user = ? AND r.generation = ? ORDER BY r.received DESC LIMIT 1`).get(user, generation);
     return row === null ? null : recordOf(user, row);
   }
 
@@ -402,8 +432,8 @@ export class Runs {
     const latest = "NOT EXISTS (SELECT 1 FROM turn_run n WHERE n.user = r.user AND n.turn = r.turn AND (n.received > r.received OR (n.received = r.received AND n.rowid > r.rowid)))";
     const rows =
       from === null || from.received === null
-        ? this.db.query<RunRow, [string, string, number]>(`SELECT * FROM turn_run r WHERE user = ? AND chat = ? AND ${latest} ORDER BY received DESC, rowid DESC LIMIT ?`).all(user, chat, limit)
-        : this.db.query<RunRow, [string, string, number, number]>(`SELECT * FROM turn_run r WHERE user = ? AND chat = ? AND received < ? AND ${latest} ORDER BY received DESC, rowid DESC LIMIT ?`).all(user, chat, from.received, limit);
+        ? this.db.query<RunRow, [string, string, number]>(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat, limit)
+        : this.db.query<RunRow, [string, string, number, number]>(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND r.received < ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat, from.received, limit);
     return rows.map((r) => this.running(user, r.turn) ?? recordOf(user, r));
   }
 
@@ -418,7 +448,7 @@ export class Runs {
    */
   unsettled(user: string, chat: string): RunRecord[] {
     return this.db
-      .query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND chat = ? AND settled IS NULL AND generation IS NOT NULL ORDER BY received, rowid")
+      .query<RunRow, [string, string]>(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND r.settled IS NULL AND r.generation IS NOT NULL ORDER BY r.received, r.rowid`)
       .all(user, chat)
       .filter((r) => this.running(user, r.turn)?.id !== r.id)
       .map((r) => recordOf(user, r));
@@ -430,7 +460,7 @@ export class Runs {
    */
   leftGoing(): RunRecord[] {
     return this.db
-      .query<RunRow & { user: string }, []>("SELECT * FROM turn_run WHERE status = 'running' ORDER BY received, rowid")
+      .query<RunRow & { user: string }, []>(`${RUN_ROWS} WHERE r.status = 'running' ORDER BY r.received, r.rowid`)
       .all()
       .filter((r) => this.running(r.user, r.turn)?.id !== r.id)
       .map((r) => recordOf(r.user, r));

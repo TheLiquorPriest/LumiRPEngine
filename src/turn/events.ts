@@ -1,9 +1,10 @@
 // What RPH tells RPE as a turn goes (`TurnEvents` in `rp-harness/contract`). None of it returns a
 // decision: RPE records it with the turn and shows it. The intent record is kept on the turn as text and
 // never read by code (plan §10.3). A sub-agent's writes the lead drops are taken back from the turn's
-// staged changes, from the cast's and the story's rows beside them, and from the notes it wrote. Rules
-// that fired, consents, gap checks, suggestions and the attachments an agent was given are kept with the
-// turn (`turn_told`) for the Turn page; a suggestion of a file is filed for the Files page too.
+// staged changes, from the cast's and the story's rows beside them, and from the notes it wrote. Consents,
+// gap checks and rules that fired are each a row of their own table (App. B), a turn's, or a job's the
+// user started; suggestions and the attachments an agent was given are kept with the turn (`turn_told`)
+// for the Turn page; a suggestion of a file is filed for the Files page too.
 //
 // Of RPE's own spaces an agent is given by name, each at the turn it runs in (at the chat's head, for an
 // agent of no turn) and laid out as the briefing lays it out: the story brief (`story:brief`); the scene
@@ -27,7 +28,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "rp-harness";
-import type { AgentRef, ContextBlock, FilesPort, Log, Scope, TurnEvents } from "rp-harness/contract";
+import type { AgentRef, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, dropCastStaged, type SourceReader } from "../cast";
 import { mapLines, mapView, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
@@ -245,11 +246,32 @@ export interface Told {
   at: number;
 }
 
+/** What else RPH told of a turn (`turn_told`): suggestions, attachments asked for, drops, the release and the end. */
 export function toldOf(db: Database, user: string, turn: string): Told[] {
   return db
     .query<{ kind: string; body: string; at: number }, [string, string]>("SELECT kind, body, at FROM turn_told WHERE user = ? AND turn = ? ORDER BY id")
     .all(user, turn)
     .map((r) => ({ kind: r.kind, body: JSON.parse(r.body) as unknown, at: r.at }));
+}
+
+/** The tables of App. B that each hold one kind of told item, by the kind RPE tells it as. */
+const TOLD_TABLES = { consent: "consent", "gap-check": "gap_check", rule: "rule_firing" } as const;
+
+/** One consent, gap check or rule fired as kept: whole as RPH gave it, with the turn it was told in, or the job of the user's it belongs to. */
+export interface ToldRow<T> {
+  body: T;
+  turn: string | null;
+  job: string | null;
+  at: number;
+}
+
+/** A turn's, or a user's job's, consents, gap checks or rules fired, in the order they were told. */
+export function toldRows<K extends keyof typeof TOLD_TABLES>(db: Database, user: string, kind: K, of: { turn: string } | { job: string }): ToldRow<K extends "consent" ? ConsentGrant : K extends "gap-check" ? GapCheck : RuleFiring>[] {
+  const [column, id] = "turn" in of ? ["turn", of.turn] : ["job", of.job];
+  return db
+    .query<{ body: string; turn: string | null; job: string | null; at: number }, [string, string]>(`SELECT body, turn, job, at FROM ${TOLD_TABLES[kind]} WHERE user = ? AND ${column} = ? ORDER BY seq`)
+    .all(user, id)
+    .map((r) => ({ body: JSON.parse(r.body), turn: r.turn, job: r.job, at: r.at }));
 }
 
 export function turnEvents(deps: EventsDeps): TurnEvents {
@@ -261,6 +283,22 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     if (scope.turn === undefined) return;
     const { turn } = scope;
     await deps.writes.run((db) => db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [scope.user, turn, kind, JSON.stringify(body), deps.now()]), "keeping what RPH told of a turn");
+  };
+  /**
+   * A consent, a gap check or a rule fired, a row of its own table (App. B): with its turn, or, told of a call in a job the user started
+   * (no turn, the agent's `job` set), with that job (R-27). One told with neither has nowhere to be kept; its trace holds it.
+   */
+  const keep = async (scope: Scope, kind: keyof typeof TOLD_TABLES, agent: AgentRef, name: string, body: ConsentGrant | GapCheck | RuleFiring): Promise<void> => {
+    const turn = scope.turn ?? null;
+    const job = agent.job ?? null;
+    if (turn === null && job === null) return;
+    const named = kind === "rule" ? "rule" : "id, topic";
+    const values = kind === "rule" ? [name] : [(body as ConsentGrant | GapCheck).id, name];
+    await deps.writes.run(
+      (db) =>
+        db.run(`INSERT INTO ${TOLD_TABLES[kind]} (user, chat, turn, job, ${named}, body, at) VALUES (?, ?, ?, ?, ${values.map(() => "?").join(", ")}, ?, ?)`, [scope.user, scope.chat, turn, job, ...values, JSON.stringify(body), deps.now()]),
+      "keeping what RPH told of a turn",
+    );
   };
   return {
     async intent(scope, text) {
@@ -298,8 +336,8 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       }
       return blocks;
     },
-    consent: (scope, grant) => tell(scope, "consent", grant),
-    gapCheck: (scope, check) => tell(scope, "gap-check", check),
+    consent: (scope, grant) => keep(scope, "consent", grant.by, grant.topic, grant),
+    gapCheck: (scope, check) => keep(scope, "gap-check", check.by, check.topic, check),
     async dropStaged(scope, agent) {
       const turn = turnOf(scope);
       await deps.writes.run(() => {
@@ -311,7 +349,7 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       await deps.notes.drop(scope.user, scope.chat, turn, agent.id);
       await tell(scope, "dropped", { agent });
     },
-    ruleFired: (scope, firing) => tell(scope, "rule", firing),
+    ruleFired: (scope, firing) => keep(scope, "rule", firing.agent, firing.rule, firing),
     async suggestion(scope, agent, suggestion) {
       await tell(scope, "suggestion", { agent, suggestion });
       await deps.suggestions.file(scope, agent, suggestion);

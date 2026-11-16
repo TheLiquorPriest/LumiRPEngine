@@ -6,11 +6,12 @@
 // each slice in a turn's prompt.
 //
 // Area `harness` (Appendix B, "Harness"): RPH's small durable state (`kv`, and its job records, `job`), each turn's run as the Turn
-// page shows it (`turn_run`: where it stands, its timings and usage, what went to the chat), what RPH
-// told RPE about the run (`turn_told`: rules that fired, consents, gap checks, suggestions, attachments
-// asked for), the player's messages as RPE read them (`player_text`), what the player asked for
-// through a panel (`panel_request`), what a comparison of a chat's path found (`since_found`), which
-// of these a turn was told (`since_told`), and each job as RPH last told of it (`turn_job`).
+// page shows it (`turn_run`: where it stands, its timings, what went to the chat), what each run spent (`usage`: its calls, its
+// tokens and its lore lookups, a row per run), the consents, gap checks and rules that fired (`consent`, `gap_check`,
+// `rule_firing`: each of a turn's, or of a job the user started, which belongs to no turn), what else RPH told RPE about the run
+// (`turn_told`: suggestions, attachments asked for, drops, the release and the end), the player's messages as RPE read them
+// (`player_text`), what the player asked for through a panel (`panel_request`), what a comparison of a chat's path found
+// (`since_found`), which of these a turn was told (`since_told`), and each job as RPH last told of it (`turn_job`).
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -317,6 +318,89 @@ ALTER TABLE turn_run ADD COLUMN not_given TEXT;
     sql: `
 ALTER TABLE turn_run ADD COLUMN held TEXT;
 CREATE INDEX turn_run_by_held ON turn_run (user, held) WHERE held IS NOT NULL;
+`,
+  },
+  {
+    version: 16,
+    name: "what each run spent as a row of its own, and the consents, gap checks and rules fired in tables of their own",
+    // `usage`: a run's calls and tokens (RPH's `Usage`) and its `lore_search` and `lore_read` calls, written when the run ends, carried
+    // over from `turn_run.usage` (a run kept before counted no lookups). `consent`, `gap_check`, `rule_firing`: each told item whole as
+    // RPH gave it (`body`), with its turn, or for a job the user started (no turn), its job; today's `turn_told` rows of those kinds are
+    // moved, each with its chat as the store's turn holds it.
+    sql: `
+CREATE TABLE usage (
+  user TEXT NOT NULL,
+  run TEXT NOT NULL,
+  turn TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  calls INTEGER NOT NULL,
+  input INTEGER NOT NULL,
+  cache_read INTEGER NOT NULL,
+  cache_write INTEGER NOT NULL,
+  output INTEGER NOT NULL,
+  reasoning INTEGER,
+  lore_searches INTEGER NOT NULL DEFAULT 0,
+  lore_reads INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user, run)
+);
+CREATE INDEX usage_at ON usage (user, at);
+INSERT OR REPLACE INTO usage (user, run, turn, chat, at, calls, input, cache_read, cache_write, output, reasoning)
+  SELECT user, id, turn, chat, COALESCE(ended, received), COALESCE(json_extract(usage, '$.calls'), 0), COALESCE(json_extract(usage, '$.input'), 0),
+    COALESCE(json_extract(usage, '$.cacheRead'), 0), COALESCE(json_extract(usage, '$.cacheWrite'), 0), COALESCE(json_extract(usage, '$.output'), 0), json_extract(usage, '$.reasoning')
+  FROM turn_run WHERE usage IS NOT NULL AND json_valid(usage);
+ALTER TABLE turn_run DROP COLUMN usage;
+CREATE TABLE consent (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  job TEXT,
+  id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  body TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX consent_turn ON consent (user, turn);
+CREATE INDEX consent_job ON consent (user, job) WHERE job IS NOT NULL;
+CREATE TABLE gap_check (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  job TEXT,
+  id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  body TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX gap_check_turn ON gap_check (user, turn);
+CREATE INDEX gap_check_job ON gap_check (user, job) WHERE job IS NOT NULL;
+CREATE TABLE rule_firing (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  job TEXT,
+  rule TEXT NOT NULL,
+  body TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX rule_firing_turn ON rule_firing (user, turn);
+CREATE INDEX rule_firing_job ON rule_firing (user, job) WHERE job IS NOT NULL;
+INSERT INTO consent (user, chat, turn, job, id, topic, body, at)
+  SELECT t.user, COALESCE((SELECT chat FROM turn s WHERE s.user = t.user AND s.id = t.turn), ''), t.turn, json_extract(t.body, '$.by.job'),
+    COALESCE(json_extract(t.body, '$.id'), ''), COALESCE(json_extract(t.body, '$.topic'), ''), t.body, t.at
+  FROM turn_told t WHERE t.kind = 'consent' AND json_valid(t.body) ORDER BY t.id;
+INSERT INTO gap_check (user, chat, turn, job, id, topic, body, at)
+  SELECT t.user, COALESCE((SELECT chat FROM turn s WHERE s.user = t.user AND s.id = t.turn), ''), t.turn, json_extract(t.body, '$.by.job'),
+    COALESCE(json_extract(t.body, '$.id'), ''), COALESCE(json_extract(t.body, '$.topic'), ''), t.body, t.at
+  FROM turn_told t WHERE t.kind = 'gap-check' AND json_valid(t.body) ORDER BY t.id;
+INSERT INTO rule_firing (user, chat, turn, job, rule, body, at)
+  SELECT t.user, COALESCE((SELECT chat FROM turn s WHERE s.user = t.user AND s.id = t.turn), ''), t.turn, json_extract(t.body, '$.agent.job'),
+    COALESCE(json_extract(t.body, '$.rule'), ''), t.body, t.at
+  FROM turn_told t WHERE t.kind = 'rule' AND json_valid(t.body) ORDER BY t.id;
+DELETE FROM turn_told WHERE kind IN ('consent', 'gap-check', 'rule') AND json_valid(body);
 `,
   },
 ];

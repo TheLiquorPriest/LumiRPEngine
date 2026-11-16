@@ -1,6 +1,7 @@
 // What a turn's run keeps of its lead's own writing as it arrives (plan §4.7, §17.1, R-185), from RPH's trace: the intent record's
 // own time, from RPH's `intent_began` (its first token) to its `intent` (its last), and the thinking before the first output of each of
-// the lead's model calls on the reply's path (those begun before the release). A run is known by RPH's own id for it, from its
+// the lead's model calls on the reply's path (those begun before the release). With them, every agent's lore lookups in the run, its
+// `lore_search` and `lore_read` calls as each began, kept with what the run spent. A run is known by RPH's own id for it, from its
 // `run_started`. Nothing here waits for, holds or orders anything RPH does: it only notes when things came.
 
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
@@ -40,6 +41,10 @@ export class RunTimes {
     if (event.kind === "run_ended") {
       this.#followed.delete(record.run);
       return;
+    }
+    if (event.kind === "tool_started" && (event.tool === "lore_search" || event.tool === "lore_read")) {
+      if (event.tool === "lore_search") followed.run.lookups.searches++;
+      else followed.run.lookups.reads++;
     }
     if (record.agent.id !== followed.lead) return;
     const { run, calls } = followed;
