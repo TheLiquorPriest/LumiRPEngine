@@ -68,6 +68,12 @@ describe("a carried chat's states, texts and record", () => {
     expect(own.started).toBe(own.created);
     expect([own.wasOn, own.engine]).toEqual([null, null]);
     expect(s.createChat({ id: "other", revision }).seed).not.toBe(own.seed);
+    // A carried branch takes its own record as any chat does; one made on RPE gets its own seed and start.
+    play(s, "old", "m1", "Wren comes in.", 1, engine(tick(1)));
+    const branch = s.branchChat({ id: "br", from: "old", map: { m1: "bm1" }, seed: "branch-seed", started: 1700000005000, wasOn: false, engine: "classic" });
+    expect([branch.seed, branch.started, branch.wasOn, branch.engine]).toEqual(["branch-seed", 1700000005000, false, "classic"]);
+    const made = s.branchChat({ id: "br2", from: "old", map: { m1: "b2m1" } });
+    expect([made.seed === "" || made.seed === "branch-seed", made.started, made.wasOn, made.engine]).toEqual([false, made.created, null, null]);
   });
 
   test("a carried reply that stood with no turn is in its stretch with its reason", () => {

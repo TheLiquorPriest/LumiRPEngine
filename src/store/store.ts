@@ -908,9 +908,10 @@ export class UserStore {
    * old-to-new map the chat application gave when it made the copy. The branch's path finds the
    * source's turns through the map, so shared history is shared, not copied. The fork point is the
    * message the branch was made at: given, or, as Lumiverse's `CHAT_FORKED` gives only the two chats
-   * and the map, the last message of the source's path that the map names.
+   * and the map, the last message of the source's path that the map names. The branch keeps its own record as any chat does
+   * (`createChat`): its own seed and start unless given, and, for a carried branch, whether the old engine was on and which played it.
    */
-  branchChat(input: { id: string; from: string; map: Readonly<Record<string, string>>; at?: string | null }): ChatRow {
+  branchChat(input: { id: string; from: string; map: Readonly<Record<string, string>>; at?: string | null; seed?: string; started?: number; wasOn?: boolean | null; engine?: string | null }): ChatRow {
     const source = this.chatOrThrow(input.from);
     if (this.chat(input.id)) throw new StoreInputError(`chat ${input.id} exists`);
     const was = pathOf(source.path);
@@ -928,7 +929,7 @@ export class UserStore {
     }
     this.write(false, () => {
       const made = this.store.now();
-      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, head, path, heard, heard_count, created, seed, started) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, head, path, heard, heard_count, created, seed, started, was_on, engine) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
         this.id,
         input.id,
         source.world,
@@ -940,8 +941,10 @@ export class UserStore {
         JSON.stringify(heard),
         source.heard_count,
         made,
-        crypto.randomUUID(),
-        made,
+        input.seed ?? crypto.randomUUID(),
+        input.started ?? made,
+        input.wasOn === undefined || input.wasOn === null ? null : input.wasOn ? 1 : 0,
+        input.engine ?? null,
       ]);
       const link = this.db.query("INSERT OR REPLACE INTO message_link (user, chat, message, source_chat, source_message) VALUES (?, ?, ?, ?, ?)");
       for (const [old, now] of Object.entries(input.map)) link.run(this.id, input.id, now, input.from, old);
