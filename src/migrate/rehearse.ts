@@ -292,7 +292,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       for (const f of Object.values(meta.learned)) nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", `a file of chat ${chat.id}'s learned area`);
       for (const h of [...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) nameBlob(`agents/blobs/${h}`, "assistant-threads", `a message or proposal of chat ${chat.id}'s assistant thread`);
       unreadable.push(...read.unreadable);
-      chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, turns: (tally.counts.get("ledger") ?? 0) - before, story: (tally.counts.get("story-record") ?? 0) - stories, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting });
+      chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, turns: (tally.counts.get("ledger") ?? 0) - before, story: (tally.counts.get("story-record") ?? 0) - stories, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting, held: read.held });
     }
 
     // The agents engine's global workspace: its files, by the blobs they name.

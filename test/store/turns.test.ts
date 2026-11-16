@@ -39,7 +39,7 @@ function seen(...messages: ([string, string] | [string, string, number])[]): See
 
 /** The same path as the turn's own comparison is later shown it, each reply with its swipe's date. */
 function asShown(path: readonly SeenMessage[], dates: Readonly<Record<string, number>>): ShownMessage[] {
-  return path.map((m) => (m.user ? { id: m.id, user: true, hash: m.hash } : { id: m.id, user: false, hash: m.hash, date: dates[m.id] ?? null }));
+  return path.map((m) => (m.user ? { id: m.id, user: true, hash: m.hash, hidden: false } : { id: m.id, user: false, hash: m.hash, date: dates[m.id] ?? null, hidden: false }));
 }
 
 /** How many changes the store's database has made so far: a call that writes nothing leaves it as it is. */

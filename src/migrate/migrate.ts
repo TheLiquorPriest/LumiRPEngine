@@ -86,12 +86,29 @@ async function rowsGiven(paths: DataPaths): Promise<OwnerRow[]> {
   return MIGRATE_SETTINGS.flatMap((def) => ownerRowsOf(read.read(def).value));
 }
 
+/**
+ * A real run that failed after the gate let it write. Today's data was only read; whatever it wrote is RPE's own, and the backup
+ * it took stands. Each chat's import is one transaction and every run reads today's data whole, so the next run finishes the work
+ * and writes nothing twice.
+ */
+export class MigrationStopped extends Error {
+  constructor(
+    readonly step: string,
+    cause: unknown,
+  ) {
+    super(`while ${step}: ${cause instanceof Error ? cause.message : String(cause)}. Today's data is as it was and the backup it took is kept; run again, and the run finishes what this one left, with nothing duplicated`, { cause });
+    this.name = "MigrationStopped";
+  }
+}
+
 export async function migrate(sources: Sources, options: MigrateOptions): Promise<MigrateResult> {
   const now = options.now ?? (() => new Date());
   const paths = dataPaths(options.data);
   // Whose RPE this is, read before anything is written: the user its config names, and the users earlier runs carried.
   const config = await loadConfig(paths, options.env ?? {});
   const { previous, users } = earlierRuns(paths.database, sources.userId);
+  // Where a failed run stopped, once the gate has let it write: null before that, where a failure leaves nothing written.
+  let step: string | null = null;
   const today = await openToday(sources);
   try {
     const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
@@ -100,10 +117,13 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
     const owner = config.lumiverse.user;
     if (owner === null || owner === "") throw new Error(NO_OWNER);
 
+    step = "preparing RPE's data folder";
     await prepareDataFolder(paths);
+    step = "taking the backup";
     const backup = await backupOf(today, paths.backups, config.database.pieceBytes, now);
     report.backup = { path: backup.path, bytes: backup.bytes, sha256: backup.sha256 };
 
+    step = "opening RPE's database";
     const db = openDatabase(paths.database, config.database.busyMs);
     try {
       const migrations = new Migrations();
@@ -118,6 +138,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       // A chat's folders are chosen once and kept in the tree's tables, which the server reads as well.
       if (options.tree) migrations.add(options.tree.tables.area, options.tree.tables.migrations);
       migrateTables(db, migrations, { user: owner, version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
+      step = "reading the chats as today's build does";
       const registry = createRegistry(ALL_PACKS);
       const { chats, notOpened } = await chatsToImport(today);
       const worlds = new Map<string, WorldDoc>();
@@ -128,28 +149,37 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
         }
       }
       const store = openStore({ db, registry, worlds: (r) => worlds.get(r) });
+      step = "importing the chats";
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();
       report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run });
+      step = "carrying the worlds, files, settings and connections";
       const layout = options.tree;
       const tree = layout ? { root: paths.files, agents: layout.agents, skills: layout.skills, prompts: layout.prompts, notes: layout.notes, chat: (chat: string, names: ChatNames) => layout.chatFolder(db, paths.files, sources.userId, chat, names), played: (chat: string) => s.chat(chat) !== null && s.isPlayed(chat) } : null;
       const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree });
       report.landed = carried.landed;
       report.carried = carried.carried;
       // What it carried of each chat it imported, over the chat's whole path, for the chat's first briefing on RPE and the Migration page.
+      step = "keeping what was carried of each chat";
       const notes = layout ? `${layout.notes}/${IMPORTED}` : null;
       for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried({ report, db, s, chat: c.chatId, notes }));
       // The store keeps the world revisions the run carried (its `world_file` table, left as it is), so a migrated chat's world can be read and written to.
+      step = "keeping the worlds the chats play";
       const kept = s.copyMigratedWorlds();
       report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };
       for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
       // Build's own copy of each carried world: copied in, replaced where it is still what an earlier run put there, and kept where it was changed in RPE since.
       report.worldsInBuild = seedCarriedWorlds(db, sources.userId);
+      step = "recording the run";
       keepRun(db, sources.userId, run, report, (row) => report.landed?.[row as keyof typeof report.landed] ?? (Object.hasOwn(NO_PLACE_YET, row) ? BACKUP_ONLY : ""));
     } finally {
       db.close();
     }
     return { report, ran: true };
+  } catch (error) {
+    // A failure once the run was writing says where it stopped: today's data is untouched, the backup stays, and the next run takes everything again from the start.
+    if (step === null) throw error;
+    throw new MigrationStopped(step, error);
   } finally {
     today.close();
   }

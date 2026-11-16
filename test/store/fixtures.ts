@@ -179,7 +179,7 @@ export function play(s: UserStore, chat: string, message: string, text: string, 
 
 /** A chat as the chat application shows it: user messages, and replies by the text and date of the swipe showing. */
 export function shown(...messages: ([string, string] | [string, string, number])[]): ShownMessage[] {
-  return messages.map(([id, text, date]) => (date === undefined ? { id, user: true, hash: hashOf(text) } : { id, user: false, hash: hashOf(text), date }));
+  return messages.map(([id, text, date]) => (date === undefined ? { id, user: true, hash: hashOf(text), hidden: false } : { id, user: false, hash: hashOf(text), date, hidden: false }));
 }
 
 /** Who holds what, as the engine says: every thing whose chain of holders reaches `who`, sorted. */

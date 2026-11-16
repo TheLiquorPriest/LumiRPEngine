@@ -35,10 +35,11 @@ export function textHash(text: string): string {
   return new Bun.CryptoHasher("sha256").update(text).digest("hex").slice(0, 32);
 }
 
-/** A message's swipes as RPE knows them: each one's text hash (null for one with no text) and its date, as Lumiverse keeps them. */
+/** A message's swipes as RPE knows them: each one's text hash (null for one with no text) and its date, as Lumiverse keeps them; and whether the player hid the message from the prompt. */
 export interface SwipeFacts {
   hashes: (string | null)[];
   dates: (number | null)[];
+  hidden: boolean;
 }
 
 export interface ChatRow {
@@ -170,6 +171,7 @@ export class LumiverseDb {
           const d = r.dates[i];
           return typeof d === "number" && Number.isFinite(d) ? d : null;
         }),
+        hidden: r.hidden,
       });
     }
     return { messages, swipes: facts };

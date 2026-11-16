@@ -140,7 +140,7 @@ describe("the new fold against today's", () => {
     const headChain = chainOf(msgs, headPicks, "a4");
     s.sync(
       "c",
-      headChain.map((m) => ({ id: m.id, user: m.isUser, hash: contentId(m.swipes[m.swipeId] ?? "").hash, date: m.isUser ? null : (played.find((p) => p.id === m.id && p.swipe === m.swipeId)?.date ?? null) })),
+      headChain.map((m) => ({ id: m.id, user: m.isUser, hash: contentId(m.swipes[m.swipeId] ?? "").hash, date: m.isUser ? null : (played.find((p) => p.id === m.id && p.swipe === m.swipeId)?.date ?? null), hidden: false })),
     );
     const theirs = today(headChain);
     const ours = s.headState("c");

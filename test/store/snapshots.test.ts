@@ -91,7 +91,7 @@ describe("snapshots", () => {
   test("after a delete far back, the comparison leaves the same snapshots with or without a question before it", () => {
     const ts = playMany(25, 120);
     const exchanges = Array.from({ length: 120 }, (_, i) => i + 1);
-    const shown = (ns: readonly number[]): ShownMessage[] => ns.flatMap((n) => [{ id: `u${n}`, user: true, hash: hashOf(`Line ${n}.`) }, { id: `m${n}`, user: false, hash: hashOf(`Reply ${n}.`), date: n }]);
+    const shown = (ns: readonly number[]): ShownMessage[] => ns.flatMap((n) => [{ id: `u${n}`, user: true, hash: hashOf(`Line ${n}.`), hidden: false }, { id: `m${n}`, user: false, hash: hashOf(`Reply ${n}.`), date: n, hidden: false }]);
     ts.s.sync("c", shown(exchanges));
     // Each way runs on a copy of the same database, so the turns, and the keys of their nodes, are the same ones.
     const played = ts.store.db.serialize();

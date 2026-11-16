@@ -163,14 +163,14 @@ export interface TurnRow {
 
 /**
  * One message of the chat as the chat application shows it: the showing swipe's text hash and date,
- * and whether the player hid it from the prompt (absent: not hidden).
+ * and whether the player hid it from the prompt. Every caller says: a mark left out would clear one.
  */
 export interface ShownMessage {
   id: string;
   user: boolean;
   hash: string;
   date?: number | null;
-  hidden?: boolean;
+  hidden: boolean;
 }
 
 /** One message of a chat's path as last compared. Ids, hashes and marks only: never its text. */

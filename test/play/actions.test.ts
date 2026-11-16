@@ -292,7 +292,7 @@ describe("a tap that manages", () => {
     const reply = shared.message ?? "";
     await bed.writes.run(() => {
       s.branchChat({ id: BRANCH, from: CHAT, map: { [reply]: `b-${reply}` }, at: reply });
-      s.sync(BRANCH, [{ id: `b-${reply}`, user: false, hash: shared.hash ?? "" }]);
+      s.sync(BRANCH, [{ id: `b-${reply}`, user: false, hash: shared.hash ?? "", hidden: false }]);
     });
     const before = banked(await bed.state());
 

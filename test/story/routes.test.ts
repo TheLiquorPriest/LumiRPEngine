@@ -55,7 +55,7 @@ async function branchOf(t: Table): Promise<ShownMessage[]> {
 
 /** A whole exchange in chat B: the player's line, a turn begun after it, its reply tied and shown. */
 async function playIn(t: Table, shown: ShownMessage[]): Promise<TurnRow> {
-  shown.push({ id: `b-u${shown.length}`, user: true, hash: hashOf("the player's line in the branch") });
+  shown.push({ id: `b-u${shown.length}`, user: true, hash: hashOf("the player's line in the branch"), hidden: false });
   await t.writes.run(() => t.s.sync(BRANCH, shown));
   const turn = await t.writes.run(() => t.s.beginTurn({ chat: BRANCH, kind: "new" }));
   const reply = { id: `b-r${shown.length}`, user: false, hash: hashOf("The branch goes its own way."), date: 9_000 };
@@ -83,7 +83,7 @@ interface Story {
 async function played(settings: Partial<StorySettings> = {}): Promise<Story> {
   const page = await openPage(settings);
   const { t } = page;
-  t.shown.push({ id: "old-0", user: true, hash: hashOf("an old line") });
+  t.shown.push({ id: "old-0", user: true, hash: hashOf("an old line"), hidden: false });
   await t.writes.run(() => t.s.sync(CHAT, t.shown));
   const opened = await t.writes.run(() => t.s.beginTurn({ chat: CHAT, kind: "new", imported: true }));
   const carriedWrites: StoryWrite[] = [

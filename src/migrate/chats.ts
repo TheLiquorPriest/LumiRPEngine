@@ -36,6 +36,25 @@ export type ChatEngine = "classic" | "agents" | "harness";
 /** How today's ledger reader found a chat's journal. */
 export type JournalRead = "read" | "none" | "unreadable" | "malformed" | "from another run of this chat" | "not opened";
 
+/**
+ * What today's own opening of a chat did with the writes its journal held (a GM edit, a ✎ fix, a keep, a discard, an undo, waiting
+ * for a reply's window to close): those whose windows today's build closes land on their turns, a refused one is kept with its
+ * notice, and one whose window stays open waits on. Counts and kinds only, never what the write says.
+ */
+export interface HeldRead {
+  landed: number;
+  refused: number;
+  waiting: { kind: string; windows: number }[];
+}
+
+/** What the journal's held writes came to over today's own chat open: those of `before` that landed, those refused, and those still held after it. */
+function heldOver(before: Journal, after: Journal): HeldRead {
+  const still = new Set(after.held.map((h) => h.write.id));
+  const refused = new Set((after.refused ?? []).map((r) => r.write.id));
+  const went = before.held.filter((h) => !still.has(h.write.id));
+  return { landed: went.filter((h) => !refused.has(h.write.id)).length, refused: went.filter((h) => refused.has(h.write.id)).length, waiting: after.held.map((h) => ({ kind: h.write.kind, windows: h.waitFor.length })) };
+}
+
 export interface ChatRead {
   chatId: string;
   /** Null for a chat that plays no world. */
@@ -50,9 +69,11 @@ export interface ChatRead {
   notOpened: string | null;
   /** Records the journal keeps of turns that were deleted (tombstones). */
   deletedTurns: number;
-  /** Turns started and not finished when the chat was read: their pending entries and open windows. */
+  /** Turns started and not finished when the chat was read, before today's own open of it: their pending entries and open windows. */
   underWay: number;
   waiting: { questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean };
+  /** The writes the journal held, over today's own open of the chat. */
+  held: HeldRead;
   unreadable: Unreadable[];
 }
 
@@ -138,12 +159,18 @@ export class ChatReader {
     let chain: ChainMessage[] = observed;
     let state: JournalRead = "none";
     let notOpened: string | null = null;
+    // The journal as it stood when read, before today's own open of the chat closed the windows a stopped build left: what was under way.
+    let wasOpen: Journal | null = null;
+    let held: HeldRead = { landed: 0, refused: 0, waiting: [] };
     if (run) {
       // How the journal stood before today's reader opened it: what the reader does with it follows.
       const stored = await this.host.storage.read(journalPath(chatId), userId);
-      const before = decodeJournal(stored, chatId, run);
-      state = stored === null ? "none" : ((before.reset as JournalRead | null) ?? "read");
+      const decoded = decodeJournal(stored, chatId, run);
+      state = stored === null ? "none" : ((decoded.reset as JournalRead | null) ?? "read");
       const failed = this.ledger.errors.length;
+      const first = await this.open(chatId, userId);
+      wasOpen = first.before;
+      held = first.held;
       await this.ledger.with(chatId, userId, async (core, seen) => {
         journal = structuredClone(core.journal);
         chain = core.chain(seen);
@@ -154,13 +181,14 @@ export class ChatReader {
         state = "not opened";
         notOpened = this.why.get(chatId)?.why ?? "today's reader didn't open it";
         unreadable.push({ path: `chats/${chatId}`, why: notOpened });
-        journal = before.journal;
+        journal = decoded.journal;
       }
     }
     const opened = journal as Journal | null;
     const prefs = chatKnowledgePrefsOf(meta);
     const chips = run ? await this.chips.list(chatId, userId) : [];
-    const pending = new Set([...Object.keys(opened?.pending ?? {}), ...(opened?.windows ?? []), ...(opened?.prereply ?? [])]);
+    const was = wasOpen ?? opened;
+    const pending = new Set([...Object.keys(was?.pending ?? {}), ...(was?.windows ?? []), ...(was?.prereply ?? [])]);
     return {
       chatId,
       engine: run ? (prefs.engine ?? "classic") : null,
@@ -179,8 +207,38 @@ export class ChatReader {
         reviewCards: chips.filter((c) => c.kind === "review").length,
         rollback: agentMetaOf(meta).rollback !== null,
       },
+      held,
       unreadable,
     };
+  }
+
+  /** Chats already opened as today's build opens one, with what the journal looked like before and what its held writes came to. */
+  private readonly opens = new Map<ChatId, { before: Journal | null; held: HeldRead }>();
+
+  /**
+   * Today's own open of a chat (`LedgerService.open`), once: its ledger synced with the messages as they stand now, so an edit
+   * today's build never saw pauses the chat as its own sync pauses it, and the windows a stopped build left open closed, so the
+   * writes they held land on their turns, as today's build lands them when it next starts. A turn it left under way keeps what
+   * it had written, as today's restart handles it.
+   */
+  private async open(chatId: ChatId, userId: UserId): Promise<{ before: Journal | null; held: HeldRead }> {
+    const known = this.opens.get(chatId);
+    if (known) return known;
+    let before: Journal | null = null;
+    await this.ledger.with(chatId, userId, async (core) => {
+      before = structuredClone(core.journal);
+    });
+    let held: HeldRead = { landed: 0, refused: 0, waiting: [] };
+    const was = before as Journal | null;
+    if (was !== null) {
+      await this.ledger.open(chatId, userId);
+      await this.ledger.with(chatId, userId, async (core) => {
+        held = heldOver(was, core.journal);
+      });
+    }
+    const out = { before: was, held };
+    this.opens.set(chatId, out);
+    return out;
   }
 
   /**
@@ -193,6 +251,8 @@ export class ChatReader {
     const run = readRun(await this.host.chats.chatMetadata(chatId, userId));
     if (!run) return null;
     let found: { input: FoldInput; revisions: Set<RevisionId> } | null = null;
+    // As today's build opens it first: edits it never saw pause the chat, and the writes held through a window it left open land.
+    await this.open(chatId, userId);
     await this.ledger.with(chatId, userId, async (core, seen) => {
       // A copy: the importer's folds read it after the reader is done with the chat.
       const input = core.foldInput(seen);

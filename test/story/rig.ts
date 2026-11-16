@@ -81,7 +81,7 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
     writes,
     shown,
     async begin() {
-      shown.push({ id: `m${n++}`, user: true, hash: hashOf(`the player's line ${n}`) });
+      shown.push({ id: `m${n++}`, user: true, hash: hashOf(`the player's line ${n}`), hidden: false });
       await sync();
       return writes.run(() => s.beginTurn({ chat: CHAT, kind: "new" }));
     },
@@ -90,7 +90,7 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
       const message = target?.id ?? `m${n++}`;
       const at = date++;
       const tied = await writes.run(() => s.tieTurn(turn.id, { message, hash: hashOf(text), date: at }));
-      const entry: ShownMessage = { id: message, user: false, hash: hashOf(text), date: at };
+      const entry: ShownMessage = { id: message, user: false, hash: hashOf(text), date: at, hidden: false };
       if (target) shown[shown.length - 1] = entry;
       else shown.push(entry);
       await sync();
@@ -105,7 +105,7 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
       const row = s.turn(turn.id);
       const at = shown.findIndex((m) => m.id === row?.message);
       if (!row || at < 0) throw new Error("that swipe's message is not shown");
-      shown[at] = { id: row.message ?? "", user: false, hash: row.hash ?? "", date: row.date };
+      shown[at] = { id: row.message ?? "", user: false, hash: row.hash ?? "", date: row.date, hidden: false };
       await sync();
     },
     async remove(count) {

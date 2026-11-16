@@ -38,7 +38,7 @@ function firstComparison(data: string, fixture: Fixture, chat: string): FoundIte
     const was = s.path(chat);
     const report = s.sync(
       chat,
-      steps.map((st) => ({ id: st.id, user: st.role !== "assistant", hash: st.shown.hash, date: st.shown.date })),
+      steps.map((st) => ({ id: st.id, user: st.role !== "assistant", hash: st.shown.hash, date: st.shown.date, hidden: false })),
     );
     return foundItems(report, was, steps);
   });

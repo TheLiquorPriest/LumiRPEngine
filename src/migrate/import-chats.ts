@@ -242,8 +242,8 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
       s.setBase(turn.id, step.state);
     }
   }
-  // The chat as it stands: its path as today's build last read it (a reply edited since, as its turn is tied), and the check at its head against today's fold of it.
-  const shownOf = (messages: readonly ChainMessage[]): ShownMessage[] => messages.map((m) => (m.isUser ? { id: m.id, user: true, hash: hashOf(m, m.swipeId) } : { id: m.id, user: false, hash: tieHash(chat, m, m.swipeId), date: dateOf(m, m.swipeId) }));
+  // The chat as it stands: its path as today's build last read it (a reply edited since, as its turn is tied), each message with the hidden mark Lumiverse holds for it (R-21), and the check at its head against today's fold of it.
+  const shownOf = (messages: readonly ChainMessage[]): ShownMessage[] => messages.map((m) => (m.isUser ? { id: m.id, user: true, hash: hashOf(m, m.swipeId), hidden: facts(m)?.hidden === true } : { id: m.id, user: false, hash: tieHash(chat, m, m.swipeId), date: dateOf(m, m.swipeId), hidden: facts(m)?.hidden === true }));
   const shown = shownOf(chain);
   s.sync(id, shown);
   const today = foldToday(registry, chat.input);

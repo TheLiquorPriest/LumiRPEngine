@@ -69,6 +69,12 @@ export interface ChatReport {
   deletedTurns: number;
   underWay: number;
   waiting: { questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean };
+  /**
+   * The writes its journal held (a GM edit, a ✎ fix, a keep, a discard, an undo) over today's own open of the chat: landed on their
+   * turns as today's build lands them, refused with a notice, or still held for a window that stays open, which no fold applies;
+   * each of those is listed by its kind. Absent from a report kept before runs counted them.
+   */
+  held?: { landed: number; refused: number; waiting: { kind: string; windows: number }[] };
 }
 
 /** What came of a chat a run did not import, as the run's outcome for it says, and whether an earlier run's import of it stands in RPE. */
@@ -322,8 +328,10 @@ export function reportText(report: MigrationReport): string {
   }
   lines.push("", "Chats: turns, and what waits on you");
   for (const c of report.chats) {
-    const waits = [c.waiting.questions > 0 ? `${c.waiting.questions} keep-or-discard question(s)` : "", c.waiting.staged > 0 ? "a staged action" : "", c.waiting.chips > 0 ? `${c.waiting.chips} chip(s), ${c.waiting.reviewCards} of them review cards` : "", c.waiting.rollback ? "a rollback that was never applied" : ""].filter((w) => w !== "");
-    lines.push(`  ${c.chatId} (${c.engine ?? "no world"}): ${c.turns} turns over ${c.replies} replies; journal ${c.journal}${c.underWay > 0 ? `; ${c.underWay} turn(s) under way` : ""}${waits.length > 0 ? `; waiting: ${waits.join(", ")}` : ""}`);
+    const held = c.held ?? { landed: 0, refused: 0, waiting: [] };
+    const waits = [c.waiting.questions > 0 ? `${c.waiting.questions} keep-or-discard question(s)` : "", c.waiting.staged > 0 ? "a staged action" : "", c.waiting.chips > 0 ? `${c.waiting.chips} chip(s), ${c.waiting.reviewCards} of them review cards` : "", c.waiting.rollback ? "a rollback that was never applied" : "", held.waiting.length > 0 ? `${held.waiting.length} held write(s) still waiting for a reply that is under way (${held.waiting.map((w) => w.kind).join(", ")}), which no fold applies` : ""].filter((w) => w !== "");
+    const landed = [held.landed > 0 ? `${held.landed} held write(s) landed on their turns` : "", held.refused > 0 ? `${held.refused} held write(s) refused as their window closed` : ""].filter((w) => w !== "");
+    lines.push(`  ${c.chatId} (${c.engine ?? "no world"}): ${c.turns} turns over ${c.replies} replies; journal ${c.journal}${c.underWay > 0 ? `; ${c.underWay} turn(s) under way` : ""}${landed.length > 0 ? `; ${landed.join(", ")}` : ""}${waits.length > 0 ? `; waiting: ${waits.join(", ")}` : ""}`);
   }
   if (report.imports !== null) {
     lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against today's fold");
