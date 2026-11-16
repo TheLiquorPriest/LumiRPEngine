@@ -30,7 +30,7 @@
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, JobView, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
-import { castViews, type SourceReader } from "../cast";
+import { castViews, type MemorySearch, type SourceReader } from "../cast";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
@@ -54,6 +54,8 @@ export interface EventsDeps {
   files: FilesPort;
   /** A character's sources read live, shown with its base. */
   sources: SourceReader;
+  /** The cast's search of a character's memories by the words of a cue, through the index file. */
+  search?: MemorySearch;
   /** The lore index, whose next batch an indexing run is given by name. */
   loreIndex: LoreIndex;
   /** The notes agents wrote, which follow the turn: a dropped sub-agent's are taken back. */
@@ -275,6 +277,7 @@ async function castNamed(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: s
     // What comes to mind is cued by who and what is really there (R-144): the stage's place and things, and what the moment the lead handed the agent names.
     cues: [...new Set([...(stage === null ? [] : stageCues(stage)), ...namedIn(deps.store, scope.user, scope.chat, turn, [moment.task, moment.message ?? ""])])],
     sources: deps.sources,
+    ...(deps.search !== undefined ? { search: deps.search } : {}),
     layouts,
     tokens: tokenCount(settings.charsPerToken),
     settings: settings.cast,

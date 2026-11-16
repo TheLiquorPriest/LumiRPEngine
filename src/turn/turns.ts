@@ -31,7 +31,7 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
-import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, type SourceReader } from "../cast";
+import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, type MemorySearch, type SourceReader } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording } from "../iface";
@@ -218,6 +218,8 @@ export interface TurnLaneDeps {
   migrated: MigratedSource;
   /** A character's sources read live, for a view of those on stage that shows them (`base`). */
   sources: SourceReader;
+  /** The cast's search of a character's memories by the words of a cue, through the index file. */
+  search?: MemorySearch;
   live: LiveHub;
   /** The adapter's reads of Lumiverse; null before it is mounted, or when RPE is not set up for a Lumiverse. */
   reads(): LumiverseReads | null;
@@ -1497,7 +1499,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const stage = named.length === 0 ? null : stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
     if (stage !== null && stage.who.length > 0) {
       try {
-        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: tokenCount(settings.charsPerToken), settings: settings.cast };
+        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, ...(this.#d.search !== undefined ? { search: this.#d.search } : {}), layouts: await castLayouts(guidance, named), tokens: tokenCount(settings.charsPerToken), settings: settings.cast };
         const views = await castPresentViews(named, { ...input, cues: stageCues(stage) });
         const text = views.flatMap((view) => (view.text.trim() === "" ? [] : [view.text.trimEnd()])).join("\n\n");
         if (text !== "") blocks.push({ name: BLOCKS.onStage, text });
@@ -1563,7 +1565,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const stage = stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
     if (stage === null || stage.who.length === 0) return [];
     const all = Object.keys(CAST_VIEWS) as CastViewName[];
-    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, all), tokens: tokenCount(settings.charsPerToken), settings: settings.cast, cues: stageCues(stage) };
+    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, ...(this.#d.search !== undefined ? { search: this.#d.search } : {}), layouts: await castLayouts(guidance, all), tokens: tokenCount(settings.charsPerToken), settings: settings.cast, cues: stageCues(stage) };
     const out: CastFolder[] = [];
     for (const name of new Set(stage.who)) {
       const [rest, growth] = await Promise.all([castViews(all.filter((v) => v !== "growth"), { ...input, character: name }), castViews(["growth"], { ...input, character: name })]);

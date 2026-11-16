@@ -467,7 +467,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const lorePorts = lorePort(lore, loreIndex);
   // A job's end is told through `events.job`, which records it; the lane, made below, brings the sessions of its turn up to date. Each
   // change of a job's state is told to every page that follows his jobs.
-  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), jobTold: (job) => JOB_KIND.publish(app.live, LIVE_JOBS, { job }), log: app.log };
+  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, search: memorySearch, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), jobTold: (job) => JOB_KIND.publish(app.live, LIVE_JOBS, { job }), log: app.log };
   const events = turnEvents(eventsDeps);
   const env: Environment = {
     id: "rpe",
@@ -554,6 +554,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     due,
     migrated: options.migrated,
     sources,
+    search: memorySearch,
     live: app.live,
     reads: () => options.lumiverse()?.reads ?? null,
     stopGeneration: async (generation) => (await options.lumiverse()?.stopGeneration(generation)) ?? false,
