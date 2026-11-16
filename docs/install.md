@@ -204,9 +204,10 @@ For everything:
 
 - **Build**: the previous build's own world builder, running against RPE: the worlds RPE keeps, opened, edited (the map editor among them) and saved. What Build cannot do in this build: its background jobs, its lore and secrecy tools, which say once that RPE does not serve them; "Attach to this chat" (Play's picker attaches); in the web app, Lumiverse's books and connections, and Regenerate, Continue and showing a reply in a chat. Build's place in a world is not kept in the web address.
 - **Files**: the agents' files, level by level, each with whether it is in force; open, edit and save one at a level, delete or reset one, switch a shipped one off or on, compare with the default. The agents' suggestions, to accept, edit or dismiss. An agent's stack: every part it is given, in order. See [How behaviour lives in files](behaviour.md).
-- **Connections**: RPE's model connections, each model's limits and where each comes from, **Test it**, and your own context window and longest reply for a model.
-- **Settings**: every setting with its value, its default and the file that decides it, changed at a level of your choice. It also shows the `Builds:` line, and **Update now** when a new build waits (see [Updating](#updating)).
-- **Storage**: what RPE's files take, chat by chat; a chat's largest notes; pruning a chat's old turn folders.
+- **Connections**: RPE's model connections, each model's limits and where each comes from, **Test it**, your own context window and longest reply for a model, and signing in to a provider for a connection that signs in.
+- **Settings**: every setting with its value, its default and the file that decides it, changed at a level of your choice.
+- **Runtime**: the `Builds:` line, and **Update now** when a new build waits (see [Updating](#updating)); when the web key this browser holds ends.
+- **Storage**: what RPE keeps by kind and how long, and what each chat's files and rows take; a chat's largest notes; pruning on request, after being told exactly what will go.
 - **Migration**: the last migration's report, each chat's outcome, the backup, the worlds put into Build, what waits on you, the steps of going back, and a bootstrap job for every chat the migration carried.
 - **Chats** (web app only): the chats, those RPE has played and those the migration carried, with a way to each one's pages and to Play.
 
@@ -228,10 +229,10 @@ The service does not run the file in the extension's folder: it runs RPE's own c
 2. starts it for real on a scratch copy of its data (`rpe check`): a copy of the database, a fresh file tree, no Lumiverse; it passes only once it has mounted every area, laid its shipped files and answered its status with its build, within `update.checkWait` seconds;
 3. waits until no turn and no job runs (`update.restart`, on by default), swaps the checked copy into its own copy's place, keeps the copy it replaces as known-good (`update.keepCopies`), and restarts onto it; its service starts it again.
 
-- `rpe status` has a `Builds:` line: the build RPE runs, the build waiting, the extension's build, and what RPE will do about a difference, with why a build was not taken. The **Settings** page shows the same line.
+- `rpe status` has a `Builds:` line: the build RPE runs, the build waiting, the extension's build, and what RPE will do about a difference, with why a build was not taken. The **Runtime** page shows the same line.
 - A word with no stated hash (today's registration carries only the extension's build) is not taken, and `rpe status` says why. A new build whose files do not match what was stated for it, or that does not start, is never swapped in; RPE goes on with the build it runs.
 - A build that is swapped in and does not come up within `update.startTries` starts is put back to the known-good copy by a step the service runs before each start, which an update does not replace (`rpe up --systemd` wrote it); `rpe status` says what happened. One that still cannot start is left stopped: the service stops starting RPE after `update.startTries` starts within `update.startWindow` seconds.
 - RPE run by hand (`rpe serve`) never restarts by itself: stop it and start it again.
-- With `update.restart` off, RPE waits for you: **Update now** on the Settings page restarts it at once onto the build that passed, or restart RPE's service yourself.
+- With `update.restart` off, RPE waits for you: **Update now** on the Runtime page restarts it at once onto the build that passed, or restart RPE's service yourself.
 
 Your files in RPE's data folder are never changed by an update. When an update changes a shipped file you replaced with your own, RPE records it, and the **Files** page shows the difference.
