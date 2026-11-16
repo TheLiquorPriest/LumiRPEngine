@@ -237,6 +237,13 @@ export function compose(options: ComposeOptions = {}): Composition {
       turning,
       // With no chat named, the stack the shipped and global levels give: a chat that is never placed has no levels of its own.
       stack: (user, chat, agent) => made().harness.definitions.stack(scope(user, chat ?? NO_CHAT), agent),
+      // A part as RPH renders it for the chat, with the values of its last use there, for the Files page's preview.
+      preview: async (user, chat, kind, name, text) => {
+        const at = scope(user, chat ?? NO_CHAT);
+        const { parts } = made().harness;
+        const [part, values] = await Promise.all([parts.preview(at, kind, name, text), parts.lastFields(at, kind, name)]);
+        return { part, values: values ?? null };
+      },
       apply,
       place,
       openSessions,
@@ -257,8 +264,8 @@ export function compose(options: ComposeOptions = {}): Composition {
           rules: () => rules.list(at),
           definitions: () => definitions.list(at),
           stack: (agent) => definitions.stack(at, agent),
-          // What RPH found wrong with a file that runs a command or calls out: RPH lists no other file's problems for a host.
-          problems: async () => (await external.list(at)).flatMap((e) => (e.problem === undefined ? [] : [{ path: e.path, message: e.problem }])),
+          // What the files name that runs or calls out, the hooks in force among them, as RPH lists it: RPH lists no other file's problems for a host.
+          external: () => external.list(at),
         };
       },
       written: (saved) => listing.written(saved),

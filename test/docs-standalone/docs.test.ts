@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { SHIPPED_GUIDANCE } from "rp-harness";
+import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
 import type { JsonValue } from "rp-harness/contract";
 import { configFacts, renderSettingsDoc, settingsRegistry } from "../../scripts/settings/generate";
 import { runCli } from "../../src/app/cli";

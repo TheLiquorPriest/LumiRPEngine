@@ -15,16 +15,16 @@
 import { stat } from "node:fs/promises";
 import { route, RouteError, shape } from "../app";
 import { readText } from "../app/disk";
-import { listingContext, namesInForce, userMayWrite, writtenKey } from "./catalog";
+import { kindAt, listingContext, namesInForce, userMayWrite, writtenKey } from "./catalog";
 import { defaultStanding, defaultUpdateTexts, lineDiff, updatesSince } from "./defaults";
 import { listFolder, searchTree } from "./listing";
 import { OFF_LEVELS } from "./own-files";
 import { readBytes, readLines } from "./ranged";
 import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit";
 import { treeSettingsOf } from "./settings";
-import { locate } from "./view";
+import { locate, treeLayers } from "./view";
 import { rphStanding, withStanding } from "./standing";
-import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, filePinBody, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, pinsReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
+import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, filePinBody, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, partPreviewBody, partPreviewReply, pinsReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
 
 /** The routes that name a file: its path in the chat's view follows the route's own segments. */
 const FILE_PATH = "/api/v1/files/*";
@@ -44,6 +44,28 @@ export function fileRoutes(kit: RouteKit) {
       query: { chat: shape.optional(shape.text({ blank: false }), "The chat the agent runs in; left out, the shipped and global levels alone."), agent: shape.field(shape.text({ blank: false }), "The agent's definition.") },
       reply: stackReply,
       handle: async ({ user, query }) => ({ agent: query.agent, parts: await deps.stack(user, query.chat ?? null, query.agent) }),
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/files-preview",
+      access: "page",
+      group: "files",
+      does: "A prompt part or a tool's description rendered as RPH renders it for a chat, as saved or as he drafts it, its fields filled from its last use there, with any problem in it; nothing is written.",
+      body: partPreviewBody,
+      reply: partPreviewReply,
+      handle: async ({ user, body }) => {
+        const chat = chatOf(body.chat);
+        const found = await locate(own.locationOf(user, chat), viewPathOf(body.path));
+        // A part is a `.md` file right in a level's folder of prompt parts or of tools' descriptions; its name is the file's.
+        const layer = found.ok ? treeLayers().find((l) => l.level === found.at.level) : undefined;
+        const [folder, file] = found.ok && found.at.rest.length === 2 ? found.at.rest : [];
+        const kind = layer === undefined || folder === undefined ? undefined : kindAt(layer, folder);
+        if ((kind !== "prompts" && kind !== "tools") || file === undefined || !file.endsWith(".md")) throw new RouteError(400, `${body.path} is not a prompt part or a tool's description: one is \`.prompts/<name>.md\` or \`.tools/<name>.md\` of a level.`);
+        const name = file.slice(0, -".md".length);
+        const partKind = kind === "prompts" ? ("prompt" as const) : ("tool" as const);
+        const { part, values } = await deps.preview(user, chat, partKind, name, body.text);
+        return { kind: partKind, name, values, ...part };
+      },
     }),
     route({
       method: "GET",
@@ -83,7 +105,7 @@ export function fileRoutes(kit: RouteKit) {
         const wanted = query.search?.trim() ?? "";
         const page = wanted === "" ? await listFolder(ctx, query.folder ?? "", ask) : await searchTree(ctx, wanted, ask, { grepBytes: settings.grepBytes, grepMs: settings.grepMs });
         // RPH's own standing of the guidance files on the page: what it holds out and why, what it found wrong, whose stacks they join.
-        if (!page.items.some((i) => i.entry?.item !== null && i.entry !== null)) return page;
+        if (!page.items.some((i) => i.entry !== null && (i.entry.item !== null || i.entry.hooks !== undefined))) return page;
         const standing = await rphStanding(deps.guidance(user, chat));
         return { ...page, items: page.items.map((i) => (i.entry === null ? i : { ...i, entry: withStanding(i.entry, standing) })) };
       },
@@ -196,7 +218,7 @@ export function fileRoutes(kit: RouteKit) {
       path: OFF_PATH,
       access: "page",
       group: "files",
-      does: "Switches a file's name off or on again in the `off:` list of a level's config, which is what \"Delete\" on a shipped file does; says the file as the listing now shows it.",
+      does: "Switches a file's name off or on again in the `off:` list of a level's config, which is what \"Delete\" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it.",
       body: fileSwitchBody,
       reply: fileWrittenReply,
       handle: async ({ user, params, body }) => {
@@ -206,8 +228,12 @@ export function fileRoutes(kit: RouteKit) {
         const path = viewPathOf(params["*"]);
         const listed = await kit.entryOf(user, loc, (await own.found(loc, path)).path);
         if (listed === null) throw new RouteError(404, `The tree has no file ${path}.`);
-        if (listed.item === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
-        await own.switchOff(loc, level, listed.item, body.off);
+        // A hooks file names its hooks, each switched off by its own name (`hooks/<name>`), as RPH reads them.
+        const hook = body.hook === undefined ? undefined : listed.hooks?.find((h) => h.name === body.hook);
+        if (body.hook !== undefined && hook === undefined) throw new RouteError(400, `${listed.path} names no hook ${body.hook}.`);
+        const name = hook === undefined ? listed.item : `hooks/${hook.name}`;
+        if (name === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it${listed.hooks === undefined ? "" : ": name one of its hooks"}.`);
+        await own.switchOff(loc, level, name, body.off);
         await kit.written(user, chat, listed.path, level);
         return { file: await kit.entryOf(user, loc, listed.path) };
       },

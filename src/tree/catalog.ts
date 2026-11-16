@@ -7,7 +7,8 @@
 
 import { stat } from "node:fs/promises";
 import { relative, sep } from "node:path";
-import type { FileKind, GuidanceKind, Layer, LayerLevel } from "rp-harness/contract";
+import type { FileKind, GuidanceKind, HookEvent, Layer, LayerLevel, SwitchState } from "rp-harness/contract";
+import { hookEvent } from "../app";
 import { readText } from "../app/disk";
 import { isRecord } from "../shared/json";
 import { yamlMapping } from "../app/yaml";
@@ -55,6 +56,45 @@ export interface TreeFileEntry {
   problems?: string[];
   /** The agents whose stacks it joins (a file `instructions:` names, or one they read), by definition name. Absent where RPH was not asked. */
   joins?: string[];
+  /** For a level's hooks file (`hooks.yml` in its hooks folder): each hook it names, as RPH's hook reader takes it. Absent for any other file. */
+  hooks?: TreeHook[];
+}
+
+/**
+ * A hook as a hooks file names it (plan §5.4 "Hooks"): its name, which an `off:` list names as `hooks/<name>`; the moment it runs at and
+ * the command line, as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH
+ * runs it; and, where RPH lists it, whether its command is switched on.
+ */
+export interface TreeHook {
+  name: string;
+  on: HookEvent;
+  runs: string;
+  off: boolean;
+  offIn: LayerLevel[];
+  replacedBy: string | null;
+  applies: boolean;
+  state?: SwitchState;
+}
+
+/** The file a level's hooks are written in, inside its hooks folder, as RPH reads it. */
+export const HOOKS_FILE = "hooks.yml";
+/** Every moment a hook runs at, as a hooks file writes it (RPH's `HookEvent`, held to it where the live trace declares it). */
+const HOOK_MOMENTS = hookEvent.values;
+
+/** The hooks a hooks file names, as RPH reads them: under a moment, each with its name and command; none where it does not read (RPH says why). */
+export function hooksNamed(text: string): { name: string; on: HookEvent; runs: string }[] {
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(text);
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed)) return [];
+  const doc = parsed;
+  return HOOK_MOMENTS.flatMap((on) => {
+    const list = doc[on];
+    return Array.isArray(list) ? list.flatMap((h: unknown) => (isRecord(h) && typeof h.name === "string" && h.name.trim() !== "" && typeof h.command === "string" && h.command.trim() !== "" ? [{ name: h.name.trim(), on, runs: h.command.trim() }] : [])) : [];
+  });
 }
 
 /** What the levels' config files say of the names in force (RPH's `off:` and `layered:`, `CONFIG_KEYS`): each name switched off, with the levels whose list names it. */
@@ -281,6 +321,8 @@ export async function entryAt(ctx: ListingContext, level: LayerLevel, rest: read
     placeable,
     editedOn: kind === "generated" && level === "chat" ? (EDITED_ON[rest.join("/")] ?? null) : null,
   };
+  // A level's hooks file is no one name: it names its hooks, each switched off and replaced on its own.
+  if (rest.length === 2 && rest[1] === HOOKS_FILE && kindAt(layer, rest[0]) === "hooks") entry.hooks = await hooksAt(ctx, level, disk, place);
   if (item === null) return entry;
   // The file of this name at each level, the farthest first; the nearest is the one taken.
   const same = new Map<LayerLevel, string>([[level, entry.path]]);
@@ -312,6 +354,22 @@ export async function entryAt(ctx: ListingContext, level: LayerLevel, rest: read
   const was = placeAt(level, rest, "shipped");
   if (was !== null) entry.defaultRemoved = since(viewPath("shipped", was)).findLast((u) => u.removed)?.at ?? null;
   return entry;
+}
+
+/** The hooks a level's hooks file names, each as RPH takes it: off where a config's `off:` list names `hooks/<name>`, replaced where a nearer level's hooks file names it too. */
+async function hooksAt(ctx: ListingContext, level: LayerLevel, disk: string, place: (to: LayerLevel) => string[] | null): Promise<TreeHook[]> {
+  const nearer: { path: string; names: Set<string> }[] = [];
+  for (const other of FARTHEST_FIRST.slice(FARTHEST_FIRST.indexOf(level) + 1)) {
+    const at = place(other);
+    const lookup = at === null ? null : await locate(ctx.loc, viewPath(other, at));
+    if (lookup?.ok !== true || lookup.at.is !== "file" || lookup.at.disk === null) continue;
+    nearer.push({ path: lookup.at.path, names: new Set(hooksNamed((await readText(lookup.at.disk)) ?? "").map((h) => h.name)) });
+  }
+  return hooksNamed((await readText(disk)) ?? "").map((h) => {
+    const offIn = ctx.names.off.get(`hooks/${h.name}`) ?? [];
+    const replacedBy = nearer.findLast((n) => n.names.has(h.name))?.path ?? null;
+    return { ...h, off: offIn.length > 0, offIn, replacedBy, applies: offIn.length === 0 && replacedBy === null };
+  });
 }
 
 /**

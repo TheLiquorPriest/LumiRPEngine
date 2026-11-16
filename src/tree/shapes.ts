@@ -2,8 +2,8 @@
 // held to the tree's own types, so that the pages' types and the API reference say what a page sends and
 // is sent, and a change to one stops this compiling until the declaration says the same.
 
-import type { FileKind, GuidanceKind, StackPart } from "rp-harness/contract";
-import { agentRef, type Exactly, type Holds, type Infer, layerLevel, shape } from "../app";
+import type { FileKind, GuidanceKind, PartPreview, StackPart } from "rp-harness/contract";
+import { agentRef, type Exactly, type Holds, hookEvent, type Infer, layerLevel, shape } from "../app";
 import type { TreeFileEntry } from "./catalog";
 import type { DiffLine } from "./defaults";
 import type { Listed, ListedPage } from "./listing";
@@ -51,6 +51,16 @@ const treeFileRow = shape.named(
     held: opt(nullable(shape.oneOf("needs", "broken")), "Why RPH leaves it out though it is the nearest of its name and not switched off: what its `needs:` names is not in force, or its header does not parse; null when nothing does."),
     problems: opt(shape.list(T), "What RPH found wrong with it, in its own words, line by line."),
     joins: opt(shape.list(T), "The agents whose stacks it joins: a file `instructions:` names or an agent reads."),
+    hooks: opt(
+      shape.list(
+        shape.named(
+          "TreeHook",
+          "A hook as a hooks file names it: its name (an `off:` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on.",
+          shape.object({ name: T, on: hookEvent, runs: T, off: shape.yesNo(), offIn: shape.list(layerLevel), replacedBy: nullable(T), applies: shape.yesNo(), state: opt(shape.oneOf("on", "waiting", "off")) }),
+        ),
+      ),
+      "For a level's hooks file (`hooks.yml` in its hooks folder): each hook it names, as RPH's hook reader takes it.",
+    ),
   }),
 );
 type EntryMirrored = Holds<Exactly<Infer<typeof treeFileRow>, TreeFileEntry>>;
@@ -121,7 +131,7 @@ export const fileWriteBody = shape.named(
 export const fileSwitchBody = shape.named(
   "FileSwitchAsk",
   "A file's name switched off or on again in the `off:` list of a level's config: the global level's, or a chat's, which names the chat.",
-  shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), off: shape.yesNo() }),
+  shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), off: shape.yesNo(), hook: opt(shape.text({ blank: false }), "For a hooks file: the hook of it switched, by its name.") }),
 );
 export const filePinBody = shape.named(
   "FilePinAsk",
@@ -309,5 +319,19 @@ const stackPartRow = shape.named(
 export const stackReply = shape.named("StackReply", "The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why.", shape.object({ agent: T, parts: shape.list(stackPartRow) }));
 type StackMirrored = Holds<Exactly<Infer<typeof stackPartRow>, StackPart>>;
 
+export const partPreviewBody = shape.object({
+  path: field(shape.text({ blank: false }), "The part's file, as its path in the agents' view: a prompt part (`@shipped/.prompts/briefing.md`) or a tool's description (`@global/.tools/lore_read.md`)."),
+  chat: opt(shape.text({ blank: false }), "The chat whose last use fills its fields; left out, none."),
+  text: opt(T, "The part as he is drafting it, header and body; left out, the one in force."),
+});
+const partProblem = shape.object({ line: opt(shape.number()), message: T });
+const partPreview = shape.object({ fields: shape.list(T), text: opt(T), missing: shape.list(T), problems: shape.list(partProblem) });
+export const partPreviewReply = shape.named(
+  "PartPreviewReply",
+  "A prompt part or a tool's description rendered as RPH renders it for the chat: which it is, every field it names, the values of its last use in the chat (null before it was ever used there), its text with them filled in (none where it does not read), the fields it put in that had no value, and why it does not read or what of it is shown as written, each with its line.",
+  shape.object({ kind: shape.oneOf("prompt", "tool"), name: T, values: nullable(shape.json()), fields: shape.list(T), text: opt(T), missing: shape.list(T), problems: shape.list(partProblem) }),
+);
+type PreviewMirrored = Holds<Exactly<Infer<typeof partPreview>, PartPreview>>;
+
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, KindMirrored2, PruneItemMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];
+export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, KindMirrored2, PruneItemMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored, PreviewMirrored];

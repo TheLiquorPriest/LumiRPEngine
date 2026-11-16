@@ -3,7 +3,7 @@
 // path of the view, a chat, a level.
 
 import type { Database } from "bun:sqlite";
-import type { LayerLevel, StackPart } from "rp-harness/contract";
+import type { JsonObject, LayerLevel, PartPreview, StackPart } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { entryAt, listingContext, type TreeFileEntry, treeListing } from "./catalog";
 import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
@@ -40,6 +40,11 @@ export interface TreeRoutesDeps {
   turning(user: string, chat: string): boolean;
   /** The exact stack an agent gets in the chat and where each part comes from, as the harness's definitions give it (§5.2); with no chat, the one the shipped and global levels give. */
   stack(user: string, chat: string | null, agent: string): Promise<StackPart[]>;
+  /**
+   * A prompt part or a tool's description as RPH renders it for the chat (`Harness.parts`): the one in force, or `text` as drafted, filled
+   * with the values of its last use in the chat; with those values (null before it was ever used there). Nothing is written.
+   */
+  preview(user: string, chat: string | null, kind: "prompt" | "tool", name: string, text?: string): Promise<{ part: PartPreview; values: JsonObject | null }>;
   /** "Apply now" (R-119): starts the open session's opening block afresh from the files as they stand; says which session that was, none when the chat has no session open. */
   apply(user: string, chat: string): Promise<{ session: string | null }>;
   /** Places a chat RPE has not played yet, by Lumiverse's own names for it and its character, as its first turn places it; absent where RPE cannot. */

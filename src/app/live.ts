@@ -54,6 +54,7 @@ const userSessionScope = shape.named(
   shape.object({ user: T, session: T, chat: opt(shape.nothing()), turn: opt(shape.nothing()) }),
 );
 export const runScope = shape.named("RunScope", "Where a run's work happens: a chat's, or that of a job of no chat.", shape.union(scope, userSessionScope));
+export const hookEvent = shape.named("HookEvent", "A moment a hook of his runs at, as his hooks file writes it.", shape.oneOf("turn-start", "before-tool", "after-tool", "before-release", "after-release", "run-end", "session-close", "before-compaction", "job-start", "job-end"));
 export const agentRef = shape.named("AgentRef", "One agent of a run: its handle, its definition, the agent that started it, its job, and the character it plays.", shape.object({ id: T, definition: T, parent: opt(T), job: opt(T), plays: opt(T) }));
 export const usage = shape.named("Usage", "Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.", shape.object({ calls: N, input: N, cacheRead: N, cacheWrite: N, output: N, reasoning: opt(N) }));
 export const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
@@ -202,7 +203,7 @@ const traceEvent = shape.named(
     shape.object({
       kind: shape.literal("hook"),
       hook: T,
-      on: shape.oneOf("turn-start", "before-tool", "after-tool", "before-release", "after-release", "run-end", "session-close", "before-compaction", "job-start", "job-end"),
+      on: hookEvent,
       outcome: shape.oneOf("ok", "added", "changed", "blocked", "failed", "timed-out"),
       ms: N,
       callId: opt(T),
