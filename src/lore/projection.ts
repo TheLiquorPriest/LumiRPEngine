@@ -9,7 +9,7 @@
 // With the setting off nothing of it runs, and a book made while it was on is taken away.
 
 import type { Database } from "bun:sqlite";
-import type { LinesPart } from "rp-harness";
+import type { Fields, LinesPart } from "rp-harness";
 import { hashJson } from "../shared/hash";
 import type { LoreWrites } from "./ids";
 import type { Lore, LoreAt } from "./lore";
@@ -28,6 +28,14 @@ export interface ProjectionBooks {
   remove(user: string, book: string): Promise<void>;
 }
 
+/** Something the story made, as the book holds it: the names it goes by, which its entry answers to, and the facts its line words. */
+export interface MadeThing {
+  kind: "person" | "canon";
+  title: string;
+  keys: string[];
+  facts: Fields;
+}
+
 export interface LoreProjectionDeps {
   db: Database;
   writes: LoreWrites;
@@ -39,6 +47,8 @@ export interface LoreProjectionDeps {
   enabled(user: string, chat: string): Promise<boolean>;
   /** The answers' lines in force for the chat: the book's name and each entry's words. */
   lines(at: LoreAt): Promise<LinesPart | undefined>;
+  /** What the story made at the chat's head, which the book holds beside the notes (`madeOf`); absent, only the notes. */
+  made?(user: string, chat: string): Promise<readonly MadeThing[]>;
   now?: () => number;
 }
 
@@ -66,6 +76,11 @@ export class LoreProjection {
     return this.#held(user, chat)?.book ?? null;
   }
 
+  /** Whether the chat's setting has the projection book on. */
+  on(user: string, chat: string): Promise<boolean> {
+    return this.deps.enabled(user, chat);
+  }
+
   async #refresh(user: string, chat: string): Promise<ProjectionOutcome> {
     const { writes, books } = this.deps;
     const held = this.#held(user, chat);
@@ -78,10 +93,16 @@ export class LoreProjection {
     const notes = overlayNotes(this.deps.path.overlays(user, chat), null);
     const lines = await this.deps.lines({ user, chat });
     const read = await this.deps.lore.read({ user, chat }, [...notes.keys()]);
-    const entries = read.flatMap((e): LoreEntryFields[] => {
+    const noted = read.flatMap((e): LoreEntryFields[] => {
       const content = loreLine(lines, "projection_entry", { id: e.id, title: e.title, notes: notes.get(e.id) ?? [] });
       return content === undefined ? [] : [{ comment: e.title, content, keys: [...e.keys] }];
     });
+    // What the story made, each worded by the line of its kind (`projection_person`, `projection_canon`) under the names it goes by.
+    const made = ((await this.deps.made?.(user, chat)) ?? []).flatMap((m): LoreEntryFields[] => {
+      const content = loreLine(lines, `projection_${m.kind}`, m.facts);
+      return content === undefined ? [] : [{ comment: m.title, content, keys: m.keys }];
+    });
+    const entries = [...noted, ...made];
     const signature = hashJson(entries);
     if (held !== null && held.signature === signature) return { book: held.book, written: false };
     const book = held?.book ?? (await books.create(user, chat, loreLine(lines, "projection_book", { chat }) ?? chat));

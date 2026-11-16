@@ -2,11 +2,12 @@
 // what its story changed of its lore, rewritten whenever the path changes, one per chat. Played on the
 // story lane's invented chat, with a stand-in for Lumiverse's book writes.
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EntryNumbers, Lore, type LoreEntryFields, LoreProjection, type ProjectionBooks, storePath, storeWorlds } from "../../src/lore/index";
+import { madeOf } from "../../src/lore/made";
 import { recordStory } from "../../src/story/record";
 import { CHAT, openTable, USER } from "../story/rig";
 import { Shelf, Tags } from "./fixtures";
@@ -36,8 +37,15 @@ class StandInBooks implements ProjectionBooks {
 }
 
 describe("the projection book", () => {
+  // Each test's folder is taken away whether or not its assertions hold.
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   test("with the setting off no book is made; on, the chat's book follows its path, and each chat has its own", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rpe-lore-projection-"));
+    dirs.push(dir);
     const files = await shippedGuidance(dir, [CHAT, "chat-b"]);
     const t = await openTable();
     // RPE has shown an agent the inn: it is e-1.
@@ -87,6 +95,24 @@ describe("the projection book", () => {
     on = false;
     expect(await projection.refresh(USER, CHAT)).toEqual({ off: true, removed: "book-projection-1" });
     expect([books.held.has("book-projection-1"), projection.book(USER, CHAT)]).toEqual([false, null]);
-    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("the book holds an entry for the canon the story made about someone, under the names it names", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rpe-lore-projection-"));
+    dirs.push(dir);
+    const files = await shippedGuidance(dir, [CHAT]);
+    const t = await openTable();
+    const lore = new Lore({ books: new Shelf(), worlds: storeWorlds(t.store), turns: new Tags(), numbers: new EntryNumbers(t.db, t.writes) });
+    const books = new StandInBooks();
+    const projection = new LoreProjection({ db: t.db, writes: t.writes, lore, path: storePath(t.store), books, enabled: async () => true, made: madeOf({ store: t.store, lore }), lines: async (at) => {
+      const part = await files.guidance(at.chat).part("lore-answers");
+      return part?.format === "lines" ? part : undefined;
+    } });
+    await t.play();
+    const turn = await t.begin();
+    await t.writes.run(() => recordStory(t.store, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ part: "canon", item: null, value: { text: "The inn has twelve rooms.", who: ["Bram"] } }]));
+    await t.tie(turn);
+    expect(await projection.refresh(USER, CHAT)).toMatchObject({ written: true });
+    expect([...books.held.values()].flat()).toEqual([{ comment: "Bram", content: "The inn has twelve rooms.", keys: ["Bram"] }]);
   });
 });

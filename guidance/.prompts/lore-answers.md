@@ -39,3 +39,5 @@ map_world: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/
 map_bound: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}} Bound to {{bound}}.{{#extras}} {{extras}}.{{/extras}}{{#notes}} {{note}} (on turn {{turn}}).{{/notes}}{{#secrets}} Secret {{id}}{{#holders}}, held by {{holders}}{{/holders}}.{{/secrets}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
 projection_book: RPE story notes for chat {{chat}}
 projection_entry: {{title}}, as this chat's story has it now:{{#notes}} {{.}}{{/notes}}
+projection_canon: {{text}}
+projection_person: {{name}}{{#tier}} ({{tier}}){{/tier}} came into this chat's story{{#place}} and was last at {{place}}{{/place}}.

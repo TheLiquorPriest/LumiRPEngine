@@ -29,6 +29,7 @@ import type { Lore, LoreAt, LoreCatalogEntry, LoreMapAsk } from "./lore";
 import { loreLine } from "./tools";
 import type { LoreMap, LoreMapLine } from "./map";
 import { type OverlayRow, overlayNoted } from "./overlays";
+import type { HeldSecret } from "./secrets/character";
 import type { LoreBookListing, LorePath } from "./sources";
 
 /** Every fixed value of the index, each a setting with this default. */
@@ -465,6 +466,11 @@ export class LoreIndex {
     const refs = new Set([`entity:${person.id}`]);
     const bound = all.filter((e) => isBoundTo(e, refs, persons));
     return bound.length === 0 ? [] : this.noted(at, await this.deps.lore.readAs(at, person.id, bound.map((e) => e.id)));
+  }
+
+  /** The secrets the character a reader plays holds, with how it came by each and the tokens they may take (`Lore.held`); null when it plays no one in the chat's world. */
+  held(at: LoreAt, plays: string): Promise<{ secrets: HeldSecret[]; budget: number } | null> {
+    return this.deps.lore.held(at, plays);
   }
 
   /**

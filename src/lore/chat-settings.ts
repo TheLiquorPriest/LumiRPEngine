@@ -8,7 +8,7 @@ import type { ConfigRead } from "../app/config-read";
 import type { SearchLimits } from "../engine/lore";
 import type { LoreIndexSettings } from "./indexing";
 import type { LoreSettings } from "./lore";
-import { LORE_BOOKS_DEF, LORE_INDEX_ENTRY_DEF, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_STOP_WORDS_DEF } from "./settings";
+import { LORE_BOOKS_DEF, LORE_INDEX_ENTRY_DEF, LORE_INDEX_SETTING_DEFS, LORE_PROJECTION_DEF, LORE_SETTING_DEFS, LORE_STOP_WORDS_DEF } from "./settings";
 
 /** The levels of the chat a read is for. */
 export interface LoreScope {
@@ -28,6 +28,8 @@ export interface LoreChatSettings {
   books: readonly string[] | null;
   /** The index's numbers (`lore.index.*`). */
   index: LoreIndexSettings;
+  /** Whether the chat has the projection book on (`lore.projection`). */
+  projection: boolean;
 }
 
 /** The lore's settings for one chat, read when asked. */
@@ -49,6 +51,7 @@ export function loreSettingsFor(config: (at: LoreScope) => Promise<ConfigRead>):
       // `auto`, alone or among the names, reads every book; otherwise exactly those named.
       books: listed.includes("auto") ? null : listed,
       index: read.numbers(LORE_INDEX_SETTING_DEFS),
+      projection: read.value(LORE_PROJECTION_DEF) === true,
     };
   };
 }

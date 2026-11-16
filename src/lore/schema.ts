@@ -239,6 +239,22 @@ CREATE INDEX lore_binding_record ON lore_binding (user, record)`,
     // place (the story's migration of step 1 of its own area made the table; it is dropped here, once the overlays can go with it).
     up: (db) => moveStoryRows(db),
   },
+  {
+    version: 13,
+    name: "proposals' drafts and the writes' log",
+    // A proposal keeps the draft the agent made (a new entry's book, title and keys; an edit's passage as it stands) and, for an entry of
+    // a world, the world and the entry's revision hash when drafted. The table of writes is Appendix B's `lore_write_log`, its rows kept; a
+    // write to a world's entry names the world and keeps the entry's revision hash after it.
+    sql: `ALTER TABLE lore_proposal ADD COLUMN book TEXT;
+ALTER TABLE lore_proposal ADD COLUMN title TEXT;
+ALTER TABLE lore_proposal ADD COLUMN keys TEXT;
+ALTER TABLE lore_proposal ADD COLUMN was TEXT;
+ALTER TABLE lore_proposal ADD COLUMN world TEXT;
+ALTER TABLE lore_proposal ADD COLUMN stamp TEXT;
+ALTER TABLE lore_write RENAME TO lore_write_log;
+ALTER TABLE lore_write_log ADD COLUMN world TEXT;
+ALTER TABLE lore_write_log ADD COLUMN stamp TEXT`,
+  },
 ];
 
 /**

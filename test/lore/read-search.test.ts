@@ -95,7 +95,7 @@ describe("one reader over the books and the world", () => {
   });
 
   test("his choice of books narrows what the lore reads, and a chat's shortest word is its own setting", async () => {
-    const settings = (books: string[] | null, minTerm: number): LoreChatSettings => ({ indexEntry: null, lore: { ...LORE_DEFAULTS, minTerm }, search: { minTerm, wordCap: 3, stopWords: [] }, books, index: { ...LORE_INDEX_DEFAULTS } });
+    const settings = (books: string[] | null, minTerm: number): LoreChatSettings => ({ indexEntry: null, lore: { ...LORE_DEFAULTS, minTerm }, search: { minTerm, wordCap: 3, stopWords: [] }, books, index: { ...LORE_INDEX_DEFAULTS }, projection: false });
     const only = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers, settingsFor: async () => settings(["book-songs"], 3) });
     // The atlas is a book the chat reads, but not one of his choice: only the songs are read.
     expect((await only.search(AT, { text: "lamp" })).map((h) => h.title)).toEqual(["The Lamplighter's Shanty"]);

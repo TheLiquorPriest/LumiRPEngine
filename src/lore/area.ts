@@ -14,6 +14,8 @@ import { LORE_SETTINGS } from "./settings";
 import type { LoreTurns } from "./sources";
 import { proposalRoutes } from "./proposal-routes";
 import type { LoreProposals } from "./proposals";
+import type { LoreProjection } from "./projection";
+import { projectionRoutes } from "./projection-routes";
 import { type SecrecyDeps, secrecyRules } from "./secrets";
 
 /** What the lore's routes take from the turn lane: its store and the tags it keeps of each turn's prompt. */
@@ -29,6 +31,8 @@ export interface LoreTakes {
   secrecy?: Omit<SecrecyDeps, "store">;
   /** The proposals' queue and the record of writes to his lore, which the turn lane made and hands the agents' suggestions to. Left out, the area adds no route of theirs. */
   proposals?: LoreProposals;
+  /** The projection book, which the turn lane made and refreshes; its switch's routes are added where it is given. */
+  projection?: LoreProjection;
 }
 
 /** `takes` is asked once the turn lane is mounted: the routes are made then, and the secrecy lane answers from it; with none the area lists its tables and settings and adds no route. */
@@ -51,8 +55,13 @@ export function loreArea(takes?: () => LoreTakes): Area {
             },
           },
           mounted: (at) => {
-            const { store, turns, indexing, proposals } = takes();
-            at.routes.add("lore", [...loreRoutes({ store, turns, numbers: new EntryNumbers(at.db, at.writes) }), ...(indexing === undefined ? [] : loreIndexRoutes(indexing)), ...(proposals === undefined ? [] : proposalRoutes(proposals))]);
+            const { store, turns, indexing, proposals, projection } = takes();
+            at.routes.add("lore", [
+              ...loreRoutes({ store, turns, numbers: new EntryNumbers(at.db, at.writes) }),
+              ...(indexing === undefined ? [] : loreIndexRoutes(indexing)),
+              ...(proposals === undefined ? [] : proposalRoutes(proposals)),
+              ...(projection === undefined ? [] : projectionRoutes(projection)),
+            ]);
           },
         }),
   };

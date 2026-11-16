@@ -10,7 +10,9 @@ export { isFieldName, LORE_ANSWERS, LORE_BATCH, LORE_INDEX_FAMILY, LORE_INDEX_WR
 export { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
 export { type OverlayCheck, overlayCheck, overlayNotes, overlayRows } from "./overlays";
 export { type HorizonRecord, horizonRecords } from "./horizon";
-export { type ApprovalEdit, type ApprovalOutcome, type LoreBookWrites, type LoreEntryFields, LoreProposals, type LoreProposalsDeps, type LoreProposalView, type LoreWriteView, type ProposalStatus, type PutBackOutcome, type Refusal } from "./proposals";
+export { type ApprovalEdit, type ApprovalOutcome, LORE_PROPOSAL_DEFAULTS, type LoreBookWrites, type LoreEntryFields, type LorePage, LoreProposals, type LoreProposalSettings, type LoreProposalsDeps, type LoreProposalView, type LoreWorldWrites, type LoreWriteView, type ProposalStatus, type PutBackOutcome, type Refusal, type WorldEntryNow } from "./proposals";
+export { proposalRoutes } from "./proposal-routes";
+export { worldEntryWrites } from "./world-writes";
 export { LoreProjection, type LoreProjectionDeps, type ProjectionBooks, type ProjectionOutcome } from "./projection";
 export { type LoreMap, type LoreMapFields, loreMapFields, type LoreMapLine, type LoreMapPart } from "./map";
 export { lorePort } from "./port";

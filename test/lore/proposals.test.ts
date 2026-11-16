@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRef, Scope } from "rp-harness/contract";
-import { Lore, type LoreBookEntry, type LoreBookWrites, type LoreEntryFields, LoreProposals } from "../../src/lore/index";
+import { Lore, type LoreBookEntry, type LoreBookWrites, type LoreEntryFields, LoreProposals, type LoreWorldWrites, type WorldEntryNow, worldEntryId } from "../../src/lore/index";
 import { ATLAS, CHAT, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER } from "./fixtures";
 
 const SCOPE: Scope = { user: USER, chat: CHAT, session: "session-1", turn: "turn-4" };
@@ -56,6 +56,7 @@ describe("lore proposals", () => {
   let writes: StandInWrites;
   let proposals: LoreProposals;
   let lamp: string;
+  let lore: Lore;
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "rpe-lore-proposals-"));
@@ -65,7 +66,7 @@ describe("lore proposals", () => {
     writes = new StandInWrites(shelf);
     proposals = new LoreProposals({ db: db.db, writes: db.writes, books: shelf, numbers: db.numbers, write: writes, now: () => 9 });
     // The lamp room has been shown to an agent, so it has an id.
-    const lore = new Lore({ books: shelf, worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers });
+    lore = new Lore({ books: shelf, worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers });
     lamp = (await lore.catalog({ user: USER, chat: CHAT })).find((e) => e.title === "The lamp room")?.id ?? "";
   });
   afterAll(async () => {
@@ -97,6 +98,7 @@ describe("lore proposals", () => {
         kind: "edit",
         entry: "entry-lamp",
         book: ATLAS.id,
+        world: null,
         before: { content: "Green glass and whale oil, kept burning by the night watch.", comment: "The lamp room", keys: ["lamp", "lantern"] },
         after: { content: "Green glass, cracked in the great storm.", comment: "The lamp room (cracked)", keys: ["lamp", "lantern"] },
         of: null,
@@ -105,7 +107,7 @@ describe("lore proposals", () => {
       },
     });
     expect([entry("entry-lamp")?.content, entry("entry-lamp")?.revision]).toEqual(["Green glass, cracked in the great storm.", 2]);
-    expect(proposals.proposals(USER, CHAT).map((p) => [p.id, p.status, p.write])).toEqual([
+    expect(proposals.proposals(USER, { chat: CHAT }).items.map((p) => [p.id, p.status, p.write])).toEqual([
       [other.id, "rejected", null],
       [edit.id, "approved", 1],
     ]);
@@ -124,7 +126,7 @@ describe("lore proposals", () => {
     expect(await proposals.approve(USER, draft?.id ?? 0)).toEqual({ refused: "changed" });
     expect(writes.calls).toBe(calls);
     expect(entry("entry-lamp")?.content).toBe("Green glass, mended by the glazier.");
-    expect(proposals.proposals(USER).find((p) => p.id === draft?.id)).toMatchObject({ status: "refused", refused: "changed" });
+    expect(proposals.proposals(USER).items.find((p) => p.id === draft?.id)).toMatchObject({ status: "refused", refused: "changed" });
   });
 
   test("putting an entry back restores it, under the same check; an entry RPE made is taken away again", async () => {
@@ -136,7 +138,7 @@ describe("lore proposals", () => {
     const back = await proposals.putBack(USER, approved.written.id);
     expect(back).toMatchObject({ written: { kind: "put_back", of: approved.written.id, after: { content: "Green glass, mended by the glazier." } } });
     expect(entry("entry-lamp")?.content).toBe("Green glass, mended by the glazier.");
-    expect(proposals.writesMade(USER).find((w) => w.id === approved.written.id)?.putBack).toBe("written" in back ? back.written.id : -1);
+    expect(proposals.writesMade(USER).items.find((w) => w.id === approved.written.id)?.putBack).toBe("written" in back ? back.written.id : -1);
     expect(await proposals.putBack(USER, approved.written.id)).toEqual({ problem: "put_back_already" });
 
     // A new entry: it needs a book; once made, putting it back removes it.
@@ -153,5 +155,85 @@ describe("lore proposals", () => {
     row.revision--;
     expect(await proposals.putBack(USER, made.written.id)).toMatchObject({ written: { kind: "put_back", after: null } });
     expect(entry(made.written.entry)).toBeUndefined();
+  });
+
+  test("an approved edit replaces only its passage; a new entry carries the book, title and keys the agent drafted", async () => {
+    const gull = (await lore.catalog({ user: USER, chat: CHAT })).find((e) => e.lumiverse === "entry-gull")?.id ?? "";
+    const draft = await proposals.suggested(SCOPE, AUTHOR, { target: { lore: gull }, text: "Terns", was: "Gulls", reason: "Terns drove the gulls off." });
+    expect(draft).toMatchObject({ was: "Gulls", status: "open" });
+    expect(await proposals.approve(USER, draft?.id ?? 0)).toMatchObject({ written: { kind: "edit", after: { content: "Terns nest on the harbor wall every spring and fight over the fish scraps." } } });
+    // A passage the entry no longer holds is refused, and nothing is written.
+    const calls = writes.calls;
+    const gone = await proposals.suggested(SCOPE, AUTHOR, { target: { lore: gull }, text: "x", was: "no such words", reason: "A slip." });
+    expect(await proposals.approve(USER, gone?.id ?? 0)).toEqual({ refused: "changed" });
+    expect(writes.calls).toBe(calls);
+    const fresh = await proposals.suggested(SCOPE, AUTHOR, { target: { newLore: true }, text: "A glazier on Quay Street mends lamp glass.", draft: { book: ATLAS.id, title: "The glazier", keys: ["glazier"] }, reason: "Introduced on turn 5." });
+    const made = await proposals.approve(USER, fresh?.id ?? 0);
+    if (!("written" in made)) throw new Error("the drafted entry was not written");
+    expect(entry(made.written.entry)).toMatchObject({ book: ATLAS.id, comment: "The glazier", keys: ["glazier"], content: "A glazier on Quay Street mends lamp glass." });
+  });
+
+  test("a write made outside the queue through the recorded writer is kept and can be put back", async () => {
+    const row = entry("entry-gull");
+    if (row === undefined) throw new Error("the gull entry is on the shelf");
+    const was = { content: row.content, comment: row.comment, keys: [...row.keys] };
+    const stale = row.revision - 1;
+    const done = await proposals.edit(USER, "entry-gull", { content: "Gulls, and nothing else.", comment: "", keys: ["gull"] }, row.revision);
+    expect(done).toMatchObject({ written: { proposal: null, kind: "edit", before: was, after: { content: "Gulls, and nothing else." } } });
+    expect(await proposals.edit(USER, "entry-gull", was, stale)).toEqual({ refused: "changed" });
+    if (!("written" in done)) throw new Error("the write was not made");
+    expect(await proposals.putBack(USER, done.written.id)).toMatchObject({ written: { kind: "put_back" } });
+    expect(entry("entry-gull")?.content).toBe(was.content);
+  });
+
+  test("a proposal for a world entry is a new revision of the world, refused as stale or while a draft of his stands, and put back as another; both lists are paged", async () => {
+    const entries = new Map<string, WorldEntryNow>([["world-reed-coast/tithe_law", { fields: { content: "Every boat pays a tenth of its catch.", comment: "The harbor tithe", keys: ["tithe"] }, stamp: "s0" }]]);
+    let draftStored = false;
+    let revisions = 0;
+    const worlds: LoreWorldWrites = {
+      entry: async (_user, world, key) => entries.get(`${world}/${key}`) ?? null,
+      update: async (_user, world, key, fields, stamp) => {
+        const now = entries.get(`${world}/${key}`);
+        if (now === undefined) return { refused: "missing" };
+        if (now.stamp !== stamp) return { refused: "changed" };
+        if (draftStored) return { refused: "draft" };
+        const next = { fields, stamp: `s${++revisions}` };
+        entries.set(`${world}/${key}`, next);
+        return { written: next };
+      },
+    };
+    const mine = new LoreProposals({ db: db.db, writes: db.writes, books: shelf, numbers: db.numbers, write: writes, worlds, now: () => 9 });
+    const n = (await db.numbers.ofWorld(USER, "world-reed-coast", ["tithe_law"])).get("tithe_law") ?? 0;
+    const ask = (text: string, was = "a twelfth") => mine.suggested(SCOPE, AUTHOR, { target: { lore: worldEntryId(n) }, text, was, reason: "The council voted." });
+
+    const first = await ask("a twelfth", "a tenth");
+    expect(first).toMatchObject({ world: "world-reed-coast", target: worldEntryId(n) });
+    expect(await mine.approve(USER, first?.id ?? 0)).toMatchObject({ written: { world: "world-reed-coast", entry: "tithe_law", before: { content: "Every boat pays a tenth of its catch." }, after: { content: "Every boat pays a twelfth of its catch.", comment: "The harbor tithe" } } });
+    expect(entries.get("world-reed-coast/tithe_law")?.stamp).toBe("s1");
+    // The world's entry changed meanwhile: refused, and the proposal says so.
+    const stale = await ask("a fifteenth");
+    const held = entries.get("world-reed-coast/tithe_law");
+    if (held === undefined) throw new Error("the entry is held");
+    entries.set("world-reed-coast/tithe_law", { ...held, stamp: "s-elsewhere" });
+    expect(await mine.approve(USER, stale?.id ?? 0)).toEqual({ refused: "changed" });
+    expect(mine.one(USER, stale?.id ?? 0)).toMatchObject({ status: "refused", refused: "changed" });
+    // His own uncommitted draft of the world is never committed with it.
+    entries.set("world-reed-coast/tithe_law", held);
+    draftStored = true;
+    const blocked = await ask("a twentieth");
+    expect(await mine.approve(USER, blocked?.id ?? 0)).toEqual({ refused: "draft" });
+    draftStored = false;
+    // Put back: another revision of the world, under the same check.
+    const first_write = mine.writesMade(USER).items.find((w) => w.world !== null && w.kind === "edit");
+    entries.set("world-reed-coast/tithe_law", { ...held, stamp: "s-elsewhere" });
+    expect(await mine.putBack(USER, first_write?.id ?? 0)).toMatchObject({ refused: "changed" });
+    entries.set("world-reed-coast/tithe_law", held);
+    expect(await mine.putBack(USER, first_write?.id ?? 0)).toMatchObject({ written: { kind: "put_back", world: "world-reed-coast", after: { content: "Every boat pays a tenth of its catch." } } });
+    // The queue and the record are paged, newest first.
+    const page = mine.proposals(USER, { limit: 2 });
+    expect([page.items.length, page.next === null]).toEqual([2, false]);
+    const rest = mine.proposals(USER, { after: Number(page.next), limit: 1000 });
+    expect(rest.next).toBeNull();
+    expect(mine.writesMade(USER, { limit: 1 }).next).not.toBeNull();
   });
 });

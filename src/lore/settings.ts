@@ -62,6 +62,20 @@ export const LORE_PROPOSAL_SETTING_DEFS = {
 } as const satisfies NumberSettings<keyof LoreProposalSettings>;
 
 /**
+ * Whether the chat gets a projection book: a book of its own, made by RPE and attached to that chat alone, that carries what the story changed and
+ * made into Lumiverse's own activation, rewritten after scenes and whenever the path changes. Off unless he turns it on; his own books are never touched.
+ */
+export const LORE_PROJECTION_DEF = {
+  key: "lore.projection",
+  default: false,
+  takes: { type: "yesNo" },
+  perConnection: false,
+  name: "Projection book",
+  about: "Whether this chat gets a book of its own that carries what the story changed and made (notes on your entries, the people and canon it made) into Lumiverse's own activation, rewritten after scenes and when the path changes; a branch gets its own. Off, no book is made and one made while it was on is taken away. Your own books are never touched.",
+  effect: "turn",
+} as const satisfies Setting;
+
+/**
  * The book entry that is his own lore index (Settings → Lore, carried over from today's): by its id in Lumiverse. Its text, as written,
  * heads `LORE-INDEX.md` in front of the lines RPE generates. Read for the chat, from the chat's level or the global one.
  */
@@ -128,4 +142,4 @@ export const SECRETS_THRESHOLD_DEF = {
 export const SECRETS_SETTINGS: readonly Setting[] = [SECRETS_NARRATOR_KNOWLEDGE_DEF, SECRETS_NARRATOR_SECRETS_DEF, SECRETS_TRACKED_DEF, SECRETS_THRESHOLD_DEF];
 
 /** Every setting the lore reads, as a config file writes it. */
-export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), LORE_STOP_WORDS_DEF, LORE_BOOKS_DEF, ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF, ...Object.values(LORE_PROPOSAL_SETTING_DEFS), ...SECRETS_SETTINGS];
+export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), LORE_STOP_WORDS_DEF, LORE_BOOKS_DEF, ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF, ...Object.values(LORE_PROPOSAL_SETTING_DEFS), LORE_PROJECTION_DEF, ...SECRETS_SETTINGS];
