@@ -357,6 +357,24 @@ export interface DoneEnoughShown {
   principals: { known: true; principals: { id: string; name: string; base: string[]; memories: number }[] } | FactNotKnown;
 }
 
+/** What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted). */
+export interface DueReply {
+  turn: TurnId;
+  /** The turn's span as the world prints its two ends; null where no time passed. */
+  span: { from: string; to: string } | null;
+  items: DueShown[];
+  more: number | null;
+}
+
+/** One thing a turn's time brought due: its kind, what it is, when it fell due as the world prints it, the level it concerns (null where none), and the turn's changes recorded for it (null while none were). */
+export interface DueShown {
+  kind: string;
+  words: string;
+  when: string;
+  at: string | null;
+  outcome: string | null;
+}
+
 /** When a change to a setting is in force: at its next use, from the next turn, or from RPE's next start. */
 export type Effect = "use" | "turn" | "start";
 
@@ -1836,6 +1854,16 @@ export interface ApiRoutes {
     query: { turn?: TurnId };
     body: undefined;
     reply: StateView;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** What a turn's time brought due, each thing with what the turn recorded for it. */
+  "GET /api/v1/chats/:chat/state/due": {
+    params: { chat: string };
+    query: { turn?: TurnId };
+    body: undefined;
+    reply: DueReply;
     paged: false;
     long: false;
     joined: true;

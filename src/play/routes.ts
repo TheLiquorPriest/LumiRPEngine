@@ -13,6 +13,23 @@ import type { PlayService } from "./service";
 export const STATE_PATH = "/api/v1/chats/:chat/state";
 export const ACTIONS_PATH = "/api/v1/chats/:chat/actions";
 export const UNDO_PATH = "/api/v1/chats/:chat/actions/undo";
+export const DUE_PATH = "/api/v1/chats/:chat/state/due";
+
+const dueShown = shape.named(
+  "DueShown",
+  "One thing a turn's time brought due: its kind, what it is, when it fell due as the world prints it, the level it concerns (null where none), and the turn's changes recorded for it (null while none were).",
+  shape.object({ kind: shape.text(), words: shape.text(), when: shape.text(), at: shape.nullable(shape.text()), outcome: shape.nullable(shape.text()) }),
+);
+const dueReply = shape.named(
+  "DueReply",
+  "What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted).",
+  shape.object({
+    turn: shape.turnId(),
+    span: shape.field(shape.nullable(shape.object({ from: shape.text(), to: shape.text() })), "The turn's span as the world prints its two ends; null where no time passed."),
+    items: shape.list(dueShown),
+    more: shape.nullable(shape.number()),
+  }),
+);
 
 /** One of today's requests, with the parts its own type needs where this road serves it. */
 function request(value: FrontendToBackend): FrontendToBackend {
@@ -79,6 +96,17 @@ export function playRoutes(play: PlayService) {
       reply: answered,
       joined: true,
       handle: ({ user, params, body }) => play.undo(user, params.chat, forChat(body, params.chat)),
+    }),
+    route({
+      method: "GET",
+      path: DUE_PATH,
+      access: "page",
+      group: "state",
+      does: "What a turn's time brought due, each thing with what the turn recorded for it.",
+      query: { turn: shape.optional(shape.turnId(), "A turn's id; left out, the chat's newest turn.") },
+      reply: dueReply,
+      joined: true,
+      handle: ({ user, params, query }) => play.due(user, params.chat, query.turn ?? null),
     }),
   ] as const;
 }

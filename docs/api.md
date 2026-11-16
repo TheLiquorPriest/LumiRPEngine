@@ -224,6 +224,20 @@ A chat's state view, at its head or as it stood at one of its turns, in the shap
 | Reply | [`StateView`](#stateview) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `GET /api/v1/chats/:chat/state/due`
+
+What a turn's time brought due, each thing with what the turn recorded for it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id; left out, the chat's newest turn |
+| Body | none |
+| Reply | [`DueReply`](#duereply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
 ### `GET /api/v1/chats/:chat/world`
 
 The world's tree for a chat: the level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn.
@@ -1667,6 +1681,34 @@ export interface DoneEnoughShown {
   story: { known: true; premise: number; chapters: number; scenes: number; beats: number; threads: number; openThreads: number; arcs: number; principals: number; principalsWithArc: number; player: number } | FactNotKnown;
   horizon: { known: true; entries: number; named: number; clock: boolean } | FactNotKnown;
   principals: { known: true; principals: { id: string; name: string; base: string[]; memories: number }[] } | FactNotKnown;
+}
+```
+
+### `DueReply`
+
+What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted).
+
+```ts
+export interface DueReply {
+  turn: TurnId;
+  /** The turn's span as the world prints its two ends; null where no time passed. */
+  span: { from: string; to: string } | null;
+  items: DueShown[];
+  more: number | null;
+}
+```
+
+### `DueShown`
+
+One thing a turn's time brought due: its kind, what it is, when it fell due as the world prints it, the level it concerns (null where none), and the turn's changes recorded for it (null while none were).
+
+```ts
+export interface DueShown {
+  kind: string;
+  words: string;
+  when: string;
+  at: string | null;
+  outcome: string | null;
 }
 ```
 

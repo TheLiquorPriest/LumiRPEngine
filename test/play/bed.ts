@@ -11,14 +11,14 @@ import { join, resolve } from "node:path";
 import type { HostTool, JsonObject, JsonValue, ToolCtx, ToolResult } from "rp-harness/contract";
 import { type LiveEvent, LiveHub, WriteQueue } from "../../src/app";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
-import { engineTools, shippedTexts, stateScan } from "../../src/iface/index";
+import { engineTools, gridMoves, Lines, mapView, shippedTexts, stateScan } from "../../src/iface/index";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { playRoutes, PlayService } from "../../src/play";
 import { hashJson } from "../../src/shared/hash";
 import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
-import { migrateStore, openStore, readPart, type Store, storedWorlds, type TurnRow } from "../../src/store";
+import { migrateStore, openStore, readPart, type Store, storedWorlds, timeDue, type TurnRow } from "../../src/store";
 import { asHarnessPasses } from "../story/rig";
 import { callRoute } from "../app/call";
 
@@ -87,7 +87,7 @@ export function makeBed(): Bed {
   const heard: LiveEvent[] = [];
   const logged: string[] = [];
   const log = (level: string) => (message: string) => void logged.push(`${level} ${message}`);
-  const service = new PlayService({ store, writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
+  const service = new PlayService({ store, writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), dueItems: async () => 50, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
   const [stateRoute, actionsRoute, undoRoute] = playRoutes(service);
   const call = { query: new URLSearchParams(), request: new Request("http://rpe.test/"), signal: new AbortController().signal };
 
@@ -122,7 +122,7 @@ export function makeBed(): Bed {
       const s = store.user(user);
       const begun = await writes.run(() => s.beginTurn({ chat, kind: "normal" }), "a turn");
       if (during !== undefined) {
-        const tools = new Map((await engineTools({ store: s, env: store.env, writes, files: shippedTexts(), search: stateScan })).map((t) => [t.name, t]));
+        const tools = new Map((await engineTools({ store: s, env: store.env, writes, files: shippedTexts(), search: stateScan, due: timeDue(store), grid: gridMoves(), map: mapView(Lines.none()) })).map((t) => [t.name, t]));
         const tool = tools.get("world_apply") as HostTool;
         const ctx: ToolCtx = { scope: { user, chat, session: "session-1", turn: begun.id }, agent: { id: "author-1", definition: "author" }, run: begun.id, callId: `call-${++asked}`, signal: new AbortController().signal, onUpdate: () => undefined };
         await during(async (operations) => {

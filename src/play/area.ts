@@ -5,8 +5,8 @@ import type { Area } from "../app";
 import { playRoutes } from "./routes";
 import { PlayService, type PlayDeps } from "./service";
 
-/** What the play panels take from the composition: the store each chat's state is in, whether a turn of a chat goes on, and the guidance folder holding their words. */
-export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance">;
+/** What the play panels take from the composition: the store each chat's state is in, whether a turn of a chat goes on, the guidance folder holding their words, and the chat's `engine.dueItems`. */
+export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance" | "dueItems">;
 
 /** `takes` is asked once the turn lane is mounted, whose store the panels read: the routes are made then. */
 export function playArea(takes: () => PlayTakes): Area {

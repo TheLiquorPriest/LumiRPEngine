@@ -50,6 +50,7 @@ import type { StateView } from "../shared/state-view";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import type { ParamDef, WorldDoc } from "../shared/world";
 import { type ChangeInput, type ChangeRow, JoinedTurnError, readPart, type Report, type Store } from "../store";
+import { type DueRead, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
 import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
@@ -95,6 +96,8 @@ export interface PlayDeps {
   guidance: string;
   /** Whether a turn of the user's chat runs now. */
   turning(user: string, chat: string): boolean;
+  /** The most things falling due a list gives for the chat (its `engine.dueItems`). */
+  dueItems(user: string, chat: string): Promise<number>;
   log: Log;
 }
 
@@ -202,6 +205,18 @@ export class PlayService {
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
     return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat) });
+  }
+
+  /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`). */
+  async due(user: string, chat: string, turn: string | null): Promise<DueRead> {
+    const s = this.deps.store.user(user);
+    if (s.chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat}.`);
+    const at = turn ?? headTurn(s, chat);
+    if (at === null) throw new RouteError(404, `Chat ${chat} has no turn yet.`);
+    const row = s.turn(at);
+    if (row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${at}.`);
+    if (row.joined != null) throw new JoinedTurnError(at, row.joined);
+    return turnDue(this.deps.store, user, at, await this.deps.dueItems(user, chat));
   }
 
   /** Answers one of today's requests from a play page, as today's dispatcher answers it, or says it is not served. */
