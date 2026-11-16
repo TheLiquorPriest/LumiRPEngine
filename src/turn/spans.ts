@@ -33,7 +33,7 @@ export class RunTimes {
     if (event.kind === "run_started") {
       this.runs.started(record);
       const run = record.scope.turn === undefined ? undefined : this.runs.running(record.scope.user, record.scope.turn);
-      if (run !== undefined && run.traceRun === record.run) this.#followed.set(record.run, { run, lead: record.agent.id, calls: new Map() });
+      if (run !== undefined && run.traceRun === record.run && record.agent !== undefined) this.#followed.set(record.run, { run, lead: record.agent.id, calls: new Map() });
       return;
     }
     const followed = this.#followed.get(record.run);
@@ -46,7 +46,7 @@ export class RunTimes {
       if (event.tool === "lore_search") followed.run.lookups.searches++;
       else followed.run.lookups.reads++;
     }
-    if (record.agent.id !== followed.lead) return;
+    if (record.agent?.id !== followed.lead) return;
     const { run, calls } = followed;
     // The record's first token (`intent_began`) opens its span, which stays open (`to` null) until the record ends (`intent`).
     if (event.kind === "intent_began") run.intent = { from: run.intent?.from ?? record.at, to: null };

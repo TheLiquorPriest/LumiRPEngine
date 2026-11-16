@@ -27,7 +27,7 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, secretSettingsFor, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
@@ -39,6 +39,7 @@ import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser, storeUsers } from "./kv";
 import { PlayerSide } from "./player";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
+import { TurnMarks } from "./marks";
 import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
 import { RunTimes } from "./spans";
@@ -180,6 +181,8 @@ export interface Turns {
   player: PlayerSide;
   /** What he asks for beside his words, waiting or kept with the turn that answered it. */
   requests: Requests;
+  /** The marks each turn carries apart from its run's status. */
+  marks: TurnMarks;
   trace: TurnTrace;
   lore: Lore;
   /** The lore index: what indexing runs wrote of each entry of a chat's lore, beside what the database holds. */
@@ -196,7 +199,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const { store } = options;
   const chats = new TreeChats(app.db, app.writes, app.paths.files);
   const notes = new TreeNotes({ files: app.paths.files, db: app.db, writes: app.writes, chats });
-  const suggestions = new TreeSuggestions({ db: app.db, writes: app.writes, now: () => clock.now() });
+  const suggestions = new TreeSuggestions({ db: app.db, writes: app.writes, now: () => clock.now(), limits: (user, chat) => chats.suggestionLimits(user, chat) });
   const files = servedFiles(owner, (user) =>
     treeFiles({
       files: app.paths.files,
@@ -228,13 +231,16 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const runs = new Runs(app.db, app.writes);
   const player = new PlayerSide(app.db);
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));
+  const marks = new TurnMarks(app.db, app.writes);
   const since = new SinceKept(app.db);
   // The lore may not reach the cast: a character's agent named by the cast's id is found in the world by the cast's name for it.
   const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
   // What is made once for every chat takes its limits from the global level's settings, read once.
   const global = globalConfig(app.paths.files, app.log);
-  // The lore's settings for a chat, read once for the lore and its index.
-  const loreSettings = loreSettingsFor(async (at) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS));
+  // The lore's settings for a chat, read once for the lore, its index and the secrecy a turn starts with.
+  const config = async (at: LoreScope) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS);
+  const loreSettings = loreSettingsFor(config);
+  const secretSettings = secretSettingsFor(config);
   const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
@@ -318,6 +324,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     chat: {
       info: async (scope) => (await chatNow(scope)).info(scope),
       read: async (scope, range) => (await chatNow(scope)).read(scope, range),
+      position: async (scope, id) => (await chatNow(scope)).position(scope, id),
       search: async (scope, query) => (await chatNow(scope)).search(scope, query),
     },
     lore: { ...lorePorts, read: (scope, ids, reader) => lorePorts.read(joined(scope), ids, reader), search: (scope, query, reader) => lorePorts.search(joined(scope), query, reader) },
@@ -353,9 +360,11 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     prompts,
     lore,
     loreIndex,
+    secretSettings,
     runs,
     player,
     requests,
+    marks,
     since,
     notes,
     // The older turn folders, and with them the prompt each of their turns carried and where its slices were (plan §5.5, App. B): kept
@@ -387,5 +396,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   for (const user of storeUsers(app.db)) {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, requests, trace, lore, loreIndex, notes, suggestions };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, requests, marks, trace, lore, loreIndex, notes, suggestions };
 }

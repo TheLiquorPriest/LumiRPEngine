@@ -3413,6 +3413,8 @@ export interface RunShown {
   usage: Usage;
   /** What this run sent to the chat. */
   reply: ReplySoFar;
+  /** What Lumiverse saved for it where that is not what was released (beyond the prefill in front and a continue's join): the saved text whole, beside `reply`; null where it is the same, or nothing is saved yet. */
+  saved: string | null;
   /** Why the reply failed, when it did. */
   error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
   /** What stopped it where it stood; null for neither a limit nor the hold. */
@@ -4397,6 +4399,18 @@ export interface TurnLoreRow {
 }
 ```
 
+### `TurnMark`
+
+A mark a turn carries apart from its run's status: interrupted (RPE restarted while a run of it went on), saved otherwise (what Lumiverse saved is not what was released, beyond the prefill in front and a continue's join), or standing on a message of the player's he edited, or inserted before it, since it was played; with that message, and when the mark was set.
+
+```ts
+export interface TurnMark {
+  kind: "interrupted" | "saved-otherwise" | "edited-message" | "inserted-message";
+  message: string | null;
+  at: number;
+}
+```
+
 ### `TurnMoments`
 
 When a turn's moments happened, in milliseconds since 1970; null for one that has not happened.
@@ -4439,6 +4453,8 @@ export interface TurnReply {
   /** The Lumiverse message it is tied to (plan §10.8); null until it is. */
   message: string | null;
   status: TurnState;
+  /** Its marks, in the order they were set; none for a turn that carries none. */
+  marks: TurnMark[];
   timings: TurnMoments;
   /** Every agent of its run together: model calls and tokens. */
   usage: Usage;
@@ -4486,6 +4502,8 @@ export interface TurnRow {
   /** The Lumiverse message it is tied to (plan §10.8); null until it is. */
   message: string | null;
   status: TurnState;
+  /** Its marks, in the order they were set; none for a turn that carries none. */
+  marks: TurnMark[];
   timings: TurnMoments;
   /** Every agent of its run together: model calls and tokens. */
   usage: Usage;

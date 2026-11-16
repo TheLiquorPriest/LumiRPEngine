@@ -24,7 +24,7 @@ async function remindedOf(config: string): Promise<string[]> {
   const uncovered: FactValue = { count: 2, fields: { range: { ".": [1, 2], from: 1, to: 2 } } };
   set.facts({ "history.leaving.uncovered": uncovered });
   const facts = { defs: () => set.host.facts.defs(), read: (scope: typeof set.scope, _agent: AgentRef, names: readonly string[]) => set.host.facts.read(scope, [...names]) };
-  const run = await set.guidance().ruleRun({ facts });
+  const run = await set.guidance().ruleRun({ facts, patternTime: 50 });
   return (await run.turnStart(AUTHOR)).map((fired) => fired.firing.rule);
 }
 

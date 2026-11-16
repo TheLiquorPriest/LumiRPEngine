@@ -55,6 +55,12 @@ const moments = shape.named(
 
 const replySoFar = shape.named("ReplySoFar", "What a run sent to the chat: the reply's text, and the progress lines of its thinking block.", shape.object({ text: T, progress: shape.list(T) }));
 
+const turnMark = shape.named(
+  "TurnMark",
+  "A mark a turn carries apart from its run's status: interrupted (RPE restarted while a run of it went on), saved otherwise (what Lumiverse saved is not what was released, beyond the prefill in front and a continue's join), or standing on a message of the player's he edited, or inserted before it, since it was played; with that message, and when the mark was set.",
+  shape.object({ kind: shape.oneOf("interrupted", "saved-otherwise", "edited-message", "inserted-message"), message: nullable(T), at: N }),
+);
+
 /** What a chat's list and a turn's own route both tell of it. */
 const rowFields = {
   id: shape.turnId(),
@@ -62,6 +68,7 @@ const rowFields = {
   onPath: field(shape.yesNo(), "On the chat's path; false once a swipe or a regenerate put a sibling in its place, or its message was deleted."),
   message: field(nullable(T), "The Lumiverse message it is tied to (plan §10.8); null until it is."),
   status: runState,
+  marks: field(shape.list(turnMark), "Its marks, in the order they were set; none for a turn that carries none."),
   timings: moments,
   usage: field(usage, "Every agent of its run together: model calls and tokens."),
 } as const;
@@ -117,6 +124,7 @@ const runShown = shape.named(
     timings: moments,
     usage,
     reply: field(replySoFar, "What this run sent to the chat."),
+    saved: field(nullable(T), "What Lumiverse saved for it where that is not what was released (beyond the prefill in front and a continue's join): the saved text whole, beside `reply`; null where it is the same, or nothing is saved yet."),
     error: field(nullable(replyError), "Why the reply failed, when it did."),
     stoppedBy: field(nullable(stoppedBy), "What stopped it where it stood; null for neither a limit nor the hold."),
     lastText: field(shape.yesNo(), "What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line."),

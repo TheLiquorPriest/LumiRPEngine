@@ -442,4 +442,22 @@ DELETE FROM since_told WHERE EXISTS (SELECT 1 FROM panel_request p WHERE p.user 
 DROP TABLE panel_request;
 `,
   },
+  {
+    version: 18,
+    name: "the marks a turn carries apart from its run's status",
+    // `turn_mark` (`marks.ts`): interrupted, saved otherwise, standing on an edited or inserted message of the player's (`message`, ''
+    // for a mark that names none). The saved-otherwise mark is set for each turn whose latest reply run kept a saved text.
+    sql: `
+CREATE TABLE turn_mark (
+  user TEXT NOT NULL,
+  turn TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  at INTEGER NOT NULL,
+  PRIMARY KEY (user, turn, kind, message)
+);
+INSERT OR IGNORE INTO turn_mark (user, turn, kind, message, at)
+  SELECT user, turn, 'saved-otherwise', '', COALESCE(settled, ended, received) FROM turn_run WHERE saved IS NOT NULL;
+`,
+  },
 ];

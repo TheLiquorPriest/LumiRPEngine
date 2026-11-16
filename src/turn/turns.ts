@@ -33,7 +33,7 @@ import type { LiveHub } from "../app";
 import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, joinCast, type SourceReader, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapView, mapWording } from "../iface";
-import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
+import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type SecretSettingsFor } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
 import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
@@ -46,6 +46,7 @@ import { jobsEndedBetween } from "./jobs";
 import type { Writes } from "./kv";
 import type { PlayerSide } from "./player";
 import type { TurnPrompts } from "./prompt";
+import type { TurnMarks } from "./marks";
 import type { PanelAsk, Requests } from "./requests";
 import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
@@ -160,6 +161,10 @@ export interface TurnLaneDeps {
   player: PlayerSide;
   /** What he asks for beside his words (`requests.ts`): told to the turn that answers it, and kept with it. */
   requests: Requests;
+  /** The marks each turn carries apart from its run's status (`marks.ts`). */
+  marks: TurnMarks;
+  /** What the store keeps of a chat's secrecy (`secretSettings`): the knowledge switch and threshold recorded at each turn's start. */
+  secretSettings: SecretSettingsFor;
   /** What comparisons of a chat's path found, kept with the chat. */
   since: SinceKept;
   /** The notes agents write, put as they stand at each turn's start (plan §5.4). */
@@ -372,16 +377,35 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   /**
    * What the lane does once at a start, before any chat is played. Every run kept as going on is one RPE stopped during (plan §10.10
-   * "RPE restarted mid-turn"), whatever became of its generation: each is closed, failed in the words of the turn-errors part
-   * (`stopped_mid_run`), so its record and the pages say it ended and how. One whose generation's end was recorded keeps its turn as
-   * it was tied; one whose end was not is tied or dropped at its chat's next intake (`#catchUp`).
+   * "RPE restarted mid-turn", R-87), whatever became of its generation: each is closed, failed in the words of the turn-errors part
+   * (`stopped_mid_run`), so its record and the pages say it ended and how, and its turn is marked interrupted with what the run had
+   * staged dropped (`#interrupt`). One whose generation's end was recorded keeps its turn as it was tied; one whose end was not is
+   * tied to the part Lumiverse saved, as cut short, or dropped, at its chat's next intake (`#catchUp`).
    */
   async preload(): Promise<void> {
     const left = this.#d.runs.leftGoing();
     if (left.length > 0) {
       const ended = await Promise.all(left.map(async (r): Promise<RunRecord> => ({ ...r, status: "failed", ended: r.ended ?? this.#d.clock.now(), error: { code: "failed", detail: await turnErrorWords(this.#d.files, r, "stopped_mid_run") } })));
-      await this.#d.writes.run((db) => ended.forEach((r) => this.#d.runs.put(db, r)), "ending the runs RPE stopped during");
+      await this.#d.writes.run((db) => ended.forEach((r) => this.#interrupt(db, r)), "ending the runs RPE stopped during");
     }
+  }
+
+  /**
+   * A run RPE stopped during, inside a write: kept as ended; its turn (a continue's, its held turn) marked interrupted; and what the
+   * run had staged there taken back in every lane, its jobs' rows left (R-87): a continue's held turn whole, any other run's from its
+   * marks (a first run's, the whole turn's own).
+   */
+  #interrupt(db: Database, r: RunRecord): void {
+    this.#d.runs.put(db, r);
+    const turn = r.held ?? r.turn;
+    this.#d.marks.set(db, r.user, [turn], "interrupted", this.#d.clock.now());
+    const store = this.#d.store.user(r.user);
+    const row = store.turn(turn);
+    if (row === null || row.status === "dropped" || row.joined !== null) return;
+    const own = r.held !== null;
+    takeBackCast(db, r.user, turn, own ? -1 : (r.castMark ?? -1));
+    takeBackStory(db, r.user, turn, own ? -1 : (r.storyMark ?? -1));
+    store.takeBack(turn, own ? -1 : (r.mark ?? -1));
   }
 
   async play(tagged: TaggedTurn, out: ReplyStream, signal: AbortSignal): Promise<void> {
@@ -480,6 +504,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // The turn the tag's message is tied to, of this chat: a continue's held turn is told as a continue of it, and plays in its session.
       const named = tied !== null && tied.turn.chat === chat ? tied.turn : null;
       const begun = await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, on: start.node }), "beginning a turn");
+      // The knowledge switch and threshold in force are recorded at the turn's start where the state there differs, so every reader
+      // judges a secret by what held at its point of the path.
+      const startWorld = store.stateFor(begun.id, null).state.world;
+      const knowledge = knowledgeChange(startWorld, await this.#d.secretSettings({ user, chat, world: this.#d.store.env.worlds(startWorld.revision) ?? null }));
+      if (knowledge.length > 0) await this.#d.writes.run(() => store.addChanges(begun.id, knowledge), "recording the knowledge settings");
       // The session the turn plays in (plan §11): the one in force at it (`#sessionAt`), or one opened now for the scene the story record
       // holds open there (or for none), starting from the summary of the scene before it. A swipe or a regenerate may play on in the
       // session an earlier attempt at its message played in, any turn in the turn it follows; a continue plays in the session of the turn
@@ -1080,7 +1109,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const left = awaiting.filter((r) => r.status === "running");
     if (left.length > 0) {
       const stopped: ReplyError = { code: "failed", detail: await turnErrorWords(this.#d.files, { user, chat }, "stopped_mid_run") };
-      await this.#d.writes.run((db) => left.forEach((r) => this.#d.runs.put(db, { ...r, status: "failed", ended: r.ended ?? this.#d.clock.now(), error: stopped })), "ending the runs RPE stopped during");
+      await this.#d.writes.run((db) => left.forEach((r) => this.#interrupt(db, { ...r, status: "failed", ended: r.ended ?? this.#d.clock.now(), error: stopped })), "ending the runs RPE stopped during");
+      this.#stateChanged(chat);
     }
     const messages = this.#d.store.user(user).path(chat).map((e) => ({ id: e.message, hash: e.hash, hidden: e.hidden }));
     const found = await reconcile(reads, { chat, messages, awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target })) });
@@ -1121,7 +1151,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * not yet a reply, and is left out; the message a swipe or a regenerate writes a new swipe of (`replaced`) is compared as it showed
    * before, held by the attempt being replaced: its empty new swipe, which may bear the same date, is no edit of that attempt. What the
    * comparison found is kept with the chat in the same write, under the turn then at the head of its path (`since.ts`): should the
-   * intake end before the harness takes its request, the next turn is told it. Then the turns that left the path are told (`#left`).
+   * intake end before the harness takes its request, the next turn is told it. A message of the player's he edited since RPE last read
+   * it, or one that now stands on the path where RPE held none, marks every turn after it (plan §10.10, R-25). Then the turns that left
+   * the path are told (`#left`).
    */
   async #compare(user: string, chat: string, steps: readonly LvStep[], writing: string | null, replaced: string | null, heardUpTo: number): Promise<void> {
     const store = this.#d.store.user(user);
@@ -1134,8 +1166,19 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date, hidden: s.hidden } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date, hidden: s.hidden }));
     const report = await this.#d.writes.run((db) => {
       const compared = store.sync(chat, shown, heardUpTo);
-      const head = store.path(chat).findLast((e) => e.turn !== null)?.turn ?? null;
-      this.#d.since.keep(db, user, chat, head, foundItems(compared, was, steps), this.#d.store.now());
+      const path = store.path(chat);
+      const head = path.findLast((e) => e.turn !== null)?.turn ?? null;
+      const found = foundItems(compared, was, steps);
+      this.#d.since.keep(db, user, chat, head, found, this.#d.store.now());
+      const known = new Set(was.map((e) => e.message));
+      const marking: { message: string; kind: "edited-message" | "inserted-message" }[] = [
+        ...found.flatMap((f) => (f.kind === "player_edited" ? [{ message: f.message, kind: "edited-message" as const }] : [])),
+        ...(was.length === 0 ? [] : path.filter((e) => e.user && !known.has(e.message)).map((e) => ({ message: e.message, kind: "inserted-message" as const }))),
+      ];
+      for (const m of marking) {
+        const at = path.findIndex((e) => e.message === m.message);
+        if (at >= 0) this.#d.marks.set(db, user, path.slice(at + 1).flatMap((e) => (e.turn === null ? [] : [e.turn])), m.kind, this.#d.clock.now(), m.message);
+      }
       return compared;
     }, "comparing the chat's path with its turns");
     await this.#left(user, chat, report, replaced, before?.turn ?? null);
@@ -1700,6 +1743,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     await this.#d.writes.run((db) => {
       store.tieTurn(run.turn, { message: saved.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
       this.#d.runs.put(db, record);
+      // Saved otherwise than released, beyond the prefill in front: a mark of its own on the turn (plan §10.8, R-25).
+      if (record.saved !== null) this.#d.marks.set(db, user, [run.turn], "saved-otherwise", this.#d.clock.now());
     }, "tying a turn to its saved message");
     this.#stateChanged(run.chat);
     await this.#recordMessage(record, record.turn, { id: saved.id, hash: textHash(written.text), date: written.date });
@@ -1767,6 +1812,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (into !== null) this.#join(db, user, record, heldTurn, into.id);
       store.tieTurn(record.turn, { message: written.message.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
       this.#d.runs.put(db, record);
+      // Saved otherwise than released, beyond what it went on and the preset's join: a mark of its own on the turn (plan §10.8, R-25).
+      if (record.saved !== null) this.#d.marks.set(db, user, [record.turn], "saved-otherwise", this.#d.clock.now());
     }, "tying a continue to its saved message");
     this.#stateChanged(run.chat);
     await this.#recordMessage(record, record.turn, { id: written.message.id, hash: textHash(written.text), date: written.date });
@@ -1819,6 +1866,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     joinStory(this.#d.store, user, held, into);
     const moved = store.joinTurn(held, into);
     this.#d.since.told(db, user, into, [...this.#d.since.toldTo(user, held)]);
+    this.#d.marks.join(db, user, held, into);
     run.mark = (moved[0]?.ord ?? ownLast + 1) - 1;
     run.castMark = castFrom;
     run.storyMark = storyFrom;

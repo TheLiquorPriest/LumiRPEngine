@@ -84,7 +84,7 @@ function foundTools(records: readonly TraceRecord[]): string[] {
 /** Each agent's `todo` items still open as its list last stood; an agent with none open is left out. */
 function openTodos(records: readonly TraceRecord[]): { agent: string; open: string[] }[] {
   const last = new Map<string, string[]>();
-  for (const t of records) if (t.event.kind === "todo") last.set(t.agent.id, t.event.items.flatMap((item) => (item.done ? [] : [item.text])));
+  for (const t of records) if (t.event.kind === "todo" && t.agent !== undefined) last.set(t.agent.id, t.event.items.flatMap((item) => (item.done ? [] : [item.text])));
   return [...last].flatMap(([agent, open]) => (open.length === 0 ? [] : [{ agent, open }]));
 }
 
@@ -181,7 +181,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         const { folder } = await runFolder(run);
         const trace = run.traceRun === null ? [] : (runs.get(run.traceRun) ?? []);
         const requests = trace.flatMap((t) =>
-          t.event.kind === "call_started" && t.event.request !== undefined
+          t.event.kind === "call_started" && t.event.request !== undefined && t.agent !== undefined
             ? [{ agent: t.agent.id, definition: t.agent.definition, call: t.event.call, file: folder !== null && t.event.request.startsWith(folder) ? t.event.request.slice(folder.length) : t.event.request }]
             : [],
         );
@@ -196,6 +196,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
           timings: momentsOf(run),
           usage: run.usage ?? NO_USAGE,
           reply: { text: run.reply, progress: [...run.progress] },
+          saved: run.saved,
           error: run.error,
           stoppedBy: run.stoppedBy,
           lastText: run.lastText,
@@ -217,6 +218,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       onPath,
       message: row?.message ?? null,
       status: r.status,
+      marks: turns.marks.ofTurn(user, r.turn),
       timings: momentsOf(r),
       usage: spent(turns.runs.ofTurn(user, r.turn)),
     };
