@@ -3,9 +3,9 @@
 // today's things model and moves (`engine/thing-ops`, `engine/relocate`), which keep a thing's four
 // facts apart. Where today's rules would refuse a change for what it means (a thing too big for
 // what it goes into, a return to someone who is not its owner, a giver who does not hold it), the
-// change is applied all the same and the answer reports it. A thing an operation names that is not
-// recorded, with no recorded name near it, is made where the one who acts is; where it was said to
-// be, in words that name nothing, is kept on it as those words.
+// change is applied all the same and the answer reports it. A name that is not recorded is answered
+// as not there, with its near matches: only `spawn` makes anything, and a name an operation names
+// that no recorded thing goes by is never made for it.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { ownersIn } from "../shared/finance";
@@ -148,35 +148,14 @@ function actingPlace(o: OpContext): string | null {
 }
 
 /**
- * The thing an operation names, found on the draft as it stands; or, where nothing recorded goes by
- * that name, none is near it and nothing of another kind has it, a thing of that name made where the
- * one who acts is (`spot`, as the operation says it), and said once in the answer. With nowhere to
- * make it (`spot` gives null), the name is answered as not there, as it is when a recorded name is near.
+ * `in` named something that is not a place or something that holds things (the world, the groups, elsewhere): the answer says what
+ * `in` takes and lists the near holders and the near places.
  */
-function thingNamed(o: OpContext, field: string, want: Want, spot: () => Spot | Unread | null, said: JsonValue | undefined = o.args[field]): (Found & { made?: true }) | Unread {
-  const r = find(o, field, want, false, said);
-  if (!isUnread(r) || r.line !== "unknown" || r.fields.near !== "" || r.fields.other !== "" || typeof said !== "string") return r;
-  const name = said.trim();
-  // A name a later operation of the call spawns is that one's to make: answered as not there yet, with how to put the order right.
-  if (o.later.some((x) => x.op === "spawn" && typeof x.name === "string" && x.name.trim().toLowerCase() === name.toLowerCase())) return r;
-  const at = spot();
-  if (at === null) return r;
-  if (isUnread(at)) return at;
-  const had = new Set(Object.keys(o.draft.w.state.entities));
-  const made = makeThing(o, { do: "make", name, at, why: textArg(o.args, "why") ?? "" });
-  if (made === undefined) return r;
-  if (isUnread(made)) return made;
-  // Today's find-first may find one of that name where it would be made: that one stands for it, and its own line says so.
-  const fresh = !had.has(made);
-  o.reading = o.draft.reading();
-  if (fresh) o.reply.line("made_unrecorded", { n: o.n, op: o.op, name, made: named(o.reading, made) });
-  return { id: made, ref: `entity:${made}`, name: o.reading.nameOf(made), ...(fresh ? { made: true as const } : {}) };
-}
-
-/** What an operation made for the names it was given, for its entry in the answer: the first. */
-function madeOf(found: readonly (Found & { made?: true })[]): { made?: string } {
-  const made = found.find((f) => f.made)?.id;
-  return made !== undefined ? { made } : {};
+function wrongIn(o: OpContext, said: string): Unread {
+  const holders = o.reading.find(said, "holder");
+  const places = o.reading.find(said, "place");
+  const near = [...("near" in holders ? holders.near : []), ...("near" in places ? places.near : [])].map((x) => `${x.name} [${x.id}]`);
+  return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "in", "in", said, near) } };
 }
 
 const move: OpDef = {
@@ -187,31 +166,26 @@ const move: OpDef = {
   example: { op: "move", who: "bram", to: "market_square", with: ["odile"], source: { from: "prose", message: "m-0012" }, standing: "established" },
   run(o) {
     const from = o.draft.w.events.length;
-    // Not recorded, it is made where it goes, so the move changes nothing more for it.
-    const goes = (): Spot | Unread => {
-      const to = find(o, "to", "place");
-      return isUnread(to) ? to : { place: to.id };
-    };
-    const who = thingNamed(o, "who", "entity", goes);
+    const who = find(o, "who", "entity");
     if (isUnread(who)) return who;
     const to = find(o, "to", "place");
     if (isUnread(to)) return to;
-    const company: (Found & { made?: true })[] = [];
+    const company: Found[] = [];
     const given = o.args.with;
     for (const said of Array.isArray(given) ? given : typeof given === "string" ? [given] : []) {
-      if (typeof said !== "string") continue;
-      const r = thingNamed(o, "with", "entity", goes, said);
+      // An entry that is no name is not skipped: it is refused naming `with` and what it takes.
+      if (typeof said !== "string") return notAs(o, "with", said, "names");
+      const r = find(o, "with", "entity", false, said);
       if (isUnread(r)) return r;
       company.push(r);
     }
     for (const [i, one] of [who, ...company].entries()) {
-      if (one.made) continue;
       const failed = isThing(o.draft.w.ctx, one.id) ? putThing(o, one.id, { place: to.id }, textArg(o.args, "why") ?? "") : movePerson(o, one.id, to.id, i > 0);
       if (failed) return failed;
     }
     const mapped = placeOnMap(o, who.id, to.id);
     if (mapped) return mapped;
-    o.draft.record(o.n, o.op, "engine", o.prov, from, madeOf([who, ...company]));
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
 };
@@ -234,12 +208,7 @@ const place: OpDef = {
     if (isUnread(by)) return by;
     // Where it is set down, the most exact first: on a thing, in someone's hands, at a place.
     const asked: Spot | null = on ? { in: on.id } : by ? { in: by.id } : at ? { place: at.id } : null;
-    // Not recorded, it is made where it is set down (the one who sets it down is there), so setting it down changes nothing more.
-    const what = thingNamed(o, "what", "entity", () => {
-      if (asked !== null) return asked;
-      const there = actingPlace(o);
-      return there === null ? null : { place: there };
-    });
+    const what = find(o, "what", "entity");
     if (isUnread(what)) return what;
     const here = placeOfEntity(w.state, what.id);
     if (!isThing(w.ctx, what.id)) {
@@ -253,7 +222,7 @@ const place: OpDef = {
       if (spot === null) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
       // Said to be on or with something that names nothing, and lying where it is set down already: only the words are new.
       const now = spotOf(w.state, what.id);
-      const still = what.made === true || (said.length > 0 && now !== null && ("place" in now ? "place" in spot && now.place === spot.place : "in" in spot && now.in === spot.in));
+      const still = said.length > 0 && now !== null && ("place" in now ? "place" in spot && now.place === spot.place : "in" in spot && now.in === spot.in);
       const failed = still ? undefined : putThing(o, what.id, spot, textArg(o.args, "why") ?? "");
       if (failed) return failed;
       if ("place" in spot) {
@@ -263,7 +232,7 @@ const place: OpDef = {
     }
     const kept = keepWords(o, what.id, said);
     if (kept) return kept;
-    o.draft.record(o.n, o.op, "engine", o.prov, from, madeOf([what]));
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
 };
@@ -277,16 +246,7 @@ const give: OpDef = {
   run(o) {
     const w = o.draft.w;
     const from = w.events.length;
-    // Not recorded, it is made in the giver's hands, so the handing over is recorded as any other; with no giver named, where the one it goes to is.
-    const what = thingNamed(o, "what", "thing", () => {
-      const giver = findOptional(o, "from", "entity");
-      if (isUnread(giver)) return giver;
-      if (giver !== undefined) return { in: giver.id };
-      const to = find(o, "to", "person");
-      if (isUnread(to)) return to;
-      const there = placeThere(o, placeOfEntity(w.state, to.id)) ?? actingPlace(o);
-      return there === null ? null : { place: there };
-    });
+    const what = find(o, "what", "thing");
     if (isUnread(what)) return what;
     const to = find(o, "to", "person");
     if (isUnread(to)) return to;
@@ -320,7 +280,7 @@ const give: OpDef = {
         o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, what.id), where: named(o.reading, to.id), code: out.code });
       } else return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
     } else if (out.placed !== undefined) o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, what.id), asked: named(o.reading, to.id), where: spotName(o, out.placed) });
-    o.draft.record(o.n, o.op, "engine", o.prov, from, madeOf([what]));
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
 };
@@ -341,11 +301,7 @@ const wear: OpDef = {
   run(o) {
     const w = o.draft.w;
     const from = w.events.length;
-    // Not recorded, it is made on the one who wears it.
-    const what = thingNamed(o, "what", "thing", () => {
-      const who = find(o, "who", "person");
-      return isUnread(who) ? who : { in: who.id };
-    });
+    const what = find(o, "what", "thing");
     if (isUnread(what)) return what;
     const who = find(o, "who", "person");
     if (isUnread(who)) return who;
@@ -365,7 +321,7 @@ const wear: OpDef = {
       } else return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
     }
     if (away) o.reply.report("not_to_hand", { n: o.n, op: o.op, what: named(o.reading, what.id), who: named(o.reading, who.id), brought: true });
-    o.draft.record(o.n, o.op, "engine", o.prov, from, madeOf([what]));
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
 };
@@ -399,15 +355,10 @@ const store: OpDef = {
     const said: SaidWhere[] = [];
     const into = away ? undefined : o.args.in === undefined || o.args.in === null ? find(o, "in", "point") : whereNamed(o, "in", "point", said);
     if (isUnread(into)) return into;
-    if (into !== undefined && !into.ref.startsWith("place:") && !into.ref.startsWith("entity:")) return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "in", "holder", String(o.args.in), []) } };
+    if (into !== undefined && !into.ref.startsWith("place:") && !into.ref.startsWith("entity:")) return wrongIn(o, String(o.args.in));
     const isPlace = into?.ref.startsWith("place:") === true;
     const target: Spot | null = into === undefined ? null : isPlace ? { place: into.id } : { in: into.id };
-    // Not recorded, it is made in what it goes into (the one who puts it there is there); put away, or into something that names nothing, where someone acts.
-    const what = thingNamed(o, "what", "entity", () => {
-      if (target !== null) return target;
-      const there = actingPlace(o);
-      return there === null ? null : { place: there };
-    });
+    const what = find(o, "what", "entity");
     if (isUnread(what)) return what;
     const why = textArg(o.args, "why") ?? "";
     if (away) {
@@ -424,7 +375,7 @@ const store: OpDef = {
         const failed = putThing(o, what.id, to, why);
         if (failed) return failed;
       }
-    } else if (into !== undefined && what.made !== true) {
+    } else if (into !== undefined) {
       const thing = isThing(w.ctx, what.id);
       const failed = isPlace ? (thing ? putThing(o, what.id, { place: into.id }, why) : movePerson(o, what.id, into.id, false)) : thing ? putThing(o, what.id, { in: into.id }, why) : putPerson(o, what.id, into.id);
       if (failed) return failed;
@@ -436,7 +387,7 @@ const store: OpDef = {
     }
     const kept = keepWords(o, what.id, said);
     if (kept) return kept;
-    o.draft.record(o.n, o.op, "engine", o.prov, from, madeOf([what]));
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
 };
@@ -474,7 +425,7 @@ function spawnSpot(o: OpContext): SpawnSpot | Unread {
   if (isUnread(into)) return into;
   if (into?.ref.startsWith("entity:")) return { spot: { in: into.id }, said };
   if (into?.ref.startsWith("place:")) return { spot: { place: into.id }, said };
-  if (into) return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "in", "holder", String(o.args.in), []) } };
+  if (into) return wrongIn(o, String(o.args.in));
   const at = whereNamed(o, "at", "place", said);
   if (isUnread(at)) return at;
   return { spot: at ? { place: at.id } : null, said };
@@ -587,6 +538,9 @@ const spawn: OpDef = {
   run(o) {
     const name = textArg(o.args, "name");
     if (name === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["name"] } };
+    // How many to make is a whole number of at least 1, never taken as 1 for what is not.
+    const many = o.args.qty;
+    if (many !== undefined && many !== null && !(typeof many === "number" && Number.isInteger(many) && many >= 1)) return notAs(o, "qty", many, "qty");
     const said = textArg(o.args, "kind");
     // A world's own kind of that name is its own; only a name no kind has makes a place.
     if (said !== undefined && PLACE_SPAWN_KINDS.includes(said) && !(own(o.reading.doc.kinds, said) ?? o.reading.registry.kinds.get(said))) return spawnPlace(o, name, said);
@@ -618,7 +572,7 @@ const spawn: OpDef = {
     let made: string | undefined;
     if (isThingKind(o, kind) && row === undefined) {
       if (spot === null) return { line: "spawn_nowhere", fields: { n: o.n, op: o.op, name, kind } };
-      const qty = typeof o.args.qty === "number" && Number.isInteger(o.args.qty) && o.args.qty >= 1 ? o.args.qty : undefined;
+      const qty = typeof o.args.qty === "number" ? o.args.qty : undefined;
       const type = textArg(o.args, "type");
       const vclass = textArg(o.args, "class");
       const description = textArg(o.args, "description");
