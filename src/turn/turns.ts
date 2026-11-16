@@ -525,7 +525,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const inForce = named !== null ? this.#goingOn(user, chat, named.id) : this.#sessionAt(user, chat, begun.id, [begun.id, begun.parent, ...earlierAttempts]);
       const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: begun.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: begun.id };
+      // A session already open is told the summary it opens with as the story record now holds it (the same again writes nothing).
       if (inForce.session === null) await this.#begin(scope, begun, inForce);
+      else await this.#d.harness().sessions.opensWith(scope, inForce.summary ?? "");
       // The chat's notes as they stand at the turn's start (plan §5.4): the writes of each turn before it on its path, and a continue's
       // own; a branch starts with its branch point's. Notes that cannot be put there are logged, and the turn goes on with them as they are.
       const cutAt = replaced === null ? -1 : store.path(chat).findIndex((e) => e.message === replaced);
@@ -889,6 +891,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: turn.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: turn.id };
       if (inForce.session === null) await this.#d.harness().sessions.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
+      else await this.#d.harness().sessions.opensWith(scope, inForce.summary ?? "");
       await this.#d.notes.follow(user, chat, { turns: onPath, branchOf: store.chat(chat)?.sourceChat ?? null }).catch((error: unknown) =>
         this.#d.log.error("The chat's notes could not be put as they stand at this turn's start.", { turn: turn.id, error: words(error) }),
       );
