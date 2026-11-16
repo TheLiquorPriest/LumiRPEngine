@@ -242,7 +242,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       carried: async (app, user) => (lastReport(app.db, user)?.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId),
     }),
     castArea(() => ({ store: made().store, files, settings: async (user, chat) => (await settings(user, chat)).cast })),
-    storyArea(() => ({ store: made().store, turning, files, settings: async (user, chat) => (await settings(user, chat)).story })),
+    storyArea(() => ({ store: made().store, files, settings: async (user, chat) => (await settings(user, chat)).story })),
     buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE })),
     playArea(() => ({
       store: made().store,
