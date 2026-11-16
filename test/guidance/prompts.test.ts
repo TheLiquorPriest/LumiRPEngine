@@ -284,6 +284,15 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
   });
 
+  test("play-answers.md says case by case why a tap's pick is refused, that a tap the world's rules advise against is applied with their reports, and what an edit of the world cannot do", () => {
+    const said = (split(SHIPPED.get(".prompts/play-answers.md") ?? "").header?.["lines"] ?? {}) as Record<string, string>;
+    const keys = ["needs_someone", "needs_place", "needs_something", "names_no_one", "names_no_place", "names_nothing", "not_known_someone", "not_known_place", "not_known_something", "not_kind", "not_payee", "pays_no_one", "applied_advised", "edit_at", "fact_remove", "edit_ops_count", "things_count"];
+    expect(keys.filter((key) => typeof said[key] !== "string" || said[key] === "")).toEqual([]);
+    expect(keys.filter((key) => ASKS.test(said[key] ?? ""))).toEqual([]);
+    expect(["not_known", "not_payable"].filter((key) => key in said)).toEqual([]);
+    expect(said["applied_advised"]).toBe("Done, though the world's rules say: {{reports}}");
+  });
+
   test("the composer's choices are the depths of TURN.md's header and the modes of SWIPE.md's, each described, and a swipe, a depth and a change awaiting the player are told as asked", async () => {
     const depths = split(SHIPPED.get("TURN.md") ?? "").header?.["depths"] as Record<string, unknown>;
     const modes = split(SHIPPED.get("SWIPE.md") ?? "").header?.["modes"] as Record<string, unknown>;
