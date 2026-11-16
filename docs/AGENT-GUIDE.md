@@ -1,6 +1,6 @@
 # Writing LumiRPEngine worlds: a guide for agents
 
-> This page describes the build before the standalone one. The world format it describes is the engine's, which RPE keeps; the pages, commands and tools it names are that build's.
+> The world format and the engine's rules this page describes are RPE's. The tools and commands it names (`lre_*`, `lumirpengine`) are those of the command line and MCP server for outside harnesses, which this build does not serve and a later build brings back; in this build a world is edited in Build ([Worlds in RPE](world.md)).
 
 Read this before you touch a LumiRPEngine world through the `lumirpengine` MCP server or command line ([MCP.md](MCP.md)): the world model, how to work on a user's worlds, and the mistakes that are easy to make and hard to see. Every kind, field, effect and formula function is in the reference (`lre_docs`); complete worlds to learn from are the starters (`lre_template`). How outside agents reach LumiRPEngine is DESIGN §23.
 

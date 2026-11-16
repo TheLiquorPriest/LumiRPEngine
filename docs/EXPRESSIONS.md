@@ -1,6 +1,6 @@
 # LumiRPEngine expressions
 
-> This page describes the build before the standalone one. The formula language it describes is the engine's, which RPE keeps; the pages it names are that build's.
+> The formula language this page describes is the engine's, which RPE keeps; Build's expression editor offers it ([Worlds in RPE](world.md)).
 
 A world's rules are data, and the parts that compute something are formulas: an action's requirements and duration, a check's modifier and DC, a derived field, a rule's condition, a quest stage's way forward, a sheet row. They are all written in one small language, adapted from Warp's (credited in `NOTICE`). It is safe and deterministic: a formula can't loop, can't call out, can't see anything the engine doesn't hand it, and on the same world state it always gives the same value. That is what lets the palette show exact odds before you choose, and lets every replay of a turn's recorded events reach the same state. A Re-run is a new attempt, not a replay: it rolls with a fresh seed, so its dice can land differently, unless the world sets `seedMode` to `same_roll`.
 
