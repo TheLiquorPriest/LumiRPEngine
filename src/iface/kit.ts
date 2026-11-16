@@ -103,7 +103,7 @@ export interface StateHit {
 
 /** The search over a chat's state by words (plan §6.8 `world_search`). */
 export interface StateSearch {
-  search(state: StoreState, env: FoldEnv, words: string, opts: { kind?: SearchKind; limit: number }): StateHit[];
+  search(state: StoreState, env: FoldEnv, words: string, opts: { kind?: SearchKind; limit: number }): StateHit[] | Promise<StateHit[]>;
 }
 
 export const SEARCH_KINDS = ["person", "thing", "place", "group"] as const;

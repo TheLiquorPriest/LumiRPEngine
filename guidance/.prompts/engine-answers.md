@@ -56,6 +56,8 @@ wants_list: a list of places, people and things, by name or id
 wants_names: a name, or a list of names, each a text
 wants_delta: a whole number, below 0 for wear and damage, above 0 for mending
 wants_qty: a whole number of at least 1
+wants_depth: a whole number from 0, or full
+wants_sum: numbers with + - * / and brackets, and a percent sign after a number for a rate, such as 12.50 * 3 * 1.08
 wants_specs: a list of { label, value }
 wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
@@ -127,6 +129,8 @@ due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of wha
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
+more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.
+check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; against takes the difficulty the total has to reach.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.
 store_unknown_revision: {{#n}}Operation {{n}} ({{op}}): {{/n}}the world revision {{revision}} is not to hand, so it did not apply.
 store_bad_marker: {{#n}}Operation {{n}} ({{op}}): {{/n}}this is not a marker the engine can read, so it did not apply.

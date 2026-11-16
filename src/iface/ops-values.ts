@@ -385,6 +385,8 @@ const set: OpDef = {
     if (key === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["key"] } };
     const value = o.args.value;
     const add = numberArg(o.args, "add");
+    // A number added that reads as none is refused naming the field, never taken for no number at all.
+    if (add === undefined && o.args.add !== undefined && o.args.add !== null) return notAs(o, "add", o.args.add, "amount_any");
     if ((value === undefined) === (add === undefined)) return { line: "needs_one", fields: { n: o.n, op: o.op, fields: ["value", "add"] } };
     const at = find(o, "at", "point");
     if (isUnread(at)) return at;

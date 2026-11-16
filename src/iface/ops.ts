@@ -88,10 +88,11 @@ export function textArg(args: JsonObject, field: string): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
 }
 
-/** A number argument, when it is given as a finite number. */
+/** A number argument, when it is given as a finite number or as text that is one ("40"); none when it is given as anything else. */
 export function numberArg(args: JsonObject, field: string): number | undefined {
   const v = args[field];
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v.trim()) : Number.NaN;
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /** What an argument that is not one of the choices reads as: the whole list, put in as one text so the answer says it once. */

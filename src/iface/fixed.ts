@@ -17,8 +17,8 @@ import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { clockText, listDue, timeFrom } from "./ops-time";
-import { missed, missedData, unknownFields } from "./ops";
-import { type Found, isFound, Reading, saysUnreadable, type Unreadable } from "./reading";
+import { missed, missedData, numberArg, unknownFields } from "./ops";
+import { type Found, isFound, nearestOf, Reading, saysUnreadable, type Unreadable } from "./reading";
 import { textOf } from "./texts";
 import { commit, Draft } from "./writing";
 
@@ -66,7 +66,12 @@ export const WORLD_QUERY: ToolSpec = {
     if (args.at === RULESET_POINT) return reply.data({ ruleset: rulesetData(reading.doc) });
     const at = foundOr(reading, reply, "at", args.at, "point");
     if (at === null) return reply;
-    const depth = args.depth === "full" ? "full" : typeof args.depth === "number" && Number.isInteger(args.depth) && args.depth >= 0 ? args.depth : call.settings.queryDepth;
+    // A depth that reads as none is refused naming the field, never replaced by the setting's.
+    const saidDepth = args.depth === undefined || args.depth === null ? undefined : args.depth === "full" ? "full" : numberArg(args, "depth");
+    if (args.depth !== undefined && args.depth !== null && (saidDepth === undefined || (saidDepth !== "full" && !(Number.isInteger(saidDepth) && saidDepth >= 0)))) {
+      return reply.line("unreadable", { field: "depth", value: JSON.stringify(args.depth), wants: reading.lines.line("wants_depth") ?? "" }).fail();
+    }
+    const depth = saidDepth ?? call.settings.queryDepth;
     const view = reading.view().query(at.ref, depth, { due: call.deps.due, ahead: call.deps.dueAhead ?? WORLD_STATE_DEFAULTS.dueAhead });
     if (view !== null) reply.tree(renderView(view, call.tree));
     if (typeof args.due === "string") {
@@ -100,10 +105,14 @@ export const WORLD_SEARCH: ToolSpec = {
     const words = typeof args.words === "string" ? args.words.trim() : "";
     if (words === "") return reply.line("needs_field", { field: "words" }).fail();
     if (args.kind !== undefined && !(SEARCH_KINDS as readonly JsonValue[]).includes(args.kind)) return reply.line("unreadable", { field: "kind", value: JSON.stringify(args.kind), choices: textOf(SEARCH_KINDS) }).fail();
-    const asked = typeof args.limit === "number" && Number.isInteger(args.limit) && args.limit > 0 ? args.limit : call.settings.searchHits;
-    const hits = call.deps.search.search(reading.state, call.deps.env, words, { ...(args.kind !== undefined ? { kind: args.kind as SearchKind } : {}), limit: Math.min(asked, call.settings.searchHits) });
-    if (hits.length === 0) return reply.line("none_found", { words });
-    return reply.data({ hits: hits.map((h) => ({ ...h }) as JsonObject) });
+    const asked = args.limit === undefined || args.limit === null ? call.settings.searchHits : numberArg(args, "limit");
+    if (asked === undefined || !Number.isInteger(asked) || asked < 1) return reply.line("unreadable", { field: "limit", value: JSON.stringify(args.limit), wants: reading.lines.line("wants_qty") ?? "" }).fail();
+    // At most what the setting allows, with how many more were found beyond what is listed.
+    const found = await call.deps.search.search(reading.state, call.deps.env, words, { ...(args.kind !== undefined ? { kind: args.kind as SearchKind } : {}), limit: Number.MAX_SAFE_INTEGER });
+    if (found.length === 0) return reply.line("none_found", { words });
+    const shown = Math.min(asked, call.settings.searchHits);
+    if (found.length > shown) reply.line("more_found", { words, shown, more: found.length - shown });
+    return reply.data({ hits: found.slice(0, shown).map((h) => ({ ...h }) as JsonObject) });
   },
 };
 
@@ -116,7 +125,7 @@ function rollsBefore(call: Call, turn: string, who: string): number {
 type RollBy = { dice: string } | { check: string; def: CheckDef };
 
 /** A roll drawn and drafted on the state as it stands: what it came to, or the reply that says why it could not be made. */
-function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null): { out: JsonObject | Reply; draft: Draft | null } {
+function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null, sum: { expression: string; total: number } | null): { out: JsonObject | Reply; draft: Draft | null } {
   const reply = call.reply();
   const turn = reading.turn;
   if (turn === null) return { out: reply.line("turn_needed", {}).fail(), draft: null };
@@ -133,11 +142,14 @@ function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by:
     }
     Object.assign(data, { check: "", notation: rolled.notation, dice: rolled.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: against, outcome: against === null ? "rolled" : rolled.total >= against ? "success" : "failure" });
   } else {
-    const ready = readyCheck(reading.registry, reading.ctx, against === null ? by.def : { ...by.def, dc: String(against) }, { self: who.id, actor: who.id });
+    // A difficulty given stands for any opposition the check has: nobody is named to roll against.
+    const { vs: _vs, ...unopposed } = by.def;
+    const ready = readyCheck(reading.registry, reading.ctx, against === null ? by.def : { ...unopposed, dc: String(against) }, { self: who.id, actor: who.id });
     if ("code" in ready) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: ready.code }).fail(), draft: null };
     const rolled = rollCheck(ready, rng);
     Object.assign(data, { check: by.check, notation: ready.notation, dice: rolled.roll.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: ready.dc, outcome: rolled.outcome });
   }
+  if (sum !== null) data.sum = { expression: sum.expression, total: sum.total };
   const draft = new Draft(reading, call);
   const bad = draft.applyAll([{ type: ENGINE_EVENTS.check, data }]);
   if (bad) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: bad.code }).fail(), draft: null };
@@ -145,16 +157,74 @@ function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by:
   return { out: data, draft };
 }
 
+/**
+ * An expression of numbers worked out: + - * / and brackets, decimals, a percent sign (8% is 0.08). Its value, or null when it is
+ * anything but that (a word, a division by nothing).
+ */
+function sumOf(text: string): number | null {
+  const src = text.replace(/\s+/g, "");
+  let at = 0;
+  const factor = (): number | null => {
+    const sign = src[at] === "-" ? -1 : 1;
+    if (src[at] === "-" || src[at] === "+") at++;
+    let value: number | null;
+    if (src[at] === "(") {
+      at++;
+      value = expression();
+      if (value === null || src[at] !== ")") return null;
+      at++;
+    } else {
+      const m = /^(?:\d+(?:\.\d+)?|\.\d+)/.exec(src.slice(at));
+      if (!m) return null;
+      at += m[0].length;
+      value = Number(m[0]);
+    }
+    while (src[at] === "%") {
+      value /= 100;
+      at++;
+    }
+    return sign * value;
+  };
+  const term = (): number | null => {
+    let value = factor();
+    while (value !== null && (src[at] === "*" || src[at] === "/")) {
+      const op = src[at++];
+      const next = factor();
+      if (next === null || (op === "/" && next === 0)) return null;
+      value = op === "*" ? value * next : value / next;
+    }
+    return value;
+  };
+  const expression = (): number | null => {
+    let value = term();
+    while (value !== null && (src[at] === "+" || src[at] === "-")) {
+      const op = src[at++];
+      const next = term();
+      if (next === null) return null;
+      value = op === "+" ? value + next : value - next;
+    }
+    return value;
+  };
+  const total = expression();
+  return total !== null && at === src.length && Number.isFinite(total) ? Number(total.toPrecision(12)) : null;
+}
+
 export const ROLL: ToolSpec = {
   name: "roll",
   family: "state",
   tier: "write",
   lane: "engine",
-  properties: { who: TEXT, for: TEXT, dice: TEXT, check: TEXT, against: WHOLE },
-  required: ["who", "for"],
+  properties: { who: TEXT, for: TEXT, dice: TEXT, check: TEXT, against: WHOLE, sum: TEXT },
+  required: [],
   example: { who: "wren", for: "whether she slips past the gate guard unseen", check: "stealth", against: 13 },
   async run(args, call) {
     const reply = call.reply();
+    // A sum asked for is worked out as it is written: answered as data alone, or recorded with the roll it is part of.
+    const expression = typeof args.sum === "string" && args.sum.trim() !== "" ? args.sum.trim() : undefined;
+    const total = expression === undefined ? null : sumOf(expression);
+    if (expression !== undefined && total === null) return reply.line("unreadable", { field: "sum", value: JSON.stringify(args.sum), wants: call.lines.line("wants_sum") ?? "" }).fail();
+    const sum = expression !== undefined && total !== null ? { expression, total } : null;
+    if (sum !== null && args.dice === undefined && args.check === undefined) return reply.data({ sum });
     const reading = readingOr(call, reply);
     if (reading === null) return reply;
     if (reading.turn === null) return reply.line("turn_needed", {}).fail();
@@ -165,15 +235,24 @@ export const ROLL: ToolSpec = {
     const dice = typeof args.dice === "string" && args.dice.trim() !== "" ? args.dice.trim() : undefined;
     const checkId = typeof args.check === "string" && args.check.trim() !== "" ? args.check.trim() : undefined;
     if ((dice === undefined) === (checkId === undefined)) return reply.line("needs_one_field", { fields: ["dice", "check"] }).fail();
-    const against = typeof args.against === "number" && Number.isFinite(args.against) ? Math.round(args.against) : null;
+    // A difficulty that reads as none is refused naming the field, never ignored.
+    const said = args.against === undefined || args.against === null ? null : numberArg(args, "against");
+    if (said === undefined) return reply.line("unreadable", { field: "against", value: JSON.stringify(args.against), wants: call.lines.line("wants_number") ?? "" }).fail();
+    const against = said === null ? null : Math.round(said);
     const def = checkId === undefined ? null : checkOf(reading.doc, checkId);
     const by: RollBy | null = dice !== undefined ? { dice } : checkId !== undefined && def !== null ? { check: checkId, def } : null;
-    if (by === null) return reply.line("unknown", unknownFields(call.lines, "check", "check", checkId ?? "", Object.keys(reading.doc.checks).slice(0, call.settings.nearMatches))).fail();
+    if (by === null) {
+      const ids = Object.keys(reading.doc.checks);
+      const near = nearestOf(checkId ?? "", ids, call.settings).slice(0, call.settings.nearMatches);
+      return reply.line("unknown", unknownFields(call.lines, "check", "check", checkId ?? "", near, [], ids.length === 0)).refusedWith({ field: "check", near: near.map((id) => ({ id, name: id, what: "check" })) }).fail();
+    }
+    // A check rolled against someone has no one to roll against here: it says what it needs.
+    if ("check" in by && by.def.vs !== undefined && against === null) return reply.line("check_needs_against", { check: by.check }).fail();
     // Drawn inside the write that records it, on the state as it stands then, so a roll made at the same time for the same person is counted before this one and draws other dice.
     const worked = await commit(call, () => {
       const missing = call.reply();
       const now = readingOr(call, missing);
-      return now === null ? { out: missing, draft: null } : drawRoll(call, now, who, purpose, by, against);
+      return now === null ? { out: missing, draft: null } : drawRoll(call, now, who, purpose, by, against, sum);
     });
     if (worked.gone) return unreadable(call, worked.gone);
     if (worked.out instanceof Reply) return worked.out;

@@ -18,6 +18,9 @@ import { playedWorld } from "../engine/places-in-play";
 import type { Advice, Rejection } from "../engine/registry";
 import type { EntityState, WorldState } from "../engine/state";
 import { Working } from "../engine/working";
+import { followOf } from "../packs/castlife/core/routines";
+import { fighterOf, fightsOf } from "../packs/combat/core/model";
+import { statusOf } from "../packs/economy/core/model";
 import { clockRecorded } from "../store/blank";
 import { type ChangeInput, type ChangeRow, JoinedTurnError, type Lane, StoreInputError, type StoreState } from "../store/types";
 import type { FoldEnv } from "../store/fold";
@@ -323,7 +326,10 @@ function relationsOf(e: EntityState, name: (id: string) => string): Record<strin
   return Object.fromEntries(Object.entries(by).map(([type, names]) => [type, names.sort().join(", ")]));
 }
 
-/** What a thing is, as a diff compares it: its name, tier and life, its fields, its relations, and its account's balance. */
+/**
+ * What a thing is, as a diff compares it: its name, tier and life, its fields, its relations, its account's balance, and what the
+ * packs keep apart from its fields: an account's status, the fight it is in, how it follows its routine, its classes and tags.
+ */
 function aspects(id: string, state: WorldState, doc: WorldDoc, name: (id: string) => string): Record<string, JsonValue> {
   const e = own(state.entities, id);
   if (!e) return {};
@@ -333,6 +339,13 @@ function aspects(id: string, state: WorldState, doc: WorldDoc, name: (id: string
   for (const [k, v] of Object.entries(relationsOf(e, name))) out[`${k}`] = v;
   const posted = state.accounts[id];
   if (posted !== undefined) out.balance = formatMoney(posted, doc.currency);
+  if (e.kind === "account") out.status = statusOf(state, id);
+  const fight = fightsOf(state).find((f) => fighterOf(f, id) !== undefined);
+  if (fight !== undefined) out.fight = `${fight.id} (${String(fighterOf(fight, id)?.side)})`;
+  const follows = followOf({ world: doc, state }, id).chat;
+  if (follows !== null) out.routine = JSON.stringify(follows);
+  if (e.class !== undefined) out.class = Object.entries(e.class).map(([facet, values]) => `${facet}: ${values.join(", ")}`).join("; ");
+  if (e.tags !== undefined) out.tags = e.tags.join(", ");
   return out;
 }
 
