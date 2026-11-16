@@ -226,8 +226,8 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(bare).toContain("Nothing was attached.");
     expect(bare).not.toContain("What to send back");
     const question = await template("question");
-    expect(question.render({ agent: "mapper", question: "Which quay?", found: "Two quays." }).text.trim()).toBe("mapper stopped to ask before going on:\n\nWhich quay?\n\nWhat it found before asking:\n\nTwo quays.");
-    expect(question.render({ agent: "mapper", question: "Which quay?" }).text).not.toContain("What it found");
+    expect(question.render({ agent: "mapper", question: "Which quay?", searched: "Two quays." }).text.trim()).toBe("mapper stopped to ask before going on:\n\nWhich quay?\n\nWhat it looked up before asking:\n\nTwo quays.");
+    expect(question.render({ agent: "mapper", question: "Which quay?" }).text).not.toContain("What it looked up");
     for (const part of [brief, question]) expect(written(part)).not.toMatch(ASKS);
   });
 
