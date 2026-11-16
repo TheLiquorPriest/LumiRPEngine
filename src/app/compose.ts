@@ -297,7 +297,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       guidance: RPE_GUIDANCE,
       settings: async (user: string, chat: string) => {
         const s = await settings(user, chat);
-        return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps };
+        return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps, map: s.map };
       },
       requests: made().requests,
       // What RPE writes to Lumiverse through the door, once it is set up for a Lumiverse.
