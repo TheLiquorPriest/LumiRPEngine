@@ -150,6 +150,15 @@ export function turnArea(takes: TurnTakes): TurnArea {
             return key;
           }
         },
+        // What a store of Lumiverse's holds, in the shipped file's words (`.prompts/store-lines.md`); its name alone where the file has none or cannot be read.
+        storeLine: async (store) => {
+          try {
+            const part = await loadGuidance(made().files, { user: owner() }).part("store-lines");
+            return (part?.format === "lines" ? part.line(store, {}) : undefined) ?? store;
+          } catch {
+            return store;
+          }
+        },
         // The Author's model's room for a chat's prompt (plan §4.2): its window as the model layer gives it, less the reply's room (the
         // request's own, else RPH's room kept for the answer); the model layer's count of a prompt as the Author's model takes it; and
         // whether the story record covers messages.
