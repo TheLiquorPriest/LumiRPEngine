@@ -12,9 +12,10 @@ import { MONEY_TOOLS } from "./families/money";
 import { NOTE_TOOLS } from "./families/notes";
 import { PEOPLE_TOOLS } from "./families/people";
 import { READ_TOOLS } from "./families/reads";
+import { ROUND_TOOLS } from "./families/rounds";
 import { THING_TOOLS } from "./families/things";
 import { TIME_TOOLS } from "./families/time";
 import { UPKEEP_TOOLS } from "./families/upkeep";
 import { VEHICLE_TOOLS } from "./families/vehicles";
 
-export const SEARCHABLE_TOOLS: readonly ToolSpec[] = [...THING_TOOLS, ...MONEY_TOOLS, ...BUSINESS_TOOLS, ...TIME_TOOLS, ...CALENDAR_TOOLS, ...GROUP_TOOLS, ...FIGHT_TOOLS, ...VEHICLE_TOOLS, ...UPKEEP_TOOLS, ...PEOPLE_TOOLS, ...CHECK_TOOLS, ...NOTE_TOOLS, ...READ_TOOLS];
+export const SEARCHABLE_TOOLS: readonly ToolSpec[] = [...THING_TOOLS, ...MONEY_TOOLS, ...BUSINESS_TOOLS, ...TIME_TOOLS, ...CALENDAR_TOOLS, ...GROUP_TOOLS, ...FIGHT_TOOLS, ...ROUND_TOOLS, ...VEHICLE_TOOLS, ...UPKEEP_TOOLS, ...PEOPLE_TOOLS, ...CHECK_TOOLS, ...NOTE_TOOLS, ...READ_TOOLS];

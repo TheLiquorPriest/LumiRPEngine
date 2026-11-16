@@ -28,7 +28,7 @@ function fightViews(ctx: ReadContext, only?: string): JsonValue {
 }
 
 /** The fights as the state recorded stands, for the answer, with the world rules that hear what the call recorded (listed, none of them run). */
-function fightAfter(o: OpContext, heard: JsonObject[]): (state: StoreState) => JsonObject {
+export function fightAfter(o: OpContext, heard: JsonObject[]): (state: StoreState) => JsonObject {
   return (state) => ({ fights: fightViews(o.reading.registry.context(o.reading.doc, state.world)), ...(heard.length > 0 ? { rules_heard: heard } : {}) });
 }
 
@@ -38,7 +38,7 @@ function listed(r: { nameOf(id: string): string }, fights: readonly Encounter[])
 }
 
 /** The line that says a fight is not under way, with the fights that are: the fight named by an id, or the line that says which to name when several are. */
-function noSuchFight(o: OpContext, said: JsonValue | undefined, fights: readonly Encounter[]): Unread {
+export function noSuchFight(o: OpContext, said: JsonValue | undefined, fights: readonly Encounter[]): Unread {
   const ids = fights.map((f) => f.id);
   if (said === undefined || said === null || said === "") return { line: "which_fight", fields: { n: o.n, op: o.op, fights: listed(o.reading, fights) }, data: { field: "fight", choices: ids } };
   return { line: "unknown_fight", fields: { n: o.n, op: o.op, fight: typeof said === "string" ? said : JSON.stringify(said), fights: fights.length === 0 ? "none" : listed(o.reading, fights) }, data: { field: "fight", choices: ids } };
