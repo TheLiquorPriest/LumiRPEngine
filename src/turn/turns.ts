@@ -1505,7 +1505,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
     }
     if (briefPart?.format === "template") {
-      const brief = storyBrief({ ...point, layout: briefPart });
+      // Its arcs are the principals' among those on stage as the turn reads them (R-56).
+      const onStage = stageAt(this.#d.store, scope.user, scope.chat, scope.turn)?.who;
+      const brief = storyBrief({ ...point, ...(onStage !== undefined ? { stage: onStage } : {}), layout: briefPart });
       if (brief.text.trim() !== "") blocks.push({ name: BLOCKS.storyBrief, text: brief.text });
     }
     // What the lead is not given (plan §4.2 "A prompt with pictures", Y6): of its prompt, and of this briefing, each told by its line of

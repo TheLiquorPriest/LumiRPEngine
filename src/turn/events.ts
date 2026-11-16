@@ -179,7 +179,8 @@ async function turnView(r: Reading, ref: string): Promise<string | null | undefi
     case VIEWS.storyBrief: {
       const layout = await r.guidance().part(PARTS.storyBrief);
       if (layout?.format !== "template") return null;
-      const { text } = storyBrief({ store: r.deps.store, user: r.scope.user, chat: r.scope.chat, turn: r.scope.turn ?? null, layout });
+      const onStage = stageAt(r.deps.store, r.scope.user, r.scope.chat, r.scope.turn ?? null)?.who;
+      const { text } = storyBrief({ store: r.deps.store, user: r.scope.user, chat: r.scope.chat, turn: r.scope.turn ?? null, ...(onStage !== undefined ? { stage: onStage } : {}), layout });
       return text !== "" ? text : nothing(layout);
     }
     case VIEWS.due:
