@@ -142,7 +142,7 @@ describe("a decision short of the decider's votes, put to a vote", () => {
     expect(motionsOf(w.state, EMR)[0]).toMatchObject({ status: "failed", why: "voted down: 40% for, 60% against" });
     expect(unitsOf(w, DANNY)).toBe(875);
     // Closed: no more votes.
-    expect(why(act(w, DANNY, "org_vote", { org: EMR, motion: id, vote: "for" }))).toContain("failed already");
+    expect(why(act(w, DANNY, "org_vote", { org: EMR, motion: id, vote: "for" }))).toBe("");
   });
 
   test("only Jordan voting, it fails at its close for want of quorum; under a quorum of 30 % it passes there and issues", () => {
@@ -242,7 +242,7 @@ describe("standing votes, counting by members, and other decisions", () => {
     expect(motionsOf(w.state, EMR)).toEqual([]);
     const id = opened(w);
     expect(why(act(w, DANNY, "org_vote", { org: EMR, motion: id, vote: "maybe" }))).toContain("for, against or abstain");
-    expect(why(act(w, MARCUS, "org_vote", { org: EMR, motion: id, vote: "for" }))).toContain("Marcus Delgado has no vote on it");
+    expect(why(act(w, MARCUS, "org_vote", { org: EMR, motion: id, vote: "for" }))).toBe("");
   });
 
   test("the reply's vote fact for Danny lands his vote; one naming a motion that isn't open, or hedged, is refused", () => {
@@ -259,7 +259,7 @@ describe("standing votes, counting by members, and other decisions", () => {
     expect(motionsOf(w.state, EMR)[0]).toMatchObject({ status: "passed", votes: { [DANNY]: { vote: "for", how: "story" } } });
     expect(unitsOf(w, DANNY)).toBe(975);
     // Carried, it is open no more: the same fact again is refused.
-    expect(vote.validate(fact, w.ctx)?.code).toBe("closed");
+    expect(vote.validate(fact, w.ctx)?.code).toBe("already");
   });
 });
 

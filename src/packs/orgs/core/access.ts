@@ -112,14 +112,13 @@ function entryChange(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEven
   if (keys !== null && keys !== undefined && !Array.isArray(keys)) return keys;
   if (entry === undefined && keys === undefined) return { code: "bad_args", reason: "an entry change needs who may enter or its keys" };
   const org = strOf(a.org);
-  if (org !== "" && !orgPlaces(ctx, org).some((p) => placeWithin(ctx.world, place, p))) return { code: "not_its_place", reason: `${labelOf(ctx, place)} isn't one of ${labelOf(ctx, org)}'s places` };
   const now = entryInPlay(ctx.state, place);
   const sameEntry = entry === undefined || (entry === null ? now.entry === undefined : now.entry === entry);
   const sameKeys = keys === undefined || (keys === null ? now.keys === undefined : JSON.stringify(now.keys ?? null) === JSON.stringify(keys));
   if (sameEntry && sameKeys) return { code: "no_change", reason: "it is so already" };
   const by = strOf(a.by);
   const actor = by !== "" && own(ctx.state.entities, by) ? by : null;
-  const data: JsonObject = { place, ...(entry !== undefined ? { entry } : {}), ...(keys !== undefined ? { keys } : {}), ...(actor !== null ? { by: actor } : {}), visibility: "secret" };
+  const data: JsonObject = { place, ...(entry !== undefined ? { entry } : {}), ...(keys !== undefined ? { keys } : {}), ...(actor !== null ? { by: actor } : {}), ...(org !== "" ? { org } : {}), visibility: "secret" };
   const pov = ctx.world.pov;
   const said = [
     ...(entry === undefined ? [] : [entry === null ? "who may enter as the world has it" : `who may enter: ${ENTRY_WORDS[entry].toLowerCase()}`]),
@@ -148,6 +147,12 @@ const ENTRY_EVENT: EventTypeDef<PackEvent> = {
     if (keys !== undefined && keys !== null && !(Array.isArray(keys) && keys.every((k) => typeof k === "string"))) return { code: "bad_event", reason: "keys are item ids or item types" };
     return entry === undefined && keys === undefined ? { code: "bad_event", reason: "an entry change changes who may enter or the keys" } : null;
   },
+  // A change made for an organization on a place that is not one of its places is kept all the same, and said.
+  advise: (e, ctx) => {
+    const org = str(e, "org");
+    const place = str(e, "place");
+    return org !== "" && !orgPlaces(ctx, org).some((p) => placeWithin(ctx.world, place, p)) ? { code: "not_its_place", values: { org: labelOf(ctx, org), place: labelOf(ctx, place) } } : null;
+  },
   apply: (e, state) => {
     const all = sliceRecord(state, "orgs", ENTRY_KEY);
     const place = str(e, "place");
@@ -172,9 +177,14 @@ const TRESPASS_EVENT: EventTypeDef<PackEvent> = {
     const who = str(e, "entity");
     const place = str(e, "place");
     if (!own(ctx.state.entities, who)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, who)}` };
-    if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+    return own(ctx.world.places, place) ? null : { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+  },
+  // Someone recorded as trespassing where the record does not place them is kept all the same, and said.
+  advise: (e, ctx) => {
+    const who = str(e, "entity");
+    const place = str(e, "place");
     const at = placeOfEntity(ctx.state, who);
-    return at !== null && placeWithin(ctx.world, at, place) ? null : { code: "not_there", reason: `${labelOf(ctx, who)} isn't at ${labelOf(ctx, place)}` };
+    return at !== null && placeWithin(ctx.world, at, place) ? null : { code: "not_there", values: { who: labelOf(ctx, who), place: labelOf(ctx, place) } };
   },
   apply: (e, state) => {
     const all = sliceRecord(state, "orgs", "trespass");

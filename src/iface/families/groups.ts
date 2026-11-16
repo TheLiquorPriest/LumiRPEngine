@@ -7,9 +7,12 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { hasOwn, isRecord } from "../../shared/json";
 import { isOrgPower, ORG_POWERS } from "../../shared/org";
-import { ORG_OP_DOS, ORG_OP_SLOTS, type OrgOpDo, parseOrgOp } from "../../shared/org-ops";
+import { ORG_OP_DOS, ORG_OP_SLOTS, type OrgOp, type OrgOpDo, parseOrgOp } from "../../shared/org-ops";
+import { listingIn } from "../../shared/finance";
 import { mayAct } from "../../engine/org";
+import { own } from "../../engine/pack-kit";
 import { buildOrgsGm } from "../../packs/orgs/core/gm";
+import { jobOf, orgOpFindings } from "../../packs/orgs/core/ops";
 import { OBJECT, oneOf, TEXT } from "../kit";
 import { find, isUnread, named, notOneOf, type OpContext, type Unread } from "../ops";
 import type { Want } from "../reading";
@@ -19,7 +22,7 @@ import { textOf } from "../texts";
 const FAMILY = "groups";
 
 /** What each kind of slot an organization's change names is found as. */
-const SLOT_WANT: Readonly<Record<string, Want>> = { person: "person", place: "place", entity: "entity", org: "entity" };
+const SLOT_WANT: Readonly<Record<string, Want>> = { person: "person", place: "place", entity: "entity", org: "organization" };
 
 /** The change with every name its op names found as its slot takes it (a proposal's change too); or what could not be read. */
 function withIds(o: OpContext, change: JsonObject): JsonObject | Unread {
@@ -40,9 +43,9 @@ function withIds(o: OpContext, change: JsonObject): JsonObject | Unread {
       continue;
     }
     if (typeof v !== "string" || v.trim() === "") continue;
-    const found = find(o, `change.${field}`, SLOT_WANT[field === "org" ? "org" : slot] ?? "entity", false, v);
+    const found = field === "job" ? jobFound(o, `change.${field}`, v) : find(o, `change.${field}`, SLOT_WANT[field === "org" ? "org" : slot] ?? "entity", false, v);
     if (isUnread(found)) return found;
-    out[field] = found.id;
+    out[field] = typeof found === "string" ? found : found.id;
   }
   if (kind === "propose" && isRecord(change.change)) {
     const inner = withIds(o, change.change as JsonObject);
@@ -61,21 +64,56 @@ const org: WriteDef = {
   example: { change: { do: "admit", org: "The Lamplighters", who: "tam", title: "Apprentice", why: "sworn in at the lamp-house" }, source: { from: "prose", message: "m-0401" } },
   run(o) {
     const raw = o.args.change;
-    if (!isRecord(raw)) return notOneOf(o, "change", raw ?? null, []);
+    if (!isRecord(raw)) return changeTakes(o, raw ?? null, null);
     const change = withIds(o, raw as JsonObject);
     if (isUnread(change)) return change;
     const op = parseOrgOp(change);
-    if (op === null) return notOneOf(o, "change", raw as JsonObject, []);
+    if (op === null) return changeTakes(o, raw as JsonObject, change);
+    // What an op needs to read, said as the fields it takes: neither units nor a share, no way in or keys, no other party off a market.
+    const lacks = lacksOf(o, op);
+    if (lacks !== null) return lacks;
+    const ctx = o.draft.w.ctx;
+    const findings = orgOpFindings(ctx, op);
     const from = o.draft.w.events.length;
     const refused = editChange(o, { op: "org", change: op });
     if (refused !== null) {
       if (!isAlready(refused.code)) return notApplicable(o, refused.code);
       o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, typeof change.who === "string" ? change.who : typeof change.org === "string" ? change.org : o.op) });
-    }
+    } else for (const f of findings) o.reply.report(f.code, { n: o.n, op: o.op, ...f.values });
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
 };
+
+/** A change that cannot be read: what a change is (its `do` and the fields that op names), and which of those were not given. */
+function changeTakes(o: OpContext, value: JsonValue, change: JsonObject | null): Unread {
+  const dos = textOf(ORG_OP_DOS);
+  const kind = change !== null && typeof change.do === "string" && hasOwn(ORG_OP_SLOTS, change.do) ? (change.do as OrgOpDo) : null;
+  if (kind === null || change === null) return { line: "org_change_takes", fields: { n: o.n, op: o.op, value: JSON.stringify(value), dos } };
+  const slots = ORG_OP_SLOTS[kind];
+  const takes = Object.entries(slots).map(([field, slot]) => `${field} (${o.call.lines.line(slot === "entities" ? "wants_list" : `want_${slot}`) ?? slot})`);
+  const missing = Object.keys(slots).filter((field) => change[field] === undefined || change[field] === null || change[field] === "");
+  return { line: "org_change_takes", fields: { n: o.n, op: o.op, value: JSON.stringify(value), dos, do: kind, takes: textOf(takes), missing: textOf(missing) } };
+}
+
+/** What an op cannot be read without, as the fields it takes: or null when it has them. */
+function lacksOf(o: OpContext, op: OrgOp): Unread | null {
+  const needs = (fields: readonly string[]): Unread => ({ line: "needs_any", fields: { n: o.n, op: o.op, fields: fields.map((f) => `change.${f}`) } });
+  if (op.do === "entry" && op.entry === undefined && op.keys === undefined) return needs(["entry", "keys"]);
+  if (op.do === "transfer" && op.units === undefined && op.pct === undefined) return needs(["units", "pct"]);
+  if (op.do === "trade" && op.with === undefined && listingIn(own(o.draft.w.ctx.state.entities, op.org)?.fields ?? {}) === null) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["change.with"] } };
+  return null;
+}
+
+/** Each name of a job, found as one of the jobs there are; or the jobs, when it names none. */
+function jobFound(o: OpContext, field: string, said: string): string | Unread {
+  const ctx = o.draft.w.ctx;
+  const jobs = Object.keys(ctx.state.entities).filter((id) => jobOf(ctx, id) !== null).sort();
+  const key = said.trim().toLowerCase();
+  const hit = jobs.find((id) => id.toLowerCase() === key || (own(ctx.state.entities, id)?.name ?? "").toLowerCase() === key);
+  if (hit !== undefined) return hit;
+  return { line: "unknown_job", fields: { n: o.n, op: o.op, field, name: said, jobs: textOf(jobs.map((id) => `${own(ctx.state.entities, id)?.name ?? id} [${id}]`)) } };
+}
 
 /** Who may use a power in an organization (today's `orgs_who_may`): every holder with the basis it rests on, as GM → Orgs lists them; or whether one person may. */
 const whoMay = readTool({

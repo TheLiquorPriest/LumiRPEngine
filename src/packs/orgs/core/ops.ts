@@ -95,11 +95,35 @@ function endOfDay(ctx: ReadContext, date: string): number | Rejection {
   }
 }
 
-/** An organization an op names, or why not. */
+/** An organization an op names, or why not. A dissolved one is still named: a change to it is recorded (`orgOpFindings` says so). */
 function orgProblem(ctx: ReadContext, org: EntityId): Rejection | null {
-  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, org)) return refuse("missing_entity", `no organization ${labelOf(ctx, org)}`);
-  const dissolved = dissolvedOn(ctx.state, org);
-  return dissolved === null ? null : refuse("dissolved", `${labelOf(ctx, org)} was dissolved on ${dayWords(ctx.world, dissolved)}`);
+  return orgTypeOf(ctx, org) === null || isGone(ctx.state, org) ? refuse("missing_entity", `no organization ${labelOf(ctx, org)}`) : null;
+}
+
+/** A job that is no job, refused with the jobs there are. */
+function missingJob(ctx: ReadContext, job: EntityId): Rejection {
+  const jobs = Object.keys(ctx.state.entities).filter((id) => jobOf(ctx, id) !== null).sort();
+  return { code: "missing_entity", reason: `no job ${labelOf(ctx, job)}`, choices: jobs, said: job };
+}
+
+/** What an op finds that the world's rules would have refused and the GM's change records all the same: a code and its values, for the tool that records it to say. */
+export interface OrgFinding {
+  code: string;
+  values: Record<string, JsonValue>;
+}
+
+export function orgOpFindings(ctx: ReadContext, op: OrgOp): OrgFinding[] {
+  const out: OrgFinding[] = [];
+  const org = "org" in op && typeof op.org === "string" ? op.org : null;
+  const dissolved = org !== null ? dissolvedOn(ctx.state, org) : null;
+  if (org !== null && dissolved !== null) out.push({ code: "dissolved", values: { org: labelOf(ctx, org), on: dayWords(ctx.world, dissolved) } });
+  if (op.do === "delegate") {
+    if (op.to === op.by) out.push({ code: "bad_delegation", values: { who: labelOf(ctx, op.to) } });
+    const until = op.until === undefined ? undefined : endOfDay(ctx, op.until);
+    if (typeof until === "number" && until < ctx.state.clock) out.push({ code: "delegation_ended", values: { until: String(op.until).slice(0, 10) } });
+  }
+  if (op.do === "trade" && !listingIn(own(ctx.state.entities, op.org)?.fields ?? {})) out.push({ code: "not_listed", values: { org: labelOf(ctx, op.org) } });
+  return out;
 }
 
 /** The cadence an organization's dues run on now, and the day they fall on when its `dues` field (a one-record list) sets one; null when it sets none. */
@@ -178,11 +202,9 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const bad = orgProblem(ctx, op.org);
       if (bad) return bad;
       if (!own(ctx.state.entities, op.to) || op.to === op.org) return refuse("missing_entity", `no one ${name(op.to)} to act for ${name(op.org)}`);
-      if (op.to === op.by) return refuse("bad_delegation", "a delegation is to someone else");
-      // The GM records it as its granter gave it: their name on it, flagged when they couldn't.
+      // A delegation to oneself, and one that ends before today, are recorded as given (`orgOpFindings` says so).
       const until = op.until === undefined ? undefined : endOfDay(ctx, op.until);
       if (typeof until === "object") return until;
-      if (until !== undefined && until < ctx.state.clock) return refuse("bad_date", "a delegation ends after today");
       const fields: JsonObject = { powers: op.powers, ...(op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}), ...(op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}), ...(op.accounts !== undefined ? { accounts: op.accounts } : {}), by: op.by };
       const limits = [...(op.payment !== undefined && op.payment > 0 ? [`${money(ctx, op.payment)} a payment`] : []), ...(op.month !== undefined && op.month > 0 ? [`${money(ctx, op.month)} a month`] : [])];
       const text = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
@@ -210,12 +232,12 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
     }
     case "fire": {
       const job = jobOf(ctx, op.job);
-      if (!job) return refuse("missing_entity", `no job ${name(op.job)}`);
+      if (!job) return missingJob(ctx, op.job);
       return [{ type: "economy.job_end", args: { job: op.job } }, ...(job.org !== null ? [historyLine(job.org, withWhy(`Let ${name(job.worker)} go`, op.why), { names: [job.worker] })] : [])];
     }
     case "pay": {
       const job = jobOf(ctx, op.job);
-      if (!job) return refuse("missing_entity", `no job ${name(op.job)}`);
+      if (!job) return missingJob(ctx, op.job);
       const was = typeof job.fields.rate === "number" ? job.fields.rate : 0;
       const rate = op.rate !== undefined ? Math.round(op.rate) : Math.round(was * (1 + (op.pct ?? 0) / 100));
       return [{ type: "economy.job_raise", args: { job: op.job, ...(op.rate !== undefined ? { rate: Math.round(op.rate) } : { pct: op.pct ?? 0 }) } }, ...(job.org !== null && rate > 0 ? [historyLine(job.org, `Set ${name(job.worker)}'s pay to ${money(ctx, rate)}`, { names: [job.worker] })] : [])];
@@ -252,7 +274,11 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       if (bad) return bad;
       const fields = own(ctx.state.entities, op.org)?.fields ?? {};
       const listing = listingIn(fields);
-      if (!listing) return refuse("not_listed", `${name(op.org)} isn't on a market`);
+      if (!listing) {
+        // On no market, the stake changes hands between the parties the call gives, as a sale off the market is recorded.
+        if (op.with === undefined) return refuse("bad_args", "a trade in a company on no market names the other party (with)");
+        return [{ type: "economy.stake_sell", args: { business: op.org, party: op.side === "sell" ? op.who : op.with, buyer: op.side === "sell" ? op.with : op.who, units: Math.round(op.units), price: 0 } }];
+      }
       // Units held on the cap table, and none on the market, sell into its float as a stake with no buyer.
       const onMarket = Object.values(ctx.state.entities).some((e) => e.kind === "holding" && e.fields.asset === listing.asset && ownersIn(own(ctx.state.entities, strOf(e.fields.account))?.fields ?? e.fields).some((o) => o.party === op.who));
       if (op.side === "sell" && !onMarket && unitsOf(ownersIn(fields), op.who) > 0) return [{ type: "economy.stake_sell", args: { business: op.org, party: op.who, units: Math.round(op.units), price: 0 } }];

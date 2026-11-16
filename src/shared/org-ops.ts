@@ -63,8 +63,8 @@ export type OrgOp =
   | { do: "list"; org: EntityId; units: number; price?: number; symbol?: string }
   /** A listed company off the market: every public unit bought back at `price` a unit (else its market price). */
   | { do: "delist"; org: EntityId; price?: number }
-  /** A listed company's stock bought or sold by `who` on its market, `units` of it, held in `account` when bought (else held directly); units `who` holds on the cap table, and none on the market, sell into its float. */
-  | { do: "trade"; org: EntityId; who: EntityId; side: "buy" | "sell"; units: number; account?: EntityId }
+  /** A listed company's stock bought or sold by `who` on its market, `units` of it, held in `account` when bought (else held directly); units `who` holds on the cap table, and none on the market, sell into its float. A company on no market has none to trade in: the stake changes hands between `who` and `with`, the other party. */
+  | { do: "trade"; org: EntityId; who: EntityId; side: "buy" | "sell"; units: number; account?: EntityId; with?: EntityId }
   /** Who may enter a place (`null`: as the world has it), and its keys (item ids or types). */
   | { do: "entry"; place: PlaceId; entry: Audience | null; keys?: string[] }
   /** What each member pays, in minor units, every period; `null` ends dues. */
@@ -165,7 +165,7 @@ export const ORG_OP_SLOTS: Readonly<Record<OrgOpDo, Readonly<Record<string, OrgS
   transfer: { org: "entity", from: "entity", to: "entity" },
   list: { org: "entity" },
   delist: { org: "entity" },
-  trade: { org: "entity", who: "entity", account: "entity" },
+  trade: { org: "entity", who: "entity", account: "entity", with: "entity" },
   entry: { place: "place" },
   dues: { org: "entity" },
   tier: { who: "person" },
@@ -294,8 +294,8 @@ export function parseOrgOp(o: unknown): OrgOp | null {
     case "delist":
       return str(o.org) && opt(num, o.price) ? { do: "delist", org: o.org, ...(num(o.price) ? { price: o.price } : {}) } : null;
     case "trade":
-      if (!str(o.org) || !str(o.who) || (o.side !== "buy" && o.side !== "sell") || !num(o.units) || !opt(str, o.account)) return null;
-      return { do: "trade", org: o.org, who: o.who, side: o.side, units: o.units, ...(str(o.account) ? { account: o.account } : {}) };
+      if (!str(o.org) || !str(o.who) || (o.side !== "buy" && o.side !== "sell") || !num(o.units) || !opt(str, o.account) || !opt(str, o.with)) return null;
+      return { do: "trade", org: o.org, who: o.who, side: o.side, units: o.units, ...(str(o.account) ? { account: o.account } : {}), ...(str(o.with) ? { with: o.with } : {}) };
     case "entry":
       if (!str(o.place) || !(o.entry === null || isAudience(o.entry)) || !opt(strList, o.keys)) return null;
       return { do: "entry", place: o.place, entry: o.entry, ...(strList(o.keys) ? { keys: o.keys } : {}) };

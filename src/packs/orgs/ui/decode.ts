@@ -258,6 +258,7 @@ export function decodePlan(value: unknown): OrgPlanView | null {
     goals: list(value.goals, planGoal),
     orders: list(value.orders, planOrder),
     closed: num(value.closed),
+    more: num(value.more),
     recent: list(value.recent, (c): PlanClosedView | null => (typeof c.id === "string" && typeof c.text === "string" ? { id: c.id, kind: c.kind === "goal" ? "goal" : "order", text: c.text, status: oneOf(c.status, PLAN_STATUSES, "done"), when: text(c.when) } : null)),
     mayGive: value.mayGive === true,
     people: list(value.people, ref),

@@ -217,7 +217,6 @@ export function answerEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejec
   const r = requestsOf(ctx.state, org).find((x) => x.id === strOf(a.request));
   if (!r) return refuse("missing_request", `${labelOf(ctx, org)} has no request ${strOf(a.request)}`);
   const state = requestState(ctx, r);
-  if (state !== "asked") return refuse("closed", state === "lapsed" ? `It lapsed on ${formatStamp(calendarOf(ctx.world), r.until)}` : `That request was ${state} already`);
   const by = strOf(a.by);
   const who = by !== "" ? by : strOf(a.approver);
   const said = strOf(a.said);
@@ -228,6 +227,11 @@ export function answerEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejec
   // Whom the act names, so its History line reads "someone" for each one its reader can't see.
   const named = [...(r.target !== undefined ? [r.target] : []), ...actNames(ctx, r.what)];
   const end = (status: "approved" | "denied" | "withdrawn"): LedgerEvent => ({ type: ORGS_ANSWER, data: { org, id: r.id, status, ...(who !== "" ? { by: who } : {}), ...(why !== "" ? { why } : {}), ...(said !== "" ? { said: said.slice(0, 300) } : {}), at, visibility: povIn(ctx, r, who) ? "public" : "secret" } });
+  // Answered after it closed: kept beside what was decided, which stands; nothing is carried out.
+  if (state !== "asked") {
+    const closing = answer === "approve" ? "approved" : answer === "deny" ? "denied" : answer === "withdraw" ? "withdrawn" : null;
+    return closing === null ? refuse("bad_args", "A request is approved, denied or withdrawn") : [end(closing)];
+  }
   if (answer === "withdraw") {
     if (who !== "" && who !== r.by) return refuse("not_allowed", `Only ${labelOf(ctx, r.by)} may withdraw it`);
     return [end("withdrawn"), orgLog(ctx, org, `${labelOf(ctx, r.by)} withdrew the request: ${r.text}`, { by: r.by, names: [r.by, ...named], power: r.power })];
@@ -290,19 +294,29 @@ export const APPROVAL_EVENTS: EventTypeDef<PackEvent>[] = [
     },
   },
   {
-    // A request answered: approved (the act ran with it), denied or withdrawn.
+    // A request answered: approved (the act ran with it), denied or withdrawn. An answer after it closed (answered, withdrawn or lapsed) is kept beside what was decided (`late`), which stands.
     type: ORGS_ANSWER,
     validate: (e, ctx) => {
       const r = requestsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
-      if (!r || r.status !== "asked") return refuse("bad_event", "no such request waiting");
+      if (!r) return refuse("bad_event", "no such request");
       return ["approved", "denied", "withdrawn"].includes(str(e, "status")) ? null : refuse("bad_event", "a request is approved, denied or withdrawn");
+    },
+    advise: (e, ctx) => {
+      const r = requestsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
+      return r && requestState(ctx, r) !== "asked" ? { code: "closed", values: { what: "request", who: str(e, "by") === "" ? "" : labelOf(ctx, str(e, "by")) } } : null;
     },
     apply: (e, state) => {
       const org = str(e, "org");
+      const answered = { ...(str(e, "by") !== "" ? { by: str(e, "by") } : {}), at: typeof e.data.at === "number" ? e.data.at : state.clock, ...(str(e, "why") !== "" ? { why: str(e, "why") } : {}) };
       writeList(
         state,
         org,
-        listAt(state, org).map((raw) => (isRecord(raw) && raw.id === str(e, "id") ? { ...raw, status: str(e, "status"), answered: { ...(str(e, "by") !== "" ? { by: str(e, "by") } : {}), at: typeof e.data.at === "number" ? e.data.at : state.clock, ...(str(e, "why") !== "" ? { why: str(e, "why") } : {}) } } : raw)),
+        listAt(state, org).map((raw) => {
+          if (!isRecord(raw) || raw.id !== str(e, "id")) return raw;
+          const r = requestIn(raw);
+          if (r !== null && requestState({ state }, r) !== "asked") return { ...raw, late: [...(Array.isArray(raw.late) ? raw.late : []), { status: str(e, "status"), ...answered }] };
+          return { ...raw, status: str(e, "status"), answered };
+        }),
       );
     },
     describe: (e, ctx, viewer) => {

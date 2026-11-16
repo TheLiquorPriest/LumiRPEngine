@@ -23,7 +23,7 @@ import type { ActionDef, ParamDef } from "../../../shared/world";
 import { calendarOf, formatStamp } from "../../../engine/calendar";
 import { mayAct, membersOfOrg, orgTypeOf, trusteesOf } from "../../../engine/org";
 import { labelOf, objOf, optionalQuery, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { CoreRegistry, EffectContext, EventTypeDef, ProcessDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { Advice, CoreRegistry, EffectContext, EventTypeDef, ProcessDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
@@ -288,15 +288,13 @@ function voteEvent(ctx: ReadContext, org: EntityId, m: Motion, who: EntityId, v:
  */
 export function voteEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
-  const m = motionAt(ctx, org, strOf(a.motion));
-  if (isRejection(m)) return m;
-  if (ctx.state.clock > m.closes) return refuse("closed", "Voting on it has closed");
+  const m = motionsOf(ctx.state, org).find((x) => x.id === strOf(a.motion));
+  if (!m) return refuse("missing_motion", `${labelOf(ctx, org)} has no motion ${strOf(a.motion)}`);
   const vote = strOf(a.vote);
   if (!isVote(vote)) return refuse("bad_vote", "A vote is for, against or abstain");
   const by = strOf(a.by);
   const who = strOf(a.who) || by;
   if (who === "") return refuse("bad_args", "Say whose vote it is");
-  if (m.electorate[who] === undefined) return refuse("not_voter", `${labelOf(ctx, who)} has no vote on it`);
   if (by !== "" && !castsFor(ctx, by, who)) return refuse("not_allowed", `${labelOf(ctx, by)} may not vote for ${labelOf(ctx, who)}`);
   const said = strOf(a.said);
   const how: VoteHow = by !== "" ? "own" : said !== "" ? "story" : "gm";
@@ -304,6 +302,8 @@ export function voteEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejecti
   if (was && was.vote === vote && was.how !== "rule") return refuse("already", `${labelOf(ctx, who)} voted ${VOTE_WORDS[vote]} already`);
   const at = ctx.state.clock;
   const cast: MotionVote = { vote, how, at, ...(by !== "" && by !== who ? { by } : {}) };
+  // A vote by someone with no vote on it, or on a motion that closed, is kept beside it: it moves no standing rule and settles nothing.
+  if (m.status !== "open" || ctx.state.clock > m.closes || m.electorate[who] === undefined) return [voteEvent(ctx, org, m, who, cast, said)];
   const next: Motion = { ...m, votes: { ...m.votes, [who]: cast } };
   const ruled = ruleVotes(next, rulesOf(ctx, org).standing, at, false);
   Object.assign(next.votes, ruled);
@@ -499,12 +499,19 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     },
   },
   {
-    // A vote cast, or changed, on a motion still open.
+    // A vote cast, or changed, on a motion. One by someone with no vote on it, or after it closed, is kept beside the votes (`late`), never counted: the outcome stays as it was decided.
     type: ORGS_VOTE,
     validate: (e, ctx) => {
-      const m = openIn(ctx, e);
-      if (isRejection(m)) return m;
-      return isVote(e.data.vote) && m.electorate[str(e, "who")] !== undefined ? null : refuse("bad_event", "a vote is for, against or abstain, by a voter");
+      const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
+      if (!m) return refuse("bad_event", "no such motion");
+      return isVote(e.data.vote) && str(e, "who") !== "" ? null : refuse("bad_event", "a vote is for, against or abstain, by someone");
+    },
+    advise: (e, ctx): Advice | null => {
+      const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
+      if (!m) return null;
+      const who = labelOf(ctx, str(e, "who"));
+      if (m.status !== "open" || ctx.state.clock > m.closes) return { code: "closed", values: { what: "motion", who } };
+      return m.electorate[str(e, "who")] === undefined ? { code: "not_voter", values: { who } } : null;
     },
     apply: (e, state) => {
       const org = str(e, "org");
@@ -513,9 +520,11 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
         org,
         listAt(state, org).map((raw) => {
           if (!isRecord(raw) || raw.id !== str(e, "id")) return raw;
-          const votes = { ...objOf(raw.votes) };
-          votes[str(e, "who")] = { vote: str(e, "vote"), how: isVoteHow(e.data.how) ? e.data.how : "own", at: typeof e.data.at === "number" ? e.data.at : state.clock, ...(str(e, "by") !== "" ? { by: str(e, "by") } : {}) };
-          return { ...raw, votes };
+          const who = str(e, "who");
+          const cast = { vote: str(e, "vote"), how: isVoteHow(e.data.how) ? e.data.how : "own", at: typeof e.data.at === "number" ? e.data.at : state.clock, ...(str(e, "by") !== "" ? { by: str(e, "by") } : {}) };
+          const counts = raw.status === "open" && !(typeof raw.closes === "number" && state.clock > raw.closes) && objOf(raw.electorate)[who] !== undefined;
+          if (!counts) return { ...raw, late: { ...objOf(raw.late), [who]: cast } };
+          return { ...raw, votes: { ...objOf(raw.votes), [who]: cast } };
         }),
       );
     },

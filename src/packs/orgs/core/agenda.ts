@@ -17,7 +17,7 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { isPlanStatus, isPlanStatusLive, PLAN_ACTIONS, PLAN_EFFECTS, PLAN_SECTION, PLAN_SOURCES, PLAN_STATUS_WORDS, PLAN_TEXT_MAX, type OrgPlanView, type PlanGoal, type PlanGoalView, type PlanNote, type PlanOrder, type PlanOrderView, type PlanSource, type PlanStatus } from "../../../shared/org-feed";
 import type { OrgRef } from "../../../shared/org-view";
 import { partyTierIn, type PartyTier } from "../../../shared/party";
-import type { ActionDef, ParamDef } from "../../../shared/world";
+import type { ActionDef, ParamDef, WorldDoc } from "../../../shared/world";
 import { calendarOf, clockOfLocal, dateAt, dayIndexOfText, formatClock, formatStamp } from "../../../engine/calendar";
 import { acts } from "../../../engine/life";
 import { mayAct, orgTypeOf, partyLeader } from "../../../engine/org";
@@ -50,11 +50,17 @@ export const ORGS_ORDER = "orgs.order";
 export const ORGS_STATUS = "orgs.status";
 export const ORGS_LIVED = "orgs.lived";
 
-/** The most a plan holds open (assess-party §6.2), the longest words an item keeps, and how many closed ones it keeps after. */
-export const PLAN_LIMITS = { goals: 12, orders: 40, text: PLAN_TEXT_MAX, closedGoals: 12, closedOrders: 40 } as const;
+/** The longest words a note or an offered saying keeps. */
+export const PLAN_LIMITS = { text: PLAN_TEXT_MAX } as const;
 
-/** The closed goals and orders the page lists, newest first, for Reopen. */
-export const PLAN_RECENT = 10;
+/** How many open goals and orders a plan holds before a new one is reported, and how many closed ones its view shows: the world's own figures (`packs.orgs.config.plan`), these when it gives none. */
+export const PLAN_DEFAULTS = { goals: 12, orders: 40, closedGoals: 12, closedOrders: 40 } as const;
+
+export function planLimits(world: Pick<WorldDoc, "packs">): { goals: number; orders: number; closedGoals: number; closedOrders: number } {
+  const raw = objOf(objOf(world.packs.orgs?.config).plan);
+  const count = (v: JsonValue | undefined, fallback: number): number => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : fallback);
+  return { goals: count(raw.goals, PLAN_DEFAULTS.goals), orders: count(raw.orders, PLAN_DEFAULTS.orders), closedGoals: count(raw.closedGoals, PLAN_DEFAULTS.closedGoals), closedOrders: count(raw.closedOrders, PLAN_DEFAULTS.closedOrders) };
+}
 
 /** The statuses an order's own people may move it to; the rest are for whoever gives orders. */
 const OWN_MOVES: readonly PlanStatus[] = ["under_way", "done", "blocked", "refused"];
@@ -79,7 +85,7 @@ function common(o: JsonObject): { id: string; text: string; status: PlanStatus; 
   const id = strOf(o.id);
   const text = strOf(o.text).trim();
   const source = strOf(o.source);
-  if (id === "" || text === "" || text.length > PLAN_LIMITS.text || !isPlanStatus(o.status) || !(PLAN_SOURCES as readonly string[]).includes(source) || typeof o.at !== "number") return null;
+  if (id === "" || text === "" || !isPlanStatus(o.status) || !(PLAN_SOURCES as readonly string[]).includes(source) || typeof o.at !== "number") return null;
   const last = noteIn(o.last);
   return { id, text, status: o.status, source: source as PlanSource, at: o.at, ...(strOf(o.by) !== "" ? { by: strOf(o.by) } : {}), ...(last ? { last } : {}) };
 }
@@ -97,12 +103,9 @@ function orderIn(o: JsonObject): PlanOrder | null {
   return { ...base, to, ...(strOf(o.goal) !== "" ? { goal: strOf(o.goal) } : {}), ...(strOf(o.lead) !== "" ? { lead: strOf(o.lead) } : {}), ...(strOf(o.where) !== "" ? { where: strOf(o.where) } : {}), ...(typeof o.when === "number" ? { when: o.when } : {}), ...(typeof o.lived === "number" ? { lived: o.lived } : {}) };
 }
 
-/** A list with `item` put in its place (or added), its closed items cut to the last `closedKept`. */
-function upsert<T extends { id: string; status: PlanStatus }>(list: readonly T[], item: T, closedKept: number): T[] {
-  const next = list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item];
-  const closed = next.filter((x) => !isPlanStatusLive(x.status));
-  const drop = new Set(closed.slice(0, Math.max(0, closed.length - closedKept)).map((x) => x.id));
-  return next.filter((x) => !drop.has(x.id));
+/** A list with `item` put in its place (or added): every closed item stays. */
+function upsert<T extends { id: string; status: PlanStatus }>(list: readonly T[], item: T): T[] {
+  return list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item];
 }
 
 function writePlan(state: Parameters<EventTypeDef<PackEvent>["apply"]>[1], org: EntityId, plan: { goals: PlanGoal[]; orders: PlanOrder[] }): void {
@@ -112,40 +115,51 @@ function writePlan(state: Parameters<EventTypeDef<PackEvent>["apply"]>[1], org: 
 
 export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
   {
-    // A goal set or changed, whole: the plan keeps its last 12 closed goals.
+    // A goal set or changed, whole: the plan keeps every closed goal.
     type: ORGS_GOAL,
-    validate: (e, ctx) => {
+    validate: (e) => {
       const goal = goalIn(objOf(e.data.goal));
-      if (strOf(e.data.org) === "" || !goal) return { code: "bad_event", reason: "a goal needs an organization, an id, its words (at most 300 characters), a status and where it came from" };
+      return strOf(e.data.org) === "" || !goal ? { code: "bad_event", reason: "a goal needs an organization, an id, its words, a status and where it came from" } : null;
+    },
+    // A plan holds what the story gives: past its number of open goals the goal is kept, and the number said.
+    advise: (e, ctx) => {
+      const goal = goalIn(objOf(e.data.goal));
+      if (!goal) return null;
       const plan = planOf(ctx.state, strOf(e.data.org));
       const fresh = !plan.goals.some((g) => g.id === goal.id);
-      return fresh && isPlanStatusLive(goal.status) && plan.goals.filter((g) => isPlanStatusLive(g.status)).length >= PLAN_LIMITS.goals ? { code: "plan_full", reason: `a plan holds at most ${PLAN_LIMITS.goals} open goals` } : null;
+      const most = planLimits(ctx.world).goals;
+      return fresh && isPlanStatusLive(goal.status) && plan.goals.filter((g) => isPlanStatusLive(g.status)).length >= most ? { code: "plan_full", values: { what: "goals", most } } : null;
     },
     apply: (e, state) => {
       const org = strOf(e.data.org);
       const goal = goalIn(objOf(e.data.goal));
       if (!goal) return;
       const plan = planOf(state, org);
-      writePlan(state, org, { goals: upsert(plan.goals, goal, PLAN_LIMITS.closedGoals), orders: plan.orders });
+      writePlan(state, org, { goals: upsert(plan.goals, goal), orders: plan.orders });
     },
     describe: (e) => `Plan: ${strOf(objOf(e.data.goal).text)}`,
   },
   {
-    // An order given or changed, whole: the plan keeps its last 40 closed orders.
+    // An order given or changed, whole: the plan keeps every closed order.
     type: ORGS_ORDER,
-    validate: (e, ctx) => {
+    validate: (e) => {
       const order = orderIn(objOf(e.data.order));
-      if (strOf(e.data.org) === "" || !order) return { code: "bad_event", reason: "an order needs an organization, an id, whom it is for, its words (at most 300 characters), a status and where it came from" };
+      return strOf(e.data.org) === "" || !order ? { code: "bad_event", reason: "an order needs an organization, an id, whom it is for, its words, a status and where it came from" } : null;
+    },
+    advise: (e, ctx) => {
+      const order = orderIn(objOf(e.data.order));
+      if (!order) return null;
       const plan = planOf(ctx.state, strOf(e.data.org));
       const fresh = !plan.orders.some((o) => o.id === order.id);
-      return fresh && isPlanStatusLive(order.status) && plan.orders.filter((o) => isPlanStatusLive(o.status)).length >= PLAN_LIMITS.orders ? { code: "plan_full", reason: `a plan holds at most ${PLAN_LIMITS.orders} open orders` } : null;
+      const most = planLimits(ctx.world).orders;
+      return fresh && isPlanStatusLive(order.status) && plan.orders.filter((o) => isPlanStatusLive(o.status)).length >= most ? { code: "plan_full", values: { what: "orders", most } } : null;
     },
     apply: (e, state) => {
       const org = strOf(e.data.org);
       const order = orderIn(objOf(e.data.order));
       if (!order) return;
       const plan = planOf(state, org);
-      writePlan(state, org, { goals: plan.goals, orders: upsert(plan.orders, order, PLAN_LIMITS.closedOrders) });
+      writePlan(state, org, { goals: plan.goals, orders: upsert(plan.orders, order) });
     },
     describe: (e) => `Order: ${strOf(objOf(e.data.order).text)}`,
   },
@@ -253,8 +267,7 @@ function windowOf(v: JsonValue | undefined): string | null | Rejection {
 
 function words(text: string): string | Rejection {
   const t = text.trim();
-  if (t === "") return { code: "bad_args", reason: "what it is, in words" };
-  return t.length > PLAN_LIMITS.text ? { code: "bad_args", reason: `at most ${PLAN_LIMITS.text} characters` } : t;
+  return t === "" ? { code: "bad_args", reason: "what it is, in words" } : t;
 }
 
 function isRejection(v: unknown): v is Rejection {
@@ -444,15 +457,22 @@ export function buildPlanView(ctx: ReadContext, org: EntityId, viewer: EntityId 
     };
   });
   const goalIds = new Set(live.goals.map((g) => g.id));
+  // Every closed goal and order stays in the record; the view shows the newest of each, as many as the world's settings say, and counts the rest.
+  const most = planLimits(ctx.world);
+  const newest = (list: readonly (PlanGoal | PlanOrder)[], kind: "goal" | "order", count: number) =>
+    list
+      .filter((x) => !isPlanStatusLive(x.status))
+      .sort((a, b) => (b.last?.at ?? b.at) - (a.last?.at ?? a.at) || a.id.localeCompare(b.id))
+      .slice(0, count)
+      .map((x) => ({ kind, x }));
+  const shown = [...newest(plan.goals, "goal", most.closedGoals), ...newest(plan.orders, "order", most.closedOrders)].sort((a, b) => (b.x.last?.at ?? b.x.at) - (a.x.last?.at ?? a.x.at) || a.x.id.localeCompare(b.x.id));
+  const closed = plan.goals.length - live.goals.length + plan.orders.length - live.orders.length;
   return {
     goals,
     orders: live.orders.filter((o) => o.goal === undefined || !goalIds.has(o.goal)).map(orderView),
-    closed: plan.goals.length - live.goals.length + plan.orders.length - live.orders.length,
-    recent: [...plan.goals.map((g) => ({ kind: "goal" as const, x: g as PlanGoal | PlanOrder })), ...plan.orders.map((o) => ({ kind: "order" as const, x: o as PlanGoal | PlanOrder }))]
-      .filter(({ x }) => !isPlanStatusLive(x.status))
-      .sort((a, b) => (b.x.last?.at ?? b.x.at) - (a.x.last?.at ?? a.x.at) || a.x.id.localeCompare(b.x.id))
-      .slice(0, PLAN_RECENT)
-      .map(({ kind, x }) => ({ id: x.id, kind, text: x.text, status: x.status, when: x.last ? formatClock(cal, x.last.at) : null })),
+    closed,
+    more: closed - shown.length,
+    recent: shown.map(({ kind, x }) => ({ id: x.id, kind, text: x.text, status: x.status, when: x.last ? formatClock(cal, x.last.at) : null })),
     mayGive: give,
     people: people.filter(seen).map((who) => refFor(ctx, viewer, who)),
   };

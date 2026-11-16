@@ -230,6 +230,8 @@ export interface OrgPlanView {
   goals: PlanGoalView[];
   orders: PlanOrderView[];
   closed: number;
+  /** How many of those closed are kept beyond the `recent` listed: every one stays in the record, the world's settings say how many the view shows. */
+  more: number;
   recent: PlanClosedView[];
   /** The reader may give orders here (`orders.give`). */
   mayGive: boolean;
