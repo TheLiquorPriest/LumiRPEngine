@@ -9,7 +9,7 @@ import { JoinedTurnError } from "../../src/store";
 import { recordStory, writeStory } from "../../src/story/record";
 import { CHAT, openTable, USER } from "./rig";
 
-const AUTHOR = { user: USER, by: "author", agent: "author-1", job: null };
+const AUTHOR = { user: USER, chat: CHAT, by: "author", agent: "author-1", job: null };
 
 describe("a continue's held story changes", () => {
   test("join the turn it extended after that turn's own, with its overlays, and the held turn is then refused", async () => {

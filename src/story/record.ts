@@ -9,7 +9,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { ChangeInput, Source, Store } from "../store";
-import { mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
+import { applyStory, mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
 import type { StoryAt } from "./path";
 
 export { keyedItemId, nameKey, newItemId, STORY_PARTS, type StoryPart } from "./fold";
@@ -42,12 +42,22 @@ export class StoryRecord {
 
   /**
    * The record at `at`, as the store folded it there: at the chat's head, at a turn (inside an open turn, with what it has staged),
-   * or, for a job's own reading (`job`), at the turn it was started with its own writes on top. A turn joined to another is refused
-   * as the store refuses it, naming the turn it joined.
+   * or, for a job's own reading (`job`), where it was started with its own writes on top: at the turn it was started with, or, for a
+   * job of his own that belongs to no turn, at the chat's head. A turn joined to another is refused as the store refuses it, naming
+   * the turn it joined.
    */
   static read(store: Store, user: string, at: StoryAt, job: string | null = null): StoryRecord {
     const u = store.user(user);
-    const folded = at.turn === null ? u.headState(at.chat) : job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
+    if (at.turn === null) {
+      const head = storySliceOf(u.headState(at.chat).state);
+      if (job === null) return new StoryRecord(at, head);
+      // His own job's writes are changes of no turn, placed when it ends: until then only the job reads them, on top of the head.
+      const own = store.db
+        .query<{ op: string; value: string; by: string | null }, [string, string, string]>("SELECT op, value, by FROM change WHERE user = ? AND chat = ? AND job = ? AND applied = 1 AND op LIKE 'story.%' ORDER BY ord")
+        .all(user, at.chat, job);
+      return new StoryRecord(at, applyStory(head, own.map((c) => ({ op: c.op, value: JSON.parse(c.value) as JsonValue, turn: "", n: at.turns.length + 1, by: c.by }))));
+    }
+    const folded = job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
     return new StoryRecord(at, storySliceOf(folded.state));
   }
 
@@ -148,10 +158,11 @@ export interface StoryOverlayWrite {
   note: string;
 }
 
-/** Who writes, and on which turn: an agent's definition, `player` or the import; its handle in its run; the job it was started as. */
+/** Who writes, and where: the chat and the turn it belongs to (none: his own change of no turn, placed after the chat's newest reply); an agent's definition, `player` or the import; its handle in its run; the job it was started as. */
 export interface StoryWriter {
   user: string;
-  turn: string;
+  chat: string;
+  turn: string | null;
   by: string | null;
   agent: string | null;
   job: string | null;
@@ -191,8 +202,9 @@ export function recordStory(store: Store, writer: StoryWriter, list: readonly (S
     items.push(item);
     return { ...base, op: STORY_OPS.write, value: { part: w.part, item, value: w.value } };
   });
-  const target = writer.job === null ? ({ kind: "turn", turn: writer.turn } as const) : ({ kind: "turn", turn: writer.turn, job: writer.job } as const);
-  const { changes } = store.user(writer.user).record(target, inputs);
+  const u = store.user(writer.user);
+  const target = u.writeTarget({ chat: writer.chat, turn: writer.turn, job: writer.job });
+  const { changes } = u.record(target, inputs);
   return changes.map((c, i) => ({ change: c.id, item: items[i] ?? null }));
 }
 

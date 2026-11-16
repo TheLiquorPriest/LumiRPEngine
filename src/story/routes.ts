@@ -141,7 +141,7 @@ function struck(deps: StoryRoutesDeps, user: string, chat: string, ask: StrikeAs
     const turn = r.record.at.turns.at(-1) as string;
     if (r.s.turn(turn)?.chat !== chat) throw new Refused(409, "page_branch_no_turn");
     const value: JsonObject = ask.struck ? { drop: true, ...(ask.why !== null ? { why: ask.why } : {}) } : { drop: false };
-    writeStory(deps.store, { user, turn, by: PLAYER, agent: null, job: null, source: "player" }, [{ part: item.part, item: item.id, value }]);
+    writeStory(deps.store, { user, chat, turn, by: PLAYER, agent: null, job: null, source: "player" }, [{ part: item.part, item: item.id, value }]);
     return true;
   }, "striking an item of the story record from a page");
 }

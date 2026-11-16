@@ -125,7 +125,7 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
       return table.tie(turn);
     },
     write(turn, list, by = "author") {
-      return writes.run(() => writeStory(store, { user: USER, turn: turn.id, by, agent: `${by}-1`, job: null }, list));
+      return writes.run(() => writeStory(store, { user: USER, chat: CHAT, turn: turn.id, by, agent: `${by}-1`, job: null }, list));
     },
     record(turn = null) {
       return StoryRecord.read(store, USER, storyAt(s, CHAT, turn?.id ?? null));

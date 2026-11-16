@@ -4,7 +4,7 @@ format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
 no_turn: There is no turn {{id}} in this chat.
-turn_needed: This call belongs to no turn, so nothing can be recorded. Reading needs no turn.
+turn_needed: Operation {{n}} ({{op}}) is your record of a turn, and this call belongs to no turn, so it was not made.
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}

@@ -8,7 +8,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { AreaOp, AreaOutcome, AreaPart, StoreArea, StoreState } from "../store";
+import type { AreaOp, AreaOutcome, AreaPart, Source, StoreArea, StoreState } from "../store";
 
 /** The parts of the record, as the plan names them (§8.1). */
 export const STORY_PARTS = ["premise", "chapter", "scene", "beat", "thread", "arc", "player", "future", "canon", "retcon", "record"] as const;
@@ -120,6 +120,32 @@ function asSlice(slice: Readonly<JsonObject>): StorySlice {
 
 function json(slice: StorySlice): JsonObject {
   return slice as unknown as JsonObject;
+}
+
+/** One change of the area as the replays of this file take it: the way the fold hands it to its reducer, without the marks. */
+export interface StoryReplayed {
+  op: string;
+  value: JsonValue;
+  turn: string;
+  n: number;
+  by: string | null;
+  source?: Source | null;
+}
+
+/**
+ * A slice with `changes` applied to it in order, each by its operation's reducer, as the fold applies them but for the store's checks
+ * and marks: what a reading that stands outside the fold needs (a job of his own, a migration's starting state). A change a reducer
+ * does not take is left out.
+ */
+export function applyStory(slice: StorySlice, changes: readonly StoryReplayed[]): StorySlice {
+  let at = slice;
+  for (const c of changes) {
+    const name = c.op.slice(STORY_AREA_ID.length + 1);
+    const def = c.op.startsWith(`${STORY_AREA_ID}.`) && hasOwn(STORY_STORE_AREA.ops, name) ? STORY_STORE_AREA.ops[name] : undefined;
+    const out = def?.apply(json(at), { op: name, value: c.value, turn: c.turn, n: c.n, by: c.by, standing: null, precision: null, source: c.source ?? null, cite: null });
+    if (out !== undefined && !("applied" in out)) at = asSlice(out.slice);
+  }
+  return at;
 }
 
 /**

@@ -129,7 +129,8 @@ interface OpRead {
 interface Reading {
   record: StoryRecord;
   clock: StoryClock | null;
-  turn: string;
+  /** The turn the call belongs to; none for a call of his own job or the assistant's, whose writes belong to no turn. */
+  turn: string | null;
   lines: Lines;
   /** The ref of the place a name or id names in the world the turn stands in; null when it names none there, undefined when that world has no place to name. */
   placeRef(words: string): string | null | undefined;
@@ -228,7 +229,9 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
     case "premise":
     case "record": {
       if (Object.keys(value).length === 0) return { line: "needs_one", fields: { n, op: def.name, fields: Object.keys(def.args) } };
-      return { item: def.finds === "premise" ? keyedItemId("premise", "") : keyedItemId("record", r.turn), fresh: false };
+      // A turn's record is that turn's own: a call that belongs to no turn has none to write.
+      if (def.finds === "record" && r.turn === null) return { line: "turn_needed", fields: { n, op: def.name } };
+      return { item: def.finds === "premise" ? keyedItemId("premise", "") : keyedItemId("record", r.turn ?? ""), fresh: false };
     }
   }
 }
@@ -279,7 +282,7 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
     reports.push(due !== null && now !== null ? { line: "due_now", fields: { n, op, due, now } } : { line: "due_now_undated", fields: { n, op } });
   }
   if (typeof value.due === "string") reports.push({ line: r.clock === null ? "no_clock" : "unreadable_time", fields: { n, op, field: "due", value: JSON.stringify(value.due) } });
-  r.record.apply({ part: def.part, item: found.item, value, turn: r.turn });
+  r.record.apply({ part: def.part, item: found.item, value, turn: r.turn ?? "" });
   out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
   return out;
 }
@@ -299,8 +302,7 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   const reply = call.reply();
   const list = args.operations;
   if (!Array.isArray(list) || list.length === 0) return reply.line("no_operations", {}).fail();
-  const turn = call.scope.turn;
-  if (turn === undefined) return reply.line("turn_needed", {}).fail();
+  const turn = call.scope.turn ?? null;
   const record = recordOr(call, reply);
   if (record === null) return reply;
   const { store, writes } = call.deps;
@@ -332,7 +334,7 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   }
   const read = ops.flatMap((o) => (o.read === undefined ? [] : [o.read]));
 
-  const writer = { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null };
+  const writer = { user: call.scope.user, chat: call.scope.chat, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null };
   const overlay = call.deps.overlay;
   let recorded: StoryRecorded[];
   try {

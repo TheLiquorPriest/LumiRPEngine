@@ -19,7 +19,7 @@ import { foldName } from "./keys";
 import type { LoreWorlds } from "./sources";
 
 /** The lore's word on an overlay's entry: null when it knows the entry in the chat; else the entry it does not know and any near it. The shape of the story's `LoreOverlay`. */
-export type OverlayCheck = (db: Database, input: { user: string; chat: string; turn: string; entry: string }) => { unknown: string; near?: string[] } | null;
+export type OverlayCheck = (db: Database, input: { user: string; chat: string; turn: string | null; entry: string }) => { unknown: string; near?: string[] } | null;
 
 /**
  * The lore's word on an overlay's entry, for the story's `overlay` operation, asked inside the call's queued write before anything
@@ -30,9 +30,9 @@ export type OverlayCheck = (db: Database, input: { user: string; chat: string; t
  */
 export function overlayCheck(worlds: LoreWorlds): OverlayCheck {
   return (db: Database, input) => {
-    refuseJoined(db, input.user, input.turn);
+    if (input.turn !== null) refuseJoined(db, input.user, input.turn);
     const ref = loreRefOf(input.entry);
-    const world = ref?.kind === "book" ? null : worlds.at(input.user, input.chat, input.turn);
+    const world = ref?.kind === "book" ? null : worlds.at(input.user, input.chat, input.turn ?? undefined);
     // A world entry is known when it is numbered and is an entry of the chat's own world.
     const numbered = ref?.kind === "world" ? db.query<{ world: string; key: string }, [string, number]>("SELECT world, key FROM lore_world_number WHERE user = ? AND n = ?").get(input.user, ref.n) : null;
     const known =

@@ -7,7 +7,7 @@
 import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { Source } from "../store";
-import { emptySlice, STORY_AREA_ID, STORY_OPS, STORY_STORE_AREA, type StorySlice } from "./fold";
+import { applyStory, emptySlice, STORY_AREA_ID, STORY_OPS, type StorySlice } from "./fold";
 
 interface StoryEntryRow {
   id: number;
@@ -107,16 +107,10 @@ function sliceBefore(db: Database, user: string, node: string): StorySlice {
     .all(user, JSON.stringify(chain.map((c) => c.turn)));
   const byTurn = new Map<string, typeof rows>();
   for (const r of rows) byTurn.set(r.turn, [...(byTurn.get(r.turn) ?? []), r]);
-  let slice: StorySlice = emptySlice();
-  for (const { turn, depth } of chain) {
-    for (const r of byTurn.get(turn) ?? []) {
-      const name = r.op.slice(STORY_AREA_ID.length + 1);
-      const def = Object.hasOwn(STORY_STORE_AREA.ops, name) ? STORY_STORE_AREA.ops[name] : undefined;
-      const out = def?.apply(slice as unknown as JsonObject, { op: name, value: JSON.parse(r.value) as JsonValue, turn, n: depth + 1, by: r.by, standing: null, precision: null, source: r.source as Source | null, cite: null });
-      if (out !== undefined && !("applied" in out)) slice = out.slice as unknown as StorySlice;
-    }
-  }
-  return slice;
+  return applyStory(
+    emptySlice(),
+    chain.flatMap(({ turn, depth }) => (byTurn.get(turn) ?? []).map((r) => ({ op: r.op, value: JSON.parse(r.value) as JsonValue, turn, n: depth + 1, by: r.by, source: r.source as Source | null }))),
+  );
 }
 
 /**

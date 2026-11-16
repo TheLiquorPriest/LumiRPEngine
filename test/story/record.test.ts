@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { StoreInputError } from "../../src/store";
-import { keyedItemId, STORY_PARTS, type StoryWrite, writeStory } from "../../src/story/record";
+import { storyAt } from "../../src/story/path";
+import { keyedItemId, STORY_PARTS, StoryRecord, type StoryWrite, writeStory } from "../../src/story/record";
 import { CHAT, openTable, USER } from "./rig";
 
 /** One write of every part, as an invented story's first turn might hold them. */
@@ -165,7 +166,7 @@ describe("the story record", () => {
     const mark = t.s.changes(turn.id).at(-1)?.ord ?? -1;
     // The continue goes on the same turn; a job the turn started writes on it meanwhile.
     await t.write(turn, [{ part: "beat", item: null, value: { text: "The continue's beat." } }]);
-    await t.writes.run(() => writeStory(t.store, { user: USER, turn: turn.id, by: "historian", agent: "historian-1", job: "job-1" }, [{ part: "beat", item: null, value: { text: "The job's beat.", message: "m0" } }]));
+    await t.writes.run(() => writeStory(t.store, { user: USER, chat: CHAT, turn: turn.id, by: "historian", agent: "historian-1", job: "job-1" }, [{ part: "beat", item: null, value: { text: "The job's beat.", message: "m0" } }]));
     await t.write(turn, [{ part: "beat", item: null, value: { text: "Another of the continue's." } }]);
 
     expect(await t.writes.run(() => t.s.takeBack(turn.id, mark))).toBe(2);
@@ -174,6 +175,20 @@ describe("the story record", () => {
     await t.writes.run(() => t.s.endJob("job-1"));
     const next = await t.begin();
     expect(t.record(next).of("beat").map((b) => b.fields.text)).toEqual(["Wren pays the toll.", "The job's beat."]);
+  });
+
+  test("a job of his own writes with no turn: only that job reads its writes until it ends, and the assistant's own call is read at once", async () => {
+    const t = await openTable();
+    await t.play([{ part: "beat", item: null, value: { text: "Wren pays the toll." } }]);
+    const owner = { user: USER, chat: CHAT, turn: null, by: "historian", agent: "historian-1" };
+    const at = storyAt(t.s, CHAT, null);
+    await t.writes.run(() => writeStory(t.store, { ...owner, job: "job-2" }, [{ part: "thread", item: null, value: { text: "Who sealed the letter?", kind: "question" } }]));
+    expect(StoryRecord.read(t.store, USER, at).of("thread")).toEqual([]);
+    expect(StoryRecord.read(t.store, USER, at, "job-2").of("thread").map((x) => x.fields.text)).toEqual(["Who sealed the letter?"]);
+    await t.writes.run(() => t.s.endJob("job-2"));
+    expect(StoryRecord.read(t.store, USER, at).of("thread").map((x) => x.fields.text)).toEqual(["Who sealed the letter?"]);
+    await t.writes.run(() => writeStory(t.store, { ...owner, job: null }, [{ part: "canon", item: null, value: { text: "The inn has twelve rooms." } }]));
+    expect(StoryRecord.read(t.store, USER, at).of("canon").map((x) => x.fields.text)).toEqual(["The inn has twelve rooms."]);
   });
 
   test("story changes of a chat that was deleted, or of an import that was forgotten, are removed with it; a chat a branch still shares keeps them", async () => {
@@ -185,7 +200,7 @@ describe("the story record", () => {
       await t.writes.run(() => {
         t.s.createChat({ id: chat });
         const turn = t.s.beginTurn({ chat, kind: "new", imported });
-        writeStory(t.store, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null, source: imported ? "import" : null }, [
+        writeStory(t.store, { user: USER, chat: CHAT, turn: turn.id, by: "author", agent: "author-1", job: null, source: imported ? "import" : null }, [
           { part: "beat", item: null, value: { text: `A beat in ${chat}.` } },
           { part: "thread", item: null, value: { text: `A thread in ${chat}.` } },
         ]);

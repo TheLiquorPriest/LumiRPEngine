@@ -31,7 +31,7 @@ export const STORY_ANSWERS = "story-answers";
  * the story's queued write, on the same database, before anything of the call is recorded. Null when it is known; else the entry it
  * does not know and any near it. The overlay itself is a change of the story's area, written with the call's other writes.
  */
-export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string; entry: string }) => { unknown: string; near?: string[] } | null;
+export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string | null; entry: string }) => { unknown: string; near?: string[] } | null;
 
 /** What the story tools are given by the host (the turn lane). */
 export interface StoryDeps {

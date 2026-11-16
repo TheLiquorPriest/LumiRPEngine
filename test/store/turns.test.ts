@@ -1293,7 +1293,7 @@ describe("one home for what a joined turn refuses", () => {
     const { s, store, t2 } = ts;
     const held = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
     s.joinTurn(held.id, t2.id);
-    const writer = { user: USER, turn: held.id, by: "gm", agent: "gm-1", job: null, now: 9 };
+    const writer = { user: USER, chat: "c", turn: held.id, by: "gm", agent: "gm-1", job: null, now: 9 };
     const before = written(ts);
     const calls: [string, () => unknown][] = [
       ["the store's change", () => s.addChanges(held.id, engine(tick(1)))],

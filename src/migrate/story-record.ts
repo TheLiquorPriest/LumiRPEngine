@@ -178,7 +178,7 @@ export function carryStory(input: { db: Database; store: Store; s: UserStore; ch
         const character = people.of(turn, c.entity).id;
         return { character, part: "casting", item: castingItemId(character), value: { as: c.standing, why: c.why ?? null } };
       });
-      if (story.length > 0) writeStory(store, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, source: "import" }, story);
+      if (story.length > 0) writeStory(store, { user: s.id, chat, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, source: "import" }, story);
       if (cast.length > 0) writeCast(store, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, at: turn.storyTime, now: input.now, source: "import" }, cast);
       counts.beats += part.beats.length;
       counts.struck += part.struck.length;
