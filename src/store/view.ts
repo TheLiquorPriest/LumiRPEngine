@@ -251,7 +251,7 @@ export class TreeView {
     for (const id of Object.keys(entities).sort()) {
       const e = entities[id] as EntityState;
       const category = this.categoryOf(e);
-      const holder = e.relations.find((r) => r.type === "in")?.to;
+      const holder = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
       const place = typeof e.fields.place === "string" ? e.fields.place : "";
       let parent: string;
       if (holder !== undefined && own(entities, holder)) parent = `entity:${holder}`;
@@ -407,6 +407,7 @@ export class TreeView {
       const holder = node.parent?.startsWith("entity:") ? node.parent.slice("entity:".length) : null;
       if (holder !== null && e.relations.some((r) => r.type === "worn_by" && r.to === holder)) fields.worn = true;
       if (holder !== null && e.relations.some((r) => r.type === "equipped" && r.to === holder)) fields.equipped = true;
+      if (holder !== null && e.relations.some((r) => r.type === "on" && r.to === holder)) fields.on = true;
       if (node.gone) fields.gone = true;
     }
     const pieces = reflectionPieces(this.reflectionOf(node));

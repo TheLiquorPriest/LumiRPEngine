@@ -32,7 +32,7 @@ function anchorOf(e: EntityState | undefined): string | undefined {
   if (!e) return undefined;
   const place = e.fields.place;
   if (typeof place === "string" && place !== "") return `p:${place}`;
-  const holder = e.relations.find((r) => r.type === "in")?.to;
+  const holder = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
   return holder ? `h:${holder}` : undefined;
 }
 
