@@ -10,6 +10,9 @@ import { createStore } from "../store";
 import { chatPlay, releasePlay } from "./chat-play";
 import type { ChatSurface, FrameEnv, SurfaceList } from "./surface";
 import { SURFACES } from "./surfaces/list";
+import { releaseReplies } from "./replies";
+import { releaseWindow } from "./window";
+import { releaseWorking } from "./working";
 
 export type { ChatSurface, DecoratorContext, FloatHandle, FrameEnv, SurfaceDef, SurfaceList } from "./surface";
 
@@ -68,6 +71,9 @@ export function chatFrame(env: FrameEnv, surfaces = SURFACES): ChatFrame {
       watching?.();
       listeners.clear();
       releasePlay(env);
+      releaseWorking(env);
+      releaseWindow(env);
+      releaseReplies(env);
     },
   };
 }

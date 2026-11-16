@@ -5,6 +5,9 @@ import type { SurfaceDef } from "../surface";
 import { surface as composerSurface } from "./composer";
 import { surface as hudSurface } from "./hud";
 import { surface as inputBarSurface } from "./input-bar";
+import { surface as replyLineSurface } from "./reply-line";
 import { surface as toastsSurface } from "./toasts";
+import { surface as windowSurface } from "./window";
+import { surface as workingSurface } from "./working";
 
-export const SURFACES: readonly SurfaceDef[] = [composerSurface, hudSurface, inputBarSurface, toastsSurface];
+export const SURFACES: readonly SurfaceDef[] = [composerSurface, hudSurface, inputBarSurface, replyLineSurface, toastsSurface, windowSurface, workingSurface];

@@ -20,7 +20,6 @@ import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
 import { type App, openAt, orgRoute, useApp, useView } from "./app";
 import { chipRole, chipTone } from "./chip-roles";
 import { Badge, Button, Field, useBusy } from "./components";
-import { openDiagnostics } from "./diagnostics";
 import type { IconName } from "../ui/icons";
 import { Icon } from "../ui/icons";
 import { MoneyInput } from "./money-input";
@@ -29,7 +28,6 @@ import { chipIntent, convertRequest } from "./requests";
 import { toastQueued } from "./queued";
 import { followReview, ReviewCard, reviewHandlers, ReviewUnread } from "./review-card";
 import { go } from "./build/chrome";
-import { openTurnRecord } from "./story/open";
 
 const CHIP_ICON: Record<ChipKind, IconName> = {
   change: "check",
@@ -242,11 +240,10 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
     busy,
     (choice, payload) =>
       run(async () => {
-        // A failed engine run's way to what failed (DESIGN §5.1): the drawer at Settings → Diagnostics.
-        if (choice === "diagnostics") return openDiagnostics();
-        // A harness reply's footer opens its turn's record in the drawer, and sends nothing.
-        if (chip.kind === "turn" && choice === "record") {
-          openTurnRecord({ messageId: chip.messageId, swipeId: chip.swipeId ?? 0 });
+        // A failed run's way to what failed, and a reply's footer's way to its turn's record: the turn's page (the Live page where the chip names no turn), and nothing is sent.
+        if (choice === "diagnostics" || (chip.kind === "turn" && choice === "record")) {
+          const turn = chip.turns?.at(-1);
+          app.open?.(turn === undefined ? { page: "live", chat: chatId } : { page: "turns", chat: chatId, at: [turn] });
           return;
         }
         // A harness turn's change to the world's document: Open in Build opens the chat's world there, and sends nothing.
