@@ -133,7 +133,7 @@ After the switch, `rpe up` names each carried connection that has no limits amon
 
 ### After the switch
 
-- To have RPE's agents go over a carried chat's past and fill in its records (its lore index, cast and story record), start a bootstrap job: for one chat on its **Story** page, or for every chat the migration carried on the **Migration** page. Nothing starts one by itself. The job runs under the [job settings](settings.md#jobs), and stops at `bootstrap.tokenLimit` with what it has recorded.
+- To have RPE's agents go over a carried chat's past and fill in its records (its lore index, cast and story record), start a bootstrap job: for one chat on its **Story** page, or for every chat the migration carried on the **Migration** page. Nothing starts one by itself. The job runs under the [job settings](settings.md#jobs) and its own run caps (`bootstrap.run.calls`, `bootstrap.run.time`); at `bootstrap.tokenLimit` (or your own limit) it stops and asks you whether to go on, and ends with what it has recorded if you say so.
 - The HUD inside the chat is not in this build. The previous build's play panels are on RPE's **Play** page, with the limits the [README](../README.md#what-this-build-does-not-have-yet) lists.
 - The `lumirpengine` command line and MCP server for outside harnesses do not work after the switch. They talk to the previous build's extension, which is no longer there.
 - Updates are ordinary updates of the extension in Lumiverse. See [Updating](install.md#updating).
