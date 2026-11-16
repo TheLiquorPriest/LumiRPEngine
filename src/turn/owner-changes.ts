@@ -85,8 +85,8 @@ export function ownerEditsBefore(store: UserStore, chat: string, turn: string, t
       fields: {
         what: whatOf(request, world),
         ...(request !== undefined ? { request: JSON.stringify(request) } : {}),
-        changes: { ".": e.applied },
-        not_applied: { ".": e.notApplied },
+        changes: e.applied,
+        not_applied: e.notApplied,
         ...(e.undo ? { undo: true, of: e.of ?? "" } : {}),
       },
     });

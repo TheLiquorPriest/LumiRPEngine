@@ -50,14 +50,15 @@ import type { StateView } from "../shared/state-view";
 import type { MapConfig } from "../shared/map-config";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import { formatMoney, type ParamDef, type WorldDoc } from "../shared/world";
-import { type ChangeRow, factStore, JoinedTurnError, readPart, type Report, type Store } from "../store";
+import { type ChangeRow, factStore, JoinedTurnError, type Part, readPart, type Report, type Store } from "../store";
 import { FACT_ABOUT } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import { type DueRead, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
-import type { TapSettings } from "./settings";
+import { journalNotes } from "./journal";
+import { TIDY_SWITCH, type TapSettings } from "./settings";
 import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
@@ -101,6 +102,8 @@ export interface PlayDeps {
   requests: Requests;
   /** Lumiverse's own routes as him, which put a tap's line in the chat as his message and start the reply. */
   lumiverse(): Pick<LumiverseWrites, "appendMessage" | "startGeneration">;
+  /** Writes one setting at the chat's level of his config (null takes the key away there), as the Settings page writes it. */
+  writeChatSetting(chat: string, key: string, value: JsonValue): Promise<void>;
   log: Log;
 }
 
@@ -247,16 +250,22 @@ export class PlayService {
     this.runEnds = new RunEnds(deps.live);
   }
 
-  /** The chat's state view at its head, or at `turn`, one of its turns, its controls preset by the chat's out-of-play settings and its map drawn at the chat's map settings. */
+  /**
+   * The chat's state view at its head, or at `turn`, one of its turns: its controls preset by the chat's out-of-play settings and its
+   * tidy-up switch, its map drawn at the chat's map settings, and the Journal's notes of its newest turns (`journal.ts`), a report's code
+   * in this area's words.
+   */
   async state(user: string, chat: string, turn: string | null): Promise<StateView> {
     const row = turn === null ? null : this.deps.store.user(user).turn(turn);
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
     const { taps, map } = await this.deps.settings(user, chat);
+    const keys = (await this.part()).keys;
+    const journal = journalNotes(this.deps.store, user, chat, taps.journalMost, (code) => own(keys, code) ?? code);
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
-    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat), offstage: taps.tell, map });
+    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat), offstage: taps.tell, map, tidy: taps.tidy.on, journal });
   }
 
   /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`). */
@@ -332,12 +341,15 @@ export class PlayService {
           return reply(r, "lre.fix", { pending: false, undo });
         }
         case "lre.chat.knowledge": {
-          // This chat's own choices, read as GM → This chat and the Engine page read them: RPE keeps none of today's, so each
-          // follows what it follows, and no engine of today's is named, as the state view names none. Setting one is not served.
-          if (r.knowledge !== undefined || r.narrator !== undefined || r.engine !== undefined || r.tidy !== undefined) throw new Refused("unavailable", { line: "chat_choices" });
+          // This chat's own choices, read as GM → This chat and the Engine page read them: RPE keeps none of today's but the tidy-up's
+          // switch, which is the chat's setting `things.tidy` (null: as the world's tidy.auto says), written at the chat's level. No
+          // engine of today's is named, as the state view names none. Setting the others is not served.
+          if (r.knowledge !== undefined || r.narrator !== undefined || r.engine !== undefined) throw new Refused("unavailable", { line: "chat_choices" });
           const row = this.deps.store.user(user).chat(chat);
           if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
-          return reply(r, "lre.chat.knowledge", { knowledge: null, narrator: null });
+          if (r.tidy !== undefined) await this.deps.writeChatSetting(chat, TIDY_SWITCH, r.tidy);
+          const { tidy } = (await this.deps.settings(user, chat)).taps;
+          return reply(r, "lre.chat.knowledge", { knowledge: null, narrator: null, ...(tidy.on !== null ? { tidy: tidy.on } : {}) });
         }
         case "lre.marker": {
           // The HUD's Pause clock and Resume clock, and the other time controls today's time marker carries, each his own edit at
@@ -660,10 +672,14 @@ export class PlayService {
     return fail("internal", message);
   }
 
+  /** This area's words as the guidance folder holds them now (`.prompts/play-answers.md`). */
+  private async part(): Promise<Part> {
+    return readPart(await readFile(join(this.deps.guidance, ".prompts", `${PLAY_ANSWERS}.md`), "utf8"), `.prompts/${PLAY_ANSWERS}.md`);
+  }
+
   /** A line of this area's words, filled with `fields` and with `codes` in the file's words for them (`keys`), each once; none when the user deleted the line. */
   private async words(line: string, fields: Record<string, unknown> = {}, codes: Readonly<Record<string, readonly string[]>> = {}): Promise<string> {
-    const what = `.prompts/${PLAY_ANSWERS}.md`;
-    const part = readPart(await readFile(join(this.deps.guidance, ".prompts", `${PLAY_ANSWERS}.md`), "utf8"), what);
+    const part = await this.part();
     const said = Object.fromEntries(Object.entries(codes).map(([name, list]) => [name, [...new Set(list.map((code) => own(part.keys, code) ?? code))]]));
     return part.lines.get(line)?.render(part.header, { ...fields, ...said }) ?? "";
   }

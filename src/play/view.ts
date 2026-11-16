@@ -1,9 +1,10 @@
 // The panels of a chat (plan §14, "What happens to today's UI": today's play panels kept, re-pointed to
 // RPE): today's `StateView`, built from RPE's store at the chat's head or at one of its turns. Every
 // pack's panel comes from the pack's own builder, and the HUD, the scene, the palette and the controls
-// from today's pure builders, which live in `state/` as today's backend built them (`buildView`). What
-// only today's ledger held (the Journal, the Keep report, writes held back for a turn, chips, each
-// reply's clock) has no source in RPE's store, and is present and empty. Which of today's engines
+// from today's pure builders, which live in `state/` as today's backend built them (`buildView`). The
+// Journal's notes are read from the chat's turns (`journal.ts`). What only today's ledger held (the Keep
+// report, writes held back for a turn, chips, each reply's clock) has no source in RPE's store, and is
+// present and empty (each reply's line and chips come on their own routes). Which of today's engines
 // plays the chat is left out: none of them does, RPE does, and today's pages draw the parts of
 // today's harness (its prepared turns, its connections) for a chat that names it, which RPE does not
 // serve. A chat RPE plays on no world is answered as today answers a chat that is not a world's.
@@ -15,6 +16,7 @@ import type { PackId, PanelId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import type { MapConfig } from "../shared/map-config";
 import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
+import type { JournalNote } from "../shared/ledger";
 import type { OffstageSettings } from "../shared/offstage";
 import { NARRATOR_DEFAULTS } from "../shared/settings";
 import type { StateView } from "../shared/state-view";
@@ -27,9 +29,10 @@ import { scene } from "./state/scene";
 
 /**
  * The knowledge choices the controls show. RPE keeps none of today's (a chat's own, Settings → Minds →
- * Knowledge, Settings → Narrator): the chat follows everything, and the user's are today's defaults.
+ * Knowledge, Settings → Narrator): the chat follows everything, and the user's are today's defaults. The
+ * chat's own tidy-up switch is its setting `things.tidy`, given with each view.
  */
-const KNOWLEDGE = { chat: {}, tracking: KNOWLEDGE_DEFAULTS.enabled, narrator: NARRATOR_DEFAULTS };
+const KNOWLEDGE = { tracking: KNOWLEDGE_DEFAULTS.enabled, narrator: NARRATOR_DEFAULTS };
 
 export interface ChatViewInput {
   store: Store;
@@ -43,6 +46,10 @@ export interface ChatViewInput {
   offstage: OffstageSettings;
   /** The chat's map settings (`map:` in its config), for the scale and time step a grid is drawn with. */
   map: MapConfig;
+  /** The chat's own tidy-up switch (`things.tidy`); null where it follows the world's `tidy.auto`. */
+  tidy: boolean | null;
+  /** The Journal's notes of the chat's newest turns (`journal.ts`). */
+  journal: JournalNote[];
 }
 
 /** The turn at the head of a chat's path; null before its first. */
@@ -94,12 +101,12 @@ export function chatView(input: ChatViewInput): StateView {
       scene: shown,
       chips: [],
       replyClocks: {},
-      journal: [],
+      journal: input.journal,
       keepReport: [],
       pending: [],
       panels,
       palette: palette(world, state, registry),
-      controls: controls(world, state, shown.sceneType, registry, KNOWLEDGE, input.offstage),
+      controls: controls(world, state, shown.sceneType, registry, { ...KNOWLEDGE, chat: input.tidy === null ? {} : { tidy: input.tidy } }, input.offstage),
       meter: null,
       packs,
       currency: world.currency,

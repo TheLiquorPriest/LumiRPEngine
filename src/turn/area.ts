@@ -129,6 +129,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
           return await store.afar(() => store.user(owner()).turnStart(ask.chat, ask.path, ask.point));
         },
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
+        storyFrom: async (chat) => (await chatSettings(chat)).storyFrom,
         ranges: async (chat, turn) => namedStretches(made().store, owner(), chat, turn),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
         // `chat_search` by meaning: the chat's messages in the index of vectors (`src/search/meaning.ts`), on his embedding connection.

@@ -37,6 +37,7 @@ import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, type SecretSettingsFor } from "../lore";
 import { placeLinesAt } from "../places";
+import { tidyHolds } from "../play/path-events";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
 import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState } from "../store";
@@ -1478,7 +1479,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const u = this.#d.store.user(scope.user);
         // A place shown in full carries its base's lines (`src/places`): its features, access and what the story changed of it.
         const placeLines = placeLinesAt(u, this.#d.store.env, scope.chat, scope.turn, settings.places, settings.map);
-        const state = worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
+        // With the chat's tidy-up on, the holds that cannot be, each with the fix the tidy-up would make: listed, never applied (R-173).
+        const holds = tidyHolds(this.#d.store, scope.user, scope.turn, settings.taps.tidy);
+        const state = worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, holds, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
         this.#drawnAfter.set(`${scope.user}\n${scope.turn}`, { ...drawnGiven, ...state.drawnShown });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
@@ -1661,7 +1664,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           quoted.push({ message: g.n ?? g.message, words });
         } else if (g.n !== null) more.push(g.n);
       }
-      add("delete", notices?.line("deleted", { count: gone.size, turns: { ".": quoted }, more: more.sort((a, b) => a - b).join(", ") }));
+      add("delete", notices?.line("deleted", { count: gone.size, turns: quoted, more: more.sort((a, b) => a - b).join(", ") }));
     }
     // Another swipe showing on the newest reply: its turn (none, for a swipe made without RPE) is the path now, with its own changes.
     for (const s of of("swiped")) add("swiped", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
@@ -1697,7 +1700,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         listed.push(entry);
       }
       const range = from === undefined || to === undefined ? undefined : from === to ? `${from}` : `${from}-${to}`;
-      add("restacked", notices?.line("swipe_flipped", { message: f.message, ...(range !== undefined ? { range } : {}), stopped: { ".": listed }, ...(left > 0 ? { more: left } : {}) }), f.to !== null ? { turn: f.to } : {});
+      add("restacked", notices?.line("swipe_flipped", { message: f.message, ...(range !== undefined ? { range } : {}), stopped: listed, ...(left > 0 ? { more: left } : {}) }), f.to !== null ? { turn: f.to } : {});
     }
 
     // The texts Lumiverse holds now: of each reply edited since its turn was tied, of each of the player's messages edited since RPE
@@ -1757,7 +1760,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const to = place.get(u.to);
       if (from === undefined || to === undefined) continue;
       const why = (u.why ?? []).map((w) => ({ message: place.get(w.message) ?? w.message, why: typeof keys[`unplayed_${w.why}`] === "string" ? keys[`unplayed_${w.why}`] : w.why }));
-      add("unplayed", notices?.line("unplayed", { range: from === to ? `${from}` : `${from}-${to}`, ...(why.length > 0 ? { why: { ".": why } } : {}) }), { range: { from, to: to + 1 } });
+      add("unplayed", notices?.line("unplayed", { range: from === to ? `${from}` : `${from}-${to}`, ...(why.length > 0 ? { why } : {}) }), { range: { from, to: to + 1 } });
     }
     // The last turn's reply: cut short by a stop, or saved by Lumiverse otherwise than it was released (plan §6.3, §10.8).
     const tied = last === null ? null : store.turn(last.turn);

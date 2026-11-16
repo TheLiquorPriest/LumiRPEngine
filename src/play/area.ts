@@ -9,9 +9,10 @@ import { PlayService, type PlayDeps } from "./service";
 
 /**
  * What the play panels take from the composition: the store each chat's state is in, whether a turn of a chat goes on, the guidance
- * folder holding their words, the chat's settings they read, the turn lane's requests, and Lumiverse's own routes as him.
+ * folder holding their words, the chat's settings they read, the turn lane's requests, Lumiverse's own routes as him, and a writer of
+ * one setting at a chat's level (the old route's tidy-up switch).
  */
-export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance" | "settings" | "requests" | "lumiverse">;
+export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance" | "settings" | "requests" | "lumiverse" | "writeChatSetting">;
 
 /** `takes` is asked once the turn lane is mounted, whose store the panels read: the routes are made then. */
 export function playArea(takes: () => PlayTakes): Area {
