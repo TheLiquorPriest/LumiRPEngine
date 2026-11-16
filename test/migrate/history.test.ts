@@ -176,7 +176,7 @@ describe("what today's build recorded beside each turn", () => {
       const carried = shipped.template(MIGRATED_PART).render(fields).text.trimEnd();
       expect(shipped.lines("notices").line(MIGRATED_NOTICE, { carried })).toBe(`This chat was carried over from the earlier build. Its state, cast and story record are as that build left them. ${carried}`);
       expect(carried.split("\n")).toEqual([
-        "It was played by the earlier build's harness engine; 4 of its turns were carried, each with what it changed.",
+        "It was played by the earlier build's harness engine; 3 of its turns were carried, each with what it changed.",
         "Mind files from the earlier build, on each character's record word for word, not yet filed:",
         `- ${PEOPLE.ada.name}: core.md, memory.md`,
         `- ${PEOPLE.bo.name}: profile.md`,

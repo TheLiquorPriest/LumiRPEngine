@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { decodeMessage } from "./today/host-message";
 import type { HostMessage } from "../shared/host";
 import { isRecord, type JsonObject } from "../shared/json";
-import { migrationReads, type MigrationReads } from "../adapter/lumiverse/migration-reads";
+import { migrationReads, type MigrationReads, type ProfileRow } from "../adapter/lumiverse/migration-reads";
 import { openQuiet } from "./quiet-db";
 
 /** The database's file in Lumiverse's data folder (`src/db/connection.ts`). */
@@ -130,6 +130,11 @@ export class LumiverseDb {
   /** A character of the user's, by its id and name; null when the user has none of that id. */
   character(characterId: string): { id: string; name: string } | null {
     return this.reads.character(characterId);
+  }
+
+  /** The user's connections in Lumiverse, newest first: id, name, provider, address and model; never a key (`migration-reads.ts`). */
+  connectionProfiles(): ProfileRow[] {
+    return this.reads.connectionProfiles();
   }
 
   /** How many messages a chat of the user's holds. */
