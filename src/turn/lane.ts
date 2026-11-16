@@ -27,7 +27,8 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
+import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
@@ -165,6 +166,8 @@ export interface TurnsOptions {
   migrated: MigratedSource;
   /** The lore's proposals, where an agent's suggestion about lore is kept for his approval. */
   proposals: () => Pick<LoreProposals, "suggested">;
+  /** What RPE writes to his books for the projection book (`lore.projection`), through the door's writes. */
+  projectionBooks: ProjectionBooks;
   /** A view of the host's that an agent is given by name, beyond the turn's own: its text; null for a name that is none of its own. */
   views?: (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
   /** In tests: the models agents run on, in place of the model layer's, and RPH's ids. */
@@ -199,6 +202,8 @@ export interface Turns {
   notes: TreeNotes;
   /** The suggestions agents file of the tree's files. */
   suggestions: TreeSuggestions;
+  /** The projection book of each chat's world, kept in step with the story (`lore.projection`). */
+  projection: LoreProjection;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -275,9 +280,31 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       return view !== undefined && ["queued", "held", "running", "asking"].includes(view.state);
     },
   });
+  // The projection book: the world's entries written to a book of his, after a run's reply and at every change of the path, when the
+  // chat's `lore.projection` is on; with it off, a book made while it was on is taken away.
+  const projection = new LoreProjection({
+    db: app.db,
+    writes: app.writes,
+    lore,
+    path: storePath(store),
+    books: options.projectionBooks,
+    enabled: async (user, chat) => (await loreSettings({ user, chat })).projection,
+    made: madeOf({ store, lore }),
+    lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
+    now: () => clock.now(),
+  });
   const overlay = overlayCheck(worlds);
   const facts = new FactsRegistry();
-  facts.add(turnFacts(store, (user, turn) => runs.ofTurn(user, turn)));
+  facts.add(
+    turnFacts(store, {
+      runs: (user, turn) => runs.ofTurn(user, turn),
+      stopped: (user, turn) => lane.stoppedAt(user, turn),
+      story: async (scope) => {
+        const s = await turnSettings(files, scope, app.log);
+        return { from: s.storyFrom, newest: s.storyNewest };
+      },
+    }),
+  );
   facts.add(loreIndex.facts());
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
@@ -375,6 +402,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     marks,
     since,
     notes,
+    projection,
     // The older turn folders, and with them the prompt each of their turns carried and where its slices were (plan §5.5, App. B): kept
     // for as many of the chat's newest turns as its folders are, a turn going on kept whatever its age.
     pruneTurns: async (user, chat, spare) => {
@@ -405,5 +433,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection };
 }

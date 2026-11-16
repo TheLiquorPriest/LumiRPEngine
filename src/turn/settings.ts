@@ -104,7 +104,17 @@ export interface TurnSettings {
   requestsTextMost: number;
   /** The taps' bounds, for the chat (`src/play/settings.ts`). */
   taps: TapSettings;
+  /** Whose messages are the chat's story (`story.from`), and, read with `replies`, whether his newest message is the turn's direction (`story.newest`): briefing facts (R-176). */
+  storyFrom: StoryFrom;
+  storyNewest: StoryNewest;
 }
+
+/** Whose messages are the story: as Lumiverse has it, everyone's, or the replies alone (R-176). */
+export type StoryFrom = "lumiverse" | "everyone" | "replies";
+/** With the replies as the story, his newest message: the turn's direction, or left out. */
+export type StoryNewest = "directive" | "leave_out";
+export const STORY_FROM: readonly StoryFrom[] = ["lumiverse", "everyone", "replies"];
+export const STORY_NEWEST: readonly StoryNewest[] = ["directive", "leave_out"];
 
 /** The defaults, where no level sets a value. */
 export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
@@ -141,6 +151,9 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   turnsPage: { size: 50, most: 500 },
   requestsTextMost: 2000,
   taps: TAP_DEFAULTS,
+  // R-176: today's values, carried.
+  storyFrom: "lumiverse",
+  storyNewest: "directive",
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -324,6 +337,24 @@ const DEFS = {
     about: "The most characters a request beside his words may hold (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so.",
     effect: "use",
   },
+  storyFrom: {
+    key: "story.from",
+    default: TURN_DEFAULTS.storyFrom,
+    takes: { type: "oneOf", values: STORY_FROM },
+    perConnection: false,
+    name: "Whose messages are the story",
+    about: "Whose messages the chat's story is made of: as Lumiverse has it (lumiverse), everyone's, or the replies alone (replies). A briefing fact the guidance reads.",
+    effect: "turn",
+  },
+  storyNewest: {
+    key: "story.newest",
+    default: TURN_DEFAULTS.storyNewest,
+    takes: { type: "oneOf", values: STORY_NEWEST },
+    perConnection: false,
+    name: "His newest message",
+    about: "With the story made of the replies: whether his newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads.",
+    effect: "turn",
+  },
 } as const satisfies Record<string, Setting>;
 
 /** Every setting the turn lane reads, as a config file writes it: its own, the map's and the taps'. */
@@ -359,6 +390,8 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     turnsPage: { size: read.value(DEFS.turnsPage) as number, most: read.value(DEFS.turnsPageMost) as number },
     requestsTextMost: read.value(DEFS.requestsTextMost) as number,
     taps: tapSettingsRead(read),
+    storyFrom: read.value(DEFS.storyFrom) as StoryFrom,
+    storyNewest: read.value(DEFS.storyNewest) as StoryNewest,
   };
 }
 
