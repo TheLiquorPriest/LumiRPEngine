@@ -41,6 +41,7 @@ import { storeArea } from "../store/area";
 import { storyArea } from "../story/area";
 import { treeArea } from "../tree/area";
 import { levelFiles, MOUNTS, NO_CHAT, OwnFiles, RPE_GUIDANCE, treeReader } from "../tree";
+import { GLOBAL_FOLDERS } from "../tree/layout";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { globalConfig } from "../turn/settings";
@@ -251,6 +252,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       },
       // His answer to a paused chat lands the held turns' changes through the turn lane's store.
       store: () => made().store,
+      // The global level's folders of agents, skills and prompt parts, where his carried files go.
+      folders: { agents: GLOBAL_FOLDERS.agents, skills: GLOBAL_FOLDERS.skills, prompts: GLOBAL_FOLDERS.prompts },
     }),
     goingBackArea({
       identifier: EXTENSION_IDENTIFIER,
