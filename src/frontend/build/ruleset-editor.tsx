@@ -615,7 +615,35 @@ const COMBAT: FieldSpec = {
   ],
 };
 
-type Part = "profile" | "checks" | "floors" | "progression" | "sheet" | "combat" | "json";
+/** How the world's grids measure (plan §8.2, R-160): the ruleset's `distances`, `diagonal`, `areas` and `cover`. A part left unset takes each chat's own map setting (`map.distances`, `map.diagonal`, `map.areaStart`, `map.areaShare`, `map.cover…`). */
+const MEASURES: readonly FieldSpec[] = [
+  { kind: "enum", key: "distances", label: "Distances are told in", values: ["feet", "metres"], optional: true, hint: "Unset: each chat's own setting" },
+  { kind: "enum", key: "diagonal", label: "A diagonal step counts as", values: ["one", "alternate"], labels: { one: "one square", alternate: "every second one in a row as two" }, optional: true, hint: "Unset: each chat's own setting" },
+  {
+    kind: "object",
+    key: "areas",
+    label: "Areas (a cone, a sphere, a line laid on the grid)",
+    optional: true,
+    fields: [
+      { kind: "enum", key: "start", label: "An area starts at", values: ["corner", "middle"], labels: { corner: "a point where squares meet", middle: "a square's middle" }, optional: true, hint: "Shipped: a point where squares meet" },
+      { kind: "number", key: "share", label: "Share of a square an area must cover for the square to count (0: any it covers any of)", min: 0, max: 1, step: 0.25, optional: true, hint: "Shipped: half" },
+    ],
+  },
+  {
+    kind: "object",
+    key: "cover",
+    label: "Cover (four lines from a corner of the attacker's square to the target's corners)",
+    optional: true,
+    fields: [
+      { kind: "number", key: "half", label: "Lines blocked that give half cover", min: 1, max: 4, step: 1, optional: true, hint: "Shipped: 1 or 2" },
+      { kind: "number", key: "threeQuarters", label: "Lines blocked that give three-quarters cover", min: 1, max: 4, step: 1, optional: true, hint: "Shipped: 3" },
+      { kind: "number", key: "total", label: "Lines blocked that give total cover", min: 1, max: 4, step: 1, optional: true, hint: "Shipped: 4" },
+      { kind: "bool", key: "creatures", label: "Creatures obstruct (shipped: yes)" },
+    ],
+  },
+];
+
+type Part = "profile" | "checks" | "floors" | "progression" | "sheet" | "combat" | "map" | "json";
 
 export function RulesetEditor() {
   const app = useApp();
@@ -657,6 +685,8 @@ export function RulesetEditor() {
   const sections = value.sheet?.sections ?? [];
   const rows = sections.reduce((n, s) => n + (Array.isArray(s.rows) ? s.rows.length : 0), 0);
   const combat = isRecord(value.combat) ? value.combat : null;
+  const measured = [value.distances, value.diagonal === "alternate" ? "alternating diagonals" : value.diagonal === "one" ? "diagonals of one" : undefined, value.areas === undefined ? undefined : "areas", value.cover === undefined ? undefined : "cover"].filter((m) => m !== undefined);
+  const measuresLint = draft.lint.filter((issue) => ["ruleset.distances", "ruleset.diagonal", "ruleset.areas", "ruleset.cover"].some((path) => issue.path === path || issue.path.startsWith(`${path}.`)));
   const saveBar = (
     <SaveBar>
       <Button
@@ -703,6 +733,7 @@ export function RulesetEditor() {
           {row("progression", "star", "Progression", Object.keys(progression).length > 0 ? Object.values(progression).map((p) => p.label).join(", ") : "None: levels never change on their own", lintOf("ruleset.progression"))}
           {row("sheet", "layers", "Sheet Designer", sections.length > 0 ? `${sections.length} section${sections.length === 1 ? "" : "s"}, ${rows} row${rows === 1 ? "" : "s"}` : "Not designed: the Sheets pack's own sheet", lintOf("ruleset.sheet"))}
           {row("combat", "sword", "Combat", combat ? "On: fights use its initiative, budgets and HP" : "Off: this world has no fights", lintOf("ruleset.combat"))}
+          {row("map", "map", "Distances, areas and cover on grids", measured.length > 0 ? measured.join(", ") : "Not set: each chat's own map settings", measuresLint)}
           {row("json", "code", "JSON (Advanced)", "The whole ruleset as the world file keeps it", [])}
         </List>
       </Section>
@@ -748,6 +779,17 @@ export function RulesetEditor() {
             <>
               <span class="lre-small lre-muted">Combat is data over the checks, pools and conditions the world has: leave it out and this world has no fights.</span>
               <FieldInput spec={COMBAT} value={json.combat} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("combat", next)} />
+            </>,
+          )
+        : null}
+      {part === "map"
+        ? sheet(
+            "Distances, areas and cover on grids",
+            <>
+              <span class="lre-small lre-muted">How this world's grids measure. What is left unset takes each chat's own map settings.</span>
+              {MEASURES.map((spec) => (
+                <FieldInput key={spec.key} spec={spec} value={json[spec.key]} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update(spec.key as keyof RulesetDef, next)} />
+              ))}
             </>,
           )
         : null}

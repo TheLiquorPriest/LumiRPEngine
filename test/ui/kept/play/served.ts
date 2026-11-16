@@ -9,7 +9,7 @@
 import { expect } from "bun:test";
 import type { HostTool, JsonObject, ToolCtx } from "rp-harness/contract";
 import { LiveHub, RouteError } from "../../../../src/app";
-import { buildRoutes } from "../../../../src/build";
+import { buildRoutes, worldsRoutes } from "../../../../src/build";
 import { engineTools, shippedTexts, stateScan } from "../../../../src/iface/index";
 import { PORTS } from "../../../iface/rig";
 import { playRoutes, PlayService } from "../../../../src/play";
@@ -51,14 +51,17 @@ export function servedRpe(): ServedRpe {
   const bed = makeBed();
   const live = new LiveHub({ queueEvents: 64, now: () => 0 });
   const running = new Set<string>();
-  const [post] = buildRoutes(buildServiceOn(bed));
+  const service = buildServiceOn(bed);
+  const [post] = buildRoutes(service);
+  const worlds = worldsRoutes(service.worlds, 4 * 1024 * 1024);
   // This bed holds no asks for the next message and has no Lumiverse to put a message in.
   const noLumiverse = (): never => {
     throw new Error("This bed has no Lumiverse to put a message in.");
   };
   const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, log: bed.log }));
 
-  const serve = async (key: string, chat: string, body: unknown, query: Record<string, string>): Promise<unknown> => {
+  const serve = async (key: string, params: Record<string, string>, body: unknown, query: Record<string, string>): Promise<unknown> => {
+    const chat = params.chat ?? "";
     switch (key) {
       case "POST /api/v1/build":
         return await callRoute(post, { body, user: USER });
@@ -68,17 +71,20 @@ export function servedRpe(): ServedRpe {
         return await callRoute(actionsRoute, { params: { chat }, body, user: USER });
       case "POST /api/v1/chats/:chat/actions/undo":
         return await callRoute(undoRoute, { params: { chat }, body, user: USER });
-      default:
-        throw new RpeError(404, `No route ${key}.`);
+      default: {
+        const found = worlds.find((r) => `${r.method} ${r.path}` === key);
+        if (found === undefined) throw new RpeError(404, `No route ${key}.`);
+        return await callRoute(found, { params, query, body, user: USER });
+      }
     }
   };
 
   const rpe: ServedRpe = {
     client: {
-      call: (async (key: string, params: { chat?: string }, options?: { body?: unknown; query?: Record<string, string> }) => {
+      call: (async (key: string, params: Record<string, string>, options?: { body?: unknown; query?: Record<string, string> }) => {
         rpe.asked.push({ key, body: options?.body });
         try {
-          return JSON.parse(JSON.stringify(await serve(key, params.chat ?? "", options?.body, options?.query ?? {})));
+          return JSON.parse(JSON.stringify(await serve(key, params, options?.body, options?.query ?? {})));
         } catch (error) {
           if (error instanceof RouteError) throw new RpeError(error.status, error.message);
           throw error;

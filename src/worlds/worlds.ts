@@ -31,7 +31,8 @@ import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, r
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
 import { sectionTemplatesProblem } from "../shared/sections";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
-import { compileMaps, mapSettingsOf } from "../shared/maps";
+import { compileMaps } from "../shared/maps";
+import { storedMapSettings } from "../shared/map-settings";
 import type { Registry } from "../engine/registry-impl";
 import { shippedVersion } from "../engine/table-updates";
 import type { StarterTable } from "../shared/tables";
@@ -827,8 +828,8 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     }
     // Map settings as the engine reads them; the defaults are no settings, so a world saved untouched stays as it was.
     if (value.mapSettings !== undefined) {
-      const settings = mapSettingsOf({ mapSettings: value.mapSettings });
-      if (JSON.stringify(settings) === JSON.stringify(mapSettingsOf({}))) delete doc.mapSettings;
+      const settings = storedMapSettings(value.mapSettings);
+      if (settings === null) delete doc.mapSettings;
       else doc.mapSettings = settings;
     }
     // The World Info books the world reads lore from live (DESIGN §4.2), each once; none listed is no list.

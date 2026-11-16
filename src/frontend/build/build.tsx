@@ -11,7 +11,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "pr
 import type { WorldId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
-import { mapSettingsOf } from "../../shared/maps";
+import { mapSettingsForEdit } from "../../shared/map-settings";
 import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import { placeCapsOf, playedKinds, spawnCapOf, type KindDef, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute, EntityGroup } from "../app";
@@ -836,7 +836,7 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
       return doc.time as unknown as JsonObject;
     case "meta":
       // Map settings and the spawn and place caps show as the world plays them: a world without them, with the defaults.
-      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), placeCap: placeCapsOf(doc).chat, placesPerTurn: placeCapsOf(doc).turn, lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
+      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), placeCap: placeCapsOf(doc).chat, placesPerTurn: placeCapsOf(doc).turn, lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsForEdit(doc)) as unknown as JsonObject };
   }
 }
 

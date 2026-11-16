@@ -656,6 +656,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
           ],
         },
         { kind: "bool", key: "travelSimulation", label: "Travel simulation: Go needs a route", hint: "Off (the default): Go goes even where no route leads. On: Go needs a walking route. A move the reply tells lands either way" },
+        { kind: "tags", key: "doorTerrains", label: "Terrains that are doors (a grid with no legend of its own)", noun: "terrain" },
         {
           kind: "object",
           key: "travel",

@@ -116,12 +116,12 @@ describe("the Build page", () => {
     });
     await act(() => button(root, "Save to draft").click());
     await until("the draft's change", () => root.querySelector("[data-lre-draft]")?.getAttribute("data-lre-draft") === "changed");
-    const [set] = sent(rpe, "lre.editor", "set");
-    expect(set).toMatchObject({ lre: 1, type: "lre.editor", reqId: expect.any(String), worldId: fernwick?.worldId, base: fernwick?.head, version: 0, op: "set", part: "meta", value: { name: "Fernwick Vale" } });
+    const set = rpe.asked.find((a) => a.key === "PUT /api/v1/worlds/:world/draft/parts/:part")?.body;
+    expect(set).toMatchObject({ base: fernwick?.head, version: 0, value: { name: "Fernwick Vale" } });
 
     await act(() => button(root, "Commit").click());
     await until("the commit's toast", () => root.querySelectorAll(".lre-toast").some((t) => words(t) === "Committed a new revision."));
-    expect(sent(rpe, "lre.world", "commit")).toEqual([{ lre: 1, type: "lre.world", reqId: expect.any(String), op: "commit", worldId: fernwick?.worldId, base: fernwick?.head, version: 1 }]);
+    expect(rpe.asked.filter((a) => a.key === "POST /api/v1/worlds/:world/commit").map((a) => a.body)).toEqual([{ base: fernwick?.head, version: 1 }]);
     expect(root.querySelector("[data-lre-draft]")?.getAttribute("data-lre-draft")).toBe("committed");
 
     root

@@ -4,3 +4,4 @@ export { BUILD_PATH, buildRoutes } from "./routes";
 export { BUILD_MIGRATIONS } from "./schema";
 export { seedCarriedWorlds, type WorldsSeeded } from "./seed";
 export { BUILD_ANSWERS, type BuildAnswer, type BuildDeps, BuildService, isRequest } from "./serve";
+export { WORLDS_PATH, worldsRoutes } from "./worlds-routes";
