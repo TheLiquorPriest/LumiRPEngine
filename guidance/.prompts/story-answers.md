@@ -32,5 +32,7 @@ place_unresolved: Operation {{n}} ({{op}}): the place {{place}} names no place o
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
 more: {{count}} more match. Ask again with a part, a range or a name to see them; the next is {{next}}.
-page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.
-page_branch_no_turn: This chat was branched from another and has no turn of its own yet. A strike is kept with this chat's newest turn, and the newest one here is the other chat's, so a strike here would change that chat too: nothing was struck or restored. It can be done once a turn has been played in this chat.
+correction_empty: Nothing of that could be corrected: {{id}} takes {{fields}}.
+correction_ignored: {{id}} does not take {{fields}}, so {{fields}} was left out.
+timeline_gone: The timeline has no {{id}} any more, so the page after it cannot be told. Read the timeline again from its start.
+so_far_unavailable: The story so far is not worked out here.

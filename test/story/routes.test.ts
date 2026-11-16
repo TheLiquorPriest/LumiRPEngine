@@ -13,7 +13,7 @@ import { join } from "node:path";
 import type { JsonObject } from "rp-harness/contract";
 import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import type { ShownMessage, TurnRow } from "../../src/store";
-import { type StoryAnswer, storyRoutes, type StoryRoutesDeps, type StorySettings, type StoryStruck } from "../../src/story/index";
+import { type StoryAnswer, type StoryItemShown, type StoryCorrected, type StoryCoverageAnswer, type StoryTimelinePage, storyRoutes, type StoryRoutesDeps, type StorySettings, type StoryStruck } from "../../src/story/index";
 import type { StoryWrite } from "../../src/story/record";
 import { hashOf } from "../store/fixtures";
 import { CHAT, openTable, type Table, USER } from "./rig";
@@ -27,20 +27,32 @@ const words = (line: string, fields: JsonObject = {}): string => LINES.line(line
 interface Page {
   t: Table;
   running: Set<string>;
+  /** What the prompt's window is taken to be: the first message it keeps, and whether agents read what the player hid. */
+  window: { edge: string | null; hiddenReadable: boolean };
   story(query?: Record<string, string>, user?: string, chat?: string): Promise<StoryAnswer>;
   strike(body: unknown, user?: string, chat?: string): Promise<StoryStruck>;
+  correct(body: unknown, user?: string, chat?: string): Promise<StoryCorrected>;
+  timeline(query: Record<string, string | number>, chat?: string): Promise<StoryTimelinePage>;
+  coverage(chat?: string): Promise<StoryCoverageAnswer>;
 }
 
 async function openPage(settings: Partial<StorySettings> = {}): Promise<Page> {
   const t = await openTable();
   const running = new Set<string>();
-  const deps: StoryRoutesDeps = { store: t.store, writes: t.writes, turning: (_user, chat) => running.has(chat), files: () => shippedTexts(), settings: async () => settings };
-  const [storyRoute, strikeRoute] = storyRoutes(deps);
+  const window = { edge: null as string | null, hiddenReadable: false };
+  const deps: StoryRoutesDeps = { store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => settings, window: async () => window };
+  const [storyRoute, correctRoute, timelineRoute, coverageRoute, , strikeRoute] = storyRoutes(deps);
+  const timelineHandle = timelineRoute.handle as unknown as (call: { params: { chat: string }; query: Record<string, string | number>; user: string }) => Promise<StoryTimelinePage>;
   return {
     t,
     running,
+    window,
     story: async (query = {}, user = USER, chat = CHAT) => await callRoute(storyRoute, { params: { chat }, query, user }),
     strike: async (body, user = USER, chat = CHAT) => await callRoute(strikeRoute, { params: { chat }, body, user }),
+    correct: async (body, user = USER, chat = CHAT) => await callRoute(correctRoute, { params: { chat }, body, user }),
+    // The server reads a paged route's `limit` and `after` from its cursor; the handler is given them beside what the route declares.
+    timeline: async (query, chat = CHAT) => await timelineHandle({ params: { chat }, query, user: USER }),
+    coverage: async (chat = CHAT) => await callRoute(coverageRoute, { params: { chat }, user: USER }),
   };
 }
 
@@ -207,7 +219,7 @@ describe("striking from the page", () => {
     const done = await page.strike({ id: ids.beat, struck: true, why: "Bram never touched the letter." });
     expect(done.changed).toBe(true);
     expect(done.item).toMatchObject({ id: ids.beat, struck: true, from: 3, to: 3, turn: first.id, by: "author" });
-    expect(done.item.writes.at(-1)).toEqual({ turn: second.id, message: 5, imported: false, by: "player", wrote: { drop: true, why: "Bram never touched the letter." } });
+    expect(done.item.writes.at(-1)).toEqual({ turn: null, message: null, imported: false, by: "player", wrote: { drop: true, why: "Bram never touched the letter." } });
     // Read at the chat's newest turn it is struck; as the turn it was recorded on stood, it is not.
     expect((await page.story()).timeline.beat.items.map((b) => [b.id, b.struck])).toEqual([
       ["b:x1", true],
@@ -220,7 +232,7 @@ describe("striking from the page", () => {
     expect({ changed: again.changed, writes: again.item.writes.length }).toEqual({ changed: false, writes: 2 });
     // The migration's beat the Author struck is the player's to take back, by the player's own write.
     const back = await page.strike({ id: "b:x1", struck: false });
-    expect({ changed: back.changed, struck: back.item.struck, by: back.item.by, last: back.item.writes.at(-1) }).toEqual({ changed: true, struck: false, by: "migration", last: { turn: second.id, message: 5, imported: false, by: "player", wrote: { drop: false } } });
+    expect({ changed: back.changed, struck: back.item.struck, by: back.item.by, last: back.item.writes.at(-1) }).toEqual({ changed: true, struck: false, by: "migration", last: { turn: null, message: null, imported: false, by: "player", wrote: { drop: false } } });
     expect(back.item.turn).toBe(carried.id);
     // A chapter struck is no longer where the chat is, and taking its strike back makes it so again.
     await page.strike({ id: ids.chapter, struck: true });
@@ -229,13 +241,10 @@ describe("striking from the page", () => {
     expect((await page.story()).current.chapter).toBe(ids.chapter);
   });
 
-  test("refuses in the story's words while a turn of the chat runs, for an item the record does not hold, and for what it cannot read; writes nothing", async () => {
+  test("refuses in the story's words for an item the record does not hold, and for what it cannot read; writes nothing", async () => {
     const { page, ids } = await played();
     const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op LIKE 'story.%'").get()?.n ?? 0;
     const before = rows();
-    page.running.add(CHAT);
-    await expect(page.strike({ id: ids.beat, struck: true })).rejects.toMatchObject({ status: 409, message: words("page_turning") });
-    page.running.delete(CHAT);
     await expect(page.strike({ id: "b-nowhere", struck: true })).rejects.toMatchObject({ status: 404, message: words("unknown_id", { id: '"b-nowhere"' }) });
     await expect(page.strike({ id: ids.beat, struck: "yes" })).rejects.toMatchObject({ status: 400 });
     await expect(page.strike({ id: 7, struck: true })).rejects.toMatchObject({ status: 400 });
@@ -243,17 +252,11 @@ describe("striking from the page", () => {
     // One user's chat is not another's to strike.
     await expect(page.strike({ id: ids.beat, struck: true }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
     expect(rows()).toBe(before);
-    expect(words("page_turning")).not.toBe("");
   });
 
-  test("in a branch with no turn of its own, a strike is refused in the story's words and the chat it was branched from keeps its record; once the branch has played a turn, its strike is its own", async () => {
+  test("in a branch with no turn of its own a strike lands on the branch's own line, and the chat it was branched from keeps its record", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op LIKE 'story.%'").get()?.n ?? 0;
     const shown = await branchOf(page.t);
-    const before = rows();
-    await expect(page.strike({ id: ids.beat, struck: true }, USER, BRANCH)).rejects.toMatchObject({ status: 409, message: words("page_branch_no_turn") });
-    await expect(page.strike({ id: "b:x1", struck: false }, USER, BRANCH)).rejects.toMatchObject({ status: 409, message: words("page_branch_no_turn") });
-    expect(rows()).toBe(before);
     const beats = async (chat: string) => (await page.story({}, USER, chat)).timeline.beat.items.map((b) => [b.id, b.struck]);
     const standing = [
       ["b:x1", true],
@@ -261,28 +264,92 @@ describe("striking from the page", () => {
       [ids.later, false],
     ];
     expect(await beats(CHAT)).toEqual(standing);
-
-    const own = await playIn(page.t, shown);
-    const done = await page.strike({ id: ids.beat, struck: true }, USER, BRANCH);
-    expect(done.item.writes.at(-1)).toMatchObject({ turn: own.id, by: "player", wrote: { drop: true } });
+    await page.strike({ id: ids.beat, struck: true }, USER, BRANCH);
     expect(await beats(BRANCH)).toEqual([
       ["b:x1", true],
       [ids.beat, true],
       [ids.later, false],
     ]);
     expect(await beats(CHAT)).toEqual(standing);
-    expect(words("page_branch_no_turn")).not.toBe("");
+    // A turn played in the branch afterwards goes on from it.
+    await playIn(page.t, shown);
+    expect(await beats(BRANCH)).toEqual([
+      ["b:x1", true],
+      [ids.beat, true],
+      [ids.later, false],
+    ]);
+  });
+});
+
+describe("correcting from the page", () => {
+  test("a correction of a thread's state and of a scene's summary is the player's own change, kept apart from any turn, and a turn that runs does not stop it", async () => {
+    const { page, ids } = await played();
+    const thread = await page.correct({ id: ids.thread, fields: { state: "The seal was forged." } });
+    expect(thread).toMatchObject({ changed: true, said: [], item: { id: ids.thread, fields: expect.objectContaining({ state: "The seal was forged." }) } });
+    expect(thread.item.writes.at(-1)).toMatchObject({ by: "player", wrote: { state: "The seal was forged." } });
+    // A turn is under way; the correction is made all the same.
+    await page.t.writes.run(() => page.t.s.beginTurn({ chat: CHAT, kind: "new" }));
+    const scene = await page.correct({ id: ids.scene, fields: { summary: "Wren hands over the letter." } });
+    expect(scene.item.fields.summary).toBe("Wren hands over the letter.");
+    const owner = page.t.db.query<{ turn: string; source: string | null }, []>("SELECT turn, source FROM change WHERE op = 'story.write' ORDER BY id DESC LIMIT 2").all();
+    expect(owner).toEqual([
+      { turn: "", source: "player" },
+      { turn: "", source: "player" },
+    ]);
   });
 
-  test("a turn that begins while a strike waits for its write is not written under: the strike is refused in that write, in the story's words", async () => {
+  test("in a fresh branch it lands on the branch's own line, and what cannot be read, and an item the record does not hold, are answered in the story's words", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op LIKE 'story.%'").get()?.n ?? 0;
-    const before = rows();
-    // A continue takes its marks and holds its run in one write, queued before the strike's own.
-    const began = page.t.writes.run(() => page.running.add(CHAT));
-    const strike = page.strike({ id: ids.beat, struck: true });
-    await began;
-    await expect(strike).rejects.toMatchObject({ status: 409, message: words("page_turning") });
-    expect(rows()).toBe(before);
+    await branchOf(page.t);
+    await page.correct({ id: ids.thread, fields: { state: "Forged." } }, USER, BRANCH);
+    expect((await page.story({}, USER, BRANCH)).model.thread.items[0]?.fields.state).toBe("Forged.");
+    expect((await page.story({}, USER, CHAT)).model.thread.items[0]?.fields.state).toBeUndefined();
+    const sent = await page.correct({ id: ids.thread, fields: { kind: "riddle", state: "Still forged.", colour: "red" } });
+    expect(sent.said).toEqual([words("unreadable_op", { n: 1, op: "thread", field: "kind", value: '"riddle"', choices: "question, promise, setup", says: "text" }), words("correction_ignored", { id: ids.thread, fields: "colour" })]);
+    await expect(page.correct({ id: ids.thread, fields: { colour: "red" } })).rejects.toMatchObject({ status: 400 });
+    await expect(page.correct({ id: "b-nowhere", fields: { text: "x" } })).rejects.toMatchObject({ status: 404, message: words("unknown_id", { id: '"b-nowhere"' }) });
+  });
+
+  test("a reading of the player is corrected in his words, shown with its writes by the Author and then by the player", async () => {
+    const { page, ids } = await played();
+    const before = (await page.story()).model.player.items[0] as StoryItemShown;
+    const done = await page.correct({ id: before.id, fields: { text: "Enjoys fast, short scenes.", kind: "pacing" } });
+    expect(done.item.fields).toMatchObject({ text: "Enjoys fast, short scenes.", kind: "pacing" });
+    expect(done.item.writes.map((w) => [w.by, w.wrote.text])).toEqual([...before.writes.map((w) => [w.by, w.wrote.text]), ["player", "Enjoys fast, short scenes."]]);
+    expect(ids.thread).not.toBe("");
+  });
+});
+
+describe("the timeline, the coverage and the story so far", () => {
+  test("the timeline pages chapters, scenes and beats as one list in the chat's order, each beat with its scene, its chapter and its messages", async () => {
+    const { page, ids } = await played({ queryItems: 2 });
+    const first = await page.timeline({ limit: 2 });
+    // The carried beat lies before the chapter the first turn opened.
+    expect(first.items.map((e) => [e.kind, e.item.id])).toEqual([
+      ["beat", "b:x1"],
+      ["chapter", ids.chapter],
+    ]);
+    expect(first.next).toBe(ids.chapter);
+    const second = await page.timeline({ limit: 20, after: first.next ?? "" });
+    const beat = second.items.find((e) => e.item.id === ids.beat);
+    expect(beat).toMatchObject({ kind: "beat", chapter: ids.chapter, scene: ids.scene });
+    expect(beat?.messages.length).toBeGreaterThan(0);
+    await expect(page.timeline({ limit: 2, after: "b-nowhere" })).rejects.toMatchObject({ status: 409, message: words("timeline_gone", { id: '"b-nowhere"' }) });
+  });
+
+  test("the coverage route tells every stretch, with the window's edge and the count of what lies above it that the record does not cover", async () => {
+    const { page } = await played();
+    const whole = await page.coverage();
+    expect(whole.messages).toBe(page.t.shown.length);
+    expect(whole.edge).toBeNull();
+    expect(whole.above).toBe(0);
+    expect(whole.stretches[0]?.from).toBe(0);
+    expect(whole.stretches.at(-1)?.to).toBe(whole.messages - 1);
+    // A window that keeps the newest two messages: what lies above its edge and is not covered is counted.
+    page.window.edge = page.t.shown.at(-2)?.id ?? null;
+    const cut = await page.coverage();
+    expect(cut.edge).toBe(page.t.shown.length - 2);
+    expect(cut.above).toBe(cut.stretches.filter((s) => !s.window && !s.covered).reduce((n, s) => n + (s.to - s.from + 1), 0));
+    expect(cut.stretches.every((s) => s.window === s.from >= (cut.edge ?? 0))).toBe(true);
   });
 });

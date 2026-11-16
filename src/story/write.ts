@@ -18,7 +18,7 @@ import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
 import { type Lane, STANDINGS, type TreeView } from "../store";
 import { allSpans, itemView, placeRefOf, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, treeOf, valueView } from "./kit";
-import { keyedItemId, recordStory, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
+import { keyedItemId, recordStory, type StoryItem, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
 
 /** The lane every operation of the tool writes to. */
 export const STORY_LANE: Lane = "story";
@@ -85,7 +85,7 @@ const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", 
 export const RECORD_PROPERTIES: Record<string, JsonObject> = Object.fromEntries(RECORD_ARGUMENTS.map((name) => [name, {}]));
 
 /** Something an operation says that cannot be read: the answers' line that says so, and its fields. */
-interface Unread {
+export interface Unread {
   line: string;
   fields: Fields;
 }
@@ -285,6 +285,37 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   r.record.apply({ part: def.part, item: found.item, value, turn: r.turn ?? "" });
   out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
   return out;
+}
+
+/** What a page's correction of an item is read against: the record as it stands, story time, the answers' lines and the world's places. */
+export type CorrectionReading = Omit<Reading, "turn">;
+
+/** A correction of an item as read: what it writes, and the lines that say what was not read or did not add up. */
+export interface CorrectionRead {
+  value: JsonObject;
+  said: string[];
+}
+
+/**
+ * Reads the fields a page sends to correct an item as `story_record` reads the same fields of an operation on that part (messages by
+ * number or id, a time, one of a list, names), against the item named. What cannot be read is left out and said; nothing readable
+ * is refused in the line that says so. The item's record of a turn is read as that turn's.
+ */
+export function readCorrection(r: CorrectionReading, item: StoryItem, fields: JsonObject): CorrectionRead | { refused: Unread } {
+  const reading: Reading = { ...r, turn: item.part === "record" ? item.opened : null };
+  // What names the item is the item's own, whatever the page sent: an arc is found by who it is about.
+  const given: JsonObject = { ...fields, op: item.part, id: item.id, ...(item.part === "arc" ? { who: item.fields.who ?? "" } : {}) };
+  const out = readOp(reading, 1, given);
+  const fatal = out.fatal[0];
+  if (fatal !== undefined) return { refused: fatal };
+  const planned = out.read as Planned;
+  const taken = takesOf(item.part).reads.filter((f) => f !== "id" && f !== "new");
+  if (Object.keys(planned.value).length === 0) return { refused: { line: "correction_empty", fields: { id: item.id, fields: taken.join(", ") } } };
+  const said = [...out.unread, ...planned.reports].map((u) => r.lines.line(u.line, u.fields) ?? "");
+  // The id names the item for every part, though not every operation reads one.
+  const ignored = out.ignored.filter((k) => k !== "id");
+  if (ignored.length > 0) said.push(r.lines.line("correction_ignored", { id: item.id, fields: ignored.join(", ") }) ?? "");
+  return { value: planned.value, said: said.filter((s) => s !== "") };
 }
 
 /** Raised inside the write when the lore lane does not know an entry: the write is undone and the answer says so. */

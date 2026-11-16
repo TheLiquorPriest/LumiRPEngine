@@ -23,7 +23,7 @@ const writeRow = shape.named(
   "StoryWriteRow",
   "One write of an item, as the record keeps it: its turn, that turn's reply on the path (null: on none), whether a migration wrote that turn, who wrote it, and what it said.",
   shape.object({
-    turn: shape.turnId(),
+    turn: field(nullable(shape.turnId()), "The turn it was written on; null for the player's own change, which belongs to no turn."),
     message: field(nullable(N), "The number of that turn's reply on the chat's path, from 0; null while the turn is on no path (open, or left behind)."),
     imported: field(shape.yesNo(), "That turn was written by a migration's import, not played on RPE."),
     by: field(nullable(T), "Who wrote it: an agent's definition (`author`), `player`, or the migration."),
@@ -41,7 +41,7 @@ const itemRow = shape.named(
     fields: field(shape.record(shape.json()), "Every field its writes set, the latest of each: messages by their number on the chat's path (`first` and `last` as `from` and `to`), a due time as the engine shows a time."),
     from: field(nullable(N), "Where it lies in the chat, by message number: a beat's messages, a scene's or a chapter's span. Null for a part that lies nowhere, or an end the record cannot place."),
     to: nullable(N),
-    turn: field(shape.turnId(), "Its first write: the turn."),
+    turn: field(nullable(shape.turnId()), "Its first write: the turn; null when that write was the player's own change, which belongs to no turn."),
     message: field(nullable(N), "That turn's reply on the path."),
     imported: field(shape.yesNo(), "Whether a migration's import wrote that turn."),
     by: field(nullable(T), "Who wrote it."),
@@ -99,6 +99,72 @@ export const storyStrikeReply = shape.named(
   shape.object({ changed: field(shape.yesNo(), "Whether anything was recorded: false when the item already stood so."), item: itemRow }),
 );
 export type StoryStruck = Infer<typeof storyStrikeReply>;
+
+export const storyCorrectBody = shape.named(
+  "StoryCorrectAsk",
+  "An item of the record, by id, and the fields of it to correct, each as the item shows it (a message by its number, a time as the page shows it, names as a list): the player's own words, written as his own change after the chat's newest reply.",
+  shape.object({ id: shape.text({ blank: false }), fields: field(shape.record(shape.json()), "The fields to set: the item's own, as `story_record` reads them for its part, `close` and `drop` among them.") }),
+);
+export type StoryCorrect = Infer<typeof storyCorrectBody>;
+
+export const storyCorrectReply = shape.named(
+  "StoryCorrectReply",
+  "What a correction did: whether anything was recorded, what could not be read of it, and the item as it stands now, at the chat's newest turn.",
+  shape.object({ changed: shape.yesNo(), said: field(shape.list(T), "Each thing sent that could not be read, was left out, or did not add up, in words."), item: itemRow }),
+);
+export type StoryCorrected = Infer<typeof storyCorrectReply>;
+
+const timelineRow = shape.named(
+  "StoryTimelineRow",
+  "One entry of the timeline: a chapter, a scene or a beat, with the chapter and the scene it lies in and, for a beat, the messages it stands for.",
+  shape.object({
+    kind: shape.oneOf("chapter", "scene", "beat"),
+    item: itemRow,
+    chapter: field(nullable(T), "The id of the chapter it lies in; null for a chapter, or where none does."),
+    scene: field(nullable(T), "The id of the scene it lies in; null for a chapter or a scene, or where none does."),
+    messages: field(shape.list(shape.object({ number: N, id: T })), "A beat's messages, each by its number on the chat's path and its id; empty for a chapter or a scene (their span is in `item`)."),
+  }),
+);
+export type StoryTimelineRow = Infer<typeof timelineRow>;
+
+export const storyTimelineReply = shape.named("StoryTimeline", "A page of the timeline: chapters, scenes and beats as one list in the chat's order, oldest first.", shape.page(timelineRow));
+export type StoryTimelinePage = Infer<typeof storyTimelineReply>;
+
+export const storyCoverageReply = shape.named(
+  "StoryCoverage",
+  "What the record covers of the whole chat: every stretch of messages with the same marks, in and out of the prompt's window, and how many messages above the window's edge it does not cover.",
+  shape.object({
+    chat: T,
+    messages: field(N, "How many messages the chat's path holds."),
+    edge: field(nullable(N), "The number of the first message the prompt's window keeps; null where it keeps them all, or none is known."),
+    hiddenReadable: field(shape.yesNo(), "The chat's setting: agents may read the messages the player hid, so an uncovered hidden message above the edge counts."),
+    hidden: field(shape.list(N), "The numbers of the messages the player hid."),
+    above: field(N, "How many messages above the window's edge the record does not cover: the window marker's count."),
+    stretches: shape.list(
+      shape.object({
+        from: N,
+        to: N,
+        covered: field(shape.yesNo(), "Beats or a scene's summary lie over it."),
+        beats: field(shape.yesNo(), "Beats lie over it."),
+        summarized: field(shape.yesNo(), "It lies in a scene that has its summary."),
+        window: field(shape.yesNo(), "It lies inside the prompt's window."),
+      }),
+    ),
+  }),
+);
+export type StoryCoverageAnswer = Infer<typeof storyCoverageReply>;
+
+export const storySoFarReply = shape.named(
+  "StorySoFarReply",
+  "The story so far as the next briefing gives it to the Author, worked out at the chat's head: its text, its size against its budget, and what it left out.",
+  shape.object({
+    text: field(T, "The block as laid out; empty when the window leaves nothing out or the record holds nothing for it."),
+    tokens: field(N, "Its size in tokens."),
+    budget: field(N, "The most tokens it may fill."),
+    leftOut: field(shape.list(shape.object({ from: N, to: N, chapters: N, scenes: N, beats: N })), "Each stretch it had no room for, with what of the record it holds."),
+  }),
+);
+export type StorySoFarAnswer = Infer<typeof storySoFarReply>;
 
 /** The checks above hold, and are read by no one. */
 export type Mirrors = [PartMirrored];
