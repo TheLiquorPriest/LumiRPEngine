@@ -206,6 +206,8 @@ export interface EngineDeps {
   carried?: CarriedPort;
   /** The world service Build's routes call (`src/worlds/service.ts`), for the tools that read and change a world's document. Absent: the user's worlds are not reachable from this run. */
   worlds?: Pick<WorldService, "list" | "read" | "draft" | "commit" | "lint">;
+  /** Keeps the values each line the call said was filled with, as the answers part's last use in the call's chat (the Prompts preview reads them). Absent: none is kept. */
+  lastUse?: LastUseKeeper;
   /** Milliseconds since 1970, for an approval's question; `Date.now` when absent. */
   now?: () => number;
 }
@@ -394,6 +396,34 @@ export function faultAnswer(lines: Lines, tool: string, error: unknown, failed: 
   return reply.result();
 }
 
+/** The prompt part every engine answer's sentences come from. */
+export const ANSWERS_PART = "engine-answers";
+
+/** What keeps the values a part's lines were last said with in a chat, for the Prompts preview: the part, and each line said with the fields it was filled with. */
+export type LastUseKeeper = (scope: Scope, part: string, lines: Record<string, JsonObject>) => void | Promise<void>;
+
+/**
+ * `lines` as one call says them: each line said with fields is noted, and `keep` hands them to `keeper` as `part`'s last use in the
+ * call's chat (a line said twice, by its last saying). A call that said none, or a host with no keeper, keeps nothing. It never fails the call.
+ */
+export function lastUse(lines: Lines, keeper: LastUseKeeper | undefined, scope: Scope, part: string): { lines: Lines; keep(): Promise<void> } {
+  if (keeper === undefined) return { lines, keep: async () => undefined };
+  const said: Record<string, JsonObject> = {};
+  return {
+    lines: lines.watching((name, fields) => {
+      if (Object.keys(fields).length > 0) said[name] = JSON.parse(JSON.stringify(fields)) as JsonObject;
+    }),
+    async keep() {
+      if (Object.keys(said).length === 0) return;
+      try {
+        await keeper(scope, part, said);
+      } catch {
+        // The preview shows the values before; the call is answered all the same.
+      }
+    },
+  };
+}
+
 /**
  * A tool as RPH holds it: its spec with its file's words, run with the call's context. A throw in its code is a fault, answered as
  * one (`faultAnswer`); a scope found unreadable while it ran (a turn joined to another in between) is told as the fact.
@@ -412,14 +442,19 @@ export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: Eng
       // A job of no chat has no chat's world to work on: said in the answers' words, nothing read or written.
       const { scope } = ctx;
       if (scope.chat === undefined) return new Reply(words.lines).line("no_chat_run", { tool: spec.name }).fail().result();
-      const call: Call = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: words.lines, tree: words.tree, reply: () => new Reply(words.lines) };
+      // Each line the call says is told to the chat's keeper as the answers part's last use there, once the call is over.
+      const use = lastUse(words.lines, deps.lastUse, scope, ANSWERS_PART);
+      const lines = use.lines;
+      const call: Call = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, tree: words.tree, reply: () => new Reply(lines) };
       try {
         return (await spec.run(given, call)).result();
       } catch (error) {
         if (ctx.signal.aborted) throw error;
-        if (error instanceof ScopeError) return saysUnreadable(new Reply(words.lines), error.why).result();
-        if (error instanceof JoinedTurnError) return saysUnreadable(new Reply(words.lines), { missing: "joined", id: error.turn, into: error.joined }).result();
-        return faultAnswer(words.lines, spec.name, error, deps.env.failed, ctx.scope.turn ?? "");
+        if (error instanceof ScopeError) return saysUnreadable(new Reply(lines), error.why).result();
+        if (error instanceof JoinedTurnError) return saysUnreadable(new Reply(lines), { missing: "joined", id: error.turn, into: error.joined }).result();
+        return faultAnswer(lines, spec.name, error, deps.env.failed, ctx.scope.turn ?? "");
+      } finally {
+        await use.keep();
       }
     },
   };

@@ -6,13 +6,12 @@ import type { HostTool } from "rp-harness/contract";
 import { readPart } from "../store/words";
 import { WORLD_APPLY } from "./apply";
 import { ROLL, WORLD_QUERY, WORLD_SEARCH } from "./fixed";
-import { type EngineDeps, hostTool, type ToolSpec, type Words } from "./kit";
+import { ANSWERS_PART, type EngineDeps, hostTool, type ToolSpec, type Words } from "./kit";
 import { MAP_TOOLS } from "./maptools";
 import { SEARCHABLE_TOOLS } from "./searchable";
 import { Lines, toolText } from "./texts";
 
-/** The prompt part every answer's sentences come from. */
-export const ANSWERS_PART = "engine-answers";
+export { ANSWERS_PART };
 
 /** The prompt part that words the world's tree wherever it is shown: the world state, and `world_query`. */
 export const TREE_PART = "world-state";

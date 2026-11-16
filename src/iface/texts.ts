@@ -11,6 +11,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { renderTemplate } from "rp-harness/helpers";
 
 /** The folder the shipped guidance lives in, in this repository: the lowest level of every chat's files. */
 export const SHIPPED_GUIDANCE = join(import.meta.dir, "..", "..", "guidance");
@@ -75,7 +76,10 @@ export const LIST_JOIN = ", ";
 
 /** A template, parsed once and filled as often as asked. */
 export class Template {
-  private constructor(private readonly nodes: Node[]) {}
+  private constructor(
+    private readonly nodes: Node[],
+    private readonly source: string,
+  ) {}
 
   /** Parses a template; a tag that is not one of the syntax's, or a block left open, throws. */
   static parse(source: string, what: string): Template {
@@ -107,14 +111,15 @@ export class Template {
     }
     if (last < text.length) into().push({ type: "text", text: text.slice(last) });
     if (stack.length > 0) throw new Error(`${what}: {{#${stack.at(-1)?.path}}} is never closed`);
-    return new Template(root);
+    return new Template(root, source);
   }
 
   /** The text filled from `contexts`, innermost last. */
   render(...contexts: readonly Fields[]): string {
-    const out: string[] = [];
-    renderNodes(this.nodes, contexts, out);
-    return out.join("");
+    // The one renderer of both repositories (R-44): the contexts merged, the innermost winning where it has a value.
+    const merged: Record<string, unknown> = {};
+    for (const context of contexts) for (const [key, value] of Object.entries(context)) if (value !== undefined) merged[key] = value;
+    return renderTemplate(this.source, merged as Parameters<typeof renderTemplate>[1]).text ?? "";
   }
 
   /** A pattern every text this template can fill to matches: its words as written, anything where a field goes, a block any number of times. */
@@ -144,52 +149,12 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Whether a block on this value is left out: absent, null, false, 0, "", an empty list or an object with no fields. */
-export function isEmpty(v: unknown): boolean {
-  if (v === undefined || v === null || v === false || v === "" || v === 0 || Number.isNaN(v)) return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (isObject(v)) return Object.keys(v).length === 0;
-  return false;
-}
-
 /** The text a value puts in. */
 export function textOf(v: unknown): string {
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   if (Array.isArray(v)) return v.map(textOf).filter((s) => s !== "").join(LIST_JOIN);
   return "";
-}
-
-function lookup(path: string, contexts: readonly unknown[]): unknown {
-  if (path === ".") return contexts.at(-1);
-  const [head = "", ...rest] = path.split(".");
-  for (let i = contexts.length - 1; i >= 0; i--) {
-    const c = contexts[i];
-    if (!isObject(c) || !Object.hasOwn(c, head) || c[head] === undefined) continue;
-    let v: unknown = c[head];
-    for (const name of rest) {
-      if (!isObject(v) || !Object.hasOwn(v, name)) return undefined;
-      v = v[name];
-    }
-    return v;
-  }
-  return undefined;
-}
-
-function renderNodes(nodes: readonly Node[], contexts: readonly unknown[], out: string[]): void {
-  for (const node of nodes) {
-    if (node.type === "text") out.push(node.text);
-    else if (node.type === "field") out.push(textOf(lookup(node.path, contexts)));
-    else {
-      const v = lookup(node.path, contexts);
-      if (node.inverted) {
-        if (isEmpty(v)) renderNodes(node.children, contexts, out);
-      } else if (!isEmpty(v)) {
-        if (Array.isArray(v)) for (const item of v) renderNodes(node.children, [...contexts, item], out);
-        else renderNodes(node.children, [...contexts, v], out);
-      }
-    }
-  }
 }
 
 // ---------------------------------------------------------------- the two kinds of file
@@ -233,6 +198,7 @@ export class Lines {
     readonly source: ReadonlyMap<string, string>,
     /** What of the file could not be read, each said once: those lines are left out, and the rest stands. */
     readonly problems: readonly string[] = [],
+    private readonly watcher?: (name: string, fields: Fields) => void,
   ) {}
 
   /**
@@ -276,9 +242,17 @@ export class Lines {
     return new Lines({}, new Map(), new Map());
   }
 
-  /** The line `name` filled with `fields`; undefined when the part has no such line. */
+  /** The line `name` filled with `fields`; undefined when the part has no such line. A line said is told to the watcher, if there is one. */
   line(name: string, fields: Fields = {}): string | undefined {
-    return this.templates.get(name)?.render(this.header, fields);
+    const template = this.templates.get(name);
+    if (template === undefined) return undefined;
+    this.watcher?.(name, fields);
+    return template.render(this.header, fields);
+  }
+
+  /** These lines, each line said through them told to `watcher` as its name and the fields it was filled with: what one call says, kept as the part's last use. */
+  watching(watcher: (name: string, fields: Fields) => void): Lines {
+    return new Lines(this.header, this.templates, this.source, this.problems, watcher);
   }
 
   /** A pattern for each line, which any filling of it matches. */
