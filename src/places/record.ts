@@ -10,6 +10,7 @@ import { MAP_DEFAULTS, type MapConfig } from "../iface/map";
 import { fixtureAt } from "../iface/map/fixture";
 import { doorState, drawnOf, type Drawn, movingOf, squareAt } from "../packs/space/core/grid-model";
 import { madeOf } from "../engine/places-in-play";
+import { LIGHT_FIELD, lightRead } from "../packs/space/core/light";
 import type { ReadContext } from "../engine/registry";
 import type { WorldState } from "../engine/state";
 import { type Fact, type Store, standing, type StoreState, type UserStore } from "../store";
@@ -171,10 +172,22 @@ export function doorsOf(at: PlaceAt, place: string, config: MapConfig = MAP_DEFA
     });
 }
 
-/** A place's access and state: who may enter, its facts of part `access` (the newest the setting shows), and the state of each door on its grid. */
+/** The light a place records for itself, or that of the nearest place above it that records one; null where none does (nothing is inferred). */
+export function lightRecorded(at: PlaceAt, place: string): "lit" | "dark" | null {
+  const seen = new Set<string>();
+  for (let id: string | undefined = place; id !== undefined && !seen.has(id); id = placeDef(at, id)?.parent) {
+    seen.add(id);
+    const fields = placeDef(at, id)?.fields;
+    const read = fields !== undefined && Object.hasOwn(fields, LIGHT_FIELD) ? lightRead(fields[LIGHT_FIELD]) : null;
+    if (read !== null) return read;
+  }
+  return null;
+}
+
+/** A place's access and state: who may enter, whether it is lit, its facts of part `access` (the newest the setting shows), and the state of each door on its grid. */
 export function accessOf(at: PlaceAt, place: string, settings: Pick<PlacesSettings, "access">, config: MapConfig = MAP_DEFAULTS, reader: FactReader = factReader(at)) {
   const shown = newest(factsOfPart(at, place, "access"), settings.access);
-  return { entry: entryOf(at, place), facts: { items: shown.items.map((f) => reader.row(f)), more: shown.more }, doors: doorsOf(at, place, config) };
+  return { entry: entryOf(at, place), light: lightRecorded(at, place), facts: { items: shown.items.map((f) => reader.row(f)), more: shown.more }, doors: doorsOf(at, place, config) };
 }
 
 /** Every fact row of a part the record shows in a JSON object, for lines that carry them whole. */

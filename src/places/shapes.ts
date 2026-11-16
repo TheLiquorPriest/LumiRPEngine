@@ -127,6 +127,7 @@ export const placeRecordReply = shape.named(
     ways: shape.object({ ways: shape.list(wayRow), adjoining: shape.list(adjoiningRow) }),
     access: shape.object({
       entry: field(nullable(entryRow), "Who may enter; null where neither the world nor play set an entry."),
+      light: field(nullable(shape.oneOf("lit", "dark")), "Whether it is lit, as it or the place above it records; null where none does."),
       facts: counted(factRow, "Its facts of part access, oldest first among the newest."),
       doors: field(shape.list(doorRow), "The state of each door on its grid."),
     }),

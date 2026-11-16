@@ -42,6 +42,8 @@ describe("a place's record", () => {
     expect(since.items.map((r) => [r.key, r.turn, r.beat?.id, r.beat?.text])).toEqual([["east_wing", tied.id, beat, "The east wing burned down."]]);
     expect(featuresOf(at, INN, PLACES_DEFAULTS).facts.items.map((r) => r.key)).toEqual(["hearth"]);
     expect(accessOf(at, INN, PLACES_DEFAULTS).facts.items.map((r) => r.key)).toEqual(["back_door"]);
+    // Whether it is lit is read down the places, and only where one records it: nothing is inferred.
+    expect(accessOf(at, INN, PLACES_DEFAULTS).light).toBeNull();
 
     // The setting cuts a part to its newest, and the line says how many were left out and the query that reads them.
     const lines = placeLines({ at, place: INN, settings: { ...PLACES_DEFAULTS, since: 1 }, depth: 1 });

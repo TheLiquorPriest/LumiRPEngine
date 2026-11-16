@@ -82,9 +82,10 @@ export function placeLines(input: PlaceLinesInput): ViewLine[] {
   if (wanted("access")) {
     const access = accessOf(at, place, settings, config, reader);
     if (access.entry !== null) lines.push({ kind: "place_entry", depth, fields: { audience: access.entry.audience, ...(access.entry.inherited ? { from: access.entry.name } : {}) } });
+    if (access.light !== null) lines.push({ kind: "place_light", depth, fields: { light: access.light } });
     facts("access", access.facts);
     for (const d of access.doors) lines.push({ kind: "place_door", depth, fields: { at: d.at.join(","), state: d.state } });
-    if (access.entry === null && access.facts.items.length === 0 && access.doors.length === 0) none("access");
+    if (access.entry === null && access.light === null && access.facts.items.length === 0 && access.doors.length === 0) none("access");
   }
   return lines;
 }
