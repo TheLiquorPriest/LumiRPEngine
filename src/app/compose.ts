@@ -294,6 +294,9 @@ export function compose(options: ComposeOptions = {}): Composition {
         const s = await settings(user, chat);
         return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps };
       },
+      requests: made().requests,
+      // What RPE writes to Lumiverse through the door, once it is set up for a Lumiverse.
+      lumiverse: () => lumiverse().writes,
     })),
     door.area,
   ];
