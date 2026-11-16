@@ -15,19 +15,21 @@
 import { stat } from "node:fs/promises";
 import { route, RouteError, shape } from "../app";
 import { readText } from "../app/disk";
-import { listingContext, userMayWrite, writtenKey } from "./catalog";
+import { listingContext, namesInForce, userMayWrite, writtenKey } from "./catalog";
 import { defaultStanding, defaultUpdateTexts, lineDiff, updatesSince } from "./defaults";
 import { listFolder, searchTree } from "./listing";
 import { OFF_LEVELS } from "./own-files";
 import { readBytes, readLines } from "./ranged";
 import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit";
 import { treeSettingsOf } from "./settings";
+import { locate } from "./view";
 import { rphStanding, withStanding } from "./standing";
-import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
+import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, filePinBody, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, pinsReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
 
 /** The routes that name a file: its path in the chat's view follows the route's own segments. */
 const FILE_PATH = "/api/v1/files/*";
 const OFF_PATH = "/api/v1/files-off/*";
+const PIN_PATH = "/api/v1/files-pin/*";
 const DIFF_PATH = "/api/v1/files-diff/*";
 
 export function fileRoutes(kit: RouteKit) {
@@ -203,6 +205,45 @@ export function fileRoutes(kit: RouteKit) {
         if (listed.item === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
         await own.switchOff(loc, level, listed.item, body.off);
         return { file: await kit.entryOf(user, loc, listed.path) };
+      },
+    }),
+    route({
+      method: "PUT",
+      path: PIN_PATH,
+      access: "page",
+      group: "files",
+      does: "Pins a file for an agent, or takes the pin away, in the `pins:` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it.",
+      body: filePinBody,
+      reply: fileWrittenReply,
+      handle: async ({ user, params, body }) => {
+        const chat = chatOf(body.chat);
+        const level = levelOf(body.level, OFF_LEVELS, chat);
+        const loc = await own.locationFor(user, chat);
+        const path = await own.pin(loc, level, viewPathOf(params["*"]), body.agent, body.pinned);
+        return { file: await kit.entryOf(user, loc, path) };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/files-pins",
+      access: "page",
+      group: "files",
+      does: "Every pin the levels' configs hold for a chat (with no chat, the global level's), with whether its file is in the view and whether a definition names its agent: a pin of a file that is gone or of an agent no definition names is listed as such, never dropped.",
+      query: { chat: chatQuery },
+      reply: pinsReply,
+      handle: async ({ user, query }) => {
+        const chat = chatOf(query.chat);
+        const loc = own.locationOf(user, chat);
+        const [names, definitions] = await Promise.all([namesInForce(loc), deps.guidance(user, chat).definitions()]);
+        const named = new Set(definitions.map((d) => d.name));
+        return {
+          pins: await Promise.all(
+            names.pins.map(async (p) => {
+              const found = await locate(loc, p.file);
+              return { file: p.file, agent: p.agent, level: p.level, fileFound: found.ok && found.at.is === "file", agentNamed: named.has(p.agent) };
+            }),
+          ),
+        };
       },
     }),
     route({

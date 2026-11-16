@@ -313,6 +313,34 @@ describe("the Files page's routes", () => {
     expect(await gm()).toMatchObject({ off: false, offIn: [], applies: true });
   });
 
+  test("pinning a file for an agent writes it in the level's pins: with his words kept, unpinning takes it out, a file the view does not hold is refused, and a pin of a file that is gone or an agent no definition names is listed, not dropped", async () => {
+    await writeFile(join(chatFolder, "WORLD.md"), "# World\n");
+    await writeFile(join(chatFolder, "RPE.yml"), "# his own words\noff: []\n");
+    const pinned = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true });
+    expect(pinned.body.file).toMatchObject({ path: "WORLD.md", pinnedFor: [{ agent: "gm", level: "chat" }] });
+    expect(await readFile(join(chatFolder, "RPE.yml"), "utf8")).toContain("# his own words");
+    const again = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true });
+    expect(again.body.file?.pinnedFor).toEqual([{ agent: "gm", level: "chat" }]);
+    await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "global", chat: CHAT, agent: "ghost", pinned: true });
+    expect(await readFile(app.paths.globalConfig, "utf8")).toContain("ghost");
+    expect((await listing()).get("WORLD.md")?.pinnedFor).toEqual([
+      { agent: "ghost", level: "global" },
+      { agent: "gm", level: "chat" },
+    ]);
+    expect((await call("PUT", "/api/v1/files-pin/NOPE.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true })).status).toBeGreaterThanOrEqual(400);
+
+    await rm(join(chatFolder, "WORLD.md"));
+    const pins = (await call<{ pins: { file: string; agent: string; level: string; fileFound: boolean; agentNamed: boolean | null }[] }>("GET", `/api/v1/files-pins?chat=${CHAT}`)).body.pins;
+    expect(pins).toEqual([
+      { file: "WORLD.md", agent: "ghost", level: "global", fileFound: false, agentNamed: false },
+      { file: "WORLD.md", agent: "gm", level: "chat", fileFound: false, agentNamed: true },
+    ]);
+    // A pin of a file that is gone is taken away all the same.
+    await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: false });
+    await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "global", chat: CHAT, agent: "ghost", pinned: false });
+    expect((await call<{ pins: unknown[] }>("GET", `/api/v1/files-pins?chat=${CHAT}`)).body.pins).toEqual([]);
+  });
+
   test("an agent's stack is read with or without a chat, Apply now renews the open session's block and says so, and with none open says the next one opens as the files stand", async () => {
     const withChat = await call<{ agent: string; parts: { kind: string; path: string; text?: string }[] }>("GET", `/api/v1/files-stack?agent=gm&chat=${CHAT}`);
     expect(withChat.body.parts.find((p) => p.kind === "definition")).toMatchObject({ path: "@shipped/.agents/gm.md" });

@@ -16,7 +16,7 @@ import type { GuidanceKind, LayerLevel } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";
 import { LayoutRefused, withTopLevelKey, yamlMapping } from "../app/yaml";
-import { kindAt, nameList, OFF_KEY, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
+import { kindAt, nameList, OFF_KEY, PINS_KEY, pinPath, pinRecords, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
 import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { recordWritten } from "./defaults";
 import { type ChatLocation, type Located, locate, treeLayers, viewPath } from "./view";
@@ -96,26 +96,56 @@ export class OwnFiles {
    */
   async switchOff(loc: ChatLocation, level: LayerLevel, item: string, off: boolean): Promise<void> {
     const layers = treeLayers();
+    await this.#changeList(loc, level, OFF_KEY, nameList, "a list of names", (names) => {
+      const kept = names.filter((n) => writtenItem(n, layers) !== item);
+      return off ? [...kept, item] : kept;
+    });
+  }
+
+  /**
+   * Pins the file at `path` for `agent`, or takes the pin away, in the `pins:` list of the config of `level`, keeping what else the config
+   * holds and says. Pinning names a file the view holds; a pin already as asked changes nothing, and one whose file is gone is taken away
+   * all the same.
+   */
+  async pin(loc: ChatLocation, level: LayerLevel, path: string, agent: string, pinned: boolean): Promise<string> {
+    let file = pinPath(path);
+    if (pinned) {
+      const at = await this.found(loc, file);
+      if (at.is !== "file") throw new RouteError(409, `${at.path} is not a file: only a file is pinned.`);
+      file = at.path;
+    }
+    await this.#changeList(loc, level, PINS_KEY, pinRecords, "a list of records, each with a file and an agent", (pins) => {
+      const kept = pins.filter((p) => !(pinPath(p.file) === file && p.agent === agent));
+      return pinned ? [...kept, { file, agent }] : kept;
+    });
+    return file;
+  }
+
+  /**
+   * Changes the list under `key` in the config of `level`: `next` is given the list as it stands and answers the one to write; the rest of
+   * the config, its comments and its layout, is kept. An unchanged list writes nothing; a key that is not such a list, or a config in a
+   * layout the splice does not follow, is refused in words.
+   */
+  async #changeList<T>(loc: ChatLocation, level: LayerLevel, key: string, parse: (value: unknown) => T[] | undefined, shown: string, next: (list: readonly T[]) => T[]): Promise<void> {
+    const layers = treeLayers();
     const layer = layers.find((l) => l.level === level);
-    if (layer?.config === undefined) throw new RouteError(400, `The ${level} level has no config to switch a file off in.`);
+    if (layer?.config === undefined) throw new RouteError(400, `The ${level} level has no config to write \`${key}:\` in.`);
     const config = await this.found(loc, viewPath(level, [layer.config]));
     if (config.is === "folder") throw new RouteError(409, `${config.path} is a folder.`);
     await oneFileAtATime(config.disk, async () => {
       const text = (await readText(config.disk)) ?? "";
-      let read: string[] | undefined;
+      let read: T[] | undefined;
       try {
-        read = nameList(yamlMapping(text, config.path)[OFF_KEY]);
+        read = parse(yamlMapping(text, config.path)[key]);
       } catch (error) {
         throw new RouteError(409, error instanceof Error ? error.message : String(error));
       }
-      if (read === undefined) throw new RouteError(409, `\`${OFF_KEY}:\` in ${config.path} is not a list of names: make it one, then try again.`);
-      const names = read;
-      const kept = names.filter((n) => writtenItem(n, layers) !== item);
-      const next = off ? [...kept, item] : kept;
-      if (next.length === names.length && next.every((n, i) => n === names[i])) return;
+      if (read === undefined) throw new RouteError(409, `\`${key}:\` in ${config.path} is not ${shown}: make it one, then try again.`);
+      const now = next(read);
+      if (JSON.stringify(now) === JSON.stringify(read)) return;
       let spliced: string;
       try {
-        spliced = withTopLevelKey(text, OFF_KEY, next, config.path);
+        spliced = withTopLevelKey(text, key, now, config.path);
       } catch (error) {
         // His file in a layout the splice does not follow: nothing is written, and the answer names the line.
         if (error instanceof LayoutRefused) throw new RouteError(409, error.message);

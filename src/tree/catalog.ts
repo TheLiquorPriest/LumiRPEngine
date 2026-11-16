@@ -9,6 +9,7 @@ import { stat } from "node:fs/promises";
 import { relative, sep } from "node:path";
 import type { FileKind, GuidanceKind, Layer, LayerLevel } from "rp-harness/contract";
 import { readText } from "../app/disk";
+import { isRecord } from "../shared/json";
 import { yamlMapping } from "../app/yaml";
 import { type DefaultStanding, type DefaultUpdate, updatesSince } from "./defaults";
 import { walk } from "./files";
@@ -40,6 +41,8 @@ export interface TreeFileEntry {
   defaultChanged: number | null;
   /** For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written. Absent or null otherwise. */
   defaultRemoved?: number | null;
+  /** The agents it is pinned for, handed it whole at the start of each of their runs, and the level whose config says so. Empty for a file pinned for none. */
+  pinnedFor?: PinnedFor[];
   /** Whether it is a level's config file (`RPE-global.yml`, a chat's `RPE.yml`): the Settings page edits it too. */
   isConfig?: boolean;
   /** The levels where a file of its kind and name has a place that the user may write, so "save as" offers only those. */
@@ -58,11 +61,29 @@ export interface TreeFileEntry {
 export interface NamesInForce {
   off: Map<string, LayerLevel[]>;
   layered: Set<string>;
+  /** The files pinned for agents (RPH's `pins:`), each at the level whose config says so; every level's list applies. */
+  pins: PinOf[];
+}
+
+/** A pin as a level's config says it: a file, by its path in the chat's view, and the agent it is pinned for, by its definition's name. */
+export interface Pin {
+  file: string;
+  agent: string;
+}
+
+/** A pin and the level whose config holds it. */
+export type PinOf = Pin & { level: LayerLevel };
+
+/** The agents a file is pinned for, and at which level each pin is written. */
+export interface PinnedFor {
+  agent: string;
+  level: LayerLevel;
 }
 
 /** The config keys read here, as RPH reads them. */
 export const OFF_KEY = FILE_KEYS.off;
 const LAYERED_KEY = FILE_KEYS.layered;
+export const PINS_KEY = FILE_KEYS.pins;
 
 const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "prompts", "tools"];
 
@@ -75,6 +96,23 @@ export function nameList(value: unknown): string[] | undefined {
   if (typeof value === "string") return value.trim() === "" ? [] : [value.trim()];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value.map((v: string) => v.trim()).filter((v) => v !== "");
   return undefined;
+}
+
+/** The records of a `pins:` list, each with a file and an agent; nothing for none; undefined for anything else. */
+export function pinRecords(value: unknown): Pin[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return undefined;
+  const pins: Pin[] = [];
+  for (const v of value as unknown[]) {
+    if (!isRecord(v) || typeof v.file !== "string" || typeof v.agent !== "string") return undefined;
+    pins.push({ file: v.file, agent: v.agent });
+  }
+  return pins;
+}
+
+/** A pinned file's path as the view writes it: without a leading `./` or `/`. */
+export function pinPath(file: string): string {
+  return file.trim().replace(/^(?:\.\/|\/)+/, "");
 }
 
 /** The kind a folder's name is at any level, or the kind's own word. */
@@ -141,7 +179,7 @@ export async function configText(loc: ChatLocation, layer: Layer): Promise<strin
 
 /** The names switched off, with the levels that switch each off, and the names layered, from every level's config. A config that does not read as YAML, or a key that is not a list of names, says nothing here; RPH reports it. */
 export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] = treeLayers()): Promise<NamesInForce> {
-  const names: NamesInForce = { off: new Map(), layered: new Set() };
+  const names: NamesInForce = { off: new Map(), layered: new Set(), pins: [] };
   for (const layer of layers) {
     const text = await configText(loc, layer);
     if (text === null) continue;
@@ -157,6 +195,7 @@ export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] =
       if (!levels.includes(layer.level)) names.off.set(item, [...levels, layer.level]);
     }
     for (const name of nameList(doc[LAYERED_KEY]) ?? []) names.layered.add(writtenItem(name, layers));
+    for (const pin of pinRecords(doc[PINS_KEY]) ?? []) names.pins.push({ file: pinPath(pin.file), agent: pin.agent.trim(), level: layer.level });
   }
   return names;
 }
@@ -237,6 +276,7 @@ export async function entryAt(ctx: ListingContext, level: LayerLevel, rest: read
     shipped: null,
     defaultChanged: null,
     defaultRemoved: null,
+    pinnedFor: ctx.names.pins.filter((p) => p.file === viewPath(level, rest)).map(({ agent, level: at }) => ({ agent, level: at })),
     isConfig: rest.length === 1 && rest[0] === layer.config,
     placeable,
     editedOn: kind === "generated" && level === "chat" ? (EDITED_ON[rest.join("/")] ?? null) : null,

@@ -549,6 +549,20 @@ export interface FileMovedReply {
   guidance: GuidanceKind | null;
 }
 
+/** A file pinned for an agent, or the pin taken away, in the `pins:` list of a level's config: the global level's, or a chat's, which names the chat. */
+export interface FilePinAsk {
+  level: "global" | "chat";
+  chat?: string | null;
+  /** The agent, by its definition's name. */
+  agent: string;
+  pinned: boolean;
+}
+
+/** Every pin the levels' configs hold for a chat, the file and the agent each names, with whether the file is in the chat's view now and whether a definition names the agent: a pin of a file that is gone or of an agent no definition names is listed as such, never dropped. */
+export interface FilePins {
+  pins: ({ file: string; agent: string; level: LayerLevel; fileFound: boolean; agentNamed: boolean | null })[];
+}
+
 /** One file of a turn's folder, by its path below the folder, as text. */
 export interface FileReply {
   name: string;
@@ -1858,6 +1872,8 @@ export interface TreeFileRow {
   defaultChanged: number | null;
   /** For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written. */
   defaultRemoved?: number | null;
+  /** The agents it is pinned for: each is handed the file whole at the start of its runs. Empty for a file pinned for none. */
+  pinnedFor?: { agent: string; level: LayerLevel }[];
   /** Whether it is a level's config file, which the Settings page edits too. */
   isConfig?: boolean;
   /** The levels where a file of its kind and name has a place that the user may write: "save as" offers only those. */
@@ -2684,6 +2700,26 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: FileSwitchAsk;
     reply: FileWrittenReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Pins a file for an agent, or takes the pin away, in the `pins:` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it. */
+  "PUT /api/v1/files-pin/*": {
+    params: { "*": string };
+    query: Record<string, never>;
+    body: FilePinAsk;
+    reply: FileWrittenReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Every pin the levels' configs hold for a chat (with no chat, the global level's), with whether its file is in the view and whether a definition names its agent: a pin of a file that is gone or of an agent no definition names is listed as such, never dropped. */
+  "GET /api/v1/files-pins": {
+    params: Record<string, never>;
+    query: { chat?: string };
+    body: undefined;
+    reply: FilePins;
     paged: false;
     long: false;
     joined: false;

@@ -44,6 +44,7 @@ const treeFileRow = shape.named(
     shipped: field(nullable(T), "The shipped file of the same name, for a file of another level that has one; null otherwise."),
     defaultChanged: field(nullable(N), "For a file of the user's in place of a shipped one: when the latest update that changed that shipped file did so, if it did since this file was last written; null otherwise."),
     defaultRemoved: opt(nullable(N), "For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written."),
+    pinnedFor: opt(shape.list(shape.object({ agent: field(T, "The agent it is pinned for, by its definition's name."), level: field(layerLevel, "The level whose config's `pins:` list says so.") })), "The agents it is pinned for: each is handed the file whole at the start of its runs. Empty for a file pinned for none."),
     isConfig: opt(shape.yesNo(), "Whether it is a level's config file, which the Settings page edits too."),
     placeable: opt(shape.list(layerLevel), "The levels where a file of its kind and name has a place that the user may write: \"save as\" offers only those."),
     editedOn: opt(nullable(T), "For a generated file, the page where what it shows is edited, if one is; null otherwise."),
@@ -121,6 +122,26 @@ export const fileSwitchBody = shape.named(
   "FileSwitchAsk",
   "A file's name switched off or on again in the `off:` list of a level's config: the global level's, or a chat's, which names the chat.",
   shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), off: shape.yesNo() }),
+);
+export const filePinBody = shape.named(
+  "FilePinAsk",
+  "A file pinned for an agent, or the pin taken away, in the `pins:` list of a level's config: the global level's, or a chat's, which names the chat.",
+  shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), agent: field(T, "The agent, by its definition's name."), pinned: shape.yesNo() }),
+);
+export const pinsReply = shape.named(
+  "FilePins",
+  "Every pin the levels' configs hold for a chat, the file and the agent each names, with whether the file is in the chat's view now and whether a definition names the agent: a pin of a file that is gone or of an agent no definition names is listed as such, never dropped.",
+  shape.object({
+    pins: shape.list(
+      shape.object({
+        file: T,
+        agent: T,
+        level: layerLevel,
+        fileFound: field(shape.yesNo(), "Whether the file is in the chat's view."),
+        agentNamed: field(nullable(shape.yesNo()), "Whether a definition names the agent; null where RPH was not asked."),
+      }),
+    ),
+  }),
 );
 export const fileWrittenReply = shape.named("FileWrittenReply", "What writing a file or switching its name answers: the file as the listing now shows it.", shape.object({ file: nullable(treeFileRow) }));
 export const fileRemovedReply = shape.object({

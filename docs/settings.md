@@ -165,6 +165,15 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lore.index.page` | `50` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Lore index, entries per page: Entries one page of the lore index on the Lore page holds. |
 | `lore.index.entry` | none (no index entry of his own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Your own lore index entry: A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse. |
 
+## `secrets`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `secrets.narrator.knowledge` | `scene` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Narrator's knowledge: What the narrator knows of the chat's secrets: `scene` (everyone in the scene) or `pov` (the player's character only). The chat's own choice wins over its world's own, which wins over this global one. |
+| `secrets.narrator.secrets` | `marked` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Narrator's secrets: How a secret kept from the player's character reaches the narrator: `marked` (put in, marked as a secret) or `omit` (left out). The chat's own choice wins over its world's own, which wins over this global one. |
+| `secrets.tracked` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Track who knows what: Whether a chat tracks who holds which secret. Off, no holding counts and every secret stays kept; what was recorded stays for when it is switched on again. Each new turn records the value in force, so a swipe or a branch judges a secret by what held there. |
+| `secrets.threshold` | `0.7` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | How sure a holding must be: How sure a holding of a secret must be, from 0 to 1, before it counts as the holder knowing it. Each new turn records the value in force, so a swipe or a branch judges a secret by what held there. |
+
 ## `migration`
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -284,6 +293,14 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `sampling.<definition>.presence_penalty` | none (the provider's own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Presence penalty: The presence penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. |
 | `sampling.<definition>.repetition_penalty` | none (the provider's own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Repetition penalty: The repetition penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. |
 
+## `embedding`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `embedding.connection` | none (no search by meaning) | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Embedding connection: The connection, by its name or id, that makes the vectors a search by meaning compares; none: nothing is searched by meaning. Its provider must offer embeddings (OpenAI, Google Gemini, Mistral, an OpenAI-compatible server). |
+| `embedding.model` | none (none named) | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Embedding model: The model on the embedding connection that makes the vectors, such as text-embedding-3-small; the connection's own chat model makes none. |
+| `embedding.batch` | `64` | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Texts per embedding request: Texts sent in one request for their vectors; more go in further requests. |
+
 ## The reply
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -302,12 +319,16 @@ Each row says when a change is in force: at the setting's next use, from the nex
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `results.clip` | `12000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Length of a tool's answer: Characters of a tool's answer, its reports with it, that the model reads; the whole answer is kept in a file. |
+| `results.clip` | none (no ceiling) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Length of a tool's answer: The most characters of a tool's answer, its reports with it, that the model reads, where you set one; without it an answer is cut only where it would not fit the call. The whole answer is kept in a file. |
 | `tools.search` | `8` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Tools a search gives: Tools one tool_search gives when the agent asks for no number. |
 | `tools.gapCheck` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Hits a gap check takes: Hits gap_check takes from each place it searches when the agent asks for no number. |
 | `tools.perCall` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | The most one tool call takes: Messages chat_read gives, entries lore_read reads, hits a search asks each place for, and messages a stretch of the chat an agent is given holds. |
 | `tools.schemaShown` | `600` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Schema shown with a call that does not fit: Characters of a tool's schema shown whole in the answer to a call that does not fit it; a longer schema is left out of that answer. |
-| `rules.window` | `500` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a pattern looks at: Characters a rule's pattern looks at at a time: the newest of what is written, and stretches of a tool's arguments or result. |
+| `tools.fixedTokens` | `8000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Size of an agent's tool list: Tokens an agent's fixed list of tools, as its requests carry it, should stay under; a list over it is marked in the live view and on the Turn page, and still runs. |
+| `rules.window` | none (the whole text) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a pattern looks at: Characters a rule's pattern looks at at a time, the newest of what is written and stretches of a tool's arguments or result; none: the whole text. |
+| `rules.patternTime` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a rule's pattern may run: Milliseconds one rule's pattern may run on one text; past it the run is stopped, counts as no match, and is shown on the Turn page. |
+| `rules.interrupt` | `stop` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A stream rule that interrupts: What a stream rule that interrupts does: stop the call where it matched, or remind the agent after it instead. |
+| `rules.interrupts.<connection>` | none (as rules.interrupt says) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A stream rule that interrupts, on a connection: Stop or remind, for one connection whose stopped reply cannot go on cleanly. |
 | `rules.judge` | none (the asking agent's own connection) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The model that answers a `question:` rule | Connection that judges questions: The connection that answers a rule's question, by its name or id, where the rule names none. |
 
 ## What is kept of a turn
@@ -315,7 +336,6 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `trace.requests` | `first` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Requests kept: Which model calls have what they were sent kept in the turn's folder: each agent's first, all of them, or none. |
-| `prompt.kept` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Turns whose prompts are kept: Turns of a chat whose prompts are kept, so the next turn's, or a swipe's, is compared with the turn it follows. |
 | `prompt.signatureHead` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Start a slice is known by: Characters at the start of a slice's text that the prompt map keeps, to find the slice again in a later prompt. A map learned under another value is still found. |
 
 ## What you see while a turn runs
@@ -328,11 +348,20 @@ Each row says when a change is in force: at the setting's next use, from the nex
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `compaction.reserve` | `16384` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Compaction starts | Room kept for the answer: Tokens kept free for the answer: a session's earlier turns are summarized when the lead's first call of a turn would not fit its model's window less this. |
+| `compaction.reserve` | `16384` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Compaction starts | Room kept for the answer: Tokens kept free for the answer: a run is compacted when any call of any agent would not fit its model's window less this. |
 | `compaction.keepTurns` | `3` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Compaction starts | Turns kept whole: The newest of a session's earlier turns that a summary never stands for. |
 | `compaction.records` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Carried records before folding (records mode) | Records before folding: Tokens of records the records mode carries before a compaction folds them into the summary. |
 | `compaction.saveCalls` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Calls before a compaction: Model calls the lead makes at the moment before a compaction; the tools of the last of them run, and nothing after them. |
+| `compaction.overflowTries` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Tries after a too-long refusal: Times in a row a call the provider refused as too long is compacted and sent again; past them the run ends as the provider answered. |
+| `compaction.keepRecent` | `20000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Newest work kept whole: Tokens of a run's newest calls and results kept as they are when its own older calls are summarized. |
 | `carry` | `continuing` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: How context is carried in a session | Context carried in a session: What a session carries between turns: continuing, records or nothing. |
+
+## `sessions`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `sessions.carried` | `["scratch/scene.md"]` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Scratch files a scene keeps: Files of a turn's scratch/ the session's cache keeps as they stand: each turn starts with the newest on its path, and its own version becomes the standing one at its end. Empty: nothing is carried. |
+| `sessions.held` | `8` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sessions kept read: Sessions whose file stays read in memory between their turns, so a turn starts without reading it again; past this many, the one used least recently is let go and read whole when next asked for. |
 
 ## The turn
 
@@ -341,6 +370,9 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lead` | none (no lead: no turn is played) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lead agent: The agent definition that leads a turn; the shipped config names the Author. |
 | `chat.hiddenReadable` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hidden messages readable by agents | Hidden messages readable: Agents may read the messages the player hid from the prompt. |
 | `since.editedBudget` | none (every one in full) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Edited replies in the briefing: Off as shipped, every edited reply is told with both its texts whole. Set, the tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named by message in one line, with no text. |
+| `since.deletedBudget` | `1000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Deleted turns in the briefing: The tokens the briefing spends naming the turns a delete took with the first words of each one's reply, the newest first; the rest are named by message number in one line. |
+| `since.deletedWords` | `24` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Words quoted of a deleted turn: How many of the first words of each deleted turn's reply the briefing quotes to name it. |
+| `since.notAppliedBudget` | `1500` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a flip stopped, in the briefing: The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them. |
 | `history.window` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: History window | History window: The latest this many of the chat's messages stay in the prompt. |
 | `history.step` | none (off) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The window's step | Window step: Lets the window grow by this many messages before it is cut back to its size. |
 | `history.hold.on` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold uncovered messages: Keeps a message the story record does not cover yet in the prompt. |
