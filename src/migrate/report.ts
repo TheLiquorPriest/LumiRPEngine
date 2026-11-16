@@ -414,10 +414,17 @@ export function reportText(report: MigrationReport): string {
     if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
     if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
     // What today's side reset, removed or rotated since an earlier run: followed in RPE where RPE's copy was still what a run put there; else left as RPE has it.
-    const followed = [...(connections !== null && !("why" in connections) ? (connections.followed ?? []) : []), ...(settings.followed ?? [])];
+    const own = report.carried.chatSettings;
+    const followed = [...(connections !== null && !("why" in connections) ? (connections.followed ?? []) : []), ...(settings.followed ?? []), ...(own?.followed ?? [])];
     if (followed.length > 0) {
       lines.push("", "Changed on today's side since an earlier run, and what this run did about each:");
       for (const f of followed) lines.push(`  ${f.what}: ${f.change}; ${f.followed ? "followed in RPE" : "RPE's copy is not what a run put there, left as RPE has it"}`);
+    }
+    // Each chat's own choices, in its own RPE.yml: carried, left as RPE has them, or not carried with why.
+    if (own !== null) {
+      lines.push("", `Each chat's own choices (its knowledge switch, narrator view, story and tidy-up) in its RPE.yml: ${own.carried.length} carried${own.keptInRpe.length > 0 ? `, ${own.keptInRpe.length} changed in RPE since a run put them and left as RPE has them` : ""}${own.notCarried.length > 0 ? `, ${own.notCarried.length} not carried (kept in the backup)` : ""}.`);
+      for (const n of own.notCarried) lines.push(`  ${n.chat}: ${n.from} (${n.to}: ${n.why})`);
+      for (const t of own.tidyCut) lines.push(`  ${t.chat}: ${t.left} older key(s) of what it told the tidy-up to leave alone are left out, as the list holds at most the number things.tidyLeftMost says`);
     }
     lines.push("", "Settings carried into RPE's config:");
     for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);

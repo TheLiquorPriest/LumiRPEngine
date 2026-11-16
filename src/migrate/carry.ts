@@ -16,6 +16,7 @@ import type { Setting } from "../app/setting-list";
 import { type DataPaths, SHIPPED_FOLDER } from "../app/config";
 import { SecretsFile } from "../app/secrets";
 import type { Store, UserStore } from "../store";
+import { carryChatSettings, type ChatSettingsCarried } from "./chat-settings";
 import { bookTrouble, carryConnections, type ConnectionsCarried } from "./connections";
 import { TurnAreas } from "./history";
 import { carryMinds, type MindsCarried } from "./minds";
@@ -65,6 +66,8 @@ export interface CarriedReport {
   minds: MindsCarried;
   /** The story record carried into RPE's story record and cast, of the chats this run imported. */
   story: StoryCarried;
+  /** Each chat's own choices put into its `RPE.yml`; null where no file tree was given. */
+  chatSettings: ChatSettingsCarried | null;
 }
 
 /** What the chats' import carried, and where it now is. */
@@ -126,6 +129,9 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   // The files pinned in today's build as pins, each for the agent that is handed it (R-174).
   const pinned = tree === null || ownFiles === null ? null : await carryPins({ wanted: ownFiles.pins, globalConfig: paths.globalConfig, shipped: join(paths.files, SHIPPED_FOLDER, tree.agents), own: new Set(ownFiles.agentIds), earlier });
   if (pinned !== null) keepPutPrints(db, user, pinned.put);
+  // Each chat's own choices into its `RPE.yml`, where its setting stands over the user's.
+  const chatSettings = tree === null ? null : await carryChatSettings({ today, chats, places: tree, globalConfig: paths.globalConfig, earlier, ...(input.settings ? { registry: input.settings } : {}) });
+  if (chatSettings !== null) keepPutPrints(db, user, chatSettings.put, chatSettings.drop);
 
   // The earlier import's changes on the turns it replaced or removed (the cast's and the story's among them) went with those turns; what today's build recorded beside each turn is carried next.
   const people = new People(db, store, s, now);
@@ -183,5 +189,5 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     landed["agents-workspace"] = `As notes: the agents engine's chat workspace in ${inChat} (${ownFiles.workspace} file(s)), each turn's writes and removals among its versions, and its global workspace in the global notes folder (${ownFiles.global} file(s))${alone}`;
     if (pinned !== null) landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in today's build as pins in \`pins:\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that today's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for his own definitions, which are carried switched off` : ""}`;
   }
-  return { landed, carried: { worlds, settings, connections, ownFiles, pins: pinned?.carried ?? null, minds, story } };
+  return { landed, carried: { worlds, settings, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, chatSettings: chatSettings?.carried ?? null } };
 }

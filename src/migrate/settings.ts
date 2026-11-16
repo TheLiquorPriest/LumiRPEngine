@@ -185,13 +185,15 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     else for (const from of history.from) notCarried.push({ from, to: "history.window", why: "today's cutoff keeps no whole number of messages, at least 1" });
   }
 
+  // Each chat's own choices are carried with the chat (`chat-settings.ts`), the engine's on its record: what is left here has no counterpart.
+  const withChat: Readonly<Record<string, true>> = { mapDisplay: true, tidyLeft: true, knowledge: true, narrator: true, tidy: true, engine: true };
   for (const item of items) {
     if (item.where === "user storage" && item.row === "settings" && item.fate === "carried" && /^(runs\/[^/]+\/prefs|harness\/story)\.json$/.test(item.path)) {
       const doc = json(await today.userView.read(item.path));
-      if (isRecord(doc)) for (const key of Object.keys(doc)) if (key !== "v") out.noHome.push(`${item.path}: ${key}`);
+      if (isRecord(doc)) for (const key of Object.keys(doc)) if (key !== "v" && !(item.path.startsWith("runs/") && Object.hasOwn(withChat, key))) out.noHome.push(`${item.path}: ${key}`);
     }
     const pref = item.where === "Lumiverse database" && item.row === "settings" ? new RegExp(`^chats/([^/]+)/${LEDGER_NAMESPACE}/prefs/([^/]+)$`).exec(item.path) : null;
-    if (pref) out.noHome.push(`chat ${pref[1]}'s own choice: ${pref[2]}`);
+    if (pref && !Object.hasOwn(withChat, pref[2] ?? "")) out.noHome.push(`chat ${pref[1]}'s own choice: ${pref[2]}`);
   }
 
   // The runtime's own settings (`RuntimeSetup`, `H/runtime/config.ts:44-50`): its memory limit is RPE's `service.memory`, each field of its tuning has its own fate, and whether it takes a new build by itself once nothing is under way is RPE's `update.restart`.
