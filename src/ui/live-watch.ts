@@ -98,10 +98,10 @@ interface ReadFrom {
   from: number;
 }
 
-/** Whether a live event is a run of its turn beginning or ending. */
+/** Whether a live event is a run of its turn beginning or ending, or a job of the chat changing (one held for his word among them). */
 function turning(event: LiveEvent): boolean {
   if (event.kind !== "trace" || !isRecord(event.data) || !isRecord(event.data.event)) return false;
-  return event.data.event.kind === "run_started" || event.data.event.kind === "run_ended";
+  return event.data.event.kind === "run_started" || event.data.event.kind === "run_ended" || event.data.event.kind === "job";
 }
 
 /**

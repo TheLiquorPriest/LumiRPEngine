@@ -45,8 +45,8 @@ test("each fact's counts change exactly when its own records are written, and ne
   const store = b.turns.store.user(USER);
   const [greeting] = store.path(CHAT);
   expect(b.host.chats.get(CHAT)?.messages[0]?.content).toBe(GREETING);
-  const at = { user: USER, turn, by: "author", agent: "author-1", job: null, now: Date.now() };
-  const story = (writes: StoryWrite[]) => b.app.writes.run((db) => writeStory(db, at, writes));
+  const at = { user: USER, chat: CHAT, turn, by: "author", agent: "author-1", job: null, now: Date.now() };
+  const story = (writes: StoryWrite[]) => b.app.writes.run(() => writeStory(b.turns.store, at, writes));
   const entries = await b.turns.loreIndex.entries({ user: USER, chat: CHAT });
   expect(entries.length).toBeGreaterThanOrEqual(2);
 
@@ -115,7 +115,7 @@ test("each fact's counts change exactly when its own records are written, and ne
   // What a job's agent is given by name, and what the chat's page reads, are the same counts: with every record of the six written, no fact says it holds.
   const given = await jobs.view({ user: USER, chat: CHAT, session: "none" }, { id: "author-1", definition: "author", job: "job-1" }, BOOTSTRAP_FACTS);
   const page = await boot.call<BootstrapChat>("GET", BOOTSTRAP_CHAT_PATH, { chat: CHAT });
-  expect([JSON.parse(given ?? "null"), page.status, page.body.facts, page.body.jobs]).toEqual([last, 200, last, []]);
+  expect([JSON.parse(given ?? "null"), page.status, page.body.facts, page.body.underWay]).toEqual([last, 200, last, []]);
   expect(given).not.toContain("holds");
   expect(Object.values(page.body.facts).some((f) => "holds" in f)).toBe(false);
 });

@@ -302,7 +302,7 @@ export function StoryPage(props: { chat: string }) {
       onFurther={(part) => reader.current?.further(part)}
       onStrike={(ask) => reader.current?.strike(ask)}
       onCorrect={(ask) => reader.current?.correct(ask) ?? Promise.resolve([])}
-      bootstrap={{ shown: bootstrap, onStart: (relive) => starter.current?.start(relive) }}
+      bootstrap={{ shown: bootstrap, onStart: (choice) => starter.current?.start(choice), onAnswer: (job, word) => starter.current?.answer(job, word), onOlder: () => starter.current?.older() }}
       gated={
         <>
           <TimelineSection chat={chat} current={current} stamp={stamp} />

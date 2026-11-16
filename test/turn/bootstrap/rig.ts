@@ -20,7 +20,7 @@ export interface BootBed {
 export async function openBootBed(options: TurnBedOptions & { carried?: readonly string[] }): Promise<BootBed> {
   const b = await openTurnBed(options);
   const jobs = new BootstrapJobs({ turns: () => b.turns });
-  const routes = bootstrapRoutes({ jobs, carried: async () => options.carried ?? [] });
+  const routes = bootstrapRoutes({ jobs, carried: async () => options.carried ?? [], sizes: () => ({ default: 50, most: 500 }) });
   // The turn lane's hook: a name an agent is given that is none of RPH's own is the bootstrap's to give, as well as the lane's.
   const events = b.turns.env.events;
   const given = events.attachments.bind(events);

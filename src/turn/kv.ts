@@ -44,11 +44,12 @@ export function storeUsers(db: Database): string[] {
 }
 
 /** Where a job's record stands in a page's order, the latest started first: what a page's `next` names, its last record's. */
-function placeOf(job: Pick<JobView, "started" | "id">): string {
+export function placeOf(job: Pick<JobView, "started" | "id">): string {
   return `${job.started}~${job.id}`;
 }
 
-function placeIn(cursor: string): { started: number; id: string } {
+/** The place a page's `next` names, read back. */
+export function placeIn(cursor: string): { started: number; id: string } {
   const at = cursor.indexOf("~");
   const started = at < 0 ? Number.NaN : Number(cursor.slice(0, at));
   if (Number.isNaN(started)) throw new Error(`${JSON.stringify(cursor)} is not where a page of jobs begins: a cursor is the next of the page before.`);

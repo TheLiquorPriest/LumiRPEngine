@@ -14,7 +14,9 @@ import { RouteError } from "../../src/app";
 import { callRoute } from "../app/call";
 import type { LiveEvent } from "../../src/app/live";
 import type { ChangeInput } from "../../src/store";
-import { NO_SESSION, turnRoutes } from "../../src/turn";
+import { NO_SESSION } from "../../src/turn";
+import { jobRoutes } from "../../src/turn/job-routes";
+import { globalConfig } from "../../src/turn/settings";
 import { jobsEndedBetween } from "../../src/turn/jobs";
 import { world } from "../iface/rig";
 import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
@@ -154,7 +156,7 @@ test("another user's job is not found, and is not cancelled", async () => {
   const jobs = b.turns.harness.jobs!;
   expect([await jobs.get(other, job.id), await jobs.cancel(other, job.id)]).toEqual([undefined, undefined]);
   // The page's route, called in the other user's name, finds no such job and stops nothing.
-  const cancel = turnRoutes({ turns: b.turns, chatName: async () => null }).find((r) => r.method === "POST" && r.path === "/api/v1/jobs/:job/cancel");
+  const cancel = jobRoutes({ turns: b.turns, shared: () => globalConfig(b.app.paths.files, b.app.log) }).find((r) => r.method === "POST" && r.path === "/api/v1/jobs/:job/cancel");
   if (cancel === undefined) throw new Error("the turn lane has no route to cancel a job");
   const refused = await callRoute(cancel, { params: { job: job.id }, user: other }).then(
     () => null,

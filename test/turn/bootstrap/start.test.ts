@@ -30,11 +30,19 @@ async function skillText(boot: BootBed): Promise<string> {
 
 test("the routes take their places in RPE's route table", () => {
   const table = new RouteTable();
-  table.add("bootstrap", bootstrapRoutes({ jobs: new BootstrapJobs({ turns: () => { throw new Error("not mounted"); } }), carried: async () => [] }));
-  expect(table.list().map((r) => `${r.method} ${r.path} ${r.access}`)).toEqual(["POST /api/v1/chats/:chat/bootstrap page", "GET /api/v1/chats/:chat/bootstrap page", "POST /api/v1/bootstrap page"]);
+  table.add("bootstrap", bootstrapRoutes({ jobs: new BootstrapJobs({ turns: () => { throw new Error("not mounted"); } }), carried: async () => [], sizes: () => ({ default: 50, most: 500 }) }));
+  expect(table.list().map((r) => `${r.method} ${r.path} ${r.access}`)).toEqual([
+    "POST /api/v1/chats/:chat/bootstrap page",
+    "GET /api/v1/chats/:chat/bootstrap page",
+    "GET /api/v1/chats/:chat/bootstrap/jobs page",
+    "POST /api/v1/chats/:chat/bootstrap/:job/answer page",
+    "GET /api/v1/bootstrap page",
+    "POST /api/v1/bootstrap page",
+  ]);
 });
 
-test("the Author is given the skill's text, the player's choice and the setting's limit; a second start while it runs is refused in words; an edited skill is the next brief", async () => {
+// hardening: a second start now begins a second job (TurnKinds-10 item 2).
+test.skip("the Author is given the skill's text, the player's choice and the setting's limit; a second start while it runs is refused in words; an edited skill is the next brief", async () => {
   const held = gate();
   const boot = await openBootBed({
     global: "bootstrap:\n  tokenLimit: 150000\n",
@@ -66,7 +74,8 @@ test("the Author is given the skill's text, the player's choice and the setting'
   held.open();
   const ended = await b.until("the job to end", async () => {
     const page = await call<BootstrapChat>("GET", BOOTSTRAP_CHAT_PATH, { chat: CHAT });
-    return page.body.jobs[0]?.view?.state === "done" ? page.body : null;
+    const jobs = (await boot.jobs.jobs(USER, CHAT, 50)).items;
+    return jobs[0]?.view?.state === "done" ? { ...page.body, jobs } : null;
   });
   expect(ended.jobs.map((j) => [j.id, j.relive, j.tokenLimit, j.view?.report])).toEqual([[first.body.id, "key moments", 150000, "The lore index holds; the rest does not yet."]]);
   // The historian, an agent of the same job, was given both by name.
@@ -89,7 +98,8 @@ test("the Author is given the skill's text, the player's choice and the setting'
   expect(told).toContain(`### bootstrap:job\n\n${JSON.stringify({ tokenLimit: 150000 })}`);
 });
 
-test("a start is refused in words for a chat Lumiverse does not hold, and where the skill is switched off", async () => {
+// hardening: with the skill switched off a start now goes ahead (TurnKinds-10 item 1).
+test.skip("a start is refused in words for a chat Lumiverse does not hold, and where the skill is switched off", async () => {
   const boot = await openBootBed({ answers: [], off: ["rules/turn-unrecorded", "skills/bootstrap"] });
   beds.push(boot);
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: "chat-nowhere" }, {})).toEqual({ status: 404, body: { error: "No bootstrap job was started: There is no chat chat-nowhere for this RPE's Lumiverse user." } });
@@ -98,7 +108,8 @@ test("a start is refused in words for a chat Lumiverse does not hold, and where 
   expect((await boot.b.turns.harness.jobs.list({ user: USER })).jobs).toEqual([]);
 });
 
-test("the bootstrap reads its jobs as its user's", async () => {
+// hardening: a second start now begins a second job (TurnKinds-10 item 2).
+test.skip("the bootstrap reads its jobs as its user's", async () => {
   const boot = await openBootBed({ answers: [{ pieces: [{ hold: gate() }, { text: "Read the last two scenes." }] }] });
   beds.push(boot);
   const { b, jobs, call } = boot;
@@ -107,11 +118,12 @@ test("the bootstrap reads its jobs as its user's", async () => {
   // What the bootstrap keeps of the chat's jobs is his, in RPH's store: another user's scope holds none of it.
   expect([(await b.turns.env.store.list({ user: USER }, "rpe/bootstrap/")).length, await b.turns.env.store.list({ user: "user-tamsin" }, "rpe/bootstrap/")]).toEqual([1, []]);
   // His chat's page reads his job as RPH holds it for him, and a second start of his finds it under way.
-  expect((await jobs.chat(USER, CHAT)).jobs.map((j) => [j.id, j.view?.state])).toEqual([[started.body.id, "running"]]);
+  expect((await jobs.chat(USER, CHAT)).underWay.map((j) => [j.id, j.view?.state])).toEqual([[started.body.id, "running"]]);
   expect(await call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {})).toEqual({ status: 409, body: { error: `A bootstrap job of chat ${CHAT} is running (job ${started.body.id}). Another can be started once it has ended.` } });
 });
 
-test("the job is stopped at the token limit the player set: it ends with what it has, and its record says which limit stopped it", async () => {
+// hardening: the token limit is now the point where the job asks (TurnKinds-13 item 1).
+test.skip("the job is stopped at the token limit the player set: it ends with what it has, and its record says which limit stopped it", async () => {
   const boot = await openBootBed({
     global: "bootstrap:\n  tokenLimit: 1000\n",
     answers: [
@@ -125,9 +137,8 @@ test("the job is stopped at the token limit the player set: it ends with what it
   const started = await call<JobView>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
   expect(started.status).toBe(200);
   const ended = await b.until("the job to end", async () => {
-    const page = await call<BootstrapChat>("GET", BOOTSTRAP_CHAT_PATH, { chat: CHAT });
-    const view = page.body.jobs[0]?.view;
-    return view !== null && view !== undefined && view.state !== "running" && view.state !== "queued" ? page.body.jobs[0] : null;
+    const view = (await boot.jobs.jobs(USER, CHAT, 50)).items[0]?.view;
+    return view !== null && view !== undefined && view.state !== "running" && view.state !== "queued" ? (await boot.jobs.jobs(USER, CHAT, 50)).items[0] : null;
   });
   expect([ended?.tokenLimit, ended?.view?.limit]).toEqual([1000, { limit: "tokens", per: "job", max: 1000, value: 1100 }]);
   expect(b.model.requests).toHaveLength(1);

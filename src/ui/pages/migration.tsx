@@ -5,13 +5,14 @@
 // into Build; and the offer to start the bootstrap for every chat it carried. Before any run, one line
 // says none has.
 
+import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { MigrationChatRow, MigrationReply, WaitingOnUser } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Fold, PageHeader, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { bytesWords, counted, errorWords } from "../words";
-import { BatchOffer, type BatchShown, NO_BATCH, type Relive, startCarried } from "./bootstrap";
+import { CarriedOffer } from "./bootstrap";
 import type { PageEntry } from "../page-entry";
 
 /** The page's one read: RPE's answer, or its refusal in its own words. */
@@ -92,7 +93,7 @@ function ChatItem(props: { chat: MigrationChatRow }) {
   );
 }
 
-export function MigrationView(props: { read: MigrationRead; batch?: { shown: BatchShown; onStart(relive: Relive): void } }) {
+export function MigrationView(props: { read: MigrationRead; offer?: ComponentChildren }) {
   const { shown, loading, problem } = props.read;
   return (
     <div class="lre-stack rpe-page" data-page="migration">
@@ -124,7 +125,7 @@ export function MigrationView(props: { read: MigrationRead; batch?: { shown: Bat
               </ul>
             )}
           </Section>
-          {props.batch === undefined || !shown.chats.some((c) => c.outcome === "imported" || c.outcome === "replaced") ? null : <BatchOffer {...props.batch} />}
+          {props.offer === undefined || !shown.chats.some((c) => c.outcome === "imported" || c.outcome === "replaced") ? null : props.offer}
           <Section title="The backup" id="backup">
             {shown.backup === null ? (
               <p class="lre-muted rpe-line">The report names no backup.</p>
@@ -174,9 +175,8 @@ export function MigrationView(props: { read: MigrationRead; batch?: { shown: Bat
 export function MigrationPage() {
   const app = useApp();
   const [read, setRead] = useState<MigrationRead>(NO_MIGRATION);
-  const [batch, setBatch] = useState<BatchShown>(NO_BATCH);
   useEffect(() => readMigration(app.client, setRead), []);
-  return <MigrationView read={read} batch={{ shown: batch, onStart: (relive) => startCarried(app.client, relive, setBatch) }} />;
+  return <MigrationView read={read} offer={<CarriedOffer />} />;
 }
 
 export const entry: PageEntry = { id: "migration", title: "Migration", icon: "download", shells: ["web", "drawer"], needsChat: false, often: false, order: 130, render: () => <MigrationPage /> };

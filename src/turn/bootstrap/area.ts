@@ -3,6 +3,7 @@
 
 import type { App, Area } from "../../app";
 import type { Turns } from "../lane";
+import { globalConfig, TURN_DEFAULTS, TURN_SETTINGS } from "../settings";
 import { BootstrapJobs } from "./jobs";
 import { bootstrapRoutes } from "./routes";
 import { BOOTSTRAP_SETTINGS } from "./settings";
@@ -21,6 +22,23 @@ export function bootstrapArea(takes: BootstrapTakes): Area {
     name: "bootstrap",
     settings: BOOTSTRAP_SETTINGS,
     fills: { views: (scope, agent, ref) => jobs.view(scope, agent, ref) },
-    mounted: (at) => at.routes.add("bootstrap", bootstrapRoutes({ jobs, carried: (user) => takes.carried(at, user) })),
+    mounted: (at) =>
+      at.routes.add(
+        "bootstrap",
+        bootstrapRoutes({
+          jobs,
+          carried: (user) => takes.carried(at, user),
+          // The lists page as the turn area's do, by its page settings in the levels every chat shares.
+          sizes: () => {
+            const read = globalConfig(at.paths.files, at.log);
+            const value = (key: string, fallback: number): number => {
+              const def = TURN_SETTINGS.find((s) => s.key === key);
+              const v = def === undefined ? fallback : read.value(def);
+              return typeof v === "number" ? v : fallback;
+            };
+            return { default: value("turns.page", TURN_DEFAULTS.turnsPage.size), most: value("turns.pageMost", TURN_DEFAULTS.turnsPage.most) };
+          },
+        }),
+      ),
   };
 }

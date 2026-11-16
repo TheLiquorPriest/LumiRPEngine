@@ -21,11 +21,20 @@ export const BOOT: BootstrapChatReply = {
     horizon: { known: true, entries: 2, named: 1, clock: true },
     principals: { known: true, principals: [{ id: "char-odile", name: "Odile Holt", base: ["seed"], memories: 0 }] },
   },
-  jobs: [
-    { id: "job-1", relive: "outline", tokenLimit: 200_000, view: job("job-1", "done", { ended: 1_700_000_600_000, report: "Recorded the premise, one chapter and the cast." }) },
-    { id: "job-2", relive: null, tokenLimit: 200_000, view: job("job-2", "running") },
-    { id: "job-0", relive: "all", tokenLimit: 150_000, view: null },
-  ],
+  start: {
+    skill: true,
+    relive: ["outline", "key moments", "all"],
+    tokenLimit: 200_000,
+    cachedWeight: 0.1,
+    caps: [
+      { key: "bootstrap.run.calls", value: 200 },
+      { key: "bootstrap.run.time", value: 3_600 },
+      { key: "jobs.run.tokensIn", value: 600_000 },
+      { key: "jobs.run.tokensOut", value: 60_000 },
+    ],
+  },
+  underWay: [{ id: "job-2", relive: null, tokenLimit: 200_000, view: job("job-2", "running") }],
+  questions: [],
 };
 
 export const BATCH: BootstrapBatchReply = { started: [{ chat: "chat-calder", job: job("job-9", "running") }], refused: [{ chat: "chat-harbour", why: "A bootstrap job of this chat is under way." }] };
