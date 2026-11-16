@@ -8,9 +8,9 @@ export { type HorizonEntry, horizonOf, openSceneOf, openThreadsOf, STORY_AREA_ID
 export { type LeftOpen, leftOpen, type OpenThread } from "./open";
 export { storyTools, STORY_TOOLS } from "./tools";
 export { storyBrief, storyRecordParts, type StoryBrief, type StoryBriefFields, type StoryPoint } from "./brief";
-export { STORY_ANSWERS, STORY_DEFAULTS, type LoreOverlay, type StoryDeps, type StorySettings } from "./kit";
+export { namesOf, STORY_ANSWERS, STORY_DEFAULTS, type LoreOverlay, type StoryDeps, type StorySettings } from "./kit";
 export { STORY_LANE, STORY_OPERATIONS } from "./write";
-export { recordStory, STORY_PARTS, writeStory, type StoryPart, type StoryRecorded, type StoryRow, type StoryWrite, type StoryWriter } from "./record";
+export { nameKey, recordStory, STORY_PARTS, storyHead, StoryRecord, writeStory, type StoryItem, type StoryPart, type StoryRecorded, type StoryRow, type StoryWrite, type StoryWriter } from "./record";
 export { storyCoverage, type StoryCoverage } from "./cover";
 export { STORY_FACT_DEFAULTS, STORY_FACT_DEFS, storyFacts, type StoryFacts, type StoryFactSettings, type StoryFactsDeps } from "./facts";
 export { closeOpenScene, sceneSession, type SceneSession } from "./sessions";

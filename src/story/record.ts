@@ -12,7 +12,7 @@ import { emptyQuests, type QuestSlice, questSliceOf } from "../quests/record";
 import type { Stamp } from "../iface/source";
 import type { ChangeInput, Source, Store } from "../store";
 import { applyStory, type HorizonEntry, mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
-import type { StoryAt } from "./path";
+import { type StoryAt, storyAt } from "./path";
 
 export { keyedItemId, nameKey, newItemId, STORY_PARTS, type StoryPart } from "./fold";
 
@@ -233,4 +233,9 @@ export interface StoryWritten {
 /** `recordStory` for writes of items only. */
 export function writeStory(store: Store, writer: StoryWriter, writes: readonly StoryWrite[]): StoryWritten[] {
   return recordStory(store, writer, writes).map((r, i) => ({ change: r.change, item: r.item as string, part: (writes[i] as StoryWrite).part, value: (writes[i] as StoryWrite).value }));
+}
+
+/** The story record at the chat's head, as the store last compared the chat's messages: its parts' items, threads and arcs. */
+export function storyHead(store: Store, user: string, chat: string): StoryRecord {
+  return StoryRecord.read(store, user, storyAt(store.user(user), chat, null));
 }
