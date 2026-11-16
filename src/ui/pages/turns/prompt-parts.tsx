@@ -83,15 +83,11 @@ const HOW_WORDS: Readonly<Record<NonNullable<TurnLoreRow["how"]>, string>> = {
   sticky: "still in force from earlier",
 };
 
-const RECEIPT_WORDS = {
+const RECEIPT_WORDS: Readonly<Record<NonNullable<TurnLoreRow["receipt"]>, string>> = {
   "kept-out": "kept out: RPE's check on the prompt's arrival took it out of the lore the Author was given",
   reworded: "worded otherwise: RPE's check on the prompt's arrival changed its words before the Author was given it",
-} as const;
-
-/** What RPE's check on the prompt's arrival did to an entry (the lore owner's `receipt`): kept it out of the Author's lore, or worded it otherwise; null where it left the entry as Lumiverse gave it, or says nothing. */
-export function receiptOf(row: TurnLoreRow): keyof typeof RECEIPT_WORDS | null {
-  return "receipt" in row && (row.receipt === "kept-out" || row.receipt === "reworded") ? row.receipt : null;
-}
+  "not-found": "its text was not found in the prompt on arrival, so RPE's check could not be applied to it",
+};
 
 /** The lore Lumiverse activated for the turn's prompt, each entry by its map id, its book and its title, with how it activated or "not said" where the turn's tag does not say; an entry the check on receipt kept out or reworded says so. */
 export function LoreMapRows(props: { rows: readonly TurnLoreRow[] | null | undefined }) {
@@ -103,7 +99,7 @@ export function LoreMapRows(props: { rows: readonly TurnLoreRow[] | null | undef
       <span class="rpe-caption">Its lore map</span>
       <ul class="rpe-reports">
         {rows.map((row) => {
-          const receipt = receiptOf(row);
+          const { receipt } = row;
           return (
             <li key={row.id} data-receipt={receipt ?? undefined}>
               <code class="lre-id">{row.id}</code> {row.title}
