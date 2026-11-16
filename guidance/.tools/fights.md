@@ -1,7 +1,9 @@
 ---
-description: How the tools for a fight are called - fight_start, fight_read and fight_end. It says how to call them, not when. Delete this file and the agents that are given it by a search are given no such guide.
+description: How the tools for a fight are called - fight_start, fight_read and fight_end. It says how to call them, not when. Delete this file and an agent that finds one of them by search is given no such guide.
 ---
-fight_start takes `foes`, the names of those the player's character fights, and rolls each side's initiative once. fight_read takes no arguments and changes nothing: it says whether a fight is on, who is on which side, the order, whose turn it is and how each fighter stands. fight_end takes `winner`, a side, or `break_off` true for a fight left unfinished. Each tool that writes also takes `source`, `precision` and `standing`.
+fight_start names the two sides: `with`, those who fight on the player's side (name the player's character too if they fight), and `foes`, each by name or id. A fight is exactly the people named: nobody joins by themselves. `at` is the place it is at (left out, where they all stand), `order` is the initiative order if you have one, and `roll_initiative` true has it rolled. Several fights can be on at once, each with an id at its place; a start that names a fight under way, by `fight` or by its place, adds the people named to it. fight_read takes `fight` to read one fight and nothing to read every fight under way. fight_end takes `fight` (needed when several are on), `winner` (`party`, the `with` side, or `foes`) and `break_off` true to end it with no winner.
 
-    fight_start {"foes": ["Reeve's guard", "Hound"], "source": {"from": "prose", "message": "m-12"}}
-    fight_end {"winner": "player", "source": {"from": "prose", "message": "m-15"}}
+The world's rules that hear a fight start, take someone in or end are listed in the answer, not run. A fighter who is not there, or cannot fight by the world's rules, is in the fight all the same and the answer reports it. Each write also takes `source`, and `precision` and `standing` where you know them.
+
+    tool_use {"name": "fight_start", "args": {"with": ["Mara", "Wren"], "foes": ["Grey wolf"], "at": "Old mill", "source": {"from": "prose", "message": "m-12"}}}
+    tool_use {"name": "fight_end", "args": {"winner": "party", "source": {"from": "prose", "message": "m-15"}}}

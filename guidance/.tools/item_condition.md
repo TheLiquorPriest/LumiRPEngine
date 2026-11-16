@@ -7,4 +7,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Changes a thing's condition by an amount, within the bounds its kind gives: worn down, damaged or broken below, mended above. The answer says what changed and how the thing now stands.
+Changes a thing's condition by an amount: worn down, damaged or broken below 0, mended above. It counts from the condition recorded, or the kind's own starting value; the change is recorded as given even when it goes past the bounds the kind gives, and the answer says so. A thing with neither is left as it is, and the answer says so. The answer says what changed and how the thing now stands.

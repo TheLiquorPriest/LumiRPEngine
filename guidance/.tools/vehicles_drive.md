@@ -9,4 +9,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Drives, rides, sails or flies a vehicle to a place by the world's routes: the fuel the trip burns, the vehicle parked there, and its driver and riders arrived with it. The answer says what changed and how the vehicle and its people now stand.
+Drives, rides, sails or flies a vehicle to a place by the world's routes: the fuel the trip burns, the vehicle parked there, and its driver and riders arrived with it. It passes no time. A trip the world's rules would refuse is made all the same, and the answer says so. The answer says what changed and how the vehicle and its people now stand.
