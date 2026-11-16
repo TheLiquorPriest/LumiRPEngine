@@ -197,7 +197,7 @@ describe("watching one turn, for its page", () => {
     await flush();
     // Its events, and one of another turn of the chat.
     const other = RECORDS[0] as TraceRecord;
-    const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "turn-99", scope: { ...other.scope, turn: "turn-99" } } };
+    const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "turn-99", scope: { user: other.scope.user, session: other.scope.session, chat: typeof other.scope.chat === "string" ? other.scope.chat : "", turn: "turn-99" } } };
     client.listener().events([...RECORDED.slice(30, 60), elsewhere], null);
     timers.advance(50);
     expect(seen.at(-1)?.model.runs.map((r) => r.run)).toEqual([RUN_FIRST]);
@@ -248,7 +248,7 @@ describe("watching one turn, for its page", () => {
     await flush();
     // The first run's events go on, beside a record of another turn's run.
     const other = RECORDS[0] as TraceRecord;
-    const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "run-99", scope: { ...other.scope, turn: "turn-99" } } };
+    const elsewhere: LiveEvent = { ...(RECORDED[0] as LiveEvent), seq: 9_999, kind: "trace", data: { ...other, run: "run-99", scope: { user: other.scope.user, session: other.scope.session, chat: typeof other.scope.chat === "string" ? other.scope.chat : "", turn: "turn-99" } } };
     client.listener().events([...first.slice(30), elsewhere], null);
     timers.advance(50);
     expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.turn, r.seq])).toEqual([["run-31a", RUN, RECORDS.length]]);

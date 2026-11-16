@@ -5,7 +5,7 @@
 // the chat before the Author's closing calls. Every name, id and number here is made up.
 
 import type { AgentRef, TraceDelta, TraceEvent, TraceRecord, Usage } from "rp-harness/contract";
-import type { ChatsReply, LevelNode, LevelReflection, LiveEvent, ReplyPiece, RunShown, TurnReply, TurnRow, TurnsReply, WorldReply } from "../../src/shared/api";
+import type { ChatsReply, LevelNode, LevelReflection, LiveEvent, ReplyPiece, RunScope, RunShown, Scope, TurnReply, TurnRow, TurnsReply, WorldReply } from "../../src/shared/api";
 import type { ValuesShown } from "../../src/ui/pages/world";
 
 export const USER = "user-1";
@@ -290,12 +290,15 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
 }
 
 /** What a turn's read holds beside its runs, for a turn that has none of it: no located prompt, nothing asked, no record, no tool found, nothing open, no change, nothing told, not carried. */
-export const NOTHING_MORE = { prompt: null, asked: [], record: null, found: [], todos: [], changes: [], told: { gapChecks: [], consents: [], rules: [], attachments: [], dropped: [] }, carried: null } satisfies Pick<TurnReply, "prompt" | "asked" | "record" | "found" | "todos" | "changes" | "told" | "carried">;
+export const NOTHING_MORE = { prompt: null, asked: [], record: null, found: [], todos: [], changes: [], told: { gapChecks: [], consents: [], rules: [], attachments: [], dropped: [] }, carried: null, card: "", quests: [] } satisfies Pick<TurnReply, "prompt" | "asked" | "record" | "found" | "todos" | "changes" | "told" | "carried" | "card" | "quests">;
+
+/** A run's scope placed in `chat`: the user and session it had, and the turn when it names one. */
+const inChat = (scope: RunScope, chat: string): Scope => ({ user: scope.user, session: scope.session, chat, ...(typeof scope.turn === "string" ? { turn: scope.turn } : {}) });
 
 /** The recorded turn as a read of it answers once the hub had sent its first `count` events (all of them when absent), with its trace from record `from`. */
 export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): TurnReply {
   const detail = turnOf(RECORDED.slice(0, count), { run: RUN, chat, received: T0 - INTAKE_MS, from });
-  return chat === CHAT ? detail : { ...detail, trace: detail.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })), runs: detail.runs.map((run) => ({ ...run, trace: run.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })) })) };
+  return chat === CHAT ? detail : { ...detail, trace: detail.trace.map((r) => ({ ...r, scope: inChat(r.scope, chat) })), runs: detail.runs.map((run) => ({ ...run, trace: run.trace.map((r) => ({ ...r, scope: inChat(r.scope, chat) })) })) };
 }
 
 export function summaryOf(detail: TurnReply): TurnRow {

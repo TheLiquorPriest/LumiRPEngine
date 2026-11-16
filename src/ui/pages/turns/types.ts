@@ -2,6 +2,7 @@
 
 import type { ComponentChildren } from "preact";
 import type { FolderEntry, RequestReply, StageTurn, TurnLoreRow, TurnReply } from "../../../shared/api";
+import type { ReviewShown } from "./review";
 import type { RunNode } from "../../live-model";
 import type { NoticeLines } from "../../notice-words";
 
@@ -42,6 +43,9 @@ export interface TurnParts {
   loreRows?: readonly TurnLoreRow[] | null;
   /** Who was on stage for the turn and who has a perception of it; null until read. */
   stage?: StageTurn | null;
+  /** The turn's review card and the record an old engine kept for a carried reply; read once the spoiler gate is open. */
+  review?: ReviewShown;
+  onOpenQuest?(id: string): void;
   onOpenFile(name: string): void;
   onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;

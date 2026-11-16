@@ -24,6 +24,7 @@ import type { PageEntry } from "../../page-entry";
 import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "../jobs";
 import { useRead } from "../../reading";
 import { readFolder } from "./folder";
+import { type ReviewShown, useReview } from "./review";
 import { TURN_SECTIONS } from "./sections/list";
 import { type FolderShown, NO_FOLDER, type RequestShown, type TurnParts, type TurnSection } from "./types";
 
@@ -337,6 +338,9 @@ export interface TurnViewProps {
   loreRows?: readonly TurnLoreRow[] | null;
   /** Who was on stage for the turn and who has a perception of it; null until read. */
   stage?: StageTurn | null;
+  /** The turn's review card and, for a turn carried in, the record an old engine kept; read once the gate is open. */
+  review?: ReviewShown;
+  onOpenQuest?(id: string): void;
   onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
@@ -351,7 +355,7 @@ export function TurnView(props: TurnViewProps) {
   const kind = turn.runs.at(-1)?.kind ?? turn.kind;
   const status = statusWords(kind, turn.status);
   const failure = turn.error === null || (kind === "settle" && turn.status === "no-reply") ? null : replyErrorWords(turn.error, turn.status);
-  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, stage: props.stage, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
+  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, stage: props.stage, review: props.review, onOpenQuest: props.onOpenQuest, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
@@ -462,6 +466,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
   );
   const loreRead = useRead(gateOpen ? async () => replyOf(await app.client.call("GET /api/v1/chats/:chat/turns/:turn/lore", { chat, turn })).entries : null, [chat, turn, gateOpen, reads]);
   const stageRead = useRead(async () => replyOf(await app.client.call("GET /api/v1/chats/:chat/perceptions", { chat }, { query: { turn, count: 1 } })).turns.at(-1) ?? null, [chat, turn, reads]);
+  const review = useReview(chat, turn, watched.detail?.carried != null, gateOpen, reads, () => setReads((n) => n + 1));
   const runs = runsOf(watched.model, turn);
   const latest = watched.detail === null ? runs.at(-1) : latestOf(watched.detail, runs);
   const detail = watched.detail === null ? null : liveTurn(watched.detail, latest);
@@ -493,6 +498,8 @@ export function TurnPage(props: { chat: string; turn: string }) {
       lead={lead.value}
       loreRows={loreRead.value}
       stage={stageRead.value}
+      review={review}
+      onOpenQuest={(id) => app.go({ page: "quests", chat, at: [id] })}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onBack={back}

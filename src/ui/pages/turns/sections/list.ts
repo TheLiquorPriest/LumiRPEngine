@@ -4,6 +4,7 @@
 import type { TurnSection } from "../types";
 import { section as agentTokensSection } from "./agent-tokens";
 import { section as askedSection } from "./asked";
+import { section as carriedSection } from "./carried";
 import { section as continuedSection } from "./continued";
 import { section as foundSection } from "./found";
 import { section as frontSection } from "./front";
@@ -14,8 +15,10 @@ import { section as lanesSummarySection } from "./lanes-summary";
 import { section as marksSection } from "./marks";
 import { section as openSection } from "./open";
 import { section as perceptionsSection } from "./perceptions";
+import { section as questsSection } from "./quests";
 import { section as recordSection } from "./record";
 import { section as replySection } from "./reply";
+import { section as reviewSection } from "./review";
 import { section as runsSection } from "./runs";
 import { section as timingsSection } from "./timings";
 import { section as tokensSection } from "./tokens";
@@ -24,4 +27,4 @@ import { section as traceSection } from "./trace";
 import { section as unsettledSection } from "./unsettled";
 import { section as wholeSection } from "./whole";
 
-export const TURN_SECTIONS: readonly TurnSection[] = [agentTokensSection, askedSection, continuedSection, foundSection, frontSection, givenSection, intentSection, lanesSection, lanesSummarySection, marksSection, openSection, perceptionsSection, recordSection, replySection, runsSection, timingsSection, tokensSection, toldSection, traceSection, unsettledSection, wholeSection].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+export const TURN_SECTIONS: readonly TurnSection[] = [agentTokensSection, askedSection, carriedSection, continuedSection, foundSection, frontSection, givenSection, intentSection, lanesSection, lanesSummarySection, marksSection, openSection, perceptionsSection, questsSection, recordSection, replySection, reviewSection, runsSection, timingsSection, tokensSection, toldSection, traceSection, unsettledSection, wholeSection].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
