@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../src/engine/places-in-play";
-import { STORE_OPS } from "../../src/store/types";
+import { HORIZON, horizonOf } from "../../src/store";
 import { rig, texts, wordsFromFiles } from "./rig";
 
 const src = { from: "prose", message: "m-60" };
@@ -26,7 +26,7 @@ describe("never at a place that is not there", () => {
     const made = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: "Gull Skerry", source: src }] });
     expect(made.error).toBeUndefined();
     // As a horizon recorded before entries like this were refused, or by any other way in.
-    await t.writes.run(() => t.s.addChanges(t.turn.id, [{ lane: "story", op: STORE_OPS.horizon, value: { list: ["place:keepers_kitchen"] }, by: "author-1" }]));
+    await t.writes.run(() => t.s.addChanges(t.turn.id, [{ lane: "story", op: HORIZON.op, value: { list: [{ at: "place:keepers_kitchen", depth: "full" }] }, by: "author-1" }]));
     const person = await t.call("world_apply", { operations: [{ op: "spawn", kind: "person", name: "Ida Pell", at: "the back room", source: src }] });
     const thing = await t.call("world_apply", { operations: [{ op: "spawn", name: "Wet coat", on: "the peg by the stove", source: src }] });
     const state = t.s.stateAt(t.turn.id).state;
@@ -43,6 +43,6 @@ describe("never at a place that is not there", () => {
       if (typeof at === "string") expect(places.has(at)).toBe(true);
     }
     expect(Object.values(state.world.entities).map((e) => e.name)).toEqual(expect.arrayContaining(["Ida Pell", "Wet coat"]));
-    expect(state.horizon).toEqual(["place:keepers_kitchen"]);
+    expect(horizonOf(t.deps.env, state).map((h) => h.at)).toEqual(["place:keepers_kitchen"]);
   });
 });

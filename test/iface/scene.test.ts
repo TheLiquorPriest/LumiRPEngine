@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject, ToolResult } from "rp-harness/contract";
 import { playedWorld } from "../../src/engine/places-in-play";
+import { horizonOf } from "../../src/store";
 import { dataOf, rig, texts, wordsFromFiles } from "./rig";
 
 const src = { from: "prose", message: "m-1" };
@@ -42,7 +43,7 @@ describe("the first turn of a chat with no world", () => {
     const at = (name: string): unknown => Object.values(state.world.entities).find((e) => e.name === name)?.fields.place;
     for (const name of ["Ada Lorne", "Tobin Lorne", "Oil lamp"]) expect(at(name)).toBe(kitchen?.id);
     expect(state.facts["entity:ada_lorne"]?.map((f) => f.value)).toEqual(["Keeps the light on Gull Skerry."]);
-    expect(state.horizon).toHaveLength(4);
+    expect(horizonOf(t.deps.env, state)).toHaveLength(4);
     wordsFromFiles(r);
   });
 

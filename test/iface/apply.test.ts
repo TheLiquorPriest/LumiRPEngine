@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import { playedWorld } from "../../src/engine/places-in-play";
 import { gridMoves, mapLines, shippedTexts } from "../../src/iface/index";
+import { horizonOf } from "../../src/store";
 import { SCENE_FROM_NOTHING } from "../../src/iface/apply";
 import { compileMaps } from "../../src/shared/maps";
 import type { WorldDoc } from "../../src/shared/world";
@@ -84,7 +85,7 @@ describe("one call builds on itself", () => {
     // A bell holds nothing: the key is put in it all the same, and the answer says which rule that bent.
     expect(stored.world.entities[byName("Brass key")]?.relations).toContainEqual({ type: "in", to: "bell" });
     expect((r.reports ?? []).some((x) => x.startsWith("Operation 3 (spawn): Brass key") && x.includes("cant_hold"))).toBe(true);
-    expect(stored.horizon).toEqual(["place:common_room", `entity:${ines}`, `entity:${byName("Brass key")}`]);
+    expect(horizonOf(t.deps.env, stored).map((h) => h.at)).toEqual(["place:common_room", `entity:${ines}`, `entity:${byName("Brass key")}`]);
     wordsFromFiles(r);
   });
 
@@ -127,7 +128,7 @@ describe("a world with nothing in it", () => {
     expect(places[id("Keeper's kitchen")]?.parent).toBe(id("Gull Skerry"));
     expect(places[id("Lamp room")]?.parent).toBe(id("Gull Skerry"));
     expect(state.world.entities.ada_lorne?.fields.place).toBe(id("Keeper's kitchen"));
-    expect(state.horizon).toEqual([`place:${id("Keeper's kitchen")}`, "entity:ada_lorne", `place:${id("Lamp room")}`]);
+    expect(horizonOf(t.deps.env, state).map((h) => h.at)).toEqual([`place:${id("Keeper's kitchen")}`, "entity:ada_lorne", `place:${id("Lamp room")}`]);
     const data = dataOf(r);
     expect((data.changed as JsonObject[]).filter((c) => String(c.at).startsWith("place:") && c.new === true).map((c) => c.name)).toEqual(expect.arrayContaining(["Gull Skerry", "Keeper's kitchen", "Lamp room"]));
     expect((data.now as JsonObject[]).some((n) => n.ref === `place:${id("Keeper's kitchen")}`)).toBe(true);

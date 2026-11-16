@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { HostTool, JsonObject } from "rp-harness/contract";
 import { asHarnessPasses } from "../story/rig";
+import { horizonOf } from "../../src/store";
 import { rig, texts, wordsFromFiles } from "./rig";
 
 const SRC = { from: "prose", message: "m-1" };
@@ -29,11 +30,13 @@ describe("the horizon", () => {
     expect(r.error).toBeUndefined();
     wordsFromFiles(r);
     expect(r.reports).toBeUndefined();
-    expect(texts(r)).toContain("Operation 8 (horizon): kept on the horizon as words, naming no place, person or thing: the tower and its lamp, the storm.");
+    expect(texts(r).some((x) => x.startsWith("Operation 8 (horizon): the tower and its lamp names no place, person or thing, so it is kept on the horizon as words."))).toBe(true);
+    expect(texts(r).some((x) => x.startsWith("Operation 8 (horizon): the storm names no place, person or thing, so it is kept on the horizon as words."))).toBe(true);
     const state = t.s.stateAt(t.turn.id).state;
-    const kitchen = state.horizon[0] ?? "";
+    const horizon = horizonOf(t.deps.env, state).map((h) => h.at);
+    const kitchen = horizon[0] ?? "";
     expect(kitchen.startsWith("place:")).toBe(true);
-    expect(state.horizon).toEqual([kitchen, "the tower and its lamp", "entity:ada_lorne", "the storm"]);
+    expect(horizon).toEqual([kitchen, "the tower and its lamp", "entity:ada_lorne", "the storm"]);
     expect(Object.values(state.world.entities).filter((e) => e.kind === "person")).toHaveLength(2);
   });
 
@@ -61,6 +64,6 @@ describe("the horizon", () => {
     expect(r.marks ?? []).toEqual([]);
     expect(texts(r).some((x) => x.includes("marked unsourced"))).toBe(false);
     wordsFromFiles(r);
-    expect(t.s.stateAt(t.turn.id).state.horizon).toHaveLength(1);
+    expect(horizonOf(t.deps.env, t.s.stateAt(t.turn.id).state)).toHaveLength(1);
   });
 });

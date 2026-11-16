@@ -43,7 +43,7 @@ describe("an answer with nothing wrong in it is clean", () => {
     expect(r.reports).toBeUndefined();
     const lines = texts(r).filter((x) => x.startsWith("Operation"));
     expect(lines.some((x) => x.startsWith("Operation 1 (place): hand lantern [") && x.endsWith("] was already so; nothing changed."))).toBe(true);
-    expect(lines).toContain("Operation 2 (horizon): kept on the horizon as words, naming no place, person or thing: the storm coming in.");
+    expect(lines.some((x) => x.startsWith("Operation 2 (horizon): the storm coming in names no place, person or thing, so it is kept on the horizon as words."))).toBe(true);
   });
 
   test("what does not add up stays a report: a giver who did not hold what was given", async () => {
