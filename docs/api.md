@@ -406,6 +406,19 @@ The lore index of a chat, a page at a time in the order of the lore map's catalo
 | Body | none |
 | Reply | `{ items: LoreIndexRow[]; next: string | null }`, a page at a time |
 
+### `PUT /api/v1/chats/:chat/lore/index/:entry`
+
+The owner's own lines for one entry of a chat's lore: its kind, its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries. What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `entry` |
+| Query | none |
+| Body | `{ kind?: string | null; line?: string | null; defines?: { what: string; aspect: string }[] | null; related?: string[] | null }` |
+| Reply | [`LoreIndexRow`](#loreindexrow) |
+
 ### `POST /api/v1/chats/:chat/lore/index/jobs`
 
 Starts a lore indexing job for a chat: the indexer's definition as a job of the owner's own, tied to no turn, handed the entries no run has indexed as they stand now a batch at a time. Refused, with the fact, where jobs are off or a limit of the day is reached.
@@ -629,6 +642,32 @@ What the tree takes: each chat's folder by area, the user's own level, the shipp
 | Query | none |
 | Body | none |
 | Reply | [`StorageReply`](#storagereply) |
+
+### `POST /api/v1/storage-prune`
+
+Prunes on request, asked first: without `plan` it answers which places would go (a chat's old turn folders, its closed sessions' files, a deleted chat's other files, or the backup or copy of the database named), how many files and bytes, and a plan standing for exactly that; with the plan it takes exactly that, or nothing if the tree has changed since. Never a turn going on, never an open session's files.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`StoragePruneAsk`](#storagepruneask) |
+| Reply | [`StoragePruneReply`](#storageprunereply) |
+
+### `GET /api/v1/storage/kinds`
+
+Each kind RPE keeps (notes, versions of notes, suggestions, turn folders kept whole and pruned, session files, the user's files, the shipped level, the database, the migration's backups, copies of the database, archives) with how many, how big, the oldest, how long it is kept and by which setting, and when the user last pruned.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`StorageKindsReply`](#storagekindsreply) |
 
 ### `GET /api/v1/storage/notes`
 
@@ -1775,6 +1814,8 @@ export interface ChatStorageRow {
   folder: string;
   bytes: number;
   areas: { notes: number; turns: number; sessions: number; files: number };
+  /** When RPE heard that Lumiverse deleted the chat, epoch milliseconds; its session files are gone and its other files stay until he prunes them. */
+  deleted?: number | null;
 }
 ```
 
@@ -2415,6 +2456,14 @@ export interface JoinedAnswer {
 }
 ```
 
+### `KeptFor`
+
+How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which gives its key and what it is now (null: none, all kept).
+
+```ts
+export type KeptFor = { by: "never" } | { by: "chat" } | { by: "setting"; setting: string; value: number | null };
+```
+
 ### `KeptMessage`
 
 One message of a model call's request as it was sent: its role, its text, and the block the harness placed it as (`opening`, `frame`, `prompt`, `session:carry`, `briefing`, a given name, `brief`); none for the run's own conversation.
@@ -2701,6 +2750,8 @@ export interface LoreIndexRow {
   stale: boolean;
   /** Which of the lines are the user's own. */
   edited: ("kind" | "line" | "defines" | "related")[];
+  /** What the entry is bound to: each binding in force, the owner's over an indexing run's, and the world's own pins of it, each to a record by its id. */
+  links: ({ record: string; linked: boolean; aspect: string; by: "run" | "casting" | "bootstrap" | "owner" | "pin" })[];
 }
 ```
 
@@ -3061,6 +3112,19 @@ What pruning a chat's old turn folders took away: of how many folders, how many 
 ```ts
 export interface PrunedShown {
   folders: number;
+  files: number;
+  bytes: number;
+}
+```
+
+### `PruneItem`
+
+One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, or a backup; its path below the tree's folder (a backup's, its name), and the files and bytes that go.
+
+```ts
+export interface PruneItem {
+  kind: "turn-folder" | "session" | "chat" | "backup";
+  path: string;
   files: number;
   bytes: number;
 }
@@ -3552,6 +3616,62 @@ True when the turn was running and is being stopped, false when it had already e
 ```ts
 export interface StopReply {
   stopped: boolean;
+}
+```
+
+### `StorageKindRow`
+
+One kind RPE keeps: how many, how big, the oldest of it, and how long it is kept.
+
+```ts
+export interface StorageKindRow {
+  kind: string;
+  /** How many: files, rows, folders or backups, by what the kind is. */
+  count: number;
+  bytes: number;
+  /** When the oldest of it was made, epoch milliseconds; null where there is none. */
+  oldest: number | null;
+  kept: KeptFor;
+}
+```
+
+### `StorageKindsReply`
+
+Each kind RPE keeps, with its count, size, oldest and how long it is kept, and when the user last pruned.
+
+```ts
+export interface StorageKindsReply {
+  kinds: StorageKindRow[];
+  /** When the user last pruned anything the page offers, epoch milliseconds; null when never. */
+  lastPrune: number | null;
+}
+```
+
+### `StoragePruneAsk`
+
+What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that.
+
+```ts
+export interface StoragePruneAsk {
+  what: "turns" | "sessions" | "chat" | "backup";
+  chat?: string | null;
+  name?: string | null;
+  plan?: string;
+}
+```
+
+### `StoragePruneReply`
+
+What a prune would take (its places, files and bytes, and the `plan` that stands for exactly that), or, when asked with the plan, took.
+
+```ts
+export interface StoragePruneReply {
+  plan: string;
+  /** False: this is what would go. True: this went. */
+  removed: boolean;
+  files: number;
+  bytes: number;
+  items: PruneItem[];
 }
 ```
 

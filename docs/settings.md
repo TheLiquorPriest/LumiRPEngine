@@ -168,6 +168,13 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `files.listMost` | `1000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most entries a Files page lists: The most files and folders one page of the Files page's listing gives, whatever number it asks for. |
 | `files.readLines` | `500` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lines of a file read at once: Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole. |
 
+## `suggestions`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `suggestions.openMost` | `50` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Open suggestions kept: The most suggestions of a chat that wait for the user at once; past it an agent's new suggestion is not kept, and the agent is told so. |
+| `suggestions.decidedKept` | `500` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Decided suggestions kept: How many accepted and dismissed suggestions of a chat are kept, the oldest going after each decision and when the Storage page prunes them. |
+
 ## The files in force
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -319,6 +326,12 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `turns.page` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns on a page: The turns a chat's list on the Turn page gives when the page names no number. |
 | `turns.pageMost` | `500` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most turns on a page: The most turns one page of a chat's list may ask for. |
 
+## `requests`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `requests.textMost` | `2000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest request: The most characters a request beside his words may hold (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so. |
+
 ## `map`
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -330,6 +343,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `map.printRows` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | Map printed, rows: The most rows of a map the world state prints; a taller map is printed around the horizon. |
 | `map.diagonal` | `one` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | How a diagonal counts: one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins. |
 | `map.distances` | `feet` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Distances told in: feet or metres. A world's ruleset that says otherwise wins. |
+| `map.picture` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | World state prints the map's picture: The world state prints the map's picture with its legend; off, it gives the title and the legend and the list of who and what is where carries the load. |
 
 ## Bootstrap
 
@@ -393,6 +407,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lumiverse.extension.followRenewal` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Page follow renewal: Seconds between a page's renewals of its follow of a chat; keep it well inside the relay lease. |
 | `lumiverse.search.hits` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chat search hits: Hits a chat search gives when the query names no number. |
 | `lumiverse.search.snippet` | `80` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chat search snippet: Characters of a chat search hit's snippet. |
+| `lumiverse.stores.hits` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Store search hits: Hits a search of Lumiverse's databanks and memory gives when the query names no number. |
 | `lumiverse.untagged.whileAwaited` | `pass` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Untagged request while a reply awaits its tag: pass: a request with no tag is passed on, as every other is. fail: while a reply RPE heard start on its connection has neither sent its tagged request nor ended, a request with no tag on its connection is answered with an error line; it may fail a title or summary asked meanwhile. |
 
 ## The install: config.json

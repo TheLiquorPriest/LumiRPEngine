@@ -33,6 +33,12 @@ export interface TreeRoutesDeps {
   place?(user: string, chat: string): Promise<ChatFolders>;
   /** What RPH makes of the files of the chat's view: what it holds out, what it found wrong, whose stacks they join; with no chat, of the shipped and global levels. */
   guidance(user: string, chat: string | null): Guidance;
+  /** The data folder's backups: the migration's, the copies of the database taken before migrations, the archives `rpe backup` made. */
+  backups: string;
+  /** How many of those copies are kept (`database.copiesKept`). */
+  copiesKept: number;
+  /** The ids of the chat's sessions that are open now: a prune leaves their files. */
+  openSessions(user: string, chat: string): Promise<string[]>;
 }
 
 /** The levels a file may be written at (plan §5): every level but the shipped one's is the user's. */

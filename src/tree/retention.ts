@@ -1,14 +1,17 @@
 // Retention (plan §5.5). The newest turn folders of each chat are kept whole; each older one keeps its
 // record (`turn.json`), what it released (`output/`) and its transcripts (`transcripts/`), and drops the
 // rest: the snapshots of the chat and the lore, which nothing reads as a source of truth and which can
-// be made again. Session files are not pruned here: they stay until the chat is deleted. How many turn
-// folders are kept whole is the setting `retention.turnFolders` (`settings.ts`). Pruning runs when
-// asked for and after a turn, never during one: the folders of turns going on are left alone, however
-// old. Newest is by when the turn was received, as its record says, or RPE's record of the turn its
-// folder's name gives; never by file times, which a copy or a restore of the tree resets.
+// be made again. Session files are not pruned here: they stay until the chat is deleted or he prunes them
+// (`prune.ts`). How many turn folders are kept whole is the setting `retention.turnFolders` (`settings.ts`).
+// Pruning runs when asked for and after a turn, never during one: the folders of turns going on are left
+// alone, however old. Newest is by when the turn was received, as its record says, or RPE's record of the
+// turn its folder's name gives; never by file times, which a copy or a restore of the tree resets.
+//
+// What a prune takes is worked out first (`planTurnPrune`), so that he can be told before it goes, and
+// then taken exactly as planned.
 
-import { readFile, lstat, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readFile, readdir, rm } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 import type { TreeChats } from "./chats";
 import { SESSIONS_FOLDER, TURNS_FOLDER } from "./layout";
 import { type TreeSettings, treeSettingsOf } from "./settings";
@@ -28,12 +31,24 @@ export interface Pruned {
   bytes: number;
 }
 
+/** What a prune would take of one place: its path below the tree's folder, the files and bytes of what goes, and the paths on disk that go. */
+export interface Planned {
+  /** What goes: a turn folder's snapshots, a session, a chat's folder. */
+  kind: "turn-folder" | "session" | "chat";
+  /** The place it goes from, below the tree's folder, "/" between names. */
+  path: string;
+  files: number;
+  bytes: number;
+  /** The paths on disk removed, whole. */
+  disks: string[];
+}
+
 /** The chat's retention settings, as its levels' config files set them over the default. */
 export async function retentionOf(loc: ChatLocation): Promise<RetentionSettings> {
   return { turnFolders: (await treeSettingsOf(loc)).turnFolders };
 }
 
-async function folderNames(disk: string): Promise<string[]> {
+export async function folderNames(disk: string): Promise<string[]> {
   try {
     return (await readdir(disk, { withFileTypes: true })).filter((d) => d.isDirectory() && !d.isSymbolicLink()).map((d) => d.name);
   } catch {
@@ -42,7 +57,7 @@ async function folderNames(disk: string): Promise<string[]> {
 }
 
 /** The files below a path, and what they hold, links not followed. */
-async function measure(disk: string): Promise<{ files: number; bytes: number }> {
+export async function measure(disk: string): Promise<{ files: number; bytes: number }> {
   const info = await lstat(disk);
   if (!info.isDirectory()) return { files: 1, bytes: info.size };
   let files = 0;
@@ -55,18 +70,22 @@ async function measure(disk: string): Promise<{ files: number; bytes: number }> 
   return { files, bytes };
 }
 
+/** A place on disk as the tree's folder names it: below it, "/" between names. */
+export function below(files: string, disk: string): string {
+  return relative(files, disk).split(sep).join("/");
+}
+
 /** The id letters a turn folder's name ends with (`turn-<n>-<id8>`, `turnFolderName`). */
 const TURN_FOLDER = /^turn-\d+-([a-z0-9]+)$/;
 
 /**
- * Prunes a chat's turn folders: all but the newest `settings.turnFolders` keep only what plan §5.5 keeps. Newest by when each
- * turn was received: its `turn.json`, or `begun` (RPE's record of each turn, by the id letters its folder's name gives) for a
- * folder without one; a folder neither says is the oldest. `spare`: the folder names of turns going on, left alone.
+ * What pruning a chat's turn folders takes: all but the newest `settings.turnFolders` lose what plan §5.5 does not keep. Newest by
+ * when each turn was received: its `turn.json`, or `begun` (RPE's record of each turn, by the id letters its folder's name gives)
+ * for a folder without one; a folder neither says is the oldest. `spare`: the folder names of turns going on, left alone.
  */
-export async function pruneTurnFolders(loc: ChatLocation, settings: RetentionSettings, spare: ReadonlySet<string> = new Set(), begun: ReadonlyMap<string, number> = new Map()): Promise<Pruned> {
-  const pruned: Pruned = { folders: 0, files: 0, bytes: 0 };
+export async function planTurnPrune(loc: ChatLocation, settings: RetentionSettings, spare: ReadonlySet<string> = new Set(), begun: ReadonlyMap<string, number> = new Map()): Promise<Planned[]> {
   const sessions = await locate(loc, SESSIONS_FOLDER);
-  if (!sessions.ok || sessions.at.is !== "folder" || sessions.at.disk === null) return pruned;
+  if (!sessions.ok || sessions.at.is !== "folder" || sessions.at.disk === null) return [];
   const folders: { name: string; disk: string; begun: number }[] = [];
   for (const session of await folderNames(sessions.at.disk)) {
     const turns = join(sessions.at.disk, session, TURNS_FOLDER);
@@ -78,21 +97,38 @@ export async function pruneTurnFolders(loc: ChatLocation, settings: RetentionSet
     }
   }
   folders.sort((a, b) => b.begun - a.begun);
+  const planned: Planned[] = [];
   for (const folder of folders.slice(settings.turnFolders)) {
     if (spare.has(folder.name)) continue;
-    let took = false;
-    for (const entry of await readdir(folder.disk)) {
-      if (KEPT_IN_OLD_TURNS.includes(entry)) continue;
-      const at = join(folder.disk, entry);
-      const gone = await measure(at);
-      await rm(at, { recursive: true, force: true });
-      pruned.files += gone.files;
-      pruned.bytes += gone.bytes;
-      took = true;
+    const goes = (await readdir(folder.disk)).filter((entry) => !KEPT_IN_OLD_TURNS.includes(entry));
+    if (goes.length === 0) continue;
+    let files = 0;
+    let bytes = 0;
+    for (const entry of goes) {
+      const taken = await measure(join(folder.disk, entry));
+      files += taken.files;
+      bytes += taken.bytes;
     }
-    if (took) pruned.folders++;
+    planned.push({ kind: "turn-folder", path: below(loc.files, folder.disk), files, bytes, disks: goes.map((entry) => join(folder.disk, entry)) });
+  }
+  return planned;
+}
+
+/** Takes what was planned, exactly. */
+export async function takePlanned(planned: readonly Planned[]): Promise<Pruned> {
+  const pruned: Pruned = { folders: 0, files: 0, bytes: 0 };
+  for (const p of planned) {
+    for (const disk of p.disks) await rm(disk, { recursive: true, force: true });
+    pruned.folders++;
+    pruned.files += p.files;
+    pruned.bytes += p.bytes;
   }
   return pruned;
+}
+
+/** Prunes a chat's turn folders as `planTurnPrune` plans. */
+export async function pruneTurnFolders(loc: ChatLocation, settings: RetentionSettings, spare: ReadonlySet<string> = new Set(), begun: ReadonlyMap<string, number> = new Map()): Promise<Pruned> {
+  return await takePlanned(await planTurnPrune(loc, settings, spare, begun));
 }
 
 /** Prunes a chat's turn folders by its own retention settings; nothing for a chat RPE has not placed. */

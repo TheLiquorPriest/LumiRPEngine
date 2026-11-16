@@ -44,6 +44,10 @@ export const TREE_DEFAULTS = Object.freeze({
   listMost: 1000,
   /** Lines of a file the Files page reads when it names none. */
   readLines: 500,
+  /** The most suggestions of a chat open at once (plan §5.1): a new one past it is not kept. */
+  suggestionsOpenMost: 50,
+  /** How many decided suggestions of a chat are kept. */
+  suggestionsDecidedKept: 500,
 });
 
 export type TreeSettings = { -readonly [K in keyof typeof TREE_DEFAULTS]: number };
@@ -71,6 +75,8 @@ export const TREE_SETTING_DEFS = {
   listPage: { key: "files.listPage", default: TREE_DEFAULTS.listPage, takes: { type: "whole", least: 1 }, perConnection: false, name: "Entries a Files page lists", about: "Files and folders the Files page lists in one page of a folder, or of a search, when it asks for no number.", effect: "use" },
   listMost: { key: "files.listMost", default: TREE_DEFAULTS.listMost, takes: { type: "whole", least: 1 }, perConnection: false, name: "Most entries a Files page lists", about: "The most files and folders one page of the Files page's listing gives, whatever number it asks for.", effect: "use" },
   readLines: { key: "files.readLines", default: TREE_DEFAULTS.readLines, takes: { type: "whole", least: 1 }, perConnection: false, name: "Lines of a file read at once", about: "Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole.", effect: "use" },
+  suggestionsOpenMost: { key: "suggestions.openMost", default: TREE_DEFAULTS.suggestionsOpenMost, takes: { type: "whole", least: 0 }, perConnection: false, name: "Open suggestions kept", about: "The most suggestions of a chat that wait for the user at once; past it an agent's new suggestion is not kept, and the agent is told so.", effect: "use" },
+  suggestionsDecidedKept: { key: "suggestions.decidedKept", default: TREE_DEFAULTS.suggestionsDecidedKept, takes: { type: "whole", least: 0 }, perConnection: false, name: "Decided suggestions kept", about: "How many accepted and dismissed suggestions of a chat are kept, the oldest going after each decision and when the Storage page prunes them.", effect: "use" },
 } as const satisfies NumberSettings<keyof TreeSettings>;
 
 /** A name of a file in force as the files layer reads it: an instruction file by its own name, anything else by its folder and name. */

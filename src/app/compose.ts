@@ -110,6 +110,8 @@ export function compose(options: ComposeOptions = {}): Composition {
     await made().harness.definitions.apply({ user, chat, session: open.id });
     return { session: open.id };
   };
+  // The sessions of a chat that are open now: a prune of the chat's files leaves them.
+  const openSessions = async (user: string, chat: string): Promise<string[]> => (await made().harness.sessions.list(user, chat)).filter((s) => s.state === "open").map((s) => s.id);
 
   const areas: Area[] = [
     appArea({
@@ -145,6 +147,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       stack: (user, chat, agent) => made().harness.definitions.stack(scope(user, chat ?? NO_CHAT), agent),
       apply,
       place,
+      openSessions,
       // What RPH itself makes of the files of a chat's view, for the Files page.
       guidance: (user, chat) => loadGuidance(made().files, scope(user, chat ?? NO_CHAT)),
     })),

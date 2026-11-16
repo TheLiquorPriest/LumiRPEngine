@@ -7,6 +7,8 @@ import { agentRef, type Exactly, type Holds, type Infer, layerLevel, shape } fro
 import type { TreeFileEntry } from "./catalog";
 import type { DiffLine } from "./defaults";
 import type { Listed, ListedPage } from "./listing";
+import type { StorageKind } from "./kinds";
+import type { PruneItem } from "./prune";
 import type { Pruned } from "./retention";
 import type { ChatStorage, NoteFile, NoteFiles, TreeStorage } from "./storage";
 import type { SuggestionState, TreeSuggestion } from "./suggestions";
@@ -193,7 +195,7 @@ export const suggestionDismissedReply = shape.named("SuggestionDismissedReply", 
 const chatStorageRow = shape.named(
   "ChatStorageRow",
   "What a chat's folder takes in all, and by area: its notes, its turn folders, its sessions' own files, and the rest of its files.",
-  shape.object({ chat: T, folder: field(T, "Its folder below the tree's `chats/`."), bytes: N, areas: shape.object({ notes: N, turns: N, sessions: N, files: N }) }),
+  shape.object({ chat: T, folder: field(T, "Its folder below the tree's `chats/`."), bytes: N, areas: shape.object({ notes: N, turns: N, sessions: N, files: N }), deleted: opt(nullable(N), "When RPE heard that Lumiverse deleted the chat, epoch milliseconds; its session files are gone and its other files stay until he prunes them.") }),
 );
 type ChatStorageMirrored = Holds<Exactly<Infer<typeof chatStorageRow>, ChatStorage>>;
 
@@ -224,6 +226,40 @@ type PrunedMirrored = Holds<Exactly<Infer<typeof prunedShown>, Pruned>>;
 export const pruneBody = shape.named("PruneAsk", "The chat whose old turn folders are pruned.", shape.object({ chat: shape.text({ blank: false }) }));
 export const pruneReply = shape.object({ pruned: prunedShown });
 
+const keptFor = shape.named(
+  "KeptFor",
+  "How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which gives its key and what it is now (null: none, all kept).",
+  shape.union(shape.object({ by: shape.literal("never") }), shape.object({ by: shape.literal("chat") }), shape.object({ by: shape.literal("setting"), setting: T, value: nullable(N) })),
+);
+const storageKindRow = shape.named(
+  "StorageKindRow",
+  "One kind RPE keeps: how many, how big, the oldest of it, and how long it is kept.",
+  shape.object({ kind: T, count: field(N, "How many: files, rows, folders or backups, by what the kind is."), bytes: N, oldest: field(nullable(N), "When the oldest of it was made, epoch milliseconds; null where there is none."), kept: keptFor }),
+);
+type KindMirrored2 = Holds<Exactly<Infer<typeof storageKindRow>, StorageKind>>;
+export const storageKindsReply = shape.named(
+  "StorageKindsReply",
+  "Each kind RPE keeps, with its count, size, oldest and how long it is kept, and when the user last pruned.",
+  shape.object({ kinds: shape.list(storageKindRow), lastPrune: field(nullable(N), "When the user last pruned anything the page offers, epoch milliseconds; null when never.") }),
+);
+
+const pruneItem = shape.named(
+  "PruneItem",
+  "One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, or a backup; its path below the tree's folder (a backup's, its name), and the files and bytes that go.",
+  shape.object({ kind: shape.oneOf("turn-folder", "session", "chat", "backup"), path: T, files: N, bytes: N }),
+);
+type PruneItemMirrored = Holds<Exactly<Infer<typeof pruneItem>, PruneItem>>;
+export const storagePruneBody = shape.named(
+  "StoragePruneAsk",
+  "What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that.",
+  shape.object({ what: shape.oneOf("turns", "sessions", "chat", "backup"), chat: opt(nullable(T)), name: opt(nullable(T)), plan: opt(T) }),
+);
+export const storagePruneReply = shape.named(
+  "StoragePruneReply",
+  "What a prune would take (its places, files and bytes, and the `plan` that stands for exactly that), or, when asked with the plan, took.",
+  shape.object({ plan: T, removed: field(shape.yesNo(), "False: this is what would go. True: this went."), files: N, bytes: N, items: shape.list(pruneItem) }),
+);
+
 const stackPartRow = shape.named(
   "StackPartRow",
   "One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why.",
@@ -243,4 +279,4 @@ export const stackReply = shape.named("StackReply", "The exact stack an agent ge
 type StackMirrored = Holds<Exactly<Infer<typeof stackPartRow>, StackPart>>;
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];
+export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, KindMirrored2, PruneItemMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];

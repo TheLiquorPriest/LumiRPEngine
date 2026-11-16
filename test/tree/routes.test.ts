@@ -97,7 +97,7 @@ describe("the Files page's routes", () => {
             };
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, suggestions, turning: () => turning, stack, apply, place, guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }) }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, suggestions, turning: () => turning, stack, apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }) }));
           },
         },
       ],
@@ -443,6 +443,53 @@ describe("the Files page's routes", () => {
     expect((await call<{ pruned: { folders: number; files: number } }>("POST", "/api/v1/files-prune", { chat: CHAT })).body.pruned).toMatchObject({ folders: 1, files: 1 });
     expect((await listing()).has("sessions/s-1/turns/turn-1-abc1/briefing.md")).toBe(false);
     expect((await listing()).has("sessions/s-1/turns/turn-2-abc2/briefing.md")).toBe(true);
+  });
+
+  test("the Storage page lists each kind with its count, size and how long it is kept, and a prune says first what goes, then takes exactly that: closed sessions' files, a deleted chat's other files, a backup he names", async () => {
+    const kinds = (await call<{ kinds: { kind: string; count: number; bytes: number; kept: { by: string; setting?: string; value?: number | null } }[]; lastPrune: number | null }>("GET", "/api/v1/storage/kinds")).body;
+    expect(kinds.kinds.map((k) => k.kind)).toEqual(["notes", "note versions", "suggestions", "turn folders kept whole", "turn folders pruned", "session files", "your files", "the shipped level", "the database", "the migration's backups", "database copies", "archives"]);
+    expect(kinds.kinds.find((k) => k.kind === "database copies")?.kept).toEqual({ by: "setting", setting: "database.copiesKept", value: 3 });
+    expect(kinds.kinds.find((k) => k.kind === "the shipped level")?.count).toBeGreaterThan(3);
+    expect(kinds.lastPrune).toBeNull();
+
+    // Closed sessions: asked first; the open one's files stay; the plan taken exactly.
+    for (const [id, text] of [["s-1", "open"], ["s-2", "closed"]] as const) {
+      await mkdir(join(chatFolder, "sessions", id, "turns", "turn-1-abc1"), { recursive: true });
+      await writeFile(join(chatFolder, "sessions", id, `${id}.jsonl`), `${text}\n`);
+      await writeFile(join(chatFolder, "sessions", id, "turns", "turn-1-abc1", "turn.json"), "{}\n");
+    }
+    open = "s-1";
+    type Asked = { plan: string; removed: boolean; files: number; bytes: number; items: { kind: string; path: string; files: number }[] };
+    const asked = await call<Asked>("POST", "/api/v1/storage-prune", { what: "sessions", chat: CHAT });
+    expect(asked.body).toMatchObject({ removed: false, files: 2, items: [{ kind: "session", files: 2 }] });
+    expect(asked.body.items[0]?.path.endsWith("sessions/s-2")).toBe(true);
+    expect((await call("POST", "/api/v1/storage-prune", { what: "sessions", chat: CHAT, plan: "not-the-plan" })).status).toBe(409);
+    turning = true;
+    expect((await call("POST", "/api/v1/storage-prune", { what: "sessions", chat: CHAT })).status).toBe(409);
+    turning = false;
+    expect((await call<Asked>("POST", "/api/v1/storage-prune", { what: "sessions", chat: CHAT, plan: asked.body.plan })).body).toMatchObject({ removed: true, files: 2 });
+    expect((await readdir(join(chatFolder, "sessions"))).sort()).toEqual(["s-1"]);
+    expect((await call<{ lastPrune: number | null }>("GET", "/api/v1/storage/kinds")).body.lastPrune).toBeGreaterThan(0);
+
+    // A backup goes only when he names it, after the same question.
+    await mkdir(app.paths.backups, { recursive: true });
+    await writeFile(join(app.paths.backups, "rpe-backup-old.tar"), "an archive\n");
+    expect((await call("POST", "/api/v1/storage-prune", { what: "backup", name: "nothing-like-it" })).status).toBe(404);
+    const backup = await call<Asked>("POST", "/api/v1/storage-prune", { what: "backup", name: "rpe-backup-old.tar" });
+    expect(backup.body).toMatchObject({ removed: false, items: [{ kind: "backup", path: "rpe-backup-old.tar" }] });
+    await call("POST", "/api/v1/storage-prune", { what: "backup", name: "rpe-backup-old.tar", plan: backup.body.plan });
+    expect(await readdir(app.paths.backups)).not.toContain("rpe-backup-old.tar");
+
+    // A chat Lumiverse deleted: its session files go when RPE hears, its other files stay, listed as a deleted chat's, and go when he prunes them.
+    expect((await call("POST", "/api/v1/storage-prune", { what: "chat", chat: CHAT })).status).toBe(409);
+    await writeFile(join(chatFolder, "WORLD.md"), "# World\n");
+    await new TreeChats(app.db, app.writes, app.paths.files).deleted(OWNER, CHAT, 4_242);
+    expect(await readdir(chatFolder)).not.toContain("sessions");
+    expect((await call<TreeStorage>("GET", "/api/v1/storage")).body.chats.find((c) => c.chat === CHAT)).toMatchObject({ deleted: 4_242 });
+    const gone = await call<Asked>("POST", "/api/v1/storage-prune", { what: "chat", chat: CHAT });
+    expect(gone.body.items[0]).toMatchObject({ kind: "chat" });
+    await call("POST", "/api/v1/storage-prune", { what: "chat", chat: CHAT, plan: gone.body.plan });
+    expect(await readdir(join(chatFolder, ".."))).not.toContain(chatFolder.split("/").at(-1) ?? "");
   });
 
   test("the Storage page gets what each chat's folder takes by area and the notes agents lean on; the Files page gets an agent's stack with where each part comes from", async () => {

@@ -10,7 +10,7 @@ import { TREE_SETTINGS } from "./settings";
 import { RPE_GUIDANCE } from "./shipped";
 
 /** What the tree takes from the turn lane: its chats and suggestions, whether a turn of a chat goes on, and the stack an agent gets. */
-export type TreeTakes = Omit<TreeRoutesDeps, "files" | "db" | "writes" | "now">;
+export type TreeTakes = Omit<TreeRoutesDeps, "files" | "db" | "writes" | "now" | "backups" | "copiesKept">;
 
 /**
  * The shipped files are laid when the tree mounts, before the areas after it: the turn lane reads them as it is made. The
@@ -27,6 +27,6 @@ export function treeArea(takes: () => TreeTakes): Area {
       if (user === null) throw new Error(NO_OWNER);
       await layDefaults({ files: at.paths.files, scratch: at.paths.root, sources: { rph: SHIPPED_GUIDANCE, rpe: RPE_GUIDANCE }, writes: at.writes, user, now: at.now });
     },
-    mounted: (at) => at.routes.add("tree", treeRoutes({ files: at.paths.files, db: at.db, writes: at.writes, now: at.now, ...takes() })),
+    mounted: (at) => at.routes.add("tree", treeRoutes({ files: at.paths.files, db: at.db, writes: at.writes, now: at.now, backups: at.paths.backups, copiesKept: at.config.database.copiesKept, ...takes() })),
   };
 }

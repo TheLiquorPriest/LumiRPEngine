@@ -17,6 +17,8 @@ export interface ChatStorage {
   folder: string;
   bytes: number;
   areas: { notes: number; turns: number; sessions: number; files: number };
+  /** When RPE heard that Lumiverse deleted the chat; its session files are gone and its other files stay until the user prunes them. Null while the chat is not deleted. */
+  deleted?: number | null;
 }
 
 export interface TreeStorage {
@@ -74,7 +76,7 @@ async function levelBytes(loc: ChatLocation, path: string): Promise<number> {
 export async function treeStorage(deps: StorageDeps, user: string): Promise<TreeStorage> {
   const none: ChatLocation = { files: deps.files, character: null, chat: null };
   const chats: ChatStorage[] = [];
-  for (const row of deps.db.query<{ chat: string; character: string; folder: string }, [string]>("SELECT chat, character, folder FROM tree_chat WHERE user = ? ORDER BY chat").all(user)) {
+  for (const row of deps.db.query<{ chat: string; character: string; folder: string; deleted: number | null }, [string]>("SELECT chat, character, folder, deleted FROM tree_chat WHERE user = ? ORDER BY chat").all(user)) {
     const loc: ChatLocation = { files: deps.files, character: row.character, chat: row.folder };
     const areas = { notes: 0, turns: 0, sessions: 0, files: 0 };
     const top = await locate(loc, "");
@@ -84,7 +86,7 @@ export async function treeStorage(deps: StorageDeps, user: string): Promise<Tree
         areas[area] += f.bytes;
       }
     }
-    chats.push({ chat: row.chat, folder: join(row.character, row.folder), bytes: areas.notes + areas.turns + areas.sessions + areas.files, areas });
+    chats.push({ chat: row.chat, folder: join(row.character, row.folder), bytes: areas.notes + areas.turns + areas.sessions + areas.files, areas, deleted: row.deleted });
   }
   const database = deps.db.filename === "" || deps.db.filename === ":memory:" ? 0 : (await sizeOf(deps.db.filename)) + (await sizeOf(`${deps.db.filename}-wal`));
   const globalNotes = await levelBytes(none, `@global/${NOTES_FOLDER}/`);

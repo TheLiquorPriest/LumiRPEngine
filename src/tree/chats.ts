@@ -6,7 +6,7 @@
 // (plan §5.1, `notes.ts`); the shipped defaults an update changed; and agents' suggestions.
 
 import type { Database } from "bun:sqlite";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { AreaTables } from "../app/app";
 import type { Migration } from "../app/migrations";
@@ -169,6 +169,18 @@ CREATE TABLE tree_written (
 );
 `,
   },
+  {
+    version: 9,
+    name: "chats Lumiverse deleted, and when the user last pruned",
+    // `tree_chat.deleted`: when RPE heard Lumiverse delete the chat. `tree_prune`: when the user last pruned anything the Storage page offers.
+    sql: `
+ALTER TABLE tree_chat ADD COLUMN deleted INTEGER;
+CREATE TABLE tree_prune (
+  user TEXT PRIMARY KEY,
+  at INTEGER NOT NULL
+);
+`,
+  },
 ];
 
 /** The tree's tables, under its one name among the migration areas: the application and the command line open them by this. */
@@ -227,6 +239,23 @@ export class TreeChats {
     const stored = this.db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'turn'").get()?.n === 1;
     if (!stored) return new Map();
     return new Map(this.db.query<{ id: string; created: number }, [string, string]>("SELECT id, created FROM turn WHERE user = ? AND chat = ?").all(user, chat).map((t) => [id8(t.id), t.created]));
+  }
+
+  /** Every chat placed for the user, each with when RPE heard that Lumiverse deleted it (null while it has not). */
+  placed(user: string): { chat: string; character: string; folder: string; deleted: number | null }[] {
+    return this.db.query<{ chat: string; character: string; folder: string; deleted: number | null }, [string]>("SELECT chat, character, folder, deleted FROM tree_chat WHERE user = ? ORDER BY chat").all(user);
+  }
+
+  /**
+   * Lumiverse deleted the chat (RPE heard it, or found it gone at its reconcile): its session files go, and it is marked deleted from
+   * `at`. Its other files stay, listed on the Storage page as a deleted chat's, to be pruned when the user asks. A chat RPE never
+   * placed has nothing here, and a chat already marked keeps its first mark.
+   */
+  async deleted(user: string, chat: string, at: number): Promise<void> {
+    const folders = this.folders(user, chat);
+    if (folders === null) return;
+    await this.writes.run((db) => db.run("UPDATE tree_chat SET deleted = ? WHERE user = ? AND chat = ? AND deleted IS NULL", [at, user, chat]), "marking a deleted chat");
+    await rm(join(this.files, CHATS_FOLDER, folders.character, folders.chat, SESSIONS_FOLDER), { recursive: true, force: true });
   }
 
   /**
