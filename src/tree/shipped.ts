@@ -102,10 +102,11 @@ async function exists(path: string): Promise<boolean> {
   );
 }
 
-/** A shipped file an update changed: its path below the shipped level, and its text before. */
+/** A shipped file an update changed or took away: its path below the shipped level, its text before, and whether the update removed it. */
 export interface ShippedChange {
   path: string;
   before: string;
+  removed?: true;
 }
 
 /** Every file below a folder by its path below it ("/" between names), with its text; none for a folder that is not there. */
@@ -133,7 +134,7 @@ export async function layShipped(files: string, scratch: string, sources: { rph:
   await layShippedChanges(files, scratch, sources);
 }
 
-/** Lays the shipped level as `layShipped` does, and gives back each file laid out before whose text this copy changes. */
+/** Lays the shipped level as `layShipped` does, and gives back each file laid out before whose text this copy changes, and each it no longer has. */
 export async function layShippedChanges(files: string, scratch: string, sources: { rph: string; rpe: string }): Promise<ShippedChange[]> {
   const next = join(scratch, "shipped.next");
   const old = join(scratch, "shipped.old");
@@ -157,7 +158,7 @@ export async function layShippedChanges(files: string, scratch: string, sources:
   await readOnly(next);
   const target = join(files, SHIPPED_FOLDER);
   const [was, now] = await Promise.all([textsBelow(target), textsBelow(next)]);
-  const changed = [...was].flatMap(([path, before]) => (now.has(path) && now.get(path) !== before ? [{ path, before }] : []));
+  const changed = [...was].flatMap(([path, before]): ShippedChange[] => (!now.has(path) ? [{ path, before, removed: true }] : now.get(path) !== before ? [{ path, before }] : []));
   await mkdir(files, { recursive: true });
   if (await exists(target)) await rename(target, old);
   await rename(next, target);

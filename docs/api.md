@@ -343,7 +343,7 @@ Every file of the chat's view of the tree; with no chat, of the shipped level an
 
 ### `GET /api/v1/files-diff/*`
 
-A file's difference from the shipped file of its name, and what the update that changed the shipped file since it was written changed of it.
+A file's difference from the shipped file of its name, and what the updates that changed the shipped file since it was written changed of it, together and one by one.
 
 | | |
 |---|---|
@@ -421,16 +421,16 @@ Writes a file's whole text as the user at a level (for a file of another level, 
 
 ### `DELETE /api/v1/files/*`
 
-Removes a file of the user's; for one in place of a default, that is resetting to the default.
+Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `off:` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `*` (the rest of the path) |
-| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
+| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`level` (may be left out): `"global" | "chat"`, For a shipped file, the level whose `off:` list takes its name; the chat's when a chat is named, else the global level's |
 | Body | none |
-| Reply | `{ removed: string }` |
+| Reply | `{ removed: string; switchedOff?: LayerLevel }` |
 
 ### `GET /api/v1/storage`
 
@@ -460,7 +460,7 @@ A chat's largest notes, and those agents rewrote most.
 
 ### `GET /api/v1/suggestions`
 
-A chat's suggestions from the agents (every chat's when none is named), newest first, each with what it would change.
+A chat's suggestions from the agents (every chat's when none is named), newest first, each with what it would change and the level accepting it writes at.
 
 | | |
 |---|---|
@@ -473,7 +473,7 @@ A chat's suggestions from the agents (every chat's when none is named), newest f
 
 ### `POST /api/v1/suggestions/:id/accept`
 
-Accepts a suggestion as it is or edited, writing it as the user at a level; says the suggestion as it now stands and the file.
+Accepts a suggestion as it is or edited, writing it as the user at the level named, or where the suggestion says it writes; says the suggestion as it now stands and the file.
 
 | | |
 |---|---|
@@ -3270,6 +3270,10 @@ export interface SuggestionShown {
   /** When the user accepted or dismissed it; null while open. */
   decided: number | null;
   lines: DiffRow[];
+  /** The level accepting it writes at when no level is named: its file's own, or for a shipped file the chat's. */
+  level?: LayerLevel;
+  /** The levels that have a place for its file, any of which accepting it may name. */
+  levels?: LayerLevel[];
 }
 ```
 
@@ -3438,7 +3442,7 @@ export interface TraceRecord {
 
 ### `TreeDiffReply`
 
-A file's differences: from the shipped file of its name to this one; and what the update that changed the shipped file since this one was written changed of it.
+A file's differences: from the shipped file of its name to this one; and what the updates that changed the shipped file since this one was written changed of it, together and one by one.
 
 ```ts
 export interface TreeDiffReply {
@@ -3447,8 +3451,10 @@ export interface TreeDiffReply {
   shipped: string | null;
   /** From the shipped file to this one, line by line; none without a shipped file. */
   lines: DiffRow[];
-  /** The update that changed the shipped file since this one was last written: when, and from the shipped file before it to the shipped file now. */
+  /** Every change to the shipped file since this one was last written, as one difference: when the latest update ran, and from the shipped file as it stood when this one was written to the shipped file now. */
   update: { at: number; lines: DiffRow[] } | null;
+  /** The same changes one update at a time, oldest first: when each ran, and from the shipped file before it to the shipped file after it. */
+  updates?: { at: number; lines: DiffRow[] }[];
 }
 ```
 
@@ -3500,8 +3506,10 @@ export interface TreeFileRow {
   editable: boolean;
   /** The shipped file of the same name, for a file of another level that has one; null otherwise. */
   shipped: string | null;
-  /** For a file of the user's in place of a shipped one: when an update changed that shipped file, if it did since this file was last written; null otherwise. */
+  /** For a file of the user's in place of a shipped one: when the latest update that changed that shipped file did so, if it did since this file was last written; null otherwise. */
   defaultChanged: number | null;
+  /** For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written. */
+  defaultRemoved?: number | null;
 }
 ```
 

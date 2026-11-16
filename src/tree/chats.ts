@@ -141,6 +141,34 @@ DROP INDEX tree_suggestion_chat;
 CREATE INDEX suggestion_chat ON suggestion (user, chat, state);
 `,
   },
+  {
+    version: 8,
+    name: "every change an update made to a default, and when the user wrote their own files",
+    // `tree_default` becomes one row for each file an update changed or took away (`removed`), numbered in the order updates came (`seq`),
+    // where it kept only the last change of each file. `tree_written`: when the user wrote one of their files through RPE (by its place below
+    // the tree's folder), and the last `seq` there had been then, which is what says which updates came after.
+    sql: `
+CREATE TABLE tree_default_updates (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  user TEXT NOT NULL,
+  path TEXT NOT NULL,
+  before TEXT NOT NULL,
+  removed INTEGER NOT NULL DEFAULT 0,
+  at INTEGER NOT NULL
+);
+INSERT INTO tree_default_updates (user, path, before, removed, at) SELECT user, path, before, 0, at FROM tree_default ORDER BY at;
+DROP TABLE tree_default;
+ALTER TABLE tree_default_updates RENAME TO tree_default;
+CREATE INDEX tree_default_path ON tree_default (user, path);
+CREATE TABLE tree_written (
+  user TEXT NOT NULL,
+  file TEXT NOT NULL,
+  seen INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (user, file)
+);
+`,
+  },
 ];
 
 /** The tree's tables, under its one name among the migration areas: the application and the command line open them by this. */

@@ -6,10 +6,11 @@
 // files as it will find them.
 
 import { stat } from "node:fs/promises";
+import { relative, sep } from "node:path";
 import type { FileKind, GuidanceKind, Layer, LayerLevel } from "rp-harness/contract";
 import { readText } from "../app/disk";
 import { yamlMapping } from "../app/yaml";
-import type { DefaultChange } from "./defaults";
+import { type DefaultStanding, type DefaultUpdate, updatesSince } from "./defaults";
 import { walk } from "./files";
 import { CHARACTER_FOLDERS, FILE_KEYS } from "./layout";
 import { type ChatLocation, kindOf, locate, treeLayers, viewPath } from "./view";
@@ -35,8 +36,10 @@ export interface TreeFileEntry {
   editable: boolean;
   /** The shipped file of the same name, for a file of another level that has one; null otherwise. */
   shipped: string | null;
-  /** For a file of the user's in place of a shipped one: when an update changed that shipped file, if it did since this file was last written; null otherwise. */
+  /** For a file of the user's in place of a shipped one: when the latest update that changed that shipped file did so, if it did since this file was last written; null otherwise. */
   defaultChanged: number | null;
+  /** For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written. Absent or null otherwise. */
+  defaultRemoved?: number | null;
 }
 
 /** What the levels' config files say of the names in force (RPH's `off:` and `layered:`, `CONFIG_KEYS`): each name switched off, with the levels whose list names it. */
@@ -146,15 +149,41 @@ export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] =
   return names;
 }
 
+/** The key of a file the user wrote, as `tree_written` keeps it: its place below the tree's folder, "/" between names. */
+export function writtenKey(files: string, disk: string): string {
+  return relative(files, disk).split(sep).join("/");
+}
+
 /**
- * Every file of the chat's view, level by level (shipped, global, character, chat), each in the order of its path. `changed`: the
- * shipped files an update changed (`defaultChanges`), by path.
+ * Where a file found at one level goes at another, by what it is there: a level's config is the other level's config, a file in a
+ * folder of guidance goes in that level's folder of the same kind, a file at a level's top goes at the other's top. Anything else is
+ * its own level's alone. Null: the other level has no such place.
  */
-export async function treeListing(loc: ChatLocation, changed: ReadonlyMap<string, DefaultChange> = new Map()): Promise<TreeFileEntry[]> {
+export function placeAt(from: LayerLevel, rest: readonly string[], to: LayerLevel): string[] | null {
+  if (from === to) return [...rest];
+  const layers = treeLayers();
+  const source = layers.find((l) => l.level === from);
+  const target = layers.find((l) => l.level === to);
+  if (source === undefined || target === undefined) return null;
+  const [first, ...below] = rest;
+  if (rest.length === 1 && first === source.config) return target.config === undefined ? null : [target.config];
+  const kind = kindAt(source, first);
+  if (kind !== undefined && below.length > 0) {
+    const folder = target.folders[kind];
+    return folder === undefined ? null : [folder, ...below];
+  }
+  return rest.length === 1 ? [...rest] : null;
+}
+
+/**
+ * Every file of the chat's view, level by level (shipped, global, character, chat), each in the order of its path. `standing`: what
+ * updates changed of the shipped files and when the user wrote their own (`defaultStanding`).
+ */
+export async function treeListing(loc: ChatLocation, standing: DefaultStanding = { updates: new Map(), written: new Map() }): Promise<TreeFileEntry[]> {
   const layers = treeLayers();
   const names = await namesInForce(loc, layers);
   const found: TreeFileEntry[] = [];
-  const written = new Map<TreeFileEntry, number>();
+  const origin = new Map<TreeFileEntry, { changed: number; key: string; rest: string[] }>();
   for (const layer of layers) {
     const top = await locate(loc, layer.mount);
     if (!top.ok || top.at.is !== "folder" || top.at.disk === null) continue;
@@ -164,9 +193,9 @@ export async function treeListing(loc: ChatLocation, changed: ReadonlyMap<string
       const item = itemOf(layer, e.rest, kind);
       const offIn = item === null ? [] : (names.off.get(item) ?? []);
       const info = await stat(e.disk);
-      const entry: TreeFileEntry = { path: viewPath(layer.level, e.rest), level: layer.level, kind, bytes: info.size, item, applies: true, replacedBy: null, off: offIn.length > 0, offIn, editable: userMayWrite(layer.level, e.rest, kind), shipped: null, defaultChanged: null };
+      const entry: TreeFileEntry = { path: viewPath(layer.level, e.rest), level: layer.level, kind, bytes: info.size, item, applies: true, replacedBy: null, off: offIn.length > 0, offIn, editable: userMayWrite(layer.level, e.rest, kind), shipped: null, defaultChanged: null, defaultRemoved: null };
       found.push(entry);
-      written.set(entry, info.mtimeMs);
+      origin.set(entry, { changed: info.mtimeMs, key: writtenKey(loc.files, e.disk), rest: e.rest });
     }
   }
   // The nearest file of a name is the one taken; the levels were walked farthest first, the shipped one first of all.
@@ -177,17 +206,29 @@ export async function treeListing(loc: ChatLocation, changed: ReadonlyMap<string
     nearest.set(f.item, f);
     if (f.level === "shipped") shipped.set(f.item, f);
   }
+  /** The updates since the file was last written that touched the shipped file at `path`. */
+  const since = (f: TreeFileEntry, path: string): readonly DefaultUpdate[] => {
+    const at = origin.get(f);
+    const updates = standing.updates.get(path);
+    return at === undefined || updates === undefined ? [] : updatesSince(updates, standing.written.get(at.key), at.changed);
+  };
   for (const f of found) {
     if (f.item === null) continue;
     const layered = !f.item.includes("/") && names.layered.has(f.item);
     const taken = nearest.get(f.item);
     f.replacedBy = layered || taken === undefined || taken === f ? null : taken.path;
     f.applies = !f.off && f.replacedBy === null && !f.item.startsWith(`rules/${EXAMPLES}/`);
+    if (f.level === "shipped") continue;
     const theirs = shipped.get(f.item);
-    if (theirs === undefined || theirs === f) continue;
-    f.shipped = theirs.path;
-    const change = changed.get(theirs.path);
-    if (change !== undefined && change.at > (written.get(f) ?? Number.POSITIVE_INFINITY)) f.defaultChanged = change.at;
+    if (theirs !== undefined) {
+      f.shipped = theirs.path;
+      f.defaultChanged = since(f, theirs.path).findLast((u) => !u.removed)?.at ?? null;
+      continue;
+    }
+    // A file of his that replaces a default an update has taken away since he wrote it: the default is not there to name, but the place it was is.
+    const rest = origin.get(f)?.rest;
+    const was = rest === undefined ? null : placeAt(f.level, rest, "shipped");
+    if (was !== null) f.defaultRemoved = since(f, viewPath("shipped", was)).findLast((u) => u.removed)?.at ?? null;
   }
   return found;
 }

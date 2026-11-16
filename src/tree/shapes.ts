@@ -39,7 +39,8 @@ const treeFileRow = shape.named(
     offIn: field(shape.list(layerLevel), "The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing."),
     editable: field(shape.yesNo(), "Whether the user may write it where it is: never a shipped file or a generated one."),
     shipped: field(nullable(T), "The shipped file of the same name, for a file of another level that has one; null otherwise."),
-    defaultChanged: field(nullable(N), "For a file of the user's in place of a shipped one: when an update changed that shipped file, if it did since this file was last written; null otherwise."),
+    defaultChanged: field(nullable(N), "For a file of the user's in place of a shipped one: when the latest update that changed that shipped file did so, if it did since this file was last written; null otherwise."),
+    defaultRemoved: opt(nullable(N), "For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written."),
   }),
 );
 type EntryMirrored = Holds<Exactly<Infer<typeof treeFileRow>, TreeFileEntry>>;
@@ -59,12 +60,13 @@ type DiffMirrored = Holds<Exactly<Infer<typeof diffRow>, DiffLine>>;
 
 export const treeDiffReply = shape.named(
   "TreeDiffReply",
-  "A file's differences: from the shipped file of its name to this one; and what the update that changed the shipped file since this one was written changed of it.",
+  "A file's differences: from the shipped file of its name to this one; and what the updates that changed the shipped file since this one was written changed of it, together and one by one.",
   shape.object({
     path: T,
     shipped: field(nullable(T), "The shipped file of the same name; null when there is none, or the file is the shipped one."),
     lines: field(shape.list(diffRow), "From the shipped file to this one, line by line; none without a shipped file."),
-    update: field(nullable(shape.object({ at: N, lines: shape.list(diffRow) })), "The update that changed the shipped file since this one was last written: when, and from the shipped file before it to the shipped file now."),
+    update: field(nullable(shape.object({ at: N, lines: shape.list(diffRow) })), "Every change to the shipped file since this one was last written, as one difference: when the latest update ran, and from the shipped file as it stood when this one was written to the shipped file now."),
+    updates: opt(shape.list(shape.object({ at: N, lines: shape.list(diffRow) })), "The same changes one update at a time, oldest first: when each ran, and from the shipped file before it to the shipped file after it."),
   }),
 );
 
@@ -82,7 +84,10 @@ export const fileSwitchBody = shape.named(
   shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), off: shape.yesNo() }),
 );
 export const fileWrittenReply = shape.named("FileWrittenReply", "What writing a file or switching its name answers: the file as the listing now shows it.", shape.object({ file: nullable(treeFileRow) }));
-export const fileRemovedReply = shape.object({ removed: field(T, "The path of the file removed.") });
+export const fileRemovedReply = shape.object({
+  removed: field(T, "The path of the file removed; for a shipped file, the path of the one switched off."),
+  switchedOff: opt(layerLevel, "For a shipped file: the level whose `off:` list now names it. The file itself stays."),
+});
 
 // ---------------------------------------------------------------- suggestions
 
@@ -107,7 +112,12 @@ type SuggestionMirrored = Holds<Exactly<Infer<typeof suggestionRow>, TreeSuggest
 const suggestionShown = shape.named(
   "SuggestionShown",
   "A suggestion with what it would change: from the file as it is now to the text proposed.",
-  shape.object({ ...suggestionFields, lines: shape.list(diffRow) }),
+  shape.object({
+    ...suggestionFields,
+    lines: shape.list(diffRow),
+    level: opt(layerLevel, "The level accepting it writes at when no level is named: its file's own, or for a shipped file the chat's."),
+    levels: opt(shape.list(layerLevel), "The levels that have a place for its file, any of which accepting it may name."),
+  }),
 );
 /** An agent's suggestion as the Files page shows it: with the difference from its file as it is now to the text proposed. */
 export type TreeSuggestionView = Infer<typeof suggestionShown>;

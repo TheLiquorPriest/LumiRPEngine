@@ -7,7 +7,7 @@
 // name and text is invented.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { YAML } from "bun";
 import { loadGuidance } from "rp-harness";
@@ -86,7 +86,7 @@ describe("the Files page's routes", () => {
             port = treeFiles({ files: a.paths.files, user: OWNER, chats, turnFolder: async () => null, writes: a.writes, now: a.now });
             // The definition, instruction and rule files of the agent's stack, as the harness's own `definitions.stack` lists them among its parts.
             const stack = async (user: string, chat: string, agent: string) => (await loadGuidance(port, { user, chat, session: "none" }).stack(agent)).entries.map(({ replaces: _replaces, layered: _layered, ...part }) => part);
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, suggestions, turning: () => turning, stack }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, suggestions, turning: () => turning, stack }));
           },
         },
       ],
@@ -171,6 +171,48 @@ describe("the Files page's routes", () => {
     expect((await call<TreeFileText>("GET", "/api/v1/files/@shipped/.agents/gm.md")).body.text).toContain("steadier");
   });
 
+  test("after two updates change a default he replaced its difference shows both, one an update took away is named, and Delete on a shipped file switches it off", async () => {
+    const head = "---\nname: gm\ndescription: Rules the scene.\n---\n";
+    const mine = `${head}The shipped GM.\nAnd my own line.\n`;
+    await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "global", text: mine });
+    await call("PUT", "/api/v1/files/@shipped/.rules/consent.md", { level: "global", text: "---\ndescription: Mine.\nagents: all\n---\nAsk twice.\n" });
+    // His file copied without its file time keeps its standing: what says it came after the updates is RPE's record.
+    const own = join(app.paths.files, ".agents", "gm.md");
+    const long = new Date(Date.now() - 3_600_000);
+    await utimes(own, long, long);
+    await writeFile(join(rph, ".agents", "gm.md"), `${head}The shipped GM, steadier.\n`);
+    await layDefaults(defaults);
+    await writeFile(join(rph, ".agents", "gm.md"), `${head}The shipped GM, steadier and kinder.\n`);
+    await rm(join(rph, ".rules", "consent.md"));
+    await layDefaults(defaults);
+    expect(await readFile(own, "utf8")).toBe(mine);
+    const diff = (await call<TreeFileDiff>("GET", `/api/v1/files-diff/@global/.agents/gm.md?chat=${CHAT}`)).body;
+    expect(diff.updates?.map((u) => u.lines.filter((l) => l.op !== "same").map((l) => `${l.op}: ${l.text}`))).toEqual([
+      ["removed: The shipped GM.", "added: The shipped GM, steadier."],
+      ["removed: The shipped GM, steadier.", "added: The shipped GM, steadier and kinder."],
+    ]);
+    expect(diff.update?.lines.filter((l) => l.op !== "same").map((l) => `${l.op}: ${l.text}`)).toEqual(["removed: The shipped GM.", "added: The shipped GM, steadier and kinder."]);
+    const files = await listing();
+    expect(files.get("@global/.agents/gm.md")?.defaultChanged).toBeGreaterThan(0);
+    expect(files.get("@global/.rules/consent.md")).toMatchObject({ shipped: null });
+    expect(files.get("@global/.rules/consent.md")?.defaultRemoved).toBeGreaterThan(0);
+    expect(await readFile(join(app.paths.files, ".rules", "consent.md"), "utf8")).toContain("Ask twice.");
+    // Writing his file again starts from the default as it then stands.
+    await call("PUT", "/api/v1/files/@global/.agents/gm.md", { level: "global", text: mine });
+    expect((await listing()).get("@global/.agents/gm.md")?.defaultChanged).toBeNull();
+    expect((await call<TreeFileDiff>("GET", `/api/v1/files-diff/@global/.agents/gm.md?chat=${CHAT}`)).body.update).toBeNull();
+
+    // Delete on a shipped file writes its name in the off: list of the level it is deleted at, and the file stays.
+    await call("DELETE", "/api/v1/files/@global/.agents/gm.md");
+    const deleted = await call<{ removed: string; switchedOff: string }>("DELETE", `/api/v1/files/@shipped/.agents/gm.md?chat=${CHAT}`);
+    expect(deleted.body).toEqual({ removed: "@shipped/.agents/gm.md", switchedOff: "chat" });
+    expect(offOf(await readFile(join(chatFolder, "RPE.yml"), "utf8"))).toEqual(["agents/gm"]);
+    expect((await listing()).get("@shipped/.agents/gm.md")).toMatchObject({ off: true, applies: false });
+    const global = await call<{ removed: string; switchedOff: string }>("DELETE", "/api/v1/files/@shipped/.rules/examples/nudge.md");
+    expect(global.body.switchedOff).toBe("global");
+    expect(offOf(await readFile(app.paths.globalConfig, "utf8"))).toContain("rules/examples/nudge");
+  });
+
   test("a suggestion writes nothing until it is accepted, then writes the file as the user, edited or as proposed; a dismissed one writes nothing", async () => {
     const scope = { user: OWNER, chat: CHAT, session: "s-1", turn: "t-1" };
     const author = { id: "lead-1", definition: "author" };
@@ -200,7 +242,8 @@ describe("the Files page's routes", () => {
     expect((await call("POST", `/api/v1/suggestions/${world}/accept`, {})).status).toBe(409);
 
     // A shipped file's suggestion is written, edited, as the user's own at the level they name.
-    expect((await call("POST", `/api/v1/suggestions/${gm}/accept`, {})).status).toBe(400);
+    expect(open.find((s) => s.id === gm)).toMatchObject({ level: "chat", levels: ["global", "character", "chat"] });
+    expect(open.find((s) => s.id === world)).toMatchObject({ level: "chat" });
     const edited = await call<{ file: TreeFileEntry }>("POST", `/api/v1/suggestions/${gm}/accept`, { level: "global", text: "---\nname: gm\ndescription: Rules the scene.\n---\nShow rolls when asked.\n" });
     expect(edited.body.file).toMatchObject({ path: "@global/.agents/gm.md", applies: true });
     expect(await readFile(join(app.paths.files, ".agents", "gm.md"), "utf8")).toContain("Show rolls when asked.");
@@ -264,7 +307,7 @@ describe("the Files page's routes", () => {
     }
     expect((await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "shipped", text: "x" })).status).toBe(403);
     expect((await call("PUT", "/api/v1/files/sessions/s1/s1.jsonl", { level: "chat", chat: CHAT, text: "x" })).status).toBe(403);
-    expect((await call("DELETE", "/api/v1/files/@shipped/.agents/gm.md")).status).toBe(403);
+    expect((await call("DELETE", `/api/v1/files/sessions/s1/s1.jsonl?chat=${CHAT}`)).status).toBe(403);
     expect((await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "chat", text: "x" })).status).toBe(400);
     expect(await readFile(join(app.paths.files, "defaults", ".agents", "gm.md"), "utf8")).toBe(SHIPPED_RPH[".agents/gm.md"] ?? "");
     expect((await call("GET", "/api/v1/files", undefined, {})).status).toBe(401);

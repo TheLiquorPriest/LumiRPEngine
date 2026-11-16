@@ -1,9 +1,12 @@
 // Shipped defaults and the user's own files beside them (plan §5.2, §5.4 "Defaults"). The shipped level
-// is laid out again at every start; what an update changed of it is kept (`tree_default`): each changed
-// file's text before, and when. The Files page then says, of a file of the user's that replaces a
-// default, that the default changed since the user last wrote theirs, and shows both differences: the
-// user's file against the default, and the default before the update against the default now. The
-// user's file is never touched. Resetting is removing the user's file, after which the default is taken.
+// is laid out again at every start; every change an update made to it is kept (`tree_default`, one row
+// for each file an update changed or took away, with the file's text before and when), and so is when
+// the user wrote each of their own files through RPE (`tree_written`, with how many updates there had
+// been). The Files page then says, of a file of the user's that replaces a default, every change made
+// to that default since they last wrote theirs, as one difference from the default as it stood when
+// they wrote theirs to the default now and as one for each update, and of one that replaces a default an
+// update removed, that it was removed. The user's file is never touched. Resetting is removing the
+// user's file, after which the default is taken.
 
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
@@ -25,11 +28,32 @@ export interface DefaultsDeps {
   now(): number;
 }
 
-/** A shipped default an update changed: its text before, and when the update laid it out. */
-export interface DefaultChange {
-  before: string;
+/** One update's change to a shipped default, without its text: where it stands among the updates, when it was laid out, and whether it took the file away. */
+export interface DefaultUpdate {
+  seq: number;
+  at: number;
+  removed: boolean;
+}
+
+/** When the user wrote one of their own files through RPE: when, and how many updates had changed defaults by then. */
+export interface FileWritten {
+  seen: number;
   at: number;
 }
+
+/** What the Files page knows of the defaults, as kept for one user: every update's change to each shipped file by its path in the view (`@shipped/…`), oldest first, and when each of the user's files was written. */
+export interface DefaultStanding {
+  updates: ReadonlyMap<string, readonly DefaultUpdate[]>;
+  written: ReadonlyMap<string, FileWritten>;
+}
+
+/** An update's change to a shipped default with its text before: what the difference of the default as it was is made from. */
+export interface DefaultUpdateText extends DefaultUpdate {
+  before: string;
+}
+
+/** How far after RPE wrote a file its time of change may be and the file still be as RPE wrote it, in milliseconds: a disk keeps its times coarsely, and the write is recorded just after it lands. */
+const WRITTEN_SLACK_MS = 2000;
 
 /** One line of a difference between two texts: in both, only in the second, or only in the first. */
 export interface DiffLine {
@@ -47,15 +71,44 @@ export async function layDefaults(deps: DefaultsDeps): Promise<ShippedChange[]> 
   if (changes.length > 0) {
     const at = deps.now();
     await deps.writes.run((db) => {
-      for (const c of changes) db.run("INSERT INTO tree_default (user, path, before, at) VALUES (?, ?, ?, ?) ON CONFLICT (user, path) DO UPDATE SET before = excluded.before, at = excluded.at", [deps.user, c.path, c.before, at]);
+      for (const c of changes) db.run("INSERT INTO tree_default (user, path, before, removed, at) VALUES (?, ?, ?, ?, ?)", [deps.user, c.path, c.before, c.removed === true ? 1 : 0, at]);
     }, "keeping what an update changed of the shipped files");
   }
   return changes;
 }
 
-/** Every shipped default an update changed, as kept for `user`, by its path in the view (`@shipped/…`). */
-export function defaultChanges(db: Database, user: string): Map<string, DefaultChange> {
-  return new Map(db.query<{ path: string; before: string; at: number }, [string]>("SELECT path, before, at FROM tree_default WHERE user = ?").all(user).map((r) => [`${MOUNTS.shipped}${r.path}`, { before: r.before, at: r.at }]));
+/** What the Files page knows of the defaults for `user`: every update's change to each shipped file, and when each of their files was written. */
+export function defaultStanding(db: Database, user: string): DefaultStanding {
+  const updates = new Map<string, DefaultUpdate[]>();
+  for (const r of db.query<{ path: string; seq: number; at: number; removed: number }, [string]>("SELECT path, seq, at, removed FROM tree_default WHERE user = ? ORDER BY seq").all(user)) {
+    const path = `${MOUNTS.shipped}${r.path}`;
+    updates.set(path, [...(updates.get(path) ?? []), { seq: r.seq, at: r.at, removed: r.removed === 1 }]);
+  }
+  const written = new Map(db.query<{ file: string; seen: number; at: number }, [string]>("SELECT file, seen, at FROM tree_written WHERE user = ?").all(user).map((r) => [r.file, { seen: r.seen, at: r.at }]));
+  return { updates, written };
+}
+
+/** Every change updates made to one shipped default (by its path in the view), with its text before, oldest first. */
+export function defaultUpdateTexts(db: Database, user: string, path: string): DefaultUpdateText[] {
+  const below = path.slice(MOUNTS.shipped.length);
+  return db.query<{ seq: number; at: number; removed: number; before: string }, [string, string]>("SELECT seq, at, removed, before FROM tree_default WHERE user = ? AND path = ? ORDER BY seq").all(user, below).map((r) => ({ seq: r.seq, at: r.at, removed: r.removed === 1, before: r.before }));
+}
+
+/**
+ * The updates that changed a default after the user last wrote their file that replaces it: those since the write RPE recorded
+ * (the file's time of change, which a copy resets, is not what says it), or, for a file made or edited beyond RPE's sight since,
+ * those after its time of change.
+ */
+export function updatesSince<U extends DefaultUpdate>(updates: readonly U[], written: FileWritten | undefined, changed: number): U[] {
+  if (written !== undefined && changed <= written.at + WRITTEN_SLACK_MS) return updates.filter((u) => u.seq > written.seen);
+  return updates.filter((u) => u.at > changed);
+}
+
+/** Keeps that the user wrote their file `file` (its place below the tree's folder, "/" between names) now, after the updates there have been. */
+export async function recordWritten(writes: TreeWrites, user: string, file: string, at: number): Promise<void> {
+  await writes.run((db) => {
+    db.run("INSERT INTO tree_written (user, file, seen, at) VALUES (?1, ?2, COALESCE((SELECT MAX(seq) FROM tree_default WHERE user = ?1), 0), ?3) ON CONFLICT (user, file) DO UPDATE SET seen = excluded.seen, at = excluded.at", [user, file, at]);
+  }, "keeping when the user wrote a file");
 }
 
 function linesOf(text: string): string[] {
