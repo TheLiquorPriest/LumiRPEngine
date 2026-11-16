@@ -41,6 +41,7 @@ import {
   castingInForce,
   castingItemId,
   awayItemId,
+  type CastWriter,
   type CastItem,
   type Character,
   findCharacter,
@@ -67,9 +68,6 @@ export const CAST_LANE: Lane = "story";
 /** Every operation, in the order the tool's file lists them. */
 export const UPDATE_OPERATIONS = ["cast", "bind", "base", "growth", "history", "relationship", "away", "knowledge", "filed"] as const;
 type Op = (typeof UPDATE_OPERATIONS)[number];
-
-/** The operations that stand outside turns: a swipe leaves what they write. Every other one is kept with its turn. */
-const OUTSIDE_TURNS: Readonly<Partial<Record<Op, true>>> = { bind: true, base: true };
 
 /** How an argument is read: words; a name or an id; a list of them; true or false; a whole number from 0; a number in a range; a relationship's dimension (on the scale the setting `cast.dimensionScale` gives); one of a list. */
 export type Kind = "text" | "name" | "texts" | "flag" | "whole" | "dimension" | Readonly<{ min: number; max: number }> | readonly string[];
@@ -293,8 +291,8 @@ interface Reading {
   bound: Map<string, Map<string, { kind: SourceKind; ref: string; now: SourceNow | null }>>;
   /** Reads a source live once per call. */
   read: (kind: SourceKind, ref: string) => Promise<SourceNow | null>;
-  /** Where knowledge holds the secrets it names: the state at the call's turn; none for a call that belongs to no turn. */
-  world: SecretWorld | null;
+  /** Where knowledge holds the secrets it names: the state at the call's own point, a turn's or a job's. */
+  world: SecretWorld;
   /** The world as the call's turn plays it, read once, for the people and places the words name; null where the chat plays none. */
   ctx: () => ReadContext | null;
   /** What a word names in the world (the engine's one reading of names), at the call's own point. */
@@ -327,7 +325,6 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
     out.fatal.push(u);
     return out;
   };
-  if (OUTSIDE_TURNS[name] !== true && r.call.scope.turn === undefined) out.fatal.push({ line: "turn_needed_op", fields: { n, op } });
 
   const who = readArg(r.call.lines, n, op, "who", "name", given.who);
   let character: { id: string; name: string; person: string | null } | null = null;
@@ -466,7 +463,7 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       if (typeof secret === "string" && planned.value.drop === true) {
         delete planned.value.secret;
         out.ignored.push("secret");
-      } else if (typeof secret === "string" && r.world !== null) {
+      } else if (typeof secret === "string") {
         const turn = r.call.scope.turn;
         const learned = turn === undefined ? null : r.call.deps.store.user(r.call.scope.user).turn(turn);
         // How it was learned, whether they believe it and how sure, as the writer says; who told them, if one did.
@@ -496,7 +493,7 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       planned.item = item.id;
       // Knowledge of a secret struck, or given another secret: the one it gave is let go, unless other knowledge of theirs still gives it.
       const replaced = planned.value.drop === true || (typeof planned.value.secret === "string" && planned.value.secret !== item.fields.secret);
-      if (name === "knowledge" && replaced && !item.dropped && r.world !== null) {
+      if (name === "knowledge" && replaced && !item.dropped) {
         const facts = secretsLetGo(r.cast.record, character.id, [item]);
         if (facts.length > 0) planned.forgets = forgetsOf(r.world.ctx, n, op, character, facts, out.unread);
       }
@@ -549,7 +546,7 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
 
   const fresh = new Map<string, string>();
   const at = call.scope.turn;
-  const world = at === undefined ? null : new SecretWorld(() => worldAt(store, scope.user, at, call.agent.job ?? null), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)), secretResolver(call.deps.secretFact, scope.user));
+  const world = new SecretWorld(() => worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)), secretResolver(call.deps.secretFact, scope.user));
   const reading: Reading = { call, cast, fresh, bound: new Map(), read, world, ctx: () => (ctxOf ??= worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat)), names: namesIn(call) };
   let ctxOf: ReadContext | null | undefined;
   const ops: OpRead[] = [];
@@ -567,11 +564,16 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const user = call.scope.user;
   const turn = call.scope.turn ?? null;
   const by = call.agent.definition;
+  const job = call.agent.job ?? null;
+  // A call with no turn (a job of his own) is recorded as changes of no turn, kept where the store keeps a job's: the writer names the chat.
+  const writer: CastWriter = { user, turn, chat: scope.chat, by, agent: call.agent.id, job, at: cast.clock?.now ?? null, now };
   const written = await writes.run((db) => {
     // Each character this call names that the cast does not hold is made first, so every operation can name it.
     const ids = makeFresh(db, call, fresh, now);
     // A secret's fact is recorded before anyone holds it.
-    if (turn !== null && world !== null && world.facts.length > 0) store.user(user).addChanges(turn, holdingChanges(world.facts, CAST_LANE, call.agent.id, call.agent.job ?? null).map((c) => ({ ...c, ...LORE_STAMP })));
+    const u = store.user(user);
+    const target = u.writeTarget({ chat: scope.chat, turn, job });
+    if (world.facts.length > 0) u.record(target, holdingChanges(world.facts, CAST_LANE, call.agent.id, job).map((c) => ({ ...c, ...LORE_STAMP })));
     const items = new Map<number, string>();
     for (const p of planned) {
       const id = ids.get(p.character) ?? p.character;
@@ -580,20 +582,20 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         else bindSource(db, user, id, { kind: p.source.kind, ref: p.source.ref, defines: typeof p.value.defines === "string" ? p.value.defines : null }, now);
       } else if (p.op === "base") {
         writeBase(db, { user, chat: scope.chat, turn, by, agent: call.agent.id, now }, id, p.value as Partial<Record<BasePart, string>>, p.seen ?? {});
-      } else if (p.op === "filed" && p.files !== undefined && turn !== null) {
+      } else if (p.op === "filed" && p.files !== undefined) {
         writeCast(
           store,
-          { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now },
+          writer,
           p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true }, ...stampOn(p.prov) })),
         );
-      } else if (p.part !== undefined && turn !== null) {
+      } else if (p.part !== undefined) {
         const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.toward ?? (p.value.with as string)) : p.part === "away" ? awayItemId(id) : (p.item ?? null);
-        const [row] = writeCast(store, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value, ...stampOn(p.prov) }]);
+        const [row] = writeCast(store, writer, [{ character: id, part: p.part, item, value: p.value, ...stampOn(p.prov) }]);
         if (row !== undefined) items.set(p.n, row.item);
         // The world's person a character is: kept on the character, outside the turn, as a binding of a source is.
         if (p.person !== undefined) setPerson(db, user, id, p.person);
         const events = [...(p.holds?.events ?? []), ...(p.forgets?.flatMap((f) => f.events) ?? [])];
-        if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null).map((c) => ({ ...c, ...(stampOn(p.prov).stamp ?? {}) })));
+        if (events.length > 0) u.record(target, holdingChanges(events, CAST_LANE, call.agent.id, job).map((c) => ({ ...c, ...(stampOn(p.prov).stamp ?? {}) })));
       }
     }
     return { ids, items };

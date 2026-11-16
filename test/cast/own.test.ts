@@ -91,7 +91,8 @@ describe("mind_set", () => {
     ]);
     expect(b.t.record(turn).of(bram, "mind").map((m) => m.fields.kind)).toEqual(["imported"]);
     expect(texts(await b.play("mind_set", { entries: [{ kind: "want", text: "Quiet." }] }, turn.id, { id: "author-1", definition: "author" }))).toEqual(["mind_set is a character's own, and this agent plays no one."]);
-    expect(texts(await b.play("mind_set", { entries: [{ kind: "want", text: "Quiet." }] }, null, BRAM))).toEqual(["What mind_set writes is kept with a turn, and this call belongs to none."]);
+    // A call with no turn is recorded as the owner's own change of no turn.
+    expect((await b.play("mind_set", { entries: [{ kind: "want", text: "Quiet." }] }, null, BRAM)).error).toBeUndefined();
   });
 });
 

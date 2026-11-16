@@ -55,7 +55,7 @@ export function secretFact(said: string): FactId | null {
  */
 export function worldAt(store: Store, user: string, turn: string | null, job: string | null = null, chat = ""): ReadContext | null {
   const u = store.user(user);
-  const state = (turn === null ? u.headState(chat) : u.stateFor(turn, job)).state.world;
+  const state = (turn === null ? u.headFor(chat, job) : u.stateFor(turn, job)).state.world;
   const doc = store.env.worlds(state.revision);
   return doc === undefined ? null : store.env.registry.context(doc, state);
 }

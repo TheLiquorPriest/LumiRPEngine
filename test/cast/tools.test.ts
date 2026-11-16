@@ -168,13 +168,11 @@ describe("cast_update", () => {
     expect(b.t.record(turn).of(charactersOf(b.t.db, USER, [CHAT])[0]?.id ?? "", "knowledge")).toEqual([]);
     expect(charactersOf(b.t.db, USER, [CHAT]).map((c) => c.name)).toEqual(["Bram"]);
 
-    // A call with no turn may still bind and draw; anything kept with a turn needs one.
+    // A call with no turn is recorded as changes of no turn, the chat's own: it binds, draws and writes growth alike.
     const outside = await b.call("cast_update", { operations: [{ op: "base", who: "Bram", seed: "An innkeeper." }, { op: "growth", who: "Bram", text: "Grew bolder." }] });
-    expect(outside.error).toBe(true);
-    expect(texts(outside).join("\n")).toContain("Operation 2 (growth) is kept with a turn, and this call belongs to none.");
-    const base = await b.call("cast_update", { operations: [{ op: "base", who: "Bram", seed: "An innkeeper." }] });
-    expect(base.error).toBeUndefined();
-    expect(ops(base)[0]?.now).toEqual({ seed: { text: "An innkeeper.", version: 1 } });
+    expect(outside.error).toBeUndefined();
+    expect(ops(outside)[0]?.now).toMatchObject({ seed: { text: "An innkeeper.", version: 1 } });
+    expect(dataOf(await b.call("cast_query", { who: "Bram", part: "growth" }, null)).growth).toEqual([expect.objectContaining({ text: "Grew bolder." })]);
   });
 
   test("a relationship and a piece of knowledge it writes in a turn are gone after that turn is swiped, and back when the swipe is shown again", async () => {

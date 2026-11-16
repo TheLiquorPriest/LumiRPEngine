@@ -203,7 +203,6 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
   const cast = readingOr(call, reply);
   if (cast === null) return reply;
   const turn = player ? null : (call.scope.turn ?? null);
-  if (!player && turn === null) return reply.line("perceive_turn", {}).fail();
 
   const world = new SecretWorld(
     () => worldAt(call.deps.store, call.scope.user, turn, call.agent.job ?? null, call.scope.chat),

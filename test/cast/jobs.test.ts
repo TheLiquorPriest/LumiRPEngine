@@ -59,6 +59,30 @@ describe("a job's cast rows", () => {
     expect(heldSecrets(b.t.s.headState(CHAT).state.world.packs.minds, "bram").lore).toEqual([SECRET_LIVE]);
   });
 
+  test("a job of no turn writes through cast_update, perceive and the character's own tools as changes of no turn: its own agents read them at once, the chat's head after it ends", async () => {
+    const b = await openBench();
+    await cast(b);
+    const bram: AgentRef & { job: string } = { id: "bram-1", definition: "character", plays: "Bram", job: JOB.job };
+    const perceived = await b.call("perceive", { perceptions: [{ who: "Bram", reach: "whole", content: "The ledger shows the forgery.", knows: ["The seal is forged."], secrets: [SECRET] }] }, null, JOB);
+    expect(perceived.error).toBeUndefined();
+    const updated = await b.call("cast_update", { operations: [{ op: "history", who: "Bram", text: "Found the forgery." }] }, null, JOB);
+    expect(updated.error).toBeUndefined();
+    const remembered = await b.call("remember", { memories: [{ text: "The ledger was forged.", gist: "Forged ledger." }] }, null, bram);
+    expect(remembered.error).toBeUndefined();
+    // The job's own agents read what it wrote at once; the chat's head has none of it while the job runs.
+    expect(await contents(b, null, JOB)).toEqual(["The ledger shows the forgery."]);
+    expect(dataOf(await b.call("cast_query", { who: "Bram", part: "history" }, null, JOB))["history"]).toEqual([expect.objectContaining({ text: "Found the forgery." })]);
+    expect((dataOf(await b.call("recall", { cue: "ledger" }, null, bram))["memories"] as JsonObject[]).map((m) => m.gist)).toEqual(["Forged ledger."]);
+    expect(await contents(b, null)).toEqual([]);
+    // Once it has ended, the first turn to begin has it all, with the holding the store placed there.
+    await b.t.writes.run(() => b.t.s.endJob(JOB.job));
+    const next = await b.t.begin();
+    expect(await contents(b, next.id)).toEqual(["The ledger shows the forgery."]);
+    expect(dataOf(await b.call("cast_query", { who: "Bram", part: "history" }, next.id))["history"]).toEqual([expect.objectContaining({ text: "Found the forgery." })]);
+    await b.t.tie(next);
+    expect(heldSecrets(b.t.s.headState(CHAT).state.world.packs.minds, "bram").lore).toEqual([SECRET_LIVE]);
+  });
+
   test("a field a turn has written since the job's own keeps that turn's value; what only the job wrote takes effect", async () => {
     const b = await openBench();
     await cast(b);

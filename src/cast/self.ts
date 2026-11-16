@@ -18,15 +18,10 @@ export interface Self {
   writer: CastWriter;
 }
 
-/** The character the calling agent plays, on the call's turn; a line says why not when there is none. */
+/** The character the calling agent plays, at the call's turn or, in a job of no turn, as that job's own changes; a line says why not when there is none. */
 export function selfOr(call: CastCall, reply: Reply): Self | null {
   const reading = readingOr(call, reply);
   if (reading === null) return null;
-  const turn = call.scope.turn;
-  if (turn === undefined) {
-    reply.line("own_turn", { tool: call.tool }).fail();
-    return null;
-  }
   const plays = call.agent.plays;
   if (plays === undefined) {
     reply.line("plays_none", { tool: call.tool }).fail();
@@ -38,7 +33,7 @@ export function selfOr(call: CastCall, reply: Reply): Self | null {
     return null;
   }
   const now = reading.clock?.now ?? null;
-  return { reading, character, now, writer: { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, at: now, now: (call.deps.now ?? Date.now)() } };
+  return { reading, character, now, writer: { user: call.scope.user, turn: call.scope.turn ?? null, chat: call.scope.chat, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, at: now, now: (call.deps.now ?? Date.now)() } };
 }
 
 /** Arguments that hold nothing back: the file says what each is, and this code reads each in whatever shape it comes. */

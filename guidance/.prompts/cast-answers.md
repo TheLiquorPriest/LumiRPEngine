@@ -20,7 +20,6 @@ no_ref: Operation {{n}} ({{op}}): {{said}} names nothing in the world{{#near}}; 
 no_person: Operation {{n}} ({{op}}): no one in the world is named {{said}}{{#near}}; the nearest are {{near}}{{/near}}. The character was not tied to anyone.
 needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
-turn_needed_op: Operation {{n}} ({{op}}) is kept with a turn, and this call belongs to none.
 added: {{who}} was not in the cast, so they were added to it, not yet cast.
 one_source: Operation {{n}} ({{op}}) binds one source: one of {{choices}}.
 no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.
@@ -38,7 +37,6 @@ no_knowers: No one the cast holds knows that.
 not_cast: {{who}} has no casting on this path.
 more: {{count}} more in {{part}}. Ask again with skip {{skip}} to see them.
 no_perceptions: perceptions cannot be read: send a list of perceptions.
-perceive_turn: A perception is kept with a turn, and this call belongs to none.
 no_message: Operation {{n}} ({{op}}): there is no reply {{message}} on this path.
 not_secret: Operation {{n}} ({{op}}): {{value}} is not a secret's id. A secret is named by the id the lore map shows it with.
 no_world_secret: Operation {{n}} ({{op}}): this chat plays no world the engine can read, so it holds no secrets.
@@ -48,7 +46,6 @@ many_named: Operation {{n}} ({{op}}): {{count}} people in the world are named {{
 unknown_secret: Operation {{n}} ({{op}}): this chat holds no secret {{secret}}{{#near}}; the nearest it holds are {{near}}{{/near}}.
 secret_refused: Operation {{n}} ({{op}}): the secret {{secret}} cannot be held by {{who}} ({{code}}).
 self_teller: Operation {{n}} ({{op}}): {{who}} was named as the one who told {{who}}; it is kept as first hand.
-own_turn: What {{tool}} writes is kept with a turn, and this call belongs to none.
 plays_none: {{tool}} is a character's own, and this agent plays no one.
 no_memories_sent: memories cannot be read: send a list of memories.
 no_memories: Nothing comes back for {{cue}}.

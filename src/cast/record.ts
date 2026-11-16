@@ -397,7 +397,7 @@ export class CastRecord {
    */
   static read(store: Store, user: string, at: CastAt, job: string | null = null): CastRecord {
     const u = store.user(user);
-    const folded = at.turn === null ? u.headState(at.chat) : job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
+    const folded = at.turn === null ? u.headFor(at.chat, job) : job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
     return new CastRecord(at, sliceOf(folded.state.areas));
   }
 
