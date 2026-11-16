@@ -242,6 +242,13 @@ export interface MigrationReport {
    * Absent from a report kept before runs listed them.
    */
   offRpe?: { chat: string; pinned: string | null }[];
+  /**
+   * Where the tidy-up's settings were found, level by level (R-201), nothing assumed of a level from its type: the chats whose own
+   * choices hold its switch or leave-alone list (carried into each chat's RPE.yml), the worlds whose head revision holds its switch
+   * (kept in the world document, carried with the world), and a user-level `tidy` in settings.json, as today's own reader reads
+   * it (carried into `things.tidyRunMost`); null where none is stored. Absent from a report kept before runs looked.
+   */
+  tidy?: { chats: string[]; worlds: string[]; user: number | null };
   /** Why the real run won't start on this report; none: it may. After a real run, what of it did not balance once counted from what the run did, which the swap reads. */
   refusals: string[];
 }
@@ -553,9 +560,25 @@ export function reportText(report: MigrationReport): string {
     else if (ownFiles.leftOut > 0) lines.push("", `${ownFiles.leftOut} of your own file(s) have names that would leave the folder they go in: not written, in the backup.`);
     if (ownFiles !== null && ownFiles.removed + ownFiles.changed > 0) lines.push("", `Files an earlier run wrote into the file tree that today's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
     for (const g of report.carried.worlds.gone ?? []) lines.push("", g.kept ? `The world ${g.world} was deleted on today's side since an earlier run: RPE keeps its copy, since a chat carried from today's side plays it.` : `The world ${g.world} was deleted on today's side since an earlier run, and no chat carried from today's side plays it: RPE's copy of it is gone too.`);
-    if (settings.lumiverseConnections.length > 0) {
-      lines.push("", "Settings that name a connection living in Lumiverse, which RPE can't use: pick one of RPE's connections for each; until you do, that work uses RPE's default connection.");
-      for (const c of settings.lumiverseConnections) lines.push(`  ${c.setting} (connection ${c.connection} in Lumiverse)`);
+    // Every place that names a connection (R-80, row 128): carried to one of RPE's connections, or with no match, by name, for him to pick.
+    const choices = report.carried.modelChoices ?? [];
+    if (choices.length > 0) {
+      lines.push("", "Model choices, each where today's build kept it:");
+      for (const c of choices) lines.push(`  ${c.where} (connection ${c.connection}${c.model === null ? "" : `, model ${c.model}`}): ${c.carried !== null ? `RPE's connection ${c.carried.id} (${c.carried.how})` : `no match in RPE${c.to === null ? "; RPE has no place for that work, which its default connection does" : `; pick one of RPE's for his agent ${c.to.agent} on the Migration page, until then its default connection does that work`}`}`);
+    }
+    // His texts and his agents' tools with no counterpart, by name.
+    if (ownFiles !== null) {
+      const apart = ownFiles.textsSetApart ?? [];
+      if (apart.length > 0) {
+        lines.push("", "His texts that today's build would not send, or whose id no build had, attached as set apart:");
+        for (const t of apart) lines.push(`  ${t.id}: ${t.reason.replaceAll("_", " ")}${t.missing.length > 0 ? ` (${t.missing.join(", ")})` : ""}`);
+      }
+      if ((ownFiles.textsNotText ?? []).length > 0) lines.push("", `Texts that are no text, kept in the backup: ${(ownFiles.textsNotText ?? []).join(", ")}.`);
+      const dead = ownFiles.deadTools ?? [];
+      if (dead.length > 0) {
+        lines.push("", "Tools his agents name that no longer exist:");
+        for (const d of dead) lines.push(`  ${d.agent}: ${d.tool}`);
+      } else if (ownFiles.toolsChecked === false && ownFiles.agents > 0) lines.push("", "His agents' tools were not checked: this run was not given the tree's list of tools.");
     }
     if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
     if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
@@ -589,6 +612,16 @@ export function reportText(report: MigrationReport): string {
     }
     lines.push("", "Settings with no setting of the same meaning in RPE (kept in the backup):");
     for (const s of settings.noHome) lines.push(`  ${s}`);
+  }
+  // Where the tidy-up's settings were found, level by level, and no level where none was (R-201).
+  if (report.tidy !== undefined) {
+    const t = report.tidy;
+    const found = [
+      t.chats.length > 0 ? `at the chat's level, in ${t.chats.length} chat(s): ${t.chats.join(", ")} (each carried into its RPE.yml)` : "",
+      t.worlds.length > 0 ? `at the world's level, in ${t.worlds.length} world(s): ${t.worlds.join(", ")} (packs.gear.config.tidy.auto, kept in the world document)` : "",
+      t.user !== null ? `at the user's level: ${t.user} finding(s) a Tidy up run shows (carried into things.tidyRunMost)` : "",
+    ].filter((s) => s !== "");
+    lines.push("", found.length === 0 ? "The tidy-up's settings: found at no level." : `The tidy-up's settings were found ${found.join("; ")}.`);
   }
   if (report.changes) {
     const c = report.changes;

@@ -19,6 +19,7 @@ import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
 import type { ChatId, UserId, WorldId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
+import { tidySettingsOf } from "../shared/settings";
 import { backupSize, backupSources, makeBackup, type BackupChat, type BackupResult } from "./backup";
 import { classifyRuntime, classifyStorage, EXTENSION_WIDE, type Classified, type ClassifyContext } from "./classify";
 import { namedFiles, readBytes, sha256 } from "./files";
@@ -311,8 +312,9 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       }
     }
 
-    // The worlds, through today's world store: every revision its index lists must read.
+    // The worlds, through today's world store: every revision its index lists must read. A world whose head revision holds the tidy-up's switch (`packs.gear.config.tidy.auto`) is noted, its level named in the report.
     const worldIds = new Set<string>();
+    const tidyWorlds: string[] = [];
     for (const path of await userView.list("worlds")) {
       const id = /^worlds\/([^/]+)\/index\.json$/.exec(path)?.[1];
       if (id) worldIds.add(id);
@@ -327,8 +329,15 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
         const docs = await reader.worldStore.getMany(id as WorldId, userId, index.revisions);
         for (const rev of index.revisions) {
           const doc = docs.get(rev);
-          if (doc) countWorldDoc(doc, rev === index.head, tally);
-          else unreadable.push({ path: `user storage: worlds/${id}/rev/${rev}.json`, why: "a revision the world's index lists, which today's world store can't read" });
+          if (!doc) {
+            unreadable.push({ path: `user storage: worlds/${id}/rev/${rev}.json`, why: "a revision the world's index lists, which today's world store can't read" });
+            continue;
+          }
+          countWorldDoc(doc, rev === index.head, tally);
+          const raw: unknown = doc;
+          const packs = rev === index.head && isRecord(raw) ? raw.packs : undefined;
+          const tidyOf = isRecord(packs) && isRecord(packs.gear) && isRecord(packs.gear.config) && isRecord(packs.gear.config.tidy) ? packs.gear.config.tidy : null;
+          if (tidyOf !== null && tidyOf.auto !== undefined) tidyWorlds.push(id);
         }
         await reader.worldStore.history(id as WorldId, userId);
         const draft = json(await userView.read(`worlds/${id}/draft.json`));
@@ -381,6 +390,17 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
 
     const settingsDoc = json(await userView.read("settings.json"));
     countSettings(settingsDoc, json(await userView.read("harness/settings.json")), tally);
+    // Where the tidy-up's settings are found (R-201): a chat's switch (its own choice) and leave-alone list (its prefs), the world's switch, and a user-level `tidy` read as today's own reader reads it.
+    const tidyChats = new Set<string>();
+    for (const item of items) {
+      const pref = new RegExp(`^chats/([^/]+)/${LEDGER_NAMESPACE}/prefs/tidy$`).exec(item.path)?.[1];
+      if (pref !== undefined) tidyChats.add(pref);
+      const run = item.where === "user storage" ? /^runs\/([^/]+)\/prefs\.json$/.exec(item.path)?.[1] : undefined;
+      if (run === undefined) continue;
+      const prefs = json(await userView.read(item.path));
+      if (isRecord(prefs) && (prefs.tidy !== undefined || prefs.tidyLeft !== undefined)) tidyChats.add(run);
+    }
+    const tidy = { chats: [...tidyChats].sort(), worlds: tidyWorlds, user: isRecord(settingsDoc) && settingsDoc.tidy !== undefined ? tidySettingsOf(settingsDoc.tidy).findings : null };
     countLink(found.runtime.runtimes.length, json(await userView.read("harness/registry.json")), tally);
     // Where today's build keeps two copies of the acceptance connections, the file of the acceptance runs is the authority (today's guard reads its list first, `agents/provider.ts:711`), and the settings' copy is counted as attached.
     const guarded = json(await userView.read("agent-acceptance.json"));
@@ -482,6 +502,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       identifier: sources.identifier,
       sources: { lumiverse: sources.lumiverse, runtime: sources.runtime, ...(sources.runtimeName !== undefined ? { runtimeName: sources.runtimeName } : {}), ...(sources.runtimeFolders !== undefined ? { runtimeFolders: sources.runtimeFolders } : {}) },
       offRpe,
+      tidy,
       refusals: [],
     };
     // Each row found only inside other rows' things gets its three ends where this run would put them, every chat as the import would take it.
