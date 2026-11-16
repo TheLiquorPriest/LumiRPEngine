@@ -429,6 +429,11 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
         if (minutes !== null) value.until_at = minutes;
       }
       if (!Object.keys(value).some((k) => k !== "drop" && k !== "why")) return unreadable({ line: "needs_one", fields: { n, op, fields: ["whereabouts", "intention", "place", "names", "until", "drop"] } });
+      // Whose it is, for what time brings due (the store lists an arrival from the slice alone): the world's person the character is (the one its name finds where none is kept yet), and the name it is cast under, as they stand now.
+      const found = ctx === null || character.person !== null ? null : personNamed(ctx, character.name);
+      const person = character.person ?? (found !== null && "id" in found ? found.id : null);
+      if (person !== null) value.person_ref = `entity:${person}`;
+      value.character_name = character.name;
       planned.part = "away";
       return out;
     }

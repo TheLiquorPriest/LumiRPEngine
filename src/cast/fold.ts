@@ -166,9 +166,42 @@ function undo(value: JsonValue, before: Readonly<JsonObject>, now: Readonly<Json
   return [{ op: WRITE_OP, value: { ...same, value: restore, ...(unset.length > 0 ? { unset } : {}) } }];
 }
 
-/** The cast as the store registers it (`StoreOptions.areas`): its one operation over its slice. */
+const textOf = (v: JsonValue | undefined): string | null => (typeof v === "string" ? v : null);
+const textsOf = (v: JsonValue | undefined): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/**
+ * What time brings due of the cast, read from the slice alone (the store lists it without knowing the cast): each away item not struck
+ * whose intention is meant for a story time, with the character it is of (by the name and the world's person its write kept), where
+ * they are and who they mean to see, the refs the write resolved. Nothing here applies it.
+ */
+function awayDue(slice: Readonly<JsonObject>): JsonValue {
+  return Object.entries((slice as unknown as CastSlice).items).flatMap(([character, mine]) =>
+    Object.entries(mine).flatMap(([id, item]) => {
+      if (item.part !== "away") return [];
+      const { fields, dropped } = fieldsOf(item.rows);
+      if (dropped || typeof fields.until_at !== "number") return [];
+      return [
+        {
+          id,
+          character,
+          name: textOf(fields.character_name),
+          ref: textOf(fields.person_ref),
+          whereabouts: textOf(fields.whereabouts),
+          place_ref: textOf(fields.place_ref),
+          names: textsOf(fields.names),
+          name_refs: textsOf(fields.name_refs),
+          intention: textOf(fields.intention),
+          until_at: fields.until_at,
+        },
+      ];
+    }),
+  );
+}
+
+/** The cast as the store registers it (`StoreOptions.areas`): its one operation over its slice, and one named read of it. */
 export const CAST_STORE_AREA: StoreArea = {
   id: CAST_AREA,
   initial: () => emptySlice() as unknown as JsonObject,
   ops: { [WRITE_OP]: { check, apply, undo } satisfies AreaOp },
+  reads: { away: awayDue },
 };
