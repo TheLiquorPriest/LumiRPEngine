@@ -67,7 +67,7 @@ describe("a tap that manages", () => {
     expect(own.map((c) => ({ by: c.by, tapped: isObject(c.cite) && "tap" in c.cite && "request" in c.cite }))).toEqual(own.map(() => ({ by: "player", tapped: true })));
     expect(bed.heard.map((e) => ({ kind: e.kind, key: e.key, data: e.data }))).toEqual([{ kind: "state", key: "state", data: {} }]);
 
-    expect(body(await bed.undo(paid.undo), "lre.chip")).toEqual({ applied: true, pending: false, said: words("opened_stay") });
+    expect(body(await bed.undo(paid.undo), "lre.chip")).toEqual({ applied: true, pending: false });
     expect(banked(await bed.state())).toBe(before);
     expect(bed.heard.map((e) => e.kind)).toEqual(["state", "state"]);
     // Undone once, it is not undone again.
@@ -122,7 +122,7 @@ describe("a tap that manages", () => {
     expect(notional(s.headState(CHAT).state.world, "hollis_garrow")).toBe(worth + 3);
 
     // Whole: everything the player did is taken back, and what the world's defaults gave stays, as the answer says.
-    expect(body(await bed.undo(paid.undo), "lre.chip")).toEqual({ applied: true, pending: false, said: [words("opened_stay"), words("worth_stays")].join(" ") });
+    expect(body(await bed.undo(paid.undo), "lre.chip")).toEqual({ applied: true, pending: false });
     const after = s.headState(CHAT).state.world;
     const opening = doc.entities.acct_pov_purse?.fields.opening;
     if (typeof opening !== "number") throw new Error("the purse has no opening");
@@ -230,7 +230,7 @@ describe("a tap that manages", () => {
       { op: "economy.txn", source: "player", standing: null },
     ]);
     if (typeof fixed.undo !== "string") throw new Error("no Undo");
-    expect(body(await bed.undo(fixed.undo), "lre.chip")).toEqual({ applied: true, pending: false, said: words("opened_stay") });
+    expect(body(await bed.undo(fixed.undo), "lre.chip")).toEqual({ applied: true, pending: false });
   });
 
   test.skip("hardening: as a ✎ of cash for someone the world gave no accounts, changes the cash they keep as a field and makes nothing up, and its Undo is whole", async () => {

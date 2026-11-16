@@ -1194,10 +1194,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const head = path.findLast((e) => e.turn !== null)?.turn ?? null;
       const found = foundItems(compared, was, steps, this.#d.since.stoppedBefore(user, chat));
       this.#d.since.keep(db, user, chat, head, found, this.#d.store.now());
-      const known = new Set(was.map((e) => e.message));
+      // His edits since RPE last read them, and his messages the store reports inserted before a played turn, mark every turn after them.
       const marking: { message: string; kind: "edited-message" | "inserted-message" }[] = [
         ...found.flatMap((f) => (f.kind === "player_edited" ? [{ message: f.message, kind: "edited-message" as const }] : [])),
-        ...(was.length === 0 ? [] : path.filter((e) => e.user && !known.has(e.message)).map((e) => ({ message: e.message, kind: "inserted-message" as const }))),
+        ...found.flatMap((f) => (f.kind === "player_inserted" ? [{ message: f.message, kind: "inserted-message" as const }] : [])),
       ];
       for (const m of marking) {
         const at = path.findIndex((e) => e.message === m.message);
@@ -1516,10 +1516,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const hidden = new Set(steps.flatMap((s) => (s.hidden && !hiddenReadable ? [s.id] : [])));
     const edited = of("edited");
     const edits = of("player_edited");
+    const inserted = of("player_inserted");
     const newest = steps.findLast((s) => s.role === "user");
     // The player's newest message, which this turn answers: read now, its text kept with the turn's request record (`prompts.answered`).
     const unkept = newest !== undefined && !hidden.has(newest.id) ? [newest.id] : [];
-    const ids = [...new Set([...edited.map((e) => e.message), ...edits.map((e) => e.message), ...unkept])].filter((id) => !hidden.has(id));
+    const ids = [...new Set([...edited.map((e) => e.message), ...edits.map((e) => e.message), ...inserted.map((e) => e.message), ...unkept])].filter((id) => !hidden.has(id));
     const now = new Map((ids.length === 0 ? [] : await reads.messagesById(chat, ids)).map((m) => [m.id, m]));
     const textNow = (message: string): { new?: string } => {
       const m = now.get(message);
@@ -1552,6 +1553,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const old = hidden.has(e.message) ? null : this.#d.prompts.answeredText(user, chat, e.message, e.had);
       add("edit", notices?.line("player_edited", { message: e.message, ...(old !== null ? { old } : {}), ...textNow(e.message) }));
     }
+    // A message of his inserted before a played turn is a change to his earlier messages, told with its text.
+    for (const i of inserted) add("edit", notices?.line("player_inserted", { message: place.get(i.message) ?? i.message, ...textNow(i.message) }));
     const answered = newest === undefined ? undefined : now.get(newest.id);
     if (answered !== undefined) await this.#d.writes.run((db) => this.#d.prompts.answered(db, user, turn.id, { message: answered.id, hash: answered.shown.hash, text: shownText(answered) }), "keeping the message the turn answered");
 

@@ -45,6 +45,8 @@ export type FoundItem =
   | { kind: "edited"; message: string; turn: string }
   /** A player's message edited since RPE last read it: `had` is the hash it had then. */
   | { kind: "player_edited"; message: string; had: string }
+  /** A message of the player's inserted before a played turn (the store's comparison reports it), with the first turn after it. */
+  | { kind: "player_inserted"; message: string; before: string }
   /** Replies no turn is tied to, from the first to the last, as one stretch of the chat. */
   | { kind: "unplayed"; from: string; to: string };
 
@@ -97,6 +99,10 @@ export function foundItems(report: PathReport, was: readonly PathEntry[], steps:
     }
     if (stretch !== null) items.push({ kind: "unplayed", ...stretch });
   }
+  // A message of his the store reports inserted before a played turn is a change to his earlier messages (plan §10.10); an inserted
+  // reply is a stretch written without RPE, which `unplayed` tells.
+  const role = new Map(steps.map((s) => [s.id, s.role]));
+  for (const i of report.inserted ?? []) if (role.get(i.message) === "user") items.push({ kind: "player_inserted", message: i.message, before: i.before });
   return items;
 }
 
