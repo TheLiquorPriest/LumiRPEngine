@@ -30,6 +30,7 @@ import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "rp-harness";
 import type { AgentRef, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, dropCastStaged, type SourceReader } from "../cast";
+import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
@@ -41,7 +42,7 @@ import type { Runs } from "./runs";
 import { turnSettings } from "./settings";
 import { stageAt } from "./stage";
 import { guidanceTexts } from "./texts";
-import { castLayouts, PARTS, turnTokens } from "./turns";
+import { castLayouts, PARTS, tokenCount } from "./turns";
 
 export interface EventsDeps {
   db: Database;
@@ -69,7 +70,7 @@ export interface EventsDeps {
 }
 
 /** The turn's own views an agent can be given by name (plan §5.4, §10.4, Appendix C), but the scene's. */
-const VIEWS = { storyBrief: "story:brief", due: "world:due", ruleset: "ruleset", reply: "turn:reply(saved)" } as const;
+const VIEWS = { storyBrief: "story:brief", due: "world:due", ruleset: "ruleset", reply: "turn:reply(saved)", mapDrawn: "map:drawn" } as const;
 
 /** The field a view's layout shows its part for nothing by: set only when an agent is given that view by name with nothing in it. */
 const NONE = "none";
@@ -114,7 +115,7 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   const part = readPart(layout.text, "world-state");
   const settings = await turnSettings(deps.files, scope, deps.log);
   const map = maps ? mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
-  return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState }) };
+  return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: { ...settings.worldState, charsPerToken: settings.charsPerToken } }) };
 }
 
 /**
@@ -139,6 +140,23 @@ function rulesetView(deps: EventsDeps, scope: Scope): string | null {
   const state = turn === null ? store.headState(scope.chat).state : store.stateAt(turn.id).state;
   const doc = deps.store.env.worlds(state.world.revision);
   return doc === undefined ? null : JSON.stringify({ ruleset: rulesetData(doc) });
+}
+
+/**
+ * The drawn layer of the map the player's character stands on (`map:drawn`), at the scope's turn or the chat's head: what the Author's
+ * opening block gives once a session (plan §10.2). Null where the chat has no world, or no map is drawn where he stands.
+ */
+async function drawnMap(deps: EventsDeps, scope: Scope): Promise<string | null> {
+  const store = deps.store.user(scope.user);
+  if (store.chat(scope.chat) === null) return null;
+  const turn = scope.turn === undefined ? null : store.turn(scope.turn);
+  const { state } = turn === null || turn.chat !== scope.chat ? store.headState(scope.chat) : store.stateAt(turn.id);
+  const doc = deps.store.env.worlds(state.world.revision);
+  const place = doc === undefined ? null : placeOfEntity(state.world, doc.pov);
+  if (place === null) return null;
+  const settings = await turnSettings(deps.files, scope, deps.log);
+  const map = mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map);
+  return map.text({ state, env: deps.store.env, place, layer: "drawn" })?.text ?? null;
 }
 
 /** A turn's reply as saved, by its latest run that wrote into the chat; null before it has gone out. */
@@ -179,6 +197,8 @@ async function turnView(r: Reading, ref: string): Promise<string | null | undefi
       const reply = savedReply(r.deps, r.scope.user, turn);
       return reply === null ? nothing(layout) : layout.render({ reply }).text.trim();
     }
+    case VIEWS.mapDrawn:
+      return await drawnMap(r.deps, r.scope);
   }
   const scene = sceneOf(ref);
   return scene === null ? undefined : sectionOf(await r.world(scene.maps), "horizon");
@@ -225,7 +245,7 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     ...(stage?.place != null ? { cues: [stage.place] } : {}),
     sources: deps.sources,
     layouts,
-    tokens: turnTokens,
+    tokens: tokenCount(settings.charsPerToken),
     settings: settings.cast,
   });
   const text = views

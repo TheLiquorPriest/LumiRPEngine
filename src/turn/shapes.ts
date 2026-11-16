@@ -407,6 +407,10 @@ const levelReflection = shape.named(
     records: N,
     notable: shape.list(T),
     open: N,
+    due: field(
+      nullable(shape.object({ n: nullable(N), after: N, kind: T })),
+      "What falls due beneath it in the time ahead: how many (null: more than one, uncounted), the minutes until the soonest, and its kind; null when nothing does, or the reading passed no due source.",
+    ),
     changed: field(nullable(N), "The number of the last turn that changed something there."),
     note: field(nullable(T), "An agent's own line on the level."),
   }),

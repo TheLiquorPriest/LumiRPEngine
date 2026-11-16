@@ -21,7 +21,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
-import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ModelsApi, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
+import type { Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
@@ -79,12 +79,12 @@ export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState
 /** The briefing's header field that names the cast's views of the characters on stage the Author is given (`castPresentViews`). */
 export const ON_STAGE_VIEWS = "on_stage_views";
 
-/** Characters to a token, for measuring what the turn gives the Author against a budget: the figure RPH's own estimates use. */
-const CHARS_PER_TOKEN = 3.2;
-
-/** A text's tokens as the turn counts what it gives against a budget (the story so far, what comes to mind): RPH's own estimate. */
-export function turnTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+/**
+ * A text's tokens as the model layer counts a prompt (`ModelsApi.count`): at RPH's characters to a token for the chat
+ * (`tokens.charsPerToken`, `TurnSettings.charsPerToken`). Every budget the turn fills is counted by it, and by no figure of RPE's own.
+ */
+export function tokenCount(charsPerToken: number): (text: string) => number {
+  return (text) => Math.ceil(text.length / charsPerToken);
 }
 
 /** The first `count` words of a text, joined by single spaces. */
@@ -132,10 +132,10 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
   }
 }
 
-/** The connection a lead's definition names for the user, by its id: null for his default (`default`, or none named). */
-export async function leadConnection(guidance: Pick<Guidance, "definition">, lead: string | null, models: Pick<ModelsApi, "list">, user: string): Promise<string | null> {
-  const named = lead === null ? undefined : (await guidance.definition(lead))?.model;
-  return named === undefined || named === "default" ? null : ((await models.list(user)).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
+/** The connection the harness runs a lead's definition on for the scope (`definitions.list`'s `runsOn`), by its id: null for his default, or where none resolves. */
+export async function leadConnection(definitions: Pick<DefinitionsApi, "list">, scope: Scope, lead: string | null): Promise<string | null> {
+  if (lead === null) return null;
+  return (await definitions.list(scope)).find((d) => d.name === lead)?.runsOn.connection?.id ?? null;
 }
 
 /**
@@ -315,6 +315,8 @@ interface Found {
   /** The turns a delete took, quoted while they fit (`since.deletedBudget`, `since.deletedWords`), and what a flip stopped, listed while it fits (`since.notAppliedBudget`). */
   deleted: { budget: number; words: number };
   notAppliedBudget: number;
+  /** A text's tokens as the model layer counts them (`tokenCount`). */
+  tokens: (text: string) => number;
 }
 
 /**
@@ -535,7 +537,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // The prompt as the lead's model takes it (plan §4.2 "A prompt with pictures"): a picture, in any message, goes to it only where its
       // model is known to take pictures. Its limits are read once, and only where something needs them.
       let leadLimits: Promise<ModelLimits | null> | undefined;
-      const limits = (): Promise<ModelLimits | null> => (leadLimits ??= this.#leadLimits(guidance, settings.lead, user, begun.id));
+      const limits = (): Promise<ModelLimits | null> => (leadLimits ??= this.#leadLimits(scope, settings.lead));
       const pictured = tagged.prompt.some((m) => typeof m.content !== "string" && m.content.some((part) => isRecord(part) && part.type === "image_url"));
       const { messages, left } = promptOf(tagged.prompt, pictured && (await limits())?.pictures?.takes === true);
       const prefill = prefillOf(tagged, messages);
@@ -614,7 +616,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // turn-errors line that says so.
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget };
+        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken) };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
@@ -952,8 +954,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
-        const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget };
-        const limits = (): Promise<ModelLimits | null> => this.#leadLimits(guidance, settings.lead, user, turn.id);
+        const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken) };
+        const limits = (): Promise<ModelLimits | null> => this.#leadLimits(scope, settings.lead);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
         const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
         run.notGiven = notGiven;
@@ -1310,7 +1312,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (layout?.status === "read") {
       const maps = mapView(await mapWording(guidanceTexts(this.#d.files, scope, this.#d.log)), settings.map);
       try {
-        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState });
+        // Counted at the model layer's ratio, as every budget of the turn is: never a figure of the world state's own.
+        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: { ...settings.worldState, charsPerToken: settings.charsPerToken } });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });
@@ -1325,7 +1328,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const stage = named.length === 0 ? null : stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
     if (stage !== null && stage.who.length > 0) {
       try {
-        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: turnTokens, settings: settings.cast };
+        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: tokenCount(settings.charsPerToken), settings: settings.cast };
         const views = await castPresentViews(named, stage.place === null ? input : { ...input, cues: [stage.place] });
         const text = views.flatMap((view) => (view.text.trim() === "" ? [] : [view.text.trimEnd()])).join("\n\n");
         if (text !== "") blocks.push({ name: BLOCKS.onStage, text });
@@ -1344,7 +1347,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const soFar =
         keptFrom === null
           ? null
-          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: this.#leadWindow(await at.limits(), settings.lead, scope.turn), settings: settings.storySoFar, tokens: turnTokens, layout: soFarPart });
+          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: this.#leadWindow(await at.limits(), settings.lead, scope.turn), settings: settings.storySoFar, tokens: tokenCount(settings.charsPerToken), layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
     }
     if (briefPart?.format === "template") {
@@ -1372,7 +1375,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const stage = stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
     if (stage === null || stage.who.length === 0) return [];
     const all = Object.keys(CAST_VIEWS) as CastViewName[];
-    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, all), tokens: turnTokens, settings: settings.cast, ...(stage.place !== null ? { cues: [stage.place] } : {}) };
+    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, all), tokens: tokenCount(settings.charsPerToken), settings: settings.cast, ...(stage.place !== null ? { cues: [stage.place] } : {}) };
     const out: CastFolder[] = [];
     for (const name of new Set(stage.who)) {
       const [rest, growth] = await Promise.all([castViews(all.filter((v) => v !== "growth"), { ...input, character: name }), castViews(["growth"], { ...input, character: name })]);
@@ -1383,15 +1386,15 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * The lead's model's limits, as the model layer gives them for the turn's user's connection its definition names (`default`, or none,
-   * is his default connection): its window, and whether it takes pictures. Null where the model layer cannot tell them; the log says so.
+   * The lead's model's limits, as the model layer gives them for the connection the harness runs the lead's definition on for the scope
+   * (its own, else his default): its window, and whether it takes pictures. Null where the model layer cannot tell them; the log says so.
    */
-  async #leadLimits(guidance: Guidance, lead: string | null, user: string, turn: string): Promise<ModelLimits | null> {
+  async #leadLimits(scope: Scope & { turn: string }, lead: string | null): Promise<ModelLimits | null> {
     try {
-      const models = this.#d.harness().models;
-      return await models.limits(user, await leadConnection(guidance, lead, models, user));
+      const { models, definitions } = this.#d.harness();
+      return await models.limits(scope.user, await leadConnection(definitions, scope, lead));
     } catch (error) {
-      this.#d.log.info("The lead's model's limits could not be read: its window is taken as unknown, and it is given no pictures.", { turn, lead, error: words(error) });
+      this.#d.log.info("The lead's model's limits could not be read: its window is taken as unknown, and it is given no pictures.", { turn: scope.turn, lead, error: words(error) });
       return null;
     }
   }
@@ -1465,7 +1468,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       for (const g of [...gone.values()].flatMap((g) => (g === null ? [] : [g])).sort((a, b) => (b.n ?? -1) - (a.n ?? -1))) {
         const run = this.#d.runs.reply(user, g.turn);
         const words = run === null ? "" : firstWords(run.saved ?? run.base + run.reply, deleted.words);
-        const cost = turnTokens(`${g.n ?? g.message} ${words}`);
+        const cost = found.tokens(`${g.n ?? g.message} ${words}`);
         if (spent + cost <= deleted.budget) {
           spent += cost;
           quoted.push({ message: g.n ?? g.message, words });
@@ -1491,7 +1494,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const tiedTo = store.turn(s.turn)?.message ?? null;
         const why = [...new Set(s.codes)].map((code) => (typeof keys[code] === "string" ? keys[code] : code)).join("; ");
         const entry = { op: s.op, value: change === undefined ? "" : JSON.stringify(change.value), message: tiedTo === null ? s.turn : (place.get(tiedTo) ?? tiedTo), why };
-        const cost = turnTokens(`${entry.message} ${entry.op} ${entry.value} ${entry.why}`);
+        const cost = found.tokens(`${entry.message} ${entry.op} ${entry.value} ${entry.why}`);
         if (spent + cost > notAppliedBudget) {
           left++;
           continue;
@@ -1530,7 +1533,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const inFull = new Set<(typeof editLines)[number]>();
     let spent = 0;
     for (const told of [...editLines].sort((a, b) => (place.get(b.edit.message) ?? -1) - (place.get(a.edit.message) ?? -1))) {
-      spent += turnTokens(told.line ?? "");
+      spent += found.tokens(told.line ?? "");
       if (editedBudget !== null && spent > editedBudget) break;
       inFull.add(told);
     }

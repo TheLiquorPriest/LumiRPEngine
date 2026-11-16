@@ -56,6 +56,13 @@ const RESERVE =
     throw new Error("rp-harness declares no compaction.reserve setting.");
   })();
 
+/** RPH's ratio of characters to a token (`tokens.charsPerToken`), at which its model layer counts a prompt (`ModelsApi.count`): every budget a turn fills is counted at it. */
+const CHARS_PER_TOKEN =
+  RPH_SETTINGS.find((s) => s.key === "tokens.charsPerToken") ??
+  (() => {
+    throw new Error("rp-harness declares no tokens.charsPerToken setting.");
+  })();
+
 export interface TurnSettings {
   /** The agent definition that leads a turn, as the config names it; null where no level does, and no turn is played. */
   lead: string | null;
@@ -89,6 +96,8 @@ export interface TurnSettings {
   map: MapConfig;
   /** RPH's room kept for the answer, in tokens (`compaction.reserve`). */
   reserve: number;
+  /** RPH's characters to a token for the chat (`tokens.charsPerToken`), the model layer's count: every budget the turn fills is counted at it. */
+  charsPerToken: number;
   /** The turns a chat's list gives when the page names no limit (`turns.page`), and the most one page may ask (`turns.pageMost`). */
   turnsPage: { size: number; most: number };
   /** The most characters a request's words may hold (`requests.textMost`); one past it is not kept. */
@@ -127,6 +136,7 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   map: MAP_DEFAULTS,
   // RPH's own default.
   reserve: RESERVE.default as number,
+  charsPerToken: CHARS_PER_TOKEN.default as number,
   // The first build's fixed page sizes, made settings.
   turnsPage: { size: 50, most: 500 },
   requestsTextMost: 2000,
@@ -345,6 +355,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     engine: read.numbers(IFACE_SETTING_DEFS),
     map: mapConfigRead(read),
     reserve: read.value(RESERVE) as number,
+    charsPerToken: read.value(CHARS_PER_TOKEN) as number,
     turnsPage: { size: read.value(DEFS.turnsPage) as number, most: read.value(DEFS.turnsPageMost) as number },
     requestsTextMost: read.value(DEFS.requestsTextMost) as number,
     taps: read.numbers(TAP_SETTING_DEFS),

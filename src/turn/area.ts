@@ -126,8 +126,8 @@ export function turnArea(takes: TurnTakes): TurnArea {
         room: async (chat, reply) => {
           const scope = { user: owner(), chat, session: NO_SESSION };
           const settings = await chatSettings(chat);
-          const { models } = made().harness;
-          const connection = await leadConnection(loadGuidance(made().files, scope), settings.lead, models, owner());
+          const { models, definitions } = made().harness;
+          const connection = await leadConnection(definitions, scope, settings.lead);
           const limits = await models.limits(owner(), connection);
           const window = limits.contextWindow?.tokens ?? null;
           return {
