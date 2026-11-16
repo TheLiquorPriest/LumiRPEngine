@@ -29,8 +29,7 @@ import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
 import { chainOf, comparePaths, matchTurn, nodeKey, turnByHash, turnsShown, type ShowingTurn } from "./path";
 import { BLANK_REVISION, blankWorld } from "./blank";
-import { MIGRATED_REVISION, readWorldDoc, type WorldRevisionRow } from "./worlds";
-import { isWorldDoc } from "../engine/authoring";
+import { UserWorlds, type WorldChange, type WorldRevisionRow } from "./worlds";
 import { migrateStore, missingStoreTables } from "./schema";
 import { FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
@@ -103,6 +102,8 @@ export interface StoreOptions {
   registry: Registry;
   /** World documents by revision. */
   worlds: (revision: RevisionId) => WorldDoc | undefined;
+  /** Told once a world's revision, index, draft or history note is durable (`UserWorlds`): the app passes it to the live socket for open Build pages. */
+  worldChanged?: (change: WorldChange) => void;
   snapshotEvery?: number;
   /** Identifies the code that folds (a build id): snapshots other code made are not used. Defaults to the packs and their versions. */
   fingerprint?: string;
@@ -386,6 +387,7 @@ export class Store {
   readonly branchHops: number;
   readonly viewOptions: { ownOnly: readonly string[]; notable: number; placeDepth: number };
   readonly now: () => number;
+  /** @internal */ readonly worldChanged: ((change: WorldChange) => void) | undefined;
   /** The log, for what the store says for people (a walk cut short); null when none was given. */
   readonly log: ((message: string, data: Record<string, unknown>) => void) | null;
   /** Whether the store opened the database itself: then it brought the tables up, and it closes it. */
@@ -456,6 +458,7 @@ export class Store {
     this.fingerprint = usual ? given : hashParts(given, "walks", String(walks.kindChain), String(walks.holderDepth), String(walks.visitDepth));
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)), placeDepth: whole(options.placeDepth, STORE_DEFAULTS.placeDepth, 1) };
     this.now = options.now ?? Date.now;
+    this.worldChanged = options.worldChanged;
   }
 
   /**
@@ -2412,61 +2415,40 @@ export class UserStore {
   // ------------------------------------------------------------ worlds
 
   /**
+   * This user's worlds: every revision's bytes as received, each world's index, draft and history, one write at a time and each told
+   * to the change notice the store was opened with (`worlds` module). `putWorld`, `worldDoc` and `worldRevisions` are the revision calls
+   * a chat's caller makes of a document it has parsed.
+   */
+  get worlds(): UserWorlds {
+    return new UserWorlds(this.db, this.id, (fn) => this.write(false, fn), this.store.now, this.store.worldChanged);
+  }
+
+  /**
    * Keeps a world revision's document (plan §4.5) for chats that play it, under the id chats and
    * markers name it by. A revision's document never changes, so one already kept stays as it is.
    * Whether it was added.
    */
   putWorld(revision: RevisionId, doc: WorldDoc): boolean {
-    if (revision === "" || revision === BLANK_REVISION) throw new StoreInputError(`"${revision}" cannot name a kept revision: the blank world is the store's own`);
-    if (!isWorldDoc(doc)) throw new StoreInputError(`revision ${revision} is not a world document`);
-    return this.write(false, () => this.db.run("INSERT INTO world_revision (user, revision, world, doc, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user, revision) DO NOTHING", [this.id, revision, doc.id, JSON.stringify(doc), this.store.now()]).changes > 0);
+    return this.worlds.putRevision(doc.id, JSON.stringify(doc), revision).added;
   }
 
   /** A kept revision's document, read as today's world store reads one; null when this user keeps no such revision. */
   worldDoc(revision: RevisionId): WorldDoc | null {
-    const row = this.db.query<{ doc: string }, [string, string]>("SELECT doc FROM world_revision WHERE user = ? AND revision = ?").get(this.id, revision);
-    return row ? readWorldDoc(row.doc) : null;
+    return this.worlds.doc(revision);
   }
 
   /** The revisions this user keeps, of one world or of all, oldest first. */
   worldRevisions(world?: WorldId): WorldRevisionRow[] {
-    const rows =
-      world === undefined
-        ? this.db.query<WorldRevisionRow, [string]>("SELECT revision, world, created FROM world_revision WHERE user = ? ORDER BY created, rowid").all(this.id)
-        : this.db.query<WorldRevisionRow, [string, string]>("SELECT revision, world, created FROM world_revision WHERE user = ? AND world = ? ORDER BY created, rowid").all(this.id, world);
-    return rows.map((r) => ({ revision: r.revision, world: r.world, created: r.created }));
+    return this.worlds.revisions(world);
   }
 
   /**
-   * Keeps every world revision the migration carried for this user (its `world_file` table, plan
-   * §15.2), so the chats it imported play their worlds. A revision already kept stays as it is; a file
-   * that does not read as a world document is left out and listed. The migration calls it after a run.
+   * Keeps what the migration carried of this user's worlds (its `world_file` table, plan §15.2) byte for byte, so the chats it
+   * imported play their worlds: every revision not yet kept, and the index, draft and history of a world this user keeps none of. A
+   * revision already kept stays as it is; one that does not read as a world document is kept and listed. The migration calls it after a run.
    */
   copyMigratedWorlds(): { added: number; held: number; unreadable: { world: WorldId; revision: RevisionId }[] } {
-    if (!this.db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'world_file'").get()?.n) {
-      throw new StoreSchemaError("This database holds no world_file table: the migration's tables are not here, so it carried no worlds into it.");
-    }
-    const files = this.db.query<{ world: string; file: string; bytes: Uint8Array }, [string]>("SELECT world, file, bytes FROM world_file WHERE user = ? ORDER BY world, file").all(this.id);
-    const decoder = new TextDecoder();
-    const unreadable: { world: WorldId; revision: RevisionId }[] = [];
-    let added = 0;
-    let held = 0;
-    this.write(false, () => {
-      const put = this.db.query("INSERT INTO world_revision (user, revision, world, doc, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user, revision) DO NOTHING");
-      const now = this.store.now();
-      for (const f of files) {
-        const revision = MIGRATED_REVISION.exec(f.file)?.[1];
-        if (revision === undefined) continue;
-        const text = decoder.decode(f.bytes);
-        if (!readWorldDoc(text)) {
-          unreadable.push({ world: f.world, revision });
-          continue;
-        }
-        if (put.run(this.id, revision, f.world, text, now).changes > 0) added++;
-        else held++;
-      }
-    });
-    return { added, held, unreadable };
+    return this.worlds.copyCarried();
   }
 
   // ------------------------------------------------------------ undo and the review card

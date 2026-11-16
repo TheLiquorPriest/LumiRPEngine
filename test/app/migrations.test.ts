@@ -131,7 +131,7 @@ describe("migrations", () => {
     const db = new Database(bed.paths.database);
     try {
       const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
-      for (const table of ["chat", "turn", "change", "snapshot", "session", "path_node", "message_link", "world_revision"]) expect(tables).toContain(table);
+      for (const table of ["chat", "turn", "change", "snapshot", "session", "path_node", "message_link", "world_part"]) expect(tables).toContain(table);
       expect(recorded(db)).toEqual([...APP_STEPS, ...STORE_MIGRATIONS.map((m) => `store ${m.version}`)]);
     } finally {
       db.close();

@@ -52,7 +52,7 @@ const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
   // A snapshot's parts go with the last snapshot that names them; none names a turn.
   snapshot_part: { user: "none", hash: "none", body: "none", refs: "none" },
   fold_mark: { user: "none", chat: "none", mark: "none" },
-  world_revision: { user: "none", revision: "none", world: "none", doc: "none", created: "none" },
+  world_part: { user: "none", world: "none", file: "none", bytes: "none", sha256: "none", version: "none", created: "none" },
   job_end: { user: "none", job: "none", ended: "none" },
 };
 

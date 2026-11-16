@@ -6,12 +6,11 @@
 // script's), keeping how far it has gone in SQLite's `user_version` rather than in a table.
 
 import type { Database } from "bun:sqlite";
+import { keepWorldsOnce } from "./worlds";
 import { StoreSchemaError } from "./types";
 
-export interface Migration {
-  version: number;
-  sql: string;
-}
+/** One step of the store's tables, as the application's runner takes it: SQL, or a function handed the database and the user it belongs to. */
+export type Migration = { version: number; name?: string } & ({ sql: string } | { up: (db: Database, user: string) => void });
 
 export const STORE_MIGRATIONS: readonly Migration[] = [
   {
@@ -258,10 +257,34 @@ ALTER TABLE change ADD COLUMN moment INTEGER;
 UPDATE change SET op = 'story.horizon', lane = 'story' WHERE op = 'store.horizon';
 `,
   },
+  {
+    version: 13,
+    name: "worlds kept once, byte for byte",
+    // Every world part in one table (plan §4.5, R-10): each revision's bytes as received under its id with their checksum, and each
+    // world's index, draft (with the version it stands at) and history notes beside them. What the migration carried (`world_file`)
+    // and what Build kept (`build_file`) move in byte for byte, their checksums compared, and stay where they are until their
+    // callers move; the store's old revision table (`world_revision`) moves in and goes.
+    up: (db) => {
+      db.run(`
+CREATE TABLE world_part (
+  user TEXT NOT NULL,
+  world TEXT NOT NULL,
+  file TEXT NOT NULL,
+  bytes BLOB NOT NULL,
+  sha256 TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL,
+  PRIMARY KEY (user, world, file)
+);
+CREATE INDEX world_part_file ON world_part (file);
+`);
+      keepWorldsOnce(db, Date.now());
+    },
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
-export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_revision", "job_end", "snapshot_part"];
+export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job_end", "snapshot_part"];
 
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {
@@ -287,7 +310,8 @@ export function migrateStore(db: Database, migrations: readonly Migration[] = ST
   for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
     if (m.version <= at) continue;
     db.transaction(() => {
-      db.run(m.sql);
+      if ("sql" in m) db.run(m.sql);
+      else m.up(db, "");
       db.run(`PRAGMA user_version = ${Math.floor(m.version)}`);
     })();
     at = m.version;

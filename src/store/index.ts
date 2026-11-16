@@ -7,7 +7,7 @@ export { TreeView, type From, type NodeKind, type NodeView, type Reflection, typ
 export { readPart, renderView, wordLine, Template, type Part, type Piece, type View, type ViewLine } from "./words";
 export { factStore, standing, type FactInput } from "./facts";
 export { BLANK_REVISION, blankWorld, clockRecorded } from "./blank";
-export { storedWorlds, readWorldDoc, WORLD_DOCS_DEFAULTS, type WorldRevisionRow } from "./worlds";
+export { moveWorldFiles, sha256Of, storedWorlds, readWorldDoc, UserWorlds, WORLD_DOCS_DEFAULTS, type DraftRead, type DraftWrite, type KeptPart, type WorldChange, type WorldFilesMoved, type WorldRevisionRow } from "./worlds";
 export { timeDue } from "./due";
 export {
   worldState,
