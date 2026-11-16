@@ -10,6 +10,7 @@ import type { PlaceFactPart } from "./parts";
 import { baseAt } from "./base";
 import type { PlacesSettings } from "./settings";
 import type { PlaceSources } from "./sources";
+import { waysPart } from "./ways";
 import type { PlaceFactRow } from "./shapes";
 
 /** The line kind of each part whose entries are facts. */
@@ -59,6 +60,11 @@ export function placeLines(input: PlaceLinesInput): ViewLine[] {
     else lines.push({ kind: "place_base", depth, fields: { text: base.text, ...(base.world ? { world: true } : {}), ...(base.older ? { older: true } : {}), ...(base.by !== null ? { by: base.by } : {}) } });
     for (const src of input.sources.sources) lines.push({ kind: "place_source", depth, fields: { entry: src.entry, aspect: src.aspect, ...(src.title !== null ? { title: src.title } : { gone: true }), ...(src.newer ? { newer: true } : {}) } });
     if (input.sources.sources.length === 0) none("sources");
+    // Its ways: each with its minutes and distance by each way of travel, and what is adjoining.
+    const { ways, adjoining } = waysPart(at, place);
+    for (const w of ways) lines.push({ kind: "place_way", depth, fields: { to: w.to.name, id: w.to.id, dir: w.dir, modes: w.modes.map((m) => ({ mode: m.mode, minutes: m.minutes, ...(m.km !== null ? { km: m.km } : {}) })), ...(w.turn !== null ? { laid: true } : {}) } });
+    for (const a of adjoining) lines.push({ kind: "place_adjoining", depth, fields: { name: a.name, id: a.id, how: a.how } });
+    if (ways.length === 0 && adjoining.length === 0) none("ways");
   }
 
   if (wanted("since")) {
