@@ -249,6 +249,8 @@ export function compose(options: ComposeOptions = {}): Composition {
         const own = new OwnFiles({ files: app().paths.files, chats: made().chats, writes: app().writes, now: app().now });
         return own.writeAsUser(user, own.locationOf(user, null), `${MOUNTS.global}${path}`, "global", text);
       },
+      // His answer to a paused chat lands the held turns' changes through the turn lane's store.
+      store: () => made().store,
     }),
     goingBackArea({
       identifier: EXTENSION_IDENTIFIER,
