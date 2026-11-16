@@ -1,10 +1,10 @@
 ---
 name: scene-end
-description: How to close a scene. Its summary, the arcs of those in it, which threads stay hot, and what is scheduled to come. Load it when a scene has ended.
+description: How to close a scene. Its summary, written in the turn that closes it, and the rest of the pass, which runs as a job (the arcs of those in it, which threads stay hot, and what is scheduled to come). Load it when a scene has ended.
 ---
 # Closing a scene
 
-A closed scene is what the story remembers once its messages have left the prompt. Whoever reads its summary a hundred turns from now will have nothing else, and that reader is most likely you. Write for them.
+A closed scene is what the story remembers once its messages have left the prompt. Whoever reads its summary a hundred turns from now will have nothing else, and that reader is most likely you. Write for them. The summary is the first part below; the others are the rest of the pass.
 
 ## 1. The summary
 
@@ -35,4 +35,4 @@ If the scene set something in motion off stage (a message sent, a debt falling d
 
 ## What you end with
 
-A scene with its summary, and arcs, threads and futures brought up to date. Say in one line that the scene is closed, and what the next one opens on.
+A scene with its summary and, once the rest has run, its arcs, threads and futures brought up to date. Say in one line that the scene is closed, and what the next one opens on.

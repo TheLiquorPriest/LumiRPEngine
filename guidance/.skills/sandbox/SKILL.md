@@ -7,21 +7,21 @@ description: Run a moment with the characters and the GM. Stage it, let each act
 1. **Write the scene sheet** to `scratch/scene.md`:
    - where and when;
    - who is on stage, where they stand, what state they are in;
-   - what the player's character does, in order. This is binding. Do not change it;
+   - what the player's character does, in order, which is binding;
    - what is open;
    - the lore in play, cited by entry;
    - the moments, if the player's message covers a stretch.
 
 2. **For each moment:**
-   - Give each acting principal the moment as that character perceives it, and call their agents together with `delegate`. Each already has who it is, what comes to mind, where it is, what it wears and carries, and the entries of the world's own lore that the lore index binds to that character and it may know; it is given nothing from a lore book. Add what it could perceive of the moment and nothing it could not. (What to record of that is in the perceptions rule.)
-   - Give the GM its questions in the same breath if they do not depend on the characters' answers. Otherwise ask after.
+   - Give each acting principal's agent the moment as that character perceives it, and call their agents together with `delegate`. Its definition already gives it what comes to mind, its relationships with those present, its base and voice, what it wears and carries and what state it is in, and the lore it would know. Add what it could perceive of the moment and nothing it could not. It answers in character with what it does, says and feels, and it may ask you. (What to record of that is in the perceptions rule.)
+   - Give the GM its specific questions in the same breath if they do not depend on the characters' answers. Otherwise ask after. Its definition already gives it the chat since the scene opened, the story brief, the activated lore in full, the scene's engine state with its map, what the moment's time brings due, the ruleset and the scene sheet. Attach more of the prompt (`prompt:<name>`) if the ruling turns on it.
    - Read what came back. If someone asked you something, answer it with `agent_message` before going on. If what an agent wrote should not stand, find `agent_drop` with `tool_search` and call it with `tool_use`: everything that agent wrote this turn is taken back.
    - Resolve the moment into beats: what happened, in order, as true.
    - Go on to the next moment, or close.
 
 3. **Voice supporting characters and extras yourself,** from their records.
 
-4. **Never call an agent for the player's character.**
+4. **Never call an agent for the player's character.** Where the player has given that character a mind of its own, an agent of its own writes its mind, memories and relationships from its perceptions; it never acts or speaks for it.
 
 5. **You end with** the beats in order and the staged changes in both lanes. Then write the reply.
 

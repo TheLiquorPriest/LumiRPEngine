@@ -301,3 +301,16 @@ test("the Author's search finds no character's own tool, nor the mapper's or the
   kept.push({ name: "prompt_map_write", family: "prompt" });
   for (const tool of kept) expect({ tool: tool.name, held: author?.tools.includes(tool.name), kept: author?.outOfReach.includes(tool.family) }).toEqual({ tool: tool.name, held: false, kept: true });
 });
+
+test("every rule that reminds of a D.2 behaviour, examples included, names that behaviour's home in `needs:`; one that reminds of none names none", () => {
+  const needs: Record<string, string | null> = {
+    ".rules/examples/memory-nudge.md": "perceptions",
+    ".rules/examples/no-player-voice.md": "ALL-AGENTS",
+    ".rules/examples/scene-too-long.md": "TURN",
+    ".rules/examples/intent-missing.md": "TURN",
+    ".rules/examples/turn-unrecorded.md": "TURN",
+    ".rules/examples/banned-phrases.md": null,
+    ".rules/examples/limits-left.md": null,
+  };
+  for (const [file, home] of Object.entries(needs)) expect({ file, needs: split(SHIPPED.get(file) ?? "").header?.needs ?? null }).toEqual({ file, needs: home });
+});

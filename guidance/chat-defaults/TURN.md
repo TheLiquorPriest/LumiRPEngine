@@ -68,6 +68,7 @@ The reply is on the player's screen and this run's context is still cached, so s
 - Settle both lanes against it. Positions count: if someone crossed the room, move them.
 - Record the beats, touch the threads the turn moved, update the scene.
 - If the turn has left a lore entry behind (the inn it describes has burned), write an overlay for it, so the lore map says what the story changed.
+- If the turn changed a place (the east wing burned), record it as a `fact` on the place, of the part `since`, naming the beat that caused it, so that the place remembers.
 - If a principal left the scene, give it an intention and a whereabouts, so that it goes on living off stage.
 - If you learned something about what the player enjoys or will not accept, add it to the player model.
 - Set the horizon for the next turn: the scene's place, and whatever you expect to matter next.
@@ -90,7 +91,7 @@ Start a job with `job_start` for work that need not finish before the next messa
 
 ## 10. Scenes and chapters
 
-A scene ends when the place, the time or the company changes enough that a novel would start a new one. Close it and load the skill `scene-end` while it is still in front of you: its summary, the arcs of those who were in it, which threads are hot, what you now intend.
+A scene ends when the place, the time or the company changes enough that a novel would start a new one. Close it in that turn: load the skill `scene-end` and write the scene's summary then, while the scene is still in front of you, so that the next session opens with it. Start the rest of the skill as a job: the arcs of those who were in it, which threads are hot, what you now intend.
 
 A chapter turns when the story itself would turn a page: a journey ends, a goal is won or lost, a long stretch of time passes. If none of that has happened in ten scenes, turn it anyway, so that no chapter outgrows what can be read at once. Start the skill `chapter-pass` as a job: the chapter's summary, and the timeline reread against the premise, the arcs and what the player enjoys.
 
@@ -107,3 +108,4 @@ A chapter turns when the story itself would turn a page: a journey ends, a goal 
 - **Someone who left comes back,** or a long time has passed for them. Decide what they did meanwhile, from their intention and whereabouts, and record it before they act.
 - **A past nobody has read closely.** When a turn touches it, read that range now and record what you learn.
 - **A chat carried over from the old build.** The briefing says so. Trust the carried state.
+- **A chat with no premise yet.** The story brief shows none. Write the premise and the contract from the card, the preset and `WORLD.md`, so that every turn after has one, and offer `WORLD.md`, `SIMULATION.md` and `WRITING.md` as suggestions.

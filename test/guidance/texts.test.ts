@@ -12,8 +12,8 @@ import { HOMES, type Row } from "./homes";
 
 const SHIPPED = shippedTexts();
 
-/** E.7's figure was 21,003 characters at the start of the build; the Author's stack as the loader builds it stood at 22,927 after G0's fix and at 23,771 after wave 2's texts. This is the size it may not pass. */
-const STACK_CEILING = 23_800;
+/** E.7's figure was 21,003 characters at the start of the build; the Author's stack as the loader builds it stood at 22,927 after G0's fix, at 23,771 after wave 2's texts and at 24,455 after wave 3's. This is the size it may not pass. */
+const STACK_CEILING = 24_500;
 
 /** A text as the checks compare it: lower case, every run of white space one space. */
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -32,6 +32,7 @@ const NAMES: Record<string, string[]> = {
   ".agents/gm.md": ["gm.md", "gm's definition"],
   ".agents/indexer.md": ["indexer.md", "indexer's instructions", "indexer's file"],
   "PRESET.md": ["preset.md"],
+  ".rules/perceptions.md": ["perceptions rule", "perceptions.md"],
 };
 
 /**
@@ -78,12 +79,13 @@ const WORDED: { row: string; markers: string[] }[] = [
   { row: "How the GM rules, stages changes", markers: ["stage those changes with `world_apply`", "with the chat's tidy-up switch on"] },
   { row: "What an index line holds", markers: ["one of character, place, item, faction, rule, event, concept, style"] },
   { row: "How a prompt is mapped, with the kinds", markers: ["one slice for each thing a reader would call one thing", "a fixed slice by its text"] },
+  { row: "Perceptions: for every principal", markers: ["name the secret by its id", "whichever comes first", "write each before that character acts"] },
+  { row: "On a chat with no premise yet", markers: ["a chat with no premise yet"] },
+  { row: "A place the turn changed", markers: ["if the turn changed a place"] },
 ];
 
 /** Rows whose home a later texts package words, with the package that does (their behaviour needs code that comes with it). */
 const LATER: { row: string; by: string }[] = [
-  { row: "On a chat with no premise yet", by: "PlanTexts-13" },
-  { row: "A place the turn changed", by: "PlanTexts-17" },
   { row: "A depth the player asked for on the composer", by: "PlanTexts-11" },
   { row: "Redrawing the part of a principal's base", by: "PlanTexts-11" },
   { row: "What the story is, by the chat's own choice", by: "PlanTexts-11" },
@@ -175,7 +177,7 @@ describe("TURN.md reads intent, then a look, then a decision on how deep to go",
   });
 
   test("closing a scene and summarizing a stretch are each asked once", () => {
-    expect(linesOf(turn).filter((line) => line.includes("close it and load the skill `scene-end`"))).toHaveLength(1);
+    expect(linesOf(turn).filter((line) => line.includes("close it in that turn: load the skill `scene-end`"))).toHaveLength(1);
     expect(linesOf(turn).filter((line) => line.includes("a stretch of the past that has beats and no summary"))).toHaveLength(1);
   });
 

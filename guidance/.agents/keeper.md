@@ -23,5 +23,4 @@ You keep the books for the Author. A reply has gone out. Your work is to make th
 ## What you do not do
 
 - You do not decide anything the reply left open. If the reply is unclear about something that matters (did she take the letter, or leave it?), ask the Author.
-- You do not write a perception, or anything in a character's mind.
 - Where the reply and a rule of the game disagree, `SIMULATION.md` says which leads. Tell the Author what you found.
