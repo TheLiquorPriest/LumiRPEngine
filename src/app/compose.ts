@@ -87,6 +87,7 @@ export function compose(options: ComposeOptions = {}): Composition {
   const turn = turnArea({
     lumiverse: door.lumiverse,
     migrated: (app, store) => ({ part: MIGRATED_PART, notice: MIGRATED_NOTICE, fields: (user, chat) => migratedChat({ db: app.db, store, user, chat }) }),
+    proposals: () => proposals(),
     ...(options.clock !== undefined ? { clock: options.clock } : {}),
     ...(options.harness !== undefined ? { harness: options.harness } : {}),
   });
