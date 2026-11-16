@@ -29,6 +29,7 @@ import { followChanges, type ChatChange, type ChatChanges } from "./events";
 import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
+import { type LumiverseCalls, lumiverseCalls } from "./lumiverse-calls";
 import { CHAT_MESSAGES_PATH, readMessages } from "./messages";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { type EndpointCall, modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
@@ -38,6 +39,7 @@ import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
 import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from "./settings";
 import { chatMessagesReply, EXTENSION_KIND, extensionStatusReply } from "./shapes";
+import { createStores, type Stores } from "./stores";
 import { QUESTION_PATH } from "./wire";
 
 /** What other lanes answer for the adapter. */
@@ -66,6 +68,8 @@ export interface AdapterLanes {
   passConnection(): string | null;
   /** The turn lane, which reads the shipped files: a passed request's failure in `guidance/.prompts/reply-errors.md`'s words (key `pass-<code>`), its key alone where the file has no line for it. */
   passWords(key: string, fields: { detail?: string }): Promise<string>;
+  /** The turn lane, which reads the shipped files: one line on what a store of Lumiverse's holds (`databank`, `memory`), for `archive_search`'s list of them; the store's name where the file has none. */
+  storeLine(store: string): Promise<string>;
 }
 
 export interface AdapterDeps {
@@ -89,6 +93,10 @@ export interface Lumiverse {
   relay: Relay;
   /** The database reader, where RPE reads Lumiverse's file. */
   database: DbReader | null;
+  /** Lumiverse's databanks and memory for RPH's `archive_search`, and one memory entity by its id. */
+  stores: Stores;
+  /** Macros resolved and tokens counted as Lumiverse does it. */
+  calls: LumiverseCalls;
   /**
    * Lumiverse's Stop (`routes/generate.routes.ts:45-65`) as RPE's user, for the generation named alone:
    * true when Lumiverse stopped it, false when it was not going (it ended, or it is another user's,
@@ -246,7 +254,14 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       const answer = await session.json("POST", "/api/v1/generate/stop", { generation_id: generation });
       return isRecord(answer) && answer.stopped === true;
     };
-    return { session, reads, chat, events, relaySocket, relay, database, stopGeneration };
+    const stores = createStores({
+      session,
+      reads,
+      user,
+      settings: () => ({ hits: settings().stores.hits, snippetChars: settings().search.snippetChars }),
+      describe: (store) => lanes.storeLine(store),
+    });
+    return { session, reads, chat, events, relaySocket, relay, database, stores, calls: lumiverseCalls(session), stopGeneration };
   }
 
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */

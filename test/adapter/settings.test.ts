@@ -9,6 +9,7 @@ import { RETRY_MS, TRIES } from "../../src/adapter/lumiverse/db";
 import { DRY_RUN_MS } from "../../src/adapter/lumiverse/hint";
 import { BREAKDOWN_TRIES, REREADS } from "../../src/adapter/lumiverse/http-reads";
 import { HTTP_KEEP_MS, KEPT } from "../../src/adapter/lumiverse/memo";
+import { STORE_HITS } from "../../src/adapter/lumiverse/stores";
 import { WHOLE_HOLD_MS } from "../../src/adapter/lumiverse/provider";
 import { RELAY_DEFAULTS } from "../../src/adapter/lumiverse/relay";
 import { KEEP_EVERY_MS } from "../../src/adapter/lumiverse/session";
@@ -51,6 +52,7 @@ describe("the door's settings", () => {
       questionBytes: QUESTION_BODY_BYTES,
       extension: { questionMs: QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS, requestMs: PAGE_ROAD_DEFAULTS.requestMs, renewMs: PAGE_ROAD_DEFAULTS.renewMs },
       search: CHAT_SEARCH_DEFAULTS,
+      stores: { hits: STORE_HITS },
       untaggedWhileAwaited: "pass",
     });
     // Each is declared under `lumiverse:`, read from the levels every chat shares, with its name and its line for the Settings page.

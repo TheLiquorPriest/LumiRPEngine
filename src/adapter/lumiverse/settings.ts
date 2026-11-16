@@ -30,6 +30,7 @@
 //       requestWait: 35                  seconds a page's request through the extension waits for its answer
 //       followRenewal: 20                seconds between a page's renewals of a chat's follow
 //     search: { hits: 20, snippet: 80 }  a chat search's hits when the query names none; a hit's snippet in characters
+//     stores: { hits: 20 }               a search of Lumiverse's databanks and memory: its hits when the query names none
 //     untagged: { whileAwaited: pass }   pass, or fail: a request with no tag while a reply RPE heard start awaits its tag
 
 import { type ConfigRead, readConfig } from "../../app/config-read";
@@ -43,6 +44,7 @@ import { RELAY_DEFAULTS, type RelaySettings } from "./relay";
 import { KEEP_EVERY_MS } from "./session";
 import { SOCKET_DEFAULTS, type SocketSettings } from "./socket";
 import { COMMENT_MS } from "./stream";
+import { STORE_HITS } from "./stores";
 import { WHOLE_HOLD_MS } from "./provider";
 import { PAGE_ROAD_DEFAULTS } from "../../ext/page";
 
@@ -60,6 +62,7 @@ export interface LumiverseSettings {
   /** The light extension's values (group "Lumiverse ▸ extension"): sent with RPE's registration (`questionMs`, `logChars`) and the page's start facts (`requestMs`, `renewMs`). */
   extension: { questionMs: number; logChars: number; requestMs: number; renewMs: number };
   search: ChatSearchSettings;
+  stores: { hits: number };
   untaggedWhileAwaited: "pass" | "fail";
 }
 
@@ -126,6 +129,7 @@ export const LUMIVERSE_SETTING_DEFS = {
   followRenewal: setting("extension.followRenewal", PAGE_ROAD_DEFAULTS.renewMs / S, { type: "number", least: 1 }, "Page follow renewal", "Seconds between a page's renewals of its follow of a chat; keep it well inside the relay lease."),
   searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }, "Chat search hits", "Hits a chat search gives when the query names no number."),
   searchSnippet: setting("search.snippet", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }, "Chat search snippet", "Characters of a chat search hit's snippet."),
+  storeHits: setting("stores.hits", STORE_HITS, { type: "whole", least: 1 }, "Store search hits", "Hits a search of Lumiverse's databanks and memory gives when the query names no number."),
 } as const satisfies NumberSettings<string>;
 
 /**
@@ -162,6 +166,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     questionBytes: v.questionBody * KIB,
     extension: { questionMs: v.questionWait * S, logChars: v.logChars, requestMs: v.requestWait * S, renewMs: v.followRenewal * S },
     search: { limit: v.searchHits, snippetChars: v.searchSnippet },
+    stores: { hits: v.storeHits },
     untaggedWhileAwaited: read.value(UNTAGGED_WHILE_AWAITED) === "fail" ? "fail" : "pass",
   };
 }
