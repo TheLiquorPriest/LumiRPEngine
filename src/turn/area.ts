@@ -108,6 +108,8 @@ export function turnArea(takes: TurnTakes): TurnArea {
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
         ranges: async (chat) => namedStretches(made().store, owner(), chat),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
+        // `chat_search` by meaning: the chat's messages in the index of vectors (`src/search/meaning.ts`), on his embedding connection.
+        meaning: (chat, text, limit, docs) => made().meaning.nearest(owner(), chat, "chat", text, limit, docs),
         // The prompt RPE passed on for the attempt a regenerate or a swipe replaces: the turn tied to the message as the chat's path shows
         // it (its newest attempt where the path no longer holds it), as its request record keeps it; null where none is kept.
         replaced: async (tag) => {
