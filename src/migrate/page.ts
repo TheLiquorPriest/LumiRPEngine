@@ -6,17 +6,20 @@
 // the things found and each chat's differences are read in pages. It reads RPE's database and the rehearsal held in memory,
 // and writes nothing.
 
-import { existsSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Database } from "bun:sqlite";
+import type { JsonObject } from "../shared/json";
 import type { ChatCarried } from "./briefing";
 import type { ChatEngine, JournalRead } from "./chats";
 import { goingBack, PREVIOUS_PERMISSIONS, swapSteps } from "./going-back";
 import type { LumiverseMarks } from "./lumiverse-db";
+import { IMPORTED, IMPORTED_AGENTS, IMPORTED_SKILLS, SET_APART } from "./own-files";
 import type { Rehearsals } from "./rehearse-job";
 import type { ChatImportReport, ChatReport, Difference, Item, MigrationReport, RowReport } from "./report";
 import type { RuntimeFolders } from "./runtime-folders";
-import { chatRecord, lastReport } from "./tables";
+import type { OwnerRow } from "./setting-list";
+import { answersOf, chatRecord, lastReport } from "./tables";
 
 /** Which report a page reads: the last real run's, or the rehearsal started from the page. */
 export type ReportOf = "run" | "rehearsal";
@@ -34,18 +37,42 @@ export interface ReportSummary {
 /** The page's rehearsal as it stands: none since RPE started, under way, read (in brief), or failed. */
 export type RehearsalShown = { state: "none" } | { state: "running"; since: number } | { state: "ready"; summary: ReportSummary } | { state: "failed"; why: string };
 
-/** One thing waiting on the user, by what it is. */
+/**
+ * A chat that was on today and is on none of RPE's connections (N-14, R-109): the head of the page, a group of its own. The one
+ * step that puts it on RPE is his, in Lumiverse: choose one of RPE's connections for it. RPE changes nothing in his chats. Done
+ * once the chat, as Lumiverse holds it now, is pinned to one of RPE's connections.
+ */
+export interface OffRpe {
+  chat: string;
+  /** The connection it is pinned to in Lumiverse now (as the report read it where Lumiverse can't be read now); null: none, so it follows the one active for him. */
+  pinned: string | null;
+  done: boolean;
+}
+
+/** One thing waiting on the user, by what it is, each with the press that does it; `done` where it is done and its line is struck. */
 export type Waiting =
-  /** Their GUIDANCE.md, attached under `imported/`, switched off: switch it on as an AGENTS.md at the same level, or copy from it. */
-  | { kind: "guidance"; path: string }
-  /** A setting that names a connection living in Lumiverse: pick one of RPE's for it; until then that work uses RPE's default connection. */
-  | { kind: "connection"; setting: string; connection: string }
-  /** A chat's changes waiting on the user, as today's build left them: an edit waiting on keep or discard, a staged action to apply or drop, chips and review cards, a rollback never applied. */
-  | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean }
-  /** Their own agents, skills and texts, attached under `imported/` and switched off: one press switches one on. */
-  | { kind: "own"; agents: number; skills: number; texts: number }
-  /** A chat whose characters' mind files and notes are attached and not yet filed: the filing job is the user's to start. */
-  | { kind: "filing"; chat: string; characters: number; notes: boolean };
+  /** His GUIDANCE.md, attached under `imported/`, switched off: one press puts it in force as AGENTS.md at the same level; or he copies from it. */
+  | { kind: "guidance"; path: string; done: boolean }
+  /** One of his own agents, attached and switched off: one press puts it where agents are read; the pins carried for it, and the tools it names that no longer exist. */
+  | { kind: "agent"; id: string; path: string; done: boolean; pins: string[]; deadTools: string[] }
+  /** One of his own skills, attached and switched off: one press puts it where skills are read. */
+  | { kind: "skill"; id: string; path: string; done: boolean }
+  /** A model choice with no matching connection of RPE's: where it was, the Lumiverse connection it named, and his agent whose `model:` takes the pick (null: RPE has no place for that work, listed only). */
+  | { kind: "connection"; where: string; connection: string; agent: string | null; path: string | null; done: boolean }
+  /** A chat today's build held paused on a keep-or-discard question: keep or discard from here (`answerPaused`); his answer, once given. */
+  | { kind: "paused"; chat: string; questions: number; answered: "keep" | "discard" | null; done: boolean }
+  /** A chat whose staged change waits for his next message, carried as a held request: keep leaves it held; drop takes it back. */
+  | { kind: "staged"; chat: string; staged: number; done: boolean }
+  /** A chat's chips, review cards and a rollback never applied, as today's build left them: on its turns (the rollback archived). */
+  | { kind: "chat"; chat: string; chips: number; reviewCards: number; rollback: boolean; done: boolean }
+  /** A chat whose characters' mind files and notes are attached and not yet filed: the filing job and bootstrap are his to start. */
+  | { kind: "filing"; chat: string; characters: number; notes: boolean; done: boolean }
+  /** A file found that no row names: one press gives it a row (`migration.rows`), which the next rehearsal uses. */
+  | { kind: "row"; path: string; done: boolean }
+  /** A file pinned in today's build for a role RPE has no agent for, now pinned for the Author: he pins and unpins on the Files page. */
+  | { kind: "pin"; file: string; role: string; done: boolean }
+  /** One of his texts attached as set apart, with why today's build did not use it, at its file. */
+  | { kind: "text"; id: string; reason: string; missing: string[]; path: string; done: boolean };
 
 export interface MigrationPage {
   run: ReportSummary | null;
@@ -54,7 +81,12 @@ export interface MigrationPage {
   sources: { lumiverse: string | null; runtime: RuntimeFolders | null };
   /** The backup the last real run took before it wrote anything: where, its size and checksum, and whether a file of that size is still there. */
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
+  /** The chats still off RPE, ahead of everything else. */
+  offRpe: OffRpe[];
+  /** What waits on him, GUIDANCE.md first, in the plan's order. */
   waiting: Waiting[];
+  /** The rows he has given (`migration.rows`), which a row press adds to. */
+  given: OwnerRow[];
   /** The swap's steps, before it as after. */
   swap: string[];
   /** Going back to the previous build: its steps, and the permissions it asks for, by name. */
@@ -73,6 +105,12 @@ export interface MigrationPageInput {
   database: string | null;
   /** Today's runtime's own folders, as it finds them on this machine. */
   runtime: RuntimeFolders;
+  /** The file tree's folder (the global level) and the folders agents, skills and prompts are read from there; absent: nothing is looked up in it. */
+  tree?: { files: string; agents: string; skills: string; prompts: string };
+  /** The rows he has given (`migration.rows`). */
+  given?: readonly OwnerRow[];
+  /** RPE's connections in Lumiverse (`lumiverse.connections`). */
+  rpeConnections?: readonly string[];
 }
 
 export function summaryOf(report: MigrationReport): ReportSummary {
@@ -109,6 +147,34 @@ export function textFor(input: Pick<MigrationPageInput, "db" | "user" | "rehears
   return report === null ? null : print(report);
 }
 
+/** The pin a chat has in Lumiverse: its connection's id, or null. */
+function pinOf(metadata: JsonObject): string | null {
+  const pin = metadata.connection_profile_id;
+  return typeof pin === "string" && pin.trim() !== "" ? pin.trim() : null;
+}
+
+/** The ids of the folders (`<id>/`) or files (`<id>.md`) of a folder, in name order; none where it is not there. */
+function idsIn(folder: string, files: boolean): string[] {
+  try {
+    return readdirSync(folder, { withFileTypes: true })
+      .flatMap((e) => (files ? (e.isFile() && e.name.endsWith(".md") ? [e.name.slice(0, -3)] : []) : e.isDirectory() ? [e.name] : []))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/** The `model:` an agent file's header names; null where it names none. */
+function headerModel(file: string): string | null {
+  try {
+    const text = readFileSync(file, "utf8");
+    const head = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
+    return /^model:\s*(.+)$/m.exec(head)?.[1]?.trim().replace(/^["']|["']$/g, "") ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** The Migration page's summary for `user`. */
 export function migrationPage(input: MigrationPageInput): MigrationPage {
   const report = lastReport(input.db, input.user);
@@ -117,30 +183,71 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
   const taken = report?.runtime?.taken ?? null;
   const [, ...steps] = goingBack({ identifier: input.identifier, runtime: taken === null ? null : { name: taken.name, source: taken.source }, downRun: false });
   const sources = report?.sources ?? null;
+  const given = [...(input.given ?? [])];
   const out: MigrationPage = {
     run: report === null ? null : summaryOf(report),
     rehearsal,
     sources: sources === null ? { lumiverse: input.database === null ? null : dirname(input.database), runtime: input.runtime } : { lumiverse: sources.lumiverse, runtime: sources.runtime },
     backup: null,
+    offRpe: [],
     waiting: [],
+    given,
     swap: swapSteps({ identifier: input.identifier }).map((s) => s.trim()),
     goingBack: { steps: steps.map((s) => s.trim()), permissions: [...PREVIOUS_PERMISSIONS] },
     lumiverse: report?.lumiverse ?? null,
   };
-  if (report === null) return out;
+  // What no row names, of the last run and of the page's rehearsal: a row given to its path is used by the next rehearsal.
+  const unnamed = new Set([...(report?.notClassified ?? []), ...(held.state === "ready" ? held.report.notClassified : [])].map((i) => `${i.where}: ${i.path}`));
+  const rows: Waiting[] = [...unnamed].map((path) => ({ kind: "row", path, done: given.some((g) => g.path === path || path.endsWith(`: ${g.path}`) || (g.path.endsWith("/") && (path.includes(`: ${g.path}`) || path.startsWith(g.path)))) }));
+  if (report === null) {
+    out.waiting.push(...rows);
+    return out;
+  }
+  // The chats still off RPE, as Lumiverse holds them now: one pinned to any of RPE's connections is on RPE.
+  const rpe = new Set(input.rpeConnections ?? []);
+  const now = input.rehearsals.chats(input.user, report.sources?.lumiverse ?? out.sources.lumiverse);
+  for (const c of report.offRpe ?? []) {
+    const pinned = now === null ? c.pinned : pinOf(now.get(c.chat) ?? {});
+    out.offRpe.push({ chat: c.chat, pinned, done: pinned !== null && rpe.has(pinned) });
+  }
+  const tree = input.tree;
+  const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));
   const own = report.carried?.ownFiles ?? null;
-  if (own !== null && own.guidance > 0) out.waiting.push({ kind: "guidance", path: "imported/GUIDANCE.md" });
-  for (const c of report.carried?.settings.lumiverseConnections ?? []) out.waiting.push({ kind: "connection", setting: c.setting, connection: c.connection });
+  const pins = report.carried?.pins ?? null;
+  if (own !== null && own.guidance > 0) out.waiting.push({ kind: "guidance", path: `${IMPORTED}/GUIDANCE.md`, done: at("AGENTS.md") });
+  if (tree !== undefined) {
+    for (const id of idsIn(join(tree.files, IMPORTED, IMPORTED_AGENTS), true)) {
+      out.waiting.push({ kind: "agent", id, path: `${IMPORTED}/${IMPORTED_AGENTS}/${id}.md`, done: at(`${tree.agents}/${id}.md`), pins: (pins?.forOwn ?? []).filter((p) => p.agent === id).map((p) => p.file), deadTools: (own?.deadTools ?? []).filter((t) => t.agent === id).map((t) => t.tool) });
+    }
+    for (const id of idsIn(join(tree.files, IMPORTED, IMPORTED_SKILLS), false)) out.waiting.push({ kind: "skill", id, path: `${IMPORTED}/${IMPORTED_SKILLS}/${id}/SKILL.md`, done: at(`${tree.skills}/${id}/SKILL.md`) });
+  }
+  for (const c of report.carried?.modelChoices ?? []) {
+    if (c.carried !== null) continue;
+    const file = c.to === null || tree === undefined ? null : join(tree.files, IMPORTED, c.to.path);
+    const model = file === null ? null : headerModel(file);
+    out.waiting.push({ kind: "connection", where: c.where, connection: c.connection, agent: c.to?.agent ?? null, path: c.to === null ? null : `${IMPORTED}/${c.to.path}`, done: model !== null && model !== "default" });
+  }
+  const answers = answersOf(input.db, input.user);
   for (const c of report.chats) {
     const w = c.waiting;
-    if (w.questions + w.staged + w.chips > 0 || w.rollback) out.waiting.push({ kind: "chat", chat: c.chatId, ...w });
+    if (w.questions > 0) {
+      const answer = answers.filter((a) => a.chat === c.chatId).at(-1) ?? null;
+      out.waiting.push({ kind: "paused", chat: c.chatId, questions: w.questions, answered: answer?.choice ?? null, done: answer !== null });
+    }
   }
-  if (own !== null && own.agents + own.skills + own.texts > 0) out.waiting.push({ kind: "own", agents: own.agents, skills: own.skills, texts: own.texts });
+  for (const c of report.chats) if (c.waiting.staged > 0) out.waiting.push({ kind: "staged", chat: c.chatId, staged: c.waiting.staged, done: false });
+  for (const c of report.chats) {
+    const w = c.waiting;
+    if (w.chips > 0 || w.rollback) out.waiting.push({ kind: "chat", chat: c.chatId, chips: w.chips, reviewCards: w.reviewCards, rollback: w.rollback, done: false });
+  }
   for (const c of report.imports ?? []) {
     if (c.outcome !== "imported" && c.outcome !== "replaced") continue;
     const carried = chatRecord(input.db, input.user, c.chatId)?.carried ?? null;
-    if (carried !== null && (carried.characters.length > 0 || carried.notes !== null)) out.waiting.push({ kind: "filing", chat: c.chatId, characters: carried.characters.length, notes: carried.notes !== null });
+    if (carried !== null && (carried.characters.length > 0 || carried.notes !== null)) out.waiting.push({ kind: "filing", chat: c.chatId, characters: carried.characters.length, notes: carried.notes !== null, done: false });
   }
+  out.waiting.push(...rows);
+  for (const p of pins?.forAuthor ?? []) out.waiting.push({ kind: "pin", file: p.file, role: p.role, done: false });
+  for (const t of own?.textsSetApart ?? []) out.waiting.push({ kind: "text", id: t.id, reason: t.reason, missing: t.missing, path: `${IMPORTED}/${tree?.prompts ?? ""}/${SET_APART}/${t.reason.replaceAll("_", "-")}/${t.id}.md`, done: false });
   const b = report.backup;
   out.backup = b === null ? null : { ...b, present: existsSync(b.path) && statSync(b.path).size === b.bytes };
   return out;

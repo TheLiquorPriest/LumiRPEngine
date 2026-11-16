@@ -9,6 +9,7 @@
 // a temporary file mid-write. None of that is a turn yet. It is counted as under way, the record it
 // would make isn't, and the next run of the migration reads it as it stands then.
 
+import type { PauseAnswer } from "./answers";
 import { agentMetaOf } from "./today/chat-agent-meta";
 import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
 import { ChipStore } from "./today/chips";
@@ -25,7 +26,7 @@ import { LedgerFold } from "../engine/ledger/fold";
 import { createRegistry } from "../engine/registry-impl";
 import { ALL_PACKS, STARTER_TABLES } from "../packs/index";
 import type { ChatId, RevisionId, UserId } from "../shared/ids";
-import type { ChatRun, Journal, MessageLedger } from "../shared/ledger";
+import type { ChatRun, HeldWrite, Journal, MessageLedger } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import type { UserSettings } from "../shared/settings";
 import type { Unreadable } from "./inside";
@@ -94,6 +95,8 @@ export class ChatReader {
   private readonly staged: StagedActions;
   private readonly chips: ChipStore;
   private readonly why = new Map<ChatId, NotOpened>();
+  /** His answers to the keep-or-discard questions today's build left, by chat (`answers.ts`): each written as today's own pause chip writes it, once the chat is opened. */
+  private answers = new Map<string, readonly PauseAnswer[]>();
 
   constructor(private readonly host: HostPort) {
     this.worlds = new WorldStore(host, this.registry, STARTER_TABLES);
@@ -148,6 +151,40 @@ export class ChatReader {
       resolveFix: (doc, state, entry) => resolveFix(this.registry, doc, state, entry, run.runSeed),
     };
   };
+
+  /** His answers to the questions chats were paused on, kept in RPE's database: each lands as today's build lands its pause chip's answer, as the chat is opened. */
+  useAnswers(answers: readonly PauseAnswer[]): void {
+    const by = new Map<string, PauseAnswer[]>();
+    for (const a of answers) by.set(a.chat, [...(by.get(a.chat) ?? []), a]);
+    this.answers = by;
+  }
+
+  /**
+   * Writes one answer to a chat's question as today's pause chip writes it (`dispatch.ts` `pause`): keep lifts the pause, discard
+   * makes the replies after the edited message plain. Only where that question still holds the chat. As today's build, it is held
+   * while a reply's window stays open in the chat, and lands once it closes. What came of it: landed, held, or not paused there.
+   */
+  async answer(chatId: ChatId, userId: UserId, a: PauseAnswer): Promise<"landed" | "held" | "not paused"> {
+    let paused = false;
+    await this.ledger.with(chatId, userId, async (core) => {
+      paused = core.journal.pauses.some((p) => p.messageId === a.message);
+    });
+    if (!paused) return "not paused";
+    const id = `migration-answer-${a.chat}-${a.message}`;
+    const w: HeldWrite = a.choice === "discard" ? { kind: "discard", id, after: a.message } : { kind: "keep", id, messageId: a.message, parentPath: "", convert: [] };
+    const done = await this.ledger.write(chatId, userId, w);
+    return done.applied ? "landed" : done.pending ? "held" : "not paused";
+  }
+
+  /** The messages a chat is paused on now, each an edit today's build asks keep or discard of. */
+  async pausedOn(chatId: ChatId, userId: UserId): Promise<string[]> {
+    await this.open(chatId, userId);
+    let out: string[] = [];
+    await this.ledger.with(chatId, userId, async (core) => {
+      out = core.journal.pauses.map((p) => p.messageId);
+    });
+    return out;
+  }
 
   async read(chatId: ChatId, userId: UserId): Promise<ChatRead> {
     const meta = await this.host.chats.chatMetadata(chatId, userId);
@@ -235,6 +272,8 @@ export class ChatReader {
       await this.ledger.with(chatId, userId, async (core) => {
         held = heldOver(was, core.journal);
       });
+      // His answers given in RPE to the questions this chat was paused on, as today's build lands its pause chip's answer.
+      for (const a of this.answers.get(chatId) ?? []) await this.answer(chatId, userId, a);
     }
     const out = { before: was, held };
     this.opens.set(chatId, out);

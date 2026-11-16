@@ -4,6 +4,7 @@
 // that starts it is a long one, whose answer the server keeps in memory too. The chats' names as Lumiverse holds them are
 // held with it, for the page, and never put in the report.
 
+import type { JsonObject } from "../shared/json";
 import { LumiverseDb } from "./lumiverse-db";
 import type { MigrationReport } from "./report";
 import { reportText } from "./report";
@@ -75,5 +76,20 @@ export class Rehearsals {
     }
     this.#names.set(key, read);
     return read;
+  }
+
+  /** Each of the user's chats' metadata as Lumiverse holds it now, read through the migration's door; null where Lumiverse's database can't be read. */
+  chats(user: string, lumiverse: string | null): ReadonlyMap<string, JsonObject> | null {
+    if (lumiverse === null) return null;
+    try {
+      const db = LumiverseDb.open(lumiverse, user);
+      try {
+        return new Map(db.chats().map((c) => [c.id, c.metadata]));
+      } finally {
+        db.close();
+      }
+    } catch {
+      return null;
+    }
   }
 }

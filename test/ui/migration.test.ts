@@ -35,9 +35,13 @@ describe("the Migration page", () => {
     expect(section(view({ ...MIGRATED, backup: { ...(MIGRATED.backup ?? { path: "", bytes: 0, sha256: "" }), present: false } }).tree, "backup")).toContain("Still there, at that sizeno");
     const waiting = section(tree, "waiting");
     expect(waiting).toContain("Waiting on you (5)");
-    expect(waiting).toContain("Your GUIDANCE.md is at imported/GUIDANCE.md, switched off.");
-    expect(waiting).toContain("Chat chat-harbour: 1 edit waiting on keep or discard, 2 staged actions, 1 review card and a rollback never applied.");
+    expect(waiting).toContain("Your GUIDANCE.md is at imported/GUIDANCE.md, switched off");
+    expect(waiting).toContain("Chat chat-harbour was paused on 1 edit waiting on keep or discard.");
     expect(waiting).not.toContain("undefined");
+    // A done line is struck; the chats still off RPE head the page, with the step that is his.
+    expect(elements(tree).find((e) => e.props["data-waiting"] === "agent" && e.props["data-done"] === "true")).toBeDefined();
+    expect(section(tree, "off-rpe")).toContain("choose one of RPE's connections for it");
+    expect(elements(tree).findIndex((e) => e.props["data-section"] === "off-rpe")).toBeLessThan(elements(tree).findIndex((e) => e.props["data-section"] === "rehearsal"));
     const permissions = elements(tree).find((e) => e.props["data-permissions"] === "true");
     expect(elements(permissions?.props.children).filter((e) => e.type === "code").map((e) => textOf(e.props.children))).toEqual(MIGRATED.goingBack.permissions);
     expect(PAGES.find((n) => n.id === "migration")?.shells).toEqual(["web", "drawer"]);

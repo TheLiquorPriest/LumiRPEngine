@@ -61,14 +61,14 @@ describe("the Migration page's data", () => {
     expect(page().backup?.present).toBe(false);
   });
 
-  test("lists what waits on the user, GUIDANCE.md first: connections to pick, each chat's open changes, their own agents switched off, the filing", () => {
+  test("lists what waits on the user, GUIDANCE.md first: each chat's paused question, staged change, chips and rollback, the filing", () => {
     const waiting = page().waiting;
-    expect(waiting[0]).toEqual({ kind: "guidance", path: "imported/GUIDANCE.md" });
-    expect(waiting.filter((w) => w.kind === "connection").map((w) => (w.kind === "connection" ? w.connection : ""))).toEqual(["conn-helper", "conn-main", "conn-story"]);
-    expect(waiting).toContainEqual({ kind: "chat", chat: CHAT.classic, questions: 1, staged: 1, chips: 1, reviewCards: 1, rollback: false });
-    expect(waiting).toContainEqual({ kind: "chat", chat: CHAT.agents, questions: 0, staged: 0, chips: 0, reviewCards: 0, rollback: true });
-    expect(waiting).toContainEqual({ kind: "own", agents: 1, skills: 1, texts: 2 });
-    expect(waiting).toContainEqual({ kind: "filing", chat: CHAT.harness, characters: 2, notes: true });
+    expect(waiting[0]).toEqual({ kind: "guidance", path: "imported/GUIDANCE.md", done: false });
+    expect(waiting).toContainEqual({ kind: "paused", chat: CHAT.classic, questions: 1, answered: null, done: false });
+    expect(waiting).toContainEqual({ kind: "staged", chat: CHAT.classic, staged: 1, done: false });
+    expect(waiting).toContainEqual({ kind: "chat", chat: CHAT.classic, chips: 1, reviewCards: 1, rollback: false, done: false });
+    expect(waiting).toContainEqual({ kind: "chat", chat: CHAT.agents, chips: 0, reviewCards: 0, rollback: true, done: false });
+    expect(waiting).toContainEqual({ kind: "filing", chat: CHAT.harness, characters: 2, notes: true, done: false });
   });
 
   test("gives the swap's steps, the four steps of going back, the runtime's own install line among them, and the previous build's permissions by name", () => {

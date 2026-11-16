@@ -126,6 +126,30 @@ CREATE TABLE migration_put (
 );
 `,
   },
+  {
+    version: 8,
+    name: "the swap's record and his word on going back",
+    // The swap's record of what it did (`going-back.ts` keepSwap/lastSwap), and his word that he will not go back (noGoingBack/sayNoGoingBack).
+    sql: `
+CREATE TABLE migration_swap (user TEXT NOT NULL, at TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (user, at));
+CREATE TABLE migration_no_going_back (user TEXT PRIMARY KEY, at TEXT NOT NULL);
+`,
+  },
+  {
+    version: 9,
+    name: "his answers to the questions today's build left",
+    // A chat today's build held paused on a keep-or-discard question, answered from RPE: every later run writes it as today's pause chip does.
+    sql: `
+CREATE TABLE migration_answer (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  message TEXT NOT NULL,
+  choice TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (user, chat, message)
+);
+`,
+  },
 ];
 
 /** Whether the database holds the migration's tables yet. */
@@ -243,6 +267,25 @@ export function runUsers(db: Database): string[] {
 export function importedChats(db: Database, user: string): { chat: string; source: string | null }[] {
   if (!hasTables(db)) return [];
   return db.query<{ chat: string; source: string | null }, [string]>("SELECT chat, source FROM migration_chat WHERE user = ? ORDER BY chat").all(user);
+}
+
+/** His answers to the questions today's build left chats paused on, oldest first; none where the database holds no such table (no run here). */
+export function answersOf(db: Database, user: string): { chat: string; message: string; choice: "keep" | "discard"; at: number }[] {
+  if ((db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'migration_answer'").get()?.n ?? 0) === 0) return [];
+  return db
+    .query<{ chat: string; message: string; choice: string; at: number }, [string]>("SELECT chat, message, choice, at FROM migration_answer WHERE user = ? ORDER BY at, chat, message")
+    .all(user)
+    .map((r) => ({ ...r, choice: r.choice === "discard" ? "discard" : "keep" }));
+}
+
+/** Keeps his answer to the question a chat was paused on, over any he gave before to that question. Inside the caller's write. */
+export function keepAnswer(db: Database, user: string, answer: { chat: string; message: string; choice: "keep" | "discard"; at: number }): void {
+  db.run("INSERT OR REPLACE INTO migration_answer (user, chat, message, choice, at) VALUES (?, ?, ?, ?, ?)", [user, answer.chat, answer.message, answer.choice, answer.at]);
+}
+
+/** The turns a run imported for a chat, each with the message and swipe it is tied to, from the records kept beside them. */
+export function importedTurns(db: Database, user: string, chat: string): { turn: string; message: string; swipe: number }[] {
+  return db.query<{ turn: string; message: string; swipe: number }, [string, string]>("SELECT turn, message, swipe FROM imported_record WHERE user = ? AND chat = ?").all(user, chat);
 }
 
 /** Keeps a run's report, with its rows and where each now lands. */

@@ -13,7 +13,7 @@ const SWAP = swapSteps({ identifier: "lumi_rp_engine" }).map((step) => step.trim
 
 const SOURCES: MigrationReply["sources"] = { lumiverse: "/srv/lumiverse/data", runtime: { configDir: "/srv/home/.config/lumiah", dataDir: "/srv/home/.local/share/lumiah" } };
 
-export const NOT_RUN: MigrationReply = { run: null, rehearsal: { state: "none" }, sources: SOURCES, backup: null, waiting: [], swap: SWAP, goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] }, lumiverse: null };
+export const NOT_RUN: MigrationReply = { run: null, rehearsal: { state: "none" }, sources: SOURCES, backup: null, offRpe: [], waiting: [], given: [], swap: SWAP, goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] }, lumiverse: null };
 
 export const MIGRATED: MigrationReply = {
   run: {
@@ -27,13 +27,16 @@ export const MIGRATED: MigrationReply = {
   rehearsal: { state: "none" },
   sources: SOURCES,
   backup: { path: "/srv/rpe/backups/before-migration.tar", bytes: 48_340_992, sha256: "4f1d2c9a8b7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c", present: true },
+  offRpe: [{ chat: "chat-calder", pinned: "conn-own", done: false }],
   waiting: [
-    { kind: "guidance", path: "imported/GUIDANCE.md" },
-    { kind: "connection", setting: "jobs.connections.Harbour Flash.atOnce", connection: "Harbour Flash" },
-    { kind: "chat", chat: "chat-harbour", questions: 1, staged: 2, chips: 0, reviewCards: 1, rollback: true },
-    { kind: "own", agents: 2, skills: 1, texts: 3 },
-    { kind: "filing", chat: "chat-calder", characters: 2, notes: true },
+    { kind: "guidance", path: "imported/GUIDANCE.md", done: false },
+    { kind: "agent", id: "scout", path: "imported/agents/scout.md", done: true, pins: [], deadTools: [] },
+    { kind: "connection", where: "agent scout of his own", connection: "Harbour Flash", agent: "scout", path: "imported/agents/scout.md", done: false },
+    { kind: "paused", chat: "chat-harbour", questions: 1, answered: null, done: false },
+    { kind: "chat", chat: "chat-harbour", chips: 0, reviewCards: 1, rollback: true, done: false },
+    { kind: "filing", chat: "chat-calder", characters: 2, notes: true, done: false },
   ],
+  given: [],
   swap: SWAP,
   goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] },
   lumiverse: null,

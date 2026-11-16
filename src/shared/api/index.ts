@@ -191,6 +191,46 @@ export interface BootstrapStartShown {
   caps: ({ key: string; value: number | null })[];
 }
 
+/** A job Build ran or runs: its id, its kind, its world, where it stands, how far it is, the words it ended with, its result so far or at the end, the input it was given and when it last changed. */
+export interface BuildJob {
+  /** The job's id. */
+  jobId: string;
+  /** What the job does. */
+  kind: "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_text";
+  /** The world it works on. */
+  worldId: string;
+  /** Where it stands; interrupted is a job that was running when RPE stopped. */
+  status: "running" | "done" | "failed" | "cancelled" | "interrupted";
+  /** How far it is, 0 to 1. */
+  progress: number;
+  /** What it says: why it failed, or what it left out. */
+  message?: string;
+  /** What it found: proposals to review, or a Playtest's turns with the lint. */
+  result?: JsonValue;
+  /** The input it was given, as kept. */
+  input: JsonValue;
+  /** Epoch ms of its last change. */
+  at: number;
+}
+
+/** A job of Build changed once it is kept: its id, kind, world, status, how far it is, the words it carries, and its result (what it found so far, or at the end). */
+export interface BuildJobChanged {
+  /** The job's id. */
+  jobId: string;
+  /** What the job does. */
+  kind: string;
+  /** The world it works on. */
+  worldId: string;
+  /** Where it stands. */
+  status: "running" | "done" | "failed" | "cancelled" | "interrupted";
+  /** How far it is, 0 to 1. */
+  progress: number;
+  /** What it says. */
+  message?: string;
+  /** What it found. */
+  result?: JsonValue;
+}
+
 /** When RPE started (epoch milliseconds), and the builds that meet at it. */
 export interface BuildsReply {
   name: "rpe";
@@ -588,6 +628,17 @@ export interface ConnectionInput {
   retries?: number | null;
   /** The user's limits for its models, by model id; null clears them. */
   limits?: { [key: string]: ModelLimitsEntry } | null;
+}
+
+/** One of RPE's connections, by its id, picked for the work one of his own agents does, where today's choice named a connection that lives in Lumiverse. */
+export interface ConnectionPick {
+  agent: string;
+  connection: string;
+}
+
+/** Each of the agent's files whose `model:` now names the connection picked: the attached one, and the one in force where it is switched on. */
+export interface ConnectionPicked {
+  written: string[];
 }
 
 /** A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; why they could not be read, where they could not; and its newest tag check, whether it keeps the reply's tags and the reply form it got. */
@@ -1342,7 +1393,7 @@ export interface LiveBatch {
 }
 
 /** One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 
 /** What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
@@ -1739,8 +1790,12 @@ export interface MigrationReply {
   sources: { lumiverse: string | null; runtime: { configDir: string; dataDir: string } | null };
   /** The backup the last run took before it wrote anything. */
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
+  /** The chats still off RPE: a group of its own at the head of the page. */
+  offRpe: OffRpeShown[];
   /** In the order the plan lists it: GUIDANCE.md first. */
   waiting: WaitingOnUser[];
+  /** The rows he has given (`migration.rows`). */
+  given: ({ path: string; fate: "archived" | "attached"; line: string })[];
   swap: string[];
   goingBack: { steps: string[]; permissions: string[] };
   /** What today's build put in Lumiverse, left as it is until the user says they will not go back. */
@@ -1897,6 +1952,14 @@ export interface NotesReply {
 /** Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, or parts that are neither text nor a picture, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why. */
 export type NotGiven = { what: "pictures" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
 
+/** A chat that was on today and is on none of RPE's connections: the connection it is pinned to in Lumiverse now (null: none, so it follows the one active for him), and whether it is on one of RPE's now. His step, in Lumiverse: choose one of RPE's connections for it. */
+export interface OffRpeShown {
+  chat: string;
+  pinned: string | null;
+  /** Whether it is done: its line is struck. */
+  done: boolean;
+}
+
 /** The proof of a page's nonce, keyed by the hash of its page token. */
 export interface PageProof {
   /** HMAC-SHA-256 of the nonce, keyed by the token's hash, as lowercase hex. */
@@ -1924,6 +1987,20 @@ export interface PartPreviewReply {
   text?: string;
   missing: string[];
   problems: { line?: number; message: string }[];
+}
+
+/** His answer to the question today's build left the chat paused on: keep or discard; `message`, the edited message it names (the first where left out). */
+export interface PausedAnswerAsk {
+  choice: "keep" | "discard";
+  message?: string;
+}
+
+/** What his answer did: the answer kept; whether today's build holds it for a reply still under way in the chat (it lands at the run after that reply's window closes, as today's build lands it); each imported turn that took the held changes today's fold now applies there, with how many; and, per chat through them, what of the later turns no longer applies and the stretch its next briefing names. */
+export interface PausedAnswered {
+  answer: { chat: string; message: string; choice: "keep" | "discard"; at: number };
+  held: boolean;
+  turns: { turn: TurnId; changes: number }[];
+  landed: JsonValue;
 }
 
 /** A perception the player writes, corrects or strikes for a character: with `id` it corrects (or, with `drop`, strikes) that one; without, it writes a new one of the turn named (`turn`), else of the chat's newest. `knows` as an empty list says the character now knows nothing from it. His own change, placed after the newest reply. */
@@ -3147,6 +3224,9 @@ export interface Switched {
   listed: ({ name: string; state: "waiting" | "on" | "off" })[];
 }
 
+/** What the press did: switched the file on where its kind is read (`to`, the path written), or left it off because a file of that name is in force there (`inForce`: its level and text, beside the attached file's text), for him to choose. */
+export type SwitchedOnShown = { switched: true; from: string; to: string } | { switched: false; from: string; to: string; inForce: { level: "global" | "shipped"; text: string }; attached: string };
+
 /** A thing that runs a command or calls out, and where it stands. */
 export interface SwitchEntry {
   /** The user whose own it is: what is on for one user is not on for another. */
@@ -3169,6 +3249,11 @@ export interface SwitchEntry {
 export interface SwitchesShown {
   /** Each of the user's things and where it stands. */
   switches: SwitchEntry[];
+}
+
+/** One of his attached files to switch on: GUIDANCE.md, an agent or a skill under `imported/`, by its path below the user's level. */
+export interface SwitchOnAsk {
+  path: string;
 }
 
 /** One row of a typed system's view at a level: its label, its value, a note, how exact and how sure it is where a change recorded it, and whether it is out of the player's sight. */
@@ -3531,6 +3616,8 @@ export interface TurnReply {
   card: string;
   /** The open quests the turn touched: opened, called a stage of, or wrote anything of. */
   quests: { id: string; name: string; kind: string }[];
+  /** The threads the turn opened or wrote anything of that stay open, each with its words, its state and its stakes as the story record holds them at the turn. */
+  threads: ({ id: string; text: string | null; state: string | null; stakes: string | null })[];
 }
 
 /** A turn as a chat's list shows it. */
@@ -3641,8 +3728,8 @@ export interface ValueHistoryReply {
   next: string | null;
 }
 
-/** One thing the last run left waiting on the user, by what it is. */
-export type WaitingOnUser = { kind: "guidance"; path: string } | { kind: "connection"; setting: string; connection: string } | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean } | { kind: "own"; agents: number; skills: number; texts: number } | { kind: "filing"; chat: string; characters: number; notes: boolean };
+/** One thing waiting on the user, by what it is, each with its press and whether it is done: his GUIDANCE.md, his own agents (with the pins carried for each and the tools it names that no longer exist) and skills, a model choice with no match, a paused chat's question, a staged change, a chat's chips and rollback, the filing, a file no row names, a pin carried for the Author, a text set apart. */
+export type WaitingOnUser = { kind: "guidance"; path: string; done: boolean } | { kind: "agent"; id: string; path: string; done: boolean; pins: string[]; deadTools: string[] } | { kind: "skill"; id: string; path: string; done: boolean } | { kind: "connection"; where: string; connection: string; agent: string | null; path: string | null; done: boolean } | { kind: "paused"; chat: string; questions: number; answered: "keep" | "discard" | null; done: boolean } | { kind: "staged"; chat: string; staged: number; done: boolean } | { kind: "chat"; chat: string; chips: number; reviewCards: number; rollback: boolean; done: boolean } | { kind: "filing"; chat: string; characters: number; notes: boolean; done: boolean } | { kind: "row"; path: string; done: boolean } | { kind: "pin"; file: string; role: string; done: boolean } | { kind: "text"; id: string; reason: string; missing: string[]; path: string; done: boolean };
 
 /** The web search provider he sets: its address (null takes it away and web_search is off), and a key for it (left out: the kept key stays only if the address is the same; null: no key). */
 export interface WebProviderSet {
@@ -3875,6 +3962,46 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: FrontendToBackend;
     reply: BuildTunnelReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The user's jobs for a world, oldest first, each with its status, progress and result. */
+  "GET /api/v1/build/jobs": {
+    params: Record<string, never>;
+    query: { world: string };
+    body: undefined;
+    reply: { jobs: BuildJob[] };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.running` allows. */
+  "POST /api/v1/build/jobs": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { world: string; kind: "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_text"; input: JsonValue };
+    reply: { job: string };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Removes the user's own job that has ended, with its result. */
+  "DELETE /api/v1/build/jobs/:job": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: void;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Cancels the user's own running job. */
+  "POST /api/v1/build/jobs/:job/cancel": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { cancelled: boolean };
     paged: false;
     long: false;
     joined: false;
@@ -5509,6 +5636,26 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** Answers the keep-or-discard question today's build left the chat paused on (R-54): kept in RPE's database, written at every later run as today's pause chip writes it, and at once the held turns' changes land on their own turns, the later turns applied again on top, what no longer applies reported and the stretch named in the chat's next briefing. Today's data is never written. */
+  "POST /api/v1/migration/chats/:chat/answer": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: PausedAnswerAsk;
+    reply: PausedAnswered;
+    paged: false;
+    long: true;
+    joined: false;
+  };
+  /** Picks one of RPE's connections for the work one of his own agents does, where today's choice named a connection that lives in Lumiverse: written as the `model:` of the agent's attached file, and of the one in force where it is switched on, so that work uses it from then on. */
+  "POST /api/v1/migration/connection": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: ConnectionPick;
+    reply: ConnectionPicked;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Removes one engine book of today's build and takes it out of every chat it is attached to, through Lumiverse's own routes as him, changing nothing else of any chat; only after he has said he will not go back. What it removed, and what it could not. */
   "POST /api/v1/migration/engine-books/:book/removal": {
     params: { book: string };
@@ -5547,6 +5694,16 @@ export interface ApiRoutes {
     reply: RehearsalReply;
     paged: false;
     long: true;
+    joined: false;
+  };
+  /** One press switches one of his attached files on (R-81): GUIDANCE.md as AGENTS.md at the user's level, an agent where agents are read, a skill where skills are read; the attached file and its original stay under imported/ word for word. A file of that name already in force there is never written over: it is answered beside the attached one. */
+  "POST /api/v1/migration/switch-on": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: SwitchOnAsk;
+    reply: SwitchedOnShown;
+    paged: false;
+    long: false;
     joined: false;
   };
   /** Every rule of a chat's stack, in force or not and why; with no chat, those of the shipped and global levels, as a new chat takes them. */
@@ -6241,6 +6398,8 @@ export interface LiveKinds {
   job: { job: JobView };
   /** A world of his changed: the page reads what it shows of that world again. */
   world: WorldChanged;
+  /** A job of his changed: the page shows its progress or its result. */
+  build_job: BuildJobChanged;
   /** The extension's status changed: as GET /api/v1/status/extension answers it. */
   extension: ExtensionStatusReply;
 }

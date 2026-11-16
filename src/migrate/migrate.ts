@@ -37,7 +37,8 @@ import { BACKUP_ONLY, chatEndOf, insideEnds, type MigrationReport, recountRows, 
 import { MIGRATE_SETTINGS, type OwnerRow, ownerRowsOf } from "./setting-list";
 import { NO_PLACE_YET } from "./rows";
 import { followWorlds } from "./worlds";
-import { importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
+import { answersOf, importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
+import type { PauseAnswer } from "./answers";
 import { openToday, type Sources } from "./today";
 
 export interface MigrateOptions {
@@ -70,24 +71,24 @@ export interface MigrateResult {
 
 /**
  * What RPE's database at `file` says of earlier runs, read without changing it: the report of the
- * user's last real run, and every user an earlier run carried. Read under SQLite's locks, or as an
- * unchanging file where no log is there (a read-only open of a database in write-ahead mode would
- * otherwise make its index file beside it).
+ * user's last real run, every user an earlier run carried, and his answers to the questions today's
+ * build left chats paused on. Read under SQLite's locks, or as an unchanging file where no log is
+ * there (a read-only open of a database in write-ahead mode would otherwise make its index file beside it).
  */
-export function earlierRuns(file: string, user: string): { previous: MigrationReport | null; users: string[] } {
-  if (!existsSync(file)) return { previous: null, users: [] };
+export function earlierRuns(file: string, user: string): { previous: MigrationReport | null; users: string[]; answers: PauseAnswer[] } {
+  if (!existsSync(file)) return { previous: null, users: [], answers: [] };
   const quiet = !existsSync(`${file}-wal`) && !existsSync(`${file}-shm`);
   const locked = quiet ? null : new Database(file, { readonly: true });
   const opened = locked === null ? openQuiet(file) : { db: locked, close: () => locked.close() };
   try {
-    return { previous: lastReport(opened.db, user), users: runUsers(opened.db) };
+    return { previous: lastReport(opened.db, user), users: runUsers(opened.db), answers: answersOf(opened.db, user) };
   } finally {
     opened.close();
   }
 }
 
 /** The rows he gave (`migration.rows` in his `RPE-global.yml`), read without changing anything; none where there is no file or none given. */
-async function rowsGiven(paths: DataPaths): Promise<OwnerRow[]> {
+export async function rowsGiven(paths: Pick<DataPaths, "globalConfig">): Promise<OwnerRow[]> {
   const read = readConfig(await diskTexts([{ level: "global", file: paths.globalConfig, disk: paths.globalConfig }]), null, MIGRATE_SETTINGS);
   return MIGRATE_SETTINGS.flatMap((def) => ownerRowsOf(read.read(def).value));
 }
@@ -118,6 +119,7 @@ export async function rehearsal(sources: Sources, options: { data: string; db: D
   const previous = lastReport(options.db, sources.userId);
   const today = await openToday(sources);
   try {
+    today.reader.useAnswers(answersOf(options.db, sources.userId));
     const report = await reportOf(today, { mode: "rehearsal", target: options.data, ...(options.now ? { now: options.now } : {}), rpe: { owner: options.owner, earlier: runUsers(options.db) }, tree: true, jobs: true, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
     return { report, names: new Map(today.chats.map((c) => [c.id, c.name])) };
   } finally {
@@ -130,11 +132,13 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
   const paths = dataPaths(options.data);
   // Whose RPE this is, read before anything is written: the user its config names, and the users earlier runs carried.
   const config = await loadConfig(paths, options.env ?? {});
-  const { previous, users } = earlierRuns(paths.database, sources.userId);
+  const { previous, users, answers } = earlierRuns(paths.database, sources.userId);
   // Where a failed run stopped, once the gate has let it write: null before that, where a failure leaves nothing written.
   let step: string | null = null;
   const today = await openToday(sources);
   try {
+    // His answers given in RPE to the questions chats were paused on, written as today's build writes them over the stand-in.
+    today.reader.useAnswers(answers);
     const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, jobs: options.runs?.keepJob !== undefined, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
     if (options.rehearse || report.refusals.length > 0) return { report, ran: false };
     // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.

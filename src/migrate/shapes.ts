@@ -61,16 +61,30 @@ const rehearsalShown = shape.named(
   ),
 );
 
+const done = field(shape.yesNo(), "Whether it is done: its line is struck.");
+
 const waiting = shape.named(
   "WaitingOnUser",
-  "One thing the last run left waiting on the user, by what it is.",
+  "One thing waiting on the user, by what it is, each with its press and whether it is done: his GUIDANCE.md, his own agents (with the pins carried for each and the tools it names that no longer exist) and skills, a model choice with no match, a paused chat's question, a staged change, a chat's chips and rollback, the filing, a file no row names, a pin carried for the Author, a text set apart.",
   shape.union(
-    shape.object({ kind: shape.literal("guidance"), path: T }),
-    shape.object({ kind: shape.literal("connection"), setting: T, connection: T }),
-    shape.object({ kind: shape.literal("chat"), chat: T, questions: N, staged: N, chips: N, reviewCards: N, rollback: shape.yesNo() }),
-    shape.object({ kind: shape.literal("own"), agents: N, skills: N, texts: N }),
-    shape.object({ kind: shape.literal("filing"), chat: T, characters: N, notes: shape.yesNo() }),
+    shape.object({ kind: shape.literal("guidance"), path: T, done }),
+    shape.object({ kind: shape.literal("agent"), id: T, path: T, done, pins: shape.list(T), deadTools: shape.list(T) }),
+    shape.object({ kind: shape.literal("skill"), id: T, path: T, done }),
+    shape.object({ kind: shape.literal("connection"), where: T, connection: T, agent: nullable(T), path: nullable(T), done }),
+    shape.object({ kind: shape.literal("paused"), chat: T, questions: N, answered: nullable(shape.oneOf("keep", "discard")), done }),
+    shape.object({ kind: shape.literal("staged"), chat: T, staged: N, done }),
+    shape.object({ kind: shape.literal("chat"), chat: T, chips: N, reviewCards: N, rollback: shape.yesNo(), done }),
+    shape.object({ kind: shape.literal("filing"), chat: T, characters: N, notes: shape.yesNo(), done }),
+    shape.object({ kind: shape.literal("row"), path: T, done }),
+    shape.object({ kind: shape.literal("pin"), file: T, role: T, done }),
+    shape.object({ kind: shape.literal("text"), id: T, reason: T, missing: shape.list(T), path: T, done }),
   ),
+);
+
+const offRpe = shape.named(
+  "OffRpeShown",
+  "A chat that was on today and is on none of RPE's connections: the connection it is pinned to in Lumiverse now (null: none, so it follows the one active for him), and whether it is on one of RPE's now. His step, in Lumiverse: choose one of RPE's connections for it.",
+  shape.object({ chat: T, pinned: nullable(T), done }),
 );
 
 const folders = shape.object({ configDir: T, dataDir: T });
@@ -83,7 +97,9 @@ export const migrationReply = shape.named(
     rehearsal: rehearsalShown,
     sources: field(shape.object({ lumiverse: nullable(T), runtime: nullable(folders) }), "The folders a rehearsal from the page reads: the last run's, else Lumiverse's database's folder as RPE's config names it and today's runtime's own."),
     backup: field(nullable(shape.object({ path: T, bytes: N, sha256: T, present: field(shape.yesNo(), "Whether a file of that size is still there.") })), "The backup the last run took before it wrote anything."),
+    offRpe: field(shape.list(offRpe), "The chats still off RPE: a group of its own at the head of the page."),
     waiting: field(shape.list(waiting), "In the order the plan lists it: GUIDANCE.md first."),
+    given: field(shape.list(shape.object({ path: T, fate: shape.oneOf("archived", "attached"), line: T })), "The rows he has given (`migration.rows`)."),
     swap: shape.list(T),
     goingBack: shape.object({ steps: shape.list(T), permissions: shape.list(T) }),
     lumiverse: field(nullable(json), "What today's build put in Lumiverse, left as it is until the user says they will not go back."),
@@ -162,6 +178,29 @@ export const rehearsalBody = shape.named(
 );
 
 export const rehearsalReply = shape.named("RehearsalReply", "The rehearsal started from the page, once read: its report in brief, which the page then reads a page at a time.", shape.object({ summary }));
+
+export const switchOnBody = shape.named("SwitchOnAsk", "One of his attached files to switch on: GUIDANCE.md, an agent or a skill under `imported/`, by its path below the user's level.", shape.object({ path: T }));
+
+export const switchOnReply = shape.named(
+  "SwitchedOnShown",
+  "What the press did: switched the file on where its kind is read (`to`, the path written), or left it off because a file of that name is in force there (`inForce`: its level and text, beside the attached file's text), for him to choose.",
+  shape.union(
+    shape.object({ switched: shape.literal(true), from: T, to: T }),
+    shape.object({ switched: shape.literal(false), from: T, to: T, inForce: shape.object({ level: shape.oneOf("global", "shipped"), text: T }), attached: T }),
+  ),
+);
+
+export const pickBody = shape.named("ConnectionPick", "One of RPE's connections, by its id, picked for the work one of his own agents does, where today's choice named a connection that lives in Lumiverse.", shape.object({ agent: T, connection: T }));
+
+export const pickReply = shape.named("ConnectionPicked", "Each of the agent's files whose `model:` now names the connection picked: the attached one, and the one in force where it is switched on.", shape.object({ written: shape.list(T) }));
+
+export const answerBody = shape.named("PausedAnswerAsk", "His answer to the question today's build left the chat paused on: keep or discard; `message`, the edited message it names (the first where left out).", shape.object({ choice: shape.oneOf("keep", "discard"), message: shape.optional(T) }));
+
+export const answerReply = shape.named(
+  "PausedAnswered",
+  "What his answer did: the answer kept; whether today's build holds it for a reply still under way in the chat (it lands at the run after that reply's window closes, as today's build lands it); each imported turn that took the held changes today's fold now applies there, with how many; and, per chat through them, what of the later turns no longer applies and the stretch its next briefing names.",
+  shape.object({ answer: shape.object({ chat: T, message: T, choice: shape.oneOf("keep", "discard"), at: N }), held: shape.yesNo(), turns: shape.list(shape.object({ turn: shape.turnId(), changes: N })), landed: json }),
+);
 
 const oldText = shape.named(
   "CarriedText",

@@ -5,7 +5,7 @@
 // what is waiting on him, the swap's steps, and going back's with the permissions the previous build asks for, by name:
 // before any run as after. Every list is paged at `migration.page`, and every part lays out at phone width.
 
-import type { ComponentChildren } from "preact";
+import { type ComponentChildren, Fragment } from "preact";
 import { useState } from "preact/hooks";
 import type { FoldDifference, MigrationChatShown, MigrationItemShown, MigrationReply, MigrationRowShown, MigrationSummaryShown, WaitingOnUser } from "../../shared/api";
 import { useApp } from "../app";
@@ -24,20 +24,211 @@ function andList(parts: readonly string[]): string {
   return parts.length < 2 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
+const REASONS: Readonly<Record<string, string>> = {
+  missing_placeholder: "a placeholder today's build needs is missing from it",
+  blank: "it is blank where a text may not be",
+  unknown_id: "no build had a text of that id",
+};
+
 /** One thing waiting on the user, in words. */
 export function waitingWords(w: WaitingOnUser): string {
-  if (w.kind === "guidance") return `Your GUIDANCE.md is at ${w.path}, switched off.`;
-  if (w.kind === "connection") return `The setting ${w.setting} names ${w.connection}, a connection in Lumiverse: pick one of RPE's for it.`;
-  if (w.kind === "own") return `Your own ${andList([counted(w.agents, "agent"), counted(w.skills, "skill"), counted(w.texts, "text")])} are attached and switched off.`;
-  if (w.kind === "filing") return `Chat ${w.chat}: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`;
-  const parts = [
-    w.questions > 0 ? counted(w.questions, "edit waiting on keep or discard", "edits waiting on keep or discard") : null,
-    w.staged > 0 ? counted(w.staged, "staged action") : null,
-    w.chips > 0 ? counted(w.chips, "chip") : null,
-    w.reviewCards > 0 ? counted(w.reviewCards, "review card") : null,
-    w.rollback ? "a rollback never applied" : null,
-  ].filter((part) => part !== null);
-  return `Chat ${w.chat}: ${andList(parts)}.`;
+  switch (w.kind) {
+    case "guidance":
+      return `Your GUIDANCE.md is at ${w.path}, switched off: one press puts it in force as AGENTS.md at the same level, or copy from it.`;
+    case "agent":
+      return `Your agent ${w.id} is at ${w.path}, switched off.${w.pins.length > 0 ? ` ${counted(w.pins.length, "pin")} carried for it wait until it is on: ${w.pins.join(", ")}.` : ""}${w.deadTools.length > 0 ? ` Tools it names that no longer exist: ${w.deadTools.join(", ")}.` : ""}`;
+    case "skill":
+      return `Your skill ${w.id} is at ${w.path}, switched off.`;
+    case "connection":
+      return w.agent === null ? `${w.where} named ${w.connection}, a connection in Lumiverse: RPE has no place for that work, which its default connection does.` : `${w.where} named ${w.connection}, a connection in Lumiverse: pick one of RPE's for your agent ${w.agent}; until you do, its default connection does that work.`;
+    case "paused":
+      return `Chat ${w.chat} was paused on ${counted(w.questions, "edit", "edits")} waiting on keep or discard${w.answered === null ? "." : `: you answered ${w.answered}.`}`;
+    case "staged":
+      return `Chat ${w.chat}: ${counted(w.staged, "staged change")} waiting for your next message, held as a request: keep it held, or drop it.`;
+    case "chat":
+      return `Chat ${w.chat}: ${andList([w.chips > 0 ? counted(w.chips, "chip") : "", w.reviewCards > 0 ? counted(w.reviewCards, "review card") : "", w.rollback ? "a rollback never applied, archived" : ""].filter((p) => p !== ""))}, on its turns.`;
+    case "filing":
+      return `Chat ${w.chat}: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`;
+    case "row":
+      return `${w.path} is found and no row names it: give it a row, and the next rehearsal uses it.`;
+    case "pin":
+      return `${w.file} was pinned for ${w.role}, which has no agent in RPE: it is pinned for the Author now. Pin and unpin it on the Files page.`;
+    case "text":
+      return `Your text ${w.id} is set apart: ${REASONS[w.reason] ?? w.reason}${w.missing.length > 0 ? ` (${w.missing.join(", ")})` : ""}.`;
+  }
+}
+
+/** A press on the waiting list: its words, busy while it runs, and what came of it. */
+function Press(props: { label: string; kind?: "primary" | "danger" | "ghost"; run(): Promise<string | null> }) {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  return (
+    <>
+      <Button small kind={props.kind ?? "ghost"} busy={busy} onClick={() => {
+        setBusy(true);
+        setSaid(null);
+        props.run().then(
+          (words) => {
+            setBusy(false);
+            setSaid(words);
+          },
+          (error: unknown) => {
+            setBusy(false);
+            setSaid(errorWords(error));
+          },
+        );
+      }}>
+        {props.label}
+      </Button>
+      {said === null ? null : <span class="rpe-meta">{said}</span>}
+    </>
+  );
+}
+
+/** A staged change held as a request for his next message: kept as it is, or dropped. */
+function StagedRequests(props: { chat: string; onDone(): void }) {
+  const app = useApp();
+  const read = useRead(() => app.client.call("GET /api/v1/chats/:chat/requests", { chat: props.chat }), [props.chat]);
+  const held = (read.value?.requests ?? []).filter((r) => r.id.startsWith("carried:") && r.turn === null);
+  if (read.problem !== null) return <p class="rpe-line">{read.problem}</p>;
+  if (read.value === null) return <p class="lre-muted rpe-line">Reading what waits for the next message…</p>;
+  if (held.length === 0) return <p class="lre-muted rpe-line">Nothing carried waits for the next message now.</p>;
+  return (
+    <ul class="lre-stack rpe-plain">
+      {held.map((r) => (
+        <li key={r.id} class="lre-inline">
+          <span class="rpe-line">{`Held since ${new Date(r.at).toISOString()}`}</span>
+          <Press label="Keep it for my next message" run={async () => "Kept: it goes with your next message."} />
+          <Press
+            label="Drop it"
+            kind="danger"
+            run={async () => {
+              await app.client.call("DELETE /api/v1/chats/:chat/requests/:request", { chat: props.chat, request: r.id });
+              read.again();
+              props.onDone();
+              return "Dropped.";
+            }}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** RPE's connections to pick from for one of his agents' work. */
+function PickConnection(props: { agent: string; onDone(): void }) {
+  const app = useApp();
+  const read = useRead(() => app.client.call("GET /api/v1/connections", {}), []);
+  const [chosen, setChosen] = useState<string>("");
+  const list = read.value?.connections ?? [];
+  if (read.value === null) return <span class="lre-muted rpe-meta">{read.problem ?? "Reading RPE's connections…"}</span>;
+  if (list.length === 0) return <span class="rpe-meta">RPE has no connection yet: add one on the Connections page.</span>;
+  return (
+    <span class="lre-inline">
+      <select class="lre-input" value={chosen} onChange={(event) => setChosen((event.currentTarget as HTMLSelectElement).value)}>
+        <option value="">One of RPE's connections</option>
+        {list.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <Press
+        label="Use it"
+        kind="primary"
+        run={async () => {
+          if (chosen === "") return "Pick one first.";
+          const done = await app.client.call("POST /api/v1/migration/connection", {}, { body: { agent: props.agent, connection: chosen } });
+          props.onDone();
+          return `Written in ${done.written.join(" and ")}.`;
+        }}
+      />
+    </span>
+  );
+}
+
+/** The row he gives a path no row names: archived or attached, with his line saying what it is; added to `migration.rows`. */
+function GiveRow(props: { path: string; given: MigrationReply["given"]; onDone(): void }) {
+  const app = useApp();
+  const [fate, setFate] = useState<"archived" | "attached">("archived");
+  const [line, setLine] = useState("");
+  return (
+    <span class="lre-stack">
+      <select class="lre-input" value={fate} onChange={(event) => setFate((event.currentTarget as HTMLSelectElement).value === "attached" ? "attached" : "archived")}>
+        <option value="archived">Archived: kept in the backup</option>
+        <option value="attached">Attached: kept beside what it belongs to</option>
+      </select>
+      <input class="lre-input" value={line} placeholder="what it is" onInput={(event) => setLine((event.currentTarget as HTMLInputElement).value)} />
+      <Press
+        label="Give it a row"
+        kind="primary"
+        run={async () => {
+          if (line.trim() === "") return "Say what it is first.";
+          await app.client.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "migration.rows", value: [...props.given, { path: props.path, fate, line: line.trim() }] } });
+          props.onDone();
+          return "Given: the next rehearsal uses it.";
+        }}
+      />
+    </span>
+  );
+}
+
+/** One waiting line with its press; a done line struck. */
+function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; onDone(): void }) {
+  const app = useApp();
+  const { w } = props;
+  const [open, setOpen] = useState(false);
+  const words = <span class="rpe-line">{waitingWords(w)}</span>;
+  let press: ComponentChildren = null;
+  const switchOn = (path: string): Promise<string> =>
+    app.client.call("POST /api/v1/migration/switch-on", {}, { body: { path } }).then((r) => {
+      props.onDone();
+      return r.switched ? `On: written at ${r.to}.` : `Not written: ${r.to} is in force at the ${r.inForce.level} level already. Compare the two on the Files page and choose.`;
+    });
+  if (w.kind === "guidance" || w.kind === "agent" || w.kind === "skill") press = <Press label="Switch it on" kind="primary" run={() => switchOn(w.path)} />;
+  else if (w.kind === "connection" && w.agent !== null) press = <PickConnection agent={w.agent} onDone={props.onDone} />;
+  else if (w.kind === "paused" && !w.done) {
+    const answer = (choice: "keep" | "discard") => async (): Promise<string> => {
+      const done = await app.client.call("POST /api/v1/migration/chats/:chat/answer", { chat: w.chat }, { body: { choice } });
+      props.onDone();
+      return done.held ? `${choice === "keep" ? "Kept" : "Discarded"}, and held as today's build holds it while a reply is under way in that chat: it lands at the run after that reply is finished.` : `${choice === "keep" ? "Kept" : "Discarded"}: ${counted(done.turns.length, "turn")} took the held changes.`;
+    };
+    press = (
+      <span class="lre-inline">
+        <Press label="Keep" kind="primary" run={answer("keep")} />
+        <Press label="Discard" kind="danger" run={answer("discard")} />
+      </span>
+    );
+  } else if (w.kind === "staged")
+    press = (
+      <>
+        <Button small kind="ghost" current={open} onClick={() => setOpen(!open)}>
+          {open ? "Hide" : "Show"} what waits
+        </Button>
+        {open ? <StagedRequests chat={w.chat} onDone={props.onDone} /> : null}
+      </>
+    );
+  else if (w.kind === "chat")
+    press = (
+      <Button small kind="ghost" onClick={() => app.go({ page: "turns", chat: w.chat })}>
+        Open its turns
+      </Button>
+    );
+  else if (w.kind === "row" && !w.done) press = <GiveRow path={w.path} given={props.given} onDone={props.onDone} />;
+  else if (w.kind === "pin" || w.kind === "text") {
+    const file = w.kind === "pin" ? w.file : w.path;
+    press = (
+      <Button small kind="ghost" onClick={() => app.go({ page: "files", at: [file.startsWith("@") ? file : `@global/${file}`] })}>
+        Open it on the Files page
+      </Button>
+    );
+  }
+  return (
+    <li class="lre-stack" data-waiting={w.kind} data-done={w.done ? "true" : undefined}>
+      {w.done ? <s>{words}</s> : words}
+      {w.done ? null : press}
+    </li>
+  );
 }
 
 /** A report in brief: when it read today's data, whether the real run may start on it, and the disk. */
@@ -250,6 +441,10 @@ export function MigrationView(props: {
   onFolder(folder: string): void;
   lists?: ComponentChildren;
   offer?: ComponentChildren;
+  /** Each waiting line with its press; left out, the lines alone. */
+  line?: (w: WaitingOnUser) => ComponentChildren;
+  /** Going back as its own part of the page draws it; left out, the steps and the permissions. */
+  goingBack?: ComponentChildren;
 }) {
   const { shown } = props;
   const lumiverse = props.folder ?? shown.sources.lumiverse ?? "";
@@ -258,6 +453,21 @@ export function MigrationView(props: {
   return (
     <div class="lre-stack rpe-page" data-page="migration">
       <PageHeader title="Migration" sub="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
+      {shown.offRpe.length === 0 ? null : (
+        <Section title={`Chats still off RPE (${shown.offRpe.filter((c) => !c.done).length})`} id="off-rpe">
+          <p class="rpe-meta">Each was on today and is on none of RPE's connections. In Lumiverse, choose one of RPE's connections for it, and it is on RPE. RPE changes nothing in your chats.</p>
+          <ul class="lre-stack rpe-plain">
+            {shown.offRpe.map((c) => {
+              const words = `Chat ${c.chat}: ${c.pinned === null ? "pinned to no connection, so it follows the one active for you" : `pinned to connection ${c.pinned}`}.`;
+              return (
+                <li key={c.chat} class="rpe-line" data-chat={c.chat} data-done={c.done ? "true" : undefined}>
+                  {c.done ? <s>{words}</s> : words}
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
       <Section title="A rehearsal" id="rehearsal">
         <p class="rpe-meta">Reads today's data as rpe migrate --rehearse does. It writes nothing: not today's data, not RPE's database. Its report is held here until the next one, or until RPE stops.</p>
         <label class="lre-stack">
@@ -299,14 +509,20 @@ export function MigrationView(props: {
           </>
         )}
       </Section>
-      <Section title={`Waiting on you (${shown.waiting.length})`} id="waiting">
+      <Section title={`Waiting on you (${shown.waiting.filter((w) => !w.done).length})`} id="waiting">
         {shown.waiting.length === 0 ? (
           <p class="lre-muted rpe-line">Nothing is waiting on you.</p>
         ) : (
-          <ul class="rpe-reports">
-            {shown.waiting.map((w, i) => (
-              <li key={i}>{waitingWords(w)}</li>
-            ))}
+          <ul class="lre-stack rpe-plain">
+            {shown.waiting.map((w, i) =>
+              props.line === undefined ? (
+                <li key={i} data-waiting={w.kind} data-done={w.done ? "true" : undefined}>
+                  {w.done ? <s>{waitingWords(w)}</s> : waitingWords(w)}
+                </li>
+              ) : (
+                <Fragment key={i}>{props.line(w)}</Fragment>
+              ),
+            )}
           </ul>
         )}
         {props.offer}
@@ -321,21 +537,25 @@ export function MigrationView(props: {
         </ul>
       </Section>
       <Section title="Going back" id="going-back">
-        <ul class="lre-stack rpe-plain">
-          {shown.goingBack.steps.map((step, i) => (
-            <li key={i} class="rpe-line">
-              {step}
-            </li>
-          ))}
-        </ul>
-        <p class="rpe-meta">The permissions the previous build asks for, to approve again ({shown.goingBack.permissions.length}):</p>
-        <ul class="rpe-files" data-permissions="true">
-          {shown.goingBack.permissions.map((p) => (
-            <li key={p}>
-              <code>{p}</code>
-            </li>
-          ))}
-        </ul>
+        {props.goingBack ?? (
+          <>
+            <ul class="lre-stack rpe-plain">
+              {shown.goingBack.steps.map((step, i) => (
+                <li key={i} class="rpe-line">
+                  {step}
+                </li>
+              ))}
+            </ul>
+            <p class="rpe-meta">The permissions the previous build asks for, to approve again ({shown.goingBack.permissions.length}):</p>
+            <ul class="rpe-files" data-permissions="true">
+              {shown.goingBack.permissions.map((p) => (
+                <li key={p}>
+                  <code>{p}</code>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </Section>
     </div>
   );
@@ -410,6 +630,7 @@ export function MigrationPage() {
       onFolder={setFolder}
       lists={has ? <ReportLists key={of} of={of} /> : null}
       offer={shown.run === null ? null : <CarriedOffer />}
+      line={(w) => <WaitingLine w={w} given={shown.given} onDone={summary.again} />}
     />
   );
 }

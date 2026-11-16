@@ -5,17 +5,26 @@
 // whose report the running RPE holds in memory, writing nothing; and, for a migrated chat, its carried turns with what each
 // old engine recorded of the reply. Every route but the rehearsal's start is a read of RPE's database or of what RPE holds.
 
+import { join } from "node:path";
 import { dirname } from "node:path";
 import type { Database } from "bun:sqlite";
 import { route, RouteError, shape } from "../app";
-import type { AppConfig, DataPaths } from "../app/config";
+import { type AppConfig, type DataPaths, SHIPPED_FOLDER } from "../app/config";
+import { readText } from "../app/disk";
+import type { Registry } from "../engine/registry-impl";
+import type { Store } from "../store";
+import { answerPaused, NotPaused } from "./answers";
+import { rowsGiven } from "./migrate";
 import { oldRecord, oldRecords } from "./old-records";
+import { IMPORTED, IMPORTED_AGENTS } from "./own-files";
 import { chatOne, chatsOf, differencesOf, itemsOf, migrationPage, type MigrationPageInput, reportFor, type ReportOf, rowsOf, summaryOf, textFor } from "./page";
 import { RehearsalRunning, type Rehearsals } from "./rehearse-job";
 import { type MigrationReport, reportText } from "./report";
 import { runtimeFoldersOf } from "./runtime-folders";
 import { carriedPage } from "./setting-list";
 import {
+  answerBody,
+  answerReply,
   carriedTurnReply,
   carriedTurnsReply,
   migrationChatReply,
@@ -26,10 +35,26 @@ import {
   migrationReply,
   migrationRowsReply,
   migrationTextReply,
+  pickBody,
+  pickReply,
   rehearsalBody,
   rehearsalReply,
+  switchOnBody,
+  switchOnReply,
 } from "./shapes";
+import { switchOn, SwitchOnRefused } from "./switch-on";
 import { lastReport } from "./tables";
+
+/** What the presses of the waiting list take from the app: its clock, its one writer of the database, the packs, and what the composition gives (the store, the tree's writer as him and its folder names); a press whose part is not given is refused in words. */
+export interface MigratePresses {
+  now(): number;
+  write<T>(work: () => T, label: string): Promise<T>;
+  registry: Registry;
+  store?(): Store;
+  writeAsUser?(user: string, path: string, text: string): Promise<string>;
+  /** The folders agents, skills and prompts are read from at a level of the file tree. */
+  folders?: { agents: string; skills: string; prompts: string };
+}
 
 export interface MigrateRoutesDeps {
   /** RPE's database. */
@@ -38,13 +63,26 @@ export interface MigrateRoutesDeps {
   identifier: string;
   /** RPE's data folder, where a rehearsal weighs the disk the real run would take and reads the rows he gave; its `RPE-global.yml` sets the page sizes. */
   paths: DataPaths;
-  /** RPE's config: Lumiverse's database file, where a rehearsal reads today's data when no run has named its folder. */
+  /** RPE's config: Lumiverse's database file, where a rehearsal reads today's data when no run has named its folder; RPE's connections in Lumiverse. */
   config: AppConfig;
   /** The page's rehearsals, held in memory. */
   rehearsals: Rehearsals;
+  /** The presses of what waits on him; absent: the page reads only. */
+  presses?: MigratePresses;
   /** The environment and home folder today's runtime finds its folders by; the server's own when left out. */
   env?: Readonly<Record<string, string | undefined>>;
   home?: string;
+}
+
+/** An agent file's text with its header's `model:` naming `connection`, the rest word for word. */
+function withModel(text: string, connection: string): string {
+  const head = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (head === null) return `---\nmodel: ${connection}\n---\n${text}`;
+  const lines = (head[1] ?? "").split("\n");
+  const at = lines.findIndex((l) => /^model:/.test(l));
+  if (at >= 0) lines[at] = `model: ${connection}`;
+  else lines.push(`model: ${connection}`);
+  return `---\n${lines.join("\n")}\n---${text.slice(head[0].length)}`;
 }
 
 export const MIGRATION_PATH = "/api/v1/migration";
@@ -66,6 +104,7 @@ function pageAfter<T>(list: readonly T[], key: (item: T) => string, after: strin
 
 /** The migration's routes: the page's, and the carried turns' of a chat. */
 export function migrateRoutes(deps: MigrateRoutesDeps) {
+  const presses = deps.presses;
   const page = (user: string): MigrationPageInput => ({
     db: deps.db,
     user,
@@ -73,7 +112,14 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
     rehearsals: deps.rehearsals,
     database: deps.config.lumiverse.database,
     runtime: runtimeFoldersOf(deps.env ?? process.env, deps.home ?? (process.env.HOME ?? "")),
+    rpeConnections: deps.config.lumiverse.connections,
+    ...(presses?.folders === undefined ? {} : { tree: { files: deps.paths.files, ...presses.folders } }),
   });
+  /** A press's part the composition gives, or the press refused in words. */
+  const needs = <T>(part: T | undefined, what: string): T => {
+    if (part === undefined) throw new RouteError(503, `This RPE was not given ${what}, so the press can't be made here.`);
+    return part;
+  };
   const sizes = async (): Promise<{ default: number; most: number }> => {
     const p = await carriedPage(deps.paths.globalConfig);
     return { default: p.size, most: p.most };
@@ -94,10 +140,84 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       group: "migration",
       does: "The Migration page's summary: the last real run and the page's rehearsal in brief, the folders a rehearsal reads, the backup, what waits on the user, the swap's steps and going back's with the permissions by name; before any run as after.",
       reply: migrationReply,
-      handle: ({ user }) => {
-        const p = migrationPage(page(user));
+      handle: async ({ user }) => {
+        const p = migrationPage({ ...page(user), given: await rowsGiven(deps.paths) });
         // What today's build put in Lumiverse is a document the migration kept as JSON; it is carried as it is.
         return { ...p, lumiverse: p.lumiverse === null ? null : { ...p.lumiverse } };
+      },
+    }),
+    route({
+      method: "POST",
+      path: `${MIGRATION_PATH}/switch-on`,
+      access: "page",
+      group: "migration",
+      does: "One press switches one of his attached files on (R-81): GUIDANCE.md as AGENTS.md at the user's level, an agent where agents are read, a skill where skills are read; the attached file and its original stay under imported/ word for word. A file of that name already in force there is never written over: it is answered beside the attached one.",
+      body: switchOnBody,
+      reply: switchOnReply,
+      handle: async ({ user, body }) => {
+        const folders = needs(presses?.folders, "the file tree's folders");
+        const write = needs(presses?.writeAsUser, "the file tree's writer");
+        try {
+          return await switchOn(body.path, { root: deps.paths.files, shipped: join(deps.paths.files, SHIPPED_FOLDER), folders, write: (path, text) => write(user, path, text) });
+        } catch (error) {
+          if (error instanceof SwitchOnRefused) throw new RouteError(400, error.message);
+          throw error;
+        }
+      },
+    }),
+    route({
+      method: "POST",
+      path: `${MIGRATION_PATH}/connection`,
+      access: "page",
+      group: "migration",
+      does: "Picks one of RPE's connections for the work one of his own agents does, where today's choice named a connection that lives in Lumiverse: written as the `model:` of the agent's attached file, and of the one in force where it is switched on, so that work uses it from then on.",
+      body: pickBody,
+      reply: pickReply,
+      handle: async ({ user, body }) => {
+        const folders = needs(presses?.folders, "the file tree's folders");
+        const write = needs(presses?.writeAsUser, "the file tree's writer");
+        if (!/^[^/\\]+$/.test(body.agent)) throw new RouteError(400, `${body.agent} names no agent of his.`);
+        const written: string[] = [];
+        for (const path of [`${IMPORTED}/${IMPORTED_AGENTS}/${body.agent}.md`, `${folders.agents}/${body.agent}.md`]) {
+          const text = await readText(join(deps.paths.files, path));
+          if (text !== null) written.push(await write(user, path, withModel(text, body.connection)));
+        }
+        if (written.length === 0) throw new RouteError(404, `No attached agent ${body.agent} is under ${IMPORTED}/${IMPORTED_AGENTS}/.`);
+        return { written };
+      },
+    }),
+    route({
+      method: "POST",
+      path: `${MIGRATION_PATH}/chats/:chat/answer`,
+      access: "page",
+      group: "migration",
+      does: "Answers the keep-or-discard question today's build left the chat paused on (R-54): kept in RPE's database, written at every later run as today's pause chip writes it, and at once the held turns' changes land on their own turns, the later turns applied again on top, what no longer applies reported and the stretch named in the chat's next briefing. Today's data is never written.",
+      body: answerBody,
+      reply: answerReply,
+      long: true,
+      handle: async ({ user, params, body }) => {
+        const p = needs(presses, "the presses");
+        const store = needs(p.store, "RPE's store")();
+        const last = lastReport(deps.db, user);
+        const lumiverse = last?.sources?.lumiverse ?? migrationPage(page(user)).sources.lumiverse;
+        if (lumiverse === null) throw new RouteError(409, "No run has read today's data here, and RPE's config names no Lumiverse database: run the migration first.");
+        try {
+          const done = await answerPaused({
+            db: deps.db,
+            s: store.user(user),
+            registry: p.registry,
+            sources: { lumiverse, identifier: deps.identifier, userId: user, runtime: last?.sources?.runtime ?? null, ...(last?.sources?.runtimeName !== undefined ? { runtimeName: last.sources.runtimeName } : {}), ...(last?.sources?.runtimeFolders !== undefined ? { runtimeFolders: last.sources.runtimeFolders } : {}) },
+            chat: params.chat,
+            ...(body.message === undefined ? {} : { message: body.message }),
+            choice: body.choice,
+            now: p.now(),
+            write: (work) => p.write(work, "landing his answer to a paused chat"),
+          });
+          return { ...done, landed: JSON.parse(JSON.stringify(done.landed)) };
+        } catch (error) {
+          if (error instanceof NotPaused) throw new RouteError(409, error.message);
+          throw error;
+        }
       },
     }),
     route({
