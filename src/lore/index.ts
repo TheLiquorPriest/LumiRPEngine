@@ -15,3 +15,5 @@ export { type LoreMap, type LoreMapFields, loreMapFields, type LoreMapLine, type
 export { lorePort } from "./port";
 export { type ActivatedEntry, type LoreBook, type LoreBookEntry, type LoreBooks, type LoreGeneration, type LorePath, type LoreTurns, type LoreWorlds, storePath, storeWorlds, type WorldAt } from "./sources";
 export { type ActivatedLoreDeps, type ActivatedLoreEntry, activatedLore, type ActivationWord } from "./activated";
+export { BINDING_BYS, type BindingBy, type BindingRow, inForce as bindingsInForce, type LoreLink, pinLinks, placesAbove, putBindings, recordName, resolveRecord, storedBindings } from "./bindings";
+export { LORE_INDEXER, loreIndexRoutes, type LoreIndexRoutesDeps } from "./index-routes";

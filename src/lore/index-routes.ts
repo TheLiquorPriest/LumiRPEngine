@@ -9,7 +9,8 @@
 
 import type { DefinitionsApi, JobRefusal, JobsApi, Scope } from "rp-harness/contract";
 import { RouteError, route, shape } from "../app";
-import { type IndexedEntry, LORE_INDEX_FIELDS, type LoreIndex } from "./indexing";
+import { BINDING_BYS } from "./bindings";
+import { type IndexedEntry, LORE_INDEX_FIELDS, type LoreIndex, type LoreIndexEdit } from "./indexing";
 import type { LoreAt } from "./lore";
 import { loreLine } from "./tools";
 
@@ -22,8 +23,16 @@ export const LORE_INDEXER = "indexer";
 export const LORE_INDEX_PATH = "/api/v1/chats/:chat/lore/index";
 export const LORE_INDEX_STATUS_PATH = "/api/v1/chats/:chat/lore/index/status";
 export const LORE_INDEX_JOBS_PATH = "/api/v1/chats/:chat/lore/index/jobs";
+export const LORE_INDEX_ENTRY_PATH = "/api/v1/chats/:chat/lore/index/:entry";
 
-const binding = shape.object({ what: field(T, "The record it defines, by its name or its id in the world's tree."), aspect: field(T, "Which side of it the entry defines; empty where none was said.") });
+const binding = shape.object({ what: field(T, "The record it defines, by its id (`entity:sefa`, `place:harbor`), its name or as written."), aspect: field(T, "Which side of it the entry defines; empty where none was said.") });
+
+const link = shape.object({
+  record: field(T, "The record's id in the tree (`entity:<id>`, `place:<id>`, `quest:<id>`, `cast:<id>`), or, where none exists, what its writer wrote."),
+  linked: field(shape.yesNo(), "Whether the record exists; false shows the binding as unlinked."),
+  aspect: field(T, "Which side of it the entry defines; empty where none was said."),
+  by: field(shape.oneOf(...BINDING_BYS, "pin"), "Who bound it: an indexing run, casting, bootstrap, the owner, or the world's own pin (read from the world, never copied)."),
+});
 
 const indexRow = shape.named(
   "LoreIndexRow",
@@ -45,6 +54,7 @@ const indexRow = shape.named(
     indexed: field(shape.yesNo(), "Whether a run has written lines for the entry as it stands now."),
     stale: field(shape.yesNo(), "Whether the lines shown were written for an earlier revision of it."),
     edited: field(shape.list(shape.oneOf(...LORE_INDEX_FIELDS)), "Which of the lines are the user's own."),
+    links: field(shape.list(link), "What the entry is bound to: each binding in force, the owner's over an indexing run's, and the world's own pins of it, each to a record by its id."),
   }),
 );
 
@@ -61,6 +71,13 @@ const statusReply = shape.named(
 );
 
 const startReply = shape.named("LoreIndexJob", "The indexing job the owner started.", shape.object({ job: field(T, "Its id in the jobs."), state: field(T, "Its state as RPH keeps it.") }));
+
+const editBody = shape.object({
+  kind: shape.optional(shape.nullable(T), "What kind of thing it is; null takes his own off."),
+  line: shape.optional(shape.nullable(T), "One line saying what it is; null takes his own off."),
+  defines: shape.optional(shape.nullable(shape.list(binding)), "What it defines, each by a record's id, its name or as written; null takes his own off, and the run's show again."),
+  related: shape.optional(shape.nullable(shape.list(T)), "Related entries, by id; null takes his own off."),
+});
 
 function rowOf(e: IndexedEntry) {
   return {
@@ -80,6 +97,7 @@ function rowOf(e: IndexedEntry) {
     indexed: e.indexed,
     stale: e.stale,
     edited: e.edited,
+    links: e.links.map((l) => ({ record: l.record, linked: l.linked, aspect: l.aspect, by: l.by })),
   };
 }
 
@@ -146,6 +164,25 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
         const started = await deps.jobs.start(deps.scope(user, params.chat), { agent: LORE_INDEXER, brief });
         if ("refused" in started) throw new RouteError(409, refusedWords(await deps.index.lines(at), started));
         return { job: started.id, state: started.state };
+      },
+    }),
+    route({
+      method: "PUT",
+      path: LORE_INDEX_ENTRY_PATH,
+      access: "page",
+      group: "lore",
+      does: "The owner's own lines for one entry of a chat's lore: its kind, its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries. What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.",
+      body: editBody,
+      reply: indexRow,
+      handle: async ({ user, params, body }) => {
+        const edit: LoreIndexEdit = {};
+        if (body.kind !== undefined) edit.kind = body.kind;
+        if (body.line !== undefined) edit.line = body.line;
+        if (body.defines !== undefined) edit.defines = body.defines;
+        if (body.related !== undefined) edit.related = body.related;
+        const row = await deps.index.edit({ user, chat: params.chat }, params.entry, edit);
+        if (row === null) throw new RouteError(404, `There is no entry ${params.entry} in this chat's lore.`);
+        return rowOf(row);
       },
     }),
   ] as const;

@@ -199,6 +199,10 @@ export interface LoreCatalogEntry {
   source: string;
   /** Its book's id in Lumiverse; null for a world entry. */
   book: string | null;
+  /** A world entry's key in its world, which the world's own pins name it by; null for a book entry. */
+  key: string | null;
+  /** Lumiverse's id of a book entry, which a pin of its book names it by; null for a world entry. */
+  lumiverse: string | null;
   title: string;
   keys: string[];
   /** Characters in its text as Lumiverse holds it. */
@@ -264,6 +268,11 @@ export class Lore {
   personPlayed(at: LoreAt, plays: string): { id: EntityId; name: string } | null {
     const world = this.worlds.at(at.user, at.chat, at.turn);
     return world === null ? null : this.personIn(at, world, plays);
+  }
+
+  /** The name of the cast's character `said` names (its id or its name), in the chat or one it was branched from; null for none. Its person in the world, where it is one, is `personPlayed`. */
+  castName(at: LoreAt, said: string): string | null {
+    return this.worlds.castName?.(at.user, at.chat, said) ?? null;
   }
 
   private personIn(at: LoreAt, world: WorldAt, plays: string): { id: EntityId; name: string } | null {
@@ -403,11 +412,11 @@ export class Lore {
         const content = typeof g.entry.content === "string" ? g.entry.content : "";
         const activation: LoreActivation[] = keys.some((k) => k !== "") ? ["keyword"] : [];
         // The revision `lore_read` gives the same entry (`worldEntry`).
-        return [{ id: worldEntryId(n), world: world?.world.id ?? "", source: g.source, book: null, title: g.title, keys, size: content.length, activation, revision: hashJson([g.title, keys, content]), text: g.text }];
+        return [{ id: worldEntryId(n), world: world?.world.id ?? "", source: g.source, book: null, key: g.key, lumiverse: null, title: g.title, keys, size: content.length, activation, revision: hashJson([g.title, keys, content]), text: g.text }];
       }
       const n = numbers.get(g.row.id);
       if (n === undefined) return [];
-      return [{ id: bookEntryId(n), world: "", source: g.book.name, book: g.book.id, title: g.title, keys: g.row.keys.filter((k) => k.trim() !== ""), size: g.row.content.length, activation: bookActivation(g.row), revision: String(g.row.revision), text: g.text }];
+      return [{ id: bookEntryId(n), world: "", source: g.book.name, book: g.book.id, key: null, lumiverse: g.row.id, title: g.title, keys: g.row.keys.filter((k) => k.trim() !== ""), size: g.row.content.length, activation: bookActivation(g.row), revision: String(g.row.revision), text: g.text }];
     });
   }
 

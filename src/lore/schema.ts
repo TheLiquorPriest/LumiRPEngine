@@ -207,7 +207,68 @@ INSERT INTO lore_index_own (user, world, entry, own_kind, own_line, own_defines,
 DROP TABLE lore_index_before;
 `,
   },
+  {
+    version: 10,
+    name: "the binding store",
+    // An entry (by the id the lore map gives it) linked to a record by its id in the tree where the record exists (`linked`), else to
+    // what its writer wrote; with the aspect it defines, who proposed it (`run`, `casting`, `bootstrap`, `owner`) and the revision
+    // of the entry it was made at. A writer's bindings of an entry are replaced together; the owner's stand over a run's.
+    sql: `CREATE TABLE lore_binding (
+  user TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  record TEXT NOT NULL,
+  linked INTEGER NOT NULL,
+  aspect TEXT NOT NULL DEFAULT '',
+  by TEXT NOT NULL,
+  revision TEXT,
+  created INTEGER NOT NULL,
+  PRIMARY KEY (user, entry, record, by)
+);
+CREATE INDEX lore_binding_record ON lore_binding (user, record)`,
+  },
+  {
+    version: 11,
+    name: "bindings out of the index and the cast",
+    up: (db) => moveBindings(db),
+  },
 ];
+
+/**
+ * Moves what the index kept of what an entry defines (a run's latest, the user's own) and the cast's bindings of lore entries
+ * (`cast_binding` rows of kind `entry`) into the one store, and takes the old columns off. A name written before is kept as
+ * written and unlinked: the store links a record by its id, which a name stored without its world cannot give.
+ */
+function moveBindings(db: Database): void {
+  const defined = (raw: string | null): { what: string; aspect: string }[] => {
+    try {
+      const list: unknown = raw === null ? [] : JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      return list.flatMap((b: unknown): { what: string; aspect: string }[] => {
+        if (typeof b !== "object" || b === null || !("what" in b) || typeof b.what !== "string") return [];
+        return [{ what: b.what, aspect: "aspect" in b && typeof b.aspect === "string" ? b.aspect : "" }];
+      });
+    } catch {
+      return [];
+    }
+  };
+  const put = db.query<unknown, [string, string, string, string, string, string | null, number]>(
+    "INSERT INTO lore_binding (user, entry, record, linked, aspect, by, revision, created) VALUES (?, ?, ?, 0, ?, ?, ?, ?) ON CONFLICT (user, entry, record, by) DO UPDATE SET aspect = excluded.aspect",
+  );
+  const runs = db.query<{ user: string; entry: string; revision: string; defines: string | null; written: number | null }, []>("SELECT user, entry, revision, defines, written FROM lore_index WHERE defines IS NOT NULL ORDER BY written, rowid").all();
+  // An entry's latest run is the one whose bindings are in force.
+  const latest = new Map(runs.map((r) => [`${r.user}\u0000${r.entry}`, r]));
+  for (const r of latest.values()) for (const b of defined(r.defines)) put.run(r.user, r.entry, b.what, b.aspect, "run", r.revision, r.written ?? 0);
+  for (const r of db.query<{ user: string; entry: string; own_defines: string; edited: number | null }, []>("SELECT user, entry, own_defines, edited FROM lore_index_own WHERE own_defines IS NOT NULL").all()) {
+    for (const b of defined(r.own_defines)) put.run(r.user, r.entry, b.what, b.aspect, "owner", null, r.edited ?? 0);
+  }
+  db.run("ALTER TABLE lore_index DROP COLUMN defines");
+  db.run("ALTER TABLE lore_index_own DROP COLUMN own_defines");
+  // The cast keeps the sources that are not lore (a card, a persona, a memory); its bindings of entries are the lore's now, bound to the character as a record of the cast.
+  if (db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cast_binding'").get() !== null) {
+    db.run("INSERT OR IGNORE INTO lore_binding (user, entry, record, linked, aspect, by, revision, created) SELECT user, ref, 'cast:' || character, 1, COALESCE(defines, ''), 'casting', NULL, created FROM cast_binding WHERE kind = 'entry'");
+    db.run("DELETE FROM cast_binding WHERE kind = 'entry'");
+  }
+}
 
 /**
  * Gives the world ids stored before world entries were numbered (`w-<key>`, in the index's rows and

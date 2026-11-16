@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore, LoreIndex } from "../../src/lore/index";
-import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER } from "./fixtures";
+import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
 
@@ -60,5 +60,27 @@ describe("bindings", () => {
     await index.edit(AT, id, { defines: null });
     expect([(await tide())?.defines, (await tide())?.edited]).toEqual([[{ what: "The Lighthouse", aspect: "sound" }], ["kind"]]);
     expect(await bound()).toEqual([]);
+  });
+
+  test("an entry casting bound to a character and one the world pins to a place both reach part 4 by the record's id, in the horizon's order; a binding to no record matches nothing", async () => {
+    const world = { ...coastWorld(), lorePins: { characters: { nell: [{ lore: "keeper_log" }] }, places: { reed_coast: [{ lore: "ferry_draft" }] }, steps: {} } };
+    const start = startingWorlds(world);
+    // The cast knows Sefa as c-1; the horizon names the net lofts (inside the coast the ferry is pinned to) and Sefa.
+    const worlds = { registry: start.registry, castName: (_u: string, _c: string, said: string) => (said === "c-1" ? "Sefa Moor" : null), at: (user: string, chat: string) => { const at = start.at(user, chat); return at === null ? null : { ...at, horizon: ["net_lofts", "sefa"] }; } };
+    const idx = new LoreIndex({ lore: new Lore({ books: shelf, worlds, turns: new Tags(), numbers: db.numbers }), db: db.db, writes: db.writes, path: { turns: () => [] } });
+    await idx.entries(AT);
+    await db.writes.run((d) => {
+      d.run("INSERT INTO lore_binding (user, entry, record, linked, aspect, by, created) VALUES (?, ?, 'cast:c-1', 1, 'background', 'casting', 1)", [USER, W.cove_route]);
+      d.run("INSERT INTO lore_binding (user, entry, record, linked, aspect, by, created) VALUES (?, ?, 'Tobin Reed', 0, '', 'run', 1)", [USER, W.tithe_law]);
+    });
+    const map = await idx.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    expect(map.bound?.map((l) => [l.id, l.bound])).toEqual([
+      [W.keeper_log, ["Nell Harrow"]],
+      [W.cove_route, ["Sefa Moor"]],
+      [W.ferry_draft, ["The Net Lofts"]],
+    ]);
+    const entries = await idx.entries(AT);
+    expect(entries.find((e) => e.id === W.keeper_log)?.links).toEqual([{ record: "entity:nell", linked: true, aspect: "", by: "pin" }]);
+    expect(entries.find((e) => e.id === W.tithe_law)?.links).toEqual([{ record: "Tobin Reed", linked: false, aspect: "", by: "run" }]);
   });
 });

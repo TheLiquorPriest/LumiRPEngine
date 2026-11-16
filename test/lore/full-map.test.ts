@@ -85,9 +85,10 @@ describe("the lore map in full", () => {
       // The player's character's first, then each character present, then the places; none that is in the parts above.
       // The tide bell, bound to the fishmarket, is past the limit; the ferry is bound to nobody on the horizon.
       bound: [
-        { id: "e-1", title: "The Lamplighter's Shanty", kind: "style", line: "A song of the lamp room.", defines: [{ what: "nell", aspect: "voice" }], bound: ["Nell Harrow"] },
+        // Each binding reads as the name its record has now: the run said "nell", and the record is Nell Harrow.
+        { id: "e-1", title: "The Lamplighter's Shanty", kind: "style", line: "A song of the lamp room.", defines: [{ what: "Nell Harrow", aspect: "voice" }], bound: ["Nell Harrow"] },
         { id: W.keeper_log, title: "The lighthouse keeper's log", kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], bound: ["Orrin Pell"] },
-        { id: W.cove_route, title: "The cove route", kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], bound: ["Sefa Moor"] },
+        { id: W.cove_route, title: "The cove route", kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "Sefa Moor", aspect: "" }], bound: ["Sefa Moor"] },
       ],
       leftOut: 1,
       // The gulls, the drowned crown, the switched-off rumor and the card's twin.

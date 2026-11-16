@@ -6,14 +6,17 @@
 
 import { isGone, kindIs } from "../engine/scope";
 import { hasOwn } from "../shared/json";
+import { placesAbove } from "./bindings";
 import type { WorldAt } from "./sources";
 
-/** A record on the horizon, by the ids and the name a binding may name it by. */
+/** A record on the horizon, by the id a binding names it by. */
 export interface HorizonRecord {
   /** Its id in the world's tree: `entity:<id>` or `place:<id>`. */
   ref: string;
   id: string;
   name: string;
+  /** The places holding it, nearest first, as refs: an entry pinned to a place is bound to the places inside it. */
+  holds: string[];
 }
 
 export function horizonRecords(at: WorldAt): HorizonRecord[] {
@@ -34,7 +37,7 @@ export function horizonRecords(at: WorldAt): HorizonRecord[] {
     const e = entities[id];
     if (e === undefined || isGone(at.state, id) || seen.has(`entity:${id}`)) return;
     seen.add(`entity:${id}`);
-    out.push({ ref: `entity:${id}`, id, name: e.name });
+    out.push({ ref: `entity:${id}`, id, name: e.name, holds: [] });
   };
   const isPerson = (id: string): boolean => {
     const e = entities[id];
@@ -64,7 +67,7 @@ export function horizonRecords(at: WorldAt): HorizonRecord[] {
   for (const p of places) {
     if (seen.has(`place:${p}`)) continue;
     seen.add(`place:${p}`);
-    out.push({ ref: `place:${p}`, id: p, name: doc.places[p]?.name ?? p });
+    out.push({ ref: `place:${p}`, id: p, name: doc.places[p]?.name ?? p, holds: placesAbove(at, p) });
   }
   for (const l of listed) if (l.kind === "entity") entity(l.id);
   return out;

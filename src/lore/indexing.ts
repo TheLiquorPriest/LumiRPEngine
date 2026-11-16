@@ -24,7 +24,7 @@ import type { LoreSettingsFor } from "./chat-settings";
 import type { LoreWrites } from "./ids";
 import { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
 import { horizonRecords } from "./horizon";
-import { foldName } from "./keys";
+import { type BindingRow, inForce, type LoreLink, pinLinks, putBindings, recordName, resolveRecord, storedBindings } from "./bindings";
 import type { Lore, LoreAt, LoreCatalogEntry, LoreMapAsk } from "./lore";
 import type { LoreMap, LoreMapLine } from "./map";
 import { overlayNotes } from "./overlays";
@@ -81,6 +81,8 @@ export interface IndexedEntry extends LoreCatalogEntry, LoreIndexLines {
   stale: boolean;
   /** The lines that are the user's own. */
   edited: LoreIndexField[];
+  /** What the entry is bound to: the binding store's rows in force (the owner's over a run's) and the world's own pins of it, each to a record by id. */
+  links: LoreLink[];
 }
 
 /** One entry's lines as a run hands them back, with the revision of the entry it read them from, as its batch showed it. */
@@ -103,7 +105,6 @@ interface IndexRow {
   revision: string;
   kind: string | null;
   line: string | null;
-  defines: string | null;
   related: string | null;
   fields: string | null;
 }
@@ -114,7 +115,6 @@ interface OwnRow {
   entry: string;
   own_kind: string | null;
   own_line: string | null;
-  own_defines: string | null;
   own_related: string | null;
 }
 
@@ -128,9 +128,9 @@ function listOf(raw: string | null): unknown[] | null {
   }
 }
 
-function bindingsOf(raw: string | null): LoreBinding[] | null {
-  const list = listOf(raw);
-  return list === null ? null : list.flatMap((b): LoreBinding[] => (typeof b === "object" && b !== null && typeof (b as LoreBinding).what === "string" ? [{ what: (b as LoreBinding).what, aspect: typeof (b as LoreBinding).aspect === "string" ? (b as LoreBinding).aspect : "" }] : []));
+/** Whether an entry is bound to one of `refs`, by a link to the record itself or to the cast character who is that person. */
+function isBoundTo(e: IndexedEntry, refs: ReadonlySet<string>, persons: ReadonlyMap<string, string>): boolean {
+  return e.links.some((l) => l.linked && (refs.has(l.record) || refs.has(persons.get(l.record) ?? "")));
 }
 
 function idsOf(raw: string | null): string[] | null {
@@ -173,17 +173,25 @@ interface Held {
   own?: OwnRow;
 }
 
+/** What the binding store and the world's pins give an entry: the links in force, what each reads as now, and whether the owner has bound it himself. */
+interface Bound {
+  links: LoreLink[];
+  defines: LoreBinding[];
+  owned: boolean;
+}
+
 /** An entry with its lines, the user's own over the run's; the run's at its revision as it stands now, else at the newest earlier one. */
-function joined(entry: LoreCatalogEntry, held: Held | undefined): IndexedEntry {
-  const own = { kind: held?.own?.own_kind ?? null, line: held?.own?.own_line ?? null, defines: bindingsOf(held?.own?.own_defines ?? null), related: idsOf(held?.own?.own_related ?? null) };
-  const edited = LORE_INDEX_FIELDS.filter((f) => own[f] !== null);
+function joined(entry: LoreCatalogEntry, held: Held | undefined, bound: Bound | undefined): IndexedEntry {
+  const own = { kind: held?.own?.own_kind ?? null, line: held?.own?.own_line ?? null, related: idsOf(held?.own?.own_related ?? null) };
+  const edited: LoreIndexField[] = [...(own.kind === null ? [] : (["kind"] as const)), ...(own.line === null ? [] : (["line"] as const)), ...(bound?.owned === true ? (["defines"] as const) : []), ...(own.related === null ? [] : (["related"] as const))];
   const current = held?.runs.find((r) => r.revision === entry.revision);
   const row = current ?? held?.runs[0];
   return {
     ...entry,
     kind: own.kind ?? row?.kind ?? null,
     line: own.line ?? row?.line ?? null,
-    defines: own.defines ?? bindingsOf(row?.defines ?? null) ?? [],
+    defines: bound?.defines ?? [],
+    links: bound?.links ?? [],
     related: own.related ?? idsOf(row?.related ?? null) ?? [],
     fields: namedOf(row?.fields ?? null),
     indexed: current !== undefined,
@@ -275,11 +283,13 @@ export class LoreIndex {
 
     const at = this.deps.lore.worldAt(ask);
     const shown = new Set([...inPrompt, ...world].map((l) => l.id));
+    const persons = this.personsOf(ask, entries);
     const boundTo = new Map<string, string[]>();
     for (const record of at === null ? [] : horizonRecords(at)) {
-      const names = new Set([record.ref, record.id, record.name].map(foldName));
+      // A pin to a place holds for the places inside it.
+      const refs = new Set([record.ref, ...record.holds]);
       for (const e of entries) {
-        if (shown.has(e.id) || !e.defines.some((b) => names.has(foldName(b.what)))) continue;
+        if (shown.has(e.id) || !isBoundTo(e, refs, persons)) continue;
         boundTo.set(e.id, [...(boundTo.get(e.id) ?? []), record.name]);
       }
     }
@@ -296,11 +306,46 @@ export class LoreIndex {
     return { inPrompt, world, changed, bound, leftOut: Math.max(0, order.length - this.settings.bound), notIndexed: entries.filter((e) => !e.indexed).length, activated };
   }
 
-  /** Every entry of the chat's lore, in the catalog's order, with its index lines. */
+  /** Every entry of the chat's lore, in the catalog's order, with its index lines and what it is bound to. */
   async entries(at: LoreAt): Promise<IndexedEntry[]> {
     const catalog = await this.deps.lore.catalog(at);
     const held = this.rows(at.user, catalog);
-    return catalog.map((entry) => joined(entry, held.get(placeOf(entry))));
+    const bound = this.bindings(at, catalog);
+    return catalog.map((entry) => joined(entry, held.get(placeOf(entry)), bound.get(entry.id)));
+  }
+
+  /**
+   * What each entry is bound to as it reads now: the binding store's rows in force, each by the name its record has now (a record
+   * the world no longer has, or a cast character no longer there, reads as unlinked), and the world's own pins of it.
+   */
+  private bindings(at: LoreAt, catalog: readonly LoreCatalogEntry[]): Map<string, Bound> {
+    const world = this.deps.lore.worldAt(at);
+    const stored = storedBindings(this.deps.db, at.user);
+    const read = (r: BindingRow): { what: string; linked: boolean } => {
+      if (!r.linked || r.record.startsWith("quest:")) return { what: r.record, linked: r.linked };
+      const name = r.record.startsWith("cast:") ? this.deps.lore.castName(at, r.record.slice("cast:".length)) : recordName(world, r.record);
+      return { what: name ?? r.record, linked: name !== null };
+    };
+    return new Map(
+      catalog.map((entry): [string, Bound] => {
+        const rows = inForce(stored.get(entry.id)).map((r) => ({ r, ...read(r) }));
+        const links: LoreLink[] = [...rows.map(({ r, linked }) => ({ record: r.record, linked, aspect: r.aspect, by: r.by })), ...(world === null ? [] : pinLinks(world, entry))];
+        return [entry.id, { links, defines: rows.map(({ r, what }) => ({ what, aspect: r.aspect })), owned: stored.get(entry.id)?.some((r) => r.by === "owner") === true }];
+      }),
+    );
+  }
+
+  /** The world person each cast character the entries are bound to is, as `entity:<id>`: the cast and the world meet by the character's id or name (`Lore.personPlayed`). */
+  private personsOf(at: LoreAt, entries: readonly IndexedEntry[]): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const e of entries) {
+      for (const l of e.links) {
+        if (!l.linked || !l.record.startsWith("cast:") || out.has(l.record)) continue;
+        const person = this.deps.lore.personPlayed(at, l.record.slice("cast:".length));
+        if (person !== null) out.set(l.record, `entity:${person.id}`);
+      }
+    }
+    return out;
   }
 
   /**
@@ -362,8 +407,10 @@ export class LoreIndex {
   async knownTo(at: LoreAt, plays: string): Promise<LoreEntry[] | null> {
     const person = this.deps.lore.personPlayed(at, plays);
     if (person === null) return null;
-    const names = new Set([`entity:${person.id}`, person.id, person.name].map(foldName));
-    const bound = (await this.entries(at)).filter((e) => e.defines.some((b) => names.has(foldName(b.what))));
+    const all = await this.entries(at);
+    const persons = this.personsOf(at, all);
+    const refs = new Set([`entity:${person.id}`]);
+    const bound = all.filter((e) => isBoundTo(e, refs, persons));
     return bound.length === 0 ? [] : this.deps.lore.readAs(at, person.id, bound.map((e) => e.id));
   }
 
@@ -380,20 +427,26 @@ export class LoreIndex {
       const entry = catalog.get(l.id);
       return entry === undefined ? [] : [{ entry, lines: l }];
     });
+    const world = this.deps.lore.worldAt(at);
     await this.deps.writes.run((db) => {
-      const put = db.query<unknown, [string, string, string, string, string | null, string | null, string, string, string, string, number]>(
-        `INSERT INTO lore_index (user, world, entry, revision, kind, line, defines, related, fields, by, written) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (user, world, entry, revision) DO UPDATE SET kind = excluded.kind, line = excluded.line, defines = excluded.defines, related = excluded.related, fields = excluded.fields, by = excluded.by, written = excluded.written`,
+      const put = db.query<unknown, [string, string, string, string, string | null, string | null, string, string, string, number]>(
+        `INSERT INTO lore_index (user, world, entry, revision, kind, line, related, fields, by, written) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (user, world, entry, revision) DO UPDATE SET kind = excluded.kind, line = excluded.line, related = excluded.related, fields = excluded.fields, by = excluded.by, written = excluded.written`,
       );
-      for (const { entry, lines: l } of kept) put.run(at.user, entry.world, entry.id, l.revision, l.kind, l.line, JSON.stringify(l.defines), JSON.stringify(l.related), JSON.stringify(l.fields ?? {}), by, now);
+      for (const { entry, lines: l } of kept) {
+        put.run(at.user, entry.world, entry.id, l.revision, l.kind, l.line, JSON.stringify(l.related), JSON.stringify(l.fields ?? {}), by, now);
+        // What the run says the entry defines is its bindings, each to the record by its id: the run's latest replaces its earlier ones, and the owner's stand over them.
+        putBindings(db, at.user, entry.id, "run", l.defines.map((b) => ({ ...resolveRecord(world, b.what), aspect: b.aspect })), l.revision, now);
+      }
     }, "keeping lore index lines");
     // What was written is no longer held for the job that was handed it.
     if (job !== undefined) for (const { entry, lines: l } of kept) this.#claims.delete(claimOf(at.user, { ...entry, revision: l.revision }));
     await this.keepFiles(at);
     const held = this.rows(at.user, kept.map((k) => k.entry));
+    const bound = this.bindings(at, kept.map((k) => k.entry));
     return lines.map((l): LoreIndexOutcome => {
       const entry = catalog.get(l.id);
-      return entry === undefined ? { id: l.id, unknown: true } : { id: l.id, kept: joined(entry, held.get(placeOf(entry))) };
+      return entry === undefined ? { id: l.id, unknown: true } : { id: l.id, kept: joined(entry, held.get(placeOf(entry)), bound.get(entry.id)) };
     });
   }
 
@@ -407,15 +460,18 @@ export class LoreIndex {
       if (given === undefined || given === null) return null;
       return typeof given === "string" ? given : JSON.stringify(given);
     };
+    const world = this.deps.lore.worldAt(at);
     await this.deps.writes.run((db) => {
       db.query<unknown, [string, string, string]>("INSERT OR IGNORE INTO lore_index_own (user, world, entry) VALUES (?, ?, ?)").run(at.user, entry.world, entry.id);
       for (const field of LORE_INDEX_FIELDS) {
-        if (!(field in edit)) continue;
+        if (field === "defines" || !(field in edit)) continue;
         db.query<unknown, [string | null, number, string, string, string]>(`UPDATE lore_index_own SET own_${field} = ?, edited = ? WHERE user = ? AND world = ? AND entry = ?`).run(value(field), now, at.user, entry.world, entry.id);
       }
+      // His own bindings stand over a run's and outlive a run that redoes the entry; null takes them off, and the run's show again.
+      if ("defines" in edit) putBindings(db, at.user, entry.id, "owner", (edit.defines ?? []).map((b) => ({ ...resolveRecord(world, b.what), aspect: b.aspect })), null, now);
     }, "keeping the user's edit of the lore index");
     await this.keepFiles(at);
-    return joined(entry, this.rows(at.user, [entry]).get(placeOf(entry)));
+    return joined(entry, this.rows(at.user, [entry]).get(placeOf(entry)), this.bindings(at, [entry]).get(entry.id));
   }
 
   /**
@@ -479,7 +535,7 @@ export class LoreIndex {
     const wanted = new Set(entries.map(placeOf));
     const marks = worlds.map(() => "?").join(", ");
     // Prepared rather than cached: the statement's shape changes with the number of worlds asked about.
-    const runs = this.deps.db.prepare<IndexRow, string[]>(`SELECT world, entry, revision, kind, line, defines, related, fields FROM lore_index WHERE user = ? AND world IN (${marks}) ORDER BY written DESC, rowid DESC`).all(user, ...worlds);
+    const runs = this.deps.db.prepare<IndexRow, string[]>(`SELECT world, entry, revision, kind, line, related, fields FROM lore_index WHERE user = ? AND world IN (${marks}) ORDER BY written DESC, rowid DESC`).all(user, ...worlds);
     for (const row of runs) {
       const place = placeOf({ world: row.world, id: row.entry });
       if (!wanted.has(place)) continue;
@@ -487,7 +543,7 @@ export class LoreIndex {
       held.runs.push(row);
       out.set(place, held);
     }
-    const owns = this.deps.db.prepare<OwnRow, string[]>(`SELECT world, entry, own_kind, own_line, own_defines, own_related FROM lore_index_own WHERE user = ? AND world IN (${marks})`).all(user, ...worlds);
+    const owns = this.deps.db.prepare<OwnRow, string[]>(`SELECT world, entry, own_kind, own_line, own_related FROM lore_index_own WHERE user = ? AND world IN (${marks})`).all(user, ...worlds);
     for (const row of owns) {
       const place = placeOf({ world: row.world, id: row.entry });
       if (!wanted.has(place)) continue;

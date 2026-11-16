@@ -133,15 +133,31 @@ export interface Binding {
 /** A source's key in a base version's `seen`. */
 export const sourceKey = (kind: SourceKind, ref: string): string => `${kind}:${ref}`;
 
+/**
+ * A cast character as a record the lore's binding store links entries to (`src/lore/bindings.ts`): the lore keeps the bindings of lore
+ * entries, so the one store is read by the lore map, a character's known lore and the cast alike. A card, a persona or a memory
+ * entity is no lore, and the cast keeps those bindings itself.
+ */
+const recordOf = (character: string): string => `cast:${character}`;
+
 export function bindingsOf(db: Database, user: string, character: string): Binding[] {
-  return db
+  const own = db
     .query<{ kind: string; ref: string; defines: string | null; created: number }, [string, string]>("SELECT kind, ref, defines, created FROM cast_binding WHERE user = ? AND character = ? ORDER BY created, rowid")
     .all(user, character)
-    .map((r) => ({ kind: r.kind as SourceKind, ref: r.ref, defines: r.defines, created: r.created }));
+    .map((r): Binding => ({ kind: r.kind as SourceKind, ref: r.ref, defines: r.defines, created: r.created }));
+  const entries = db
+    .query<{ entry: string; aspect: string; created: number }, [string, string]>("SELECT entry, aspect, created FROM lore_binding WHERE user = ? AND record = ? AND by = 'casting' ORDER BY created, rowid")
+    .all(user, recordOf(character))
+    .map((r): Binding => ({ kind: "entry", ref: r.entry, defines: r.aspect === "" ? null : r.aspect, created: r.created }));
+  return [...own, ...entries].sort((a, b) => a.created - b.created);
 }
 
-/** Binds a source, or says again which side it defines, inside the caller's write. */
+/** Binds a source, or says again which side it defines, inside the caller's write. A lore entry is bound in the lore's store. */
 export function bindSource(db: Database, user: string, character: string, b: Omit<Binding, "created">, now: number): void {
+  if (b.kind === "entry") {
+    db.run("INSERT INTO lore_binding (user, entry, record, linked, aspect, by, revision, created) VALUES (?, ?, ?, 1, ?, 'casting', NULL, ?) ON CONFLICT (user, entry, record, by) DO UPDATE SET aspect = excluded.aspect", [user, b.ref, recordOf(character), b.defines ?? "", now]);
+    return;
+  }
   db.run("INSERT INTO cast_binding (user, character, kind, ref, defines, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user, character, kind, ref) DO UPDATE SET defines = excluded.defines", [
     user,
     character,
@@ -154,6 +170,7 @@ export function bindSource(db: Database, user: string, character: string, b: Omi
 
 /** Takes a binding away, inside the caller's write; whether there was one. */
 export function unbindSource(db: Database, user: string, character: string, kind: SourceKind, ref: string): boolean {
+  if (kind === "entry") return db.run("DELETE FROM lore_binding WHERE user = ? AND entry = ? AND record = ? AND by = 'casting'", [user, ref, recordOf(character)]).changes > 0;
   return db.run("DELETE FROM cast_binding WHERE user = ? AND character = ? AND kind = ? AND ref = ?", [user, character, kind, ref]).changes > 0;
 }
 

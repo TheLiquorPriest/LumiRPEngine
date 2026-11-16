@@ -15,6 +15,7 @@ import { castTools, type CastDeps } from "../../src/cast/index";
 import { castAt } from "../../src/cast/path";
 import { CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
 import { CAST_MIGRATIONS } from "../../src/cast/schema";
+import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import type { SourceNow, SourceReader } from "../../src/cast/sources";
 import { CAST_VIEWS, type CastViewName } from "../../src/cast/views";
 import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
@@ -81,6 +82,8 @@ export async function openTable(world: WorldDoc | null = inventedWorld()): Promi
   const db = new Database(":memory:");
   migrateStore(db);
   for (const m of CAST_MIGRATIONS) if ("sql" in m) db.run(m.sql);
+  // The lore keeps the bindings of lore entries, which the cast binds a character to.
+  for (const m of LORE_MIGRATIONS) if ("sql" in m) db.run(m.sql);
   let clock = 0;
   const store = openStore({ db, registry: registry(), worlds: (r) => (world !== null && r === revision ? world : undefined), now: () => ++clock });
   const writes = new WriteQueue(db, 10);
