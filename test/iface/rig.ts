@@ -10,6 +10,7 @@ import { hashJson } from "../../src/shared/hash";
 import type { WorldDoc } from "../../src/shared/world";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
+import { QUEST_STORE_AREA } from "../../src/quests";
 import { STORY_STORE_AREA } from "../../src/story/fold";
 import { BLANK_REVISION } from "../../src/store/blank";
 import { migrateStore } from "../../src/store/schema";
@@ -73,7 +74,7 @@ export async function rig(more: Partial<EngineDeps> = {}, doc: WorldDoc | "blank
   const revision = doc === "blank" ? BLANK_REVISION : hashJson(doc);
   const db = new Database(":memory:");
   migrateStore(db);
-  const store = openStore({ db, registry: registry(), worlds: (r: string) => (doc !== "blank" && r === revision ? doc : undefined), areas: [STORY_STORE_AREA] });
+  const store = openStore({ db, registry: registry(), worlds: (r: string) => (doc !== "blank" && r === revision ? doc : undefined), areas: [STORY_STORE_AREA, QUEST_STORE_AREA] });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
   await writes.run(() => s.createChat(doc === "blank" ? { id: CHAT } : { id: CHAT, world: doc.id, revision }));
