@@ -11,12 +11,20 @@ import type { ActivatedEntry, LoreTurns } from "../lore";
 import { isRecord } from "../shared/json";
 import type { Writes } from "./kv";
 
-/** What a turn's request carried that the prompt port and the lore keep: its layout, the lore that activated, and the window's cut. */
+/** A prompt's message as RPE passed it on: its role and its content as Lumiverse sent it (text, or a list of parts). */
+export interface PassedMessage {
+  role: string;
+  content: string | unknown[];
+}
+
+/** What a turn's request carried that the prompt port and the lore keep: its layout, the prompt as passed on, the lore that activated, and the window's cut. */
 export interface Received {
   user: string;
   turn: string;
   chat: string;
   layout: RawLayout;
+  /** Absent where the caller keeps no prompt (a carried turn's): nothing is then told apart against it. */
+  prompt?: readonly PassedMessage[];
   lore: readonly ActivatedEntry[];
   cut: unknown;
   /** The messages Lumiverse's memory stood in for with a summary in this prompt. */
@@ -42,8 +50,8 @@ export interface TurnPrompts extends PromptPort {
   keptFrom(user: string, turn: string): string | null;
   /** Where the slices of the chat's prompts were found, by turn, as RPH saved it; null for a turn that has none kept. */
   located(user: string, turn: string): LocatedSlices | null;
-  /** What a turn's request carried as kept: its raw layout and the receipt's cut (`Cut`, as JSON); null for a turn whose prompt is not kept. */
-  carried(user: string, turn: string): { layout: RawLayout; cut: unknown } | null;
+  /** What a turn's request carried as kept: its raw layout, the receipt's cut (`Cut`, as JSON) and the prompt as passed on (null for a turn kept before it was); null for a turn whose prompt is not kept. */
+  carried(user: string, turn: string): { layout: RawLayout; cut: unknown; prompt: PassedMessage[] | null } | null;
   /**
    * The chat's turns whose prompt slices are kept, newest first: `limit` of them, after the place `after` (`<received>~<turn>`) when
    * named; each with when its request came, where its slices were and the receipt's cut.
@@ -98,7 +106,7 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
   return {
     mapFile,
     keep(into, r) {
-      into.run("INSERT OR REPLACE INTO turn_prompt (user, turn, chat, preset, layout, lore, cut, received, summarized, speaker, persona) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      into.run("INSERT OR REPLACE INTO turn_prompt (user, turn, chat, preset, layout, lore, cut, received, summarized, speaker, persona, prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
         r.user,
         r.turn,
         r.chat,
@@ -110,6 +118,7 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
         JSON.stringify(r.summarized),
         r.speaker,
         r.persona,
+        r.prompt === undefined ? null : JSON.stringify(r.prompt),
       ]);
     },
     answered(into, user, turn, m) {
@@ -148,8 +157,8 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
     },
 
     carried(user, turn) {
-      const row = db.query<{ layout: string; cut: string }, [string, string]>("SELECT layout, cut FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
-      return row === null ? null : { layout: JSON.parse(row.layout) as RawLayout, cut: JSON.parse(row.cut) as unknown };
+      const row = db.query<{ layout: string; cut: string; prompt: string | null }, [string, string]>("SELECT layout, cut, prompt FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
+      return row === null ? null : { layout: JSON.parse(row.layout) as RawLayout, cut: JSON.parse(row.cut) as unknown, prompt: row.prompt === null ? null : (JSON.parse(row.prompt) as PassedMessage[]) };
     },
 
     locatedPage(user, chat, limit, after) {

@@ -70,6 +70,14 @@ ALTER TABLE turn_prompt ADD COLUMN answered_text TEXT;
 CREATE INDEX turn_prompt_answered ON turn_prompt (user, chat, answered) WHERE answered IS NOT NULL;
 `,
   },
+  {
+    version: 4,
+    name: "the prompt each turn's request carried, as RPE passed it on",
+    // Kept with the turn's request record and let go with it: a regenerate or a swipe of its reply tells his feedback apart against it (READINGS R-198).
+    sql: `
+ALTER TABLE turn_prompt ADD COLUMN prompt TEXT;
+`,
+  },
 ];
 
 export const HARNESS_MIGRATIONS: readonly TableStep[] = [

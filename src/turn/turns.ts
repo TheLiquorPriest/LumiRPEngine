@@ -594,7 +594,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           // The lore Lumiverse said activated for the generation: heard before the request, and since; heard from now on, it joins the kept record.
           const late = this.#lateLore.get(chatKey);
           if (late?.generation === tag.generation) this.#lateLore.delete(chatKey);
-          this.#d.prompts.keep(db, { user, turn: begun.id, chat, layout: tagged.layout, lore: [...tagged.lore, ...(late?.generation === tag.generation ? late.lore : [])], cut: tagged.cut, summarized: summarizedOf(tag, steps), speaker: tag.speaker.id, persona: tag.persona, at: received });
+          this.#d.prompts.keep(db, { user, turn: begun.id, chat, layout: tagged.layout, prompt: tagged.prompt.map(({ role, content }) => ({ role, content })), lore: [...tagged.lore, ...(late?.generation === tag.generation ? late.lore : [])], cut: tagged.cut, summarized: summarizedOf(tag, steps), speaker: tag.speaker.id, persona: tag.persona, at: received });
           this.#d.runs.put(db, run);
           this.#d.runs.hold(run);
         }, "keeping the turn's request")

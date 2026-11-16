@@ -98,6 +98,16 @@ export function turnArea(takes: TurnTakes): TurnArea {
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
         ranges: async (chat) => namedStretches(made().store, owner(), chat),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
+        // The prompt RPE passed on for the attempt a regenerate or a swipe replaces: the turn tied to the message as the chat's path shows
+        // it (its newest attempt where the path no longer holds it), as its request record keeps it; null where none is kept.
+        replaced: async (tag) => {
+          const message = tag.target.message;
+          if (message === null) return null;
+          const s = made().store.user(owner());
+          const turn = s.path(tag.chat).find((e) => e.message === message)?.turn ?? s.swipes(tag.chat, message).at(-1)?.id ?? null;
+          const kept = turn === null ? null : made().prompts.carried(owner(), turn);
+          return kept === null || kept.prompt === null ? null : { prompt: kept.prompt, layout: kept.layout };
+        },
         // The model layer's pass, given the user this RPE belongs to: the door names no user of its own.
         models: { pass: (request, sink, signal) => made().harness.models.pass(owner(), request, sink, signal) },
         passConnection: () => (app === null ? null : passConnection(app.paths.files, app.log)),
