@@ -37,7 +37,7 @@ async function island(): Promise<Rig> {
   const t = await rig({}, "blank");
   const r = await t.call("world_apply", {
     operations: [
-      { op: "spawn", kind: "place", name: "Gull Skerry", ...SRC },
+      { op: "place", kind: "place", name: "Gull Skerry", ...SRC },
       { op: "spawn", kind: "person", name: "Ada Lorne", at: "Gull Skerry", ...SRC },
     ],
   });

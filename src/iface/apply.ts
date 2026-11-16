@@ -68,6 +68,10 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   key: TEXT,
   value: {},
   replaces: TEXT,
+  part: TEXT,
+  beat: TEXT,
+  base: TEXT,
+  sources: { type: "array", items: { anyOf: [TEXT, { type: "object", properties: { entry: TEXT, aspect: TEXT } }] } },
   add: NUMBER,
   quest: TEXT,
   stage: TEXT,
@@ -119,8 +123,8 @@ const OPERATION_ITEM: JsonObject = {
 export const SCENE_FROM_NOTHING: JsonObject = {
   operations: (
     [
-      { op: "spawn", kind: "place", name: "Gull Skerry" },
-      { op: "spawn", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry" },
+      { op: "place", kind: "place", name: "Gull Skerry" },
+      { op: "place", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry" },
       { op: "spawn", kind: "person", name: "Ada Lorne", at: "Keeper's kitchen" },
       { op: "spawn", kind: "person", name: "Tobin Lorne", at: "Keeper's kitchen" },
       { op: "spawn", name: "Oil lamp", at: "Keeper's kitchen" },

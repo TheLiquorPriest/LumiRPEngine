@@ -7,6 +7,7 @@
 // reports it. A name that is not recorded is answered as not there, with its near matches: only
 // `spawn` makes anything, and a name an operation names that no recorded thing goes by is never made for it.
 
+import { makePlace, PLACE_MAKE_KINDS } from "../places/make";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { ownersIn } from "../shared/finance";
 import type { EntityId } from "../shared/ids";
@@ -39,11 +40,6 @@ export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hol
 /** Where a spot is, for an answer: a place's, a holder's or a support's name with its id. */
 function spotName(o: OpContext, spot: Spot | Support): string {
   return named(o.reading, "place" in spot ? spot.place : "in" in spot ? spot.in : spot.on);
-}
-/** What an applied item op says beyond its events: what the engine advised is a report on the operation, and what it filled in from the world is recorded as filled in. */
-function reportItem(o: OpContext, out: ItemOpApplied): void {
-  if (out.filled !== undefined) o.draft.markFilled(out.filled);
-  for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
 }
 
 /** What an applied item op says beyond its events: what the engine advised is a report on the operation, and what it filled in from the world is recorded as filled in. */
@@ -259,10 +255,19 @@ const move: OpDef = {
 const place: OpDef = {
   name: "place",
   lane: "engine",
-  needs: ["what"],
-  takes: ["what", "at", "on", "by", "square", "near", "zone", "why"],
+  // (S17Story, places) `place` also makes a place: with a `name` and a `kind` of place, and no `what` to set down.
+  needs: [],
+  takes: ["what", "at", "on", "by", "square", "near", "zone", "why", "name", "kind", "in", "sources", "description", "base", "fields", "owner"],
   example: { op: "place", what: "lantern", on: "table", source: { from: "prose", message: "m-0013" } },
   run(o) {
+    if (o.args.what === undefined || o.args.what === null || o.args.what === "") {
+      const name = textArg(o.args, "name");
+      if (name === undefined) return { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["what", "name"] } };
+      const kind = textArg(o.args, "kind");
+      if (kind === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["kind"] } };
+      if (!PLACE_MAKE_KINDS.includes(kind)) return notOneOf(o, "kind", kind, PLACE_MAKE_KINDS);
+      return makePlace(o, name, kind);
+    }
     const w = o.draft.w;
     const from = w.events.length;
     const soft = noSoft();
@@ -524,58 +529,6 @@ function unknownType(o: OpContext, said: string): Unread {
   return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "type", "type", said, near.map((id) => `${names.get(id) ?? id} [${id}]`), [], types.length === 0) }, want: "entity", data: { near: near.map((id) => ({ id, name: names.get(id) ?? id })) } };
 }
 
-/** The kinds a place is made as: `place`, a place of the chat's own world, inside another or in none; a room, a spot or a venue, made in play inside a place. */
-export const PLACE_SPAWN_KINDS: readonly string[] = ["place", ...PLACE_KINDS];
-
-/** What `spawn` reads of a place: its name and kind, where it is, its description, its fields, and why a place made in play was made. */
-const PLACE_READS: readonly string[] = ["op", "name", "kind", "at", "in", "description", "fields", "owner", "why", ...Object.keys(PROVENANCE_PROPERTIES)];
-
-/**
- * A place made by `spawn`, inside the place `at` (or `in`) names, which an earlier operation of the
- * call may have made, with the fields the call gives and its owner. A `place` is written into this chat's own
- * world, as today's world_place writes one, so it needs nothing to be in: the first place of a world
- * with none. A room, a spot or a venue is made in play inside a place (today's place ops). A place
- * of that name already in the same place is told of in a report, never taken for it, and so is one
- * past the chat's number; the name is kept as given; what a place has none of (a tier, a type) is reported as not kept.
- */
-function spawnPlace(o: OpContext, name: string, kind: string): Unread | undefined {
-  const w = o.draft.w;
-  const field = o.args.at !== undefined && o.args.at !== null ? "at" : o.args.in !== undefined && o.args.in !== null ? "in" : null;
-  const within = field === null ? undefined : find(o, field, "place");
-  if (isUnread(within)) return within;
-  const owner = findOptional(o, "owner", "entity");
-  if (isUnread(owner)) return owner;
-  const description = textArg(o.args, "description");
-  const given = o.args.fields;
-  if (given !== undefined && given !== null && !isRecord(given)) return notAs(o, "fields", given, "fields");
-  const fields: JsonObject = { ...(isRecord(given) ? given : {}), ...(owner ? { owner: owner.id } : {}) };
-  const from = w.events.length;
-  let made: string | undefined;
-  if (kind === "place") {
-    const parent = within?.id ?? null;
-    const twins = findPlaces(w.ctx, name, parent !== null ? { parent } : {}).filter((h) => h.matched !== "head" && h.parent === parent);
-    made = freshId(o, name);
-    const value: JsonObject = { id: made, name, ...(parent !== null ? { parent } : {}), fields: { ...fields, ...(description !== undefined ? { description } : {}) } };
-    const bad = o.draft.applyAll([draftEvent(baseWorld(w.ctx.world), chatDraftOf(w.state), { collection: "places", id: made, value })]);
-    if (bad) return refusedAs(o, bad, field ?? "at", "place");
-    if (twins.length > 0) o.draft.adviseOp(o.n, { code: "same_name", values: { name, same: twins.map((t) => `${t.name} [${t.id}]`).join(", ") } });
-  } else {
-    if (within === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
-    const out = placeOp(w.ctx, { do: "make", name, parent: within.id, as: kind as PlaceKind, why: textArg(o.args, "why") ?? "", ...(description !== undefined ? { description } : {}) }, { by: o.call.agent.definition, salt: o.draft.seed(o.n), advise: true, cap: o.call.settings.placeCap });
-    if ("code" in out) return refusedAs(o, out, field ?? "at", "place");
-    // The call's fields go on the place with what today's place op writes (its description, aliases, entry), which stands where both name one.
-    const events = out.events.map((e): LedgerEvent => ("data" in e && isRecord(e.data.def) ? { ...e, data: { ...e.data, def: { ...e.data.def, fields: { ...fields, ...(isRecord(e.data.def.fields) ? e.data.def.fields : {}) } } } } : e));
-    const bad = o.draft.applyAll(events);
-    if (bad) return refusedAs(o, bad, field ?? "at", "place");
-    made = out.made;
-    for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
-  }
-  const unread = Object.keys(o.args).filter((k) => !PLACE_READS.includes(k));
-  if (unread.length > 0) o.draft.adviseOp(o.n, { code: "place_unread", values: { unread: textOf(unread) } });
-  o.draft.record(o.n, o.op, "engine", o.prov, from, made !== undefined ? { made } : {});
-  return undefined;
-}
-
 const spawn: OpDef = {
   name: "spawn",
   lane: "engine",
@@ -589,8 +542,8 @@ const spawn: OpDef = {
     const many = o.args.qty;
     if (many !== undefined && many !== null && !(typeof many === "number" && Number.isInteger(many) && many >= 1)) return notAs(o, "qty", many, "qty");
     const said = textArg(o.args, "kind");
-    // A world's own kind of that name is its own; only a name no kind has makes a place.
-    if (said !== undefined && PLACE_SPAWN_KINDS.includes(said) && !(own(o.reading.doc.kinds, said) ?? o.reading.registry.kinds.get(said))) return spawnPlace(o, name, said);
+    // (S17Story, places) One operation makes a place, `place`: a kind of place named to spawn is answered with what spawn makes.
+    if (said !== undefined && PLACE_MAKE_KINDS.includes(said) && !(own(o.reading.doc.kinds, said) ?? o.reading.registry.kinds.get(said))) return { line: "spawn_not_place", fields: { n: o.n, op: o.op, kind: said, choices: textOf(kindChoices(o)) } };
     const w = o.draft.w;
     const where = spawnSpot(o);
     if (isUnread(where)) return where;
@@ -679,7 +632,7 @@ function kindChoices(o: OpContext): string[] {
     const label = (own(doc.kinds, k) ?? registry.kinds.get(k))?.label;
     return label !== undefined && label.toLowerCase() !== k.replace(/_/g, " ").toLowerCase() ? `${k} (${label})` : k;
   });
-  return [...kinds, ...PLACE_SPAWN_KINDS];
+  return kinds;
 }
 
 /** The operations on people and things, by name. */

@@ -3,6 +3,8 @@
 // description and each argument's text from `.tools/<name>.md`; every sentence of its answers from
 // `.prompts/engine-answers.md`). An answer is data from the store plus lines from that file.
 
+import type { PlacesSettings } from "../places/settings";
+import type { PlaceSourcesReader } from "../places/sources";
 import type { Database } from "bun:sqlite";
 import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonSchema, JsonValue, Scope, ToolContent, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
 import type { NumberSettings, Setting } from "../app/setting-list";
@@ -34,6 +36,8 @@ export const IFACE_DEFAULTS = Object.freeze({
   editOps: 64,
   /** The places a chat makes in play before each further one is reported, where its world sets no `placeCap`. */
   placeCap: 64,
+  /** The most characters of an old engine's record `turn_carried` gives in one answer; the rest is read on from where the answer stops. */
+  carriedChars: 6000,
 });
 
 export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: number };
@@ -52,6 +56,7 @@ export const IFACE_SETTING_DEFS = {
   creditScoreAssumed: { key: "engine.creditScoreAssumed", default: IFACE_DEFAULTS.creditScoreAssumed, takes: { type: "whole", least: 300, most: 850 }, perConnection: false, name: "Score assumed for someone with none", about: "The credit score the finance tables are read at for someone with no score recorded.", effect: "turn" },
   editOps: { key: "engine.editOps", default: IFACE_DEFAULTS.editOps, takes: { type: "whole", least: 1 }, perConnection: false, name: "Operations one GM edit carries", about: "The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it.", effect: "turn" },
   placeCap: { key: "engine.placeCap", default: IFACE_DEFAULTS.placeCap, takes: { type: "whole", least: 0 }, perConnection: false, name: "Places a chat makes before each further one is reported", about: "The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same.", effect: "turn" },
+  carriedChars: { key: "engine.carriedChars", default: IFACE_DEFAULTS.carriedChars, takes: { type: "whole", least: 1 }, perConnection: false, name: "Characters of an old record read at once", about: "The most characters of what an earlier build recorded for a migrated turn that one turn_carried answers with; the rest is read on from where it stops.", effect: "turn" },
 } as const satisfies NumberSettings<keyof IfaceSettings>;
 
 /** Every setting the engine's tools read, as a config file writes it. */
@@ -129,6 +134,31 @@ export interface FactStore {
   of(state: StoreState, about: string): JsonValue[];
 }
 
+/** One text a carried record names, word for word: the part of the record that names it, where it was kept, and its words (null: the earlier build's clean-up had removed it). */
+export interface CarriedText {
+  part: string;
+  path: string;
+  text: string | null;
+}
+
+/** What an earlier build recorded on one migrated turn, kept beside the turn and read-only: which engine played it, each part of the record by name, the texts it names, why the reply stood unplayed, and where it said something against what its turn decided. */
+export interface CarriedRecord {
+  turn: string;
+  chat: string;
+  message: string;
+  swipe: number;
+  engine: JsonValue;
+  fields: { name: string; value: JsonValue }[];
+  texts: CarriedText[];
+  unplayed: string | null;
+  departures: string[];
+}
+
+/** The migration's records, as the application reads them (`oldRecord`): the user's own, by turn; null for a turn no migration carried. */
+export interface CarriedPort {
+  record(user: string, turn: string): CarriedRecord | null;
+}
+
 /** What the engine's tools are given by the host (the turn, `src/turn/`). */
 export interface EngineDeps {
   /** The store's user API, for the scope's user. */
@@ -155,6 +185,12 @@ export interface EngineDeps {
   settings?: Partial<IfaceSettings>;
   /** The map's settings for the chat (`map:` in its config), for the map tools; absent, their defaults. */
   mapSettings?: MapConfig;
+  /** The places' settings for the chat (`places:` in its config): how many entries of each part of a place's record a level shows; absent, their defaults. */
+  places?: Partial<PlacesSettings>;
+  /** What a place's record reads of the lore: the entries bound to a place and each as Lumiverse holds it now, for the base a call writes and the sources a place shows. Absent: no entry is bound to any place. */
+  placeSources?: PlaceSourcesReader;
+  /** What an earlier build recorded on a migrated turn, read-only, for `turn_carried`: given by the application, which holds the migration's records. Absent: none is held. */
+  carried?: CarriedPort;
   /** Milliseconds since 1970, for an approval's question; `Date.now` when absent. */
   now?: () => number;
 }

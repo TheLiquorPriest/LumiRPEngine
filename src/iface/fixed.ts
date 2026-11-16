@@ -16,6 +16,7 @@ import { WORLD_STATE_DEFAULTS } from "../store/world-state";
 import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
+import { baseOf, isPlaceFactPart, PLACE_FACT_PARTS, PLACES_DEFAULTS, placeAtState, placeSliceOf, sourcesNow, sourcesOf, withPlaceLines } from "../places";
 import { clockText, listDue, timeFrom } from "./ops-time";
 import { missed, missedData, numberArg, unknownFields } from "./ops";
 import { type Found, isFound, nearestOf, Reading, saysUnreadable, type Unreadable } from "./reading";
@@ -56,7 +57,7 @@ export const WORLD_QUERY: ToolSpec = {
   name: "world_query",
   family: "state",
   tier: "read",
-  properties: { at: TEXT, depth: { anyOf: [WHOLE, oneOf(["full"])] }, due: TEXT, map: YES_NO },
+  properties: { at: TEXT, depth: { anyOf: [WHOLE, oneOf(["full"])] }, due: TEXT, map: YES_NO, part: oneOf(PLACE_FACT_PARTS) },
   required: ["at"],
   example: { at: "thornbury", depth: 2, due: "six hours" },
   async run(args, call) {
@@ -72,7 +73,26 @@ export const WORLD_QUERY: ToolSpec = {
       return reply.line("unreadable", { field: "depth", value: JSON.stringify(args.depth), wants: reading.lines.line("wants_depth") ?? "" }).fail();
     }
     const depth = saidDepth ?? call.settings.queryDepth;
-    const view = reading.view().query(at.ref, depth, { due: call.deps.due, ahead: call.deps.dueAhead ?? WORLD_STATE_DEFAULTS.dueAhead });
+    // (S17Story, places) A place's record: what the story changed there, its features and its access and state, as lines of their own, or one part whole.
+    const part = typeof args.part === "string" && isPlaceFactPart(args.part) ? args.part : undefined;
+    if (args.part !== undefined && args.part !== null && part === undefined) return reply.line("unreadable", { field: "part", value: JSON.stringify(args.part), choices: textOf(PLACE_FACT_PARTS) }).fail();
+    if (part !== undefined && !at.ref.startsWith("place:")) return reply.line("part_needs_place", { at: `${at.name} [${at.id}]`, choices: textOf(PLACE_FACT_PARTS) }).fail();
+    const found = reading.view().query(at.ref, depth, { due: call.deps.due, ahead: call.deps.dueAhead ?? WORLD_STATE_DEFAULTS.dueAhead });
+    // Its sources are read live, as Lumiverse holds the entries now, and set against its base.
+    const sources = call.deps.placeSources !== undefined && at.ref.startsWith("place:") && part === undefined ? await sourcesNow(call.deps.placeSources, { user: call.scope.user, chat: call.scope.chat }, at.id, baseOf(placeSliceOf(reading.state), at.id), sourcesOf(placeSliceOf(reading.state), at.id)) : undefined;
+    const view =
+      found !== null && at.ref.startsWith("place:")
+        ? {
+            lines: withPlaceLines(found.lines, {
+              at: placeAtState(call.deps.store, call.deps.env, call.scope.chat, reading.turn?.id ?? null, reading.state, reading.ctx),
+              place: at.id,
+              settings: { ...PLACES_DEFAULTS, ...(call.deps.places ?? {}) },
+              ...(call.deps.mapSettings !== undefined ? { config: call.deps.mapSettings } : {}),
+              ...(part !== undefined ? { part } : {}),
+              ...(sources !== undefined ? { sources } : {}),
+            }),
+          }
+        : found;
     if (view !== null) reply.tree(renderView(view, call.tree));
     if (typeof args.due === "string") {
       const to = timeFrom(reading, reading.state.world, args.due);

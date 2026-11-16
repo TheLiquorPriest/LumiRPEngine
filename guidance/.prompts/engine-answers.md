@@ -21,9 +21,11 @@ no_operations: operations cannot be read{{#value}}: you sent {{value}}{{/value}}
 needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs one of {{fields}}, and only one.
 needs_any: Operation {{n}} ({{op}}) needs one of {{fields}}.
-op_takes: {{op}} needs {{needs}}{{#takes}}, and also takes {{takes}}{{/takes}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
+op_takes: {{op}}{{#needs}} needs {{needs}}{{#takes}}, and also takes {{takes}}{{/takes}}{{/needs}}{{^needs}} takes {{takes}}{{/needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
 place_unread: Operation {{n}} ({{op}}): a place has no {{unread}}, so that was not kept.
-make_place: A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.
+make_place: A place can be made earlier in this same call: place with a kind of place and its name, before the operation that names it.
+spawn_not_place: Operation {{n}} ({{op}}): a {{kind}} is made with the place operation (place, with its name, its kind and where it is), and spawn does not make one. spawn makes: {{choices}}.
+source_unknown: Operation {{n}} ({{op}}): Lumiverse holds no lore entry {{entries}}; it is bound to the place all the same, and shows as gone.
 make_person: Someone can be made earlier in this same call: spawn with kind person and their name, before the operation that names them.
 make_thing: A thing can be made earlier in this same call: spawn with its name and where it is (at, in or on), before the operation that names it.
 make_holder: Someone, or something that holds things, can be made earlier in this same call: spawn with kind person or container, before the operation that names it.
@@ -51,6 +53,11 @@ wants_fields: an object of field: value
 wants_amount: a number above 0, in the world's main coin
 wants_amount_not_zero: a number other than 0, in the world's main coin
 wants_amount_any: a number, in the world's main coin
+wants_positive: a number above 0
+same_ends: Operation {{n}} ({{op}}): a way joins two places, and both ends are {{name}}.
+route_of_map: Operation {{n}} ({{op}}): the way between {{from}} and {{to}} is drawn by the map {{map}}, so it is changed there: map_edit on that map, not a second way beside it.
+no_path: Operation {{n}} ({{op}}): no way of this world's own joins {{from}} and {{to}}, so there is nothing to remove.{{#others}} {{from}} has ways to: {{others}}.{{/others}}
+no_path_mode: Operation {{n}} ({{op}}): the way between {{from}} and {{to}} has no {{mode}} way. Its ways of travel: {{modes}}. Give one of them, or leave mode out to remove the whole way.
 wants_key: a field name
 wants_point: world, a place, or someone or something
 wants_change: a number other than 0
@@ -60,6 +67,7 @@ wants_delta: a whole number, below 0 for wear and damage, above 0 for mending
 wants_qty: a whole number of at least 1
 wants_depth: a whole number from 0, or full
 wants_sum: numbers with + - * / and brackets, and a percent sign after a number for a rate, such as 12.50 * 3 * 1.08
+wants_sources: a list of lore entries, each an id or { entry, aspect } with the aspect of the place it defines
 wants_specs: a list of { label, value }
 wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
@@ -133,6 +141,10 @@ due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{liste
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.
+carried_none: Turn {{turn}} carries no record of an earlier build: nothing was migrated for it.
+carried_removed: {{part}} of turn {{turn}}'s old record was removed by the earlier build's clean-up before it was carried, so its words are gone.
+carried_unknown: Turn {{turn}}'s old record has no part {{part}}.{{#near}} Near: {{near}}.{{/near}} Its parts: {{parts}}.
+carried_cut: {{part}} goes on past {{to}} of {{of}} characters: send from {{to}} to read on.
 check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; against takes the difficulty the total has to reach.
 totals_cut_short: The run ended at {{reached}}, short of {{until}}: the engine's own cap on a run of this size stopped it there. The totals are for the span up to {{reached}}.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.
@@ -145,6 +157,7 @@ store_replaces_none: {{#n}}Operation {{n}} ({{op}}): {{/n}}no standing fact {{id
 set_nothing_worn: Operation {{n}} ({{op}}): {{who}} wears nothing to keep as {{kind}}, so {{name}} was saved with no pieces.
 set_past_max: Operation {{n}} ({{op}}): {{who}} keeps {{max}} saved outfits and loadouts, which is the most this world's rules keep; {{name}} was saved all the same.
 unknown_by: Operation {{n}} ({{op}}): there is no one called {{name}} to have taken it.{{#other}} By that name there is {{other}}.{{/other}}{{#near}} Near: {{near}}.{{/near}} Something gone missing is item_lose with no by; to put it into a holder use store, and to put it somewhere use move.
+wants_words: some words, at least one character
 wants_name: a name, of any length, with at least one character
 bad_routine_value: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#wants}} It takes {{wants}}{{/wants}}{{#problems}} Cast life's problems with it: {{problems}}.{{/problems}}
 wants_block_value: an object for one block of the routine (a label, an activity, a kind of fixed, flexible or optional, a length in minutes, and the start time at for a fixed block or a window from and to for another), {"off": true}, or null to put the world's block back.
@@ -230,5 +243,8 @@ quest_exists: Operation {{n}} ({{op}}): {{what}} is already a quest, so the call
 quest_written: Operation {{n}} ({{op}}): {{what}} was written: {{parts}}.
 quest_world_part: Operation {{n}} ({{op}}): {{what}} is the world's own quest, so {{fields}} was left out; only its stages, what the player is shown and how it closes are written to it.
 unknown_thread: Operation {{n}} ({{op}}): the story record holds no thread {{thread}}.{{#near}} Its threads: {{near}}.{{/near}}
+unknown_beat: Operation {{n}} ({{op}}): the story record holds no beat {{beat}}.{{#near}} Its beats near that: {{near}}.{{/near}}
+fact_part_place: Operation {{n}} ({{op}}): a part names where in a place's record a fact belongs, and {{about}} is not a place. Leave the part out{{#choices}}, or write a fact about a place with one of: {{choices}}{{/choices}}.
+part_needs_place: world_query reads a part of a place's record, and {{at}} is not a place. Leave the part out, or ask at a place for one of: {{choices}}.
 wants_stage_list: a list of stage ids, or all, none, or default
 wants_stage: an object with the stage's id in `stage`, and its `label`, `condition` and where it stands in `after`

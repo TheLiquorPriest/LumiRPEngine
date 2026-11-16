@@ -26,11 +26,14 @@ import { LIGHT_FIELD } from "../packs/space/core/light";
 import { axesOf } from "../packs/relationships/core/index";
 import { findQuest, newQuestId, QUEST_KINDS, QUEST_OPS, QUEST_STORE_AREA, type QuestDoc, type QuestOp, type QuestSlice, questSliceOf } from "../quests";
 import { storySliceOf } from "../story";
+import { baseOf, PLACE_OPS, placeSliceOf } from "../places/fold";
+import { isPlaceFactPart, PLACE_FACT_PARTS } from "../places/parts";
+import { BASE_KEYS, drawnAgainst } from "../places/prepare";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import { HORIZON } from "../store/view";
 import type { FactStore } from "./kit";
-import type { Want } from "./reading";
+import { nearestOf, type Want } from "./reading";
 import type { Draft } from "./writing";
 import { find, findOptional, isUnread, itemOptions, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, outsideList, refusedAs, textArg, type Unread } from "./ops";
 import type { Provenance } from "./source";
@@ -362,6 +365,19 @@ function setPlaceField(o: OpContext, placeId: string, key: string, value: JsonVa
 }
 
 /**
+ * (S17Story, places) A place's base, the words that stand for what it is and looks like: today's `description` and `base` are one part with
+ * one home, the places' area. It is written as that area's change, drawn against the entries bound to the place as the call read them
+ * (`prepareBases`), and the answer gives the base as it now reads. Nothing is written into the chat's draft of its world.
+ */
+function setPlaceBase(o: OpContext, place: string, value: JsonValue | undefined): Unread | undefined {
+  if (typeof value !== "string" || value.trim() === "") return notAs(o, "value", value ?? null, "words");
+  if (!own(o.draft.w.ctx.world.places, place)) return refusedAs(o, { code: "missing_place", reason: `no place ${place}` }, "at", "place");
+  o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, { op: PLACE_OPS.base, value: { place, text: value.trim(), drawn: drawnAgainst(o.call, place) } });
+  o.after((state) => ({ base: baseOf(placeSliceOf(state), place)?.text ?? null }));
+  return undefined;
+}
+
+/**
  * Sets a value at the world's own level: any key, as the world's own value (`store.value`) with the call's provenance, said where the
  * world's setup does not list it, and said where one of its systems keeps that value itself, which then stands in the tree and in the sums.
  */
@@ -408,6 +424,11 @@ const set: OpDef = {
       const to = add !== undefined ? o.draft.w.state.clock + Math.round(add) : timeArg({ ...o, args: { ...o.args, value } }, "value");
       if (to === undefined || isUnread(to)) return to ?? { line: "needs", fields: { n: o.n, op: o.op, fields: ["value"] } };
       failed = setClock(o, to);
+    } else if (at.ref.startsWith("place:") && BASE_KEYS.includes(key)) {
+      // (S17Story, places) The base is the place's one description: written as its own record, never into the chat's draft of its world.
+      const written = setPlaceBase(o, at.id, add === undefined ? (value as JsonValue | undefined) : undefined);
+      if (written) return written;
+      return undefined;
     } else if (at.ref.startsWith("place:")) failed = setPlaceField(o, at.id, key, value, add);
     else if (at.ref.startsWith("entity:")) {
       // A place set on someone or something is a move, through the one move path.
@@ -428,7 +449,7 @@ const fact: OpDef = {
   lane: "engine",
   lanes: ["engine", "story"],
   needs: ["about", "key", "value"],
-  takes: ["about", "key", "value", "replaces"],
+  takes: ["about", "key", "value", "replaces", "part", "beat"],
   example: { op: "fact", about: "wren", key: "coin", value: "spent most of what she had", precision: "vague", source: { from: "prose", message: "m-0019" } },
   run(o) {
     const about = find(o, "about", "point");
@@ -438,9 +459,21 @@ const fact: OpDef = {
     const value = textArg(o.args, "value");
     if (key === undefined || value === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["key", "value"] } };
     const replaces = textArg(o.args, "replaces");
+    // (S17Story, places) The part of a place's record the fact belongs to, and the beat that caused it; a part is a place's alone.
+    const part = textArg(o.args, "part");
+    if (part !== undefined && !about.ref.startsWith("place:")) return { line: "fact_part_place", fields: { n: o.n, op: o.op, about: o.args.about ?? null, choices: textOf(PLACE_FACT_PARTS) } };
+    if (part !== undefined && !isPlaceFactPart(part)) return notOneOf(o, "part", part, PLACE_FACT_PARTS);
+    const beat = textArg(o.args, "beat");
+    if (beat !== undefined) {
+      const items = storySliceOf(o.draft.base.state).items;
+      if (!Object.hasOwn(items, beat) || items[beat]?.part !== "beat") {
+        const ids = Object.values(items).filter((i) => i.part === "beat").map((i) => i.id);
+        return { line: "unknown_beat", fields: { n: o.n, op: o.op, beat, near: textOf(nearestOf(beat, ids, o.call.settings).slice(0, o.call.settings.nearMatches)) } };
+      }
+    }
     // The lane its writer names; with none named it is the engine's, and the answer says so.
     if (o.args.lane === undefined || o.args.lane === null) o.reply.report("fact_lane_default", { n: o.n, op: o.op, lane: o.lane });
-    o.draft.recordStoreOp(o.n, o.op, o.lane, o.prov, FACTS.change({ about: about.ref, key, value, ...(replaces !== undefined ? { replaces } : {}) }));
+    o.draft.recordStoreOp(o.n, o.op, o.lane, o.prov, FACTS.change({ about: about.ref, key, value, ...(replaces !== undefined ? { replaces } : {}), ...(part !== undefined ? { part } : {}), ...(beat !== undefined ? { beat } : {}) }));
     o.after((state) => ({ facts: FACTS.of(state, about.ref) }));
     return undefined;
   },
