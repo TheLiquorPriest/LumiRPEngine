@@ -52,7 +52,11 @@ export function servedRpe(): ServedRpe {
   const live = new LiveHub({ queueEvents: 64, now: () => 0 });
   const running = new Set<string>();
   const [post] = buildRoutes(buildServiceOn(bed));
-  const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), log: bed.log }));
+  // This bed holds no asks for the next message and has no Lumiverse to put a message in.
+  const noLumiverse = (): never => {
+    throw new Error("This bed has no Lumiverse to put a message in.");
+  };
+  const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, log: bed.log }));
 
   const serve = async (key: string, chat: string, body: unknown, query: Record<string, string>): Promise<unknown> => {
     switch (key) {

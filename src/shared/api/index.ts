@@ -3804,6 +3804,16 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** A person's things: what they carry, wear and keep, and where each is; none for an id that is no person. */
+  "GET /api/v1/chats/:chat/people/:entity/things": {
+    params: { chat: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none. */
   "GET /api/v1/chats/:chat/perceptions": {
     params: { chat: string };
@@ -4140,6 +4150,46 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: TapAsk;
     reply: TapReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The chat's things at its head: each thing in play with who has it, where it stands and why it is theirs, as the things browser lists them. */
+  "GET /api/v1/chats/:chat/things": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A thing's page: what it is, where it stands, who has it and why, what it holds, its rest and its history; none for an id that is no thing. */
+  "GET /api/v1/chats/:chat/things/:entity": {
+    params: { chat: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The ids of the chat's things that the words name. */
+  "GET /api/v1/chats/:chat/things/find": {
+    params: { chat: string };
+    query: { words: string };
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The catalog the player's + Add offers: the types of things and the vehicle classes the chat's world has, and the pickers that go with them. */
+  "GET /api/v1/chats/:chat/things/types": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
     paged: false;
     long: false;
     joined: false;

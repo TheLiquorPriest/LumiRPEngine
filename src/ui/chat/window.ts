@@ -2,33 +2,20 @@
 // reads the chat through now: the history message just above the first it keeps, how many messages lie above
 // the window and how many of those the story does not cover yet. Read when the chat opens and again when
 // RPE says the chat's state changed (a turn ended, the story covered more), and kept while the chat stays
-// open. The route is the door's (`GET /api/v1/chats/:chat/window`); until the generated client has it, it is
-// asked through the client's call as it is written there.
+// open. The route is the door's (`GET /api/v1/chats/:chat/window`).
 
+import type { ChatWindowReply } from "../../shared/api";
 import { createStore, type Readable } from "../store";
 import { errorWords } from "../words";
 import type { FrameEnv } from "./surface";
 
-/** What RPE answers of the window. */
-export interface WindowShown {
-  /** The window is on for this chat. */
-  on: boolean;
-  /** Lumiverse's id of the first history message the window keeps. */
-  first: string | null;
-  /** The history message just above `first`: the one the marker stands under. */
-  before: string | null;
-  /** History messages above the window. */
-  above: number;
-  /** Of those, how many the story does not cover yet. */
-  uncovered: number;
-}
+/** What RPE answers of the window (`ChatWindowReply`). */
+export type WindowShown = ChatWindowReply;
 
 export interface WindowState {
   shown: WindowShown | null;
   failed: string | null;
 }
-
-type Ask = (key: string, params: Record<string, string>) => Promise<WindowShown>;
 
 const made = new WeakMap<FrameEnv, { chat: string; store: Readable<WindowState>; stop(): void }>();
 
@@ -42,10 +29,9 @@ export function windowOf(env: FrameEnv): Readable<WindowState> {
     made.set(env, { chat: "", store: state, stop: () => undefined });
     return state;
   }
-  const ask = env.client.call as unknown as Ask;
   let alive = true;
   const read = (): void => {
-    ask("GET /api/v1/chats/:chat/window", { chat }).then(
+    env.client.call("GET /api/v1/chats/:chat/window", { chat }).then(
       (shown) => {
         if (alive) state.set({ shown, failed: null });
       },

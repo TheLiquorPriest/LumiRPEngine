@@ -3,6 +3,7 @@
 
 import type { Area } from "../app";
 import { playRoutes } from "./routes";
+import { thingsRoutes } from "./things";
 import { PlayService, type PlayDeps } from "./service";
 
 /**
@@ -15,6 +16,10 @@ export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance" | "setti
 export function playArea(takes: () => PlayTakes): Area {
   return {
     name: "play",
-    mounted: (at) => at.routes.add("play", playRoutes(new PlayService({ writes: at.writes, live: at.live, log: at.log, ...takes() }))),
+    mounted: (at) => {
+      const taken = takes();
+      at.routes.add("play", playRoutes(new PlayService({ writes: at.writes, live: at.live, log: at.log, ...taken })));
+      at.routes.add("play-things", thingsRoutes(taken.store));
+    },
   };
 }

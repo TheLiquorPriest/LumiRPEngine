@@ -3,5 +3,6 @@
 
 import type { CallFile } from "../client";
 import { calls as playCalls } from "./play";
+import { calls as thingsCalls } from "./things";
 
-export const CALLS: readonly CallFile[] = [playCalls];
+export const CALLS: readonly CallFile[] = [playCalls, thingsCalls];

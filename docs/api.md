@@ -446,6 +446,19 @@ The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): a
 | Body | none |
 | Reply | [`TapReply`](#tapreply) |
 
+### `GET /api/v1/chats/:chat/people/:entity/things`
+
+A person's things: what they carry, wear and keep, and where each is; none for an id that is no person.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
 ### `POST /api/v1/chats/:chat/plays`
 
 A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line put in the chat as his message and a reply started, through Lumiverse's own routes as him, with nothing written into message or chat metadata; the turn that answers it is told what was pressed.
@@ -565,6 +578,58 @@ A tap that manages, or a correction from any page, recorded at once as his own e
 | Query | none |
 | Body | [`TapAsk`](#tapask) |
 | Reply | [`TapReply`](#tapreply) |
+
+### `GET /api/v1/chats/:chat/things`
+
+The chat's things at its head: each thing in play with who has it, where it stands and why it is theirs, as the things browser lists them.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/things/:entity`
+
+A thing's page: what it is, where it stands, who has it and why, what it holds, its rest and its history; none for an id that is no thing.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/things/find`
+
+The ids of the chat's things that the words name.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `words`: `string` |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/things/types`
+
+The catalog the player's + Add offers: the types of things and the vehicle classes the chat's world has, and the pickers that go with them.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
 
 ### `GET /api/v1/chats/:chat/world`
 
