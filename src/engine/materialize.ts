@@ -81,15 +81,10 @@ export function previewMaterialization(reg: Registry, world: WorldDoc, state: Re
 /** The event an Undo records for a materialization whose detail it took back: the entity's detail in that domain counts as not sampled. */
 export const UNMATERIALIZED = "engine.unmaterialized";
 
-/** `engine.unmaterialized {entity, domain}`: the detail recorded for it is taken off the record of what was sampled, so it is sampled again when next needed. */
+/** `engine.unmaterialized {entity, domain}`: the detail recorded for it is taken off the record of what was sampled, so it is sampled again when next needed; where none is recorded, nothing changes. */
 export const unmaterializedEvent: EventTypeDef<PackEvent> = {
   type: UNMATERIALIZED,
-  validate: (e, ctx) => {
-    const entity = e.data.entity;
-    const domain = e.data.domain;
-    if (typeof entity !== "string" || typeof domain !== "string") return { code: "bad_event", reason: `${UNMATERIALIZED} needs entity and domain` };
-    return Object.prototype.hasOwnProperty.call(ctx.state.materialized, `${entity}:${domain}`) ? null : { code: "not_materialized", reason: `no ${domain} detail is recorded for ${entity}` };
-  },
+  validate: (e) => (typeof e.data.entity === "string" && typeof e.data.domain === "string" ? null : { code: "bad_event", reason: `${UNMATERIALIZED} needs entity and domain` }),
   apply: (e, state) => {
     if (typeof e.data.entity === "string" && typeof e.data.domain === "string") delete state.materialized[`${e.data.entity}:${e.data.domain}`];
   },

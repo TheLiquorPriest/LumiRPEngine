@@ -21,6 +21,7 @@ import { numOf, objOf, own, strOf } from "../engine/pack-kit";
 import { GONE_FIELD, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { reversedAs, txn } from "../packs/economy/core/pay";
+import { CLOCK_SET, CLOCK_UNSET, setsClock } from "./blank";
 import { factStore, standing } from "./facts";
 import { eventOf, type FoldEnv } from "./fold";
 import type { AreaOp } from "./areas";
@@ -133,6 +134,8 @@ function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: Store
 /** The reverse of one event, read against the state just before its unit and the state now; `posts` are the postings of its unit. */
 function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: StoreState, now: StoreState, unlinked: Set<string>): Reversed {
   const related = (state: StoreState, rel: string, from: string, to: string) => own(state.world.entities, from)?.relations.find((r) => r.type === rel && r.to === to);
+  // The Undo of a change that set the clock where nothing had set it before takes the setting off again (A155).
+  const unset: JsonObject = setsClock(ev as unknown as JsonValue) && before.marks.world?.[CLOCK_SET] === undefined ? { [CLOCK_UNSET]: true } : {};
   switch (ev.type) {
     case "post":
       return [{ type: "post", lines: ev.lines.map((l) => ({ ...l, amount: -l.amount })) as unknown as JsonValue, memo: ev.memo }];
@@ -147,14 +150,15 @@ function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: Stor
       if (!jsonEqual(own(now.world.entities, ev.entity)?.fields[ev.field], ev.value)) return "changed_since";
       return [{ type: "set", entity: ev.entity, field: ev.field, value: own(before.world.entities, ev.entity)?.fields[ev.field] ?? null }];
     case "clock":
-      return ev.minutes > 0 ? [{ type: ENGINE_EVENTS.rewind, data: { minutes: ev.minutes } }] : "not_reversible";
+      if (ev.minutes > 0) return [{ type: ENGINE_EVENTS.rewind, data: { minutes: ev.minutes }, ...unset }];
+      return CLOCK_UNSET in unset ? [{ type: "clock", minutes: 0, cause: "advance", ...unset }] : "not_reversible";
     case "spawn":
       return despawnOf(now.world, ev.entity.id, unlinked) ?? "changed_since";
     case "materialize":
       return reverseMaterialize(ev, before, now, unlinked);
     default: {
       if (!("data" in ev)) return "not_reversible";
-      if (ev.type === ENGINE_EVENTS.rewind) return typeof ev.data.minutes === "number" ? [{ type: "clock", minutes: ev.data.minutes, cause: "advance" }] : "not_reversible";
+      if (ev.type === ENGINE_EVENTS.rewind) return typeof ev.data.minutes === "number" ? [{ type: "clock", minutes: ev.data.minutes, cause: "advance", ...unset }] : "not_reversible";
       if (ev.type === ENGINE_EVENTS.hint) return reverseHint(ev.data, before, now);
       if (ev.type === FINANCE_EVENTS.anchor) return reverseAnchor(ev.data, before, now);
       if (ev.type !== FINANCE_EVENTS.txn) return "not_reversible";

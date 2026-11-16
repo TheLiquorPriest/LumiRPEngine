@@ -168,6 +168,10 @@ export interface ClockEvent extends EventBase {
   /** How far the clock goes, in minutes; a part of a minute counts to the second (6 seconds is 0.1), and the clock sums in whole seconds (`clockPlus`). */
   minutes: number;
   cause: "tick" | "action" | "timelapse" | "advance";
+  /** It states the date and time it reaches (even the moment the clock already shows), not only how far it goes: the clock is set by it (A157). */
+  set?: true;
+  /** The Undo of the change that set a clock nobody had set before: the clock's date is one nobody set again (A155). */
+  unset?: true;
 }
 
 /** Lazy materialization: detail sampled within the entity's current representation (DESIGN §9.2). */

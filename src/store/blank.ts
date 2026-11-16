@@ -7,7 +7,7 @@
 import type { RevisionId } from "../shared/ids";
 import { isRecord, type JsonValue } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { WorldDoc } from "../shared/world";
+import { UNSET_CURRENCY, type WorldDoc } from "../shared/world";
 import { newBlankWorld } from "../engine/authoring";
 import type { Registry } from "../engine/registry-impl";
 import type { StoreState } from "./types";
@@ -15,7 +15,7 @@ import type { StoreState } from "./types";
 /** The revision a chat that names no world plays on. */
 export const BLANK_REVISION: RevisionId = "blank";
 
-/** The blank world: every pack as shipped, its default tables in, and nothing else. */
+/** The blank world: every pack as shipped, its default tables in, no currency, and nothing else. */
 export function blankWorld(registry: Registry): WorldDoc {
   const made = newBlankWorld(BLANK_REVISION, "", registry);
   return {
@@ -26,6 +26,7 @@ export function blankWorld(registry: Registry): WorldDoc {
     places: {},
     pov: "",
     start: { ...made.start, place: "" },
+    currency: UNSET_CURRENCY,
   };
 }
 
@@ -58,4 +59,15 @@ export function setsClock(value: JsonValue): boolean {
  */
 export function clockRecorded(state: StoreState): boolean {
   return state.world.revision !== BLANK_REVISION || state.marks.world?.[CLOCK_SET] !== undefined;
+}
+
+/**
+ * What the Undo of a change that set the clock carries where nothing had set it before: the clock is a date nobody set again (A155).
+ * The engine reads only how far it moves.
+ */
+export const CLOCK_UNSET = "unset";
+
+/** Whether a change's value takes the clock's setting off (`CLOCK_UNSET`). */
+export function unsetsClock(value: JsonValue): boolean {
+  return isRecord(value) && value[CLOCK_UNSET] === true;
 }

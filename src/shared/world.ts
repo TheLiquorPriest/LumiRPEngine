@@ -1400,6 +1400,9 @@ export interface WorldCurrency {
 /** Modern US, and the default for documents written before `currency` existed. */
 export const DEFAULT_CURRENCY: WorldCurrency = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
 
+/** No currency: a chat with no world, until a world attached gives one. Its amounts are bare numbers (`formatMoney`). */
+export const UNSET_CURRENCY: WorldCurrency = { code: "", symbol: "", minorUnit: "", decimals: 2, format: "{sign}{amount}" };
+
 /** Characters replies may introduce in a world that sets no `spawnCap`. */
 export const DEFAULT_SPAWN_CAP = 24;
 /** The most a world's `spawnCap` allows: each newcomer is a whole entity every fold carries and the helpers' prompts may list. */

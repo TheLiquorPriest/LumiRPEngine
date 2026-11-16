@@ -23,7 +23,7 @@ import { calendarOf, formatClock, placeOffset, placeZone } from "../engine/calen
 import { own } from "../engine/pack-kit";
 import { presetOf } from "../engine/realism";
 import { clockPaused } from "../engine/time";
-import { clockRecorded } from "./blank";
+import { BLANK_REVISION, clockRecorded } from "./blank";
 import { standing } from "./facts";
 import { aboutOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
@@ -501,10 +501,14 @@ function fitLists(part: Part, lists: readonly DueList[], room: number): { lines:
   return { lines: lists.flatMap((l) => kept.get(l) ?? []), used: room - left };
 }
 
-/** The world's realism (R-76) as the chat has it: its preset and each domain's level; each domain is shown as closely as its level says. */
+/**
+ * The world's realism (R-76) as the chat has it: its preset and each domain's level; each domain is shown as closely as its level says.
+ * A chat with no world plays the packs' shipped levels, which no one chose: their source is `default` and they are `assumed`.
+ */
 function realismLine(state: StoreState): ViewLine {
   const realism = state.world.realism;
-  return { kind: "realism", depth: 0, fields: { preset: presetOf(realism), ...Object.fromEntries(DOMAINS.map((d) => [d, realism.levels[d] ?? null])) } };
+  const shipped: JsonObject = state.world.revision === BLANK_REVISION ? { source: "default", standing: "assumed" } : {};
+  return { kind: "realism", depth: 0, fields: { preset: presetOf(realism), ...Object.fromEntries(DOMAINS.map((d) => [d, realism.levels[d] ?? null])), ...shipped } };
 }
 
 /** The maps a world state prints through the map port (Maps-4): each grid once, its drawn layer only where the session was not given that version. */

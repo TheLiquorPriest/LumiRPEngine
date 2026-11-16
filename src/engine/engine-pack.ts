@@ -353,13 +353,17 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: ENGINE_EVENTS.rewind,
-    // Never before the story starts: nothing in the world was there to be set back to.
-    validate: (e, ctx) => {
+    // Any time the story states, before the story's start too: it is applied as stated, never clamped, and said (`before_start`).
+    validate: (e) => {
       const minutes = e.data.minutes;
       if (typeof minutes !== "number" || !Number.isFinite(minutes) || clockSeconds(minutes) <= 0) return { code: "bad_event", reason: "a clock set back needs a time above zero, in minutes or a part of one counted in seconds" };
+      return null;
+    },
+    advise: (e, ctx) => {
+      const minutes = e.data.minutes;
       const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
-      if (clockPlus(ctx.state.clock, -minutes) >= start) return null;
-      return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
+      if (typeof minutes !== "number" || clockPlus(ctx.state.clock, -minutes) >= start) return null;
+      return { code: "before_start", values: { start: formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov))) } };
     },
     // A second set-back inside the window keeps the furthest the clock had run, not where it stood.
     apply: (e, state) => {

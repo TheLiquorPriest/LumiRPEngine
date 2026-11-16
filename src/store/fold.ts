@@ -23,8 +23,8 @@ import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { forgetWhereabouts } from "../engine/whereabouts";
-import { initialState } from "../engine/world-state";
-import { CLOCK_SET, setsClock } from "./blank";
+import { initialState, minutesBetween } from "../engine/world-state";
+import { BLANK_REVISION, CLOCK_SET, setsClock, unsetsClock } from "./blank";
 import { applyFact } from "./facts";
 import { PRECISIONS, STORE_OPS, type Lane, type NotApplied, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
 import { claim, knownWrites, thawWorld, tryUnit } from "./working";
@@ -248,10 +248,13 @@ export function notAppliedOf(env: Pick<FoldEnv, "registry" | "areas">, c: Pick<S
 function markTouched(state: StoreState, touches: readonly Touch[], item: Item, clockMoved: boolean): void {
   const mark = { turn: item.turn, n: item.n };
   const provenance = { standing: item.standing ?? null, source: item.source ?? null, ...(inventedUnchecked(item.source, item.cite) ? { unchecked: true as const } : {}) };
-  if (clockMoved) {
+  // A change that sets the clock is its mark even where it states the moment the clock already shows (A156); the Undo of one where
+  // nothing had set it before takes the setting off (A155).
+  if (clockMoved || setsClock(item.value) || unsetsClock(item.value)) {
     state.touched.world = mark;
     const time = { ...mark, precision: item.precision ?? null, ...provenance };
-    state.marks.world = { ...state.marks.world, time, ...(setsClock(item.value) ? { [CLOCK_SET]: { ...time } } : {}) };
+    const { [CLOCK_SET]: _set, ...kept } = state.marks.world ?? {};
+    state.marks.world = { ...(unsetsClock(item.value) ? kept : state.marks.world), time, ...(setsClock(item.value) ? { [CLOCK_SET]: { ...time } } : {}) };
   }
   // A change from the old value (an add, a subtract, a posting) keeps the least exact of the old precision and its own: about 20 less
   // an exact 4 is about 16.
@@ -400,6 +403,9 @@ function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
         forgetWhereabouts(state.world);
       }
       state.touched.world = { turn: item.turn, n: item.n };
+      // A world attached to a chat whose clock nobody set takes the world's own start; one whose clock was set keeps it.
+      const to = body.kind === "migrate" ? env.worlds(body.to) : undefined;
+      if (to !== undefined && was === BLANK_REVISION && state.marks.world?.[CLOCK_SET] === undefined) state.world.clock = minutesBetween(to.calendar.epoch, to.start.at);
       return { applied: true, reports: tracksReset(env, was, state.world, stages) };
     }
     case STORE_OPS.fact: {
@@ -551,7 +557,7 @@ export interface FoldResult {
  * The last change on record that wrote one of the parts a job's change writes, when a turn after the job's own wrote it: its value
  * stands. A pack that throws while what its event touches is read leaves the change failed, by its report.
  */
-function laterWrite(env: FoldEnv, state: StoreState, c: JobChange): number | null | Report {
+export function laterWrite(env: FoldEnv, state: StoreState, c: JobChange): number | null | Report {
   const ev = eventIn(env, c);
   const area = env.areas?.of(c.op) ?? null;
   const touched: { ref: string; part: string }[] = [];
