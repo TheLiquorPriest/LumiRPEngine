@@ -21,8 +21,8 @@ export type Side = "party" | "foes";
 export interface Fighter {
   id: EntityId;
   side: Side;
-  /** The initiative total it rolled. */
-  init: number;
+  /** The initiative total it rolled, when the call that started the fight asked for one; none otherwise. */
+  init: number | null;
   down: boolean;
   /** What is left of each budget. */
   left: Record<string, number>;
@@ -101,7 +101,7 @@ export function encounterOf(state: Readonly<WorldState>): Encounter | null {
   const order: Fighter[] = [];
   for (const f of raw.order) {
     if (!isRecord(f) || typeof f.id !== "string" || (f.side !== "party" && f.side !== "foes")) continue;
-    order.push({ id: f.id, side: f.side, init: numOf(f.init), down: f.down === true, left: numbers(f.left) });
+    order.push({ id: f.id, side: f.side, init: typeof f.init === "number" ? f.init : null, down: f.down === true, left: numbers(f.left) });
   }
   const log: LogEntry[] = [];
   for (const e of Array.isArray(raw.log) ? raw.log : []) {

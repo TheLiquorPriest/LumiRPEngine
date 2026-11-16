@@ -80,6 +80,10 @@ taken_from: Operation {{n}} ({{op}}): {{what}} was taken from {{holder}}, who is
 in_two_places: Operation {{n}} ({{op}}): {{what}} was lying at {{where}} and in {{holder}} at once; it is moved as asked.
 not_taken_in_hand: Operation {{n}} ({{op}}): {{what}} is a vehicle and was not taken in hand: it changed hands where it stands.
 no_condition: Operation {{n}} ({{op}}): {{what}} has no condition recorded and its field gives none to start from, so nothing was changed.
+same_name: Operation {{n}} ({{op}}): {{name}} was made as asked; {{same}} stood under that name already, and is not the same one.
+place_past_cap: Operation {{n}} ({{op}}): {{name}} was made; this chat had made {{made}} places in play already, and the world's number is {{cap}}.
+made_as_thing: Operation {{n}} ({{op}}): {{name}} was made as a thing, since this world plays no vehicles; its class, {{class}}, is kept on it.
+holder_nowhere: Operation {{n}} ({{op}}): {{holder}} is at no place, so {{name}} was made at none.
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
@@ -169,3 +173,10 @@ dissolved: Operation {{n}} ({{op}}): {{org}} was dissolved on {{on}}; the change
 bad_delegation: Operation {{n}} ({{op}}): {{who}} was given the delegation by themselves; it was recorded all the same.
 delegation_ended: Operation {{n}} ({{op}}): the delegation ends {{until}}, which is before today; it was recorded with that end.
 not_listed: Operation {{n}} ({{op}}): {{org}} is on no market, so the stake changed hands between the parties named.
+named_both: Operation {{n}} ({{op}}): {{who}} is named on both sides of the fight, and a fighter is on one side only; name them on one.
+no_combat_rules: Operation {{n}} ({{op}}): this world has no combat rules, so the fight was recorded with its sides and order and no budgets, hit points or rounds.
+nowhere: Operation {{n}} ({{op}}): the fighters do not all stand in one place and none was named with at, so the fight is recorded at no place.
+not_here: Operation {{n}} ({{op}}): {{who}} does not stand at {{place}}, where the fight is; they are in it all the same.
+cannot_fight: Operation {{n}} ({{op}}): {{who}} cannot take part by the world's combat rules (no hit points to fight on, or unable to act); they are in the fight all the same.
+fight_broke_off: Operation {{n}} ({{op}}): the fight under way was ended as the story moved on; no winner was recorded.
+fight_still_on: Operation {{n}} ({{op}}): the fight under way is still on; nothing was recorded.

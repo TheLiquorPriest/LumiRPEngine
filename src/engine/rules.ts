@@ -178,6 +178,11 @@ export function runRulesOnEvents(reg: Registry, w: Working, events: readonly Led
   return cascade(reg, w, roots, opts);
 }
 
+/** The world's rules that hear these events (their trigger matches), none of them fired: for a caller that lists what a rule would do and leaves applying it to an agent. */
+export function rulesHearing(reg: Registry, w: Working, events: readonly LedgerEvent[]): RuleDef[] {
+  return allRules(reg, w.world).filter((r) => events.some((e) => matchesEvent(w, r, e)));
+}
+
 /** Fires tick rules and time rules (`at`) for a turn, slot or day tick. */
 export function runRulesOnTick(reg: Registry, w: Working, tick: RuleTick, opts: RuleOptions): RuleFiring[] {
   const roots: Pending[] = [];

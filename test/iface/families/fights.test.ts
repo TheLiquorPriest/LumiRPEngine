@@ -32,7 +32,7 @@ describe("fights", () => {
 
   test("each tool is called, applies, and answers with what changed and how it stands", async () => {
     const t = await familyRig(fightWorld);
-    const started = await t.call("fight_start", { foes: ["Grey wolf"], ...SRC });
+    const started = await t.call("fight_start", { with: ["Wren"], foes: ["Grey wolf"], ...SRC });
     appliedInFull(started, "engine", false);
     expect(opOf(started).fight).not.toBeNull();
     expect(t.s.changes(t.turn.id).length).toBeGreaterThan(0);
@@ -52,9 +52,9 @@ describe("fights", () => {
 
   test("a fight started while one is on is applied as nothing and said, with no report", async () => {
     const t = await familyRig(fightWorld);
-    await t.call("fight_start", { foes: ["wolf"], ...SRC });
+    await t.call("fight_start", { with: ["Wren"], foes: ["wolf"], ...SRC });
     const changes = t.s.changes(t.turn.id).length;
-    const again = await t.call("fight_start", { foes: ["wolf"], ...SRC });
+    const again = await t.call("fight_start", { with: ["Wren"], foes: ["wolf"], ...SRC });
     appliedInFull(again, "engine", false);
     saidNotReported(again, "was already so");
     expect(t.s.changes(t.turn.id).length).toBe(changes);
@@ -64,7 +64,7 @@ describe("fights", () => {
   test("a fight takes its fighters in as recorded: no money or things are made up for them", async () => {
     const t = await familyRig(fightWorld);
     const before = Object.keys(t.s.stateAt(t.turn.id).state.world.entities).sort();
-    appliedInFull(await t.call("fight_start", { foes: ["Grey wolf"], ...SRC }), "engine", false);
+    appliedInFull(await t.call("fight_start", { with: ["Wren"], foes: ["Grey wolf"], ...SRC }), "engine", false);
     const rows = t.s.changes(t.turn.id);
     expect(rows.some((r) => r.op === "materialize")).toBe(false);
     expect(Object.keys(t.s.stateAt(t.turn.id).state.world.entities).sort()).toEqual(before);

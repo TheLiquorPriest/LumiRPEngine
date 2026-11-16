@@ -258,14 +258,14 @@ function stalled(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boo
 
 /**
  * Ends the fight under way because the player moved the story past it with a time skip (DESIGN
- * §11): its rounds take no clock time, so no skip runs inside one. Its winner is the side left
- * standing, if only one is, as the `combat.end` effect reads it. The narrator's line for it; none
- * when no fight ended.
+ * §11): its rounds take no clock time, so no skip runs inside one. No winner is recorded: none
+ * is the call's. It words nothing (the lines the narrator and the tools say are the files'); what
+ * it recorded is read from the state after it: the fight is no longer under way.
  */
 export function breakOff(w: Working, seed: string): string[] {
   const enc = encounterOf(w.state);
-  if (!enc || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "skip", winner: winnerOf(w, enc), rounds: enc.round } }], seed).length === 0) return [];
-  return ["The fight breaks off as time moves on."];
+  if (enc) record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "skip", winner: null, rounds: enc.round } }], seed);
+  return [];
 }
 
 /**

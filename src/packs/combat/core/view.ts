@@ -138,13 +138,14 @@ export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}
   const rules = rulesOf(ctx.world);
   const enc = encounterOf(ctx.state);
   const gm = opts.gm === true;
-  if (!rules || !enc || (!gm && povLeft(ctx.state, ctx.world, enc))) return null;
+  // The game master reads a fight a world with no combat rules recorded as well: its sides and order, no budgets or hit points.
+  if (!enc || (!gm && (!rules || povLeft(ctx.state, ctx.world, enc)))) return null;
   const head = paletteEncounter(ctx);
   const conditionsOf = optionalQuery(ctx, "sheets.conditions");
-  const downCondition = typeof rules.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
+  const downCondition = typeof rules?.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
   const order = enc.order.map((f, i): EncounterRow => {
     const name = nameOf(ctx, f.id, gm);
-    const seen = name === null ? null : hpSeen(ctx, rules, f.id, gm);
+    const seen = name === null || !rules ? null : hpSeen(ctx, rules, f.id, gm);
     return {
       id: name === null ? null : f.id,
       name: name === null ? "someone" : f.id === ctx.world.pov ? "You" : name,

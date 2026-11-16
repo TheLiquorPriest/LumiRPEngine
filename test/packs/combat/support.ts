@@ -50,7 +50,7 @@ export function fightWorld(patch: (w: WorldDoc) => void = () => undefined): Worl
 /** The fight started with `foes` (ids or a selector) on a working copy of the world's start. */
 export function started(world: WorldDoc, foes: unknown = ["goblin", "bandit"], seed = "start", registry = reg): Working {
   const w = new Working(registry, world, startState(world, registry));
-  const out = applyEffects(registry, w, [{ type: "combat.start", args: { foes: foes as never } }], { bindings: { self: POV }, rng: createRng(seed) });
+  const out = applyEffects(registry, w, [{ type: "combat.start", args: { foes: foes as never, roll_initiative: true } }], { bindings: { self: POV }, rng: createRng(seed) });
   if (out.rejected.length > 0) throw new Error(out.rejected[0]?.rejection.reason);
   return w;
 }
