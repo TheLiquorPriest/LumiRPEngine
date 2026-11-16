@@ -15,6 +15,7 @@ import type { PageEntry } from "../page-entry";
 import { type PagedReading, usePaged, useRead } from "../reading";
 import { bytesWords, counted, errorWords } from "../words";
 import { CarriedOffer } from "./bootstrap";
+import { GoingBack } from "./migration-going-back";
 
 /** Which report the lists read: the last real run's, or the rehearsal started from this page. */
 type Of = "run" | "rehearsal";
@@ -631,6 +632,7 @@ export function MigrationPage() {
       lists={has ? <ReportLists key={of} of={of} /> : null}
       offer={shown.run === null ? null : <CarriedOffer />}
       line={(w) => <WaitingLine w={w} given={shown.given} onDone={summary.again} />}
+      goingBack={<GoingBack />}
     />
   );
 }
