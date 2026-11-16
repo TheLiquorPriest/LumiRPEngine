@@ -36,6 +36,7 @@ export function decodeGarageView(value: unknown): GarageView | null {
     level: num(value.level, 1),
     vehicles: list(value.vehicles, (v) => {
       const assigned = obj(v.assignedTo);
+      const driver = obj(v.driver);
       return typeof v.id === "string"
         ? {
             id: v.id,
@@ -51,6 +52,7 @@ export function decodeGarageView(value: unknown): GarageView | null {
             home: optStr(v.home),
             homeId: optStr(v.homeId),
             assignedTo: assigned ? { name: str(assigned.name), until: optStr(assigned.until), overdue: assigned.overdue === true } : undefined,
+            driver: driver && typeof driver.id === "string" ? { id: driver.id, name: str(driver.name, driver.id) } : undefined,
             service: list(v.service, (s) => ({ label: str(s.label), due: str(s.due), overdue: s.overdue === true })),
             classId: optStr(v.classId),
             className: optStr(v.className),
@@ -110,6 +112,7 @@ export function VehicleCard(props: { vehicle: GarageVehicle; onSheet?(kind: "whe
       <List>
         {v.access ? <ListRow icon="key" title="Whose" value={v.access} /> : null}
         {v.place ? <ListRow icon="pin" title="Location" subtitle={v.home && v.home !== v.place ? `home: ${v.home}` : undefined} value={v.place} /> : null}
+        {v.driver ? <ListRow icon="user" title="Driver" value={v.driver.name} /> : null}
         {v.odometerLabel ? <ListRow icon="route" title={v.odometerLabel.endsWith(" h") ? "Engine hours" : "Odometer"} value={v.odometerLabel} /> : null}
         {v.cargo && v.cargo.length > 0 ? <ListRow icon="box" title="Cargo" subtitle={v.cargo.join(", ")} /> : null}
         {v.specs && v.specs.length > 0 ? <ListRow icon="list" title="Specs" subtitle={v.specs.map(specWords).join(" · ")} /> : null}
