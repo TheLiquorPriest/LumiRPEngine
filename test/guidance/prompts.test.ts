@@ -214,6 +214,11 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
       const said = answers.line(`job_refused_${cause}`, { refused: cause, max: 5, value: 5, limit: "calls", agent: "indexer" } as never) ?? "";
       expect({ cause, said: said.startsWith("The indexing job was not started"), unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ cause, said: true, unfilled: false, asks: false });
     }
+    expect(answers.line("secret_mark", { text: "The vault is empty.", id: "e-112#2", holders: "Wren, Bram" } as never)).toBe("The vault is empty. [secret e-112#2; held by Wren, Bram]");
+    expect(answers.line("secret_mark", { text: "The vault is empty.", id: "w-31" } as never)).toBe("The vault is empty. [secret w-31; held by no one yet]");
+    expect(answers.line("map_in_prompt", { id: "e-2", title: "Wharf", secrets: [{ id: "e-2#1", holders: "Wren" }, { id: "e-2#2" }] } as never)).toBe("[e-2] Wharf Secret e-2#1, held by Wren. Secret e-2#2.");
+    const secretLore = (await template("lore-map")).render({ world: { entries: [{ id: "w-4", title: "Tide table", secrets: [{ id: "w-4#1", holders: "Bram" }] }] } }).text;
+    expect(secretLore).toContain("- [w-4] Tide table Secret w-4#1, held by Bram.");
   });
 
   test("delegate-brief.md frames the task, what the sub-agent was given and what to send back; question.md shows an agent's question", async () => {
