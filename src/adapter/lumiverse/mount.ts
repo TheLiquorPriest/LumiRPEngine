@@ -25,6 +25,7 @@ import { promptReads, type ModelRooms } from "./receipt";
 import { createChatReads, type ChatReads } from "./chat";
 import { createDbReader, type DbReader } from "./db";
 import { Activations } from "./activation";
+import { IndexFeed } from "./index-feed";
 import { followChanges, type ChatChange, type ChatChanges } from "./events";
 import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
@@ -95,6 +96,10 @@ export interface Lumiverse {
   database: DbReader | null;
   /** Lumiverse's databanks and memory for RPH's `archive_search`, and one memory entity by its id. */
   stores: Stores;
+  /** What the index file holds of the user's chats' messages and books' entries, and the search over them. */
+  feed: IndexFeed;
+  /** Lets go of what the door holds of one chat for the Storage page's prune: its held reads, and its entries in the search index, fed again at the chat's next search. */
+  dropChat(chat: string): Promise<void>;
   /** Macros resolved and tokens counted as Lumiverse does it. */
   calls: LumiverseCalls;
   /**
@@ -210,11 +215,15 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
     const cfg = at.config.lumiverse;
     const session = new LumiverseSession({ base: url.replace(/\/+$/, ""), fetch: deps.fetch, signIn, save: (s) => at.secrets.write("lumiverse", s === null ? null : { ...s }), owner: () => user, clock: deps.clock, log, keepEveryMs: () => settings().sessionCheckMs });
-    const http = createHttpReads(session, () => settings().reads);
+    // The entry index tells an entry's book where a caller names none; the feed is made below, over these reads.
+    let feed: IndexFeed | null = null;
+    const http = createHttpReads(session, () => settings().reads, { bookOf: async (entry) => feed?.bookOf(entry) ?? null });
     const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log, settings: () => ({ ...settings().database, kept: settings().reads.kept }) });
     const reads = database === null ? http : preferDatabase(database, http);
     activations = new Activations(reads, log);
-    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search });
+    feed = new IndexFeed({ index: at.index, reads, user, log });
+    const fed = feed;
+    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search, feed: fed });
     const sockets = (): LumiverseSettings["socket"] => settings().socket;
     const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), settings: sockets });
     const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, settings: sockets });
@@ -261,7 +270,11 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       settings: () => ({ hits: settings().stores.hits, snippetChars: settings().search.snippetChars }),
       describe: (store) => lanes.storeLine(store),
     });
-    return { session, reads, chat, events, relaySocket, relay, database, stores, calls: lumiverseCalls(session), stopGeneration };
+    const dropChat = async (id: string): Promise<void> => {
+      reads.dropChat(id);
+      await fed.dropChat(id);
+    };
+    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, calls: lumiverseCalls(session), stopGeneration };
   }
 
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */
@@ -446,7 +459,10 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       key = (await at.auth.makeKey("extension")).key;
       // What is heard reaches the turn lane in its order, a lore change once its entries are told: while one is being told, what is heard after it waits behind it.
       let behind: Promise<void> | null = null;
+      const { feed } = parts;
       const deliver = (change: ChatChange): void => {
+        // A chat the search holds is brought up to date in the background when Lumiverse says one of its messages changed.
+        if (change.kind === "message-edited" || change.kind === "message-deleted" || change.kind === "message-swiped" || change.kind === "generation-ended") feed.changed(change.chat);
         const told = heard.heard(change);
         if (told === null && behind === null) {
           lanes.changes.changed(change);

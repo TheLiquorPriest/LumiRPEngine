@@ -15,6 +15,7 @@ import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { FakeClock } from "../standin/clock";
 import { StandInDb, type Rows } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
+import { openIndexBed } from "./index-bed";
 
 const json = (value: unknown): string => JSON.stringify(value);
 
@@ -87,12 +88,15 @@ for (const source of ["database", "http"] as const) {
       db.write(chatRows("user-tamsin", "chat-coast", COAST, 1));
       const read = await readsOf(db, "user-tamsin", source);
       closing.push(() => read.close());
+      const bed = await openIndexBed(read.reads, "user-tamsin");
+      closing.push(() => void bed.close());
       return createChatReads({
         reads: read.reads,
         user: "user-tamsin",
         hiddenReadable: async () => options.hiddenReadable === true,
         ranges: async () => ({ scene: { from: 3, to: 5 } }),
         summarized: async () => new Set(options.summarized ?? []),
+        feed: bed.feed,
       });
     }
     const scope = { user: "user-tamsin", chat: "chat-coast", session: "s-1" };
@@ -177,16 +181,19 @@ for (const source of ["database", "http"] as const) {
     const db = new StandInDb();
     db.write(chatRows(seed.scope.user, seed.scope.chat, seed.messages.map((m) => ({ id: m.id, user: m.role === "user", name: m.name, text: m.text, ...(m.hidden ? { hidden: true as const } : {}) }))));
     const read = await readsOf(db, seed.scope.user, source);
+    const bed = await openIndexBed(read.reads, seed.scope.user);
     const chat: ChatPort = createChatReads({
       reads: read.reads,
       user: seed.scope.user,
       hiddenReadable: async () => seed.hiddenReadable,
       ranges: async () => seed.ranges,
       summarized: async () => new Set(seed.messages.filter((m) => m.summarized).map((m) => m.id)),
+      feed: bed.feed,
     });
     return {
       chat,
       close: async () => {
+        await bed.close();
         read.close();
         db.close();
       },

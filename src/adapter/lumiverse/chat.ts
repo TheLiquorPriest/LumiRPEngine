@@ -9,11 +9,12 @@
 // A message's place on the path counts from 0 at the chat's first message, in Lumiverse's order; it is
 // not Lumiverse's `index_in_chat`, which keeps a gap where a message was deleted.
 //
-// The search reads the messages where they are, in Lumiverse's rows, as everything here does (§4.2,
-// "No copy"): a message is found when every word asked for begins one of its words, in any letter
-// case; hits come oldest first. Search by meaning is not here.
+// The search is answered from the messages index of the index file, which holds the tokens of each message and its id, never its text
+// (`index-feed.ts`; §4.2, "No copy"): a message is found when every word asked for begins one of its words, in any letter case, and only
+// the hits' texts are read from Lumiverse; hits come oldest first. Search by meaning is not here.
 
 import type { ChatHit, ChatInfo, ChatMessage, ChatPort, ChatQuery, ChatRole, HistoryRange, Scope } from "rp-harness/contract";
+import type { IndexFeed } from "./index-feed";
 import type { LumiverseReads } from "./reads";
 import type { LvMessage } from "./rows";
 import { matchAt, snippetOf, wordsOf } from "./words";
@@ -37,6 +38,8 @@ export interface ChatReads extends ChatPort {
   list(scope: Scope): Promise<ChatStep[]>;
   /** One message of the chat, by Lumiverse's id; null when the chat has none such. */
   find(scope: Scope, id: string): Promise<ChatMessage | null>;
+  /** A message's place on the chat's path, by its id, from 0 along the path as Lumiverse's rows have it (a gap left by a delete in `index_in_chat` counts for nothing); undefined when the path has none of that id. */
+  position(scope: Scope, id: string): Promise<number | undefined>;
 }
 
 export interface ChatSearchSettings {
@@ -61,6 +64,8 @@ export interface ChatDeps {
   summarized(chat: string): Promise<ReadonlySet<string>>;
   /** The search's limits, read at each search (the door's settings); `CHAT_SEARCH_DEFAULTS` when not given. */
   search?: () => ChatSearchSettings;
+  /** The messages index of the index file, fed from Lumiverse's rows (`index-feed.ts`): a search is answered from it. */
+  feed: Pick<IndexFeed, "searchChat">;
 }
 
 /** Why a chat cannot be read, in words an agent and the user can read. */
@@ -108,21 +113,34 @@ export function createChatReads(deps: ChatDeps): ChatReads {
       const wanted = [...new Set(wordsOf(query.text).map((w) => w.word))];
       const limit = Math.max(0, Math.floor(query.limit ?? settings.limit));
       if (wanted.length === 0 || limit === 0) return [];
-      const path = await deps.reads.path(chat);
-      if (path === null) throw new NoSuchChat(chat);
+      const found = await deps.feed.searchChat(chat, query.text);
+      if (found === null) throw new NoSuchChat(chat);
+      const { path, ids } = found;
       const from = Math.max(0, Math.floor(query.within?.from ?? 0));
       const to = Math.min(path.length, query.within?.to ?? path.length);
       if (to <= from) return [];
-      const [messages, readable] = await Promise.all([deps.reads.messages(chat, { from, to }), deps.hiddenReadable(chat)]);
-      const hits: ChatHit[] = [];
-      for (const [i, m] of messages.entries()) {
-        if (m.hidden && !readable) continue;
-        const at = matchAt(m.text, wanted);
-        if (at === null) continue;
-        hits.push({ id: m.id, index: from + i, role: m.role, name: m.name, snippet: snippetOf(m.text, at, settings.snippetChars), how: "words" });
-        if (hits.length >= limit) break;
-      }
-      return hits;
+      const readable = await deps.hiddenReadable(chat);
+      const places = new Map(path.map((s, i) => [s.id, i] as const));
+      // The index says which messages hold the words; what is read of Lumiverse is the text of the hits alone, oldest first.
+      const hits = ids
+        .flatMap((id) => {
+          const i = places.get(id);
+          const step = i === undefined ? undefined : path[i];
+          return i === undefined || step === undefined || i < from || i >= to || (step.hidden && !readable) ? [] : [{ id, i }];
+        })
+        .sort((a, b) => a.i - b.i)
+        .slice(0, limit);
+      const texts = new Map((await deps.reads.messagesById(chat, hits.map((h) => h.id))).map((m) => [m.id, m] as const));
+      return hits.flatMap(({ id, i }): ChatHit[] => {
+        const m = texts.get(id);
+        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, matchAt(m.text, wanted) ?? 0, settings.snippetChars), how: "words" }];
+      });
+    },
+    async position(scope, id): Promise<number | undefined> {
+      const path = await deps.reads.path(own(scope));
+      if (path === null) throw new NoSuchChat(scope.chat);
+      const place = path.findIndex((s) => s.id === id);
+      return place < 0 ? undefined : place;
     },
     async list(scope): Promise<ChatStep[]> {
       const chat = own(scope);
