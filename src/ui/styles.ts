@@ -103,6 +103,12 @@ const OWN_CSS = `
 @media (min-width:1000px){
 .rpe-beat{grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
 }
+.rpe-grid-pane{max-width:100%;max-height:70vh;overflow:auto;border:1px solid var(--lre-hairline);border-radius:var(--lre-r-sm);background:var(--lre-well);overscroll-behavior:contain}
+.rpe-grid{display:grid;width:max-content;font:var(--lre-fs-sm)/1 var(--lre-mono)}
+.rpe-square{display:flex;align-items:center;justify-content:center;width:var(--rpe-square,1.7em);height:var(--rpe-square,1.7em);border:1px solid var(--lre-hairline);box-sizing:border-box;user-select:none;cursor:pointer}
+.rpe-square.wall{background:var(--lre-muted);color:var(--lre-surface)}
+.rpe-square.held{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:700}
+.rpe-square.picked{outline:2px solid var(--lre-accent);outline-offset:-2px}
 
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}

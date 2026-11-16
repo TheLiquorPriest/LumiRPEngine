@@ -7,7 +7,8 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { LoreIndexRow, LoreIndexStatus, LoreOverlays } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Empty, PageHeader, Row, Section } from "../../atoms";
+import { Badge, Banner, Button, Empty, Fold, PageHeader, Row, Section } from "../../atoms";
+import { EntryBindings } from "../../bindings";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { counted, errorWords } from "../../words";
@@ -26,7 +27,7 @@ export function loreMatches(row: LoreIndexRow, query: string): boolean {
   return hay.some((h) => h.toLowerCase().includes(q));
 }
 
-function EntryLine(props: { row: LoreIndexRow }) {
+function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) => ComponentChildren) | undefined }) {
   const { row } = props;
   const how = row.activation.length === 0 ? "never by itself" : row.activation.map((a) => ACTIVATION_WORDS[a] ?? a).join(", ");
   return (
@@ -53,6 +54,11 @@ function EntryLine(props: { row: LoreIndexRow }) {
         <p class="rpe-meta" data-links>
           Bound to: {row.links.map((l) => `${l.record}${l.linked ? "" : " (not found)"}, ${l.aspect}, by ${BY_WORDS[l.by] ?? l.by}`).join("; ")}
         </p>
+      )}
+      {props.bindings === undefined ? null : (
+        <Fold summary="Change what it is bound to" class="rpe-open">
+          {props.bindings(row)}
+        </Fold>
       )}
     </li>
   );
@@ -81,6 +87,8 @@ export interface LoreViewProps {
   top?: ComponentChildren;
   /** The writes made to his lore and the projection switch, below the overlays. */
   bottom?: ComponentChildren;
+  /** What edits an entry's bindings, drawn under the entry's own lines; none where the view is only read. */
+  bindings?(row: LoreIndexRow): ComponentChildren;
 }
 
 export function LoreView(props: LoreViewProps) {
@@ -136,7 +144,7 @@ export function LoreView(props: LoreViewProps) {
         {rows.length === 0 && index.items.length > 0 ? <p class="lre-muted rpe-line">{index.more ? "Nothing among the entries read so far; reading on." : "No entry matches."}</p> : null}
         <ul class="rpe-plain lre-stack" data-entries>
           {rows.map((row) => (
-            <EntryLine key={row.id} row={row} />
+            <EntryLine key={row.id} row={row} bindings={props.bindings} />
           ))}
         </ul>
         {index.more ? (
@@ -178,6 +186,7 @@ export function LorePage(props: { chat: string }) {
   const [query, setQuery] = useState("");
   const [indexing, setIndexing] = useState<IndexingShown>({ busy: false, job: null, problem: null });
   const [written, setWritten] = useState(0);
+  const [edited, setEdited] = useState<ReadonlyMap<string, LoreIndexRow>>(new Map());
   const index = usePaged((cursor) => readIndex(app.client, chat, cursor), [chat]);
   const status = useRead(() => readIndexStatus(app.client, chat), [chat, indexing.job]);
   const overlays = useRead(() => readOverlays(app.client, chat), [chat]);
@@ -187,7 +196,8 @@ export function LorePage(props: { chat: string }) {
   }, [query, index.more, index.loading, index.items.length]);
   return (
     <LoreView
-      index={index}
+      index={{ ...index, items: index.items.map((row) => edited.get(row.id) ?? row) }}
+      bindings={(row) => <EntryBindings chat={chat} row={row} onChanged={(next) => setEdited((held) => new Map(held).set(next.id, next))} />}
       query={query}
       status={status.value}
       statusProblem={status.problem}
