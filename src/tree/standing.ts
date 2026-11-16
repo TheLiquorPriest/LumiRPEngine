@@ -5,7 +5,7 @@
 // its definitions and their stacks, what it found wrong with a file that runs or calls out); this asks
 // it and hands the answer to the listing, so the page shows a file as RPH will find it.
 
-import type { DefinitionView, ExternalEntry, RuleView, StackPart, SwitchState } from "rp-harness/contract";
+import type { DefinitionView, ExternalEntry, FileProblem, RuleView, StackPart, SwitchState } from "rp-harness/contract";
 import type { TreeFileEntry } from "./catalog";
 
 /** What the tree reads of RPH's own listing of the files in force for a chat's view (or, with no chat, the shipped and global levels). */
@@ -15,6 +15,8 @@ export interface GuidanceReads {
   stack(agent: string): Promise<readonly StackPart[]>;
   /** Everything the files name that runs a command or calls out, as RPH lists it (`Harness.external`): the hooks in force among them, each with where its command stands, and what keeps one from working, in RPH's words. */
   external(): Promise<readonly ExternalEntry[]>;
+  /** Every problem RPH finds in the files it reads (`Harness.problems`): a file that does not read, a field it does not know, a name that finds no file; a hooks file that will not parse among them. */
+  problems(): Promise<readonly FileProblem[]>;
 }
 
 /** What RPH says of one file. */
@@ -28,15 +30,20 @@ export interface FileStanding {
 
 /** RPH's standing of every file it has something to say of, by its path in the chat's view. */
 export async function rphStanding(reads: GuidanceReads): Promise<Map<string, FileStanding>> {
-  const [external, rules, definitions] = await Promise.all([reads.external(), reads.rules(), reads.definitions()]);
+  const [external, problems, rules, definitions] = await Promise.all([reads.external(), reads.problems(), reads.rules(), reads.definitions()]);
   const out = new Map<string, FileStanding>();
   const at = (path: string): FileStanding => {
     const found = out.get(path) ?? { held: null, problems: [], joins: [], hooks: new Map() };
     out.set(path, found);
     return found;
   };
+  for (const p of problems) at(p.path).problems.push(p.line === undefined ? p.message : `Line ${p.line}: ${p.message}`);
   for (const e of external) {
-    if (e.problem !== undefined) at(e.path).problems.push(e.problem);
+    // An entry's problem repeats its file's own (listed above) and adds what the thing itself says, an MCP server that would not start: only that is kept.
+    if (e.problem !== undefined) {
+      const own = problems.reduce((left, p) => (p.path === e.path ? left.replace(p.message, "") : left), e.problem).trim();
+      if (own !== "") at(e.path).problems.push(own);
+    }
     if (e.kind === "hook") at(e.path).hooks.set(e.name, e.state);
   }
   for (const r of rules) if (r.why === "needs" || r.why === "broken") at(r.path).held = r.why;

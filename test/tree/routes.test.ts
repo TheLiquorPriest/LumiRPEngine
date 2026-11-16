@@ -101,7 +101,7 @@ describe("the Files page's routes", () => {
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
             measurer = new ChatMeasurer({ files: a.paths.files, chats, now: a.now });
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => [], definitions: async () => [], stack: async () => [], external: async () => [] }), written: (saved) => void told.push(saved) }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => [], definitions: async () => [], stack: async () => [], external: async () => [], problems: async () => [] }), written: (saved) => void told.push(saved) }));
           },
         },
       ],
