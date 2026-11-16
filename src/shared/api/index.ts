@@ -97,6 +97,14 @@ export interface BackupsReply {
   items: BackupShown[];
 }
 
+/** The owner redraws documents of a character's base: each document given is written as the next version of its part, outside any turn; the others stand as they are. */
+export interface BaseAsk {
+  seed?: string;
+  soul?: string;
+  inner_voice?: string;
+  background?: string;
+}
+
 /** The base's four documents. */
 export type BaseDocument = "seed" | "soul" | "inner_voice" | "background";
 
@@ -260,6 +268,21 @@ export interface CarriedTurnsReply {
 /** How much of a scene's earlier turns its next turn carries: what the Author did in them (continuing), its record of each (records), or only the summary the scene opened with (nothing). */
 export type CarryMode = "continuing" | "records" | "nothing";
 
+/** What the owner's edit of a character did: whether anything changed, the character as the cast lists it now, and what it could not do or left as it was, in the cast's words. The edit is his own change, which the Author is told of in the next briefing. */
+export interface CastEditedReply {
+  /** False when the character already stood so. */
+  changed: boolean;
+  character: CastMemberRow;
+  notes: string[];
+}
+
+/** The owner sets how large a part a character plays. `as` names the casting; `pin` true pins it, so it stands over the Author's (a casting of his own from then on, until he takes the pin away); false sets it as his casting alone, which the Author may change next turn, and takes any pin away. `as` null with `pin` false takes the pin away and leaves the casting as it is. `line` is the line of the character's part, where he gives one. */
+export interface CastingAsk {
+  as: CastRole | null;
+  pin: boolean;
+  line?: string | null;
+}
+
 /** A casting in force: the player's pin, else the Author's; with the Author's line for the character, where it wrote one. */
 export interface CastingRow {
   as: CastRole;
@@ -319,6 +342,9 @@ export interface CastStrikeReply {
   /** What it could not do, and what it left as it was (knowledge struck apart, and the secret it gave), in the cast's words. */
   notes: string[];
 }
+
+/** The lists of a character's record the answer bounds. */
+export type CharacterListName = "growth" | "mind" | "memories" | "relationships" | "knowledge" | "history" | "perceptions" | "files";
 
 /** Everything on one character's record, by kind; `turn` null: at the chat's newest. Each list is bounded by cast.queryItems and read further back with `part` and `skip`. */
 export interface CharacterReply {
@@ -889,6 +915,29 @@ export interface InstallFact {
   from: "config.json" | "environment" | "install";
 }
 
+/** One change a job recorded: its id, its lane and operation, its value, who decided it, where it came from, how sure it is, what it cites, whether it applied, its reports, and the changes of his that undid it. */
+export interface JobChange {
+  id: string;
+  lane: string;
+  op: string;
+  value: JsonValue;
+  by: string | null;
+  source: string | null;
+  standing: string | null;
+  precision: string | null;
+  cite: JsonValue;
+  applied: boolean;
+  reports: ReportShown[];
+  undoneBy: string[];
+}
+
+/** What a job recorded, change by change in the order recorded, and the evidence it was told as it went (its gap checks, consents and rules fired). */
+export interface JobChangesReply {
+  job: string;
+  changes: JobChange[];
+  told: TurnTold;
+}
+
 /** Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on. */
 export interface JobLimits {
   calls?: number;
@@ -1165,7 +1214,7 @@ export interface LiveBatch {
 }
 
 /** One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 
 /** What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
@@ -1385,6 +1434,68 @@ export interface LumiverseSave {
   set?: { [key: string]: string | string[] | null };
   /** Where RPE listens, as the swap takes it from today's runtime. */
   listens?: { address: string; port: number };
+}
+
+/** One grid in full, as the chat plays it: both layers as data. What is drawn (its rows of symbols with the squares the chat changed laid over, its legend, where it comes from), what moves (everyone and everything on a square, those at the place with none and where they are kept, each door's state), the squares and symbols the chat changed, and the scale and time step. */
+export interface MapGridReply {
+  place: string;
+  name: string;
+  grid: string;
+  map: string | null;
+  from: "world" | "laid" | "changed";
+  width: number;
+  height: number;
+  scale: JsonValue;
+  rows: string[];
+  legend: { [key: string]: JsonValue };
+  doors: ({ square: number[]; state: "open" | "closed" | "locked" })[];
+  pieces: MapPieceShown[];
+  unplaced: { id: string; name: string; kind: string; zone?: string; words?: string }[];
+  edits: { squares: number; legend: string[] };
+}
+
+/** What keeping a chat's map in the world came to: what was copied into the world's draft, what was left (the id and why), and the draft's version after it, with whether anything was written. */
+export interface MapKept {
+  kept: { maps: string[]; places: string[]; paths: string[]; settings: boolean };
+  skipped: ({ id: string; code: "not_changed" | "in_draft_already" | "no_map" })[];
+  draft: { version: number; written: boolean };
+}
+
+/** A grid of a chat as the Places page lists it: the place it is the grid of and its name, the grid's id, the map that draws it (none for a grid authored without one), where it comes from (the world's own, laid in play, or the world's own changed in play), its size in squares and how wide a square is. */
+export interface MapListed {
+  place: string;
+  name: string;
+  grid: string;
+  map: string | null;
+  from: "world" | "laid" | "changed";
+  width: number;
+  height: number;
+  feet: number;
+  unit: "feet" | "metres";
+}
+
+/** Someone or something on a grid: its id, name and kind, its square (the top left of its footprint), its footprint when it covers more than one square, what it blocks, what it lies on or in, and its life state when it is not alive. */
+export interface MapPieceShown {
+  id: string;
+  name: string;
+  kind: string;
+  square: number[];
+  size?: number[];
+  blocks?: { way?: boolean; view?: boolean };
+  on?: string;
+  within?: boolean;
+  state?: string;
+}
+
+/** The grids of a chat, by place. */
+export interface MapsReply {
+  maps: MapListed[];
+}
+
+/** What an edit of his on a map came to: the id its Undo takes (null when it changed nothing), and what the grid found that does not add up, which was done all the same. */
+export interface MapWrote {
+  undo: string | null;
+  advised: JsonValue[];
 }
 
 /** A memory's tier: top of mind, short term, long term. */
@@ -1677,6 +1788,11 @@ export interface PerceptionWrittenReply {
   letGo: string[];
   /** What it left out or could not do, in the cast's words. */
   notes: string[];
+}
+
+/** The owner says which of the world's people a character is, by the person's id or name; null takes the reference away. */
+export interface PersonAsk {
+  person: string | null;
 }
 
 /** Lumiverse's own clipping inside RPE's window: how many of the window's messages the prompt does not hold, and why (its memory's summary stands for them, its message limit, or the preset's context size; null where it could not be told). */
@@ -2270,6 +2386,14 @@ export interface SignInState {
 
 /** A slice's kind, from the prompt map's fixed list. */
 export type SliceKind = "instructions" | "style" | "character" | "persona" | "world" | "note" | "lore" | "history" | "other";
+
+/** The owner binds a source to a character, says again which side of it a bound source defines (`defines`; null: none), or takes the binding away (`drop`). A card, a persona, a memory entity or a lore entry Lumiverse does not hold is refused. */
+export interface SourceAsk {
+  kind: SourceBindingKind;
+  ref: string;
+  defines?: string | null;
+  drop?: boolean;
+}
 
 /** What a source bound to a character points at. */
 export type SourceBindingKind = "card" | "persona" | "entry" | "memory";
@@ -3016,6 +3140,10 @@ export interface TurnReply {
   told: TurnTold;
   /** For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other. */
   carried: { message: string; swipe: number; record: JsonValue } | null;
+  /** The route of the turn's review card, where each of its changes is reviewed and undone. */
+  card: string;
+  /** The open quests the turn touched: opened, called a stage of, or wrote anything of. */
+  quests: { id: string; name: string; kind: string }[];
 }
 
 /** A turn as a chat's list shows it. */
@@ -3146,6 +3274,20 @@ export interface WindowGauge {
   used: number;
   window: number;
   reserve: number;
+}
+
+/** A change to one of his worlds, once it is kept: the world, what was written (a revision, the index, the draft, a history note, or the whole world removed), and for the draft its version and whether one is stored now. */
+export interface WorldChanged {
+  /** The world's id. */
+  world: string;
+  /** What was written. */
+  part: "revision" | "index" | "draft" | "history" | "removed";
+  /** For a revision: the revision kept. */
+  revision?: string;
+  /** For the draft: its version after the write. */
+  version?: number;
+  /** For the draft: whether one is stored now (false once it is discarded or committed). */
+  stored?: boolean;
 }
 
 /** The level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn. */
@@ -3296,15 +3438,35 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
-  /** Everything on one character's record, by kind: at the chat's newest turn, or as it stood at one of its turns. */
+  /** Everything on one character's record, by kind: at the chat's newest turn, or as it stood at one of its turns. The base as it stands with the accepted growth laid over it, each bound source read live and marked against the base, a principal's whereabouts and intention while it is away, and its game side; each list bounded by cast.queryItems, read further back with `part` and `skip`. */
   "GET /api/v1/chats/:chat/cast/:character": {
     params: { chat: string; character: string };
-    query: { turn?: TurnId };
+    query: { turn?: TurnId; part?: CharacterListName; skip?: number };
     body: undefined;
     reply: CharacterReply;
     paged: false;
     long: false;
     joined: true;
+  };
+  /** Redraws documents of a character's base as the owner's own change: each document given that differs from the one in force is written as the next version of its part, drawn against the sources as they stand in Lumiverse now. Told to the Author in the next briefing. */
+  "POST /api/v1/chats/:chat/cast/:character/base": {
+    params: { chat: string; character: string };
+    query: Record<string, never>;
+    body: BaseAsk;
+    reply: CastEditedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Sets how large a part a character plays, as the owner's own change: pinned, it stands over the Author's castings; not pinned, it is his casting alone and the Author may change it; or takes the pin away. Told to the Author in the next briefing. */
+  "POST /api/v1/chats/:chat/cast/:character/casting": {
+    params: { chat: string; character: string };
+    query: Record<string, never>;
+    body: CastingAsk;
+    reply: CastEditedReply;
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** Writes a perception for a character, corrects one or strikes one, as the player's own change placed after the newest reply: it lands while a run goes on and in a branch with no turn of its own, and the Author is told of it at the next turn. `knows` as an empty list says the character now knows nothing from it. */
   "POST /api/v1/chats/:chat/cast/:character/perceptions": {
@@ -3315,6 +3477,26 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
+  };
+  /** Says which of the world's people a character is, by the person's id or name (null takes the reference away), as the owner's own change; the character's game side and its holdings are found by it. Told to the Author in the next briefing. */
+  "POST /api/v1/chats/:chat/cast/:character/person": {
+    params: { chat: string; character: string };
+    query: Record<string, never>;
+    body: PersonAsk;
+    reply: CastEditedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Binds a source to a character (a card, a persona, a lore entry or a memory entity Lumiverse holds), says again which side of it a bound source defines, or takes the binding away, as the owner's own change. Told to the Author in the next briefing. */
+  "POST /api/v1/chats/:chat/cast/:character/sources": {
+    params: { chat: string; character: string };
+    query: Record<string, never>;
+    body: SourceAsk;
+    reply: CastEditedReply;
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** Strikes an entry of a character's record, or takes its strike back, as the player's own change on the chat's newest turn; says what it did, in the cast's words. */
   "POST /api/v1/chats/:chat/cast/:character/strike": {
@@ -3442,6 +3624,66 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: LoreProjectionRefreshed;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The grids of a chat: each place that has one, the grid's id and the map that draws it, whether it is the world's own, laid in play or the world's own changed in play, its size and how wide a square is. */
+  "GET /api/v1/chats/:chat/maps": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: MapsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Lays a grid for a place, by the same code as the `map_lay` tool: rows of symbols, or a walled room of a width and a height; over one square of a coarser map with `over` and `square`. His own change, applied at once, with an Undo, told to the Author at the next turn unless he says not to. */
+  "POST /api/v1/chats/:chat/maps": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { place: string; rows?: string[]; width?: number; height?: number; doors?: number[][]; legend?: { [key: string]: JsonValue }; feet?: number; title?: string; over?: string; square?: number[]; tell?: boolean };
+    reply: MapWrote;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One grid in full, both layers as data: what is drawn with the squares the chat changed laid over, everyone and everything on it, the doors as they stand, what the chat changed, the scale and the time step; at the chat's head, or at a turn. */
+  "GET /api/v1/chats/:chat/maps/:place": {
+    params: { chat: string; place: string };
+    query: { turn?: TurnId };
+    body: undefined;
+    reply: MapGridReply;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** Keeps the chat's map of a place in the world: its map as the chat plays it, with the squares drawn on it, copied into the world's draft, the working copy Build edits, with the places, paths and settings named; the chat keeps its own changes until the world takes them in. */
+  "POST /api/v1/chats/:chat/maps/:place/keep": {
+    params: { chat: string; place: string };
+    query: Record<string, never>;
+    body: { places?: string[]; paths?: string[]; settings?: boolean };
+    reply: MapKept;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Drags someone or something to a square of the grid of a place: his own change, applied at once on the chat's line, with an Undo, told to the Author at the next turn unless he says not to. */
+  "POST /api/v1/chats/:chat/maps/:place/moves": {
+    params: { chat: string; place: string };
+    query: Record<string, never>;
+    body: { who: string; square: number[]; tell?: boolean };
+    reply: MapWrote;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Edits squares of the grid of a place, by the same code as the `map_edit` tool: strokes of one symbol over squares, a rectangle or a line, and what a symbol stands for. His own change, applied at once, with an Undo, told to the Author at the next turn unless he says not to. */
+  "POST /api/v1/chats/:chat/maps/:place/squares": {
+    params: { chat: string; place: string };
+    query: Record<string, never>;
+    body: { strokes: { symbol: string; squares?: number[][]; rect?: number[][]; line?: number[][] }[]; legend?: { [key: string]: JsonValue }; tell?: boolean };
+    reply: MapWrote;
     paged: false;
     long: false;
     joined: false;
@@ -4306,6 +4548,26 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** What a job recorded, change by change, with its source, what it cites, whether it applied and what undid it, beside the gap checks, consents and rules the job was told. */
+  "GET /api/v1/jobs/:job/changes": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobChangesReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes. */
+  "POST /api/v1/jobs/:job/changes/:change/undo": {
+    params: { job: string; change: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: UndoReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Carries on a job that stopped at one of its own limits, from its own session where it stood, with more of each limit named. */
   "POST /api/v1/jobs/:job/continue": {
     params: { job: string };
@@ -4372,6 +4634,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: JobToldReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes. */
+  "POST /api/v1/jobs/:job/undo": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: UndoReply;
     paged: false;
     long: false;
     joined: false;
@@ -4876,6 +5148,8 @@ export interface LiveKinds {
   folder: { turn: string; path: string };
   /** One of his jobs changed: the job as RPH keeps it now. */
   job: { job: JobView };
+  /** A world of his changed: the page reads what it shows of that world again. */
+  world: WorldChanged;
   /** The extension's status changed: as GET /api/v1/status/extension answers it. */
   extension: ExtensionStatusReply;
 }

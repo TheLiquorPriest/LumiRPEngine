@@ -291,6 +291,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `since.deletedBudget` | `1000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Deleted turns in the briefing: The tokens the briefing spends naming the turns a delete took with the first words of each one's reply, the newest first; the rest are named by message number in one line. |
 | `since.deletedWords` | `24` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Words quoted of a deleted turn: How many of the first words of each deleted turn's reply the briefing quotes to name it. |
 | `since.notAppliedBudget` | `1500` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a flip stopped, in the briefing: The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them. |
+| `since.jobBudget` | `1500` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a finished job changed, in the briefing: The tokens the briefing spends on each finished job's changes, thing by thing, with why one did not take effect; past them the rest are counted, and the Jobs page lists them all. |
 | `history.window` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: History window | History window: The latest this many of the chat's messages stay in the prompt. |
 | `history.step` | none (off) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The window's step | Window step: Lets the window grow by this many messages before it is cut back to its size. |
 | `history.hold.on` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold uncovered messages: Keeps a message the story record does not cover yet in the prompt. |
@@ -451,6 +452,14 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `gap.snippet` | `240` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Gap check hit length: The most characters of a gap check's hit in the world state or the story record that the agent reads and the evidence keeps. |
 
+## `permissions`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `permissions.story` | `auto` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Write permission, the story lane: What the agents' writes to the story record do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never). |
+| `permissions.engine` | `auto` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Write permission, the engine lane: What the agents' writes to the world's state do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never). |
+| `permissions.external` | `auto` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Permission for tools that reach outside RPE: What a call of a tool outside RPE (the web, a command, an MCP server) does: go ahead (auto), wait for his word (confirm), or is refused (never). |
+
 ## `map`
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -521,6 +530,18 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `cast.comesToMindTokens` | `2000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: What comes to mind | What comes to mind: Tokens of a character's memories that come to mind for a scene. |
 | `cast.recallItems` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Memories one recall brings back: The most memories one recall brings back; the answer says how many more touch the cue. |
 | `cast.dimensionScale` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Scale of a relationship's dimensions: The scale a relationship's trust, warmth, respect and fear are read and reported against: from minus this to this. A value past it is kept as sent, and said to be past. |
+| `cast.playerMind` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | His character has a mind: His own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind. |
+
+## `worlds`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `worlds.patchOps` | `500` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Operations in one world patch: The most operations one patch of a world's draft may carry; a longer one is refused naming this setting. |
+| `worlds.patchBytes` | `4194304` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Size one world patch may bring in: The most one patch of a world's draft may bring in, in characters of JSON: the values it adds or replaces and what it copies. |
+| `worlds.depth` | `64` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Depth of a world document: How deep a world document may nest; a write that would nest it deeper is refused. |
+| `worlds.noteChars` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Characters of a commit note: The longest note a commit keeps in a world's history, cut to it. |
+| `worlds.revisionsHeld` | `8` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | World revisions the editor holds in memory: Revisions of worlds the editor keeps loaded across requests, the least recently used going first; a revision is several MB once read. |
+| `worlds.bodyBytes` | `4194304` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Largest body a worlds route takes: The most bytes a request of Build's worlds routes may carry (a world file imported, a draft written whole); a larger one is refused naming this setting. |
 
 ## Lumiverse
 
