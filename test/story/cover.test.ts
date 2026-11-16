@@ -111,17 +111,6 @@ describe("what the story record covers", () => {
     expect((await factsAt(t, capped))["history.leaving.uncovered"]).toEqual({ count: 1, fields: range(2, 2) });
   });
 
-  // hardening: a rule run is RPH's loader's, which RPE's guidance reader does not give.
-  test.skip("the shipped rule history-leaving fires at a turn's start with the count and the range, and not when nothing leaves uncovered", async () => {
-    const t = await tenMessages();
-    const fired = async (window: WindowSettings): Promise<string[]> => {
-      const facts = storyFacts({ store: t.store, window: async () => window });
-      const run = await guidance.ruleRun({ facts: { defs: () => [...facts.defs], read: (scope, _agent, names) => facts.read(scope, names) } });
-      expect(run.problems).toEqual([]);
-      return (await run.turnStart({ id: "author-1", definition: "author" })).map((f) => f.text);
-    };
-    const [text] = await fired(settings({ size: 9 }));
-    expect(text).toStartWith("2 messages (1, 2) are about to leave the prompt");
-    expect(await fired(settings({ size: 6 }))).toEqual([]);
-  });
+  // hardening: a rule run is RPH's loader's, which RPE's guidance reader does not give; the shipped rule `history-leaving` fires at a turn's start with the count and the range, and not when nothing leaves uncovered.
+  test.skip("the shipped rule history-leaving fires at a turn's start with the count and the range", () => {});
 });
