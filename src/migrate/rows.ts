@@ -95,6 +95,5 @@ export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "assistant-threads": "the pages lane",
   "chips-staged": "the pages lane",
   "approvals-jobs": "the jobs lane",
-  "runtime-settings": "the jobs lane: RPE's config has no setting for the runtime's tuning or memory limit yet (its update choice is carried as a setting)",
   "owner-rows": "nothing reads a file he names (§22): an attached one stays in the backup, with his line, until a reader of it is built",
 };

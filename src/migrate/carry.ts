@@ -12,6 +12,7 @@ import type { Database } from "bun:sqlite";
 import { attachTexts } from "./old-records";
 import { join } from "node:path";
 import { modelsPort } from "../app/connections";
+import type { Setting } from "../app/setting-list";
 import { type DataPaths, SHIPPED_FOLDER } from "../app/config";
 import { SecretsFile } from "../app/secrets";
 import type { Store, UserStore } from "../store";
@@ -44,6 +45,10 @@ export interface CarryInput {
   now: number;
   /** Where the user's own files go in the file tree, as its layout names it; null: the run was not given it, and they stay in the backup. */
   tree: TreePlaces | null;
+  /** Every setting RPE's areas and RPH declare, which takes each value a run carries as its own reader takes it (`carrySettings`); absent: RPH's and the update's only. */
+  settings?: readonly Setting[];
+  /** The ids of the world revisions the chats this run imports play: a world today's side has deleted is kept while one of its revisions is among them. */
+  plays?: ReadonlySet<string>;
 }
 
 /** What the run carried besides the chats, counted: never a value of a key. */
@@ -102,7 +107,7 @@ export async function placesOf(today: Today, items: readonly Item[], tree: boole
 export async function carry(input: CarryInput): Promise<{ landed: Partial<Record<RowId, string>>; carried: CarriedReport }> {
   const { today, report, paths, db, store, s, run, now, tree } = input;
   const user = today.sources.userId;
-  const worlds = await carryWorlds(db, user, today.user, report.items, run);
+  const worlds = await carryWorlds(db, user, today.user, report.items, run, input.plays);
 
   // The connections of the runtime the run took, the user's, through the models port the app gives RPH, into his own documents (he is the install's user: the run refuses another's); each, the default and each setting replaced only where RPE's copy is still what a run put there.
   const earlier = putPrints(db, user);
@@ -110,9 +115,9 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const serial = oneToolAtATime(await lumiahSettings(today));
   const carriedConnections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets), () => user), user, runtime, today.runtime.files, serial, earlier);
   const connections = carriedConnections === null || "why" in carriedConnections ? carriedConnections : carriedConnections.carried;
-  if (carriedConnections !== null && !("why" in carriedConnections)) keepPutPrints(db, user, carriedConnections.put);
-  const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier);
-  keepPutPrints(db, user, carriedSettings.put);
+  if (carriedConnections !== null && !("why" in carriedConnections)) keepPutPrints(db, user, carriedConnections.put, carriedConnections.drop);
+  const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier, input.settings);
+  keepPutPrints(db, user, carriedSettings.put, carriedSettings.drop);
   const settings = carriedSettings.carried;
   // Each chat the import carried; and each chat's area as each turn left it, read once for its notes and its characters' mind files.
   const chats = (report.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId);
@@ -143,9 +148,9 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     worlds: `RPE's database (world_file): ${worlds.worlds} world(s) with ${worlds.revisions} revision(s), ${worlds.drafts} draft(s) and ${worlds.histories} history file(s), byte for byte, each with its checksum`,
     "world-contents": "Inside the world documents, as they were: RPE reads them with today's world store, so each world holds what it held",
     pins: "Inside the world documents they pin, carried with them",
-    settings: `RPE-global.yml: ${settings.carried.length} setting(s) carried; ${(settings.notCarried ?? []).length > 0 ? `${(settings.notCarried ?? []).length} not carried, as RPE's like setting means something else or takes no such value; ` : ""}${settings.noHome.length} with no setting of the same meaning in RPE yet, listed by name`,
+    settings: `RPE-global.yml: ${settings.carried.length} setting(s) carried; ${(settings.notCarried ?? []).length > 0 ? `${(settings.notCarried ?? []).length} not carried, as RPE's like setting means something else or takes no such value; ` : ""}${(settings.archived ?? []).length > 0 ? `${(settings.archived ?? []).length} archived in the backup, as they steered only an old engine, each named with why; ` : ""}${settings.noHome.length} with no setting of the same meaning in RPE, listed by name`,
     "model-choices": `Listed for you: ${settings.lumiverseConnections.length} setting(s) name a connection that lives in Lumiverse, which RPE can't use; that work uses RPE's default connection until you pick one of RPE's`,
-    "runtime-settings": "Listed by name with your settings: RPE's config has no setting for the runtime's tuning or memory limit yet; its update choice is RPE's update.restart, carried with them",
+    "runtime-settings": "RPE-global.yml: the runtime's memory limit as service.memory, and each field of its tuning as the setting of the same meaning (the door's, the calls', the update's and the service's), a time in milliseconds as seconds; those with none are named, and the old link's are archived; its update choice is update.restart",
     loopback: "At the swap (rpe up): the hash of its key among RPE's provider keys, RPE answering at today's address under today's model name; the connection in Lumiverse is left as it is",
     sessions: `In the migration's imported_record, beside each carried turn and read-only, with the words of every text its record names word for word: ${old.texts} text(s) on ${old.turns} turn(s)${old.missing.length > 0 ? `; ${old.missing.length} text(s) today's clean-up had removed are listed by path as not read` : ""}`,
     // What this run carried, against what the rehearsal found, and where the rest is: each part named.

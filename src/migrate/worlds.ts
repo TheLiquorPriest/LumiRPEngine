@@ -22,14 +22,17 @@ export interface WorldsCarried {
   drafts: number;
   histories: number;
   bytes: number;
+  /** Worlds an earlier run carried that today's side has deleted since: each kept (`kept`) while a chat this run imported plays one of its revisions, else gone from RPE's copy as well. Absent where none, and from a report kept before runs named them. */
+  gone?: { world: string; kept: boolean }[];
 }
 
 /**
  * Copies the world files the report classifies as carried from the user's storage folder into RPE's
  * database, byte for byte with each one's checksum, in place of what an earlier run copied: a world
- * gone from today's data is gone from RPE's copy too.
+ * gone from today's data is gone from RPE's copy too, and named, unless a chat this run imported plays
+ * one of its revisions (`plays`, the revision ids those chats name): then it is kept as it was, and named.
  */
-export async function carryWorlds(db: Database, user: string, folder: string | null, items: readonly Item[], run: string): Promise<WorldsCarried> {
+export async function carryWorlds(db: Database, user: string, folder: string | null, items: readonly Item[], run: string, plays: ReadonlySet<string> = new Set()): Promise<WorldsCarried> {
   const files: { world: string; file: string; bytes: Uint8Array }[] = [];
   for (const item of items) {
     const match = item.where === "user storage" && item.row === "worlds" && item.fate === "carried" ? WORLD_FILE.exec(item.path) : null;
@@ -37,13 +40,23 @@ export async function carryWorlds(db: Database, user: string, folder: string | n
     const bytes = await readBytes(join(folder, item.path));
     if (bytes !== null) files.push({ world: match[1] ?? "", file: match[2] ?? "", bytes });
   }
+  const today = new Set(files.map((f) => f.world));
+  const gone: { world: string; kept: boolean }[] = [];
   db.transaction(() => {
-    db.run("DELETE FROM world_file WHERE user = ?", [user]);
+    const had = db.query<{ world: string; file: string }, [string]>("SELECT world, file FROM world_file WHERE user = ?").all(user);
+    for (const world of new Set(had.map((r) => r.world))) {
+      if (today.has(world)) continue;
+      const kept = had.some((r) => r.world === world && plays.has(/^rev\/([0-9a-f]{32})\.json$/.exec(r.file)?.[1] ?? ""));
+      gone.push({ world, kept });
+    }
+    const keep = new Set(gone.filter((g) => g.kept).map((g) => g.world));
+    const remove = db.query("DELETE FROM world_file WHERE user = ? AND world = ?");
+    for (const world of new Set(had.map((r) => r.world))) if (!keep.has(world)) remove.run(user, world);
     const put = db.query("INSERT INTO world_file (user, world, file, bytes, sha256, run) VALUES (?, ?, ?, ?, ?, ?)");
     for (const f of files) put.run(user, f.world, f.file, f.bytes, sha256(f.bytes), run);
   })();
   const count = (name: string): number => files.filter((f) => f.file === name).length;
-  return { worlds: count("index.json"), revisions: files.filter((f) => f.file.startsWith("rev/")).length, drafts: count("draft.json"), histories: count("history.json"), bytes: files.reduce((n, f) => n + f.bytes.length, 0) };
+  return { worlds: count("index.json"), revisions: files.filter((f) => f.file.startsWith("rev/")).length, drafts: count("draft.json"), histories: count("history.json"), bytes: files.reduce((n, f) => n + f.bytes.length, 0), ...(gone.length > 0 ? { gone } : {}) };
 }
 
 /**

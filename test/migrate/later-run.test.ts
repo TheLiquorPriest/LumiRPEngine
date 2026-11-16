@@ -136,4 +136,40 @@ describe("a later run over today's data changed since", () => {
       expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: { "conn-1": SECRETS.key } });
     });
   });
+
+  test("what today's side reset, removed or rotated since is followed where RPE's copy is still a run's, and named", async () => {
+    await withFixture(async (fixture, data) => {
+      const paths = dataPaths(data);
+      const port = modelsPort(paths, new SecretsFile(paths.secrets), () => USER);
+      const book = join(fixture.sources.runtime?.dataDir ?? "", "runtimes", RUNTIME);
+      const hidden = async (): Promise<unknown> => (Bun.YAML.parse(await readFile(paths.globalConfig, "utf8")) as { chat?: { hiddenReadable?: boolean } }).chat?.hiddenReadable;
+      await migrated(fixture, data, 9);
+      expect(await hidden()).toBe(true);
+
+      // On today's side since: the hidden-messages setting reset, and the connection's key rotated.
+      const settings = join(fixture.userFolder, "harness/settings.json");
+      const lumiah = JSON.parse(await readFile(settings, "utf8")) as { own: { path: string[] }[] };
+      lumiah.own = lumiah.own.filter((p) => p.path.join(".") !== "core.story.hidden");
+      await writeFile(settings, JSON.stringify(lumiah));
+      const secrets = JSON.parse(await readFile(join(book, "secrets.json"), "utf8")) as { keys: Record<string, string> };
+      secrets.keys["conn-1"] = "sk-invented-rotated-0123456789";
+      await writeFile(join(book, "secrets.json"), JSON.stringify(secrets));
+      const second = await migrated(fixture, data, 10);
+      expect(await hidden()).toBeUndefined();
+      expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: { "conn-1": "sk-invented-rotated-0123456789" } });
+      expect(second.carried?.settings.followed).toEqual([{ what: "RPE-global.yml: chat.hiddenReadable", change: "reset or removed on today's side since an earlier run", followed: true }]);
+      expect(second.carried?.connections).toMatchObject({ followed: [{ what: "the key of connection conn-1", followed: true }] });
+
+      // The connection removed on today's side since: RPE's copy, still the run's, goes with its key.
+      const connections = JSON.parse(await readFile(join(book, "connections.json"), "utf8")) as { connections: unknown[]; default?: string };
+      connections.connections = [];
+      delete connections.default;
+      await writeFile(join(book, "connections.json"), JSON.stringify(connections));
+      const third = await migrated(fixture, data, 11);
+      expect(((await port.loadConnections({ user: USER })) as ConnectionsDoc).connections.map((c) => c.id)).toEqual([]);
+      expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: {} });
+      expect(third.carried?.connections).toMatchObject({ followed: [{ what: "connection conn-1", followed: true }] });
+      expect(reportText(third)).toContain("  connection conn-1: removed on today's side since an earlier run; followed in RPE");
+    });
+  });
 });

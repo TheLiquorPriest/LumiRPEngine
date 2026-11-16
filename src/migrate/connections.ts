@@ -18,12 +18,14 @@
 // together, so where RPE's were given for another place than today's the two are not mixed: a
 // connection left as RPE has it keeps RPE's, and one taken from today's takes today's whole.
 
+import { stat } from "node:fs/promises";
 import type { ConnectionsDoc, ModelsPort, SecretsDoc, SignInToken, StoredConnection } from "rp-harness/contract";
 import { placeOf as rphPlaceOf } from "rp-harness/helpers";
 import { hashJson } from "../shared/hash";
 import { isRecord } from "../shared/json";
 import { readText } from "./files";
 import type { RuntimeFile } from "./runtime-folders";
+import type { Followed } from "./tables";
 
 /** What was carried, counted: never a key's or a header's value. */
 export interface ConnectionsCarried {
@@ -43,13 +45,15 @@ export interface ConnectionsCarried {
   changedInRpe?: string[];
   /** Whether the default is one the user chose in RPE, kept over today's. Absent from a report kept before runs told them apart. */
   defaultKept?: boolean;
+  /** What a later run did about a connection removed on today's side since an earlier run, and a key or header value rotated there: followed where RPE's copy is still what a run put there, else left as RPE has it. */
+  followed?: Followed[];
 }
 
 /** What a run put into RPE's own documents, by what it is, as `migration_put` keeps it: the fingerprint of each. */
 export type PutPrints = ReadonlyMap<string, string>;
 
 /** Today's book as its two files hold it, or why it can't be read. */
-type Book = { connections: StoredConnection[]; values: Record<string, Record<string, string>>; leftOut: number; default: string | null; secrets: { keys: Record<string, string>; signins: Record<string, SignInToken>; device?: string } } | { why: string };
+type Book = { connections: StoredConnection[]; values: Record<string, Record<string, string>>; leftOut: number; present: Set<string>; default: string | null; secrets: { keys: Record<string, string>; signins: Record<string, SignInToken>; device?: string } } | { why: string };
 
 /** The file format both of the book's files carry (`FORMAT`, book.ts). */
 const FORMAT = 1;
@@ -109,13 +113,38 @@ function placeOf(c: { provider?: unknown; baseUrl?: unknown }): string | undefin
   return rphPlaceOf(provider, baseUrl);
 }
 
-async function readBook(connectionsFile: string, secretsFile: string | undefined, serial: ReadonlySet<string>): Promise<Book> {
-  const raw = parsed(await readText(connectionsFile));
-  const secret = secretsFile === undefined ? null : parsed(await readText(secretsFile));
+/** The fingerprint of a key or a header's value of a connection, as the run keeps it: never the value itself. */
+const printOf = (id: string, value: string): string => hashJson([id, value]);
+
+/** A file of today's runtime that is not as the run counted it. */
+class ConnectionsChanged extends Error {
+  constructor(path: string) {
+    super(`today's file ${path} was changed after the run counted it, so its counts would not describe what is carried; nothing is carried until it is run again`);
+    this.name = "ConnectionsChanged";
+  }
+}
+
+/** A file's text, read as the run counted it: one that is not the size and time it was found at, before or after the read, was changed since. */
+async function counted(file: RuntimeFile): Promise<string | null> {
+  const steady = async (): Promise<boolean> => {
+    const now = await stat(file.disk).catch(() => null);
+    return now !== null && now.size === file.bytes && now.mtimeMs === file.mtimeMs;
+  };
+  if (!(await steady())) throw new ConnectionsChanged(file.path);
+  const body = await readText(file.disk);
+  if (!(await steady())) throw new ConnectionsChanged(file.path);
+  return body;
+}
+
+async function readBook(connectionsFile: RuntimeFile, secretsFile: RuntimeFile | undefined, serial: ReadonlySet<string>): Promise<Book> {
+  const raw = parsed(await counted(connectionsFile));
+  const secret = secretsFile === undefined ? null : parsed(await counted(secretsFile));
   if (raw === undefined || (raw !== null && !(isRecord(raw) && raw.lumiah === FORMAT && Array.isArray(raw.connections)))) return { why: "its connections file isn't a list of connections today's runtime reads" };
   if (secret === undefined || (secret !== null && !(isRecord(secret) && secret.lumiah === FORMAT && isRecord(secret.keys) && isRecord(secret.signins)))) return { why: "its secrets file isn't a set of secrets today's runtime reads" };
   const connections: StoredConnection[] = [];
+  const present = new Set<string>();
   const values: Record<string, Record<string, string>> = {};
+  for (const entry of isRecord(raw) && Array.isArray(raw.connections) ? raw.connections : []) if (isRecord(entry) && typeof entry.id === "string") present.add(entry.id);
   let leftOut = 0;
   for (const entry of isRecord(raw) && Array.isArray(raw.connections) ? raw.connections : []) {
     const read = connectionOf(entry, serial);
@@ -135,7 +164,7 @@ async function readBook(connectionsFile: string, secretsFile: string | undefined
     device = text(secret.device);
   }
   const chosen = isRecord(raw) ? text(raw.default) : undefined;
-  return { connections, values, leftOut, default: chosen !== undefined && connections.some((c) => c.id === chosen) ? chosen : null, secrets: { keys, signins, ...(device !== undefined ? { device } : {}) } };
+  return { connections, values, leftOut, present, default: chosen !== undefined && connections.some((c) => c.id === chosen) ? chosen : null, secrets: { keys, signins, ...(device !== undefined ? { device } : {}) } };
 }
 
 /** A record of strings from a document read as it comes; empty where it holds none. */
@@ -148,7 +177,7 @@ const isValues = (v: unknown): v is Record<string, string> => isRecord(v) && Obj
 
 /** A runtime's book as the carry reads it from the files the migration found: null where it keeps neither file; `{ why }` where the carry would take nothing of it. */
 async function bookOf(runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>): Promise<Book | null> {
-  const at = (name: string): string | undefined => files.find((f) => f.path === `runtimes/${runtime}/${name}` && !f.link)?.disk;
+  const at = (name: string): RuntimeFile | undefined => files.find((f) => f.path === `runtimes/${runtime}/${name}` && !f.link);
   const connectionsFile = at("connections.json");
   const secretsFile = at("secrets.json");
   if (connectionsFile === undefined) return secretsFile === undefined ? null : { why: "it has a secrets file and no connections file, and today's runtime reads its keys only with one" };
@@ -157,8 +186,18 @@ async function bookOf(runtime: string, files: readonly RuntimeFile[], serial: Re
 
 /** Why this run would carry nothing of a runtime's book, or null where it carries it or there is none: read before anything is written. */
 export async function bookTrouble(runtime: string, files: readonly RuntimeFile[]): Promise<string | null> {
-  const book = await bookOf(runtime, files, new Set());
-  return book !== null && "why" in book ? book.why : null;
+  try {
+    const book = await bookOf(runtime, files, new Set());
+    return book !== null && "why" in book ? book.why : null;
+  } catch (error) {
+    if (error instanceof ConnectionsChanged) return error.message;
+    throw error;
+  }
+}
+
+/** Reads the runtime's book once more, as the carry will, and throws where either file is not as the run counted it: a run that is about to write stops before it does. */
+export async function checkConnectionsSteady(runtime: string, files: readonly RuntimeFile[]): Promise<void> {
+  await bookOf(runtime, files, new Set());
 }
 
 /**
@@ -169,7 +208,7 @@ export async function bookTrouble(runtime: string, files: readonly RuntimeFile[]
  * connections; `{ why }` when its files can't be read, and nothing is carried. Else what was carried,
  * and what this run put there, by what it is, to be kept for the next run.
  */
-export async function carryConnections(port: ModelsPort, user: string, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>, earlier: PutPrints): Promise<{ carried: ConnectionsCarried; put: Map<string, string> } | { why: string } | null> {
+export async function carryConnections(port: ModelsPort, user: string, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>, earlier: PutPrints): Promise<{ carried: ConnectionsCarried; put: Map<string, string>; drop: Set<string> } | { why: string } | null> {
   const book = await bookOf(runtime, files, serial);
   if (book === null || "why" in book) return book;
   const ids = new Set(book.connections.map((c) => c.id));
@@ -178,7 +217,22 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
   // Each of today's connections against RPE's copy: taken where RPE holds none and no run put one there, or where RPE's is still what a run put there; else RPE's stands.
   const hadDoc = await port.loadConnections({ user });
   const held = (isRecord(hadDoc) && Array.isArray(hadDoc.connections) ? hadDoc.connections : []).filter((c: unknown): c is StoredConnection => isRecord(c) && typeof c.id === "string");
-  const own = held.filter((c) => !ids.has(c.id));
+  // A connection removed on today's side since a run goes from RPE where RPE's copy is still what a run put there, else it stays as RPE has it; either way it is named and no run keeps its print.
+  const followed: Followed[] = [];
+  const drop = new Set<string>();
+  const removed = new Set<string>();
+  const own = held.filter((c) => {
+    // Today's own readable connections are taken below; one today's file holds but would leave out stays as RPE has it.
+    if (ids.has(c.id)) return false;
+    if (book.present.has(c.id)) return true;
+    const was = earlier.get(`connection ${c.id}`);
+    if (was === undefined) return true;
+    drop.add(`connection ${c.id}`);
+    const follows = hashJson(c) === was;
+    followed.push({ what: `connection ${c.id}`, change: "removed on today's side since an earlier run", followed: follows });
+    if (follows) removed.add(c.id);
+    return !follows;
+  });
   const taken: StoredConnection[] = [];
   const changedInRpe: string[] = [];
   for (const c of book.connections) {
@@ -205,6 +259,13 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
   const headers = strings(had.headers, isValues);
   // Beside each connection's key and headers' values, the place they were given for: RPE's stay with RPE's, today's go with the place today's build sends them to.
   const places = strings(had.places, isString);
+  // A connection followed out of RPE takes its key, headers' values and place with it, and the prints of them.
+  for (const id of removed) {
+    delete keys[id];
+    delete headers[id];
+    delete places[id];
+    for (const what of earlier.keys()) if (what.startsWith(`key ${id}`) || what.startsWith(`value ${id}\u0000`)) drop.add(what);
+  }
   for (const c of book.connections) {
     // A connection removed in RPE takes no key back.
     if (!there.has(c.id)) continue;
@@ -220,20 +281,30 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
     }
     const key = book.secrets.keys[c.id];
     if (key !== undefined) {
-      if (keys[c.id] !== undefined && keys[c.id] !== key) carried.kept++;
+      const what = `key ${c.id}`;
+      const ourKey = keys[c.id];
+      // A key rotated on today's side since a run is taken where RPE's key is still the one a run put there; one the user set in RPE stays.
+      const rotated = ourKey !== undefined && ourKey !== key && earlier.get(what) === printOf(c.id, ourKey);
+      if (ourKey !== undefined && ourKey !== key && !rotated) carried.kept++;
       else if (joins) {
+        if (rotated) followed.push({ what: `the key of connection ${c.id}`, change: "rotated on today's side since an earlier run, and still given for the address it was", followed: true });
         keys[c.id] = key;
         carried.keys++;
+        put.set(what, printOf(c.id, key));
       }
     }
     const values = book.values[c.id];
     if (values !== undefined) {
       const ours = { ...headers[c.id] };
       for (const [name, value] of Object.entries(values)) {
-        if (ours[name] !== undefined && ours[name] !== value) carried.kept++;
+        const what = `value ${c.id}\u0000${name}`;
+        const rotated = ours[name] !== undefined && ours[name] !== value && earlier.get(what) === printOf(c.id, ours[name] ?? "");
+        if (ours[name] !== undefined && ours[name] !== value && !rotated) carried.kept++;
         else if (joins) {
+          if (rotated) followed.push({ what: `the value of header ${name} of connection ${c.id}`, change: "rotated on today's side since an earlier run", followed: true });
           ours[name] = value;
           carried.headerValues++;
+          put.set(what, printOf(c.id, value));
         }
       }
       if (joins) headers[c.id] = ours;
@@ -281,7 +352,9 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
       default: chosen,
       changedInRpe,
       defaultKept: !takeTodays,
+      ...(followed.length > 0 ? { followed } : {}),
     },
     put,
+    drop,
   };
 }

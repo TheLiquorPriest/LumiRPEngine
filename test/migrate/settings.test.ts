@@ -8,11 +8,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { settingsRegistry } from "../../scripts/settings/generate";
 import { dataPaths } from "../../src/app/config";
 import { withKeyAt } from "../../src/app/yaml";
 import { migrate } from "../../src/migrate/migrate";
 import { type MigrationReport, reportText } from "../../src/migrate/report";
-import { buildFixture, CHAT, type Fixture, STRAY } from "./fixture";
+import { buildFixture, CHAT, type Fixture, RUNTIME, STRAY } from "./fixture";
 import { TREE as tree } from "./tree";
 
 /** LumiAH's settings as a user changed them: values put whole at a path of its sections, a deeper one standing over a group put above it. */
@@ -43,11 +44,25 @@ async function changeToday(fixture: Fixture, own: readonly { path: string[]; val
   const lumiah = join(fixture.userFolder, "harness/settings.json");
   await writeFile(lumiah, JSON.stringify({ ...(JSON.parse(await readFile(lumiah, "utf8")) as object), own }));
   const engine = join(fixture.userFolder, "settings.json");
-  await writeFile(engine, JSON.stringify({ ...(JSON.parse(await readFile(engine, "utf8")) as object), time: { sceneTicks: { conversation: 1, travel: 30 }, scale: 1 } }));
+  await writeFile(
+    engine,
+    JSON.stringify({
+      ...(JSON.parse(await readFile(engine, "utf8")) as object),
+      time: { sceneTicks: { conversation: 1, travel: 30 }, scale: 1 },
+      minds: { knowledge: { enabled: true, threshold: 0.5 } },
+      narrator: { knowledge: "pov", secrets: "omit" },
+      loreBooks: ["book-a"],
+    }),
+  );
+  // The runtime's tuning: a time in milliseconds, one the old link kept, and one RPE's stop has no wait for.
+  const config = join(fixture.sources.runtime?.configDir ?? "", `${RUNTIME}.json`);
+  const doc = JSON.parse(await readFile(config, "utf8")) as { runtime: Record<string, unknown> };
+  doc.runtime.tuning = { buildStartMs: 90_000, commentMs: 5_000, progressMs: 45_000, stallMs: 5_000, stopGraceMs: 1_000 };
+  await writeFile(config, JSON.stringify(doc));
 }
 
 async function run(fixture: Fixture, data: string, hour: number): Promise<MigrationReport> {
-  const done = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
+  const done = await migrate(fixture.sources, { data, env: fixture.named, tree, settings: settingsRegistry(), now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
   expect(done.ran).toBe(true);
   return done.report;
 }
@@ -72,56 +87,67 @@ describe("today's settings into RPE's config", () => {
       const report = await run(fixture, data, 9);
 
       // In RPE-global.yml: each value as RPE's setting takes it; milliseconds as seconds; every message kept as ~; today's update choice as RPE's.
-      const carriedKeys = { "chat.hiddenReadable": true, "limits.turn.tokensOut": 20_000, "limits.turn.time": 180, "limits.turn.depth": 1, "limits.turn.agents": null, "results.clip": 9_000, "compaction.keepTurns": 5, "jobs.atOnce": 3, "jobs.perRun": 4, "jobs.run.tokensOut": 40_000, "history.window": null, "update.restart": true };
+      const carriedKeys = { "chat.hiddenReadable": true, "limits.turn.tokensIn": 300_000, "limits.turn.tokensOut": 20_000, "limits.turn.toolRounds": 30, "limits.turn.time": 180, "limits.turn.depth": 1, "limits.turn.agents": null, "limits.turn.agentsAtOnce": 2, "limits.cachedWeight": 0.2, "results.clip": 9_000, "compaction.keepTurns": 5, "jobs.atOnce": 3, "jobs.perRun": 4, "jobs.tokensPerDay": 5_000_000, "jobs.run.tokensIn": 400_000, "jobs.run.tokensOut": 40_000, "history.window": null, "update.restart": true, "service.memory": "1G", "secrets.tracked": true, "secrets.threshold": 0.5, "secrets.narrator.knowledge": "pov", "secrets.narrator.secrets": "omit", "lore.books": ["book-a"], "update.versionWait": 90, "lumiverse.stream.comment": 5, "progress.silence": 45 };
       for (const [key, value] of Object.entries(carriedKeys)) expect({ key, value: await setIn(data, key) }).toEqual({ key, value });
-      for (const key of ["limits.turn.tokensIn", "limits.turn.calls", "jobs.run.tokensIn", "jobs.run.calls", "jobs.run.time", "jobs.tokensPerDay", "jobs.cachedWeight", "progress"]) expect({ key, value: await setIn(data, key) }).toEqual({ key, value: undefined });
+      for (const key of ["limits.turn.calls", "jobs.run.calls", "jobs.run.time", "progress.show"]) expect({ key, value: await setIn(data, key) }).toEqual({ key, value: undefined });
 
       const settings = report.carried?.settings;
       if (settings === undefined) throw new Error("a real run carries the settings");
       expect([...settings.carried].sort((a, b) => a.from.localeCompare(b.from))).toEqual([
+        { from: lumiah("core.delegation.atOnce"), to: global("limits.turn.agentsAtOnce") },
         { from: lumiah("core.delegation.depth"), to: global("limits.turn.depth") },
         { from: lumiah("core.delegation.perRun"), to: global("limits.turn.agents") },
         { from: lumiah("core.jobs.atOnce"), to: global("jobs.atOnce") },
+        { from: lumiah("core.jobs.budget.tokensIn"), to: global("jobs.run.tokensIn") },
         { from: lumiah("core.jobs.budget.tokensOut"), to: global("jobs.run.tokensOut") },
         { from: lumiah("core.jobs.perRun"), to: global("jobs.perRun") },
+        { from: lumiah("core.jobs.tokensPerDay"), to: global("jobs.tokensPerDay") },
         { from: lumiah("core.loop.clipChars"), to: global("results.clip") },
         { from: lumiah("core.session.keepTurns"), to: global("compaction.keepTurns") },
+        { from: lumiah("core.spend.cachedWeight"), to: global("limits.cachedWeight") },
         { from: lumiah("core.story.hidden"), to: global("chat.hiddenReadable") },
+        { from: lumiah("core.turn.tokensIn"), to: global("limits.turn.tokensIn") },
         { from: lumiah("core.turn.tokensOut"), to: global("limits.turn.tokensOut") },
+        { from: lumiah("core.turn.toolTurns"), to: global("limits.turn.toolRounds") },
         { from: lumiah("core.turn.wallMs"), to: global("limits.turn.time") },
         { from: lumiah("transport.connections.oneToolAtATime"), to: global("models, serialTools on each connection named") },
         { from: lumiah("transport.history.count"), to: global("history.window") },
         { from: lumiah("transport.history.keep"), to: global("history.window") },
         { from: "runtime home: autoUpdate", to: global("update.restart") },
+        { from: "runtime home: memory", to: global("service.memory") },
+        { from: "runtime home: tuning.buildStartMs", to: global("update.versionWait") },
+        { from: "runtime home: tuning.commentMs", to: global("lumiverse.stream.comment") },
+        { from: "runtime home: tuning.progressMs", to: global("progress.silence") },
+        { from: "settings.json: loreBooks", to: global("lore.books") },
+        { from: "settings.json: minds.knowledge.enabled", to: global("secrets.tracked") },
+        { from: "settings.json: minds.knowledge.threshold", to: global("secrets.threshold") },
+        { from: "settings.json: narrator.knowledge", to: global("secrets.narrator.knowledge") },
+        { from: "settings.json: narrator.secrets", to: global("secrets.narrator.secrets") },
       ]);
-      const cached = "today's counted a token read again from a provider's cache as a share of one (core.spend.cachedWeight); RPE's counts every token sent in full";
-      const rounds = "today's counted the answers that called tools; RPE's counts every model call";
+      // Not carried: today's counts the answers that called tools where RPE's jobs count every model call, and a time of 90.5 seconds is no whole number.
       expect([...(settings.notCarried ?? [])].sort((a, b) => a.from.localeCompare(b.from))).toEqual([
-        { from: lumiah("core.jobs.budget.tokensIn"), to: "jobs.run.tokensIn", why: cached },
-        { from: lumiah("core.jobs.budget.toolTurns"), to: "jobs.run.calls", why: rounds },
+        { from: lumiah("core.jobs.budget.toolTurns"), to: "jobs.run.calls", why: "today's counted the answers that called tools; RPE's counts every model call" },
         { from: lumiah("core.jobs.budget.wallMs"), to: "jobs.run.time", why: "jobs.run.time takes a whole number, at least 1, or ~ for no limit, not 90.5." },
-        { from: lumiah("core.jobs.tokensPerDay"), to: "jobs.tokensPerDay", why: "today's counted the tokens of any 24 hours; RPE's counts those of the user's day" },
         { from: lumiah("core.reply.progress"), to: "progress.show", why: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive" },
-        { from: lumiah("core.spend.cachedWeight"), to: "jobs.cachedWeight", why: "today's weighed every limit on tokens sent by it; RPE's weighs only the jobs' tokens of the user's day" },
-        { from: lumiah("core.turn.tokensIn"), to: "limits.turn.tokensIn", why: cached },
-        { from: lumiah("core.turn.toolTurns"), to: "limits.turn.calls", why: rounds },
       ]);
+      // Archived: what steered only an old engine, named with why; the runtime's stop wait is named as having no counterpart.
+      expect([...(settings.archived ?? [])].map((s) => s.from).sort()).toEqual([lumiah("core.session.summarizeAtTokens"), lumiah("transport.mcp.callMs"), "runtime home: tuning.stallMs", "settings.json: agents", "settings.json: defaults", "settings.json: helper"].sort());
 
       // The whole list of today's settings, each named once: carried, not carried with why, or with no setting of the same meaning in RPE yet.
-      const named = [...settings.carried.map((s) => s.from), ...(settings.keptInRpe ?? []).map((s) => s.from), ...(settings.notCarried ?? []).map((s) => s.from), ...settings.noHome];
+      const named = [...settings.carried.map((s) => s.from), ...(settings.keptInRpe ?? []).map((s) => s.from), ...(settings.notCarried ?? []).map((s) => s.from), ...(settings.archived ?? []).map((s) => s.from), ...settings.noHome];
       expect(named.length).toBe(new Set(named).size);
       expect(new Set(named)).toEqual(
         new Set([
           ...["core.agents.main.effort", "core.story.hidden", "core.turn.tokensIn", "core.turn.tokensOut", "core.turn.toolTurns", "core.turn.wallMs", "core.delegation.depth", "core.delegation.perRun", "core.delegation.atOnce", "core.loop.clipChars", "core.session.keepTurns", "core.session.summarizeAtTokens", "core.jobs.atOnce", "core.jobs.perRun", "core.jobs.tokensPerDay", "core.jobs.budget.tokensIn", "core.jobs.budget.tokensOut", "core.jobs.budget.toolTurns", "core.jobs.budget.wallMs", "core.spend.cachedWeight", "core.reply.progress", "transport.history.keep", "transport.history.count", "transport.connections.oneToolAtATime", "transport.mcp.callMs"].map(lumiah),
-          ...["defaults", "helper", "agents", "story", "prompts", "time"].map((key) => `settings.json: ${key}`),
+          ...["defaults", "helper", "agents", "story", "prompts", "time", "loreBooks", "minds.knowledge.enabled", "minds.knowledge.threshold", "narrator.knowledge", "narrator.secrets"].map((key) => `settings.json: ${key}`),
           `runs/${CHAT.classic}/prefs.json: mapDisplay`,
           `runs/${CHAT.classic}/prefs.json: tidyLeft`,
           "harness/story.json: jobs",
           ...["knowledge", "narrator"].map((key) => `chat ${CHAT.classic}'s own choice: ${key}`),
           `chat ${CHAT.branch}'s own choice: knowledge`,
-          "runtime home: tuning",
           "runtime home: memory",
           "runtime home: autoUpdate",
+          ...["buildStartMs", "commentMs", "progressMs", "stallMs", "stopGraceMs"].map((field) => `runtime home: tuning.${field}`),
         ]),
       );
       // The round's own example: today's conversation tick seeds chats started from now on; RPE has no setting for it, so it is named, not carried.
@@ -130,8 +156,8 @@ describe("today's settings into RPE's config", () => {
       const text = reportText(report);
       expect(text).toContain("  harness/settings.json: core.turn.wallMs → RPE-global.yml: limits.turn.time");
       expect(text).toContain("\nSettings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):\n");
-      expect(text).toContain(`\n  harness/settings.json: core.jobs.budget.tokensIn (RPE's jobs.run.tokensIn: ${cached})\n`);
-      expect(text).toContain("Your settings: RPE-global.yml: 14 setting(s) carried; 8 not carried, as RPE's like setting means something else or takes no such value; ");
+      expect(text).toContain(`\n  harness/settings.json: core.jobs.budget.toolTurns (RPE's jobs.run.calls: today's counted the answers that called tools; RPE's counts every model call)\n`);
+      expect(text).toContain("Your settings: RPE-global.yml: 29 setting(s) carried; 3 not carried, as RPE's like setting means something else or takes no such value; 6 archived in the backup, as they steered only an old engine, each named with why; ");
     } finally {
       await fixture.remove();
     }

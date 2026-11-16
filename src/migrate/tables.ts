@@ -189,11 +189,23 @@ export function putPrints(db: Database, user: string): Map<string, string> {
   return new Map(db.query<{ what: string; print: string }, [string]>("SELECT what, print FROM migration_put WHERE user = ?").all(user).map((r) => [r.what, r.print]));
 }
 
-/** Keeps what a run put into RPE's own documents, over what an earlier run put of the same. */
-export function keepPutPrints(db: Database, user: string, prints: ReadonlyMap<string, string>): void {
+/** What a later run did about a thing today's side reset, removed or rotated since an earlier run: followed where RPE's copy is still what a run put there, else left as RPE has it. */
+export interface Followed {
+  /** What it is, where it is in RPE. */
+  what: string;
+  /** What changed on today's side. */
+  change: string;
+  /** True where RPE's copy was changed to follow; false where RPE's copy is not what a run put there, and stands. */
+  followed: boolean;
+}
+
+/** Keeps what a run put into RPE's own documents, over what an earlier run put of the same; `drop` are the prints of what the run followed out of RPE, which no run keeps any more. */
+export function keepPutPrints(db: Database, user: string, prints: ReadonlyMap<string, string>, drop: Iterable<string> = []): void {
   db.transaction(() => {
     const put = db.query("INSERT INTO migration_put (user, what, print) VALUES (?, ?, ?) ON CONFLICT (user, what) DO UPDATE SET print = excluded.print");
     for (const [what, print] of prints) put.run(user, what, print);
+    const gone = db.query("DELETE FROM migration_put WHERE user = ? AND what = ?");
+    for (const what of drop) gone.run(user, what);
   })();
 }
 

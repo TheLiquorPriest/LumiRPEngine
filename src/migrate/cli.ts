@@ -5,6 +5,7 @@
 // data moves, and the runtime's two folders. RPE's command line (`src/app/cli.ts`) runs this and
 // gives it the file tree's layout: its folder names, its tables and where a chat's own folder is.
 
+import type { Setting } from "../app/setting-list";
 import { runtimeFoldersOf } from "./runtime-folders";
 import { migrate } from "./migrate";
 import type { TreeLayout } from "./own-files";
@@ -45,9 +46,10 @@ export interface CliIo {
 
 /**
  * Runs the migration from the command line's words; the exit code: 0 done, 1 refused or failed, 2
- * misused. `tree` is the file tree's layout, which says where the user's own files go.
+ * misused. `tree` is the file tree's layout, which says where the user's own files go; `settings` the
+ * app's one registry of settings, which takes each value the run carries as its own reader takes it.
  */
-export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout): Promise<number> {
+export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[]): Promise<number> {
   const values: Record<string, string> = {};
   const folders: Record<string, "mine" | "theirs"> = {};
   const switches = new Set<string>();
@@ -83,7 +85,7 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
   const found = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
   try {
-    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree });
+    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}) });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
     return switches.has("rehearse") || ran ? 0 : 1;
   } catch (error) {

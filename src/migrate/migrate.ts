@@ -10,6 +10,7 @@
 // chat played on RPE is left as it is (`import-chats.ts`). Run it while RPE's own server is not
 // running on that data folder.
 
+import type { Setting } from "../app/setting-list";
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { NO_OWNER } from "../app/auth";
@@ -28,6 +29,7 @@ import { openStore, STORE_MIGRATIONS } from "../store";
 import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
 import { carry } from "./carry";
+import { checkConnectionsSteady } from "./connections";
 import { chatsToImport, importChats } from "./import-chats";
 import { type ChatNames, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
@@ -54,6 +56,8 @@ export interface MigrateOptions {
    * user's own files stay in the backup only, and the report says so.
    */
   tree?: TreeLayout;
+  /** Every setting RPE's areas and RPH declare (the app's one registry), which takes each value the run carries as its own reader takes it. Absent: RPH's own and the update's only are known, and another key is written as it is. */
+  settings?: readonly Setting[];
 }
 
 export interface MigrateResult {
@@ -116,6 +120,9 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
     // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.
     const owner = config.lumiverse.user;
     if (owner === null || owner === "") throw new Error(NO_OWNER);
+    // The runtime's connections and secrets files are read once more as the carry will read them: one changed since the run counted it stops the run now, with nothing written.
+    const taking = today.runtime.runtimes[0]?.name;
+    if (taking !== undefined) await checkConnectionsSteady(taking, today.runtime.files);
 
     step = "preparing RPE's data folder";
     await prepareDataFolder(paths);
@@ -168,7 +175,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
             forgetVersions: (chat: string) => layout.forgetVersions(db, paths.files, sources.userId, chat),
           }
         : null;
-      const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree });
+      const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree, plays: new Set(worlds.keys()), ...(options.settings ? { settings: options.settings } : {}) });
       report.landed = carried.landed;
       report.carried = carried.carried;
       // What it carried of each chat it imported, over the chat's whole path, for the chat's first briefing on RPE and the Migration page.

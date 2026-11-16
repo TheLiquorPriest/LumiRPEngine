@@ -409,12 +409,19 @@ export function reportText(report: MigrationReport): string {
     if (ownFiles === null) lines.push("", "Your own agents, skills, texts, GUIDANCE.md, notes and learned files were not carried: this run was not given the file tree's places. They are in the backup.");
     else if (ownFiles.leftOut > 0) lines.push("", `${ownFiles.leftOut} of your own file(s) have names that would leave the folder they go in: not written, in the backup.`);
     if (ownFiles !== null && ownFiles.removed + ownFiles.changed > 0) lines.push("", `Files an earlier run wrote into the file tree that today's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
+    for (const g of report.carried.worlds.gone ?? []) lines.push("", g.kept ? `The world ${g.world} was deleted on today's side since an earlier run: RPE keeps its copy, since a chat carried from today's side plays it.` : `The world ${g.world} was deleted on today's side since an earlier run, and no chat carried from today's side plays it: RPE's copy of it is gone too.`);
     if (settings.lumiverseConnections.length > 0) {
       lines.push("", "Settings that name a connection living in Lumiverse, which RPE can't use: pick one of RPE's connections for each; until you do, that work uses RPE's default connection.");
       for (const c of settings.lumiverseConnections) lines.push(`  ${c.setting} (connection ${c.connection} in Lumiverse)`);
     }
     if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
     if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
+    // What today's side reset, removed or rotated since an earlier run: followed in RPE where RPE's copy was still what a run put there; else left as RPE has it.
+    const followed = [...(connections !== null && !("why" in connections) ? (connections.followed ?? []) : []), ...(settings.followed ?? [])];
+    if (followed.length > 0) {
+      lines.push("", "Changed on today's side since an earlier run, and what this run did about each:");
+      for (const f of followed) lines.push(`  ${f.what}: ${f.change}; ${f.followed ? "followed in RPE" : "RPE's copy is not what a run put there, left as RPE has it"}`);
+    }
     lines.push("", "Settings carried into RPE's config:");
     for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);
     if (settings.carried.length === 0) lines.push("  none");
@@ -426,7 +433,11 @@ export function reportText(report: MigrationReport): string {
       lines.push("", "Settings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):");
       for (const s of settings.notCarried ?? []) lines.push(`  ${s.from} (RPE's ${s.to}: ${s.why})`);
     }
-    lines.push("", "Settings with no setting of the same meaning in RPE yet (kept in the backup):");
+    if ((settings.archived ?? []).length > 0) {
+      lines.push("", "Settings that steered only an old engine, archived (kept in the backup):");
+      for (const s of settings.archived ?? []) lines.push(`  ${s.from} (${s.why})`);
+    }
+    lines.push("", "Settings with no setting of the same meaning in RPE (kept in the backup):");
     for (const s of settings.noHome) lines.push(`  ${s}`);
   }
   if (report.changes) {

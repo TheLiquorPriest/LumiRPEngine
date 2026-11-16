@@ -18,15 +18,17 @@ import { hashJson } from "../shared/hash";
 import { isRecord, type JsonValue } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";
-import { takenValue } from "../app/setting-list";
+import { type Setting, takenValue } from "../app/setting-list";
 import { UPDATE_SETTINGS } from "../app/update";
 import { LayoutRefused, withKeyAt, yamlMapping } from "../app/yaml";
 import type { PutPrints } from "./connections";
 import { readText as readFile } from "./files";
+import { type Fate, engineFate, engineLeaves, lumiahFate, MEMORY_KEY, tuningFate } from "./setting-map";
 import type { Item } from "./report";
+import type { Followed } from "./tables";
 import type { Today } from "./today";
 
-/** Settings carried, settings with no home in RPE yet, settings RPE's like setting counts otherwise or can't take, and settings that name a connection in Lumiverse. */
+/** Settings carried, those archived as steering only an old engine, settings with no home in RPE, settings RPE's like setting counts otherwise or can't take, and settings that name a connection in Lumiverse. */
 export interface SettingsCarried {
   /** Where each carried setting was, and the setting it now is in RPE's config. */
   carried: { from: string; to: string }[];
@@ -34,7 +36,11 @@ export interface SettingsCarried {
   keptInRpe?: { from: string; to: string }[];
   /** Today's settings RPE has a like setting for that counts something else, or takes no such value: not carried, with that setting's key and why. Absent from a report kept before runs told them. */
   notCarried?: { from: string; to: string; why: string }[];
-  /** Today's settings with no setting of the same meaning in RPE yet, by where they are and their name. */
+  /** Today's settings that steered only an engine that is gone: kept in the backup, each with why. Absent from a report kept before runs told them apart. */
+  archived?: { from: string; why: string }[];
+  /** What a later run did about a setting reset or removed on today's side since an earlier run: followed in RPE's file where RPE's value is still the one a run put there, else left as RPE has it. */
+  followed?: Followed[];
+  /** Today's settings with no setting of the same meaning in RPE, by where they are and their name. */
   noHome: string[];
   /** Today's settings that name a connection that lives in Lumiverse: where each is, and the connection's id there. */
   lumiverseConnections: { setting: string; connection: string }[];
@@ -99,46 +105,6 @@ export function oneToolAtATime(own: Record<string, JsonValue>): Set<string> {
   return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
 }
 
-/**
- * What RPE's settings a run writes take, as their readers declare them: RPH's own list and the update's.
- * The turn lane's two a run writes, `chat.hiddenReadable` and `history.window`, are declared where the
- * migration may not reach (`test/standalone-boundaries.test.ts`): their values are made to fit where
- * they are read from today's.
- */
-const RPE_SETTINGS = [...HARNESS_SETTINGS, ...UPDATE_SETTINGS];
-
-/**
- * LumiAH's settings RPE has a setting of the same meaning for (RPH kept most of them from it: its
- * `src/harness/settings/`), by their paths in its sections (`H/core/settings.ts`): the setting each
- * becomes, and for a time, that LumiAH keeps it in milliseconds where RPE takes seconds.
- */
-const LUMIAH_SAME: Readonly<Record<string, { to: string; seconds?: true }>> = {
-  "core.turn.tokensOut": { to: "limits.turn.tokensOut" },
-  "core.turn.wallMs": { to: "limits.turn.time", seconds: true },
-  "core.delegation.depth": { to: "limits.turn.depth" },
-  "core.delegation.perRun": { to: "limits.turn.agents" },
-  "core.loop.clipChars": { to: "results.clip" },
-  "core.session.keepTurns": { to: "compaction.keepTurns" },
-  "core.jobs.atOnce": { to: "jobs.atOnce" },
-  "core.jobs.perRun": { to: "jobs.perRun" },
-  "core.jobs.budget.tokensOut": { to: "jobs.run.tokensOut" },
-  "core.jobs.budget.wallMs": { to: "jobs.run.time", seconds: true },
-};
-
-const CACHED = "today's counted a token read again from a provider's cache as a share of one (core.spend.cachedWeight); RPE's counts every token sent in full";
-const ROUNDS = "today's counted the answers that called tools; RPE's counts every model call";
-
-/** LumiAH's settings RPE has a like setting for that counts something else, so that no value of theirs means the same there: the RPE setting, and why. */
-const LUMIAH_UNLIKE: Readonly<Record<string, { to: string; why: string }>> = {
-  "core.turn.tokensIn": { to: "limits.turn.tokensIn", why: CACHED },
-  "core.jobs.budget.tokensIn": { to: "jobs.run.tokensIn", why: CACHED },
-  "core.turn.toolTurns": { to: "limits.turn.calls", why: ROUNDS },
-  "core.jobs.budget.toolTurns": { to: "jobs.run.calls", why: ROUNDS },
-  "core.jobs.tokensPerDay": { to: "jobs.tokensPerDay", why: "today's counted the tokens of any 24 hours; RPE's counts those of the user's day" },
-  "core.spend.cachedWeight": { to: "jobs.cachedWeight", why: "today's weighed every limit on tokens sent by it; RPE's weighs only the jobs' tokens of the user's day" },
-  "core.reply.progress": { to: "progress.show", why: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive" },
-};
-
 /** LumiAH's history cutoff as it ships (`H/link/settings.ts:260`), for the part of it a user left as it was: the latest 40 messages kept. */
 const LUMIAH_HISTORY = { keep: "last", count: 40 } as const;
 
@@ -152,27 +118,54 @@ interface Put {
 /**
  * Carries today's settings into the global config file at `globalConfig` (`RPE-global.yml`) where RPE
  * has a setting of the same meaning, each written under its own key and the rest of the file kept as
- * the user wrote it, and lists the others. `items` are the report's: the settings row's files and
- * entries, and the runtimes' configs. `earlier` is what earlier runs put into RPE's documents
- * (`migration_put`); with what was carried comes what this run put there, to be kept for the next.
+ * the user wrote it, and says what becomes of every other one (`setting-map.ts`). `items` are the report's: the
+ * settings row's files and entries, and the runtimes' configs. `earlier` is what earlier runs put into
+ * RPE's documents (`migration_put`); with what was carried comes what this run put there, to be kept for
+ * the next. `registry` is every setting RPE's areas and RPH declare, which takes each value as its own
+ * reader takes it; without it only RPH's list and the update's are known, and a value for another key
+ * is written as it is.
  */
-export async function carrySettings(today: Today, items: readonly Item[], globalConfig: string, earlier: PutPrints): Promise<{ carried: SettingsCarried; put: Map<string, string> }> {
+export async function carrySettings(today: Today, items: readonly Item[], globalConfig: string, earlier: PutPrints, registry?: readonly Setting[]): Promise<{ carried: SettingsCarried; put: Map<string, string>; drop: Set<string> }> {
+  const known = registry ?? [...HARNESS_SETTINGS, ...UPDATE_SETTINGS];
   const keptInRpe: SettingsCarried["carried"] = [];
   const notCarried: NonNullable<SettingsCarried["notCarried"]> = [];
-  const out: SettingsCarried = { carried: [], keptInRpe, notCarried, noHome: [], lumiverseConnections: [] };
+  const archived: NonNullable<SettingsCarried["archived"]> = [];
+  const followed: Followed[] = [];
+  const out: SettingsCarried = { carried: [], keptInRpe, notCarried, archived, followed, noHome: [], lumiverseConnections: [] };
   const put = new Map<string, string>();
+  /** What a run put before that this one followed out of RPE's file: its print is let go. */
+  const drop = new Set<string>();
+  const puts: Put[] = [];
+  /** Files one of today's settings where its fate says: into RPE's setting, or named as not carried, archived or without a counterpart. */
+  const settle = (from: string, fate: Fate, value: JsonValue): void => {
+    if ("unlike" in fate) notCarried.push({ from, to: fate.to, why: fate.unlike });
+    else if ("to" in fate) puts.push({ from: [from], to: fate.to, value: fate.seconds === true && typeof value === "number" ? value / 1000 : fate.books === true && value === "auto" ? ["auto"] : value });
+    else if ("archived" in fate) archived.push({ from, why: fate.archived });
+    else out.noHome.push(from);
+  };
   const engine = json(await today.userView.read("settings.json"));
+  let readSome = engine !== null;
   if (isRecord(engine)) {
-    for (const key of Object.keys(engine)) if (key !== "v") out.noHome.push(`settings.json: ${key}`);
+    for (const [key, value] of Object.entries(engine)) {
+      if (key === "v") continue;
+      // A group some of whose leaves have a setting of the same meaning: those leaves are settled one by one, and the group's own fate names the rest.
+      const inside = engineLeaves(key);
+      if (inside.length === 0) {
+        settle(`settings.json: ${key}`, engineFate(key), value as JsonValue);
+        continue;
+      }
+      const present = new Map(leaves(value, key, []));
+      for (const [path, fate] of inside) if (present.has(path)) settle(`settings.json: ${path}`, fate, present.get(path) as JsonValue);
+      if ([...present.keys()].some((path) => !inside.some(([named]) => named === path))) settle(`settings.json: ${key}`, engineFate(key), value as JsonValue);
+    }
     out.lumiverseConnections.push(...connectionSettings(engine, "", []).map((c) => ({ ...c, setting: `settings.json: ${c.setting}` })));
   }
 
-  const puts: Put[] = [];
   const history: { from: string[]; keep: unknown; count: unknown } = { from: [], keep: LUMIAH_HISTORY.keep, count: LUMIAH_HISTORY.count };
-  for (const [path, value] of leaves(lumiahOwn(json(await today.userView.read("harness/settings.json"))), "", [])) {
+  const harness = json(await today.userView.read("harness/settings.json"));
+  if (harness !== null) readSome = true;
+  for (const [path, value] of leaves(lumiahOwn(harness), "", [])) {
     const from = `harness/settings.json: ${path}`;
-    const same = LUMIAH_SAME[path];
-    const unlike = LUMIAH_UNLIKE[path];
     // Today's "messages you hid": whether agents may read them.
     if (path === "core.story.hidden") {
       if (value === "include" || value === "leave_out") puts.push({ from: [from], to: "chat.hiddenReadable", value: value === "include" });
@@ -184,9 +177,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
       if (path.endsWith("keep")) history.keep = value;
       else history.count = value;
     } else if (path === "transport.connections.oneToolAtATime") out.carried.push({ from, to: SERIAL_TOOLS });
-    else if (same !== undefined) puts.push({ from: [from], to: same.to, value: same.seconds === true && typeof value === "number" ? value / 1000 : (value as JsonValue) });
-    else if (unlike !== undefined) notCarried.push({ from, to: unlike.to, why: unlike.why });
-    else out.noHome.push(from);
+    else settle(from, lumiahFate(path), value as JsonValue);
   }
   if (history.from.length > 0) {
     const kept = history.keep === "all" ? null : history.count;
@@ -203,14 +194,17 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     if (pref) out.noHome.push(`chat ${pref[1]}'s own choice: ${pref[2]}`);
   }
 
-  // The runtime's own settings (`RuntimeSetup`, `H/runtime/config.ts:44-50`): whether it takes a new build by itself once nothing is under way is RPE's `update.restart`; RPE's config has none of the others.
+  // The runtime's own settings (`RuntimeSetup`, `H/runtime/config.ts:44-50`): its memory limit is RPE's `service.memory`, each field of its tuning has its own fate, and whether it takes a new build by itself once nothing is under way is RPE's `update.restart`.
   for (const f of today.runtime.files) {
     const name = /^config\/([^/]+)\.json$/.exec(f.path)?.[1];
     if (name === undefined || !today.runtime.runtimes.some((r) => r.name === name)) continue;
     const doc = json(await readFile(f.disk));
     const runtime = isRecord(doc) ? doc.runtime : undefined;
     if (!isRecord(runtime)) continue;
-    for (const key of ["tuning", "memory"]) if (runtime[key] !== undefined) out.noHome.push(`runtime ${name}: ${key}`);
+    readSome = true;
+    if (typeof runtime.memory === "string") puts.push({ from: [`runtime ${name}: memory`], to: MEMORY_KEY, value: runtime.memory });
+    else if (runtime.memory !== undefined) out.noHome.push(`runtime ${name}: memory`);
+    for (const [field, value] of Object.entries(isRecord(runtime.tuning) ? runtime.tuning : {})) settle(`runtime ${name}: tuning.${field}`, tuningFate(field), value as JsonValue);
     if (runtime.autoUpdate !== undefined) puts.push({ from: [`runtime ${name}: autoUpdate`], to: "update.restart", value: runtime.autoUpdate as JsonValue });
   }
 
@@ -220,9 +214,13 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     const config = yamlMapping(before, globalConfig);
     let text = before;
     for (const p of puts) {
-      // Where the app declares the setting, the value as it takes it; and none, for a setting none holds where nothing sets it and no file may set `~` for: nothing is written, and RPE's own none holds.
-      const def = RPE_SETTINGS.find((d) => d.key === p.to);
+      // As the app's registry declares the setting, the value as it takes it; and none, for a setting none holds where nothing sets it and no file may set `~` for: nothing is written, and RPE's own none holds.
+      const def = known.find((d) => d.key === p.to);
       let value: JsonValue | undefined = p.value;
+      if (def === undefined && registry !== undefined) {
+        for (const from of p.from) notCarried.push({ from, to: p.to, why: `RPE declares no setting ${p.to}` });
+        continue;
+      }
       if (def !== undefined && p.value === null && def.default === null && def.orNone !== true) value = undefined;
       else if (def !== undefined) {
         const taken = takenValue(def, p.value, p.to, true);
@@ -256,7 +254,33 @@ export async function carrySettings(today: Today, items: readonly Item[], global
         for (const from of p.from) out.carried.push({ from, to });
       } else for (const from of p.from) keptInRpe.push({ from, to });
     }
+    // What a run carried before that today's side no longer gives (reset or removed since): taken out of RPE's file where RPE's value is still the one a run put there, else left as RPE has it; named either way. Only while some file of today's settings is still read: with none, nothing can be said of what was reset.
+    if (readSome) {
+      const given = new Set(puts.map((p) => `setting ${p.to}`));
+      for (const [what, was] of earlier) {
+        if (!what.startsWith("setting ") || given.has(what)) continue;
+        const key = what.slice("setting ".length);
+        const path = key.split(".");
+        let ours: unknown = config;
+        for (const part of path) ours = isRecord(ours) ? ours[part] : undefined;
+        drop.add(what);
+        if (ours === undefined) continue;
+        const to = `RPE-global.yml: ${key}`;
+        const change = "reset or removed on today's side since an earlier run";
+        if (hashJson(ours) !== was) {
+          followed.push({ what: to, change, followed: false });
+          continue;
+        }
+        try {
+          text = withKeyAt(text, path, undefined, globalConfig);
+          followed.push({ what: to, change, followed: true });
+        } catch (error) {
+          if (!(error instanceof LayoutRefused)) throw error;
+          followed.push({ what: to, change: `${change}; ${error.message}`, followed: false });
+        }
+      }
+    }
     if (text !== before) await writeWhole(globalConfig, text);
   });
-  return { carried: out, put };
+  return { carried: out, put, drop };
 }
