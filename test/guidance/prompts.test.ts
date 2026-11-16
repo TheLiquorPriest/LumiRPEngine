@@ -186,6 +186,14 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(text).toContain("- [e-1] Harbour (place): The quay. tide: high. (by a key) (changed since it was indexed)");
     expect(text).toContain("- [e-3] Quay: Burnt down.");
     expect(text).toContain("- [e-4] Tide table Bound to Wren.");
+    expect(answers.line("batch_head", { count: 5, left: 9, held: 4 } as never)).toBe("Entries to index: 5 of the 9 not indexed yet. 4 more are with another indexing job.");
+    expect(answers.line("batch_held", { held: 4 } as never)).toBe("4 entries are with another indexing job just now; none is left for you to index yet.");
+    expect(answers.line("batch_unreadable", { reason: "the store is closed" } as never)).toBe("The entries to index could not be read: the store is closed");
+    expect(answers.line("job_brief", {})?.trim()).toBe("Index this chat's lore.");
+    for (const cause of ["off", "day_count", "day_tokens", "limit", "agent"]) {
+      const said = answers.line(`job_refused_${cause}`, { refused: cause, max: 5, value: 5, limit: "calls", agent: "indexer" } as never) ?? "";
+      expect({ cause, said: said.startsWith("The indexing job was not started"), unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ cause, said: true, unfilled: false, asks: false });
+    }
   });
 
   test("delegate-brief.md frames the task, what the sub-agent was given and what to send back; question.md shows an agent's question", async () => {

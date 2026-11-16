@@ -1,5 +1,5 @@
 ---
-description: The sentences of the lore's tools (lore_index_write), the batch an indexing run is given, the lore a character's agent is given as its own, the readable index LORE-INDEX.md, and each line of the lore map, which says how an entry came into the prompt and whether it changed since it was indexed. Each is data from RPE's records plus these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that text is not shown, and the lore map then lays out each entry itself by the layout in lore-map.
+description: The sentences of the lore's tools (lore_index_write), the batch an indexing run is given, the brief of the Lore page's Start indexing press and the words it shows when that press started nothing (job_refused_ and the cause, off, day_count, day_tokens, limit or agent, or job_refused where no line names the cause), the lore a character's agent is given as its own, the readable index LORE-INDEX.md, and each line of the lore map, which says how an entry came into the prompt and whether it changed since it was indexed. Each is data from RPE's records plus these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that text is not shown, and the lore map then lays out each entry itself by the layout in lore-map.
 format: lines
 ---
 fault: {{tool}} failed by a fault of RPE's own, not by anything in your call. It is logged.
@@ -9,10 +9,19 @@ unreadable: Entry {{n}}: {{field}} cannot be read, you sent {{value}}; it was no
 unknown_entry: Entry {{n}}: there is no entry {{id}} in this chat's lore; it was not kept.
 kept: Kept the lines of {{count}} entries.{{#left}} {{left}} entries are not indexed yet.{{/left}}{{^left}} Every entry is indexed.{{/left}}
 binding: {{what}}{{#aspect}} ({{aspect}}){{/aspect}}
-batch_head: Entries to index: {{count}} of the {{left}} not indexed yet.
+batch_head: Entries to index: {{count}} of the {{left}} not indexed yet.{{#held}} {{held}} more are with another indexing job.{{/held}}
 batch_entry: ### [{{id}}] {{title}} (from {{source}}; revision {{revision}}{{#keys}}; keys: {{keys}}{{/keys}})
 batch_text: {{text}}
 batch_none: Every entry of this chat's lore is indexed.
+batch_held: {{held}} entries are with another indexing job just now; none is left for you to index yet.
+batch_unreadable: The entries to index could not be read: {{reason}}
+job_brief: Index this chat's lore.
+job_refused_off: The indexing job was not started: jobs are switched off.
+job_refused_day_count: The indexing job was not started: {{value}} jobs have started in a day{{#connection}} on {{connection}}{{/connection}}, and {{max}} is the most allowed.
+job_refused_day_tokens: The indexing job was not started: jobs sent and wrote {{value}} tokens in a day, and {{max}} is the most allowed.
+job_refused_limit: The indexing job was not started: its limit on {{limit}} is {{value}}, and a limit is a whole number above 0.
+job_refused_agent: The indexing job was not started: there is no agent named {{agent}}, or it has no model to run on.
+job_refused: The indexing job was not started ({{refused}}).
 known_entry: ### [{{id}}] {{title}} (from {{source}})
 known_text: {{text}}
 known_none: No lore is bound to you.
