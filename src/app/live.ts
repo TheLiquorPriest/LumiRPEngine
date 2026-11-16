@@ -162,6 +162,7 @@ export const jobView = shape.named(
     repeats: opt(T, "For a job the owner started again: the job it repeats."),
     asks: opt(shape.object({ at: N, tokens: N }), "For a job that asks: the ask point it reached, and the tokens it had spent when it did."),
     more: opt(jobLimits, "What the owner gave it beyond its limits by carrying it on, added up over every time he did."),
+    check: opt(shape.object({ connection: T }), "For a tag check: the connection it measures, by id."),
   }),
 );
 export const replyError = shape.object({

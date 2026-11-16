@@ -206,7 +206,7 @@ describe("the hooks areas fill", () => {
       { ref: "test:chat_name", from: "definition", own: false },
       { ref: BOOTSTRAP_FACTS, from: "definition", own: false },
       { ref: "test:nobody_has_this", from: "definition", own: false },
-    ]);
+    ], { task: "Answer the turn." });
     // The test area's view, from Lumiverse's chat; the bootstrap's own, which another area fills; and a name no area has is left out.
     expect(blocks.map((block) => block.name)).toEqual(["test:chat_name", BOOTSTRAP_FACTS]);
     expect(blocks[0]?.text).toBe("The lighthouse");

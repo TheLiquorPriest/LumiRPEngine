@@ -3,7 +3,7 @@
 
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type Guidance, loadGuidance } from "rp-harness";
+import { type Guidance, loadGuidance } from "../../src/app/guidance";
 import type { FilesPort, Scope, ToolCtx } from "rp-harness/contract";
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { USER } from "./fixtures";

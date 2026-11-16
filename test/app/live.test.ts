@@ -114,7 +114,7 @@ describe("the live hub", () => {
     ];
     for (const event of each) live.publish("chat-a", event);
     expect(new Set<string>(each.map((e) => e.kind))).toEqual(new Set(Object.keys(LIVE_KINDS)));
-    expect(r.batches.flatMap((b) => b.events.map((e) => ({ kind: e.kind, key: e.key, data: e.data })))).toEqual(each.map((e) => ({ kind: e.kind, key: e.kind === "state" ? "state" : undefined, data: e.data })));
+    expect(r.batches.flatMap((b) => b.events.map((e) => ({ kind: e.kind, key: e.key, data: e.data }))) as unknown[]).toEqual(each.map((e) => ({ kind: e.kind, key: e.kind === "state" ? "state" : undefined, data: e.data })));
   });
 });
 

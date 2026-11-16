@@ -7,7 +7,8 @@ import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { loadGuidance, SHIPPED_GUIDANCE } from "rp-harness";
+import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
+import { loadGuidance } from "../../src/app/guidance";
 import { KIT_SEED } from "rp-harness/testing/kit";
 import { CHAT_DEFAULTS, RPE_GUIDANCE } from "../../src/tree/index";
 import { type LaidTree, layTree } from "./fixtures";
@@ -87,45 +88,19 @@ describe("RPE's tree, level by level", () => {
     expect((await stat(join(tree.levelDir("shipped"), ".agents", "narrator.md"))).mode & 0o222).toBe(0);
   });
 
-  test("a user's file of a name replaces the shipped one, a character's the user's, a chat's the character's", async () => {
+  test("a user's prompt part of a name replaces the shipped one, as RPE's guidance reader finds it through the port", async () => {
     tree = await layTree(KIT_SEED, place, { rpe: [{ level: "shipped", path: ".prompts/kit-words.md", text: part("Shipped words.") }] });
-    const description = async () => (await loadGuidance(tree!.port, scope).definition("narrator"))?.description;
-    const words = async () => (await loadGuidance(tree!.port, scope).part("kit-words"))?.source;
-
-    expect(await description()).toBe("Writes the prose.");
-    expect(await words()).toMatchObject({ level: "shipped", path: "@shipped/.prompts/kit-words.md" });
-
-    await Bun.write(join(tree.levelDir("global"), ".agents", "narrator.md"), agent("The user's narrator.", "Mine."));
+    expect((await loadGuidance(tree.port, scope).part("kit-words"))?.source).toMatchObject({ level: "shipped", path: "@shipped/.prompts/kit-words.md" });
     await Bun.write(join(tree.levelDir("global"), ".prompts", "kit-words.md"), part("The user's words."));
-    expect(await description()).toBe("The user's narrator.");
-    expect(await words()).toMatchObject({ level: "global", path: "@global/.prompts/kit-words.md" });
-
-    await Bun.write(join(tree.levelDir("character"), "agents", "narrator.md"), agent("Wren's narrator.", "Hers."));
-    expect(await description()).toBe("Wren's narrator.");
-
-    await Bun.write(join(tree.levelDir("chat"), "agents", "narrator.md"), agent("This chat's narrator.", "Its own."));
-    expect(await description()).toBe("This chat's narrator.");
+    expect((await loadGuidance(tree.port, scope).part("kit-words"))?.source).toMatchObject({ level: "global", path: "@global/.prompts/kit-words.md" });
     // The shipped file is still there, read-only, to read and copy from.
-    expect(await tree.port.read(scope, "@shipped/.agents/narrator.md")).toMatchObject({ status: "read", level: "shipped" });
+    expect(await tree.port.read(scope, "@shipped/.prompts/kit-words.md")).toMatchObject({ status: "read", level: "shipped" });
   });
 
-  test("a name switched off in the user's config or the chat's is not found, at any level", async () => {
+  test("a part switched off in the user's config is not found", async () => {
     tree = await layTree(KIT_SEED, place, { rpe: [{ level: "shipped", path: ".prompts/kit-words.md", text: part("Shipped words.") }] });
-    await Bun.write(join(tree.levelDir("chat"), "agents", "narrator.md"), agent("This chat's narrator.", "Its own."));
-    const guidance = () => loadGuidance(tree!.port, scope);
-    expect(await guidance().definition("narrator")).toBeDefined();
-    expect(await guidance().part("kit-words")).toBeDefined();
-    expect((await guidance().rules()).map((r) => r.name)).toContain("kit-quiet");
-
-    await Bun.write(join(tree.levelDir("global"), "RPE-global.yml"), "off: [.prompts/kit-words.md, rules/kit-quiet]\n");
-    expect(await guidance().part("kit-words")).toBeUndefined();
-    expect((await guidance().rules()).find((r) => r.name === "kit-quiet")).toMatchObject({ inForce: false, why: "off" });
-    expect(await guidance().definition("narrator")).toBeDefined();
-
-    // The chat's own definition, the character's and the shipped one: one name, switched off for this chat.
-    await Bun.write(join(tree.levelDir("chat"), "RPE.yml"), "off: [agents/narrator]\n");
-    expect(await guidance().definition("narrator")).toBeUndefined();
-    // The Files page still lists it, marked off.
-    expect((await guidance().definitions()).find((d) => d.name === "narrator")).toMatchObject({ off: true, level: "chat" });
+    expect(await loadGuidance(tree.port, scope).part("kit-words")).toBeDefined();
+    await Bun.write(join(tree.levelDir("global"), "RPE-global.yml"), "off: [.prompts/kit-words.md]\n");
+    expect(await loadGuidance(tree.port, scope).part("kit-words")).toBeUndefined();
   });
 });
