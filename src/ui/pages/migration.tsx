@@ -99,7 +99,7 @@ function ChatItem(props: { chat: MigrationChatRow }) {
         <ul class="rpe-reports">
           {c.check.differences.map((d, i) => (
             <li key={i}>
-              {d.kept ? "differs" : "going back differs (not kept)"} at {d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: {d.values.join(", ")}
+              {d.kept ? "differs" : "differs (not kept: the turn is the chat it was made from's)"} at {d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: {d.values.join(", ")}
             </li>
           ))}
         </ul>

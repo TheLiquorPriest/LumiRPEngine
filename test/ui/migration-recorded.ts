@@ -42,7 +42,7 @@ export const MIGRATED: MigrationReply = {
           { at: "head", turn: "turn-h8", values: ["place:harbour.boats"], kept: true },
           { at: { message: "msg-h5", swipe: 1 }, turn: "turn-h5b", values: ["entity:ash.coins"], kept: false },
         ],
-        placed: { own: 7, shown: 1, lost: 0, head: 0 },
+        placed: { own: 7, shown: 1, lost: 0 },
       },
       carried: null,
     },

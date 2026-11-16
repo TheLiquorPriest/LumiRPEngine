@@ -36,7 +36,7 @@ describe("the Migration page", () => {
     expect(chats).toContain("chat-calderimported31 turns imported · matched at the head: yes, at 12 of 12 swipes");
     expect(chats).toContain("chat-harbourimported8 turns imported · matched at the head: no, at 3 of 4 swipes · shares 4 messages with chat-calder");
     expect(chats).toContain("differs at the head: place:harbour.boats");
-    expect(chats).toContain("going back differs (not kept) at message msg-h5, swipe 1: entity:ash.coins");
+    expect(chats).toContain("differs (not kept: the turn is the chat it was made from's) at message msg-h5, swipe 1: entity:ash.coins");
     expect(chats).toContain("chat-oldnot importedit plays no world");
     expect(chats).not.toContain("0 turns imported");
     // The chat that differed is marked apart from the one that matched.
