@@ -12,6 +12,8 @@ import { loreRoutes } from "./routes";
 import { LORE_MIGRATIONS } from "./schema";
 import { LORE_SETTINGS } from "./settings";
 import type { LoreTurns } from "./sources";
+import { proposalRoutes } from "./proposal-routes";
+import type { LoreProposals } from "./proposals";
 import { type SecrecyDeps, secrecyRules } from "./secrets";
 
 /** What the lore's routes take from the turn lane: its store and the tags it keeps of each turn's prompt. */
@@ -25,6 +27,8 @@ export interface LoreTakes {
   indexing?: { index: LoreIndex; jobs: Pick<JobsApi, "start">; definitions: Pick<DefinitionsApi, "list">; scope(user: string, chat: string): Scope };
   /** What the secrecy lane needs besides the store: the secrecy settings of a chat, the lines that word a mark, and the log. Left out, the lane answers that the secrets are not known. */
   secrecy?: Omit<SecrecyDeps, "store">;
+  /** The proposals' queue and the record of writes to his lore, which the turn lane made and hands the agents' suggestions to. Left out, the area adds no route of theirs. */
+  proposals?: LoreProposals;
 }
 
 /** `takes` is asked once the turn lane is mounted: the routes are made then, and the secrecy lane answers from it; with none the area lists its tables and settings and adds no route. */
@@ -47,8 +51,8 @@ export function loreArea(takes?: () => LoreTakes): Area {
             },
           },
           mounted: (at) => {
-            const { store, turns, indexing } = takes();
-            at.routes.add("lore", [...loreRoutes({ store, turns, numbers: new EntryNumbers(at.db, at.writes) }), ...(indexing === undefined ? [] : loreIndexRoutes(indexing))]);
+            const { store, turns, indexing, proposals } = takes();
+            at.routes.add("lore", [...loreRoutes({ store, turns, numbers: new EntryNumbers(at.db, at.writes) }), ...(indexing === undefined ? [] : loreIndexRoutes(indexing)), ...(proposals === undefined ? [] : proposalRoutes(proposals))]);
           },
         }),
   };

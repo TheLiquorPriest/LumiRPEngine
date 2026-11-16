@@ -9,6 +9,7 @@ import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
 import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS } from "../shared/settings";
 import { LORE_INDEX_DEFAULTS, type LoreIndexSettings } from "./indexing";
 import { LORE_DEFAULTS, type LoreSettings } from "./lore";
+import { LORE_PROPOSAL_DEFAULTS, type LoreProposalSettings } from "./proposals";
 
 /** The lore's (`Lore`): searches and what an entry is titled by. */
 export const LORE_SETTING_DEFS = {
@@ -53,6 +54,11 @@ export const LORE_INDEX_SETTING_DEFS = {
   // The route that pages the index reads its size once, from the global level.
   page: { key: "lore.index.page", default: LORE_INDEX_DEFAULTS.page, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false, name: "Lore index, entries per page", about: "Entries one page of the lore index on the Lore page holds.", effect: "start" },
 } as const satisfies NumberSettings<keyof LoreIndexSettings>;
+
+/** The proposals' (`LoreProposals`): how many rows a page of the queue and of the writes' record holds. The routes read it once, from the global level. */
+export const LORE_PROPOSAL_SETTING_DEFS = {
+  page: { key: "lore.proposals.page", default: LORE_PROPOSAL_DEFAULTS.page, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false, name: "Lore proposals, rows per page", about: "Rows one page of the proposals' queue and of the record of writes to your lore holds on the Lore page.", effect: "start" },
+} as const satisfies NumberSettings<keyof LoreProposalSettings>;
 
 /**
  * The book entry that is his own lore index (Settings → Lore, carried over from today's): by its id in Lumiverse. Its text, as written,
@@ -121,4 +127,4 @@ export const SECRETS_THRESHOLD_DEF = {
 export const SECRETS_SETTINGS: readonly Setting[] = [SECRETS_NARRATOR_KNOWLEDGE_DEF, SECRETS_NARRATOR_SECRETS_DEF, SECRETS_TRACKED_DEF, SECRETS_THRESHOLD_DEF];
 
 /** Every setting the lore reads, as a config file writes it. */
-export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), LORE_STOP_WORDS_DEF, LORE_BOOKS_DEF, ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF, ...SECRETS_SETTINGS];
+export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), LORE_STOP_WORDS_DEF, LORE_BOOKS_DEF, ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF, ...Object.values(LORE_PROPOSAL_SETTING_DEFS), ...SECRETS_SETTINGS];

@@ -112,6 +112,11 @@ function worldTitle(entry: LoreEntryDef, key: string): string {
   return typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title.trim() : key;
 }
 
+/** A world entry's revision, as `lore_read`, the catalog and the index give it: what a proposal for it is drafted against, and a write to it checked against. */
+export function worldRevision(entry: LoreEntryDef, key: string): string {
+  return hashJson([worldTitle(entry, key), keysOf(entry), typeof entry.content === "string" ? entry.content : ""]);
+}
+
 /** A book entry's title: its own, else the first words of what anyone may read of its text (or `text`, what the reader may read of it), as today's (`backend/book-lore.ts:28-39`). */
 function bookTitle(row: LoreBookEntry, words: number, text = publicText(row.content)): string {
   const comment = row.comment.replace(/\s+/g, " ").trim();
@@ -189,7 +194,7 @@ function worldEntry(at: WorldAt, n: number, key: string, entry: LoreEntryDef, he
     title,
     keys,
     text: publicText(content),
-    revision: hashJson([title, keys, content]),
+    revision: worldRevision(entry, key),
     ...(held?.knowing ? { knowing: held.knowing } : {}),
     ...(held !== undefined && loreIsSecret(entry) ? { secrets: [{ id, heldBy: held.readers }] } : {}),
   };
@@ -511,7 +516,7 @@ export class Lore {
         const content = typeof g.entry.content === "string" ? g.entry.content : "";
         const activation: LoreActivation[] = keys.some((k) => k !== "") ? ["keyword"] : [];
         // The revision `lore_read` gives the same entry (`worldEntry`).
-        return [{ id: worldEntryId(n), world: world?.world.id ?? "", source: g.source, book: null, key: g.key, lumiverse: null, title: g.title, keys, size: content.length, activation, revision: hashJson([g.title, keys, content]), text: g.text }];
+        return [{ id: worldEntryId(n), world: world?.world.id ?? "", source: g.source, book: null, key: g.key, lumiverse: null, title: g.title, keys, size: content.length, activation, revision: worldRevision(g.entry, g.key), text: g.text }];
       }
       const n = numbers.get(g.row.id);
       if (n === undefined) return [];
