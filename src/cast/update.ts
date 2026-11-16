@@ -18,12 +18,15 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
+import type { ReadContext } from "../engine/registry";
 import type { Reply } from "../iface/kit";
 import { type Fields, type Lines, textOf } from "../iface/texts";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { FactId } from "../shared/minds";
 import type { Lane } from "../store";
+import { IFACE_DEFAULTS } from "../iface/kit";
+import { nearestOf } from "../iface/reading";
 import { baseView, type CastCall, type CastReading, type CastToolSpec, itemView, readingOr, sourceView, whoView } from "./kit";
 import {
   addCharacter,
@@ -35,12 +38,14 @@ import {
   CASTINGS,
   castingInForce,
   castingItemId,
+  awayItemId,
   type CastItem,
   type Character,
   findCharacter,
   nameKey,
   RELATIONSHIP_DIMENSIONS,
   relationshipItemId,
+  setPerson,
   type RowPart,
   SOURCE_KINDS,
   type SourceKind,
@@ -50,42 +55,41 @@ import {
   writeCast,
 } from "./record";
 import { fileName, fileNamed, importedFiles, isFiled } from "./imported";
-import { forgetsOf, holdingChanges, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
+import { refOf, storyTimeOf, towardOf } from "./refs";
+import { forgetsOf, holdingChanges, personNamed, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { type SourceNow, type SourceReader, sourcesNow } from "./sources";
 
 /** The lane every operation of the tool writes to: the cast is the story's side of a turn. */
 export const CAST_LANE: Lane = "story";
 
 /** Every operation, in the order the tool's file lists them. */
-export const UPDATE_OPERATIONS = ["cast", "bind", "base", "growth", "history", "relationship", "knowledge", "filed"] as const;
+export const UPDATE_OPERATIONS = ["cast", "bind", "base", "growth", "history", "relationship", "away", "knowledge", "filed"] as const;
 type Op = (typeof UPDATE_OPERATIONS)[number];
 
 /** The operations that stand outside turns: a swipe leaves what they write. Every other one is kept with its turn. */
 const OUTSIDE_TURNS: Readonly<Partial<Record<Op, true>>> = { bind: true, base: true };
 
-/** The scale a relationship's dimensions are given on: the one today's regard is kept on (`src/packs/relationships/core/index.ts:41-45`). */
-export const DIMENSION_RANGE = Object.freeze({ min: -100, max: 100 });
-
-/** How an argument is read: words; a name or an id; a list of them; true or false; a whole number from 0; a number in a range; one of a list. */
-export type Kind = "text" | "name" | "texts" | "flag" | "whole" | Readonly<{ min: number; max: number }> | readonly string[];
+/** How an argument is read: words; a name or an id; a list of them; true or false; a whole number from 0; a number in a range; a relationship's dimension (on the scale the setting `cast.dimensionScale` gives); one of a list. */
+export type Kind = "text" | "name" | "texts" | "flag" | "whole" | "dimension" | Readonly<{ min: number; max: number }> | readonly string[];
 
 const DROP = { drop: "flag", why: "text" } as const;
-const DIMENSIONS = Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, DIMENSION_RANGE])) as Record<(typeof RELATIONSHIP_DIMENSIONS)[number], typeof DIMENSION_RANGE>;
+const DIMENSIONS = Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, "dimension"])) as Record<(typeof RELATIONSHIP_DIMENSIONS)[number], "dimension">;
 
 /** The arguments each operation takes besides `op` and `who`, each read as its kind. */
 const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
-  cast: { as: CASTINGS, line: "text", why: "text" },
+  cast: { as: CASTINGS, line: "text", person: "name", why: "text" },
   bind: { card: "name", persona: "name", entry: "name", memory: "name", defines: "text", drop: "flag" },
   base: { seed: "text", soul: "text", inner_voice: "text", background: "text" },
   growth: { id: "name", text: "text", cause: "text", accept: "flag", ...DROP },
   history: { id: "name", text: "text", beats: "texts", ...DROP },
   relationship: { with: "name", text: "text", ...DIMENSIONS, ...DROP },
+  away: { whereabouts: "text", place: "name", names: "texts", intention: "text", until: "text", ...DROP },
   knowledge: { id: "name", text: "text", secret: "name", how: "text", ...DROP },
   filed: { files: "texts" },
 };
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "how", "secret", "files", "accept", "drop", "why"];
+const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "person", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "whereabouts", "place", "names", "intention", "until", "how", "secret", "files", "accept", "drop", "why"];
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -94,11 +98,12 @@ const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "card", "persona", "e
  */
 export const UPDATE_PROPERTIES: Record<string, JsonObject> = Object.fromEntries(UPDATE_ARGUMENTS.map((name) => [name, {}]));
 
-/** Something a call says that cannot be read: the answers' line that says so, and its fields; `kept` when it is one item left out of a list whose other items were kept. */
+/** Something a call says that cannot be read: the answers' line that says so, and its fields; `kept` when it is one item left out of a list whose other items were kept, or a value kept as sent (`applied`) though it is past what it should be. */
 export interface Unread {
   line: string;
   fields: Fields;
   kept?: boolean;
+  applied?: JsonValue;
 }
 
 export function isUnread(v: unknown): v is Unread {
@@ -204,6 +209,10 @@ interface Planned {
   holds?: { fact: FactId; events: LedgerEvent[] };
   /** For knowledge it strikes, or gives another secret: the holding of the secret it gave taken back, with the events that do. */
   forgets?: { fact: FactId; events: LedgerEvent[] }[];
+  /** For a casting: the world's person the character is, by its entity's id, to keep on the character. */
+  person?: string;
+  /** For a relationship: who it is toward, by reference (a character's id, the world's person, or the name). */
+  toward?: string;
 }
 
 /** One operation as read, and what it writes when it can be read. */
@@ -215,7 +224,7 @@ interface OpRead extends ItemRead {
  * One argument of the `n`th item of a call (`op` names what kind of item) read as its kind, in any
  * shape that says it; undefined when it is not given. `lines` give the words for what a value takes.
  */
-export function readArg(lines: Lines, n: number, op: string, field: string, kind: Kind, said: JsonValue | undefined): JsonValue | Unread | undefined {
+export function readArg(lines: Lines, n: number, op: string, field: string, kind: Kind, said: JsonValue | undefined, scale = 100): JsonValue | Unread | undefined {
   if (said === undefined || said === null) return undefined;
   const unreadable = (choices: readonly JsonValue[] = [], wants?: string): Unread => ({
     line: "unreadable_op",
@@ -223,6 +232,11 @@ export function readArg(lines: Lines, n: number, op: string, field: string, kind
   });
   const number = typeof said === "number" ? said : typeof said === "string" && said.trim() !== "" && Number.isFinite(Number(said)) ? Number(said) : null;
   if (Array.isArray(kind)) return typeof said === "string" && kind.includes(said.trim()) ? said.trim() : unreadable(kind);
+  if (kind === "dimension") {
+    // A dimension past its scale is applied as it was sent, and said to be past it; only what is no number at all is left out.
+    if (number === null) return { line: "out_of_range", fields: { n, op, field, value: JSON.stringify(said), min: -scale, max: scale } };
+    return number >= -scale && number <= scale ? number : { line: "past_scale", fields: { n, op, field, value: JSON.stringify(said), min: -scale, max: scale }, kept: true, applied: number };
+  }
   if (typeof kind === "object") {
     const range = kind as Readonly<{ min: number; max: number }>;
     return number !== null && number >= range.min && number <= range.max ? number : { line: "out_of_range", fields: { n, op, field, value: JSON.stringify(said), min: range.min, max: range.max } };
@@ -274,6 +288,8 @@ interface Reading {
   read: (kind: SourceKind, ref: string) => Promise<SourceNow | null>;
   /** Where knowledge holds the secrets it names: the state at the call's turn; none for a call that belongs to no turn. */
   world: SecretWorld | null;
+  /** The world as the call's turn plays it, read once, for the people and places the words name; null where the chat plays none. */
+  ctx: () => ReadContext | null;
 }
 
 /** The bindings of a character as the call has them so far, read live on first use. */
@@ -312,19 +328,37 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
 
   const value: JsonObject = {};
   for (const [field, kind] of Object.entries(ARGS[name])) {
-    const got = readArg(r.call.lines, n, op, field, kind, given[field]);
-    if (isUnread(got)) out.unread.push(got);
-    else if (got !== undefined) value[field] = got;
+    const got = readArg(r.call.lines, n, op, field, kind, given[field], r.call.settings.dimensionScale);
+    if (isUnread(got)) {
+      out.unread.push(got);
+      if (got.applied !== undefined) value[field] = got.applied;
+    } else if (got !== undefined) value[field] = got;
   }
   if (out.fatal.length > 0 || character === null) return out;
   const planned: Planned = { n, op: name, character: character.id, name: character.name, value };
   out.planned = planned;
 
   switch (name) {
-    case "cast":
+    case "cast": {
       if (value.as === undefined) return needed(out, ["as"]);
       planned.part = "casting";
+      // The world's person it is, kept on the character: the one named (an id or a name the world holds), else the one its name finds where it has none yet.
+      const ctx = r.ctx();
+      const held = findCharacter(r.call.deps.store.db, r.call.scope.user, r.cast.chats, character.id)?.person ?? null;
+      if (typeof value.person === "string") {
+        const found = ctx === null ? null : personNamed(ctx, value.person);
+        if (found !== null && "id" in found) planned.person = found.id;
+        else {
+          const names = ctx === null ? [] : Object.values(ctx.state.entities).map((e) => e.name);
+          out.unread.push({ line: "no_person", fields: { n, op, field: "person", said: value.person, near: textOf(nearestOf(value.person, names, IFACE_DEFAULTS).slice(0, IFACE_DEFAULTS.nearMatches)) } });
+        }
+      } else if (held === null && ctx !== null) {
+        const found = personNamed(ctx, character.name);
+        if ("id" in found) planned.person = found.id;
+      }
+      delete value.person;
       return out;
+    }
     case "bind": {
       const named = SOURCE_KINDS.filter((k) => value[k] !== undefined);
       const [kind] = named;
@@ -355,7 +389,38 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
     case "relationship": {
       if (typeof value.with !== "string") return needed(out, ["with"]);
       if (Object.keys(value).length === 1) return unreadable({ line: "needs_one", fields: { n, op, fields: ["text", ...RELATIONSHIP_DIMENSIONS, "drop"] } });
+      // Toward a person by reference: a rename follows, and the id or a nickname joins the same relationship.
+      const toward = towardOf(r.call.deps.store.db, r.call.scope.user, r.cast.chats, r.ctx(), value.with);
+      planned.toward = toward.ref;
+      value.with = toward.name;
+      value.toward = toward.ref;
       planned.part = "relationship";
+      return out;
+    }
+    case "away": {
+      // A principal out of view keeps living: where it is and what it means to do, in the Author's words, with the refs of the places and
+      // people they name and the story time the intention is meant for. A word the world holds nothing for is left unreferenced and says so.
+      const ctx = r.ctx();
+      if (value.place !== undefined) {
+        const named = ctx === null ? ({ near: [] } as const) : refOf(ctx, value.place as string);
+        if ("ref" in named) value.place_ref = named.ref;
+        else out.unread.push({ line: "no_ref", fields: { n, op, field: "place", said: value.place as string, near: textOf(named.near) } });
+      }
+      if (Array.isArray(value.names)) {
+        const refs: string[] = [];
+        for (const said of value.names as string[]) {
+          const named = ctx === null ? ({ near: [] } as const) : refOf(ctx, said);
+          if ("ref" in named) refs.push(named.ref);
+          else out.unread.push({ line: "no_ref", fields: { n, op, field: "names", said, near: textOf(named.near) }, kept: true });
+        }
+        if (refs.length > 0) value.name_refs = refs;
+      }
+      if (typeof value.until === "string" && ctx !== null) {
+        const minutes = storyTimeOf(ctx, value.until);
+        if (minutes !== null) value.until_at = minutes;
+      }
+      if (!Object.keys(value).some((k) => k !== "drop" && k !== "why")) return unreadable({ line: "needs_one", fields: { n, op, fields: ["whereabouts", "intention", "place", "names", "until", "drop"] } });
+      planned.part = "away";
       return out;
     }
     case "growth":
@@ -458,7 +523,8 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const fresh = new Map<string, string>();
   const at = call.scope.turn;
   const world = at === undefined ? null : new SecretWorld(() => worldAt(store, scope.user, at, call.agent.job ?? null), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)));
-  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world };
+  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world, ctx: () => (ctxOf ??= worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat)) };
+  let ctxOf: ReadContext | null | undefined;
   const ops: OpRead[] = [];
   for (const [i, raw] of list.entries()) ops.push(await readOp(reading, i + 1, raw));
   if (ops.some((o) => o.fatal.length > 0)) return refused(reply, ops, readsOf);
@@ -488,9 +554,11 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
           p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true } })),
         );
       } else if (p.part !== undefined && turn !== null) {
-        const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.value.with as string) : (p.item ?? null);
+        const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.toward ?? (p.value.with as string)) : p.part === "away" ? awayItemId(id) : (p.item ?? null);
         const [row] = writeCast(store, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value }]);
         if (row !== undefined) items.set(p.n, row.item);
+        // The world's person a character is: kept on the character, outside the turn, as a binding of a source is.
+        if (p.person !== undefined) setPerson(db, user, id, p.person);
         const events = [...(p.holds?.events ?? []), ...(p.forgets?.flatMap((f) => f.events) ?? [])];
         if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));
       }

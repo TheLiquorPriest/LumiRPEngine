@@ -71,6 +71,13 @@ CREATE INDEX cast_entry_turn ON cast_entry (user, turn, ord);
     name: "the cast's writes are changes of the store",
     up: (db) => moveRows(db),
   },
+  {
+    version: 3,
+    name: "a character keeps the world's person it is",
+    up: (db) => {
+      db.run("ALTER TABLE character ADD COLUMN person TEXT");
+    },
+  },
 ];
 
 /**

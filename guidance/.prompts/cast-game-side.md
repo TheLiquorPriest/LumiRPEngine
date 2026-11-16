@@ -17,6 +17,13 @@ On them:
 - {{name}}{{#what}} ({{what}}){{/what}}
 {{/holds.items}}
 {{/holds}}
+{{#owns}}
+
+What they own that is kept elsewhere:
+{{#owns.items}}
+- {{name}}{{#what}} ({{what}}){{/what}}{{#where}}, at {{where}}{{/where}}
+{{/owns.items}}
+{{/owns}}
 {{#values}}
 
 As the world state has them:
@@ -24,3 +31,16 @@ As the world state has them:
 - {{key}}: {{value}}
 {{/values.items}}
 {{/values}}
+{{#away}}
+
+Away from the scene, as the Author recorded:
+{{#whereabouts}}
+- Where: {{whereabouts}}
+{{/whereabouts}}
+{{#intention}}
+- Meaning to: {{intention}}
+{{/intention}}
+{{#until}}
+- By: {{until}}
+{{/until}}
+{{/away}}

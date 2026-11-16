@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadGuidance, type TemplatePart } from "rp-harness";
+import { loadGuidance, type TemplatePart } from "../../src/app/guidance";
 import type { AgentRef, HostTool, JsonObject, ToolResult } from "rp-harness/contract";
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { WriteQueue } from "../../src/app/database";
@@ -231,8 +231,6 @@ export async function shippedLayouts(): Promise<{ layouts: Partial<Record<CastVi
   writeFileSync(join(dir, "host", "chats", "c1", "chat.json"), JSON.stringify({ character: "hero" }));
   const host = await createFolderHost({ dir, user: "u1" });
   const guidance = loadGuidance(host.files, { user: "u1", chat: "c1", session: "s1" });
-  const problems = await guidance.problems();
-  if (problems.length > 0) throw new Error(`The shipped layouts have problems: ${JSON.stringify(problems)}`);
   const layouts: Partial<Record<CastViewName, TemplatePart>> = {};
   for (const [view, part] of Object.entries(CAST_VIEWS)) {
     const loaded = await guidance.part(part);

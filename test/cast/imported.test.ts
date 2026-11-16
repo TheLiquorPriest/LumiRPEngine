@@ -4,7 +4,7 @@
 // every word here is made up.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { TemplatePart } from "rp-harness";
+import type { TemplatePart } from "../../src/app/guidance";
 import type { JsonObject } from "rp-harness/contract";
 import { charactersOf, type CastWrite } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";

@@ -59,6 +59,8 @@ export interface Character {
   name: string;
   /** The casting the player pinned; it stands over the Author's. */
   pinned: Casting | null;
+  /** The world's person it is, by the entity's id: set at casting, by the migration, or by the owner; the game side and the holdings find the person by it. Null where none is known. */
+  person: string | null;
   created: number;
 }
 
@@ -67,6 +69,7 @@ interface CharacterDb {
   chat: string;
   name: string;
   pinned: string | null;
+  person: string | null;
   created: number;
 }
 
@@ -84,9 +87,9 @@ export function chatLine(user: UserStore, chat: string): string[] {
 /** Every character the chats know, in the order they were made. */
 export function charactersOf(db: Database, user: string, chats: readonly string[]): Character[] {
   return db
-    .query<CharacterDb, [string, string]>("SELECT id, chat, name, pinned, created FROM character WHERE user = ?1 AND chat IN (SELECT value FROM json_each(?2)) ORDER BY n")
+    .query<CharacterDb, [string, string]>("SELECT id, chat, name, pinned, person, created FROM character WHERE user = ?1 AND chat IN (SELECT value FROM json_each(?2)) ORDER BY n")
     .all(user, JSON.stringify(chats))
-    .map((r) => ({ id: r.id, chat: r.chat, name: r.name, pinned: r.pinned as Casting | null, created: r.created }));
+    .map((r) => ({ id: r.id, chat: r.chat, name: r.name, pinned: r.pinned as Casting | null, person: r.person, created: r.created }));
 }
 
 /** The character `said` names, by id or by name, the nearest chat's first; null when none. */
@@ -100,14 +103,19 @@ export function findCharacter(db: Database, user: string, chats: readonly string
   return named[0] ?? null;
 }
 
-/** A new character of `chat`, inside the caller's write. Its id is given from its row. */
-export function addCharacter(db: Database, user: string, chat: string, name: string, now: number): Character {
+/** A new character of `chat`, inside the caller's write. Its id is given from its row. `person` is the world's person it is, where that is known. */
+export function addCharacter(db: Database, user: string, chat: string, name: string, now: number, person: string | null = null): Character {
   const n = Number(
-    db.query<unknown, [string, string, string, string, string, number]>("INSERT INTO character (user, id, chat, name, name_key, created) VALUES (?, ?, ?, ?, ?, ?)").run(user, `new:${crypto.randomUUID()}`, chat, name.trim(), nameKey(name), now).lastInsertRowid,
+    db.query<unknown, [string, string, string, string, string, number, string | null]>("INSERT INTO character (user, id, chat, name, name_key, created, person) VALUES (?, ?, ?, ?, ?, ?, ?)").run(user, `new:${crypto.randomUUID()}`, chat, name.trim(), nameKey(name), now, person).lastInsertRowid,
   );
   const id = `c-${n}`;
   db.run("UPDATE character SET id = ? WHERE n = ?", [id, n]);
-  return { id, chat, name: name.trim(), pinned: null, created: now };
+  return { id, chat, name: name.trim(), pinned: null, person, created: now };
+}
+
+/** The world's person a character is, by its entity's id (null takes the reference away), inside the caller's write. */
+export function setPerson(db: Database, user: string, character: string, person: string | null): void {
+  db.run("UPDATE character SET person = ? WHERE user = ? AND id = ?", [person, user, character]);
 }
 
 /** The player pins a casting (null takes the pin away), inside the caller's write. It stands over whatever the Author casts. */
@@ -313,7 +321,10 @@ export interface CastItem {
 /** The id of the one casting item a character has. */
 export const castingItemId = (character: string): string => `casting:${character}`;
 
-/** The id of the one relationship item a character has toward a person. */
+/** The id of the one item that keeps where a character is away and what it means to do there. */
+export const awayItemId = (character: string): string => `away:${character}`;
+
+/** The id of the one relationship item a character has toward a person: by the reference `towardOf` gives (a character's id, a world entity, or a name key). */
 export const relationshipItemId = (character: string, toward: string): string => `rel:${character}:${nameKey(toward)}`;
 
 /** The id a new item of `part` is given from the number of the change that writes it. */

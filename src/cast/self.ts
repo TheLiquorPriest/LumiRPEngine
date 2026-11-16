@@ -54,9 +54,11 @@ export function listOf(said: JsonValue | undefined): JsonValue[] {
 /** Reads `kinds` of an item into `value`; what cannot be read goes to the item's `unread`. */
 export function readFields(call: CastCall, it: ItemRead, given: JsonObject, kinds: Readonly<Record<string, Kind>>, value: JsonObject): void {
   for (const [field, kind] of Object.entries(kinds)) {
-    const got = readArg(call.lines, it.n, it.op ?? "", field, kind, given[field]);
-    if (isUnread(got)) it.unread.push(got);
-    else if (got !== undefined) value[field] = got;
+    const got = readArg(call.lines, it.n, it.op ?? "", field, kind, given[field], call.settings.dimensionScale);
+    if (isUnread(got)) {
+      it.unread.push(got);
+      if (got.applied !== undefined) value[field] = got.applied;
+    } else if (got !== undefined) value[field] = got;
   }
 }
 

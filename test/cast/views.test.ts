@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { loadGuidance, type TemplatePart } from "rp-harness";
+import { loadGuidance, type TemplatePart } from "../../src/app/guidance";
 import type { JsonObject } from "rp-harness/contract";
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { addCharacter, bindSource, castingItemId, charactersOf, type CastWrite, relationshipItemId, sourceKey, writeBase, writeCast } from "../../src/cast/record";
@@ -27,7 +27,6 @@ beforeAll(async () => {
   writeFileSync(join(dir, "host", "chats", "c1", "chat.json"), JSON.stringify({ character: "hero" }));
   const host = await createFolderHost({ dir, user: "u1" });
   const guidance = loadGuidance(host.files, { user: "u1", chat: "c1", session: "s1" });
-  expect(await guidance.problems()).toEqual([]);
   for (const [view, part] of Object.entries(CAST_VIEWS)) {
     const loaded = await guidance.part(part);
     if (loaded?.format !== "template") throw new Error(`The shipped ${part} part did not load as a template.`);

@@ -3,7 +3,7 @@
 // a model sends them, played as the harness plays a call. Every name and word here is made up.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { TemplatePart } from "rp-harness";
+import type { TemplatePart } from "../../src/app/guidance";
 import type { AgentRef, JsonObject } from "rp-harness/contract";
 import { charactersOf } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";
@@ -114,13 +114,13 @@ describe("relate", () => {
     expect(wordsFromFiles(r)).toBe(true);
     expect(r.reports).toEqual([
       "Operation 1 (relationship) was written without mood. It reads with, text, trust, warmth, respect, fear, from, drop, why.",
-      "Operation 2 (relationship): fear runs from -100 to 100, and you sent 140.",
-      "Operation 2 (relationship) was written without fear. It reads with, text, trust, warmth, respect, fear, from, drop, why.",
+      "Operation 2 (relationship): fear runs from -100 to 100, and you sent 140. It was kept as sent.",
     ]);
     const [wren, hale] = dataOf(r).relationships as JsonObject[];
     expect(wren).toMatchObject({ with: "Wren", trust: -10, warmth: 30 });
     expect(hale).toMatchObject({ with: "Hale", text: "A cheat with a badge." });
-    expect(hale?.fear).toBeUndefined();
+    // Past the scale, a value is kept as sent and said to be past it.
+    expect(hale?.fear).toBe(140);
     await b.t.tie(turn);
 
     const later = await b.t.begin();

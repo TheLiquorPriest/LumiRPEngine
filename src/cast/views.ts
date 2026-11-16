@@ -8,17 +8,23 @@
 // laid out by its prompt part in `.prompts/`; what goes in is decided by the record's marks and by who
 // is on stage, which the caller says. Code ranks nothing and writes no word around the record's.
 
-import type { TemplatePart } from "rp-harness";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Store } from "../store";
 import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings, datedAt } from "./kit";
 import { castAt } from "./path";
-import { baseHistory, baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
+import { awayItemId, baseHistory, baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
 import { gameSide } from "./game";
+import { towardName } from "./refs";
+import { worldAt } from "./secrets";
 import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import { memoriesNow, type MemoryNow, strongestFirst, type Tier, touches, untakenPerceptions } from "./memory";
 import { perceptionView } from "./perceive";
 import { type SourceReader, sourcesNow } from "./sources";
+
+/** What a view's layout is asked: to lay its fields out as text. The guidance's template part is one. */
+export interface Layout {
+  render(fields: Readonly<Record<string, JsonValue | undefined>>): { text: string };
+}
 
 /** Each view a `given` list can name, and the prompt part that lays it out. */
 export const CAST_VIEWS = {
@@ -51,7 +57,7 @@ export interface CastViewInput {
   /** Reads a bound source live in Lumiverse, for the sources shown with the base. */
   sources: SourceReader;
   /** The prompt parts in force that lay the views out, by view. A view whose part is not given (switched off) is given no text. */
-  layouts: Partial<Record<CastViewName, Pick<TemplatePart, "render">>>;
+  layouts: Partial<Record<CastViewName, Layout>>;
   /** Settings over `CAST_DEFAULTS`: memory's, and what comes to mind's budget. */
   settings?: Partial<CastSettings>;
   /** A text's tokens, by the harness's own count (the turn's), for what comes to mind's budget. */
@@ -96,7 +102,7 @@ function listed(items: JsonObject[]): Listed | undefined {
  * and words; the order is the tiers' and strength's arithmetic. The text grows with each memory, so the
  * most that fit is found by halving.
  */
-function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], s: CastSettings, tokens: (text: string) => number, layout: Pick<TemplatePart, "render">): string {
+function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], s: CastSettings, tokens: (text: string) => number, layout: Layout): string {
   const memories = memoriesNow(record, character.id, clock?.now ?? null, s);
   const touching = (tier: Tier): MemoryNow[] => memories.filter((m) => m.tier === tier && touches(m.item, cues));
   const top = memories.filter((m) => m.tier === "top");
@@ -198,11 +204,16 @@ export async function castViews(names: readonly string[], input: CastViewInput):
     } else if (name === "relationships:present") {
       const here = new Set(input.present.map(nameKey));
       here.delete(nameKey(character.name));
+      // Toward a person by reference: called by the name they have now, whatever the relationship was first written under.
+      const ctx = worldAt(input.store, input.user, input.turn, input.job ?? null, input.chat);
+      const chats = chatLine(user, input.chat);
       // A dimension is given as words, so that a 0 shows as one.
       const shown = record
         .of(character.id, "relationship")
-        .filter((r) => typeof r.fields.with === "string" && here.has(nameKey(r.fields.with)))
-        .map((r) => ({ ...r.fields, ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.flatMap((d) => (typeof r.fields[d] === "number" ? [[d, String(r.fields[d])]] : []))) }));
+        .flatMap((r) => {
+          const toward = towardName(db, input.user, chats, ctx, r);
+          return toward !== null && here.has(nameKey(toward)) ? [{ ...r.fields, with: toward, ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.flatMap((d) => (typeof r.fields[d] === "number" ? [[d, String(r.fields[d])]] : []))) }] : [];
+        });
       const relationships = listed(shown);
       if (relationships !== undefined) fields = { ...head, relationships };
     } else if (name === "history") {
@@ -210,8 +221,11 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       const history = listed(record.of(character.id, "history").map((h) => ({ ...h.fields, ...datedAt(clock, h.at) })));
       if (history !== undefined) fields = { ...head, history };
     } else if (name === "game-side") {
-      const side = gameSide(input.store, input.user, input.chat, input.turn, character.name);
-      if (side !== null) fields = { ...head, ...side };
+      const side = gameSide(input.store, input.user, input.chat, input.turn, character);
+      // A principal out of view: where it is and what it means to do, as the Author recorded them, shown beside where the state places it.
+      const gone = record.items.get(awayItemId(character.id));
+      const away = gone === undefined || gone.dropped ? undefined : Object.fromEntries(["whereabouts", "intention", "until"].flatMap((k) => (typeof gone.fields[k] === "string" ? [[k, gone.fields[k]]] : [])));
+      if (side !== null || (away !== undefined && Object.keys(away).length > 0)) fields = { ...head, ...(side ?? {}), ...(away !== undefined && Object.keys(away).length > 0 ? { away } : {}) };
     }
     const layout = input.layouts[name];
     out.push({ name, text: fields === null || layout === undefined ? "" : layout.render(fields).text.trimEnd(), ...(version !== undefined ? { version } : {}) });

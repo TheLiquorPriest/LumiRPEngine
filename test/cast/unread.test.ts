@@ -54,7 +54,7 @@ describe("the cast's tools, never refused for what they do not read", () => {
       "Operation 2 (knowledge) was written without source. It reads who, id, text, secret, how, drop, why.",
     ]);
     const [rel, known] = dataOf(r).operations as JsonObject[];
-    expect(rel?.wrote).toEqual({ with: "Wren", text: "She owes him for the lamp oil.", trust: 35 });
+    expect(rel?.wrote).toEqual({ with: "Wren", text: "She owes him for the lamp oil.", trust: 35, toward: "entity:wren" });
     expect(known?.wrote).toEqual({ text: "The causeway floods at the spring tide." });
   });
 

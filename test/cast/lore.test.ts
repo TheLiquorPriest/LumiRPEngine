@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { loadGuidance, type TemplatePart } from "rp-harness";
+import { loadGuidance, type TemplatePart } from "../../src/app/guidance";
 import type { HostTool, JsonObject, ToolResult } from "rp-harness/contract";
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { castTools } from "../../src/cast/index";

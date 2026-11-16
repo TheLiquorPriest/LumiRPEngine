@@ -12,12 +12,15 @@
 // relationship toward no one) is answered whole, and nothing is written.
 
 import type { JsonObject } from "rp-harness/contract";
+import type { ReadContext } from "../engine/registry";
 import type { Reply } from "../iface/kit";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastToolSpec, itemView, readingOr } from "./kit";
 import { type CastRow, type CastWrite, type CastWriter, MIND_KINDS, RELATIONSHIP_DIMENSIONS, relationshipItemId, writeCast } from "./record";
+import { towardOf } from "./refs";
+import { worldAt } from "./secrets";
 import { listOf, notAnItem, ownIds, readFields, selfOr, unchecked } from "./self";
-import { CAST_LANE, DIMENSION_RANGE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
+import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
 
 /** What one entry of the mind reads, each as its kind. */
 const ENTRY: Readonly<Record<string, Kind>> = { id: "name", kind: MIND_KINDS, text: "text", about: "texts", from: "texts", drop: "flag", why: "text" };
@@ -27,7 +30,7 @@ const ENTRY_READS: Reads = { reads: Object.keys(ENTRY), needs: [], newNeeds: ["k
 const FROM_PARTS = ["perception", "memory"] as const;
 
 /** What one relationship reads, each as its kind. */
-const RELATIONSHIP: Readonly<Record<string, Kind>> = { with: "name", text: "text", ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, DIMENSION_RANGE])), from: "texts", drop: "flag", why: "text" };
+const RELATIONSHIP: Readonly<Record<string, Kind>> = { with: "name", text: "text", ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, "dimension"])), from: "texts", drop: "flag", why: "text" };
 const RELATIONSHIP_READS: Reads = { reads: Object.keys(RELATIONSHIP), needs: ["with"], newNeeds: [] };
 
 /** Writes what a call read, and answers with each item it wrote as it now stands, and with what was left out. */
@@ -110,6 +113,7 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
   if (self === null) return reply;
   const items: ItemRead[] = [];
   const writes: CastWrite[] = [];
+  let ctx: ReadContext | null | undefined;
   for (const [i, raw] of list.entries()) {
     const n = i + 1;
     if (!isRecord(raw)) {
@@ -134,7 +138,9 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
       it.fatal.push({ line: "needs_one", fields: { n, op: "relationship", fields: RELATIONSHIP_READS.reads.filter((f) => f !== "with" && f !== "why") } });
       continue;
     }
-    writes.push({ character: self.character.id, part: "relationship", item: relationshipItemId(self.character.id, value.with), value });
+    // Toward a person by reference (a character of the chat, or the world's person), the name as written beside it: a rename follows, and the id joins the same relationship.
+    const toward = towardOf(call.deps.store.db, call.scope.user, self.reading.chats, ctx ??= worldAt(call.deps.store, call.scope.user, call.scope.turn ?? null, call.agent.job ?? null, call.scope.chat), value.with);
+    writes.push({ character: self.character.id, part: "relationship", item: relationshipItemId(self.character.id, toward.ref), value: { ...value, with: toward.name, toward: toward.ref } });
   }
   return writeOwn(call, reply, self.writer, items, writes, RELATIONSHIP_READS, "relationships");
 }

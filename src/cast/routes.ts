@@ -262,6 +262,7 @@ function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, 
 function kindOf(item: CastItem): CastKind | null {
   switch (item.part) {
     case "casting":
+    case "away":
       return null;
     case "mind":
       return item.fields.kind === IMPORTED_KIND ? "files" : "mind";

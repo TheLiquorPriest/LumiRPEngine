@@ -10,7 +10,7 @@
 
 import type { Database } from "bun:sqlite";
 import { addCharacter, chatLine, findCharacter } from "../cast";
-import { renameCharacter } from "../cast/record";
+import { renameCharacter, setPerson } from "../cast/record";
 import { personNamed, worldAt } from "../cast/secrets";
 import type { ReadContext } from "../engine/registry";
 import type { Store, TurnRow, UserStore } from "../store";
@@ -87,6 +87,7 @@ export class People {
       // A character of a chat played on RPE is RPE's now, and keeps its name.
       const name = this.s.isPlayed(chat) ? found.name : said !== null && (holder === null || holder.id === id) ? said : entity;
       if (name !== found.name) renameCharacter(this.db, this.s.id, id, name);
+      if (found.person !== entity) setPerson(this.db, this.s.id, id, entity);
       person = { id, name };
       break;
     }
@@ -95,7 +96,9 @@ export class People {
       const holder = said === null ? null : findCharacter(this.db, this.s.id, line, said);
       // A character of that name no run made of a person (one a run of an earlier build made, or the player's): the same person, as the cast ties a character to the world's person by name.
       const adopt = holder !== null && holder.id !== said && !isPerson(this.db, this.s.id, holder.id);
-      const made = adopt ? holder : addCharacter(this.db, this.s.id, turn.chat, said !== null && holder === null ? said : entity, this.now);
+      const made = adopt ? holder : addCharacter(this.db, this.s.id, turn.chat, said !== null && holder === null ? said : entity, this.now, entity);
+      // The reference to the world's person a run kept for the character: the game side and every holding find the person by it, whatever the names.
+      if (made.person !== entity) setPerson(this.db, this.s.id, made.id, entity);
       keepPerson(this.db, this.s.id, made.chat, entity, made.id);
       person = { id: made.id, name: made.name };
     }

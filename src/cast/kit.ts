@@ -50,6 +50,8 @@ export const CAST_DEFAULTS = Object.freeze({
   comesToMindTokens: 2000,
   /** The most memories one recall brings back; the answer says how many more touch the cue. */
   recallItems: 10,
+  /** The scale a relationship's dimensions are read and reported against: from minus this to this (`src/packs/relationships/core/index.ts:41-45` keeps today's regard on it). */
+  dimensionScale: 100,
 });
 
 export type CastSettings = { -readonly [K in keyof typeof CAST_DEFAULTS]: number };
@@ -73,6 +75,7 @@ export const CAST_SETTING_DEFS = {
   weightMax: { key: "cast.weightMax", default: CAST_DEFAULTS.weightMax, takes: { type: "whole", least: 1 }, perConnection: false, name: "Highest weight of a memory", about: "The highest weight a memory can have; weights run from 1.", effect: "turn" },
   comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false, name: "What comes to mind", about: "Tokens of a character's memories that come to mind for a scene.", effect: "turn", row: "What comes to mind" },
   recallItems: { key: "cast.recallItems", default: CAST_DEFAULTS.recallItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Memories one recall brings back", about: "The most memories one recall brings back; the answer says how many more touch the cue.", effect: "turn" },
+  dimensionScale: { key: "cast.dimensionScale", default: CAST_DEFAULTS.dimensionScale, takes: { type: "number", least: 1 }, perConnection: false, name: "Scale of a relationship's dimensions", about: "The scale a relationship's trust, warmth, respect and fear are read and reported against: from minus this to this. A value past it is kept as sent, and said to be past.", effect: "turn" },
 } as const satisfies NumberSettings<keyof CastSettings>;
 
 /** Every setting the cast reads, as a config file writes it. */
@@ -147,7 +150,10 @@ export async function castHostTool(spec: CastToolSpec, lines: Lines, deps: CastD
     parameters: described(spec.properties, spec.required, text),
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      const call: CastCall = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
+      // A job of no chat has no chat's cast to work on: said in the answers' words, nothing written.
+      const { scope } = ctx;
+      if (scope.chat === undefined) return new Reply(lines).line("no_chat_run", { tool: spec.name }).fail().result();
+      const call: CastCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
       return (await spec.run(given, call)).result();
     },
   };

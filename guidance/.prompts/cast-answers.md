@@ -3,6 +3,7 @@ description: The sentences the cast tools answer with (cast_query, cast_update, 
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
+no_chat_run: {{tool}} works on a chat's cast, and this run belongs to no chat: nothing was done.
 no_turn: There is no turn {{id}} in this chat.
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
@@ -14,6 +15,9 @@ wants_whole: a whole number from 0
 op_takes: {{op}} reads {{reads}}{{#needs}}, and needs {{needs}}{{/needs}}{{#new_needs}}, and a new one needs {{new_needs}}{{/new_needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
 not_read: Operation {{n}} ({{op}}) was written without {{left}}. It reads {{reads}}.
 out_of_range: Operation {{n}} ({{op}}): {{field}} runs from {{min}} to {{max}}, and you sent {{value}}.
+past_scale: Operation {{n}} ({{op}}): {{field}} runs from {{min}} to {{max}}, and you sent {{value}}. It was kept as sent.
+no_ref: Operation {{n}} ({{op}}): {{said}} names nothing in the world{{#near}}; the nearest are {{near}}{{/near}}. It was kept as you wrote it, without a reference.
+no_person: Operation {{n}} ({{op}}): no one in the world is named {{said}}{{#near}}; the nearest are {{near}}{{/near}}. The character was not tied to anyone.
 needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
 turn_needed_op: Operation {{n}} ({{op}}) is kept with a turn, and this call belongs to none.

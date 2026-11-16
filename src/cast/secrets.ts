@@ -25,7 +25,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import { bookTextHash } from "../shared/lore";
 import { type FactId, type Holding, type KnowledgeFact, MINDS_EVENTS, parseFactId, wiFactIdOfLiveLore } from "../shared/minds";
 import { parseSecretMarks, wholeEntrySecret } from "../shared/secret-marks";
-import { type CastItem, type CastRecord, nameKey } from "./record";
+import { type CastItem, type CastRecord, type Character, nameKey } from "./record";
 import type { Unread } from "./update";
 
 /** Reads a Lumiverse book entry's text live, for the secret a mark of it holds; null when the book or the entry is not there. */
@@ -67,6 +67,17 @@ export function personNamed(ctx: ReadContext, said: string): PersonFound {
   const [one] = named;
   if (one === undefined) return { none: true };
   return named.length === 1 ? { id: one } : { many: named };
+}
+
+/**
+ * The world's person a character is: the one its stored reference names, when the world still has that person; else the one its name finds.
+ * Two people of one name, or a cast name the world spells otherwise, keep their person by the reference.
+ */
+export function personOfCharacter(ctx: ReadContext, character: Pick<Character, "name" | "person">): PersonFound {
+  const ref = character.person;
+  const there = ref === null ? undefined : ctx.state.entities[ref];
+  if (ref !== null && there !== undefined && kindIs(ctx.registry, ctx.world, there.kind, "person")) return { id: ref };
+  return personNamed(ctx, character.name);
 }
 
 /** Someone in the world a name gives, or the answers' line that says why no one is: `none` names the line for no one so named. */

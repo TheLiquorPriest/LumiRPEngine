@@ -11,11 +11,11 @@ import { baseHistory, baseOf, bindingsOf, type CastItem, castingInForce, casting
 import { sourcesNow } from "./sources";
 
 /** The parts a query can ask for, as the record's table names them. */
-export const QUERY_PARTS = ["sources", "base", "casting", "growth", "mind", "relationships", "knowledge", "history", "perceptions"] as const;
+export const QUERY_PARTS = ["sources", "base", "casting", "growth", "mind", "relationships", "knowledge", "history", "perceptions", "away"] as const;
 type QueryPart = (typeof QUERY_PARTS)[number];
 
 /** The parts kept as rows, by the name a query gives them. */
-const ROWS: Readonly<Partial<Record<QueryPart, RowPart>>> = { growth: "growth", mind: "mind", relationships: "relationship", knowledge: "knowledge", history: "history", perceptions: "perception" };
+const ROWS: Readonly<Partial<Record<QueryPart, RowPart>>> = { growth: "growth", mind: "mind", relationships: "relationship", knowledge: "knowledge", history: "history", perceptions: "perception", away: "away" };
 
 const QUERY_PROPERTIES: Record<string, JsonObject> = {
   who: TEXT,

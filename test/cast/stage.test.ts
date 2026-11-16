@@ -3,7 +3,7 @@
 // a supporting character's old mind files). Every name and word here is made up.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { TemplatePart } from "rp-harness";
+import type { TemplatePart } from "../../src/app/guidance";
 import type { JsonValue } from "rp-harness/contract";
 import { charactersOf } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castPresentViews, castViews } from "../../src/cast/views";

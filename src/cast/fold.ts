@@ -25,7 +25,7 @@ export const WRITE_OP = "write";
 export const CAST_WRITE = `${CAST_AREA}.${WRITE_OP}`;
 
 /** The parts kept as writes tied to turns. */
-export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history", "perception", "memory"] as const;
+export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history", "perception", "memory", "away"] as const;
 export type RowPart = (typeof ROW_PARTS)[number];
 
 /** What a cast change's value holds: one write of one item. */

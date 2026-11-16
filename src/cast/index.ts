@@ -19,6 +19,7 @@ export {
   addCharacter,
   BASE_PARTS,
   CASTINGS,
+  awayItemId,
   castingItemId,
   castMark,
   chatLine,
