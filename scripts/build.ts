@@ -40,7 +40,9 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import pkg from "../package.json";
 import { statedHash, STATEMENT_FILE, statementOf, statementText } from "../src/app/build-statement";
 import { installScan } from "./install-scan";
+import { writeCallList } from "./ui/calls";
 import { writePageList } from "./ui/pages";
+import { writeSurfaceList } from "./ui/surfaces";
 
 export const ROOT = resolve(import.meta.dir, "..");
 export const DIST = join(ROOT, "dist");
@@ -212,7 +214,11 @@ async function main(argv: readonly string[]): Promise<number> {
     // Bun's metafile names each input by its path from here.
     process.chdir(ROOT);
     // The shells offer the pages the folders hold, so the list of them is made from the folders first.
-    if (pages) writePageList();
+    if (pages) {
+      writePageList();
+      writeCallList();
+      writeSurfaceList();
+    }
     const seconds = Math.floor(Date.now() / 1000);
     const sha = git(ROOT, ["rev-parse", "--short=8", "HEAD"])?.trim() ?? null;
     const sources = ["src", "guidance", "docs", "schemas", "package.json", "bun.lock", "tsconfig.json", "bunfig.toml", "scripts/build.ts"];
@@ -246,8 +252,9 @@ async function main(argv: readonly string[]): Promise<number> {
     if (pages) {
       const from = (path: string): string => relative(dirname(FRONTEND_ENTRY), join(ROOT, path));
       const entry = [`import { loader } from ${JSON.stringify(from(ENTRIES.loader))};`, `import { mount } from ${JSON.stringify(from(UI_SHELLS.extension))};`, "export const setup = loader(mount);", ""].join("\n");
-      await oneFile("the extension's frontend", FRONTEND_ENTRY, OUT.frontend, "browser", stamp, roots, { files: { [FRONTEND_ENTRY]: entry } });
-      const web = await bundle("the web app", { entrypoints: [join(ROOT, UI_SHELLS.web)], outdir: join(STAGE, OUT.ui), target: "browser", define: stamp }, roots);
+      // Both UI bundles are minified: the page loads the extension's frontend on every visit to Lumiverse, and the web app on every visit to RPE.
+      await oneFile("the extension's frontend", FRONTEND_ENTRY, OUT.frontend, "browser", stamp, roots, { files: { [FRONTEND_ENTRY]: entry }, minify: true });
+      const web = await bundle("the web app", { entrypoints: [join(ROOT, UI_SHELLS.web)], outdir: join(STAGE, OUT.ui), target: "browser", define: stamp, minify: true }, roots);
       if (!web.outputs.some((path) => path === join(STAGE, OUT.ui, "index.html"))) fail(`the web app came out without ${OUT.ui}/index.html, which RPE serves at /ui/`);
     }
 
