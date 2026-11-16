@@ -110,12 +110,12 @@ export function notApplicable(o: OpContext, code: string): Unread {
 }
 
 /**
- * One of today's item ops on the draft (`engine/thing-ops`), recorded as the call's change. One that
- * finds it so already changes nothing and says so; one the size rules put elsewhere than `asked`
- * says where; `bend` takes any other refusal the tool applies all the same (it returns undefined
- * when it has, and null when it cannot).
+ * One of today's item ops on the draft (`engine/thing-ops`), recorded as the call's change and asked for its advice: where the
+ * things model's rules would refuse or move a thing elsewhere, the op applies as asked and each finding is advice, said in the
+ * answer and kept with the change. One that finds it so already changes nothing and says so; `bend` takes any other refusal the
+ * tool applies all the same (it returns undefined when it has, and null when it cannot).
  */
-export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, lane: Lane, what: EntityId, more: { asked?: EntityId; bend?: (code: string) => Unread | null | undefined } = {}): Unread | undefined {
+export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, lane: Lane, what: EntityId, more: { bend?: (code: string) => Unread | null | undefined } = {}): Unread | undefined {
   const w = o.draft.w;
   const from = w.events.length;
   const out = applyItemOp(w, op, { ...itemOptions(o), advise: true });
@@ -130,10 +130,6 @@ export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, 
     // What the engine advises on the op (the op applied all the same) is said in the answer and kept with its change; what it filled in from the world is recorded apart, as a default.
     for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
     if (out.filled !== undefined) o.draft.markFilled(out.filled);
-    if (out.placed !== undefined) {
-      const at = "place" in out.placed ? out.placed.place : out.placed.in;
-      o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, what), asked: named(o.reading, more.asked ?? what), where: named(o.reading, at) });
-    }
   }
   o.draft.record(o.n, o.op, lane, o.prov, from);
   return undefined;

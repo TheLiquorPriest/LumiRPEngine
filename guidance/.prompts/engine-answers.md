@@ -73,6 +73,13 @@ not_applied: Operation {{n}} ({{op}}) was recorded and did not apply ({{code}}).
 already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
 placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
+above_carry: Operation {{n}} ({{op}}): {{what}} is {{size}}, above what a person carries, and it is in {{holder}}'s hands all the same.
+ends_before_now: Operation {{n}} ({{op}}): the end of {{what}} for {{who}}, {{until}}, is not after now; it is recorded with that end.
+returned_not_owner: Operation {{n}} ({{op}}): {{to}} is not among the owners of {{what}}; the return is recorded all the same, and whose it is did not change.
+taken_from: Operation {{n}} ({{op}}): {{what}} was taken from {{holder}}, who is at {{where}}, not where it went.
+in_two_places: Operation {{n}} ({{op}}): {{what}} was lying at {{where}} and in {{holder}} at once; it is moved as asked.
+not_taken_in_hand: Operation {{n}} ({{op}}): {{what}} is a vehicle and was not taken in hand: it changed hands where it stands.
+no_condition: Operation {{n}} ({{op}}): {{what}} has no condition recorded and its field gives none to start from, so nothing was changed.
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.

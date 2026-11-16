@@ -17,7 +17,7 @@ import { reachOf } from "../engine/access";
 import { applyEffects } from "../engine/effects";
 import { own } from "../engine/pack-kit";
 import { baseWorld, findPlaces, placeOp } from "../engine/places-in-play";
-import { relocate } from "../engine/relocate";
+import { relocate, relocateInto } from "../engine/relocate";
 import { createRng } from "../engine/rng";
 import { placeOfEntity } from "../engine/scope";
 import { putAwaySpot } from "../engine/thing-gm";
@@ -326,20 +326,19 @@ const wear: OpDef = {
   },
 };
 
-/** Puts someone into a holder (a vehicle, a cart, a room built as a thing): out of what holds them now, no place of their own, inside it. */
-function putPerson(o: OpContext, who: EntityId, into: EntityId): Unread | undefined {
-  const w = o.draft.w;
-  const e = own(w.state.entities, who);
-  if (!e) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_entity" } };
-  if (e.relations.some((r) => r.type === "in" && r.to === into)) {
+/** Puts someone into a holder (a vehicle, a cart, a room built as a thing) through the engine's holder path (`relocateInto`): out of what holds them now, no place of their own, inside it, off their square, and as its driver when asked. */
+function putPerson(o: OpContext, who: EntityId, into: EntityId, driver: boolean): Unread | undefined {
+  const e = own(o.draft.w.state.entities, who);
+  if (e?.relations.some((r) => r.type === "in" && r.to === into) && !driver) {
     o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, who) });
     return undefined;
   }
-  const events: LedgerEvent[] = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink", rel: "in", from: who, to: r.to }));
-  if (typeof e.fields.place === "string") events.push({ type: "set", entity: who, field: "place", value: null });
-  events.push({ type: "link", rel: "in", from: who, to: into });
-  const bad = o.draft.applyAll(events);
-  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+  const boarded = relocateInto(o.draft.w.ctx, who, into, { driver });
+  if ("code" in boarded) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: boarded.code } };
+  const bad = o.draft.applyAll(boarded.events);
+  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+  for (const advice of boarded.advice) o.draft.adviseOp(o.n, advice);
+  return undefined;
 }
 
 const store: OpDef = {
@@ -377,13 +376,8 @@ const store: OpDef = {
       }
     } else if (into !== undefined) {
       const thing = isThing(w.ctx, what.id);
-      const failed = isPlace ? (thing ? putThing(o, what.id, { place: into.id }, why) : movePerson(o, what.id, into.id, false)) : thing ? putThing(o, what.id, { in: into.id }, why) : putPerson(o, what.id, into.id);
+      const failed = isPlace ? (thing ? putThing(o, what.id, { place: into.id }, why) : movePerson(o, what.id, into.id, false)) : thing ? putThing(o, what.id, { in: into.id }, why) : putPerson(o, what.id, into.id, o.args.driving === true);
       if (failed) return failed;
-      // Who takes the driver's place is kept on the vehicle: the vehicles skill asks for it, and nothing else holds it.
-      if (o.args.driving === true && !isPlace && !thing) {
-        const bad = o.draft.applyAll([{ type: "set", entity: into.id, field: "driver", value: what.id }]);
-        if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-      }
     }
     const kept = keepWords(o, what.id, said);
     if (kept) return kept;

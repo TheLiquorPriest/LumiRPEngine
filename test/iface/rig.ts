@@ -15,7 +15,7 @@ import { migrateStore } from "../../src/store/schema";
 import { openStore } from "../../src/store/store";
 import type { UserStore } from "../../src/store/store";
 import type { TurnRow } from "../../src/store/types";
-import { BESTIARY_SCHEMA, BESTIARY_TABLE, type DueList, type EngineDeps, engineTools, gridMoves, Lines, mapView, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../src/iface/index";
+import { BESTIARY_SCHEMA, BESTIARY_TABLE, type DueList, type EngineDeps, engineTools, gridMoves, Lines, mapView, NO_WORDING, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../src/iface/index";
 import { inventedWorld } from "../store/fixtures";
 
 export const USER = "user-a";
@@ -56,7 +56,7 @@ export const DUE: DueList = {
 };
 
 /** The ports the live turn always gives: what falls due, squares on maps and the maps themselves (the map's own words are the shipped lines, none here). */
-export const PORTS = { due: DUE, grid: gridMoves(), map: mapView(Lines.none()) };
+export const PORTS = { due: DUE, grid: gridMoves(), map: mapView(NO_WORDING) };
 
 export interface Rig {
   s: UserStore;

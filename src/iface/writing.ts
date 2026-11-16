@@ -215,7 +215,8 @@ export class Draft {
     rec.advice.push({ code: advice.code, ...(advice.values !== undefined ? { values: advice.values } : {}), input });
     const reply = this.reply;
     if (reply === null) return;
-    const fields = { n: rec.n, op: rec.op, ...(advice.values ?? {}), code: advice.code };
+    // The advice's own values come last: a bent rule's `code` is the rule's, the line named by the advice's code.
+    const fields = { n: rec.n, op: rec.op, code: advice.code, ...(advice.values ?? {}) };
     if (reply.says(advice.code)) reply.report(advice.code, fields);
     else reply.report("advised", fields);
   }

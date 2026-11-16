@@ -15,8 +15,9 @@ import { PARTY_FOLLOWS, partyTierIn } from "../shared/party";
 import { acts } from "./life";
 import { optionalQuery, optionalService, own } from "./pack-kit";
 import { together } from "./presence";
-import type { ReadContext, Rejection } from "./registry";
+import type { Advice, ReadContext, Rejection } from "./registry";
 import { isGone, placeOfEntity } from "./scope";
+import { holdsOf } from "./things";
 
 export interface RelocateOptions {
   /**
@@ -60,6 +61,32 @@ export function relocate(ctx: ReadContext, who: EntityId, to: PlaceId, opts: Rel
     }
   }
   return out;
+}
+
+/** What putting someone into a holder comes to: its events, and what the engine advises on it. */
+export interface Boarded {
+  events: LedgerEvent[];
+  advice: Advice[];
+}
+
+/**
+ * The events that put `who` into the holder `into` (a cart, a boat, a room built as a thing): out of whatever holds them now, no
+ * place of their own, inside it, and off the square they stood on through the space pack's service for a thing that goes into a
+ * holder (`space.lay` with no place); when asked, as the vehicle's driver. A holder that holds nothing is applied as asked and
+ * advised (`rule_bent`); one that is not there is refused.
+ */
+export function relocateInto(ctx: ReadContext, who: EntityId, into: EntityId, opts: { driver?: boolean } = {}): Boarded | Rejection {
+  const e = own(ctx.state.entities, who);
+  if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
+  const holder = own(ctx.state.entities, into);
+  if (!holder || isGone(ctx.state, into)) return { code: "missing_entity", reason: `no holder ${into}` };
+  const events: LedgerEvent[] = e.relations.filter((r) => r.type === "in" && r.to !== into).map((r): LedgerEvent => ({ type: "unlink", rel: "in", from: who, to: r.to }));
+  if (typeof e.fields.place === "string" && e.fields.place !== "") events.push({ type: "set", entity: who, field: "place", value: null });
+  if (!e.relations.some((r) => r.type === "in" && r.to === into)) events.push({ type: "link", rel: "in", from: who, to: into });
+  events.push(...(optionalService(ctx, "space.lay")?.(ctx, who, null, null) ?? []));
+  if (opts.driver === true) events.push({ type: "set", entity: into, field: "driver", value: who });
+  const advice: Advice[] = holdsOf(ctx, into) === null ? [{ code: "rule_bent", values: { what: `${e.name} [${who}]`, where: `${holder.name} [${into}]`, code: "cant_hold" } }] : [];
+  return { events, advice };
 }
 
 /** The bare move: out of what holds them, the place, and where they stand there. */

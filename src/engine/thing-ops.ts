@@ -19,8 +19,9 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { Got, GotHow, ItemOp, Rest, SetOp, Size, SizeClass, Spot } from "../shared/things";
 import { typeFields } from "../shared/items-build";
 import { isSetOp, nameKey, sizeRank, SIZE_LABELS, THING_NAME_MAX, thingsConfigOf } from "../shared/things";
-import type { EntityDef } from "../shared/world";
+import type { EntityDef, FieldDef } from "../shared/world";
 import { accessFor, assignFor } from "./access";
+import { calendarOf, formatClock } from "./calendar";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { orgPower, orgTypeOf } from "./org";
 import { labelOf, optionalQuery, optionalService, own, rowOf } from "./pack-kit";
@@ -150,22 +151,78 @@ function roomProblem(ctx: ReadContext, name: string, holder: EntityId, opts: Ite
  * own paths a holder's room, load and depth count too (`roomProblem`): `adding` is the thing moved,
  * or what a thing being made adds.
  */
-function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts: ItemOpOptions, moving: boolean, adding: EntityId | Adding): { spot: Spot; noted?: string } | Rejection {
-  if (moving && size === "part") return reject("part", `${name} is built into what holds it`);
-  if (moving && size === "builtin" && !opts.confirmed) return reject("builtin", `${name} is built in: moving it needs a confirmed change`);
-  if ("place" in to) return own(ctx.world.places, to.place) ? { spot: to } : reject("missing_place", `no place ${labelOf(ctx, to.place)}`);
+function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts: ItemOpOptions, moving: boolean, adding: EntityId | Adding): { spot: Spot; noted?: string; advice?: Advice[] } | Rejection {
+  const advice: Advice[] = [];
+  const dest = "place" in to ? to.place : to.in;
+  /** A rule of what a change means: refused, or with advice asked, applied as asked and advised (no note sentence is written then). */
+  const bend = (rule: Rejection): Rejection | null => {
+    if (opts.advise !== true) return rule;
+    advice.push({ code: "rule_bent", values: { what: name, where: ref(ctx, dest), code: rule.code } });
+    return null;
+  };
+  const asked = (): { spot: Spot; advice?: Advice[] } => ({ spot: to, ...(advice.length > 0 ? { advice } : {}) });
+  if (moving && size === "part") {
+    const refused = bend(reject("part", `${name} is built into what holds it`));
+    if (refused) return refused;
+  }
+  if (moving && size === "builtin" && !opts.confirmed) {
+    const refused = bend(reject("builtin", `${name} is built in: moving it needs a confirmed change`));
+    if (refused) return refused;
+  }
+  if ("place" in to) return own(ctx.world.places, to.place) ? asked() : reject("missing_place", `no place ${labelOf(ctx, to.place)}`);
   const holder = own(ctx.state.entities, to.in);
   if (!holder || isGone(ctx.state, to.in)) return reject("missing_entity", `no holder ${labelOf(ctx, to.in)}`);
   const holds = holdsOf(ctx, to.in);
-  if (holds === null) return reject("cant_hold", `${holder.name} can't hold anything`);
-  if (size === "vehicle" && !kindIs(ctx.registry, ctx.world, holder.kind, "vehicle")) return reject("cant_hold", `${name} is a vehicle: it goes only on another vehicle`);
-  if (size === "unknown" || size === "part" || size === "vehicle" || sizeRank(size) <= sizeRank(holds)) return roomProblem(ctx, name, to.in, opts, adding) ?? { spot: to };
+  if (holds === null) return bend(reject("cant_hold", `${holder.name} can't hold anything`)) ?? asked();
+  if (size === "vehicle" && !kindIs(ctx.registry, ctx.world, holder.kind, "vehicle")) {
+    const refused = bend(reject("cant_hold", `${name} is a vehicle: it goes only on another vehicle`));
+    if (refused) return refused;
+  }
+  if (size === "unknown" || size === "part" || size === "vehicle" || sizeRank(size) <= sizeRank(holds)) {
+    const problem = roomProblem(ctx, name, to.in, opts, adding);
+    return problem === null ? asked() : (bend(problem) ?? asked());
+  }
   if (kindIs(ctx.registry, ctx.world, holder.kind, "person")) {
+    // Above what a person carries: with advice asked it stays in their hands, as asked, and says so.
+    if (opts.advise === true) {
+      advice.push({ code: "above_carry", values: { what: name, holder: ref(ctx, to.in), size: SIZE_LABELS[size] } });
+      return asked();
+    }
     const place = placeOfEntity(ctx.state, to.in);
     if (!place) return reject("too_big", `${name} is too big for ${holder.name} to carry, and ${holder.name} is nowhere`);
     return { spot: { place }, noted: `${name} is too big to carry (${SIZE_LABELS[size]}), so it is at ${labelOf(ctx, place)} rather than on ${holder.name}.` };
   }
-  return reject("too_big", `${name} is too big for ${holder.name}, which takes things up to ${SIZE_LABELS[holds]}`);
+  return bend(reject("too_big", `${name} is too big for ${holder.name}, which takes things up to ${SIZE_LABELS[holds]}`)) ?? asked();
+}
+
+/** A thing or a place as an advice names it: its name and its id, as the answers say a name. */
+function ref(ctx: ReadContext, id: string): string {
+  return `${labelOf(ctx, id)} [${id}]`;
+}
+
+/** The advice for an end that is not after now: what it is on, who has it, and the end as the world prints it. */
+function endsBeforeNow(ctx: ReadContext, what: string, who: string, until: number): Advice {
+  return { code: "ends_before_now", values: { what, who, until: formatClock(calendarOf(ctx.world), Math.round(until)) } };
+}
+
+/**
+ * A condition changed with advice asked: applied as given, never held to the field's bounds (advised past them with the bounds),
+ * and counted from what is recorded or the field's own default, which is returned apart as filled in; with neither, no number is
+ * invented: nothing is applied, and the advice says it has no value to change.
+ */
+function conditionAdvised(w: Working, op: Extract<ItemOp, { do: "condition" }>, name: string, def: FieldDef | undefined): ItemOpApplied | Rejection {
+  const ctx = w.ctx;
+  const e = own(ctx.state.entities, op.item);
+  const recorded = typeof e?.fields.condition === "number" ? e.fields.condition : undefined;
+  const start = recorded ?? (typeof def?.default === "number" ? def.default : undefined);
+  if (start === undefined) return { advice: [{ code: "no_condition", values: { what: ref(ctx, op.item) } }] };
+  const next = start + op.delta;
+  const filled: LedgerEvent[] = recorded === undefined ? [{ type: "set", entity: op.item, field: "condition", value: start }] : [];
+  const bad = applyAll(w, [...filled, { type: "add", entity: op.item, field: "condition", delta: op.delta }]);
+  if (bad) return bad;
+  const outside = (def?.min !== undefined && next < def.min) || (def?.max !== undefined && next > def.max);
+  const advice: Advice[] = outside && def !== undefined ? [{ code: "off_the_sheet", values: { key: "condition", name, value: next, type: def.type, ...(def.min !== undefined ? { min: def.min } : {}), ...(def.max !== undefined ? { max: def.max } : {}) } }] : [];
+  return { ...(filled.length > 0 ? { filled } : {}), ...(advice.length > 0 ? { advice } : {}) };
 }
 
 /** A why as kept: trimmed, and cut at the caller's length; none when it says nothing. */
@@ -194,12 +251,15 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   const ctx = w.ctx;
   const e = own(ctx.state.entities, thing);
   if (!e) return reject("missing_entity", `no thing ${labelOf(ctx, thing)}`);
-  // There already, and nowhere else: a thing both lying at a place and in a holder (from before one
-  // writer kept them apart) reads at its place, but a move there still takes it out of the holder.
-  if (sameSpot(spotOf(ctx.state, thing), to) && !(typeof e.fields.place === "string" && e.fields.place !== "" && e.relations.some((r) => r.type === "in"))) return reject("no_change", `${e.name} is there already`);
+  // A thing both lying at a place and in a holder (from before one writer kept them apart) reads at its place, but a move there still takes it out of the holder.
+  const twice = typeof e.fields.place === "string" && e.fields.place !== "" && e.relations.some((r) => r.type === "in");
+  if (sameSpot(spotOf(ctx.state, thing), to) && !twice) return reject("no_change", `${e.name} is there already`);
   if ("in" in to && (to.in === thing || holdersOf(ctx.state, to.in).includes(thing))) return reject("cycle", `${e.name} can't go inside ${labelOf(ctx, to.in)}`);
   const where = landing(ctx, e.name, sizeOf(ctx, thing).size, to, opts, true, thing);
   if ("code" in where) return where;
+  const advice: Advice[] = [...(where.advice ?? [])];
+  // Its own typed facts disagreed about where it was: it was at a place and in a holder at once.
+  if (opts.advise === true && twice) advice.push({ code: "in_two_places", values: { what: ref(ctx, thing), holder: ref(ctx, e.relations.find((r) => r.type === "in")?.to ?? ""), where: ref(ctx, String(e.fields.place)) } });
   const before = possessorOf(ctx, thing);
   const hidden = isDiscoverable(ctx.world, ctx.state, thing);
   const moved = applyAll(w, [...locate(ctx, thing, where.spot), ...(where.noted ? [note(where.noted, thing)] : [])]);
@@ -207,6 +267,12 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   const after = possessorOf(ctx, thing);
   const events: LedgerEvent[] = [];
   if (after !== before) {
+    // Taken from the hands of someone who is not where it goes: noticed, never refused.
+    if (opts.advise === true && before !== null) {
+      const theirs = placeOfEntity(ctx.state, before);
+      const there = "place" in where.spot ? where.spot.place : placeOfEntity(ctx.state, where.spot.in);
+      if (theirs !== null && there !== null && theirs !== there) advice.push({ code: "taken_from", values: { what: ref(ctx, thing), holder: ref(ctx, before), where: ref(ctx, theirs) } });
+    }
     // A hold ends with the holding: whoever held it for its owner no longer does.
     if (before !== null && own(ctx.state.entities, before)?.relations.some((r) => r.type === "uses" && r.to === thing && r.fields?.basis === "hold")) events.push({ type: "unlink", rel: "uses", from: before, to: thing });
     if (after !== null) {
@@ -219,7 +285,7 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   }
   const done = applyAll(w, events);
   if (done) return done;
-  return sameSpot(where.spot, to) ? {} : { placed: where.spot };
+  return { ...(sameSpot(where.spot, to) ? {} : { placed: where.spot }), ...(advice.length > 0 ? { advice } : {}) };
 }
 
 /** Every use grant on a thing, and its overdue flag, ended (it is back with its owner, or has a new one). */
@@ -403,7 +469,7 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   const entity: EntityDef = { id, kind, name, tier: "background", fields, relations: holder !== null ? [{ type: "in", to: holder }] : [] };
   const rejection = applyAll(w, [{ type: "spawn", entity }, ...(where.noted ? [note(where.noted, id)] : [])]);
   if (rejection) return rejection;
-  return sameSpot(where.spot, op.at) ? { made: id } : { made: id, placed: where.spot };
+  return { made: id, ...(sameSpot(where.spot, op.at) ? {} : { placed: where.spot }), ...(where.advice !== undefined ? { advice: where.advice } : {}) };
 }
 
 /** The grant a hold or a loan brings: a loan to one who isn't an owner; a hold only to one who may not use it already (§3.4), so staff handed the shop's tool at the shop hold it as staff and no more. */
@@ -414,56 +480,81 @@ function handGrant(ctx: ReadContext, op: Extract<ItemOp, { do: "hand" }>, by: En
 
 function hand(w: Working, op: Extract<ItemOp, { do: "hand" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
   const ctx = w.ctx;
+  const advising = opts.advise === true;
   const to = own(ctx.state.entities, op.to);
   if (!to || isGone(ctx.state, op.to) || !kindIs(ctx.registry, ctx.world, to.kind, "person")) return reject("not_a_person", `${labelOf(ctx, op.to)} can't be handed anything`);
-  if (op.until !== undefined && !(op.until > ctx.state.clock)) return reject("bad_until", "a loan's end is after now");
+  const advice: Advice[] = [];
+  // With advice asked, an end not after now is recorded as given and advised, never refused.
+  if (op.until !== undefined && !(op.until > ctx.state.clock)) {
+    if (!advising) return reject("bad_until", "a loan's end is after now");
+    advice.push(endsBeforeNow(ctx, ref(ctx, op.item), ref(ctx, op.to), op.until));
+  }
   const e = own(ctx.state.entities, op.item);
   if (!e) return reject("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
   const giver = possessorOf(ctx, op.item);
   const owners = ownersIn(e.fields).map((o) => o.party);
-  // A return goes back to the owner, or to one of an owning household's or group's own.
-  if (op.basis === "return" && !owners.some((o) => o === op.to || (orgTypeOf(ctx, o) !== null && orgPower(ctx, op.to, o, "assets.use") !== null))) return reject("not_owner", `${e.name} goes back to its owner, not ${to.name}`);
+  // A return goes back to the owner, or to one of an owning household's or group's own; to anyone else, with advice asked, it is recorded as a return all the same.
+  const owed = op.basis !== "return" || owners.some((o) => o === op.to || (orgTypeOf(ctx, o) !== null && orgPower(ctx, op.to, o, "assets.use") !== null));
+  if (!owed) {
+    if (!advising) return reject("not_owner", `${e.name} goes back to its owner, not ${to.name}`);
+    advice.push({ code: "returned_not_owner", values: { what: ref(ctx, op.item), to: ref(ctx, op.to) } });
+  }
   const newOwner = op.basis === "gift" || op.basis === "sale" || op.basis === "trade";
   const owning = newOwner && !(owners.length === 1 && owners[0] === op.to) ? ownerEvents(ctx, op.item, op.to) : [];
   // A vehicle changes hands where it stands (§28.8): its basis applies in place, nobody carrying it.
   if (sizeOf(ctx, op.item).size === "vehicle") {
-    if (op.basis === "theft") return reject("cant_hold", `${e.name} is a vehicle: it is taken by driving it off, not by hand`);
+    if (op.basis === "theft" && !advising) return reject("cant_hold", `${e.name} is a vehicle: it is taken by driving it off, not by hand`);
     const by = own(ctx.state.entities, opts.by) ? opts.by : (owners.find((o) => own(ctx.state.entities, o) !== undefined) ?? null);
-    const events = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, by);
+    // A theft takes it as someone who holds it, owner unchanged.
+    const events = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : op.basis === "theft" ? [{ type: "link" as const, rel: "uses", from: op.to, to: op.item, fields: { basis: "hold", ...(by !== null ? { by } : {}) } }] : handGrant(ctx, op, by);
     if (events.length === 0) return reject("no_change", `${to.name} may use ${e.name} already`);
-    return applyAll(w, events) ?? {};
+    const bad = applyAll(w, events);
+    if (bad) return bad;
+    if (advising) advice.push({ code: "not_taken_in_hand", values: { what: ref(ctx, op.item) } });
+    return advice.length > 0 ? { advice } : {};
   }
   const how: Record<typeof op.basis, GotHow | null> = { hold: "holding", loan: "loan", return: null, gift: "given", sale: "bought", trade: "bought", theft: "took" };
   const moved = moveThing(w, op.item, { in: op.to }, opts, op.why, how[op.basis]);
   if ("code" in moved) return moved;
   const events = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, giver);
-  return applyAll(w, events) ?? moved;
+  const bad = applyAll(w, events);
+  if (bad) return bad;
+  const all = [...(moved.advice ?? []), ...advice];
+  return { ...moved, ...(all.length > 0 ? { advice: all } : {}) };
 }
 
-function grant(w: Working, op: Extract<ItemOp, { do: "grant" | "revoke" }>): ItemOpApplied | Rejection {
+function grant(w: Working, op: Extract<ItemOp, { do: "grant" | "revoke" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
   const ctx = w.ctx;
   const missing = partyProblem(ctx, op.who) ?? (op.by !== undefined ? partyProblem(ctx, op.by) : null);
   if (missing) return missing;
   if (op.do === "revoke") return applyAll(w, [{ type: "unlink", rel: "uses", from: op.who, to: op.item }]) ?? {};
-  if (op.until !== undefined && !(op.until > ctx.state.clock)) return reject("bad_until", "a grant's end is after now");
+  // With advice asked, an end not after now is recorded as given and advised, never refused.
+  const past = op.until !== undefined && !(op.until > ctx.state.clock);
+  if (past && opts.advise !== true) return reject("bad_until", "a grant's end is after now");
   const basis = op.basis ?? (op.until !== undefined ? "loan" : "assign");
   const events: LedgerEvent[] = [{ type: "link", rel: "uses", from: op.who, to: op.item, fields: { basis, ...(op.by !== undefined ? { by: op.by } : {}) }, ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) }];
   // From someone it isn't theirs to lend, it lands with its giver, flagged for the GM (§3.4).
   if (op.by !== undefined && assignFor(ctx, op.by, op.item) === null) events.push(note(`${labelOf(ctx, op.by)} let ${labelOf(ctx, op.who)} use ${labelOf(ctx, op.item)}, though it isn't theirs to lend.`, op.item));
-  return applyAll(w, events) ?? {};
+  const bad = applyAll(w, events);
+  if (bad) return bad;
+  return past && op.until !== undefined ? { advice: [endsBeforeNow(ctx, ref(ctx, op.item), ref(ctx, op.who), op.until)] } : {};
 }
 
-function permit(w: Working, op: Extract<ItemOp, { do: "permit" | "unpermit" }>): ItemOpApplied | Rejection {
+function permit(w: Working, op: Extract<ItemOp, { do: "permit" | "unpermit" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
   const ctx = w.ctx;
   const missing = partyProblem(ctx, op.from) ?? partyProblem(ctx, op.to) ?? (op.by !== undefined ? partyProblem(ctx, op.by) : null);
   if (missing) return missing;
   if (op.from === op.to) return reject("self", `${labelOf(ctx, op.from)} needs no leave of their own`);
   if (op.do === "unpermit") return applyAll(w, [{ type: "unlink", rel: "permits", from: op.from, to: op.to }]) ?? {};
-  if (op.until !== undefined && !(op.until > ctx.state.clock)) return reject("bad_until", "a permission's end is after now");
+  // With advice asked, an end not after now is recorded as given and advised, never refused.
+  const past = op.until !== undefined && !(op.until > ctx.state.clock);
+  if (past && opts.advise !== true) return reject("bad_until", "a permission's end is after now");
   const events: LedgerEvent[] = [{ type: "link", rel: "permits", from: op.from, to: op.to, fields: { scope: op.scope ?? "all", ...(op.by !== undefined ? { by: op.by } : {}) }, ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) }];
   // Given on an organization's behalf by someone without the say over its things: flagged for the GM.
   if (op.by !== undefined && op.by !== op.from && (orgTypeOf(ctx, op.from) === null || orgPower(ctx, op.by, op.from, "assets.assign") === null)) events.push(note(`${labelOf(ctx, op.by)} let ${labelOf(ctx, op.to)} use what is ${labelOf(ctx, op.from)}'s, without the say to.`, op.from));
-  return applyAll(w, events) ?? {};
+  const bad = applyAll(w, events);
+  if (bad) return bad;
+  return past && op.until !== undefined ? { advice: [endsBeforeNow(ctx, ref(ctx, op.from), ref(ctx, op.to), op.until)] } : {};
 }
 
 function wear(w: Working, op: Extract<ItemOp, { do: "wear" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
@@ -481,15 +572,19 @@ function wear(w: Working, op: Extract<ItemOp, { do: "wear" }>, opts: ItemOpOptio
   if (op.slot !== undefined && op.slot !== ownSlot && op.slot !== "hand_held" && rowOf(ctx, "gear.slots", op.slot) === undefined) return reject("bad_slot", `there is no ${op.slot.replace(/_/g, " ")} slot`);
   // Worn already: in that slot it is so; in another, it moves to this one.
   if (worn.length > 0 && (op.slot === undefined || worn.some((r) => r.fields?.slot === slot))) return reject("no_change", `${who.name} already wears ${e.name}`);
+  let carried: Advice[] = [];
   if (holdersOf(ctx.state, op.item)[0] !== op.who) {
     const moved = moveThing(w, op.item, { in: op.who }, opts, "", null);
     if ("code" in moved) return moved;
     if (moved.placed) return reject("too_big", `${e.name} is too big to wear`);
+    carried = moved.advice ?? [];
   }
   // Whatever holds the slot already comes off and stays carried (§10.3); pockets and hands hold several.
   const rel = slot === "hand_held" ? "equipped" : "worn_by";
   const taken = hasOwn(SHARED_SLOTS, slot) ? [] : Object.keys(ctx.state.entities).sort().filter((id) => id !== op.item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === op.who && r.fields?.slot === slot));
-  return applyAll(w, [...unworn, ...taken.map((id): LedgerEvent => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]) ?? {};
+  const bad = applyAll(w, [...unworn, ...taken.map((id): LedgerEvent => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]);
+  if (bad) return bad;
+  return carried.length > 0 ? { advice: carried } : {};
 }
 
 function merge(w: Working, op: Extract<ItemOp, { do: "merge" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
@@ -593,7 +688,7 @@ export function applyItemOp(w: Working, op: Exclude<ItemOp, { do: "remove" }>, o
   const ctx = w.ctx;
   if (op.do === "make") return make(w, op, opts);
   if (isSetOp(op)) return setOp(w, op, opts);
-  if ("from" in op) return permit(w, op);
+  if ("from" in op) return permit(w, op, opts);
   const missing = thingProblem(ctx, op.do === "merge" ? op.drop : op.item);
   if (missing) return missing;
   switch (op.do) {
@@ -614,7 +709,7 @@ export function applyItemOp(w: Working, op: Exclude<ItemOp, { do: "remove" }>, o
     }
     case "grant":
     case "revoke":
-      return grant(w, op);
+      return grant(w, op, opts);
     case "home": {
       const bad = op.home !== null ? restProblem(ctx, op.home) : null;
       if (bad) return bad;
@@ -635,6 +730,7 @@ export function applyItemOp(w: Working, op: Exclude<ItemOp, { do: "remove" }>, o
     case "condition": {
       const e = own(ctx.state.entities, op.item);
       const def = e ? fieldDef(ctx.registry, ctx.world, e.kind, "condition") : undefined;
+      if (opts.advise === true) return conditionAdvised(w, op, e?.name ?? labelOf(ctx, op.item), def);
       const now = typeof e?.fields.condition === "number" ? e.fields.condition : typeof def?.default === "number" ? def.default : 100;
       const next = Math.min(def?.max ?? Infinity, Math.max(def?.min ?? -Infinity, now + op.delta));
       if (next === now) return reject("no_change", "its condition stays as it is");

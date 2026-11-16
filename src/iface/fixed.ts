@@ -77,9 +77,9 @@ export const WORLD_QUERY: ToolSpec = {
     }
     if (args.map === true) {
       const place = at.ref.startsWith("place:") ? at.id : null;
-      const text = place === null ? null : call.deps.map.text({ state: reading.state, env: call.deps.env, place });
-      if (text === null) reply.line("no_map", { at: `${at.name} [${at.id}]` });
-      else reply.tree(text);
+      const printed = place === null ? null : call.deps.map.text({ state: reading.state, env: call.deps.env, place });
+      if (printed === null) reply.line("no_map", { at: `${at.name} [${at.id}]` });
+      else reply.tree(printed.text);
     }
     return reply;
   },
