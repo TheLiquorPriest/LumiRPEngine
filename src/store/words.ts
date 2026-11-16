@@ -9,18 +9,20 @@
 // header between two `---` lines (YAML), then a body. `{{name.path}}` puts a field in;
 // `{{#name}}…{{/name}}` shows its block when the field is there and not empty (once per item for a
 // list, `{{.}}` the item); `{{^name}}…{{/name}}` shows it when the field is absent or empty; a list
-// put in whole is joined by ", "; a line holding only a block's tag leaves nothing behind. The
-// store may not import either reader (test/standalone-boundaries.test.ts), so it carries its own.
+// put in whole is joined by ", "; a line holding only a block's tag leaves nothing behind. Lines are
+// filled by RPH's one renderer (`templateOf`, R-44): each template is read once and rendered for every
+// line of its kind; the store's own parse checks a template and names the fields it reads.
 //
 // The header's `lines:` names a template for each kind of line; a kind the part has no template
 // for is not said. `keys:` gives words for the keys the store names by a code (`time_zone`); any
 // other key is the data's own and is shown as it is. The body is the world state's layout.
 
+import { type renderTemplate, type TemplateRender, templateOf } from "rp-harness/helpers";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { StoreInputError } from "./types";
 
-/** A list put in whole is joined by this, as in every guidance file. */
-const LIST_JOIN = ", ";
+/** The fields RPH's renderer takes (a host is given no name for them). */
+type Fields = NonNullable<Parameters<typeof renderTemplate>[1]>;
 
 /** Levels of a view are indented by this much per level: the tree's shape, not a word. */
 const INDENT = "  ";
@@ -35,55 +37,12 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function isEmpty(v: unknown): boolean {
-  if (v === undefined || v === null || v === false || v === "" || v === 0 || Number.isNaN(v)) return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (isObject(v)) return Object.keys(v).length === 0;
-  return false;
-}
-
-function textOf(v: unknown): string {
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v)) return v.map(textOf).filter((s) => s !== "").join(LIST_JOIN);
-  return "";
-}
-
-function lookup(path: string, contexts: readonly unknown[]): unknown {
-  if (path === ".") return contexts.at(-1);
-  const [head = "", ...rest] = path.split(".");
-  for (let i = contexts.length - 1; i >= 0; i--) {
-    const c = contexts[i];
-    if (!isObject(c) || !Object.hasOwn(c, head) || c[head] === undefined) continue;
-    let v: unknown = c[head];
-    for (const name of rest) {
-      if (!isObject(v) || !Object.hasOwn(v, name)) return undefined;
-      v = v[name];
-    }
-    return v;
-  }
-  return undefined;
-}
-
-function renderNodes(nodes: readonly Node[], contexts: readonly unknown[], out: string[]): void {
-  for (const node of nodes) {
-    if (node.type === "text") out.push(node.text);
-    else if (node.type === "field") out.push(textOf(lookup(node.path, contexts)));
-    else {
-      const v = lookup(node.path, contexts);
-      if (node.inverted) {
-        if (isEmpty(v)) renderNodes(node.children, contexts, out);
-      } else if (!isEmpty(v)) {
-        if (Array.isArray(v)) for (const item of v) renderNodes(node.children, [...contexts, item], out);
-        else renderNodes(node.children, [...contexts, v], out);
-      }
-    }
-  }
-}
-
-/** A template, parsed once and filled as often as asked. */
+/** A template, read once and filled as often as asked. */
 export class Template {
-  private constructor(private readonly nodes: Node[]) {}
+  private constructor(
+    private readonly nodes: Node[],
+    private readonly fill: (fields: Fields) => TemplateRender,
+  ) {}
 
   /** Parses a template; a tag that is not one of the syntax's, or a block left open, is input that cannot be read. */
   static parse(source: string, what: string): Template {
@@ -114,14 +73,14 @@ export class Template {
     }
     if (last < text.length) into().push({ type: "text", text: text.slice(last) });
     if (stack.length > 0) throw new StoreInputError(`${what}: {{#${stack.at(-1)?.path}}} is never closed`);
-    return new Template(root);
+    return new Template(root, templateOf(source));
   }
 
-  /** The text filled from `contexts`, innermost last. */
+  /** The text filled from `contexts`, innermost last: merged, the innermost winning where it has a value, as RPH's renderer reads one set of fields. */
   render(...contexts: readonly unknown[]): string {
-    const out: string[] = [];
-    renderNodes(this.nodes, contexts, out);
-    return out.join("");
+    const merged: Record<string, unknown> = {};
+    for (const context of contexts) if (isObject(context)) for (const [key, value] of Object.entries(context)) if (value !== undefined) merged[key] = value;
+    return this.fill(merged as Fields).text ?? "";
   }
 
   /** The fields the template reads at its top level, block names included. */
