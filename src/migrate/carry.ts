@@ -31,6 +31,8 @@ import { carryStory, type StoryCarried } from "./story-record";
 import { keepPutPrints, putPrints } from "./tables";
 import type { Today } from "./today";
 import { carryWorlds, type WorldsCarried } from "./worlds";
+import { carryTurnThings, type TurnThingsCarried } from "./turn-things";
+import { carryJobs, type JobsCarried, type KeepCarriedJob } from "./history-things";
 
 export interface CarryInput {
   today: Today;
@@ -51,6 +53,8 @@ export interface CarryInput {
   settings?: readonly Setting[];
   /** The ids of the world revisions the chats this run imports play: a world today's side has deleted is kept while one of its revisions is among them. */
   plays?: ReadonlySet<string>;
+  /** The turn lane's writer of a carried job, which the migration may not import (`carryJob`); absent: his jobs stay in the backup only. */
+  keepJob?: KeepCarriedJob;
 }
 
 /** What the run carried besides the chats, counted: never a value of a key. */
@@ -69,6 +73,8 @@ export interface CarriedReport {
   minds: MindsCarried;
   /** The story record carried into RPE's story record and cast, of the chats this run imported. */
   story: StoryCarried;
+  /** What he asked through a panel, his stored chips and review cards, his staged change and the tools he approved, in the turn lane's tables. */
+  turnThings: TurnThingsCarried & { jobs: JobsCarried };
   /** Each chat's own choices put into its `RPE.yml`; null where no file tree was given. */
   chatSettings: ChatSettingsCarried | null;
 }
@@ -94,13 +100,15 @@ export type Place = "lands" | "later" | { none: string };
  * connections, where the book of the runtime the run took doesn't read; and the user's own files and
  * each chat's notes, where the run is not given the file tree's places (`tree`).
  */
-export async function placesOf(today: Today, items: readonly Item[], tree: boolean): Promise<(item: Item) => Place> {
+export async function placesOf(today: Today, items: readonly Item[], tree: boolean, lane = false): Promise<(item: Item) => Place> {
   // The runtime the run took (`runtime-folders.ts`): the one this user registered with this Lumiverse, its book theirs.
   const runtime = today.runtime.runtimes[0]?.name ?? null;
   const trouble = runtime === null ? null : await bookTrouble(runtime, today.runtime.files);
   return (item) => {
     if (item.row === "connections") return trouble === null ? "lands" : { none: `the runtime ${runtime}: ${trouble}` };
     if ((item.row === "learned-and-home" || item.row === "author-notes" || item.row === "texts") && !tree) return { none: "this run was not given the file tree's places" };
+    // What the turn lane's tables hold (his panel requests, chips, staged change, approvals, and his jobs through its writer of a carried job) lands where the run is given the lane (`lane`); without it, it waits in the backup.
+    if (item.row === "panel-requests" || item.row === "chips-staged" || item.row === "approvals-jobs") return lane ? "lands" : "later";
     return item.row !== null && Object.hasOwn(NO_PLACE_YET, item.row) ? "later" : "lands";
   };
 }
@@ -160,6 +168,8 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const story = db.transaction(() => carryStory({ db, store, s, chats, people, now, inside: new Map(report.chats.map((c) => [c.chatId, c.story])), fate }))();
   // What the old engines recorded on each carried reply, with every text it names, word for word beside its turn (read after the minds and the story took the records as they were).
   const old = await attachTexts(today, db, user, chats);
+  const turnThings = await carryTurnThings({ today, db, s, chats, now });
+  const jobs = await carryJobs({ today, items: report.items, db, user, chats: new Set(chats), keep: input.keepJob });
   const [mindsFound, storyFound] = (["mind-files", "story-record"] as const).map((row) => report.rows.find((r) => r.row === row)?.inside?.count ?? 0);
   const files = new Set(minds.characters.flatMap((c) => c.files.map((f) => `${c.character}\u0000${f}`))).size;
   const characters = new Set(minds.characters.map((c) => c.character)).size;
@@ -190,6 +200,10 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
       ...(story.unheld > 0 ? [`${story.unheld} entr(ies) on records no imported turn holds are in the backup only`] : []),
       ...apartText(story.apart, "entr(ies)"),
     ].join("; "),
+    // What today's build kept beside a reply that belongs to its turn, in the turn lane's tables.
+    "panel-requests": turnThings.tables ? `The turn lane's request table: ${turnThings.requests} request(s) of the ${report.rows.find((r) => r.row === "panel-requests")?.count.found ?? 0} found, each on the turn that answered it, as the request he made${turnThings.requestsUnplaced.length > 0 ? `; ${turnThings.requestsUnplaced.length} on a message whose reply has no turn here are in the backup only` : ""}` : "This run was not given the turn lane's tables: in the backup only",
+    "chips-staged": turnThings.tables ? `The turn lane's chip table: ${turnThings.chips} stored chip(s) and review card(s), each on its turn as today's build kept it, its items and statuses with it${turnThings.chipsLoose > 0 ? ` (${turnThings.chipsLoose} on no turn, their message having none)` : ""}; ${turnThings.staged} change(s) staged for his next message waiting as held requests that go with it` : "This run was not given the turn lane's tables: in the backup only",
+    "approvals-jobs": turnThings.tables ? `Approvals: the turn lane's chip table, ${turnThings.approvals} tool(s) he approved for a chat, each on the turn running then, as history. Jobs: ${jobs.written ? `${jobs.carried} in the job history marked carried, with task, report and transcript${jobs.unfinished > 0 ? `, ${jobs.unfinished} that had not finished as cancelled` : ""}${jobs.left > 0 ? `; ${jobs.left} of chats not carried or no job in the backup only` : ""}` : "in the backup only: this run was not given the turn lane's writer of a carried job"}` : "This run was not given the turn lane's tables: in the backup only",
   };
   if (connections !== null && !("why" in connections)) landed.connections = `RPH's two documents, through the models port: ${connections.connections.length} connection(s) in RPE-global.yml's models; ${connections.keys} key(s), ${connections.signins} sign-in(s) and ${connections.headerValues} header value(s) in the secrets file and nowhere else`;
   if (tree !== null && ownFiles !== null) {
@@ -204,5 +218,5 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     landed["agents-workspace"] = `As notes: the agents engine's chat workspace in ${inChat} (${ownFiles.workspace} file(s)), each turn's writes and removals among its versions, and its global workspace in the global notes folder (${ownFiles.global} file(s))${alone}`;
     if (pinned !== null) landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in today's build as pins in \`pins:\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that today's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for his own definitions, which are carried switched off` : ""}`;
   }
-  return { landed, carried: { worlds, settings, modelChoices: choices, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, chatSettings: chatSettings?.carried ?? null } };
+  return { landed, carried: { worlds, settings, modelChoices: choices, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, turnThings: { ...turnThings, jobs }, chatSettings: chatSettings?.carried ?? null } };
 }

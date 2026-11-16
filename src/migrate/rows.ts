@@ -90,9 +90,9 @@ export const ROW: Readonly<Record<RowId, Row>> = Object.fromEntries(ROWS.map((r)
  */
 export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "build-jobs": "the jobs lane",
-  "panel-requests": "the pages lane: each request onto the turn that answered it",
+  "panel-requests": "the turn lane's tables, which a run is given by its caller (`MigrateOptions.runs`); without them it is kept in the backup only",
   "assistant-threads": "the pages lane",
-  "chips-staged": "the pages lane",
-  "approvals-jobs": "the jobs lane",
+  "chips-staged": "the turn lane's tables, which a run is given by its caller (`MigrateOptions.runs`); without them it is kept in the backup only",
+  "approvals-jobs": "the turn lane's tables, and its writer of a carried job (`MigrateOptions.runs.keepJob`), which a run is given by its caller",
   "owner-rows": "nothing reads a file he names (§22): an attached one stays in the backup, with his line, until a reader of it is built",
 };

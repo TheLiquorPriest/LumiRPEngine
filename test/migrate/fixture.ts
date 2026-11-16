@@ -356,6 +356,8 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   const learnedArea = area({ "notes.md": "The pier floods at high tide." }, blobs);
   const segment = "harness session segment";
   blobs.set(sha(segment), segment);
+  const jobReport = "The notebook is filed.";
+  blobs.set(sha(jobReport), jobReport);
   for (const [hash, text] of blobs) await user(`harness/blobs/${hash.slice(0, 2)}/${hash}`, text);
   const docs: Record<string, string> = {
     "workspace/user.json": userArea,
@@ -369,7 +371,7 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     [`chats/${CHAT.harness}/jobs.json`]: JSON.stringify({ v: 1, kind: "jobs", jobs: [{ id: "job-1", at: 1 }] }),
     [`chats/${CHAT.harness}/recall.json`]: JSON.stringify({ v: 1, generationId: "gen-1", at: 1, held: {}, added: [], dropped: [] }),
     [`chats/${CHAT.forgot}/learned.json`]: learnedArea,
-    "jobs/job-1.json": JSON.stringify({ v: 1, kind: "job", job: "job-1", task: "file the notebook" }),
+    "jobs/job-1.json": JSON.stringify({ v: 1, kind: "job", job: { id: "job-1", chatId: CHAT.harness, agent: "filer", task: "file the notebook", when: "now", state: "done", by: { who: "user" }, basis: null, createdAt: 1_700_000_000_000, startedAt: 1_700_000_001_000, endedAt: 1_700_000_090_000, usage: { calls: 3, toolTurns: 2, in: 1200, cachedIn: 0, out: 340, reasoningOut: 0, estimated: false, ms: 5000 }, report: sha(jobReport) }, task: "file the notebook" }),
     "jobs/all.json": JSON.stringify({ v: 1, kind: "job_ids", jobs: [{ id: "job-1", chatId: CHAT.harness, at: 1 }] }),
     "jobs/running.json": JSON.stringify({ v: 1, kind: "running", ids: [] }),
     "sides.json": JSON.stringify({ v: 1, kind: "sides", sides: [{ id: "side-1" }, { id: "side-old" }] }),
