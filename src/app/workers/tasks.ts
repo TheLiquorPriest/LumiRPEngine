@@ -4,12 +4,15 @@
 // cross between threads by structured clone: plain data, and buffers that may be handed over.
 
 import { INDEX_TASKS } from "../index-file/thread";
+import { grepLines } from "./grep";
 
 const decoder = new TextDecoder();
 
 export const TASKS = {
   /** A request's body as JSON; throws a SyntaxError for one that is not. */
   parseJson: (bytes: Uint8Array): unknown => JSON.parse(decoder.decode(bytes)),
+  /** A pattern tested on the lines of one file's text: the grep of the agents' files, which the pool may end when its time is out. */
+  grepLines,
   ...INDEX_TASKS,
 } as const;
 

@@ -9,10 +9,13 @@ import { appendFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Places, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "rp-harness/contract";
+import { type GrepLines, grepLines, TaskTimedOut, type Workers } from "../app";
 import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { areaOf, MOUNTS } from "./layout";
 import { treeSettingsOf } from "./settings";
+import { scan } from "./ranged";
+import { linesOf, RunningFiles } from "./running";
 import { type ChatLocation, entriesOf, fileKey, kindOf, type Located, locate, type Lookup, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
 
 /** The levels every chat shares, which a scope that names only the user sees. */
@@ -33,6 +36,8 @@ export interface TreeFilesDeps {
   turnFolder(scope: Scope): Promise<string | null>;
   writes: TreeWrites;
   now(): number;
+  /** The pool the pattern of a grep runs on, so that one that never returns holds up no one: its thread is ended when the grep's time is out. Without one a grep runs where it is called and stops between lines. */
+  workers?: Workers;
 }
 
 /** RPE's file port, and where a chat's turn folder is on disk for the parts of RPE that write it. */
@@ -124,8 +129,17 @@ function occurrences(text: string, old: string): number {
 }
 
 /** Applies a change to a file the writer may write, and gives the result with the file's text before it and after it (null: none). */
-async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ result: Written | Unapplied; old: string | null; after: string | null }> {
+async function apply(at: Located & { disk: string }, op: FileOp, running: RunningFiles): Promise<{ result: Written | Unapplied; old: string | null; after: string | null }> {
   if (at.is === "folder") return { result: { status: "unapplied", path: at.path, reason: "folder" }, old: null, after: null };
+  // An append to a file whose texts nobody records costs the append alone: its hashes come from what is known of the file.
+  if (op.op === "append" && at.kind !== "notes") {
+    const info = at.is === "file" ? await stat(at.disk) : null;
+    const was = info === null ? null : (running.valid(at.disk, info) ?? (await running.seed(at.disk)));
+    await mkdir(dirname(at.disk), { recursive: true });
+    await appendFile(at.disk, op.text, "utf8");
+    const now = await running.appended(at.disk, was, op.text);
+    return { result: { status: "written", path: at.path, kind: at.kind, op: "append", bytes: now.bytes, hash: now.after, before: now.before }, old: null, after: null };
+  }
   const old = at.is === "file" ? await readFile(at.disk, "utf8") : null;
   const unapplied = (result: Unapplied) => ({ result, old, after: old });
   let after: string | null;
@@ -168,6 +182,8 @@ async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ resu
 }
 
 export function treeFiles(deps: TreeFilesDeps): TreeFiles {
+  /** What RPE knows of the files it has appended to or read a range of: their hash, size and lines. */
+  const running = new RunningFiles();
   function check(scope: Scope | UserScope): void {
     if (scope.user !== deps.user) throw new Error(`This RPE belongs to the Lumiverse user ${JSON.stringify(deps.user)}, not ${JSON.stringify(scope.user)}.`);
     if (!namesChat(scope)) return;
@@ -285,19 +301,29 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
       }
       const data = await readFile(f.disk);
       if (data.includes(0)) continue;
-      const lines = data.toString("utf8").split("\n");
-      if (lines.at(-1) === "") lines.pop();
-      for (const [i, whole] of lines.entries()) {
-        if (hits.length >= room) break files;
-        if (performance.now() >= stopAt) {
-          late = true;
-          break files;
-        }
-        const line = whole.slice(0, grepLineChars);
-        if (!pattern.test(line)) continue;
-        const hit: FileHit = { path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line };
+      const left = stopAt - performance.now();
+      if (left <= 0) {
+        late = true;
+        break;
+      }
+      // The pattern runs on a thread the pool ends when the time is out, even inside one line; without a pool, where it is, between lines.
+      const ask = { text: data.toString("utf8"), source: pattern.source, flags: pattern.flags, lineChars: grepLineChars, most: room - hits.length };
+      let tested: GrepLines;
+      try {
+        tested = deps.workers === undefined ? grepLines({ ...ask, until: stopAt }) : await deps.workers.run("grepLines", ask, [], { timeoutMs: Math.ceil(left) });
+      } catch (error) {
+        if (!(error instanceof TaskTimedOut)) throw error;
+        late = true;
+        break;
+      }
+      for (const m of tested.hits) {
+        const hit: FileHit = { path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: m.line, text: m.text };
         hits.push(hit);
-        if (whole.length > grepLineChars) cutLines.add(hit);
+        if (m.cut) cutLines.add(hit);
+      }
+      if (tested.late) {
+        late = true;
+        break;
       }
     }
     const cutCount = hits.slice(0, limit).filter((hit) => cutLines.has(hit)).length;
@@ -323,9 +349,21 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
       const at = lookup.at;
       if (at.is === "none" || at.disk === null) return { status: "missing", path: at.path };
       if (at.is === "folder") return { status: "missing", path: at.path, folder: true };
-      const [data, info] = await Promise.all([readFile(at.disk), stat(at.disk)]);
-      const part = cut(data.toString("utf8"), range);
-      return { status: "read", path: at.path, level: at.level, kind: at.kind, text: part.text, start: part.start, end: part.end, lines: part.lines, bytes: data.byteLength, hash: sha256(data), modified: info.mtimeMs };
+      const info = await stat(at.disk);
+      if (range === undefined) {
+        const data = await readFile(at.disk);
+        const part = cut(data.toString("utf8"), range);
+        return { status: "read", path: at.path, level: at.level, kind: at.kind, text: part.text, start: part.start, end: part.end, lines: part.lines, bytes: data.byteLength, hash: sha256(data), modified: info.mtimeMs };
+      }
+      // A range is read as a stream: the file's size, lines and hash come from what RPE kept of it, or from one pass over it that keeps them, never from holding it whole.
+      const start = range.start ?? 1;
+      if (!Number.isInteger(start) || start < 1) throw new RangeError(`A range starts at line 1 or later, not ${start}.`);
+      if (range.end !== undefined && !Number.isInteger(range.end)) throw new RangeError(`A range ends at a whole line, not ${range.end}.`);
+      const state = running.valid(at.disk, info) ?? (await running.seed(at.disk));
+      const lines = linesOf(state);
+      const end = Math.min(range.end ?? lines, lines);
+      const part = end < start ? { text: "" } : await scan(at.disk, start, end - start + 1, { early: true });
+      return { status: "read", path: at.path, level: at.level, kind: at.kind, text: part.text, start, end: end < start ? start - 1 : end, lines, bytes: state.bytes, hash: state.hash.copy().digest("hex"), modified: state.mtimeMs };
     },
 
     find,
@@ -346,7 +384,7 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         if (!again.ok) return await refusal(scope, again.path, again.reason, by);
         if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", by);
         const before = await sizeOfFile(again.at.disk);
-        const { result, old, after } = await apply({ ...again.at, disk: again.at.disk }, op);
+        const { result, old, after } = await apply({ ...again.at, disk: again.at.disk }, op, running);
         if (result.status === "written" && again.at.level === "chat") await deps.chats.grew(scope.user, scope.chat, areaOf(again.at.rest), result.bytes - before);
         // A note written in a turn is recorded against it, with what the file held before and after, and stands in the chat's notes
         // folder (`notes.ts`), so a swipe, a delete, a branch or the lead dropping a sub-agent's writes can put the notes back.
@@ -382,7 +420,7 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", "harness");
         const old = again.at.is === "file" ? await readFile(again.at.disk, "utf8") : null;
         const before = await sizeOfFile(again.at.disk);
-        const { result } = await apply({ ...again.at, disk: again.at.disk }, { op: "write", text: change(old) });
+        const { result } = await apply({ ...again.at, disk: again.at.disk }, { op: "write", text: change(old) }, running);
         if (result.status !== "written") throw new Error(`${again.at.path} could not be changed (${result.reason}).`);
         await deps.chats.grew(scope.user, scope.chat, areaOf(again.at.rest), result.bytes - before);
         return result;

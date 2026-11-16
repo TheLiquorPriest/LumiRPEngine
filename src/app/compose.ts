@@ -159,7 +159,15 @@ export function compose(options: ComposeOptions = {}): Composition {
     castArea(() => ({ store: made().store, turning, files, settings: async (user, chat) => (await settings(user, chat)).cast })),
     storyArea(() => ({ store: made().store, turning, files, settings: async (user, chat) => (await settings(user, chat)).story })),
     buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE })),
-    playArea(() => ({ store: made().store, turning, guidance: RPE_GUIDANCE, dueItems: async (user: string, chat: string) => (await settings(user, chat)).engine.dueItems })),
+    playArea(() => ({
+      store: made().store,
+      turning,
+      guidance: RPE_GUIDANCE,
+      settings: async (user: string, chat: string) => {
+        const s = await settings(user, chat);
+        return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps };
+      },
+    })),
     door.area,
   ];
 

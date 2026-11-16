@@ -39,6 +39,17 @@ export class TaskFailed extends Error {
   }
 }
 
+/** A task that ran past the time it was given: its thread was ended. */
+export class TaskTimedOut extends Error {
+  constructor(
+    readonly task: string,
+    readonly ms: number,
+  ) {
+    super(`${task} ran past ${ms} ms`);
+    this.name = "TaskTimedOut";
+  }
+}
+
 /** What a thread answers for one task. */
 type Answer = { ok: true; output: unknown } | { ok: false; name: string; message: string };
 
@@ -46,6 +57,8 @@ interface Job {
   task: TaskName;
   input: unknown;
   transfer: readonly Transferable[];
+  timeoutMs?: number;
+  timer?: Timer;
   resolve: (output: unknown) => void;
   reject: (error: unknown) => void;
 }
@@ -80,11 +93,14 @@ export class Workers {
     this.#log = options.log;
   }
 
-  /** Runs `task` on a thread with `input`, handing over `transfer` (the input's buffers it gives up); its answer, or its failure. */
-  run<N extends TaskName>(task: N, input: TaskInput<N>, transfer: readonly Transferable[] = []): Promise<TaskOutput<N>> {
+  /**
+   * Runs `task` on a thread with `input`, handing over `transfer` (the input's buffers it gives up); its answer, or its failure. With
+   * `timeoutMs`, a task still running that long after it began is stopped by ending its thread, and fails as `TaskTimedOut`.
+   */
+  run<N extends TaskName>(task: N, input: TaskInput<N>, transfer: readonly Transferable[] = [], options: { timeoutMs?: number } = {}): Promise<TaskOutput<N>> {
     if (this.#closed) return Promise.reject(new Error(`RPE is stopping, so ${this.#name} ran no ${task}.`));
     const done = Promise.withResolvers<TaskOutput<N>>();
-    this.#queue.push({ task, input, transfer, resolve: done.resolve as (output: unknown) => void, reject: done.reject });
+    this.#queue.push({ task, input, transfer, ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }), resolve: done.resolve as (output: unknown) => void, reject: done.reject });
     this.#next();
     return done.promise;
   }
@@ -97,10 +113,23 @@ export class Workers {
     this.#all.clear();
     this.#idle.length = 0;
     for (const thread of threads) {
-      thread.job?.reject(new Error(`RPE is stopping, so ${this.#name} did not finish ${thread.job.task}.`));
+      if (thread.job !== null) {
+        clearTimeout(thread.job.timer);
+        thread.job.reject(new Error(`RPE is stopping, so ${this.#name} did not finish ${thread.job.task}.`));
+      }
       thread.job = null;
     }
     await Promise.all(threads.map((thread) => thread.worker.terminate()));
+  }
+
+  /** A task that ran past its time: its thread is ended (a pattern in a line may never return) and the next task starts another; the caller is told. */
+  #timedOut(thread: Thread, job: Job): void {
+    if (thread.job !== job) return;
+    this.#all.delete(thread);
+    thread.job = null;
+    void thread.worker.terminate();
+    job.reject(new TaskTimedOut(job.task, job.timeoutMs ?? 0));
+    this.#next();
   }
 
   #next(): void {
@@ -112,6 +141,7 @@ export class Workers {
       thread.worker.ref();
       try {
         thread.worker.postMessage({ task: job.task, input: job.input }, [...job.transfer]);
+        if (job.timeoutMs !== undefined) job.timer = setTimeout(() => this.#timedOut(thread, job), job.timeoutMs);
       } catch (error) {
         // An input that cannot be sent to a thread fails its task alone.
         thread.job = null;
@@ -132,6 +162,7 @@ export class Workers {
       worker.unref();
       if (this.#all.has(thread)) this.#idle.push(thread);
       if (job !== null) {
+        clearTimeout(job.timer);
         if (answer.ok) job.resolve(answer.output);
         else this.#failed(job, new TaskFailed(job.task, answer.name, answer.message));
       }
@@ -143,8 +174,10 @@ export class Workers {
       if (at >= 0) this.#idle.splice(at, 1);
       const job = thread.job;
       thread.job = null;
-      if (job !== null) this.#failed(job, new Error(`${this.#name} lost the thread running ${job.task}: ${why}`));
-      else this.#log.warn("a worker thread ended", { workers: this.#name, why });
+      if (job !== null) {
+        clearTimeout(job.timer);
+        this.#failed(job, new Error(`${this.#name} lost the thread running ${job.task}: ${why}`));
+      } else this.#log.warn("a worker thread ended", { workers: this.#name, why });
       this.#next();
     };
     worker.on("error", (error: unknown) => lost(error instanceof Error ? error.message : String(error)));
