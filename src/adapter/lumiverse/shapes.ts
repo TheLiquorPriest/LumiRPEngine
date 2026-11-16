@@ -5,6 +5,7 @@
 import { type Exactly, type Holds, type Infer, liveKind, shape } from "../../app";
 import type { MessageShown as MessageShownRow } from "./messages";
 import type { ExtensionStatus } from "./pipe-wire";
+import type { WindowShown } from "./window-view";
 
 const T = shape.text();
 
@@ -55,8 +56,21 @@ type MessageMirrored = Holds<Exactly<Infer<typeof messageShown>, MessageShownRow
 
 export const chatMessagesReply = shape.named("ChatMessagesReply", "The messages of a chat asked for, in the chat's order.", shape.object({ messages: shape.list(messageShown) }));
 
+export const chatWindowReply = shape.named(
+  "ChatWindowReply",
+  "What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path, the message just above that, how many messages lie above it, and how many of those the story does not cover yet.",
+  shape.object({
+    on: shape.field(shape.yesNo(), "The window is on for this chat."),
+    first: shape.field(shape.nullable(T), "Lumiverse's id of the first history message the window keeps, with the step and the hold as the chat's settings set them; null where it keeps all, or is off."),
+    before: shape.field(shape.nullable(T), "Lumiverse's id of the history message just above `first`, the one the marker stands under; null where nothing is above it."),
+    above: shape.field(shape.number(), "History messages above the window."),
+    uncovered: shape.field(shape.number(), "Of those, how many the story record does not cover yet; a hidden message counts, among those above, only where the chat's setting lets agents read hidden messages."),
+  }),
+);
+
 /** The door's own live kind: the extension's status changed, published to the user's own channel (`LIVE_USER`) at each change, as the status route answers it. */
 export const EXTENSION_KIND = liveKind("extension", { data: extensionStatusReply, does: "The extension's status changed: as GET /api/v1/status/extension answers it." });
 type StatusMirrored = Holds<Exactly<Infer<typeof extensionStatusReply>, ExtensionStatus>>;
-/** The check above holds, and is read by no one. */
-export type Mirrors = [StatusMirrored, MessageMirrored];
+type WindowMirrored = Holds<Exactly<Infer<typeof chatWindowReply>, WindowShown>>;
+/** The checks above hold, and are read by no one. */
+export type Mirrors = [StatusMirrored, MessageMirrored, WindowMirrored];

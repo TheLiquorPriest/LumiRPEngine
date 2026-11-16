@@ -56,6 +56,8 @@ const UNFILLED: UnfilledLanes = {
   replaced: async () => null,
   // No embedding connection known to the door: a search is by words alone, and nothing is embedded or sent.
   meaning: async () => null,
+  // No window known to the door: the marker reads it off.
+  windowView: async () => ({ on: false, first: null, covered: new Set() }),
 };
 
 /** The door, its lanes read from the app's hooks each time one is used. Mounting it reads what the areas filled. */
@@ -84,6 +86,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     storeLine: (store) => lane("storeLine")(store),
     replaced: (tag) => lane("replaced")(tag),
     meaning: (chat, text, limit, docs) => lane("meaning")(chat, text, limit, docs),
+    windowView: (chat, path) => lane("windowView")(chat, path),
   };
   const door = lumiverseDoor(lanes, deps);
   return {

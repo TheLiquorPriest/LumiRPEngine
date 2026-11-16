@@ -34,6 +34,7 @@ import { type LumiverseCalls, lumiverseCalls } from "./lumiverse-calls";
 import { createFeedback, type EarlierPrompt } from "./feedback";
 import { createLoreCheck } from "./lore-check";
 import { CHAT_MESSAGES_PATH, readMessages } from "./messages";
+import { CHAT_WINDOW_PATH, type WindowViewOf, windowShown } from "./window-view";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { type EndpointCall, modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
@@ -41,7 +42,7 @@ import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
 import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from "./settings";
-import { chatMessagesReply, EXTENSION_KIND, extensionStatusReply } from "./shapes";
+import { chatMessagesReply, chatWindowReply, EXTENSION_KIND, extensionStatusReply } from "./shapes";
 import { createStores, type Stores } from "./stores";
 import { QUESTION_PATH, type Tag } from "./wire";
 import { createWrites, type Writes } from "./writes";
@@ -81,6 +82,8 @@ export interface AdapterLanes {
   replaced(tag: Tag): Promise<EarlierPrompt | null>;
   /** The turn lane's meaning index: the ids of a chat's messages nearest a text in meaning, nearest first, or null while no embedding connection is set (nothing is embedded or sent then); `docs` is read only once one is. For `chat_search`. */
   meaning: MeaningNearest;
+  /** The turn lane: the history window as it stands for a chat's current path, for the chat's window marker (`window-view.ts`): its setting, the first message it keeps, and what the story record covers at the chat's head. */
+  windowView: WindowViewOf;
 }
 
 export interface AdapterDeps {
@@ -388,6 +391,22 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             const messages = await readMessages(parts.reads, params.chat, ask);
             if (messages === null) throw new RouteError(404, "The signed-in user has no such chat.");
             return { messages };
+          },
+        }),
+        route({
+          method: "GET",
+          path: CHAT_WINDOW_PATH,
+          access: "page",
+          group: "chats",
+          does: "What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path (with the step and the hold as the chat's settings set them), the message just above it, how many messages lie above, and how many of those the story does not cover yet; only the signed-in user's own chats.",
+          reply: chatWindowReply,
+          handle: async ({ user, params }) => {
+            if (handlers === null || parts === null) throw new RouteError(503, NOT_SET_UP);
+            if (user !== handlers.user) throw new RouteError(403, "This RPE belongs to another Lumiverse user.");
+            const path = await parts.reads.path(params.chat);
+            if (path === null) throw new RouteError(404, "The signed-in user has no such chat.");
+            const [view, readable] = await Promise.all([lanes.windowView(params.chat, path.map((s) => ({ id: s.id, index: s.index, user: s.role === "user", hidden: s.hidden }))), lanes.hiddenReadable(params.chat)]);
+            return windowShown(path, view, readable);
           },
         }),
         rawRoute({

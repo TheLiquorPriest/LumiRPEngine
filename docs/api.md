@@ -126,6 +126,19 @@ Withdraws a request that waits; one kept with a turn already stays, and the answ
 | Body | none |
 | Reply | [`RequestWithdrawnReply`](#requestwithdrawnreply) |
 
+### `GET /api/v1/chats/:chat/window`
+
+What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path (with the step and the hold as the chat's settings set them), the message just above it, how many messages lie above, and how many of those the story does not cover yet; only the signed-in user's own chats.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`ChatWindowReply`](#chatwindowreply) |
+
 ## Turns
 
 ### `POST /api/v1/chats/:chat/approvals/:approval/answer`
@@ -432,6 +445,32 @@ The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): a
 | Query | none |
 | Body | none |
 | Reply | [`TapReply`](#tapreply) |
+
+### `POST /api/v1/chats/:chat/plays`
+
+A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line put in the chat as his message and a reply started, through Lumiverse's own routes as him, with nothing written into message or chat metadata; the turn that answers it is told what was pressed.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`PlayAsk`](#playask) |
+| Reply | [`PlayedReply`](#playedreply) |
+
+### `POST /api/v1/chats/:chat/requests/panel`
+
+A panel's tap for his next message (the palette, Walk here, any tap with no words): held as a request in place of the panel's tap that waited, and the same tap again takes it back; the turn that answers his next message is told what was pressed and on what.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`PanelTapAsk`](#paneltapask) |
+| Reply | [`PanelHeldReply`](#panelheldreply) |
 
 ### `GET /api/v1/chats/:chat/state`
 
@@ -1449,9 +1488,22 @@ Undoes one compaction of a session by its id: from its next turn the turns the s
 
 ## Jobs
 
+### `GET /api/v1/bootstrap`
+
+The chats the last migration carried, a page at a time, each with how its bootstrap stands (no job yet, queued, held, running, waiting for his word, or ended), its newest bootstrap job, and that job's question when it waits.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: CarriedBootstrap[]; next: string | null }`, a page at a time |
+
 ### `POST /api/v1/bootstrap`
 
-Starts the bootstrap job for the chats named, or for every chat the last migration carried, one after another; says which started and which were refused, and why.
+Starts the bootstrap job for the chats named, or for every chat the last migration carried, one after another, each with his choice of what to relive and his token limit if he sets one; says which started and which were refused, and why.
 
 | | |
 |---|---|
@@ -1464,7 +1516,7 @@ Starts the bootstrap job for the chats named, or for every chat the last migrati
 
 ### `GET /api/v1/chats/:chat/bootstrap`
 
-A chat's bootstrap: the six facts of "done enough", and the chat's bootstrap jobs, oldest first, each with how it stands or ended.
+A chat's bootstrap: the six facts of "done enough"; the start as it stands (whether the skill is in force, the relive words it offers, the token limit at which a job asks, how a cached token counts, and each cap on a bootstrap job's run); the chat's bootstrap jobs under way; and the question of each that waits for his word.
 
 | | |
 |---|---|
@@ -1477,7 +1529,7 @@ A chat's bootstrap: the six facts of "done enough", and the chat's bootstrap job
 
 ### `POST /api/v1/chats/:chat/bootstrap`
 
-Starts a chat's bootstrap job (taking on a story with a past), with the player's choice of what to relive; a start that is refused is answered in words, with nothing started.
+Starts a chat's bootstrap job (taking on a story with a past), with his choice of what to relive (a word the skill offers, or none) and his own token limit for this job if he sets one; a second start while one is under way begins a second job. A start that is refused is answered in words, with nothing started.
 
 | | |
 |---|---|
@@ -1487,6 +1539,32 @@ Starts a chat's bootstrap job (taking on a story with a past), with the player's
 | Query | none |
 | Body | [`BootstrapStartAsk`](#bootstrapstartask) |
 | Reply | [`JobView`](#jobview) |
+
+### `POST /api/v1/chats/:chat/bootstrap/:job/answer`
+
+His word to a bootstrap job of the chat that waits for it at its token limit: go on in its own session, asking again after `more` tokens (its token limit again when left out), or end with what it has.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `job` |
+| Query | none |
+| Body | [`BootstrapAnswerAsk`](#bootstrapanswerask) |
+| Reply | [`JobView`](#jobview) |
+
+### `GET /api/v1/chats/:chat/bootstrap/jobs`
+
+A chat's bootstrap jobs a page at a time, the newest started first, each with what it was given and how it stands or ended.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: BootstrapJobShown[]; next: string | null }`, a page at a time |
 
 ### `POST /api/v1/chats/:chat/jobs`
 
@@ -2720,15 +2798,25 @@ export interface BaseVersionRow {
 }
 ```
 
+### `BootstrapAnswerAsk`
+
+His word to a bootstrap job that waits for it: go on, asking again after `more` tokens (its token limit again when left out), or end with what it has.
+
+```ts
+export type BootstrapAnswerAsk = { go: "on"; more?: number } | { go: "end" };
+```
+
 ### `BootstrapBatchAsk`
 
-The chats to start the bootstrap job for, one after another: a list of chat ids, or "migrated" for every chat the last migration carried; and the player's choice of what to relive.
+The chats to start the bootstrap job for, one after another: a list of chat ids, or "migrated" for every chat the last migration carried; his choice of what to relive, and his token limit for each job.
 
 ```ts
 export interface BootstrapBatchAsk {
   chats: "migrated" | string[];
-  /** The player's choice of what to relive: one of the words the bootstrap skill offers for reliving the past; left out or null, none was made. */
+  /** His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes. */
   relive?: string | null;
+  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat. */
+  tokenLimit?: number;
 }
 ```
 
@@ -2745,19 +2833,21 @@ export interface BootstrapBatchReply {
 
 ### `BootstrapChatReply`
 
-A chat's bootstrap: the six facts, and the chat's bootstrap jobs, oldest first.
+A chat's bootstrap: the six facts, the start as it stands, the chat's bootstrap jobs under way (newest first), and the question of each that waits for his word.
 
 ```ts
 export interface BootstrapChatReply {
   chat: string;
   facts: DoneEnoughShown;
-  jobs: BootstrapJobShown[];
+  start: BootstrapStartShown;
+  underWay: BootstrapJobShown[];
+  questions: BootstrapQuestion[];
 }
 ```
 
 ### `BootstrapJobShown`
 
-A bootstrap job of a chat: what it was given (the player's relive word, the token limit), and its view as RPH gives it (null: RPH no longer holds it).
+A bootstrap job of a chat: what it was given (his relive word, the token limit at which it asks), and its view as RPH gives it (null: RPH no longer holds it).
 
 ```ts
 export interface BootstrapJobShown {
@@ -2768,14 +2858,47 @@ export interface BootstrapJobShown {
 }
 ```
 
+### `BootstrapQuestion`
+
+A bootstrap job held at its token limit, waiting for his word: the point it reached and the tokens counted when it did, what it spent and how a cached token counts, what its agent last wrote, the six facts as they stand now, and how many more tokens a go-on gives by default.
+
+```ts
+export interface BootstrapQuestion {
+  job: string;
+  at: number;
+  tokens: number;
+  usage: Usage;
+  cachedWeight: number;
+  wrote: string | null;
+  facts: DoneEnoughShown;
+  more: number;
+}
+```
+
 ### `BootstrapStartAsk`
 
-What starts a chat's bootstrap job: the player's choice of what to relive, where one was made.
+What starts a chat's bootstrap job: his choice of what to relive, and his own token limit for it, where he made them.
 
 ```ts
 export interface BootstrapStartAsk {
-  /** The player's choice of what to relive: one of the words the bootstrap skill offers for reliving the past; left out or null, none was made. */
+  /** His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes. */
   relive?: string | null;
+  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat. */
+  tokenLimit?: number;
+}
+```
+
+### `BootstrapStartShown`
+
+The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).
+
+```ts
+export interface BootstrapStartShown {
+  skill: boolean;
+  relive: string[];
+  tokenLimit: number;
+  cachedWeight: number;
+  caps: ({ key: string; value: number | null })[];
 }
 ```
 
@@ -2889,6 +3012,20 @@ export interface CardQuestion {
   asked: number;
   state: "waiting" | "answered" | "taken_down";
   answer: { go: boolean; reason?: string } | null;
+}
+```
+
+### `CarriedBootstrap`
+
+A chat the last migration carried, with how its bootstrap stands (none: no job yet; queued, held, running, asking: its newest job; ended: its newest job ended, how and with what on the job), its newest bootstrap job, that job's question when it waits for his word, and the start as it stands for the chat.
+
+```ts
+export interface CarriedBootstrap {
+  chat: string;
+  state: "none" | "queued" | "held" | "running" | "asking" | "ended";
+  job: BootstrapJobShown | null;
+  question: BootstrapQuestion | null;
+  start: BootstrapStartShown;
 }
 ```
 
@@ -3216,6 +3353,25 @@ export interface ChatStorageRow {
   rows?: number;
   /** When the sizes were last checked against the disk, epoch milliseconds; null for a chat not measured yet, whose sizes are then none and come at the next read. */
   measured?: number | null;
+}
+```
+
+### `ChatWindowReply`
+
+What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path, the message just above that, how many messages lie above it, and how many of those the story does not cover yet.
+
+```ts
+export interface ChatWindowReply {
+  /** The window is on for this chat. */
+  on: boolean;
+  /** Lumiverse's id of the first history message the window keeps, with the step and the hold as the chat's settings set them; null where it keeps all, or is off. */
+  first: string | null;
+  /** Lumiverse's id of the history message just above `first`, the one the marker stands under; null where nothing is above it. */
+  before: string | null;
+  /** History messages above the window. */
+  above: number;
+  /** Of those, how many the story record does not cover yet; a hidden message counts, among those above, only where the chat's setting lets agents read hidden messages. */
+  uncovered: number;
 }
 ```
 
@@ -4909,7 +5065,7 @@ export interface MigrationReply {
 
 ### `MigrationReportShown`
 
-The last real run's report as the run printed it, whole (counts and checksums, never content): the page reads of it what became of each world in Build; every other field is the migration's own document, carried as JSON.
+The last real run's report as the run printed it, whole (counts and checksums, never content): every field is the migration's own document, carried as JSON.
 
 ```ts
 export interface MigrationReportShown {
@@ -4935,7 +5091,8 @@ export interface MigrationReportShown {
   landed: JsonValue;
   carried: JsonValue;
   worldsInStore: JsonValue;
-  worldsInBuild?: WorldsInBuildShown;
+  identifier?: JsonValue;
+  offRpe?: JsonValue;
   changes: JsonValue;
   refusals: JsonValue;
 }
@@ -5121,6 +5278,28 @@ export interface PageProof {
 }
 ```
 
+### `PanelHeldReply`
+
+The tap held: it waits for his next message, in place of a panel's tap that waited; null where the same tap again took the one that waited back.
+
+```ts
+export interface PanelHeldReply {
+  request: RequestShown | null;
+}
+```
+
+### `PanelTapAsk`
+
+A panel's tap for his next message: one of the world's actions (Walk here among them, or a Timelapse with its label and its "follow my routine" choice among its values), its values, and where it was made.
+
+```ts
+export interface PanelTapAsk {
+  action: string;
+  values: { [key: string]: JsonValue };
+  from: "palette" | "map" | "panel";
+}
+```
+
 ### `PartPreviewReply`
 
 A prompt part or a tool's description rendered as RPH renders it for the chat: which it is, every field it names, the values of its last use in the chat (null before it was ever used there), its text with them filled in (none where it does not read), the fields it put in that had no value, and why it does not read or what of it is shown as written, each with its line.
@@ -5240,6 +5419,26 @@ The owner says which of the world's people a character is, by the person's id or
 ```ts
 export interface PersonAsk {
   person: string | null;
+}
+```
+
+### `PlayAsk`
+
+A tap that plays now: one of the world's actions with its values, where it was made, and any words typed with it (its line in the chat; with none, what was pressed); or the id of a request that waits (Send now).
+
+```ts
+export type PlayAsk = { action: string; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now" | "command"; words?: string } | { request: string };
+```
+
+### `PlayedReply`
+
+The tap played: the message its line went into the chat as, the generation Lumiverse started to answer it, and the request kept with it as played now.
+
+```ts
+export interface PlayedReply {
+  message: string;
+  generation: string;
+  request: string;
 }
 ```
 
@@ -5586,7 +5785,7 @@ export interface RequestShown {
   id: string;
   chat: string;
   kind: "panel" | "depth" | "swipe";
-  asked: { action: string | null; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now"; what: string; on: string | null } | { choice: string; words: string | null };
+  asked: { action: string | null; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now" | "command"; what: string; on: string | null } | { choice: string; words: string | null };
   /** Played now, as a message of its own, rather than with the next message. */
   played: boolean;
   /** The message it was sent as, where it was played now. */
@@ -7467,7 +7666,7 @@ export interface ValueHistoryReply {
 One thing the last run left waiting on the user, by what it is.
 
 ```ts
-export type WaitingOnUser = { kind: "guidance"; path: string } | { kind: "connection"; setting: string; connection: string } | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean } | { kind: "own"; agents: number; skills: number; texts: number } | { kind: "filing"; chat: string; characters: number; notes: boolean } | { kind: "world"; world: string; name: string | null };
+export type WaitingOnUser = { kind: "guidance"; path: string } | { kind: "connection"; setting: string; connection: string } | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean } | { kind: "own"; agents: number; skills: number; texts: number } | { kind: "filing"; chat: string; characters: number; notes: boolean };
 ```
 
 ### `WebProviderSet`
@@ -7531,21 +7730,6 @@ The level asked for, then each level below it to the depth asked for, at the cha
 export interface WorldReply {
   at: string;
   nodes: LevelNode[];
-}
-```
-
-### `WorldsInBuildShown`
-
-What a run did with each world it carried into Build's own copy, by the world's id: copied in, replaced (Build's copy was still a run's), unchanged, or kept as RPE has it (changed or made there); of those kept, which are newer on today's side too; and each world's name as today's index gives it. The last two are absent from a report kept before runs told them.
-
-```ts
-export interface WorldsInBuildShown {
-  copied: string[];
-  replaced: string[];
-  unchanged: string[];
-  kept: string[];
-  newer?: string[];
-  names?: { [key: string]: string };
 }
 ```
 

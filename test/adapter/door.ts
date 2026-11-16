@@ -132,6 +132,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
       storeLine: async (store) => store,
       replaced: async () => null,
       meaning: async () => null,
+      windowView: async () => ({ on: false, first: null, covered: new Set() }),
     };
     if (options.lumiverse !== undefined) await Bun.write(paths.globalConfig, JSON.stringify({ lumiverse: options.lumiverse }));
     const logs: string[] = [];
