@@ -50,6 +50,15 @@ CREATE TABLE prompt_located (
 );
 `,
   },
+  {
+    version: 2,
+    name: "the speaker and the persona each turn's generation named",
+    // For the lore, whose books follow them (`LoreTurns.generation`). A turn kept before has neither, and its lore reads the chat's own books.
+    sql: `
+ALTER TABLE turn_prompt ADD COLUMN speaker TEXT;
+ALTER TABLE turn_prompt ADD COLUMN persona TEXT;
+`,
+  },
 ];
 
 export const HARNESS_MIGRATIONS: readonly TableStep[] = [

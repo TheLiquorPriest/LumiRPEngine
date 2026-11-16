@@ -95,7 +95,7 @@ test("an indexing run is given the next batch by name and answered with the batc
 
   await play(b, "I go down to see the oil for myself.");
   const map = textsOf(b.model.requests.at(-1));
-  expect(map).toContain(`### In the prompt, each in full\n\n- [${ids.oil}] The oil store (place): Where the lamp oil is kept. Defines the oil store (layout).`);
+  expect(map).toContain(`### In the prompt, each in full, as its text alone with no title or id\n\n- [${ids.oil}] The oil store (place): Where the lamp oil is kept. Defines the oil store (layout).`);
   expect(map).toContain(`### Changed by the story\n\n- [${ids.oil}] The oil store: The flood moved the barrels to the boathouse.`);
   expect(map).toContain(`### Not in the prompt, but bound to who and what is at hand\n\n- [${ids.oath}] The courier's oath (rule): What every courier swears. Bound to Wren.`);
   expect(map).toContain("1 attached entries are not indexed yet.");

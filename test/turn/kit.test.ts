@@ -67,7 +67,7 @@ runKitPart("RPE's prompt port", "prompt", async (seed, place) => {
       return { role: m.role, content: m.content, text, media: 0, places: [{ member: i, start: 0, end: text.length }] };
     });
     const layout = rawLayout(tag, laid, true, { from: "breakdown", presetId: seed.preset.id, presetName: seed.preset.name ?? null, blocks: p.blocks });
-    await writes.run((d) => prompts.keep(d, { user: seed.scope.user, turn: p.turn, chat: seed.scope.chat, layout, lore: [], cut: tag.cut, summarized: [], at }));
+    await writes.run((d) => prompts.keep(d, { user: seed.scope.user, turn: p.turn, chat: seed.scope.chat, layout, lore: [], cut: tag.cut, summarized: [], speaker: null, persona: null, at }));
   }
   return { prompt: prompts, close };
 });

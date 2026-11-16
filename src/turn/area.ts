@@ -64,7 +64,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
     return loreBooks(parts.reads, owner());
   };
   const books: LoreBooks = {
-    attached: (user, chat) => booksNow().attached(user, chat),
+    attached: (user, chat, at) => booksNow().attached(user, chat, at),
     book: (user, id) => booksNow().book(user, id),
     entries: (user, book) => booksNow().entries(user, book),
     entry: (user, id) => booksNow().entry(user, id),

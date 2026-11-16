@@ -23,15 +23,16 @@ import type { AgentRef, Clock, Environment, Harness, HostTool, Scope } from "rp-
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
+import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, loreLines, lorePort, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_SETTINGS, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
-import { CHATS_FOLDER, pruneChat, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
+import { CHATS_FOLDER, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser, storeUsers } from "./kv";
@@ -234,6 +235,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
     },
     now: () => clock.now(),
+    // His own index entry heading the index's file (`lore.index.entry`), read for the chat at each write.
+    settingsFor: loreSettingsFor(async (at) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS)),
+    log: app.log,
   });
   const overlay = overlayWrite(worlds, () => clock.now());
   const facts = new FactsRegistry();
@@ -266,7 +270,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines, settings.map), map: mapView(lines, settings.map), mapSettings: settings.map, due, settings: settings.engine, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now(), settings: settings.story }),
-      loreTools({ index: loreIndex, guidance: loadGuidance(files, scope) }),
+      loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
     ]);
     return [...engine, ...cast, ...story, ...indexing];
   };
@@ -332,7 +336,18 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     player,
     since,
     notes,
-    pruneTurns: (user, chat, spare) => pruneChat({ files: app.paths.files, chats }, user, chat, spare),
+    // The older turn folders, and with them the prompt each of their turns carried and where its slices were (plan §5.5, App. B): kept
+    // for as many of the chat's newest turns as its folders are, a turn going on kept whatever its age.
+    pruneTurns: async (user, chat, spare) => {
+      const pruned = await pruneChat({ files: app.paths.files, chats }, user, chat, spare);
+      const folders = chats.folders(user, chat);
+      if (folders !== null) {
+        const { turnFolders } = await retentionOf({ files: app.paths.files, character: folders.character, chat: folders.chat });
+        const going = new Set(runs.ofChat(user, chat).map((r) => r.turn));
+        await app.writes.run((db) => prompts.prune(db, user, chat, turnFolders, going), "pruning the prompts of older turns");
+      }
+      return pruned;
+    },
     due,
     migrated: options.migrated,
     sources,
