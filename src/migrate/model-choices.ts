@@ -8,13 +8,21 @@
 
 import type { ProfileRow } from "../adapter/lumiverse/migration-reads";
 import { isRecord } from "../shared/json";
+import { IMPORTED_AGENTS } from "./own-files";
 import { lumiahOwn } from "./settings";
 
-/** A place that names a connection: where it is, the connection's id as named, and the model named beside it. */
+/** Where RPE keeps the work a choice is for: his own agent's attached file, whose header's `model:` takes a connection of RPE's; or none, RPE having no setting of the same meaning (the old engines' helper and story models, LumiAH's built-in agents, a connection's throttle), where the choice is listed only. */
+export type ModelPlace = { agent: string; path: string } | null;
+
+/** The place of his own agent `id`: its attached file below the user's level. */
+const agentPlace = (id: string): ModelPlace => ({ agent: id, path: `${IMPORTED_AGENTS}/${id}.md` });
+
+/** A place that names a connection: where it is, the connection's id as named, the model named beside it, and RPE's place for that work. */
 export interface Named {
   where: string;
   connection: string;
   model: string | null;
+  to: ModelPlace;
 }
 
 /** A connection RPE holds, as much of it as says what it is. */
@@ -43,8 +51,8 @@ function walk(value: unknown, at: string, prefix: string, out: Named[]): void {
   if (!isRecord(value)) return;
   for (const [key, v] of Object.entries(value)) {
     const path = at === "" ? key : `${at}.${key}`;
-    if (key === "connectionId" && text(v) !== null) out.push({ where: `${prefix}${path}`, connection: v as string, model: text(value.model) });
-    else if (path === "core.connections.throttles" && isRecord(v)) for (const id of Object.keys(v)) out.push({ where: `${prefix}${path}.${id}`, connection: id, model: null });
+    if (key === "connectionId" && text(v) !== null) out.push({ where: `${prefix}${path}`, connection: v as string, model: text(value.model), to: null });
+    else if (path === "core.connections.throttles" && isRecord(v)) for (const id of Object.keys(v)) out.push({ where: `${prefix}${path}.${id}`, connection: id, model: null, to: null });
     else walk(v, path, prefix, out);
   }
 }
@@ -55,10 +63,15 @@ function walk(value: unknown, at: string, prefix: string, out: Named[]): void {
  */
 export function findChoices(engine: unknown, harness: unknown): Named[] {
   const out: Named[] = [];
+  const defs = isRecord(harness) && isRecord(harness.definitions) && isRecord(harness.definitions.agents) ? harness.definitions.agents : {};
   walk(engine, "", "settings.json: ", out);
   walk(lumiahOwn(harness), "", "harness/settings.json: ", out);
-  const defs = isRecord(harness) && isRecord(harness.definitions) && isRecord(harness.definitions.agents) ? harness.definitions.agents : {};
-  for (const [id, def] of Object.entries(defs)) if (isRecord(def) && text(def.connectionId) !== null) out.push({ where: `agent ${id} of his own`, connection: def.connectionId as string, model: text(def.model) });
+  // An agent of his own takes its model where its header says it; what he set for it in LumiAH's settings stands over its definition's, so it is that place too.
+  for (const c of out) {
+    const id = /^harness\/settings\.json: core\.agents\.([^.]+)\.connectionId$/.exec(c.where)?.[1];
+    if (id !== undefined && Object.hasOwn(defs, id)) c.to = agentPlace(id);
+  }
+  for (const [id, def] of Object.entries(defs)) if (isRecord(def) && text(def.connectionId) !== null) out.push({ where: `agent ${id} of his own`, connection: def.connectionId as string, model: text(def.model), to: agentPlace(id) });
   return out;
 }
 

@@ -165,7 +165,8 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     return { why, kept: s.chat(chat) !== null };
   };
   const minds = await carryMinds({ db, store, s, chats, areas: turnAreas, people, now, fate });
-  const story = db.transaction(() => carryStory({ db, store, s, chats, people, now, inside: new Map(report.chats.map((c) => [c.chatId, c.story])), fate }))();
+  const story = db.transaction(() => carryStory({ db, store, s, chats, people, now, inside: new Map(report.chats.map((c) => [c.chatId, c.story])), fate, earlier }))();
+  keepPutPrints(db, user, story.put);
   // What the old engines recorded on each carried reply, with every text it names, word for word beside its turn (read after the minds and the story took the records as they were).
   const old = await attachTexts(today, db, user, chats);
   const turnThings = await carryTurnThings({ today, db, s, chats, now });
@@ -195,6 +196,8 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     ].join("; "),
     "story-record": [
       `${IMPORTED["story-record"]}: ${story.beats} beat(s), ${story.struck} struck, ${story.futures} draft(s) as proposed futures, ${story.castings} casting(s) in the cast${story.pinned > 0 ? `, ${story.pinned} pinned as the player pinned them` : ""}, ${story.beats + story.struck + story.futures + story.castings} of the ${storyFound} entr(ies) found in today's records`,
+      ...(story.perceptions + story.takenIn + story.exposureLeft + story.digestedUnknown > 0 ? [`${story.perceptions} perception(s) in the cast for whom each beat reached, as its exposure says, and ${story.takenIn} of them marked taken in, for the principals whose mind had taken the beats in (so only later beats reach them as not yet taken in)${story.exposureLeft > 0 ? `; ${story.exposureLeft} exposure(s) naming the world itself or no point of view are in imported_record only` : ""}${story.digestedUnknown > 0 ? `; ${story.digestedUnknown} casting(s) name a beat no carried record holds as the last their mind took in, and mark none` : ""}`] : []),
+      ...(story.pinsKept.length > 0 ? [`${story.pinsKept.length} casting pin(s) you set or took away in RPE since a run put the one it left stand as you set them: ${story.pinsKept.map((p) => `${p.character} in ${p.chat} (${p.standing ?? "none"})`).join(", ")}`] : []),
       ...(story.leftOut > 0 ? [`${story.leftOut} damaged entr(ies) today's reader leaves out are in imported_record only`] : []),
       ...(story.shared > 0 ? [`${story.shared} entr(ies) in the records a branch copied from the chat it was made from are carried once, with the turns the two share`] : []),
       ...(story.unheld > 0 ? [`${story.unheld} entr(ies) on records no imported turn holds are in the backup only`] : []),

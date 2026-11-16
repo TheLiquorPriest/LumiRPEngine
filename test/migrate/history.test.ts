@@ -100,7 +100,7 @@ describe("what today's build recorded beside each turn", () => {
       const record = StoryRecord.read(store, USER, storyAt(s, CHAT.harness, lit));
       expect(record.of("beat").map((b) => b.fields.text)).toEqual(["Ada lit the lamp."]);
       expect(record.items.get("b:b1")).toMatchObject({ dropped: true, fields: { text: "Fog came.", why: "The fog came after the lamp was lit." } });
-      expect(record.items.get("b:b2")?.fields).toEqual({ text: "Ada lit the lamp.", who: [PEOPLE.ada.name, PEOPLE.bo.name], place: "Home", kind: "do", surface: "The lamp glows.", quotes: [], time: "Thu 1 Jan 2026, 12:30 AM" });
+      expect(record.items.get("b:b2")?.fields).toEqual({ text: "Ada lit the lamp.", who: [PEOPLE.ada.name, PEOPLE.bo.name], place: "Home", kind: "do", surface: "The lamp glows.", quotes: [], time: "Thu 1 Jan 2026, 12:30 AM", decided_by: "author", settles: null });
       expect(record.items.get("fu:d1")).toMatchObject({ closedBy: lit, fields: { text: "A ship comes in at dawn.", tier: 2, due: 0, who: [PEOPLE.bo.name], place: "Home", notes: null, state: "settled" } });
       expect(storyBrief({ ...at(lit), layout: parts.template("story-brief") }).fields.futures).toBeUndefined();
       // Each row says the migration wrote it.
@@ -123,10 +123,10 @@ describe("what today's build recorded beside each turn", () => {
       expect(lit.castingOf(bo.id)).toEqual({ as: "supporting", line: null });
     });
     expect(report.carried?.story).toMatchObject({ beats: 3, struck: 1, futures: 2, castings: 2, pinned: 1, leftOut: 0, shared: 0, unheld: 0, apart: [] });
-    expect(report.carried?.story.byChat.find((c) => c.chat === CHAT.harness)).toEqual({ chat: CHAT.harness, beats: 3, struck: 1, futures: 2, castings: 2 });
+    expect(report.carried?.story.byChat.find((c) => c.chat === CHAT.harness)).toEqual({ chat: CHAT.harness, beats: 3, struck: 1, futures: 2, castings: 2, perceptions: 1, takenIn: 0, exposureLeft: 0, digestedUnknown: 0 });
     const found = report.rows.find((r) => r.row === "story-record")?.inside?.count;
     expect(found).toBe(3 + 1 + 2 + 2);
-    expect(reportText(report)).toContain("RPE's story record and cast, each on the turn whose record held it; each swipe's record also kept word for word beside its turn in the migration's imported_record, read-only: 3 beat(s), 1 struck, 2 draft(s) as proposed futures, 2 casting(s) in the cast, 1 pinned as the player pinned them, 8 of the 8 entr(ies) found in today's records\n");
+    expect(reportText(report)).toContain("RPE's story record and cast, each on the turn whose record held it; each swipe's record also kept word for word beside its turn in the migration's imported_record, read-only: 3 beat(s), 1 struck, 2 draft(s) as proposed futures, 2 casting(s) in the cast, 1 pinned as the player pinned them, 8 of the 8 entr(ies) found in today's records; 1 perception(s) in the cast for whom each beat reached, as its exposure says, and 0 of them marked taken in, for the principals whose mind had taken the beats in (so only later beats reach them as not yet taken in)\n");
   });
 
   test("the Author's notes are in the chat's own notes folder as they stand at the reply the chat shows, and each change a turn made to them is a version on that turn in RPE's own history of notes", async () => {

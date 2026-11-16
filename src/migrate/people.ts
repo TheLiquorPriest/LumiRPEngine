@@ -9,9 +9,7 @@
 // matches a name.
 
 import type { Database } from "bun:sqlite";
-import { addCharacter, chatLine, findCharacter } from "../cast";
-import { renameCharacter, setPerson } from "../cast/record";
-import { personNamed, worldAt } from "../cast/secrets";
+import { addCharacter, chatLine, findCharacter, personNamed, renameCharacter, setPerson, worldAt } from "../cast";
 import type { ReadContext } from "../engine/registry";
 import type { Store, TurnRow, UserStore } from "../store";
 import { isPerson, keepPerson, personOf } from "./tables";
