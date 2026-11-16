@@ -62,12 +62,14 @@ export interface LoreCheckDeps {
   macros: MacroCalls;
 }
 
-/** The prompt after the check, and what the check found; null where the extension applied RPE's own verdict and nothing is checked. */
+/** The prompt after the check, what the check found (null where the extension applied RPE's own verdict, and nothing is checked), and the activated lore with each entry's text as the prompt carries it where it is found there. */
 export interface Checked {
   messages: readonly LaidMessage[];
   record: LoreRecord | null;
+  lore: readonly TagLore[];
 }
 
+/** `lore`: what Lumiverse activated for the generation. */
 export type LoreCheck = (tag: Tag, messages: readonly LaidMessage[], lore: readonly TagLore[], signal: AbortSignal) => Promise<Checked>;
 
 const words = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -138,17 +140,22 @@ function replaced(messages: readonly LaidMessage[], text: string, insert: string
 
 export function createLoreCheck(deps: LoreCheckDeps): LoreCheck {
   const check: LoreCheck = async (tag, messages, lore, signal) => {
-    if (tag.secrecy.by !== "extension") return { messages, record: null };
+    const byExtension = tag.secrecy.by === "extension";
+    // The answer RPE worked out at the question is taken here for its generation: the verdict RPE answered late with, and the wording of the secrets where RPE's own was applied.
+    const kept = deps.answers.take(tag.chat, tag.generation)?.secrecy ?? null;
+    if (!byExtension && lore.length === 0) return { messages, record: null, lore };
     let candidates: WorldInfoCandidate[];
-    let verdict: SecrecyVerdict;
-    let from: "late" | "now";
     try {
       candidates = await candidatesOf(deps.reads, tag);
-      const kept = deps.answers.take(tag.chat, tag.generation)?.secrecy ?? null;
-      if (kept !== null) {
-        verdict = kept;
-        from = "late";
-      } else {
+    } catch (error) {
+      return { messages, record: byExtension ? { checked: false, why: words(error) } : null, lore };
+    }
+    // Where the extension applied its own verdict, RPE's is the one kept or worked out now; where it could not be, the prompt stands as the extension left it, and the record says why.
+    let verdict: SecrecyVerdict | null = kept;
+    let from: "late" | "now" = "late";
+    let unworked: string | null = null;
+    if (byExtension && verdict === null) {
+      try {
         const generation = generationOf(tag);
         const path = pathOf(tag);
         const point = pointOf(generation, path);
@@ -156,56 +163,85 @@ export function createLoreCheck(deps: LoreCheckDeps): LoreCheck {
         start.catch(() => undefined);
         verdict = await deps.secrecy({ user: tag.user, chat: tag.chat, purpose: "prompt", generation, path, start, point, entries: candidates.map(questionEntryOf) }, signal);
         from = "now";
+      } catch (error) {
+        unworked = words(error);
       }
-    } catch (error) {
-      return { messages, record: { checked: false, why: words(error) } };
     }
-    // What the prompt holds of each of the user's entries, by the extension's own verdict; and what RPE's verdict says it should hold.
+    // What the prompt holds of each of the user's entries, by the extension's own verdict (the engine's own entries stand as stored); and what RPE's verdict says it should hold.
     const own = usersOwn(candidates);
+    const ownIds = new Set(own.map((e) => e.id));
     const blinded = blind(own);
     const blindOff = new Set(blinded.disabled);
     const blindWorded = new Map((blinded.mutated ?? []).map((m) => [m.id, m.content]));
-    const off = new Set(verdict.disabled);
-    const on = new Set(verdict.enabled);
-    const worded = new Map(verdict.mutated.map((m) => [m.id, m.content]));
+    const worded = new Map((verdict?.mutated ?? []).map((m) => [m.id, m.content]));
+    /** An entry's text as the prompt holds it before the check, macros unresolved; null where the prompt holds none of it. */
+    const hadOf = (e: WorldInfoCandidate): string | null => {
+      if (byExtension) return !ownIds.has(e.id) ? e.content : e.disabled || blindOff.has(e.id) ? null : (blindWorded.get(e.id) ?? e.content);
+      return worded.get(e.id) ?? e.content;
+    };
     const note = (e: WorldInfoCandidate): LoreEntryNote => ({ id: e.id, book: e.bookId, title: e.comment });
     const activated = new Set(lore.map((l) => l.id));
     const record = { checked: true as const, verdict: from, removed: [] as LoreEntryNote[], reworded: [] as LoreEntryNote[], turnedOn: [] as LoreEntryNote[], notFound: [] as LoreEntryNote[] };
     const jobs: { entry: WorldInfoCandidate; had: string; should: string | null }[] = [];
-    for (const e of own) {
-      const had = e.disabled || blindOff.has(e.id) ? null : (blindWorded.get(e.id) ?? e.content);
-      const should = off.has(e.id) ? null : (worded.get(e.id) ?? (e.disabled && !on.has(e.id) ? null : e.content));
-      if (had === should) continue;
-      if (had === null) {
-        if (should !== null && (on.has(e.id) || blindOff.has(e.id))) record.turnedOn.push(note(e));
-        continue;
+    if (byExtension && verdict !== null) {
+      const off = new Set(verdict.disabled);
+      const on = new Set(verdict.enabled);
+      for (const e of own) {
+        const had = hadOf(e);
+        const should = off.has(e.id) ? null : (worded.get(e.id) ?? (e.disabled && !on.has(e.id) ? null : e.content));
+        if (had === should) continue;
+        if (had === null) {
+          if (should !== null && (on.has(e.id) || blindOff.has(e.id))) record.turnedOn.push(note(e));
+          continue;
+        }
+        jobs.push({ entry: e, had, should });
       }
-      jobs.push({ entry: e, had, should });
     }
-    if (jobs.length === 0) return { messages, record };
-    // Lumiverse inserted each entry's text with its macros resolved by its own route; where that route cannot be asked, the texts are searched as stored.
+    // Lumiverse inserted each entry's text with its macros resolved by its own route, which is asked once for all of them; where it cannot be asked, the texts are taken as stored.
     const templates: Record<string, string> = {};
-    jobs.forEach((j, i) => {
-      templates[`h${i}`] = j.had;
-      if (j.should !== null) templates[`s${i}`] = j.should;
-    });
+    for (const j of jobs) {
+      templates[`h:${j.entry.id}`] = j.had;
+      if (j.should !== null) templates[`s:${j.entry.id}`] = j.should;
+    }
+    const jobbed = new Set(jobs.map((j) => j.entry.id));
+    const byId = new Map(candidates.map((e) => [e.id, e]));
+    const plain: string[] = [];
+    for (const l of lore) {
+      const e = byId.get(l.id);
+      const had = e === undefined || jobbed.has(l.id) ? null : hadOf(e);
+      if (had === null || had.trim() === "") continue;
+      templates[`t:${l.id}`] = had;
+      plain.push(l.id);
+    }
     const context = { chat: tag.chat, ...(tag.speaker.id !== null ? { character: tag.speaker.id } : {}), ...(tag.persona !== null ? { persona: tag.persona } : {}) };
-    const resolved = await deps.macros.resolveBatch(templates, context).catch(() => templates);
+    const resolved = Object.keys(templates).length === 0 ? templates : await deps.macros.resolveBatch(templates, context).catch(() => templates);
+    const texts = new Map<string, string>();
     let current: LaidMessage[] = [...messages];
-    jobs.forEach((j, i) => {
-      const text = (resolved[`h${i}`] ?? j.had).trim();
-      const insert = j.should === null ? "" : (resolved[`s${i}`] ?? j.should).trim();
+    for (const j of jobs) {
+      const id = j.entry.id;
+      const text = (resolved[`h:${id}`] ?? j.had).trim();
+      const insert = j.should === null ? "" : (resolved[`s:${id}`] ?? j.should).trim();
       const next = text === "" ? null : replaced(current, text, insert);
       if (next === null) {
         // Not found: where Lumiverse never inserted the entry there is nothing to change; where it activated it, the turn says it stands as it was.
-        if (activated.has(j.entry.id)) record.notFound.push(note(j.entry));
-        return;
+        if (activated.has(id)) record.notFound.push(note(j.entry));
+        continue;
       }
       current = next;
-      (j.should === null ? record.removed : record.reworded).push(note(j.entry));
-    });
-    return { messages: current, record };
+      if (j.should === null) record.removed.push(note(j.entry));
+      else {
+        record.reworded.push(note(j.entry));
+        texts.set(id, insert);
+      }
+    }
+    // Each activated entry's text as the prompt now carries it, where it is found in it.
+    for (const id of plain) {
+      const text = (resolved[`t:${id}`] ?? templates[`t:${id}`] ?? "").trim();
+      if (text !== "" && current.some((m) => m.text.includes(text))) texts.set(id, text);
+    }
+    return { messages: current, record: byExtension ? (verdict === null ? { checked: false, why: unworked ?? "" } : record) : null, lore: lore.map((l) => (texts.has(l.id) ? { ...l, text: texts.get(l.id)! } : l)) };
   };
   // Nothing in the check may refuse a reply: where it fails on its own, the turn's record says it could not work the secrets out, and why.
-  return (tag, messages, lore, signal) => check(tag, messages, lore, signal).catch((error: unknown): Checked => ({ messages, record: { checked: false, why: words(error) } }));
+  return (tag, messages, lore, signal) =>
+    check(tag, messages, lore, signal).catch((error: unknown): Checked => ({ messages, record: tag.secrecy.by === "extension" ? { checked: false, why: words(error) } : null, lore }));
 }

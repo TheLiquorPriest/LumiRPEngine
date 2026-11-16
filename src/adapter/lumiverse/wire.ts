@@ -143,6 +143,11 @@ export interface TagLore {
   how: "constant" | "keyword" | "vector" | "sticky" | null;
   /** `how` is known. False where the door could not tell the ways apart (the entry's sticky setting changed while its window was open, or its row could not be read): `how` is then null. */
   told: boolean;
+  /**
+   * The entry's text as the prompt carries it after RPE's check of the lore: its stored text (or the verdict's wording of it) with its macros resolved by Lumiverse's own route, found in the
+   * prompt; absent where it is not found there (left out of it, or its words changed after the interceptors) or where the entry could not be read.
+   */
+  text?: string;
 }
 
 /** The history cut the extension made: on RPE's answer, or none when it had no answer in time (RPE then cuts on receipt). */

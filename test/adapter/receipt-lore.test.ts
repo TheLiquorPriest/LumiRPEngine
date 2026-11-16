@@ -150,7 +150,24 @@ describe("the check on its own", () => {
     const check = checkOf([entry("e1", "Hidden line.")], async () => (asked++, verdict({ disabled: ["e1"] })));
     const messages = [message("system", "Hidden line.")];
     const out = await check({ ...tag, secrecy: { by: "rpe" } }, messages, [], new AbortController().signal);
-    expect(out).toEqual({ messages, record: null });
+    expect(out).toEqual({ messages, record: null, lore: [] });
     expect(asked).toBe(0);
+  });
+
+  test("each activated entry's text is told as the prompt carries it, macros resolved; one taken out, or not found in the prompt, has none", async () => {
+    const entries = [entry("e1", "Hidden line."), entry("e2", "The tide is low."), entry("e3", "{{char}} rings the bell."), entry("e4", "Not in the prompt.")];
+    const told = (id: string) => ({ id, book: "book-1", bookName: null, title: "", how: null, told: false });
+    const lore = ["e1", "e2", "e3", "e4"].map(told);
+    const block = "Hidden line.\nThe tide is low.\nMara rings the bell.";
+    // The extension applied its own verdict: RPE's takes e1 out and words e2 otherwise.
+    const check = checkOf(entries, async () => verdict({ disabled: ["e1"], mutated: [{ id: "e2", content: "The tide is high." }] }));
+    const byExtension = await check(tag, [message("system", block)], lore, new AbortController().signal);
+    expect(byExtension.lore.map((l) => l.text)).toEqual([undefined, "The tide is high.", "Mara rings the bell.", undefined]);
+    // RPE's own verdict was applied by the extension, and kept for the generation: the prompt holds each entry as that verdict worded it.
+    const answers = new KeptAnswers();
+    answers.keep("chat-a", "gen-a", { v: 1, secrecy: verdict({ mutated: [{ id: "e2", content: "The tide is high." }] }), cut: null });
+    const own = await checkOf(entries, async () => verdict({}), answers)({ ...tag, secrecy: { by: "rpe" } }, [message("system", "Hidden line.\nThe tide is high.\nMara rings the bell.")], lore, new AbortController().signal);
+    expect(own.record).toBeNull();
+    expect(own.lore.map((l) => l.text)).toEqual(["Hidden line.", "The tide is high.", "Mara rings the bell.", undefined]);
   });
 });

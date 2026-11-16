@@ -175,7 +175,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
       cut: { ...received.cut, lore: checked.record },
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),
-      lore,
+      lore: [...checked.lore],
       parameters: parameters as JsonObject,
       ...(feedback !== null ? { feedback } : {}),
     };
