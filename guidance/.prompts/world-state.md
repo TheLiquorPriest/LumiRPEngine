@@ -12,6 +12,7 @@ lines:
   reflection_groups: '{{n}} {{#one}}group{{/one}}{{^one}}groups{{/one}}'
   reflection_records: '{{n}} {{#one}}record{{/one}}{{^one}}records{{/one}}'
   reflection_open: '{{n}} open'
+  reflection_due: '{{#n}}{{n}} due{{/n}}{{#more}}more than one due{{/more}}, the soonest in {{after}} minutes ({{what}})'
   reflection_changed: 'changed turn {{turn}}'
   reflection_note: 'note: {{text}}'
   value: '· {{key}}: {{#value}}{{value}}{{/value}}{{^value}}none{{/value}}{{#system}} ({{system}}{{#from}}, from {{name}}{{/from}}){{/system}}{{^system}}{{#from}} (from {{#world}}the world{{/world}}{{^world}}{{name}}{{/world}}){{/from}}{{/system}}{{#facts}}{{#turn}} — {{#precision}}{{precision}}, {{/precision}}turn {{turn}}{{/turn}}{{/facts}}'
