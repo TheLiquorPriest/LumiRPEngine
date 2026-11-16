@@ -43,7 +43,6 @@ depth_asked: The player asked for this turn to be played at the depth {{depth}}.
 swipe_asked: The player asked for this attempt to be played in the mode {{mode}}.
 change_awaiting: A change is waiting for the player's yes or no: {{what}}
 settle_asked: The player asked, from the Turn page, for this turn to be settled now against the chat as it reads. This run writes no reply, and nothing of it reaches the chat.
-previous_run_stopped: The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.
 saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}
 cut_short: The reply in message {{message}} was stopped before it was finished. The chat kept only the part written by then.
 progress_missing: This chat's progress.md has no still line, so nothing keeps a long turn alive: the chat application ends a generation that shows nothing after ten minutes. The turn's own time limit was held at {{time}} milliseconds.

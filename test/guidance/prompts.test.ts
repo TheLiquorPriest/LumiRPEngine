@@ -43,7 +43,6 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   swipe_asked: { mode: "afresh" },
   change_awaiting: { what: "Wren's purse goes to the harbour master" },
   settle_asked: {},
-  previous_run_stopped: {},
   saved_differs: { message: 4, released: "Wren waved.", saved: "Wren waved twice." },
   cut_short: { message: 4 },
   progress_missing: { time: 540000 },
