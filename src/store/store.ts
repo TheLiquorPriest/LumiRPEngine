@@ -2795,4 +2795,14 @@ export class UserStore {
   viewHeadFor(chat: string, job: string | null): TreeView {
     return this.store.viewOf(this.headFor(chat, job).state);
   }
+
+  /**
+   * Names the world a chat that played none plays from now (R-22, R-29: attached from Build, its next turn taking the world's head
+   * revision through his own `store.marker` migrate): only where the chat names none, leaving its `revision` (the fold's start), its
+   * snapshots and every state held as they are. Whether it changed; refused for a chat that is not there.
+   */
+  playsWorld(chat: string, world: WorldId): boolean {
+    this.chatOrThrow(chat);
+    return this.write(false, () => this.db.run("UPDATE chat SET world = ? WHERE user = ? AND id = ? AND world IS NULL", [world, this.id, chat]).changes > 0);
+  }
 }
