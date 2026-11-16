@@ -1747,6 +1747,8 @@ export class UserStore {
       return held === null ? [] : [{ key: r.key, chat: r.chat, held }];
     });
     for (const k of kept) this.store.keep(this.cacheKey(k.key), k.held.folded, k.held.upto, this.id, k.chat, this.store.markOf(this.id, k.chat));
+    });
+    for (const k of kept) this.store.keep(this.cacheKey(k.key), k.held.folded, k.held.upto, this.id, k.chat, this.store.markOf(this.id, k.chat));
    */
   addEarlier(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; landed: EarlierLanded[] } {
     const turn = this.turnToWrite(turnId);
