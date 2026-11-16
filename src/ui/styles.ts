@@ -98,6 +98,11 @@ const OWN_CSS = `
 .rpe-gauge-reserve{background:var(--lre-hairline)}
 .rpe-window[data-full=yes] .rpe-gauge-held{background:var(--lre-warn)}
 .rpe-open-session{min-width:0}
+.rpe-beat{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s2) var(--lre-s3);min-width:0}
+.rpe-beat>*{min-width:0}
+@media (min-width:1000px){
+.rpe-beat{grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
+}
 
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}

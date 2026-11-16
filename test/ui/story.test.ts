@@ -4,16 +4,19 @@
 // a strike shows the item as it stands now, in place; a refusal in RPE's words. And its place.
 
 import { describe, expect, test } from "bun:test";
+import type { ComponentChildren } from "preact";
 import { h } from "preact";
 import type { StoryStrikeReply } from "../../src/shared/api";
 import { PAGES } from "../../src/ui/page-list";
 import { NO_STORY, listsOf, readStory, type StoryShown, StoryView } from "../../src/ui/pages/story";
+import { CoverageView, hiddenIn, needsEye } from "../../src/ui/pages/story/coverage";
+import { missingIds, Prose } from "../../src/ui/pages/story/timeline";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { askingClient, settle } from "./asking";
 import { CHAT, OLDER_BEATS, STORY, THREAD } from "./records-recorded";
 import { banners, elements, expand, press, textOf } from "./vnodes";
 
-function view(shown: Partial<StoryShown>, gateOpen = false) {
+function view(shown: Partial<StoryShown>, gateOpen = false, gated?: ComponentChildren) {
   const pressed: unknown[] = [];
   const tree = expand(
     h(StoryView, {
@@ -23,50 +26,33 @@ function view(shown: Partial<StoryShown>, gateOpen = false) {
       onCloseGate: () => pressed.push("close"),
       onFurther: (part) => pressed.push(["further", part]),
       onStrike: (ask) => pressed.push(ask),
+      gated,
     }),
   );
   return { tree, text: textOf(tree), pressed };
 }
 
 const section = (tree: unknown, id: string): string => textOf(elements(tree).find((e) => e.props["data-section"] === id)?.props.children);
-const order = (tree: unknown): string[] => elements(elements(tree).find((e) => e.props["data-section"] === "timeline")).flatMap((e) => (typeof e.props["data-entry"] === "string" ? [e.props["data-entry"]] : []));
 
 describe("the Story page", () => {
-  test("the timeline in the chat's order, a chapter before the scene it opens and the scene before its beats, each with where it lies, its summary, and what is now", () => {
-    const { tree } = view({});
-    expect(order(tree)).toEqual(["ch-1", "sc-1", "bt-3", "sc-2", "bt-4"]);
-    const timeline = section(tree, "timeline");
-    expect(timeline).toContain("Odile takes the ferry out in a storm.");
-    expect(timeline).toContain("messages 0 to 6");
-    expect(timeline).toContain("messages 7 to open");
-    expect(timeline).toContain("message 4");
-    expect(timeline).toContain("closed");
-    expect(textOf(elements(tree).find((e) => e.props["data-entry"] === "sc-2")?.props.children)).toContain("now");
-    expect(timeline).toContain("1 chapter, 2 scenes and 5 beats in all; each list reads 2 at a time.");
-  });
-
-  test("the story model, the horizon and the futures stay behind the spoiler gate until it is opened", () => {
-    const shut = view({});
+  test("what the Author keeps of the story stays behind the spoiler gate until it is opened: the timeline and what covers it, the model, the horizon and the futures", () => {
+    const gated = h("p", { "data-timeline-slot": true }, "THE TIMELINE");
+    const shut = view({}, false, gated);
+    expect(shut.text).not.toContain("THE TIMELINE");
     expect(shut.text).not.toContain(THREAD);
     expect(shut.text).not.toContain("The Reeve's Hall");
     expect(shut.text).not.toContain("spring fair");
-    expect(shut.text).toContain("The story model, the horizon and the futures are what the Author plans");
+    expect(shut.text).toContain("The Author's timeline and summaries, the story model");
     press(shut.tree, "Show them for this chat");
     expect(shut.pressed).toEqual(["open"]);
-    const open = view({}, true);
+    const open = view({}, true, gated);
+    expect(open.text).toContain("THE TIMELINE");
     expect(section(open.tree, "threads")).toContain(THREAD);
     expect(section(open.tree, "premise")).toContain("A river town and the one ferry across it.");
-    expect(section(open.tree, "horizon")).toContain("the reeve's hallThe Reeve's Hall");
+    expect(section(open.tree, "horizon")).toContain("the reeve's hallshown 1 level deepThe Reeve's Hall");
     expect(section(open.tree, "horizon")).toContain("a storm upriver");
     expect(section(open.tree, "futures")).toContain("The reeve is found out at the spring fair.");
     expect(section(open.tree, "arcs")).toContain("None recorded.");
-  });
-
-  test("a list with older items offers to read them, and only that list", () => {
-    const { tree, pressed } = view({});
-    press(tree, "Older beats (3 more)");
-    expect(pressed).toEqual([["further", "beat"]]);
-    expect(elements(tree).filter((e) => e.type === "button" && textOf(e.props.children).startsWith("Older"))).toHaveLength(1);
   });
 
   test("it reads the record; further back it asks the route for that list past what it holds and adds what comes before it; a strike shows the item as it stands now in place; a refusal is said in RPE's words", async () => {
@@ -106,7 +92,7 @@ describe("the Story page", () => {
     reader.stop();
   });
 
-  test("read again when a run begins or ends, each list keeps what was read further back of it, with the newest page after it; a newest page that does not reach the items held stands alone", async () => {
+  test("read again when a run begins or ends, a list read further back is read back to its depth, so an item the record dropped is gone and the rest stay", async () => {
     const { client, asked } = askingClient();
     const shown: StoryShown[] = [];
     const reader = readStory(client, CHAT, (s) => shown.push(s));
@@ -118,26 +104,47 @@ describe("the Story page", () => {
     const beats = () => shown.at(-1)?.lists?.beat;
     expect(beats()?.items.map((i) => i.id)).toEqual(["bt-1", "bt-2", "bt-3", "bt-4"]);
 
-    // A run wrote one beat more: the newest page now ends with it.
+    // A run wrote one beat more, and the record no longer holds bt-1 and bt-2: the newest page is read, then the page before it back to the depth held.
     const held = STORY.timeline.beat.items as [StoryStrikeReply["item"], StoryStrikeReply["item"]];
     const fifth = { ...held[1], id: "bt-5", from: 10, to: 10 };
     reader.refresh();
-    asked[2]?.answer({ ...STORY, timeline: { ...STORY.timeline, beat: { items: [held[1], fifth], total: 6, before: 4, after: 0 } } });
+    asked[2]?.answer({ ...STORY, timeline: { ...STORY.timeline, beat: { items: [held[1], fifth], total: 5, before: 3, after: 0 } } });
     await settle();
-    expect(beats()?.items.map((i) => i.id)).toEqual(["bt-1", "bt-2", "bt-3", "bt-4", "bt-5"]);
-    expect(beats()).toMatchObject({ total: 6, before: 1, after: 0 });
+    expect(asked[3]).toMatchObject({ key: "GET /api/v1/chats/:chat/story", query: { part: "beat", skip: 2 } });
+    asked[3]?.answer({ ...STORY, timeline: { ...STORY.timeline, beat: { items: [held[0]], total: 5, before: 0, after: 0 } } });
+    await settle();
+    expect(beats()?.items.map((i) => i.id)).toEqual([held[0].id, held[1].id, "bt-5"]);
     expect(shown.at(-1)?.lists?.scene).toEqual(STORY.timeline.scene);
-
-    reader.refresh();
-    asked[3]?.answer({ ...STORY, timeline: { ...STORY.timeline, beat: { items: [{ ...fifth, id: "bt-9" }, { ...fifth, id: "bt-10" }], total: 10, before: 8, after: 0 } } });
-    await settle();
-    expect(beats()?.items.map((i) => i.id)).toEqual(["bt-9", "bt-10"]);
-    expect(beats()?.before).toBe(8);
     reader.stop();
   });
 
   test("Story is a chat's page in both shells, behind More on a narrow bar, with its own address", () => {
     expect(PAGES.find((n) => n.id === "story")).toMatchObject({ shells: ["web", "drawer"], needsChat: true, often: false });
     expect(routeOfHash(hashOf({ page: "story", chat: CHAT }))).toEqual({ page: "story", chat: CHAT });
+  });
+});
+
+describe("the timeline's prose and what the record covers", () => {
+  const message = (id: string, text: string, over: Record<string, unknown> = {}) => ({ id, chat: CHAT, index: 0, role: "assistant" as const, name: "Odile", text, swipe: 0, swipes: 1, ...over });
+  const row = (id: string, ids: string[]) => ({ kind: "beat" as const, item: { ...(STORY.timeline.beat.items[0] as StoryStrikeReply["item"]), id }, chapter: null, scene: null, messages: ids.map((m, i) => ({ number: i, id: m })) });
+
+  test("a beat shows the text of its messages beside it, and only the messages not yet read are asked for", () => {
+    const held = new Map([["m1", message("m1", "Odile takes the ferry out in a storm.") as never]]);
+    expect(missingIds([row("bt-1", ["m1", "m2"]), row("bt-2", ["m2", "m3"])], held)).toEqual(["m2", "m3"]);
+    const text = textOf(expand(h(Prose, { row: row("bt-1", ["m1", "m2"]), messages: held })));
+    expect(text).toContain("Message 0 · Odile");
+    expect(text).toContain("Odile takes the ferry out in a storm.");
+    expect(text).toContain("Reading it…");
+  });
+
+  test("a stretch left uncovered or with beats and no summary is listed, with its hidden messages; one covered and summarized is not", () => {
+    const coverage = { chat: CHAT, messages: 60, edge: 30, hiddenReadable: false, hidden: [12, 40], above: 4, stretches: [{ from: 0, to: 9, covered: true, beats: true, summarized: true, window: false }, { from: 10, to: 19, covered: false, beats: false, summarized: false, window: false }, { from: 20, to: 29, covered: true, beats: true, summarized: false, window: false }] };
+    expect(coverage.stretches.map(needsEye)).toEqual([false, true, true]);
+    expect(hiddenIn({ from: 10, to: 19 }, coverage.hidden)).toBe(1);
+    const text = textOf(expand(h(CoverageView, { coverage, shownAtOnce: 30 })));
+    expect(text).toContain("Messages 10 to 19");
+    expect(text).toContain("1 hidden message");
+    expect(text).toContain("4 messages above the window's edge are not covered");
+    expect(text).toContain("agents may not read hidden messages in this chat");
   });
 });
