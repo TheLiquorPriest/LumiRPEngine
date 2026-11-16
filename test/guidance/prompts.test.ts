@@ -318,6 +318,17 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     }
   });
 
+  test("tag-check.md has the ask that wants an intent record and a reply, and simple messages of the player's to play", async () => {
+    const part = await lines("tag-check");
+    const ask = part.line("ask", {}) ?? "";
+    expect(ask).toMatch(/intent record/);
+    expect(ask).toMatch(/reply/);
+    expect({ asks: ASKS.test(ask), unfilled: ask.includes("{{"), tag: /<\/?(reply|intent)>/.test(ask) }).toEqual({ asks: false, unfilled: false, tag: false });
+    const turns = [...part.names].filter((name) => name !== "ask");
+    expect(turns.length).toBeGreaterThanOrEqual(5);
+    for (const name of turns) expect({ name, said: (part.line(name, {}) ?? "").trim().length > 0 }).toEqual({ name, said: true });
+  });
+
   test("request-answers.md words why a request from a panel cannot be kept or withdrawn, and a panel's request is told with what was pressed, on what, from where and with which values", async () => {
     const part = await lines("request-answers");
     expect([...part.names].sort()).toEqual(["kept", "no_chat", "not_found", "too_long"]);
