@@ -8,7 +8,6 @@ import { useApp } from "../../app";
 import { Badge, Banner, Empty, PageHeader } from "../../atoms";
 import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
-import { callWanted } from "../../wanted";
 import { LEVEL_WORDS } from "../../words";
 import { AgentOpen } from "./open";
 
@@ -54,7 +53,7 @@ export function AgentsPage(props: { chat: string | null; at: readonly string[] |
   const app = useApp();
   const { chat } = props;
   const [changed, setChanged] = useState(0);
-  const agents = useRead(() => callWanted(app.client, "GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }), [chat, changed]);
+  const agents = useRead(() => app.client.call("GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }), [chat, changed]);
   const connections = useRead(() => app.client.call("GET /api/v1/connections", {}), []);
   const name = props.at?.[0] ?? null;
   const list = sortedAgents(agents.value?.agents ?? []);

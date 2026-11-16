@@ -1,10 +1,9 @@
 // What the World page reads and sends: the tree at a level, a value's history, a level's typed systems,
 // what a turn's time brought due, what no longer applies on another swipe, and the owner's own edit.
 
-import type { ApiRoutes, DueReply, EditOpAsk, SystemsReply, TapReply, TurnId, WorldReply } from "../../../shared/api";
+import type { ApiRoutes, DueReply, EditOpAsk, NotAppliedReply, SystemsReply, TapReply, TurnId, ValueChangeShown, WorldReply } from "../../../shared/api";
 import { replyOf, type RpeClient } from "../../client";
 import type { PageOf } from "../../reading";
-import { callWanted, type NotAppliedReply, type ValueChangeShown } from "../../wanted";
 import { errorWords } from "../../words";
 
 /** Which values each level carries: none, its own (with what game systems keep), or all (with what it inherits). */
@@ -43,7 +42,7 @@ export function readWorld(client: Pick<RpeClient, "call">, chat: string, query: 
 
 /** One page of a value's history, newest first, from `cursor` on. */
 export async function readHistory(client: Pick<RpeClient, "call">, chat: string, at: string, part: string, turn: TurnId | null, cursor: string | undefined): Promise<PageOf<ValueChangeShown>> {
-  const page = await callWanted(client, "GET /api/v1/chats/:chat/state/history", { chat }, { query: { at, part, ...(turn === null ? {} : { turn }), ...(cursor === undefined ? {} : { cursor }) } });
+  const page = await client.call("GET /api/v1/chats/:chat/state/history", { chat }, { query: { at, part, ...(turn === null ? {} : { turn }), ...(cursor === undefined ? {} : { cursor }) } }).then(replyOf);
   return { items: page.items, next: page.next };
 }
 
@@ -59,7 +58,7 @@ export function readDue(client: Pick<RpeClient, "call">, chat: string, turn: Tur
 
 /** What no longer applies on the swipe an earlier reply now shows. */
 export function readNotApplied(client: Pick<RpeClient, "call">, chat: string): Promise<NotAppliedReply> {
-  return callWanted(client, "GET /api/v1/chats/:chat/state/not-applied", { chat });
+  return client.call("GET /api/v1/chats/:chat/state/not-applied", { chat }).then(replyOf);
 }
 
 /** The owner's own edit of a value or a fact: recorded as his change (source `player`), told to the Author at the next turn when `tell`. */

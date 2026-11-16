@@ -5,7 +5,7 @@
 import type { RuleFiring } from "../../../shared/api";
 import { Badge } from "../../atoms";
 import { when } from "../../words";
-import type { FiringShown } from "../../wanted";
+import type { FiringShown } from "../../../shared/api";
 
 export const MOMENT_WORDS: Readonly<Record<RuleFiring["moment"], string>> = {
   stream: "while the agent was writing",
@@ -44,9 +44,9 @@ export function factWords(fact: NonNullable<RuleFiring["fact"]>): string {
   return `${fact.name} was ${fact.value.count}${groups}${names}`;
 }
 
-export function FiringLine(props: { firing: RuleFiring | FiringShown; gate: boolean; onRule?: (rule: string) => void; onTurn?: (turn: string) => void }) {
+export function FiringLine(props: { firing: RuleFiring; placed?: FiringShown; gate: boolean; onRule?: (rule: string) => void; onTurn?: (turn: string) => void }) {
   const f = props.firing;
-  const placed = "run" in f ? f : null;
+  const placed = props.placed ?? null;
   const then = thenWords(f.then);
   return (
     <li class="rpe-entry lre-stack" data-firing={placed?.id ?? f.rule}>

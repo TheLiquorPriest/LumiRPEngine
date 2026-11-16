@@ -35,7 +35,7 @@ export function limitsOf(typed: Readonly<Record<string, string>>): { limits: Job
 export function StartSection(props: { chat: string | null; onStarted(job: JobView): void }) {
   const app = useApp();
   const { chat } = props;
-  const agents = useRead(() => callWanted(app.client, "GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }), [chat]);
+  const agents = useRead(() => app.client.call("GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }), [chat]);
   const [definition, setDefinition] = useState("");
   const [brief, setBrief] = useState("");
   const [given, setGiven] = useState("");

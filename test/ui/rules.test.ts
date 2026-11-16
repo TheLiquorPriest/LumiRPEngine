@@ -5,10 +5,10 @@ import { h } from "preact";
 import { FiringLine, thenWords } from "../../src/ui/pages/rules/firings";
 import { namesOf, ruleFileOf, triggerWords } from "../../src/ui/pages/rules/header";
 import { sortedRules, whyWords } from "../../src/ui/pages/rules";
-import type { RuleShown } from "../../src/ui/wanted";
+import type { RuleView } from "../../src/shared/api";
 import { expand, textOf } from "./vnodes";
 
-const rule = (name: string, over: Partial<RuleShown> = {}): RuleShown => ({ name, path: `@shipped/rules/${name}.md`, level: "shipped", description: "", agents: "all", inForce: true, replaces: [], ...over });
+const rule = (name: string, over: Partial<RuleView> = {}): RuleView => ({ name, path: `@shipped/rules/${name}.md`, level: "shipped", description: "", agents: "all", inForce: true, replaces: [], ...over });
 
 describe("a rule's header in words", () => {
   const FILE = `---\ndescription: Notices silence.\nagents: [author]\nneeds: TURN\nfact: turns.since.engine.change >= 6\nat: turn-start\nrepeat: after 6 turns\n---\nNothing has been recorded.`;

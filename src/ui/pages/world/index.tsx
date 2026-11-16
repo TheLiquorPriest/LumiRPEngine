@@ -19,7 +19,7 @@ import { useSelect } from "../../store";
 import { TURN_KIND_WORDS } from "../../trace-view";
 import { thingsBrowser } from "../../things-slot";
 import { useUiSetting } from "../../ui-settings";
-import type { NotAppliedReply } from "../../wanted";
+import type { NotAppliedReply } from "../../../shared/api";
 import { counted, when } from "../../words";
 import { readTurns } from "../turns";
 import { NodeTree, type WorldSlots } from "./parts";

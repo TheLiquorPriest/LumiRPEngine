@@ -5,19 +5,10 @@
 // itself. Nothing here is a copy of a route that is in the table: a name the generated file holds is
 // taken from it, and this file is the shorter for it.
 
-import type { FactPrecision, FactSource, FactStanding, JsonValue, TurnId } from "../../shared/api";
 import { type CallOptions, type ParamsOf, replyOf, type RpeClient } from "../client";
-import type { AgentsRoutes } from "./agents";
-import type { FilesRoutes } from "./files";
 import type { JobRoutes } from "./jobs";
-import type { RulesRoutes } from "./rules";
-import type { WorldRoutes } from "./world";
 
-export * from "./agents";
-export * from "./files";
 export * from "./jobs";
-export * from "./rules";
-export * from "./world";
 
 /** One route as the generated types hold it. */
 export interface WantedRoute<Params, Query, Body, Reply> {
@@ -30,31 +21,8 @@ export interface WantedRoute<Params, Query, Body, Reply> {
   joined: boolean;
 }
 
-/** A change of the store as a page lists it: whose, from where, how exact and how sure, and what it reported. */
-export interface ChangeShown {
-  id: string;
-  turn: TurnId;
-  /** Its turn's number on the chat's path. */
-  n: number;
-  /** When it was recorded, epoch milliseconds. */
-  at: number;
-  lane: "story" | "engine";
-  /** The area that holds what it wrote: the story, the cast, the overlays or the engine. */
-  area: string;
-  op: string;
-  /** What it changed, in a line. */
-  words: string;
-  /** The values it wrote, by key. */
-  values: { [key: string]: JsonValue };
-  by: string | null;
-  precision: FactPrecision | null;
-  standing: FactStanding | null;
-  source: FactSource | null;
-  reports: string[];
-}
-
 /** The routes asked for and not yet in the table, by their key, each page's own together. */
-export type WantedRoutes = WorldRoutes & RulesRoutes & JobRoutes & AgentsRoutes & FilesRoutes;
+export type WantedRoutes = JobRoutes;
 
 export type WantedKey = keyof WantedRoutes;
 

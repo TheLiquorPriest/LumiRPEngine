@@ -14,7 +14,7 @@
 // new objects only along its path (run, agent, step), so a view can tell what changed by identity.
 
 import type { AgentStatus, TodoItem } from "rp-harness/contract";
-import type { AgentRef, LiveEvent, Release, ReplyPiece, RunOutcome, Scope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, Usage } from "../shared/api";
+import type { AgentRef, LiveEvent, Release, ReplyPiece, RunOutcome, RunScope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, Usage } from "../shared/api";
 import { isRecord } from "../shared/json";
 
 export type EventOf<K extends TraceEvent["kind"]> = Extract<TraceEvent, { kind: K }>;
@@ -83,7 +83,7 @@ export interface RunNode {
   readonly run: string;
   /** The turn it is a run of, as its records' scope names it, or the read that named the run; null for a run of no turn (a job the user started), or one heard of by nothing else yet. */
   readonly turn: string | null;
-  readonly scope: Scope | null;
+  readonly scope: RunScope | null;
   /** The agent, run and tool call of another run that started this one (a job's). */
   readonly startedBy: { readonly agent: string; readonly run: string; readonly call: string } | null;
   readonly started: EventOf<"run_started"> | null;
@@ -154,7 +154,7 @@ export function readTrace(value: unknown): TraceRecord | null {
   const { seq, run, at, agent, scope, event, parent } = value;
   if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1 || typeof run !== "string" || typeof at !== "number") return null;
   if (agent !== undefined && (!isRecord(agent) || typeof agent.id !== "string" || typeof agent.definition !== "string")) return null;
-  if (!isRecord(scope) || typeof scope.chat !== "string" || !isRecord(event) || typeof event.kind !== "string") return null;
+  if (!isRecord(scope) || (scope.chat !== undefined && typeof scope.chat !== "string") || !isRecord(event) || typeof event.kind !== "string") return null;
   if (parent !== undefined && !(isRecord(parent) && typeof parent.agent === "string" && typeof parent.run === "string" && typeof parent.call === "string")) return null;
   return value as unknown as TraceRecord;
 }

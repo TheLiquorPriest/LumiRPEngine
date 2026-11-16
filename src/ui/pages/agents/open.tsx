@@ -11,7 +11,6 @@ import { useApp } from "../../app";
 import { Badge, Banner, Button, Fold, Section } from "../../atoms";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
-import { callWanted } from "../../wanted";
 import { counted, errorWords, LEVEL_WORDS, num } from "../../words";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
 import { windowOfModel } from "../usage";
@@ -82,7 +81,7 @@ function ModelSection(props: { agent: ListedDefinition; connections: readonly Co
 
 function ToolsSection(props: { chat: string | null; agent: ListedDefinition }) {
   const app = useApp();
-  const tools = useRead(() => callWanted(app.client, "GET /api/v1/agents/:agent/tools", { agent: props.agent.name }, { query: props.chat === null ? {} : { chat: props.chat } }), [props.agent.name, props.chat]);
+  const tools = useRead(() => app.client.call("GET /api/v1/agents/:agent/tools", { agent: props.agent.name }, { query: props.chat === null ? {} : { chat: props.chat } }), [props.agent.name, props.chat]);
   const registered = tools.value?.registered ?? [];
   const over = tools.value !== undefined && tools.value !== null && tools.value.tokens > tools.value.most;
   return (
@@ -132,7 +131,7 @@ function StackSection(props: { chat: string | null; agent: string }) {
 function GivenSection(props: { chat: string | null; agent: ListedDefinition }) {
   const app = useApp();
   const chat = props.chat;
-  const given = useRead(chat === null ? null : () => callWanted(app.client, "GET /api/v1/chats/:chat/given", { chat }), [chat, props.agent.name]);
+  const given = useRead(chat === null ? null : () => app.client.call("GET /api/v1/chats/:chat/given", { chat }), [chat, props.agent.name]);
   const mine = given.value?.definitions.find((d) => d.name === props.agent.name);
   return (
     <Section id="given" title="What it is given">
@@ -161,7 +160,7 @@ function ChangeSection(props: AgentOpenProps) {
   const files = filesCalls(app.client, chat);
   const piece = useUiSetting("filePieceBytes");
   const file = useRead(() => files.read(agent.path, 0, piece), [agent.path, chat]);
-  const tools = useRead(() => callWanted(app.client, "GET /api/v1/agents/:agent/tools", { agent: agent.name }, { query: chat === null ? {} : { chat } }), [agent.name, chat]);
+  const tools = useRead(() => app.client.call("GET /api/v1/agents/:agent/tools", { agent: agent.name }, { query: chat === null ? {} : { chat } }), [agent.name, chat]);
   const [model, setModel] = useState(agent.model ?? "default");
   const [effort, setEffort] = useState(agent.effort ?? "");
   const [picked, setPicked] = useState<readonly string[]>(agent.tools);

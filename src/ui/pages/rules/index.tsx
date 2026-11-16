@@ -11,7 +11,7 @@ import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { useSelect } from "../../store";
 import { useUiSetting } from "../../ui-settings";
-import { callWanted, type FactShown, type RuleShown } from "../../wanted";
+import type { FactShown, RuleView } from "../../../shared/api";
 import { counted, LEVEL_WORDS } from "../../words";
 import { WaitingSection } from "../settings/waiting";
 import { FiringLine } from "./firings";
@@ -24,12 +24,12 @@ const FACTS = "~facts";
 const LOG = "~log";
 
 /** Rules in force first, then those not, each by name; an example last. */
-export function sortedRules(rules: readonly RuleShown[]): RuleShown[] {
-  const rank = (r: RuleShown): number => (r.inForce ? 0 : r.why === "example" ? 2 : 1);
+export function sortedRules(rules: readonly RuleView[]): RuleView[] {
+  const rank = (r: RuleView): number => (r.inForce ? 0 : r.why === "example" ? 2 : 1);
   return [...rules].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 
-function RuleLine(props: { rule: RuleShown; open: boolean; onOpen(): void }) {
+function RuleLine(props: { rule: RuleView; open: boolean; onOpen(): void }) {
   const { rule } = props;
   const why = whyWords(rule);
   return (
@@ -104,7 +104,7 @@ function LogPart(props: { chat: string; rule: string | null; onRule(rule: string
   const perPage = useUiSetting("rowsAtOnce");
   const gate = useSelect(app.gate, (open) => open.has(chat));
   const list = usePaged(
-    (cursor) => callWanted(app.client, "GET /api/v1/chats/:chat/rules/firings", { chat }, { query: { ...(props.rule === null ? {} : { rule: props.rule }), limit: perPage, ...(cursor === undefined ? {} : { cursor }) } }),
+    (cursor) => app.client.call("GET /api/v1/chats/:chat/rules/firings", { chat }, { query: { ...(props.rule === null ? {} : { rule: props.rule }), limit: perPage, ...(cursor === undefined ? {} : { cursor }) } }),
     [chat, props.rule],
   );
   return (
@@ -124,7 +124,7 @@ function LogPart(props: { chat: string; rule: string | null; onRule(rule: string
       ) : (
         <ul class="rpe-plain lre-stack" data-log>
           {list.items.map((f) => (
-            <FiringLine key={f.id} firing={f} gate={gate} onRule={props.onRule} onTurn={props.onTurn} />
+            <FiringLine key={f.id} firing={f.firing} placed={f} gate={gate} onRule={props.onRule} onTurn={props.onTurn} />
           ))}
         </ul>
       )}
@@ -141,16 +141,16 @@ export function RulesPage(props: { chat: string | null; at: readonly string[] | 
   const app = useApp();
   const { chat } = props;
   const [changed, setChanged] = useState(0);
-  const rules = useRead(() => callWanted(app.client, "GET /api/v1/rules", {}, { query: chat === null ? {} : { chat } }), [chat, changed]);
+  const rules = useRead(() => app.client.call("GET /api/v1/rules", {}, { query: chat === null ? {} : { chat } }), [chat, changed]);
   const switches = useRead(() => app.client.call("GET /api/v1/switches", {}).then((got) => got.switches), [changed]);
   const view = props.at?.[0] ?? null;
-  const facts = useRead(view === FACTS ? () => callWanted(app.client, "GET /api/v1/rules/facts", {}, { query: chat === null ? {} : { chat } }) : null, [chat, view === FACTS]);
+  const facts = useRead(view === FACTS ? () => app.client.call("GET /api/v1/rules/facts", {}, { query: chat === null ? {} : { chat } }) : null, [chat, view === FACTS]);
   const go = (at: string[]): void => app.go({ page: "rules", chat, at });
-  const [switched, setSwitched] = useState<ReadonlyMap<string, RuleShown>>(new Map());
+  const [switched, setSwitched] = useState<ReadonlyMap<string, RuleView>>(new Map());
   const list = sortedRules((rules.value?.rules ?? []).map((r) => switched.get(r.name) ?? r));
   const open = view === null || view === FACTS || view === LOG ? null : (list.find((r) => r.name === view) ?? null);
   const waiting = (switches.value ?? []).filter((s: SwitchEntry) => s.kind === "hook" || s.kind === "rule-command");
-  const reload = (rule: RuleShown | null): void => {
+  const reload = (rule: RuleView | null): void => {
     if (rule !== null) setSwitched((held) => new Map(held).set(rule.name, rule));
     setChanged((n) => n + 1);
   };

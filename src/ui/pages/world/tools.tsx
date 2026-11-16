@@ -8,7 +8,7 @@ import { useApp } from "../../app";
 import { Badge, Banner, Button, Row } from "../../atoms";
 import { marksWords, PRECISIONS } from "../../marks";
 import { usePaged, useRead } from "../../reading";
-import type { ValueChangeShown } from "../../wanted";
+import type { ValueChangeShown } from "../../../shared/api";
 import { errorWords, when } from "../../words";
 import { readHistory, readSystems, sendEdit, sendUndo } from "./read";
 

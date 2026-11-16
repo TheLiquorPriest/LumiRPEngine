@@ -6,7 +6,7 @@ import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../../app";
 import { Badge, Pre, Section } from "../../atoms";
 import { useUiSetting } from "../../ui-settings";
-import { callWanted, type PartPreviewReply } from "../../wanted";
+import type { PartPreviewReply } from "../../../shared/api";
 import { errorWords } from "../../words";
 
 /** Whether a path is a prompt part or a tool's description, the two things RPH renders: the part's folder is in its path. */
@@ -62,7 +62,7 @@ export function PartPreview(props: { chat: string | null; path: string; text: st
     let alive = true;
     setAsking(true);
     const handle = app.timers.setTimeout(() => {
-      callWanted(app.client, "POST /api/v1/files-preview", {}, { body: { path: props.path, text: props.text, ...(props.chat === null ? {} : { chat: props.chat }) } }).then(
+      app.client.call("POST /api/v1/files-preview", {}, { body: { path: props.path, text: props.text, ...(props.chat === null ? {} : { chat: props.chat }) } }).then(
         (answer) => {
           if (!alive) return;
           setAsking(false);

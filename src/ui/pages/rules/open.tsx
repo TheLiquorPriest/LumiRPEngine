@@ -7,16 +7,17 @@ import { useState } from "preact/hooks";
 import type { TurnRow } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Section } from "../../atoms";
+import { replyOf } from "../../client";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
 import { useUiSetting } from "../../ui-settings";
-import { callWanted, type RuleShown } from "../../wanted";
+import type { RuleView } from "../../../shared/api";
 import { counted, errorWords, LEVEL_WORDS, when } from "../../words";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
 import { FiringLine } from "./firings";
 import { namesOf, ruleFileOf, triggerWords } from "./header";
 
-const WHY_WORDS: Readonly<Record<NonNullable<RuleShown["why"]>, string>> = {
+const WHY_WORDS: Readonly<Record<NonNullable<RuleView["why"]>, string>> = {
   off: "switched off",
   needs: "a file it needs is not in force",
   example: "an example: nothing under examples/ is in force",
@@ -24,14 +25,14 @@ const WHY_WORDS: Readonly<Record<NonNullable<RuleShown["why"]>, string>> = {
   judge: "its question cannot be put",
 };
 
-const JUDGE_WORDS: Readonly<Record<NonNullable<RuleShown["judge"]>, string>> = {
+const JUDGE_WORDS: Readonly<Record<NonNullable<RuleView["judge"]>, string>> = {
   part: "the judging model's part is missing or switched off",
   yes: "it names no yes: answer",
   connection: "the connection that judges is none of his",
 };
 
 /** Why a rule is not in force, in words; null for one that is. */
-export function whyWords(rule: RuleShown): string | null {
+export function whyWords(rule: RuleView): string | null {
   if (rule.inForce) return null;
   const why = rule.why === undefined ? "not in force" : WHY_WORDS[rule.why];
   return rule.why === "judge" && rule.judge !== undefined ? `${why}: ${JUDGE_WORDS[rule.judge]}` : why;
@@ -39,14 +40,14 @@ export function whyWords(rule: RuleShown): string | null {
 
 export interface RuleOpenProps {
   chat: string | null;
-  rule: RuleShown;
-  onChanged(rule: RuleShown | null): void;
+  rule: RuleView;
+  onChanged(rule: RuleView | null): void;
   onAgent(definition: string): void;
   onTurn(turn: string): void;
   onFile(path: string): void;
 }
 
-function Tester(props: { chat: string; rule: RuleShown; onTurn(turn: string): void }) {
+function Tester(props: { chat: string; rule: RuleView; onTurn(turn: string): void }) {
   const app = useApp();
   const { chat, rule } = props;
   const perPage = useUiSetting("turnsAtATime");
@@ -61,7 +62,7 @@ function Tester(props: { chat: string; rule: RuleShown; onTurn(turn: string): vo
     setBusy(true);
     setProblem(null);
     setResult(null);
-    callWanted(app.client, "POST /api/v1/chats/:chat/rules/:name/test", { chat, name: rule.name }, { body: { turn: picked } }).then(
+    app.client.call("POST /api/v1/chats/:chat/rules/:name/test", { chat, name: rule.name }, { body: { turn: picked } }).then(
       (test) => {
         setBusy(false);
         setResult(test);
@@ -174,7 +175,7 @@ export function RuleOpen(props: RuleOpenProps) {
     });
   const switchTo = (on: boolean, at: "chat" | "global"): void =>
     press("switch", async () => {
-      const answer = await callWanted(app.client, "POST /api/v1/rules/:name/switch", { name: rule.name }, { body: { on, level: at, ...(chat === null ? {} : { chat }) } });
+      const answer = await app.client.call("POST /api/v1/rules/:name/switch", { name: rule.name }, { body: { on, level: at, ...(chat === null ? {} : { chat }) } }).then(replyOf);
       setSaid(`${rule.name} is ${answer.rule.inForce ? "in force" : "not in force"} now${answer.rule.inForce ? "" : whyWords(answer.rule) === null ? "" : `: ${whyWords(answer.rule)}`}.`);
       props.onChanged(answer.rule);
     });
