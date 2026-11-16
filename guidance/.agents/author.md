@@ -2,7 +2,7 @@
 name: author
 description: The lead. The story's author, whom the GM and the characters work for.
 model: default
-effort: low
+effort: off
 tools: [prompt, chat_read, chat_search, lore_read, lore_search, archive_search, web_search, gap_check, delegate, agent_message, agent_drop, write_reply, reply_release, file_read, file_find, file_write, skill_load, job_start, suggest, todo, tool_search, tool_use, world_query, world_search, world_apply, roll, story_query, story_record, cast_query, cast_update, perceive]
 reads: [ALL-AGENTS, rules, AGENTS, WORLD, SIMULATION, WRITING, TURN, PRESET]
 given:
