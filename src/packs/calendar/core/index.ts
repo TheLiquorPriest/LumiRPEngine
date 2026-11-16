@@ -10,7 +10,8 @@
 //   3  recurrence and time zones (local time per place)
 //   4  holidays, terms and exceptions
 
-import type { JsonValue } from "../../../shared/json";
+import { isRecord, type JsonValue } from "../../../shared/json";
+import type { PackEvent } from "../../../shared/ledger";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import { agentOf } from "../../../shared/tiers";
 import type { DateRule, HolidayDef } from "../../../shared/world";
@@ -18,8 +19,9 @@ import { calendarOf, clockOfLocal, dateAt, dayIndexOf, dayPartAt, formatClock, h
 import type { PackDef } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { clockPaused } from "../../../engine/time";
-import { numOf, strOf } from "../../../engine/pack-kit";
+import { mutableSlice, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import { buildCalendarView } from "./view";
+import { CALENDAR_PACK, dateRuleOf, holidaysOf } from "./holidays";
 import dst from "./tables/modern-us/dst.json";
 import holidays from "./tables/modern-us/holidays.json";
 import observances from "./tables/modern-us/observances.json";
@@ -81,6 +83,31 @@ export const calendarPack: PackDef = {
   register(r) {
     for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
 
+    // A holiday the story took off, changed or added in this chat (`holidaysOf`): kept by its id, over the world's own.
+    r.event<PackEvent>({
+      type: "calendar.holiday",
+      validate(e, ctx) {
+        const id = strOf(e.data.id);
+        if (id === "") return { code: "bad_event", reason: "a holiday has an id" };
+        if (e.data.removed === true) return null;
+        const held = holidaysOf(ctx).find((h) => h.id === id);
+        if (e.data.rule !== undefined && dateRuleOf(e.data.rule) === null) return { code: "bad_event", reason: "a holiday's rule is a date the calendar reads" };
+        if (e.data.label !== undefined && strOf(e.data.label) === "") return { code: "bad_event", reason: "a holiday's label is a text" };
+        return held === undefined && (strOf(e.data.label) === "" || dateRuleOf(e.data.rule) === null) ? { code: "bad_event", reason: "a new holiday needs a label and a rule" } : null;
+      },
+      apply(e, state) {
+        const id = strOf(e.data.id);
+        const kept = { ...objOf(mutableSlice(state, CALENDAR_PACK).holidays) };
+        if (e.data.removed === true) kept[id] = { removed: true };
+        else {
+          const was = own(kept, id);
+          kept[id] = { ...(isRecord(was) && was.removed !== true ? was : {}), ...(e.data.label !== undefined ? { label: strOf(e.data.label) } : {}), ...(e.data.rule !== undefined ? { rule: e.data.rule } : {}), ...(typeof e.data.dayOff === "boolean" ? { dayOff: e.data.dayOff } : {}) };
+        }
+        mutableSlice(state, CALENDAR_PACK).holidays = kept;
+      },
+      describe: (e) => (e.data.removed === true ? `${strOf(e.data.id)} is no longer a holiday` : `${strOf(e.data.label, strOf(e.data.id))} is a holiday`),
+    });
+
     r.formula("is_weekend", (ctx) => {
       const wd = dateAt(calendarOf(ctx.world), ctx.state.clock).weekday;
       return wd === 0 || wd === 6;
@@ -88,7 +115,7 @@ export const calendarPack: PackDef = {
     r.formula("is_day_off", (ctx) => {
       const cal = calendarOf(ctx.world);
       const d = dateAt(cal, ctx.state.clock);
-      if (ctx.levelOf(ctx.world.pov, "calendar") >= 4 && holidaysOn(cal, d.dayIndex).some((h) => h.dayOff)) return true;
+      if (ctx.levelOf(ctx.world.pov, "calendar") >= 4 && holidaysOn(cal, d.dayIndex, holidaysOf(ctx)).some((h) => h.dayOff)) return true;
       return d.weekday === 0 || d.weekday === 6;
     });
     r.formula("minutes_until", (ctx, at) => {
@@ -122,7 +149,7 @@ export const calendarPack: PackDef = {
         const part = dayPartAt(cal, ctx.state.clock + offset).label;
         const lines = [level === 1 ? `Time: ${part}.` : `Time: ${formatClock(cal, ctx.state.clock, offset)} (${part.toLowerCase()}).`];
         if (level >= 4) {
-          const today = holidaysOn(cal, dateAt(cal, ctx.state.clock + offset).dayIndex);
+          const today = holidaysOn(cal, dateAt(cal, ctx.state.clock + offset).dayIndex, holidaysOf(ctx));
           if (today.length > 0) lines.push(`Today is ${today.map((h) => h.label).join(" and ")}.`);
         }
         if (clockPaused(ctx.world, ctx.state)) lines.push("The clock is paused for this scene.");

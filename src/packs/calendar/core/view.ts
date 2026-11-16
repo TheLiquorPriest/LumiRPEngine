@@ -6,6 +6,7 @@ import type { ReadContext } from "../../../engine/registry";
 import { calendarOf, dateAt, dayPartAt, formatClock, holidayDay, MINUTES_PER_DAY, monthName, placeOffset, weekdayName } from "../../../engine/calendar";
 import { allSchedules, nextStartFor, scheduleOwners } from "../../../engine/schedules";
 import { placeOfEntity } from "../../../engine/scope";
+import { holidaysOf } from "./holidays";
 
 export interface CalendarView {
   level: number;
@@ -28,7 +29,7 @@ export function buildCalendarView(ctx: ReadContext): CalendarView {
   const upcoming: CalendarView["upcoming"] = [];
   const holidays: string[] = [];
   if (level >= 4) {
-    for (const h of ctx.world.calendar.holidays) {
+    for (const h of holidaysOf(ctx)) {
       const day = holidayDay(cal, h, d.dayIndex);
       const next = day !== null && day >= d.dayIndex ? day : holidayDay(cal, h, d.dayIndex + 366);
       if (next === null) continue;
