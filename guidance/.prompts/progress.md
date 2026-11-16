@@ -10,4 +10,5 @@ agents: {{count}} agents at work.
 question: {{agent}} has a question.
 rule: A rule of yours fired: {{rule}}.
 writing: Writing.
+hook_waits: Waiting for a hook of yours to see the reply.
 still: Still working ({{elapsed}}).
