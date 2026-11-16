@@ -20,6 +20,8 @@ export interface DerivedMeans {
   name: string;
   /** The tables of RPE's database it keeps, which the dry run counts. */
   keeps: readonly string[];
+  /** What it keeps outside RPE's database (the vectors of search by meaning are in the index file), which the dry run counts with the tables'. */
+  held?(user: string, chat: string): Promise<{ rows: number; bytes: number }>;
   /** Drops the chat's, its own way; nothing it is is lost, and every answer after is the same. */
   drop(user: string, chat: string): Promise<void>;
 }
