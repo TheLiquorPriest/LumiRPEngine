@@ -123,7 +123,7 @@ describe("the Turn page", () => {
   });
 
   test("a section a later lane adds as a spoiler stays behind the gate", () => {
-    const sections = [...TURN_SECTIONS, { id: "lanes", title: "Changes in each lane", spoiler: true, body: () => "The lamp room's door: shut to open." }];
+    const sections = [...TURN_SECTIONS, { id: "lanes", order: 999, title: "Changes in each lane", spoiler: true, body: () => "The lamp room's door: shut to open." }];
     expect(turnView({ sections, gateOpen: false }).text).not.toContain("The lamp room's door");
     expect(turnView({ sections, gateOpen: true }).text).toContain("The lamp room's door");
   });

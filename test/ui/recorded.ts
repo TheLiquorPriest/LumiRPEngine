@@ -248,7 +248,7 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
   const spent = records.flatMap((r) => (r.event.kind === "call_ended" ? [r.event.usage] : []));
   const sum = spent.reduce<Usage>((a, b) => ({ calls: a.calls + b.calls, input: a.input + b.input, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite, output: a.output + b.output, reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }), { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 });
   const status = outcome?.status ?? "running";
-  const timings = { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended"), intent: null, thinking: [] };
+  const timings = { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended"), finished: null, intent: null, thinking: [], intake: null, wait: null };
   const trace = records.filter((r) => r.seq >= (options.from ?? 1));
   const run: RunShown = {
     id: `${options.run}.1`,
@@ -283,8 +283,12 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
     trace,
     lore: { activated: [...LORE.activated], map: [...LORE.map] },
     runs: [run],
+    ...NOTHING_MORE,
   };
 }
+
+/** What a turn's read holds beside its runs, for a turn that has none of it: no located prompt, nothing asked, no record, no tool found, nothing open, no change, nothing told, not carried. */
+export const NOTHING_MORE = { prompt: null, asked: [], record: null, found: [], todos: [], changes: [], told: { gapChecks: [], consents: [], rules: [], attachments: [], dropped: [] }, carried: null } satisfies Pick<TurnReply, "prompt" | "asked" | "record" | "found" | "todos" | "changes" | "told" | "carried">;
 
 /** The recorded turn as a read of it answers once the hub had sent its first `count` events (all of them when absent), with its trace from record `from`. */
 export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): TurnReply {
@@ -298,9 +302,9 @@ export function summaryOf(detail: TurnReply): TurnRow {
 
 /** The chat's earlier turns: a swipe that stands, the attempt it replaced (off the path now), and one stopped by the player. */
 export const EARLIER: readonly TurnRow[] = [
-  { id: "turn-30", kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, intent: null, thinking: [] }, usage: usage(3, 24_100, 19_456, 512, 88) },
-  { id: "turn-29", kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, intent: null, thinking: [] }, usage: usage(4, 30_870, 22_528, 640, 120) },
-  { id: "turn-28", kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, intent: null, thinking: [] }, usage: usage(2, 11_920, 8_192, 301, 64) },
+  { id: "turn-30", kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(3, 24_100, 19_456, 512, 88) },
+  { id: "turn-29", kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(4, 30_870, 22_528, 640, 120) },
+  { id: "turn-28", kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(2, 11_920, 8_192, 301, 64) },
 ];
 
 const EARLIER_WORDS: Readonly<Record<string, { intent: string; reply: string }>> = {
@@ -318,7 +322,7 @@ export function earlierTurn(id: string, chat = CHAT): TurnReply | null {
   const reply = { text: words.reply, progress: [] };
   // The recording names a run by its turn, as RPH did before each run had an id of its own.
   const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], target: null, held: null, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
-  return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run] };
+  return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run], ...NOTHING_MORE };
 }
 
 /** A chat's list of turns, newest first: the recorded one as it stands after `count` events, then the earlier ones. */

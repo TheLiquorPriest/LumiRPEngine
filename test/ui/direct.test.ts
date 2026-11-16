@@ -115,13 +115,14 @@ function webClient(held: string | null): RpeClient {
 
 describe("the routes the pages call, against the route table", () => {
   test("every route a page calls through the client is one the composed app's table declares, with the method and path the page writes it by", async () => {
-    // The route keys the pages write in their calls, found in the pages' own files.
-    const called = new Set<string>();
-    for (const file of new Bun.Glob("src/ui/**/*.{ts,tsx}").scanSync(ROOT)) for (const m of (await Bun.file(join(ROOT, file)).text()).matchAll(/"((?:GET|POST|PUT|DELETE) \/api\/v1\/[^"]*)"/g)) called.add(m[1] ?? "");
+    // The route keys the pages write in their calls, found in the pages' own files, and those asked of the area that owns them and written in src/ui/wanted until they land.
+    const { called, wanted } = await pagesKeys();
     const { generateApi } = await import("../../scripts/api/generate");
     const { types } = await generateApi();
     const held = new Set([...types.matchAll(/^ {2}"([A-Z]+ [^"]+)": \{$/gm)].map((m) => m[1] ?? ""));
-    expect([...called].filter((key) => !held.has(key))).toEqual([]);
+    expect([...called].filter((key) => !held.has(key) && !wanted.has(key))).toEqual([]);
+    // A route that landed leaves src/ui/wanted, and its page calls it through the client.
+    expect([...wanted].filter((key) => held.has(key))).toEqual([]);
   });
 });
 
@@ -277,11 +278,19 @@ describe("the direct road, against RPE's own server", () => {
   });
 });
 
-/** The route keys the pages write in their calls, found in the pages' own files. */
-async function pagesCall(): Promise<Set<string>> {
+/** The route keys the pages write in their calls, found in the pages' own files; and, apart, those wanted and not yet in the table (src/ui/wanted). */
+async function pagesKeys(): Promise<{ called: Set<string>; wanted: Set<string> }> {
   const called = new Set<string>();
-  for (const file of new Bun.Glob("src/ui/**/*.{ts,tsx}").scanSync(ROOT)) for (const m of (await Bun.file(join(ROOT, file)).text()).matchAll(/"((?:GET|POST|PUT|DELETE) \/api\/v1\/[^"]*)"/g)) called.add(m[1] ?? "");
-  return called;
+  const wanted = new Set<string>();
+  for (const file of new Bun.Glob("src/ui/**/*.{ts,tsx}").scanSync(ROOT)) {
+    for (const m of (await Bun.file(join(ROOT, file)).text()).matchAll(/"((?:GET|POST|PUT|DELETE) \/api\/v1\/[^"]*)"/g)) (file.includes("src/ui/wanted/") ? wanted : called).add(m[1] ?? "");
+  }
+  for (const key of wanted) called.delete(key);
+  return { called, wanted };
+}
+
+async function pagesCall(): Promise<Set<string>> {
+  return (await pagesKeys()).called;
 }
 
 describe("every route the pages call, through the client, on RPE as composed", () => {
