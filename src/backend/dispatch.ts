@@ -26,7 +26,7 @@ import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview, WorldChatInfo } from "../shared/protocol";
-import { AGENT_API, FIX_THINGS_MAX, PROTOCOL_VERSION } from "../shared/protocol";
+import { AGENT_API, EDIT_OPS_MAX, FIX_THINGS_MAX, PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES, helperCallOf, narratorViewOf, perfSettingsOf, type UserSettings } from "../shared/settings";
 import type { DiagStep } from "../shared/diagnostics";
 import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
@@ -601,7 +601,8 @@ export class Dispatcher {
       }
       case "lre.edit": {
         // The GM editor (DESIGN §7): every operation checked, all or none, one `fix` entry; locked fields too.
-        const ops = parseEditOps(r.ops);
+        const parsed = parseEditOps(r.ops, EDIT_OPS_MAX);
+        const ops = Array.isArray(parsed) ? parsed : null;
         if (!ops) throw new RequestError("bad_request", "not a list of edits");
         const { state, world } = await this.head(r.chatId, userId);
         // The GM's words in a minds edit are held to the user's lengths (Settings → Minds → Lengths), refused past them, never cut.

@@ -413,7 +413,8 @@ const events: EventTypeDef<PackEvent>[] = [
       if (!ent) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
       const classes = classOf(e.data.class);
       if (!classes) return { code: "bad_event", reason: "a classification is facet → values" };
-      const problem = classProblems(ctx.world, classes, ent.name)[0];
+      // More values than a one-valued facet takes are held as they were recorded (the edit that recorded them said so); a facet or a value the world lacks is still held back.
+      const problem = classProblems(ctx.world, classes, ent.name).find((p) => p.code !== "single_class");
       if (problem) return { code: problem.code, reason: problem.message };
       if (e.data.was !== undefined && !classOf(e.data.was)) return { code: "bad_event", reason: "the classification before is facet → values" };
       return tagList(e.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };

@@ -239,7 +239,8 @@ const ROUTINE_OPS: Readonly<Record<RoutineEditOp["op"], true>> = { routine_follo
 
 /** One edit as `lre.edit` reads it, or null when it isn't one. */
 function oneEdit(raw: unknown): EditOp | null {
-  const [edit] = parseEditOps([raw]) ?? [];
+  const parsed = parseEditOps([raw], EDIT_OPS_MAX);
+  const [edit] = Array.isArray(parsed) ? parsed : [];
   return edit ?? null;
 }
 

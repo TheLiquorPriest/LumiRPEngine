@@ -6,7 +6,6 @@
 import { describe, expect, test } from "bun:test";
 import type { FixOp, LedgerEvent } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/protocol";
-import { EDIT_OPS_MAX } from "../../src/shared/protocol";
 import { blobHash } from "../../src/shared/stores";
 import { parseEditOps, parseFixOps, resolveEdit, resolveFix } from "../../src/engine/edits";
 import type { WorldState } from "../../src/engine/state";
@@ -183,8 +182,12 @@ describe("reading what a fix entry asks for", () => {
     ]) expect(parseFixOps([bad])).toBeNull();
     expect(parseFixOps([])).toBeNull();
     expect(parseFixOps("ops")).toBeNull();
-    expect(parseFixOps(Array.from({ length: EDIT_OPS_MAX + 1 }, () => NEW_OPS[1]))).toBeNull();
-    expect(parseFixOps(Array.from({ length: EDIT_OPS_MAX }, () => NEW_OPS[1]))).toHaveLength(EDIT_OPS_MAX);
+    // The most one edit carries is the caller's (the setting `engine.editOps`): more are told apart from a malformed one, and an edit recorded is read with no most at all.
+    const many = (n: number): unknown[] => Array.from({ length: n }, () => NEW_OPS[1]);
+    expect(parseFixOps(many(65), 64)).toEqual({ tooMany: { count: 65, most: 64 } });
+    expect(parseFixOps(many(64), 64)).toHaveLength(64);
+    expect(parseFixOps(many(65), 100)).toHaveLength(65);
+    expect(parseFixOps(many(65))).toHaveLength(65);
     for (const op of NEW_OPS) expect(parseEditOps([op])).toBeNull();
   });
 

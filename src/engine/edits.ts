@@ -19,13 +19,12 @@
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
-import { DOMAINS } from "../shared/ids";
+import { BANDS, DOMAINS } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
-import { isRecord, safeKey } from "../shared/json";
+import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { FixDirective, FixOp, LedgerEvent, PostEntry, WorkspaceOp } from "../shared/ledger";
 import type { Holding, MindLengths } from "../shared/minds";
 import type { EditOp } from "../shared/protocol";
-import { EDIT_OPS_MAX } from "../shared/protocol";
 import { isBlobHash, isWorkspacePath } from "../shared/stores";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";
@@ -54,6 +53,7 @@ import { Working } from "./working";
 import { workspaceOf, workspacePins, wsDelete, wsPin, wsWrite } from "./workspace";
 import { applyItemOp, type ItemOpOptions } from "./thing-ops";
 import { accessFor } from "./access";
+import { counterpartOf, linkEvents } from "./relations";
 import { householdOf, isThing, mayFixThing, restOf, whoseOf } from "./things";
 import { claimsOf } from "./realism";
 import { canSeeEntity, canSeePlace } from "./visibility";
@@ -291,9 +291,14 @@ function setField(reg: Registry, w: Working, entity: EntityId, field: FieldId, v
   // is the authored opening amount, so the accounts open first and the correction is measured from
   // them (the fix records both).
   if (field === "cash" && typeof value === "number") {
-    if (opts.opened !== true) materializeIfNeeded(reg, w, entity, "money", opts.runSeed);
-    const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, value) ?? null;
-    if (corrected !== null) return Array.isArray(corrected) ? applyAll(w, corrected) : corrected;
+    // A holder the world gave a cash account has what it authored opened first, so the correction is measured from it; one it gave
+    // none keeps the cash as a field, and nothing is drawn from the tables to make it up.
+    const service = optionalService(w.ctx, "economy.set_cash");
+    if ((service?.(w.ctx, entity, value) ?? null) !== null) {
+      if (opts.opened !== true) materializeIfNeeded(reg, w, entity, "money", opts.runSeed);
+      const corrected = service?.(w.ctx, entity, value) ?? null;
+      if (corrected !== null) return Array.isArray(corrected) ? applyAll(w, corrected) : corrected;
+    }
   }
   // A place set from the field editor is a move like any other (the one move path): out of whatever
   // holds them and onto where they stand there, rather than the field alone.
@@ -310,29 +315,88 @@ function addField(reg: Registry, w: Working, entity: EntityId, field: FieldId, d
   return run(reg, w, [{ type: "add", args: { entity, field, delta } }], rng);
 }
 
-/** A relation: its type known (the world's, a pack's or built in), its ends of the kinds it allows, its fields typed. */
+/**
+ * A relation: its type known (the world's, a pack's or built in), its fields typed. The ends of kinds it does not take, a
+ * field past its bounds and someone related to themselves are recorded all the same (`editFindings` says so); a thing put
+ * inside itself, which the tree of where things are cannot hold, is refused.
+ */
 function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, opts: EditOptions, rng: Rng): Rejection | null {
   const def = own(w.world.relations, op.rel) ?? reg.relations.get(op.rel);
-  if (!def && !BUILTIN_RELATIONS.some((r) => r === op.rel)) return reject("unknown_relation", `no relation type ${op.rel.replace(/_/g, " ")}`);
+  if (!def && !BUILTIN_RELATIONS.some((r) => r === op.rel)) return { code: "unknown_relation", reason: `no relation type ${op.rel.replace(/_/g, " ")}`, choices: relationTypes(reg, w.world), said: op.rel };
   const from = own(w.state.entities, op.from);
   const to = own(w.state.entities, op.to);
   if (!from || !to) return reject("missing_entity", `no entity ${labelOf(w, from ? op.to : op.from)}`);
-  if (op.from === op.to) return reject("self", `${from.name} can't relate to itself`);
+  if (op.from === op.to && op.rel === "in" && isThing(w.ctx, op.from)) return reject("self", `${from.name} can't be inside itself`);
   // A thing linked `in` something is a thing moved into it.
   if (op.rel === "in" && isThing(w.ctx, op.from)) return thingMove(w, op.from, { in: op.to }, opts, rng);
-  const label = def?.label ?? op.rel.replace(/_/g, " ");
-  if (def && def.from !== "*" && !kindIs(reg, w.world, from.kind, def.from)) return reject("bad_kind", `${label} starts from a ${(kindDef(reg, w.world, def.from)?.label ?? def.from).toLowerCase()}`);
-  if (def && def.to !== "*" && !kindIs(reg, w.world, to.kind, def.to)) return reject("bad_kind", `${label} points at a ${(kindDef(reg, w.world, def.to)?.label ?? def.to).toLowerCase()}`);
   for (const [key, value] of Object.entries(op.fields ?? {})) {
     const fdef = def ? own(def.fields, key) : undefined;
-    const problem = !safeKey(key) ? "isn't a field name" : fdef ? valueProblem(reg, w, op.from, fdef, value) : null;
+    const problem = !safeKey(key) ? "isn't a field name" : fdef ? shapeProblem(reg, w, fdef.type, fdef, value) : null;
     if (problem) return reject("bad_value", `${fdef?.label ?? key.replace(/_/g, " ")} ${problem}`);
   }
   if (op.until !== undefined && !Number.isFinite(op.until)) return reject("bad_until", "an end time is a time");
-  const args: Record<string, JsonValue> = { rel: op.rel, from: op.from, to: op.to };
-  if (op.fields && Object.keys(op.fields).length > 0) args.fields = op.fields;
-  if (op.until !== undefined) args.until = op.until;
-  return run(reg, w, [{ type: "link", args }], rng);
+  const link = { rel: op.rel, from: op.from, to: op.to, ...(op.fields && Object.keys(op.fields).length > 0 ? { fields: op.fields as JsonObject } : {}), ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) };
+  const made = linkEvents(reg, w.world, w.state, link);
+  if (!Array.isArray(made)) {
+    // The world's rule on what a relation joins is the story's to bend here: the link, and the other side of a symmetric or inverse type, are recorded as given.
+    if (made.code !== "relation_kind") return made;
+    const back = counterpartOf(reg, w.world, op.rel);
+    const extra = { ...(link.fields ? { fields: link.fields } : {}), ...(link.until !== undefined ? { until: link.until } : {}) };
+    return applyAll(w, [{ type: "link", rel: op.rel, from: op.from, to: op.to, ...extra }, ...(back !== null && !(back === op.rel && op.from === op.to) ? [{ type: "link" as const, rel: back, from: op.to, to: op.from, ...extra }] : [])]);
+  }
+  return applyAll(w, made);
+}
+
+/** The relation types a world has: its own, the packs', and the built-in ones. */
+function relationTypes(reg: Registry, world: WorldDoc): string[] {
+  return [...new Set([...Object.keys(world.relations), ...reg.relations.keys(), ...BUILTIN_RELATIONS])].sort();
+}
+
+/** What an edit finds that the world's rules would have refused and the GM's edit records all the same: a code and its values, for the tool that records it to say. */
+export interface EditFinding {
+  code: string;
+  values: Record<string, JsonValue>;
+}
+
+/**
+ * What `op` finds on `w` as it stands, before it applies: someone given a life state who is out of the world; the player's
+ * character removed, or made an agent; more values on a facet than it takes; a relation between kinds it does not join,
+ * from someone to themselves, or with a field past its bounds. Each is applied anyway (R-73).
+ */
+export function editFindings(reg: Registry, w: Working, op: EditOp): EditFinding[] {
+  const named = (id: EntityId): string => own(w.state.entities, id)?.name ?? labelOf(w, id);
+  switch (op.op) {
+    case "life":
+      return isGone(w.state, op.entity) ? [{ code: "removed_life", values: { who: named(op.entity) } }] : [];
+    case "despawn":
+      return op.entity === w.world.pov ? [{ code: "pov_removed", values: { who: named(op.entity) } }] : [];
+    case "entity":
+      return op.agent === true && op.entity === w.world.pov ? [{ code: "pov_agent", values: { who: named(op.entity) } }] : [];
+    case "classify": {
+      const classes = classOf(op.class);
+      return classes ? classProblems(w.world, classes, named(op.entity)).filter((p) => p.code === "single_class").map((p) => ({ code: "single_class", values: { who: named(op.entity), problem: p.message } })) : [];
+    }
+    case "link": {
+      const def = own(w.world.relations, op.rel) ?? reg.relations.get(op.rel);
+      const from = own(w.state.entities, op.from);
+      const to = own(w.state.entities, op.to);
+      if (!from || !to) return [];
+      const label = def?.label ?? op.rel.replace(/_/g, " ");
+      const out: EditFinding[] = [];
+      if (op.from === op.to) out.push({ code: "related_to_self", values: { who: from.name, relation: label } });
+      if (def && def.from !== "*" && !kindIs(reg, w.world, from.kind, def.from)) out.push({ code: "relation_kind", values: { relation: label, end: "from", who: from.name, takes: kindDef(reg, w.world, def.from)?.label ?? def.from } });
+      if (def && def.to !== "*" && !kindIs(reg, w.world, to.kind, def.to)) out.push({ code: "relation_kind", values: { relation: label, end: "to", who: to.name, takes: kindDef(reg, w.world, def.to)?.label ?? def.to } });
+      for (const [key, value] of Object.entries(op.fields ?? {})) {
+        const fdef = def ? own(def.fields, key) : undefined;
+        if (!fdef || shapeProblem(reg, w, fdef.type, fdef, value) !== null || valueProblem(reg, w, op.from, fdef, value) === null) continue;
+        const { min, max } = fieldBounds(reg, w.ctx, op.from, fdef);
+        out.push({ code: "off_the_sheet", values: { key, name: from.name, value: JSON.stringify(value), type: fdef.type, ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}) } });
+      }
+      return out;
+    }
+    default:
+      return [];
+  }
 }
 
 /** Into a container (`in`), never inside itself; or out of it (`into: null`) to where the container stands. */
@@ -396,18 +460,16 @@ function entityOp(w: Working, op: Extract<EditOp, { op: "entity" }>): Rejection 
   if (!e) return reject("missing_entity", `no entity ${labelOf(w, op.entity)}`);
   const data: JsonObject = { entity: op.entity };
   if (op.tier !== undefined) {
-    if (!tierOf(w.world, op.tier) && !isBand(op.tier)) return reject("bad_tier", `no tier ${op.tier}`);
+    if (!tierOf(w.world, op.tier) && !isBand(op.tier)) return { code: "bad_tier", reason: `no tier ${op.tier}`, choices: [...new Set([...Object.keys(w.world.tiers).filter((t) => tierOf(w.world, t)), ...BANDS])], said: op.tier };
     data.tier = op.tier;
   }
-  if (op.agent !== undefined) {
-    if (op.entity === w.world.pov) return reject("pov", "the point of view is played, never an agent");
-    data.agent = op.agent;
-  }
+  // The player's own character may be made an agent: whether the persona has a mind of its own is the owner's setting (`editFindings` says so).
+  if (op.agent !== undefined) data.agent = op.agent;
   if (op.levels !== undefined) {
     const levels: JsonObject = {};
     for (const [domain, level] of Object.entries(op.levels)) {
-      if (!DOMAINS.some((d) => d === domain)) return reject("bad_domain", `no domain ${domain}`);
-      if (level !== null && level !== undefined && !(Number.isInteger(level) && level >= 0 && level <= 4)) return reject("bad_level", "a level is a whole number 0–4");
+      if (!DOMAINS.some((d) => d === domain)) return { code: "bad_domain", reason: `no domain ${domain}`, choices: [...DOMAINS], said: domain };
+      if (level !== null && level !== undefined && !(Number.isInteger(level) && level >= 0 && level <= 4)) return { code: "bad_level", reason: "a level is a whole number 0–4", choices: ["0", "1", "2", "3", "4"], said: String(level) };
       levels[domain] = level ?? null;
     }
     data.levels = levels;
@@ -429,7 +491,14 @@ function classifyOp(w: Working, op: Extract<EditOp, { op: "classify" }>): Reject
   if (!e) return reject("missing_entity", `no entity ${labelOf(w, op.entity)}`);
   const classes = classOf(op.class);
   if (!classes) return reject("bad_args", "a classification is facet → values");
-  const problem = classProblems(w.world, classes, e.name)[0];
+  // A facet or a value the world does not have is refused with the world's own; more values than a one-valued facet takes are recorded (`editFindings` says so).
+  for (const [facet, values] of Object.entries(classes)) {
+    const def = hasOwn(w.world.classifications, facet) ? w.world.classifications[facet] : undefined;
+    if (!def) return { code: "unknown_facet", reason: `${e.name} is classed under "${facet}", which isn't one of the world's classifications.`, choices: Object.keys(w.world.classifications), said: facet };
+    const unknown = values.find((v) => !hasOwn(def.values, v));
+    if (unknown !== undefined) return { code: "unknown_class", reason: `${e.name} is classed as "${unknown}", which isn't a value of ${def.label}.`, choices: Object.keys(def.values), said: unknown };
+  }
+  const problem = classProblems(w.world, classes, e.name).find((p) => p.code !== "single_class");
   if (problem) return reject(problem.code, problem.message);
   const tags = [...new Set(op.tags.map((t) => t.trim()).filter((t) => t !== ""))];
   const sameAs = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
@@ -476,7 +545,7 @@ function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>
 function despawnOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejection | null {
   const e = own(w.state.entities, entity);
   if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
-  if (entity === w.world.pov) return reject("pov", "the point of view can't be removed");
+  // The player's own character may be removed: that is a story event (`editFindings` says so).
   if (e.fields[GONE_FIELD] === true) return reject("gone", `${e.name} is already removed`);
   // Where it is, read before its container lets go of it: taken out, it keeps that place, so Restore brings it back there.
   const where = placeOfEntity(w.state, entity);
@@ -711,9 +780,15 @@ export function resolveFix(reg: Registry, world: WorldDoc, state: Readonly<World
 
 const str = (v: unknown): v is string => typeof v === "string";
 
-/** Operations from a request, each read by `one`: null when any is malformed or there are none or too many. */
-function parseOps<T>(raw: unknown, one: (o: Record<string, unknown>) => T | null): T[] | null {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > EDIT_OPS_MAX) return null;
+/** An edit with more operations than its caller allows: how many it carries and the most. Told apart from one that cannot be read, so the caller refuses it naming its setting. */
+export interface TooMany {
+  tooMany: { count: number; most: number };
+}
+
+/** Operations from a request, each read by `one`: null when any is malformed or there are none; more than `most` (when a most is given) are told as such. */
+function parseOps<T>(raw: unknown, one: (o: Record<string, unknown>) => T | null, most?: number): T[] | TooMany | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  if (most !== undefined && raw.length > most) return { tooMany: { count: raw.length, most } };
   const out: T[] = [];
   for (const o of raw) {
     const op = isRecord(o) ? one(o) : null;
@@ -725,10 +800,12 @@ function parseOps<T>(raw: unknown, one: (o: Record<string, unknown>) => T | null
 
 /**
  * Operations from a request, checked for shape (the frontend is outside data): null when any is
- * malformed or there are none or too many. What they name is checked when they resolve.
+ * malformed or there are none, and more than `most` told as too many (`TooMany`). What they name is checked when they resolve.
  */
-export function parseEditOps(raw: unknown): EditOp[] | null {
-  return parseOps(raw, parseEditOp);
+export function parseEditOps(raw: unknown): EditOp[] | null;
+export function parseEditOps(raw: unknown, most: number): EditOp[] | TooMany | null;
+export function parseEditOps(raw: unknown, most?: number): EditOp[] | TooMany | null {
+  return parseOps(raw, parseEditOp, most);
 }
 
 /**
@@ -738,7 +815,9 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
  * write named are read and ignored; its op that set them alone is no operation, so an entry holding
  * it asks for nothing this reads and its own events stand (`resolveFix`).
  */
-export function parseFixOps(raw: unknown): FixOp[] | null {
+export function parseFixOps(raw: unknown): FixOp[] | null;
+export function parseFixOps(raw: unknown, most: number): FixOp[] | TooMany | null;
+export function parseFixOps(raw: unknown, most?: number): FixOp[] | TooMany | null {
   return parseOps(raw, (o): FixOp | null => {
     switch (o.op) {
       case "ws_write":
@@ -760,7 +839,7 @@ export function parseFixOps(raw: unknown): FixOp[] | null {
       default:
         return parseEditOp(o);
     }
-  });
+  }, most);
 }
 
 /** One GM editor operation, checked for shape: null when malformed. */

@@ -8,14 +8,24 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { FixOp } from "../../shared/ledger";
+import type { EditOp } from "../../shared/protocol";
+import { lifeStatesOf } from "../../shared/world";
+import type { EntityId } from "../../shared/ids";
+import { editFindings } from "../../engine/edits";
 import { OBJECT, TEXT, TEXTS, YES_NO } from "../kit";
-import { find, isUnread, named, notOneOf, textArg, type OpContext, type Unread } from "../ops";
+import { find, isUnread, named, notAs, notOneOf, textArg, type OpContext, type Unread } from "../ops";
 import { timeArg } from "../ops-time";
 import { FILLED_IN } from "../source";
+import { textOf } from "../texts";
 import { tagsOf } from "../../engine/selector";
 import { editTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "people";
+
+/** An edit with what it finds that the world's rules would have refused, for the answer to report once it is recorded. */
+function built(o: OpContext, op: FixOp, what: EntityId): { op: FixOp; what: EntityId; findings: { code: string; values: Record<string, JsonValue> }[] } {
+  return { op, what, findings: editFindings(o.reading.registry, o.draft.w, op as EditOp) };
+}
 
 /** Each name of a list argument, found as a person or a thing. */
 function idsOf(o: OpContext, field: string): string[] | Unread {
@@ -41,7 +51,9 @@ const life = editTool({
     const tell = idsOf(o, "tell");
     if (isUnread(tell)) return tell;
     const state = textArg(o.args, "state");
-    return { op: { op: "life", entity: person.id, ...(state !== undefined ? { to: state } : {}), ...(tell.length > 0 ? { tell } : {}) }, what: person.id };
+    // A call with neither a state nor anyone to tell is answered naming both and what each takes.
+    if (state === undefined && tell.length === 0) return { line: "life_takes", fields: { n: o.n, op: o.op, states: textOf(lifeStatesOf(o.reading.doc).map(([id, def]) => `${id} (${def.label})`)) } };
+    return built(o, { op: "life", entity: person.id, ...(state !== undefined ? { to: state } : {}), ...(tell.length > 0 ? { tell } : {}) }, person.id);
   },
 });
 
@@ -54,7 +66,7 @@ const despawn = editTool({
   example: { entity: "tam", source: { from: "prose", message: "m-0702" } },
   build(o) {
     const e = find(o, "entity", "entity", true);
-    return isUnread(e) ? e : { op: { op: "despawn", entity: e.id }, what: e.id };
+    return isUnread(e) ? e : built(o, { op: "despawn", entity: e.id }, e.id);
   },
 });
 
@@ -82,9 +94,9 @@ const classify = editTool({
     const e = find(o, "entity", "entity");
     if (isUnread(e)) return e;
     const given = o.args.class;
-    if (!isRecord(given) || !Object.values(given).every((v) => Array.isArray(v) && v.every((x) => typeof x === "string"))) return notOneOf(o, "class", given ?? null, []);
+    if (!isRecord(given) || !Object.values(given).every((v) => Array.isArray(v) && v.every((x) => typeof x === "string"))) return notAs(o, "class", given ?? null, "class");
     const tags = Array.isArray(o.args.tags) ? o.args.tags.filter((t): t is string => typeof t === "string") : [];
-    return { op: { op: "classify", entity: e.id, class: given as Record<string, string[]>, tags }, what: e.id };
+    return built(o, { op: "classify", entity: e.id, class: given as Record<string, string[]>, tags }, e.id);
   },
   // Classes and tags are kept apart from the thing's own values: the answer shows them as they now stand.
   shows(o, state) {
@@ -106,10 +118,10 @@ const entity = editTool({
     const e = find(o, "entity", "entity");
     if (isUnread(e)) return e;
     const levels = o.args.levels;
-    if (levels !== undefined && !isRecord(levels)) return notOneOf(o, "levels", levels, []);
+    if (levels !== undefined && !isRecord(levels)) return notAs(o, "levels", levels, "levels");
     const tier = textArg(o.args, "tier");
     const op = { op: "entity", entity: e.id, ...(tier !== undefined ? { tier } : {}), ...(typeof o.args.agent === "boolean" ? { agent: o.args.agent } : {}), ...(isRecord(levels) ? { levels } : {}) };
-    return { op: op as unknown as FixOp, what: e.id };
+    return built(o, op as unknown as FixOp, e.id);
   },
 });
 
@@ -126,11 +138,11 @@ const link = editTool({
     const to = find(o, "to", "point");
     if (isUnread(to)) return to;
     const fields = o.args.fields;
-    if (fields !== undefined && fields !== null && !isRecord(fields)) return notOneOf(o, "fields", fields, []);
+    if (fields !== undefined && fields !== null && !isRecord(fields)) return notAs(o, "fields", fields, "fields");
     const until = timeArg(o, "until");
     if (isUnread(until)) return until;
     const op = { op: "link", rel: textArg(o.args, "relation") ?? "", from: from.id, to: to.id, ...(isRecord(fields) ? { fields } : {}), ...(until !== undefined ? { until } : {}) };
-    return { op: op as unknown as FixOp, what: from.id };
+    return built(o, op as unknown as FixOp, from.id);
   },
 });
 
