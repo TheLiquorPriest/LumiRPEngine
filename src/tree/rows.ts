@@ -78,3 +78,47 @@ export function rowShares(db: Database, user: string, size: number): RowShares {
   if (size > 0 && shared > size) for (const [chat, n] of chats) chats.set(chat, Math.floor((n * size) / shared));
   return { chats, rest: Math.max(0, size - [...chats.values()].reduce((sum, n) => sum + n, 0)) };
 }
+
+/** The tables a chat's rows are never removed from: where the tree keeps that a chat was placed and deleted, which the removal of its files needs. */
+const KEPT_TABLES: ReadonlySet<string> = new Set(["tree_chat"]);
+
+/** What a chat has in one table: its rows, and the bytes they take as the rows' own lengths add up. */
+export interface ChatTableRows {
+  table: string;
+  rows: number;
+  bytes: number;
+}
+
+/** How early a table's rows go: the rows that name their chat through a path's node first, then those through a turn, then those that name the chat themselves. */
+const order = (owner: Owner): number => (owner.joins.includes('"path_node"') ? 0 : owner.joins === "" ? 2 : 1);
+
+/** What a chat has in each table that carries the chat (only those named, when `only` is given), the tables with no row of it left out. */
+export function chatRows(db: Database, user: string, chat: string, only?: readonly string[]): ChatTableRows[] {
+  const out: ChatTableRows[] = [];
+  for (const [name, owner] of ownersOf(db)) {
+    if (KEPT_TABLES.has(name) || (only !== undefined && !only.includes(name))) continue;
+    const columns = db.query<{ name: string }, []>(`PRAGMA table_info("${name}")`).all().map((c) => c.name);
+    const length = columns.map((c) => `COALESCE(length(CAST(t."${c}" AS BLOB)), 0) + 1`).join(" + ");
+    const row = db.query<{ n: number; bytes: number | null }, [string, string]>(`SELECT count(*) AS n, sum(${length}) AS bytes FROM "${name}" t ${owner.joins} WHERE t."user" = ? AND ${owner.chat} = ?`).get(user, chat);
+    if (row !== null && row.n > 0) out.push({ table: name, rows: row.n, bytes: row.bytes ?? 0 });
+  }
+  return out;
+}
+
+/**
+ * Removes the chat's rows from every table that carries the chat (or only those named), in the order its rows can still be found by:
+ * through a path's node, then through a turn, then by the chat itself. The one transaction is the caller's. How many rows went.
+ */
+export function removeChatRows(db: Database, user: string, chat: string, only?: readonly string[]): number {
+  const tables = [...ownersOf(db)].filter(([name]) => !KEPT_TABLES.has(name) && (only === undefined || only.includes(name))).sort((a, b) => order(a[1]) - order(b[1]));
+  let removed = 0;
+  for (const [name, owner] of tables) {
+    // A table kept without a rowid is found by its key.
+    const key = db.query<{ name: string; pk: number }, []>(`PRAGMA table_info("${name}")`).all().filter((c) => c.pk > 0).map((c) => `"${c.name}"`);
+    const withoutRowid = /WITHOUT\s+ROWID/i.test(db.query<{ sql: string | null }, [string]>("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name)?.sql ?? "");
+    const target = withoutRowid && key.length > 0 ? key.map((k) => `t.${k}`).join(", ") : "t.rowid";
+    const column = withoutRowid && key.length > 0 ? `(${key.join(", ")})` : "rowid";
+    removed += db.run(`DELETE FROM "${name}" WHERE ${column} IN (SELECT ${target} FROM "${name}" t ${owner.joins} WHERE t."user" = ? AND ${owner.chat} = ?)`, [user, chat]).changes;
+  }
+  return removed;
+}

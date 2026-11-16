@@ -14,6 +14,16 @@ import type { ChatMeasurer } from "./storage";
 import type { TreeSuggestions } from "./suggestions";
 import { type ChatLocation, locate } from "./view";
 
+/** An owner's means of letting go of a living chat's derived rows (its snapshots, search vectors, caches): what it keeps and its own way of dropping it, to be made again when next needed. */
+export interface DerivedMeans {
+  /** What the Storage page calls it. */
+  name: string;
+  /** The tables of RPE's database it keeps, which the dry run counts. */
+  tables: readonly string[];
+  /** Drops the chat's, its own way; nothing it is is lost, and every answer after is the same. */
+  drop(user: string, chat: string): Promise<void>;
+}
+
 export interface TreeRoutesDeps {
   /** The tree's folder: the global level. */
   files: string;
@@ -40,6 +50,10 @@ export interface TreeRoutesDeps {
   copiesKept: number;
   /** The ids of the chat's sessions that are open now: a prune leaves their files. */
   openSessions(user: string, chat: string): Promise<string[]>;
+  /** The owners' means of dropping a living chat's derived rows; none given, there is nothing to drop. */
+  derived?: readonly DerivedMeans[];
+  /** The store's own removal of a deleted chat's turns, changes and snapshots (which keeps them while a branch reads them: `kept`), before the rest of its rows go. */
+  dropStored?(user: string, chat: string): Promise<{ kept: boolean }>;
   /** Measures chats' folders in the background and keeps what it finds: asked again for a chat after a prune. */
   measurer: ChatMeasurer;
 }

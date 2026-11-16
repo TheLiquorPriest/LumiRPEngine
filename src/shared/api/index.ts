@@ -1173,9 +1173,9 @@ export interface PrunedShown {
   bytes: number;
 }
 
-/** One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, a chat's decided suggestions or old note versions, or a backup; its path below the tree's folder (a backup's, its name), and the files (or rows) and bytes that go. */
+/** One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, a chat's decided suggestions, old note versions, a deleted chat's rows or a living chat's derived rows, or a backup; its path below the tree's folder (a backup's, its name), and the files (or rows) and bytes that go. */
 export interface PruneItem {
-  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "backup";
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "chat-rows" | "derived-rows" | "backup";
   path: string;
   files: number;
   bytes: number;
@@ -1521,9 +1521,9 @@ export interface StorageKindsReply {
   lastPrune: number | null;
 }
 
-/** What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, the decided suggestions past what it keeps, the note versions past how far back they are kept, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that. */
+/** What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, the decided suggestions past what it keeps, the note versions past how far back they are kept, a deleted chat's database rows (not while a chat made from it reads its turns), a living chat's derived rows (its snapshots, vectors and caches, made again when next needed), or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that. */
 export interface StoragePruneAsk {
-  what: "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions";
+  what: "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions" | "rows" | "derived";
   chat?: string | null;
   name?: string | null;
   plan?: string;

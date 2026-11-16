@@ -34,7 +34,7 @@ export interface Pruned {
 /** What a prune would take of one place: its path below the tree's folder, the files and bytes of what goes, and the paths on disk that go. */
 export interface Planned {
   /** What goes: a turn folder's snapshots, a session, a chat's folder, a chat's decided suggestions or old note versions. */
-  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions";
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "chat-rows" | "derived-rows";
   /** The place it goes from, below the tree's folder, "/" between names; for what is kept in the database, what it is of. */
   path: string;
   files: number;

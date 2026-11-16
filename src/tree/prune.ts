@@ -16,10 +16,12 @@ import { CHATS_FOLDER, SESSIONS_FOLDER } from "./layout";
 import { TreeNotes } from "./notes";
 import { below, folderNames, measure, type Planned, planTurnPrune, retentionOf, takePlanned } from "./retention";
 import { versionsKeptOf } from "./settings";
+import { chatRows, removeChatRows } from "./rows";
+import type { DerivedMeans } from "./route-kit";
 import type { TreeSuggestions } from "./suggestions";
 import type { ChatLocation } from "./view";
 
-export type PruneWhat = "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions";
+export type PruneWhat = "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions" | "rows" | "derived";
 
 export interface PruneDeps {
   /** The tree's folder. */
@@ -36,6 +38,8 @@ export interface PruneDeps {
   /** RPE's database, read at any time. */
   db: Database;
   suggestions: TreeSuggestions;
+  derived?: readonly DerivedMeans[];
+  dropStored?(user: string, chat: string): Promise<{ kept: boolean }>;
 }
 
 /** What a page asks to prune: the chat for all but a backup, and the backup's name. */
@@ -47,7 +51,7 @@ export interface PruneAsk {
 
 /** What a prune would take, or took. */
 export interface PruneItem {
-  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "backup";
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "chat-rows" | "derived-rows" | "backup";
   /** Below the tree's folder, or for a backup its file's name. */
   path: string;
   files: number;
@@ -106,6 +110,31 @@ export async function planPrune(deps: PruneDeps, user: string, ask: PruneAsk): P
       const notes = new TreeNotes({ files: deps.files, db: deps.db, writes: deps.writes, chats: deps.chats });
       const past = kept === null ? { ids: [], bytes: 0 } : notes.foldable(user, chat, kept);
       if (kept !== null && past.ids.length > 0) planned.push({ kind: "note-versions", path: `note versions of ${chat}`, files: past.ids.length, bytes: past.bytes, disks: [], run: async () => void (await notes.fold(user, chat, kept)) });
+    } else if (ask.what === "rows") {
+      if (deps.chats.placed(user).find((c) => c.chat === chat)?.deleted == null) throw new RouteError(409, `Lumiverse has not deleted chat ${chat}: only a deleted chat's rows are pruned whole.`);
+      const linked = deps.db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'message_link'").get()?.n === 1;
+      if (linked && (deps.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM message_link WHERE user = ? AND source_chat = ?").get(user, chat)?.n ?? 0) > 0) {
+        throw new RouteError(409, `A chat made from chat ${chat} still reads its turns, so its rows stay until the last of them goes.`);
+      }
+      const held = chatRows(deps.db, user, chat);
+      if (held.length > 0) {
+        planned.push({
+          kind: "chat-rows",
+          path: `database rows of ${chat}`,
+          files: held.reduce((n, t) => n + t.rows, 0),
+          bytes: held.reduce((n, t) => n + t.bytes, 0),
+          disks: [],
+          run: async () => {
+            await deps.dropStored?.(user, chat);
+            await deps.writes.run((db) => removeChatRows(db, user, chat), "removing a deleted chat's rows");
+          },
+        });
+      }
+    } else if (ask.what === "derived") {
+      for (const means of deps.derived ?? []) {
+        const held = chatRows(deps.db, user, chat, means.tables);
+        if (held.length > 0) planned.push({ kind: "derived-rows", path: `${means.name} of ${chat}`, files: held.reduce((n, t) => n + t.rows, 0), bytes: held.reduce((n, t) => n + t.bytes, 0), disks: [], run: () => means.drop(user, chat) });
+      }
     } else {
       if (deps.chats.placed(user).find((c) => c.chat === chat)?.deleted == null) throw new RouteError(409, `Lumiverse has not deleted chat ${chat}: only a deleted chat's files are pruned whole.`);
       const taken = await measure(disk);
