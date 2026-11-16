@@ -1,12 +1,14 @@
-// The one local augmentation of `lumiverse-spindle-types` 0.6.49 (DESIGN §3, §18.6).
+// The one local augmentation of `lumiverse-spindle-types` 0.6.80, the version Lumiverse pins (DESIGN §3, §18.6).
 // The host runtime differs from the published types in these places; code uses these types
 // at the host boundary instead of the published ones. Type-only module: import it with
-// `import type`.
+// `import type`. What 0.6.80 types as the host runs it is not here.
 //
-// Host sources: frontend/src/lib/spindle/dom-decorator-service.ts:62-83,
-// frontend/src/lib/spindle/frontend-context.ts:25-78; for the backend's `spindle`,
-// src/services/regex-scripts.service.ts (validateInput, rowToRegexScript) and
-// src/services/world-books.service.ts (updateEntry, buildStoredEntryExtensions).
+// Host sources: frontend/src/lib/spindle/loader.ts (`FrontendExtensionUI`: `registerDomDecorator` under
+// `ctx.ui`, returning its remover), dom-decorator-service.ts (`DecoratorOptions`), geometry-api.ts
+// (`ctx.ui.geometry`, which 0.6.80 types with another shape), frontend-context.ts (`FrontendFloatWidgetOptions`);
+// for the backend's `spindle`, src/services/regex-scripts.service.ts (validateInput, rowToRegexScript),
+// src/services/world-books.service.ts (updateEntry, buildStoredEntryExtensions) and
+// src/services/preset-operations.ts (`prompt_order` stored as given).
 
 import type { PromptBlockSnapshotDTO, RegexScriptCreateDTO, RegexScriptDTO, RegexScriptListOptionsDTO, RegexTargetDTO, SpindleAPI, SpindleFloatWidgetHandle, SpindleFloatWidgetOptions, SpindleFrontendContext, UserPresetDTO, UserPresetUpdateDTO, WorldBookEntryDTO, WorldBookEntryUpdateDTO } from "lumiverse-spindle-types";
 
@@ -105,8 +107,8 @@ export type FloatWidgetOptions = SpindleFloatWidgetOptions & {
   onGeometryCommit?(rect: GeometryRect): void;
 };
 
-/** The host's `ctx.ui` as it exists at runtime. */
-export type HostUi = Omit<SpindleFrontendContext["ui"], "createFloatWidget"> & {
+/** The host's `ctx.ui` as it exists at runtime: the host serves `geometry` on every context, in its own shape. */
+export type HostUi = Omit<SpindleFrontendContext["ui"], "createFloatWidget" | "geometry"> & {
   registerDomDecorator(options: DomDecoratorOptions): () => void;
   geometry: HostGeometry;
   createFloatWidget(options?: FloatWidgetOptions): SpindleFloatWidgetHandle;

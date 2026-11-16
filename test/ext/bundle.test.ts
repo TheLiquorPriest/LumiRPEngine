@@ -16,3 +16,14 @@ test("the backend bundle passes the install scan", async () => {
   expect(js).toContain("registerInterceptor");
   expect(installScan(js)).toEqual([]);
 });
+
+// The version of Spindle's types Lumiverse staging pins (its `package.json` and `frontend/package.json`); move it with the host.
+const HOST_SPINDLE_TYPES = "0.6.80";
+
+test("the extension is typed against the host's version of Spindle's types", async () => {
+  const root = join(import.meta.dir, "../..");
+  const pinned = (await Bun.file(join(root, "package.json")).json()).devDependencies["lumiverse-spindle-types"];
+  const installed = (await Bun.file(join(root, "node_modules/lumiverse-spindle-types/package.json")).json()).version;
+  expect(pinned).toBe(HOST_SPINDLE_TYPES);
+  expect(installed).toBe(HOST_SPINDLE_TYPES);
+});
