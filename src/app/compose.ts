@@ -37,6 +37,7 @@ import { turnArea } from "../turn/area";
 import { bootstrapArea } from "../turn/bootstrap/area";
 import { sessionRoutes } from "../turn/session-routes";
 import { guidanceTexts } from "../turn/texts";
+import { switchesListing } from "./switches-listing";
 import { appArea } from "./area";
 import type { TurnTimes } from "./service-timings";
 import type { App, Area } from "./app";
@@ -94,6 +95,8 @@ export function compose(options: ComposeOptions = {}): Composition {
   const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
   const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat), made().env.log);
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
+  // What a file written through the Files routes names that runs a command or calls out is listed as waiting at once.
+  const listing = switchesListing({ external: () => made().harness.external, owner: () => app().config.lumiverse.user, scope: (user, chat) => scope(user, chat ?? NO_CHAT), log: () => app().log });
   // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
   const place = async (owner: string, chat: string) => {
     const known = made().chats.folders(owner, chat);
@@ -178,6 +181,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       dropStored: (user, chat) => app().writes.run(() => made().store.user(user).deleteChat(chat), "removing a deleted chat's turns"),
       // What RPH itself makes of the files of a chat's view, for the Files page.
       guidance: (user, chat) => loadGuidance(made().files, scope(user, chat ?? NO_CHAT)),
+      written: (saved) => listing.written(saved),
     })),
     turn.area,
     bootstrapArea({
@@ -196,6 +200,7 @@ export function compose(options: ComposeOptions = {}): Composition {
         return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps };
       },
     })),
+    { name: "switches", started: () => listing.start() },
     // The Sessions page's routes, over the turn lane's harness and store once the turn area is mounted.
     {
       name: "sessions",

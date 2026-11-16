@@ -57,7 +57,7 @@ Each provider key, and each header value a connection sends, is kept with the pl
 
 ## What the agents can do
 
-- They have no shell. They cannot run a command.
+- They have no shell of their own. What runs a command or calls out is only a command tool, an HTTP tool, an MCP server or a hook that you wrote or added, and each waits until you switch it on (below).
 - They see the chat's folder, with the other levels of files read-only. Paths cannot leave it, and links are not followed.
 - They write only their notes (`persistent-workspace/`) and their working files in the turn's folder. Your instruction files, rules, skills and definitions they can only read. To change one, they file a suggestion, and you decide.
 - Lore and chat text are data to them, not instructions to act outside RPE.
@@ -73,6 +73,6 @@ rpe deny <name>
 
 What is switched on is each user's own: a thing on for one user is not on for another, even of the same kind, name and target (`--user <id>` names the user; without it, the user this RPE belongs to). A thing that changes, in its command or its address, waits again: the switch holds what you were shown.
 
-No page session can switch anything, however it was opened, so a page that reaches RPE cannot plant code or point a tool at an address of its choosing. A page can only read the list: the Rules and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls. `rpe allow` with no name lists each user's own things the same way, and `rpe status` lists what is waiting. The longest name a thing may have is the setting `switches.nameLength`. (This build has no tools that run a command or call out yet; see [the README](../README.md#what-this-build-does-not-have-yet).)
+No page session can switch anything, however it was opened, so a page that reaches RPE cannot plant code or point a tool at an address of its choosing. A page can only read the list: the Rules and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls. A thing is listed as waiting the moment it is written in a file, added on a page, or put in the tools folder or an MCP server's file, before any agent loads it. `rpe allow` with no name lists each user's own things the same way, and `rpe status` lists what is waiting. The longest name a thing may have is the setting `switches.nameLength`.
 
 Rules that only add text to what an agent reads need no such step. They can say anything to an agent, and can run nothing.

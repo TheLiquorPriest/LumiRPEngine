@@ -57,7 +57,6 @@ Do not install over it. Read [Moving from the previous build](docs/migration.md)
 - On the pages there are: Live's pause and "say something to the Author"; the Turn page's lanes, perceptions, gap checks, consents, unsourced items, open items, and a migrated turn's old record; editing the world, and a value's history; the Story page's beats beside the prose, its uncovered stretches and its story so far; the Cast page's game side, lore bindings and setting a casting.
 - Anything RPE adds to the chat itself in Lumiverse.
 - Talk.
-- Tools that run a command or call out: command tools, HTTP tools, MCP servers and hooks.
 - Writing to your Lumiverse lore books.
 
 The previous build stays on its own branch of this repository for anyone who needs these.
