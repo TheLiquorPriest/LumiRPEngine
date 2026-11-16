@@ -19,7 +19,7 @@ export interface DerivedMeans {
   /** What the Storage page calls it. */
   name: string;
   /** The tables of RPE's database it keeps, which the dry run counts. */
-  tables: readonly string[];
+  keeps: readonly string[];
   /** Drops the chat's, its own way; nothing it is is lost, and every answer after is the same. */
   drop(user: string, chat: string): Promise<void>;
 }

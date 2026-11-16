@@ -108,7 +108,7 @@ describe("each area registers from a file of its own", () => {
     // The app's own area adds the Settings routes, over the whole registry, once every area is mounted, and when it mounts the backups list, the service's routes (how many turns and jobs run, an app file's arrival) and the sign-in's (the proof, the trade, the Lumiverse sign-in, the sign-out).
     expect({ name: "app", routes: (added.get("app") ?? []).sort() }).toEqual({
       name: "app",
-      routes: ["GET /api/v1/backups", "GET /api/v1/command/busy", "GET /api/v1/settings", "GET /api/v1/status/proof", "GET /api/v1/switches", "POST /api/v1/ext/arrived", "POST /api/v1/signin/end", "POST /api/v1/signin/lumiverse", "POST /api/v1/signin/session", "PUT /api/v1/settings"],
+      routes: ["GET /api/v1/backups", "GET /api/v1/command/busy", "GET /api/v1/service", "GET /api/v1/service/log", "GET /api/v1/service/timings", "GET /api/v1/settings", "GET /api/v1/status/proof", "GET /api/v1/switches", "POST /api/v1/ext/arrived", "POST /api/v1/service/restart", "POST /api/v1/signin/end", "POST /api/v1/signin/lumiverse", "POST /api/v1/signin/session", "PUT /api/v1/settings"],
     });
     for (const name of ["store", "iface"]) expect({ name, routes: added.get(name) ?? [] }).toEqual({ name, routes: [] });
 
@@ -210,36 +210,21 @@ describe("the hooks areas fill", () => {
     expect(blocks[0]?.text).toBe("The lighthouse");
   });
 
-  test("a hook of the door no area fills keeps today's answer, and one a test area fills is used", async () => {
+  test("the door's secrecy lane is the lore area's, answered from RPE's own state, and a second area that fills it stops the app in words that name both", async () => {
     const question = (b: TurnBed): Promise<Response> => {
       const registration = b.composition.door.registration();
       if (registration === null) throw new Error("RPE made no registration");
       const asked: Question = { v: 1, user: USER, chat: CHAT, purpose: "prompt", generation: null, path: [{ id: "m-greeting", index: 0, swipe: 0, user: false, hash: "0".repeat(32) }], entries: [] };
       return fetch(`${b.listening.url}${QUESTION_PATH}`, { method: "POST", headers: { authorization: `Bearer ${registration.key}`, [USER_HEADER]: USER, "content-type": "application/json" }, body: JSON.stringify(asked) });
     };
-    // No area fills the secrecy lane: today's answer, that the secrets are not known, so the extension keeps every marked secret out.
     const plain = await bedWith();
     beds.push(plain);
-    const unfilled = await (await question(plain)).json();
-    expect(unfilled).toMatchObject({ v: 1, secrecy: null });
+    const answered: { v: number; secrecy: unknown } = (await (await question(plain)).json()) as { v: number; secrecy: unknown };
+    expect(answered.v).toBe(1);
+    expect(answered.secrecy).not.toBeNull();
     expect(plain.logged.some((l) => l.level === "error")).toBe(false);
 
-    const heard: string[] = [];
-    const filling: Area = {
-      name: "secrecy-test",
-      fills: {
-        door: {
-          secrecy: async (ask) => {
-            heard.push(`${ask.chat}:${ask.purpose}`);
-            return { disabled: ["entry-1"], enabled: [], mutated: [] };
-          },
-        },
-      },
-    };
-    const filled = await bedWith(() => [filling]);
-    beds.push(filled);
-    const answered = await (await question(filled)).json();
-    expect(answered).toMatchObject({ v: 1, secrecy: { disabled: ["entry-1"], enabled: [], mutated: [] } });
-    expect(heard).toEqual([`${CHAT}:prompt`]);
+    const filling: Area = { name: "secrecy-test", fills: { door: { secrecy: async () => ({ disabled: ["entry-1"], enabled: [], mutated: [] }) } } };
+    await expect(bedWith(() => [filling])).rejects.toThrow("The door's secrecy lane is filled by two areas, lore and secrecy-test: one area fills a lane.");
   });
 });

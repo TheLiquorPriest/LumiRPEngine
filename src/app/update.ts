@@ -200,6 +200,8 @@ export interface AppFile {
   settings(): Promise<UpdateSettings>;
   /** Whether this process runs as its service, which starts it again when it exits. */
   service(): Promise<boolean>;
+  /** The name of the service's unit where this process runs as it, for a page to say; null where it runs by hand. */
+  unit?(): Promise<string | null>;
   /** Closes the app as on a stop and ends the process, for its service to start it again; `after` runs once the app has closed, before the process ends. */
   restart(after?: () => Promise<void>): void;
   sleep(ms: number): Promise<void>;
@@ -469,6 +471,50 @@ export class Builds {
       }
       this.#restart = "restarting";
       this.#swap(file, copy);
+    } finally {
+      this.#waiting = false;
+    }
+  }
+
+  /** How this process runs: as its service (its unit's name), or by hand; and what the unit's pre-start step did when a swapped-in build did not come up, in words, if it did. */
+  async runs(): Promise<{ service: boolean; unit: string | null; fellBack: string | null }> {
+    const { file } = this.deps;
+    const service = file !== null && (await file.service());
+    return { service, unit: service ? ((await file?.unit?.()) ?? null) : null, fellBack: this.#fellBack };
+  }
+
+  /**
+   * A restart onto the same files, for values that hold only at a restart: once no turn and no job runs, as "Update now" restarts. Run by
+   * hand, it cannot, and says so; while one is waiting or under way it is not asked twice.
+   */
+  async restartHere(): Promise<BuildsStatus> {
+    const { file, log } = this.deps;
+    if (file === null || !(await file.service())) {
+      this.#restart = "by hand";
+      return this.status();
+    }
+    if (this.#restart === "waiting" || this.#restart === "restarting") return this.status();
+    this.#restart = "waiting";
+    void this.#waitIdle(file).catch((error: unknown) => {
+      this.#restart = "none";
+      log.error("RPE's restart asked from a page failed; it goes on running", { error: error instanceof Error ? error.message : String(error) });
+    });
+    return this.status();
+  }
+
+  /** Waits until no turn or job runs, then restarts onto the same files. */
+  async #waitIdle(file: AppFile): Promise<void> {
+    if (this.#waiting) return;
+    this.#waiting = true;
+    try {
+      for (;;) {
+        const counts = await Promise.all(this.#running.map(async (count) => await count()));
+        if (counts.every((n) => n === 0)) break;
+        await file.sleep((await file.settings()).lookEveryMs);
+      }
+      this.#restart = "restarting";
+      this.deps.log.info("RPE restarts, as it was asked from a page.", { running: this.deps.version });
+      file.restart();
     } finally {
       this.#waiting = false;
     }

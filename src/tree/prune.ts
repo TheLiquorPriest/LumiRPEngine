@@ -132,7 +132,7 @@ export async function planPrune(deps: PruneDeps, user: string, ask: PruneAsk): P
       }
     } else if (ask.what === "derived") {
       for (const means of deps.derived ?? []) {
-        const held = chatRows(deps.db, user, chat, means.tables);
+        const held = chatRows(deps.db, user, chat, means.keeps);
         if (held.length > 0) planned.push({ kind: "derived-rows", path: `${means.name} of ${chat}`, files: held.reduce((n, t) => n + t.rows, 0), bytes: held.reduce((n, t) => n + t.bytes, 0), disks: [], run: () => means.drop(user, chat) });
       }
     } else {

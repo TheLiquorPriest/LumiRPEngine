@@ -184,6 +184,10 @@ export interface AppConfig {
     restartWait: number;
     /** How long a later `rpe up` waits for the turns under way to end before it restarts RPE's service, in milliseconds (`service.drainWait`). */
     drainWaitMs: number;
+    /** How many of its own newest log lines RPE keeps for the Runtime page (`service.logLines`). */
+    logLines: number;
+    /** How many of the latest turns the Runtime page's timings take in (`service.timingsTurns`). */
+    timingsTurns: number;
   };
   switches: {
     /** The longest name of a thing that runs a command or calls out the registry takes, in characters (`switches.nameLength`). */
@@ -217,7 +221,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64, chatIdChars: 200, sockets: 64 },
   database: { busyMs: 5000, sliceMs: 10, copiesKept: 3, pieceBytes: 1024 * 1024 },
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000, askEveryMs: 250 },
-  service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000 },
+  service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000, logLines: 2000, timingsTurns: 100 },
   switches: { nameLength: 200 },
   workers: { threads: null },
   index: { batch: 500 },
@@ -272,6 +276,8 @@ export const SERVER_SETTING_DEFS = {
   portLast: { key: "service.portLast", default: D.service.portLast, takes: whole(1, 65_535), levels: GLOBAL, perConnection: false, name: "The highest port rpe up tries", about: "The highest port rpe up tries when RPE's port is taken, counting up from it; rpe up then keeps the first free one.", effect: "start" },
   memory: { key: "service.memory", default: D.service.memory, takes: { type: "text" }, levels: GLOBAL, perConnection: false, name: "Memory RPE's service may hold", about: "The most memory RPE's service may hold, as systemd reads a size (768M, 2G) or infinity for none, at least 256M: the unit's MemoryMax. rpe up --memory sets it; the service holds to it from the next rpe up --systemd.", effect: "start" },
   restartWait: { key: "service.restartWait", default: D.service.restartWait, takes: whole(1, 3600), levels: GLOBAL, perConnection: false, name: "Wait before the service starts RPE again", about: "Seconds the service manager waits before it starts RPE again once it has stopped: the unit's RestartSec, written by rpe up --systemd.", effect: "start" },
+  logLines: { key: "service.logLines", default: D.service.logLines, takes: whole(100, 1_000_000), levels: GLOBAL, perConnection: false, name: "Log lines RPE keeps", about: "How many of its own newest log lines RPE keeps for the Runtime page, each with its level, time, area and the chat, turn or job it names; older ones are let go.", effect: "start" },
+  timingsTurns: { key: "service.timingsTurns", default: D.service.timingsTurns, takes: whole(1, 10_000), levels: GLOBAL, perConnection: false, name: "Turns the timings take in", about: "How many of the latest turns, of a chat or of all chats, the Runtime page's timings of the parts of a turn are taken over.", effect: "start" },
   drainWait: { key: "service.drainWait", default: D.service.drainWaitMs / 1000, takes: whole(0, 86_400), levels: GLOBAL, perConnection: false, name: "A later rpe up waits for turns to end", about: "Seconds a later rpe up waits for the turns under way to end before it restarts RPE's service; it restarts it at the end of the wait all the same.", effect: "start" },
   nameLength: { key: "switches.nameLength", default: D.switches.nameLength, takes: whole(1, 10_000), levels: GLOBAL, perConnection: false, name: "The longest name a switch takes", about: "Characters in the longest name of a hook, a command, an MCP server or a connection's place that RPE's registry of what is switched on takes; a longer name is refused.", effect: "start" },
   workerParseBytes: { key: "server.workerParseBytes", default: D.server.workerParseBytes, takes: whole(1024, 1024 * 1024 * 1024), levels: GLOBAL, perConnection: false, name: "Parsed on a worker from", about: "Bytes from which a request's body is parsed on a worker thread, so that a long prompt's parse never holds up another request.", effect: "start" },
@@ -415,7 +421,7 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows), chatIdChars: n(s.chatIdChars), sockets: n(s.sockets) },
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs), copiesKept: n(s.copiesKept), pieceBytes: n(s.pieceBytes) },
     commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs), askEveryMs: n(s.askEveryMs) },
-    service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000 },
+    service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000, logLines: n(s.logLines), timingsTurns: n(s.timingsTurns) },
     switches: { nameLength: n(s.nameLength) },
     workers: { threads: read.value(s.threads) as number | null },
     index: { batch: n(s.batch) },

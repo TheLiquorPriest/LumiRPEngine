@@ -204,7 +204,7 @@ describe("the server", () => {
   test("says to whoever reaches it only that RPE answers and which build; when it started and its builds are a page's", async () => {
     const res = await fetch(`${server.url}/api/v1/status`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ name: "rpe", version: "1.0.0" });
+    expect(await res.json()).toEqual({ name: "rpe", version: "1.0.0", lumiverse: "http://127.0.0.1:7860" });
     expect((await fetch(`${server.url}/api/v1/status/builds`)).status).toBe(401);
     const builds = await fetch(`${server.url}/api/v1/status/builds`, { headers: page });
     expect(await builds.json()).toMatchObject({ name: "rpe", version: "1.0.0", started: bed.clock.now, builds: { running: "1.0.0", agree: true } });

@@ -50,6 +50,7 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
           startsOn,
           settings: () => updateSettingsOf(paths, log),
           service: () => runByService(paths, io),
+          unit: async () => ((await runByService(paths, io)) ? ((await rpeServiceOf(paths.root, io.env, io.home))?.unit ?? null) : null),
           restart: (then) => {
             after.run = then ?? null;
             restart.resolve();

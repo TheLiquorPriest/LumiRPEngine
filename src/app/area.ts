@@ -8,7 +8,7 @@ import type { App, Area } from "./app";
 import { backupsRoute } from "./backups-route";
 import { installFacts, SERVER_SETTINGS } from "./config";
 import { PAGE_SETTINGS } from "./page-settings";
-import { serviceRoutes } from "./service-routes";
+import { serviceRoutes, type TurnsTimed } from "./service-routes";
 import { signinDeps, signinRoutes } from "./signin-routes";
 import { type SettingsDeps, settingsRoutes } from "./settings-routes";
 import { switchesRoutes } from "./switches-routes";
@@ -22,6 +22,8 @@ export interface AppTakes {
   settings(app: App): Pick<SettingsDeps, "levels" | "connections">;
   /** What RPE asks of Lumiverse to sign a user in to the web app, from the door; none where RPE reaches no Lumiverse, and the sign-in with a Lumiverse account then says so. */
   accounts?: LumiverseAccounts;
+  /** The latest turns' moments of a chat, or of all chats, for the Runtime page's timings. */
+  turns?: TurnsTimed;
 }
 
 export function appArea(takes?: AppTakes): Area {
@@ -33,7 +35,7 @@ export function appArea(takes?: AppTakes): Area {
       : {
           mount: (at: App) => {
             takes.opened(at);
-            at.routes.add("service", serviceRoutes({ builds: at.builds }));
+            at.routes.add("service", serviceRoutes(at, takes.turns));
             at.routes.add("backups", [backupsRoute(at.paths.backups)]);
             at.routes.add("switches", switchesRoutes(at.db));
             at.routes.add("signin", signinRoutes(signinDeps(at, takes.accounts ?? null)));

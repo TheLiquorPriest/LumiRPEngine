@@ -30,7 +30,9 @@ export function ownersOf(db: Database): Map<string, Owner> {
   const out = new Map<string, Owner>();
   for (const [name, columns] of tables) {
     if (!columns.includes("user")) continue;
-    if (columns.includes("chat")) out.set(name, { chat: `t."chat"`, joins: "" });
+    // A table of both names its chat itself where a row has no turn (his own changes), and through its turn where it has one.
+    if (columns.includes("chat") && columns.includes("turn") && has("turn", "chat")) out.set(name, { chat: 'COALESCE(t."chat", tt."chat")', joins: turnJoin('t."turn"') });
+    else if (columns.includes("chat")) out.set(name, { chat: `t."chat"`, joins: "" });
     else if (columns.includes("turn") && has("turn", "chat")) out.set(name, { chat: "tt.\"chat\"", joins: turnJoin(`t."turn"`) });
     else if (columns.includes("node") && has("path_node", "key") && has("turn", "chat")) out.set(name, { chat: "tt.\"chat\"", joins: `LEFT JOIN "path_node" pn ON pn."user" = t."user" AND pn."key" = t."node" ${turnJoin('pn."turn"')}` });
     else if (name === "chat" && columns.includes("id")) out.set(name, { chat: `t."id"`, joins: "" });
@@ -65,7 +67,7 @@ export function rowShares(db: Database, user: string, size: number): RowShares {
   for (const [name, owner] of ownersOf(db)) {
     const columns = db.query<{ name: string }, []>(`PRAGMA table_info("${name}")`).all().map((c) => c.name);
     const length = columns.map((c) => `COALESCE(length(CAST(t."${c}" AS BLOB)), 0) + 1`).join(" + ");
-    const rows = db.query<{ chat: string | null; n: number }, [string]>(`SELECT ${owner.chat} AS chat, sum(${length}) AS n FROM "${name}" t ${owner.joins} WHERE t."user" = ? GROUP BY chat`).all(user);
+    const rows = db.query<{ chat: string | null; n: number }, [string]>(`SELECT ${owner.chat} AS chat, sum(${length}) AS n FROM "${name}" t ${owner.joins} WHERE t."user" = ? GROUP BY 1`).all(user);
     const total = rows.reduce((sum, r) => sum + r.n, 0);
     if (total === 0) continue;
     const indexes = db.query<{ name: string }, []>(`PRAGMA index_list("${name}")`).all().map((i) => i.name);

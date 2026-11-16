@@ -157,7 +157,7 @@ describe("the extension's word that an app file arrived", () => {
   test("the extension's key calls the route and a word with no stated hash is not taken; a page token cannot call it", async () => {
     const bed = await makeBed();
     try {
-      const app = await bed.open({ areas: [{ name: "service", mount: (a) => a.routes.add("service", serviceRoutes({ builds: a.builds })) }] });
+      const app = await bed.open({ areas: [{ name: "service", mount: (a) => a.routes.add("service", serviceRoutes(a)) }] });
       const server = await app.start();
       const url = `http://127.0.0.1:${server.port}${ARRIVED_PATH}`;
       const ask = (token: string): Promise<Response> => fetch(url, { method: "POST", headers: { ...bearer(token), "content-type": "application/json" }, body: "{}" });

@@ -382,7 +382,7 @@ describe("rpe up", () => {
       expect((await up(ACCOUNT.password, line, [], { env: m.env, options: m.options })).code).toBe(0);
       await writeFile(bed.paths.globalConfig, "service:\n  drainWait: 3\nupdate:\n  lookEvery: 1\n");
       let running = 1;
-      const app = await bed.open({ config: { port, lumiverse: { url: lumiverse.url, user: ACCOUNT.id } }, areas: [{ name: "service", mount: (a) => a.routes.add("service", serviceRoutes({ builds: a.builds })) }] });
+      const app = await bed.open({ config: { port, lumiverse: { url: lumiverse.url, user: ACCOUNT.id } }, areas: [{ name: "service", mount: (a) => a.routes.add("service", serviceRoutes(a)) }] });
       app.builds.counts(() => running);
       await app.start();
       // The turn ends a moment after: up waits for it, and does not wait the whole of drainWait.

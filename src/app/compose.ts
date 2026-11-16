@@ -37,6 +37,7 @@ import { turnArea } from "../turn/area";
 import { bootstrapArea } from "../turn/bootstrap/area";
 import { guidanceTexts } from "../turn/texts";
 import { appArea } from "./area";
+import type { TurnTimes } from "./service-timings";
 import type { App, Area } from "./app";
 import type { SettingsReader } from "./config-read";
 import { RouteError } from "./routes";
@@ -133,9 +134,21 @@ export function compose(options: ComposeOptions = {}): Composition {
       },
       // The web app's sign-in with a Lumiverse account asks Lumiverse through the door.
       accounts: door.accounts,
+      // The Runtime page's timings: the latest turns' moments, as the turn lane keeps them, of one chat or the newest across chats.
+      turns: async (user, chat, limit) => {
+        const runs = made().runs;
+        const out: TurnTimes[] = [];
+        for (const c of chat === null ? runs.chats(user) : [{ chat, last: Number.POSITIVE_INFINITY }]) {
+          const oldest = out.length < limit ? Number.NEGATIVE_INFINITY : (out[limit - 1]?.received ?? Number.NEGATIVE_INFINITY);
+          if (c.last < oldest) break;
+          for (const r of runs.ofChatKept(user, c.chat, limit)) out.push({ chat: c.chat, turn: r.turn, received: r.received, started: r.started, firstWord: r.firstWord, released: r.released, ended: r.ended, intent: r.intent, thinking: r.thinking, intake: r.intake, wait: r.wait });
+          out.sort((a, b) => b.received - a.received);
+        }
+        return out.slice(0, limit);
+      },
     }),
     storeArea(),
-    loreArea(() => ({ store: made().store, turns: made().prompts.lore, indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) } })),
+    loreArea(() => ({ store: made().store, turns: made().prompts.lore, indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) }, secrecy: { settingsFor: made().secretSettings, wording: made().secretMarks, log: (message) => made().env.log.warn(message) } })),
     ifaceArea(),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
     // The tree lays the shipped files before the areas after it read them.
@@ -150,7 +163,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       openSessions,
       // A deleted chat's turns, changes and snapshots go the store's own way: kept where a branch reads them.
       // The snapshots of a living chat's folds are derived: the fold makes them again when next due, every answer the same.
-      derived: [{ name: "snapshots", tables: ["snapshot"], drop: async (user, chat) => void (await app().writes.run(() => made().store.user(user).dropSnapshots(chat), "dropping a chat's snapshots")) }],
+      derived: [{ name: "snapshots", keeps: ["snapshot"], drop: async (user, chat) => void (await app().writes.run(() => made().store.user(user).dropSnapshots(chat), "dropping a chat's snapshots")) }],
       dropStored: (user, chat) => app().writes.run(() => made().store.user(user).deleteChat(chat), "removing a deleted chat's turns"),
       // What RPH itself makes of the files of a chat's view, for the Files page.
       guidance: (user, chat) => loadGuidance(made().files, scope(user, chat ?? NO_CHAT)),

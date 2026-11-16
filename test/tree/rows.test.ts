@@ -12,7 +12,7 @@ function laid(): Database {
   db.run("CREATE TABLE turn (user TEXT NOT NULL, id TEXT NOT NULL, chat TEXT NOT NULL, PRIMARY KEY (user, id))");
   db.run("CREATE TABLE path_node (user TEXT NOT NULL, key TEXT NOT NULL, turn TEXT NOT NULL, PRIMARY KEY (user, key))");
   db.run("CREATE TABLE snapshot (user TEXT NOT NULL, node TEXT NOT NULL, state TEXT NOT NULL, PRIMARY KEY (user, node)) WITHOUT ROWID");
-  db.run("CREATE TABLE change (user TEXT NOT NULL, turn TEXT NOT NULL, text TEXT NOT NULL)");
+  db.run("CREATE TABLE change (user TEXT NOT NULL, turn TEXT NOT NULL, chat TEXT, text TEXT NOT NULL)");
   db.run("CREATE TABLE note_version (user TEXT NOT NULL, chat TEXT NOT NULL, text TEXT NOT NULL)");
   db.run("CREATE TABLE tree_chat (user TEXT NOT NULL, chat TEXT NOT NULL, folder TEXT NOT NULL)");
   db.run("CREATE TABLE settings_row (user TEXT NOT NULL, name TEXT NOT NULL)");
@@ -21,10 +21,12 @@ function laid(): Database {
     db.run("INSERT INTO turn VALUES ('u', ?, ?)", [`${chat}-t1`, chat]);
     db.run("INSERT INTO path_node VALUES ('u', ?, ?)", [`${chat}-n1`, `${chat}-t1`]);
     db.run("INSERT INTO snapshot VALUES ('u', ?, 'the state of the sea')", [`${chat}-n1`]);
-    db.run("INSERT INTO change VALUES ('u', ?, 'the tide came in')", [`${chat}-t1`]);
+    db.run("INSERT INTO change VALUES ('u', ?, NULL, 'the tide came in')", [`${chat}-t1`]);
     db.run("INSERT INTO note_version VALUES ('u', ?, 'Fog, turn 1.')", [chat]);
     db.run("INSERT INTO tree_chat VALUES ('u', ?, 'folder')", [chat]);
   }
+  // A change of his own names the chat itself, and no turn.
+  db.run("INSERT INTO change VALUES ('u', '', 'c1', 'his own edit')");
   db.run("INSERT INTO settings_row VALUES ('u', 'mine')");
   return db;
 }
@@ -33,7 +35,7 @@ test("a chat's rows are counted in every table that carries it, however each nam
   const db = laid();
   const held = chatRows(db, "u", "c1");
   expect(held.map((t) => [t.table, t.rows]).sort()).toEqual([
-    ["change", 1],
+    ["change", 2],
     ["chat", 1],
     ["note_version", 1],
     ["path_node", 1],
@@ -43,7 +45,7 @@ test("a chat's rows are counted in every table that carries it, however each nam
   expect(held.every((t) => t.bytes > 0)).toBe(true);
   expect(chatRows(db, "u", "c1", ["snapshot"]).map((t) => t.table)).toEqual(["snapshot"]);
 
-  expect(removeChatRows(db, "u", "c1")).toBe(6);
+  expect(removeChatRows(db, "u", "c1")).toBe(7);
   expect(chatRows(db, "u", "c1")).toEqual([]);
   expect(chatRows(db, "u", "c2")).toHaveLength(6);
   expect(db.query("SELECT count(*) AS n FROM tree_chat WHERE chat = 'c1'").get()).toEqual({ n: 1 });

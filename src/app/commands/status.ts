@@ -2,16 +2,34 @@
 
 import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
-import { recordedSource } from "../app-copy";
+import { appCopyPlaces, fellBackWords, recordedSource } from "../app-copy";
 import { currentKeys } from "../auth";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { appliedMigrations } from "../migrations";
+import { accountSystemctl, rpeServiceOf } from "../up";
 import { listAllSwitches } from "../switches";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { atWords } from "./words";
 import { runningServer } from "./writer";
+
+/** Whether RPE's service is installed, and if so whether it runs, stopped at its start limit, or stopped otherwise; and whether it fell back to the known-good copy. */
+async function serviceLines(paths: DataPaths, io: CliIO): Promise<string[]> {
+  const service = await rpeServiceOf(paths.root, io.env, io.home);
+  if (service === null) return [`Service: not installed: RPE runs where ${runLine(io, paths, "serve")} starts it, or ${runLine(io, paths, "up")} installs it as a service.`];
+  const ran = await accountSystemctl(io.env, process.getuid?.() ?? null)(["show", "--property=ActiveState,SubState,Result", service.unit]);
+  const fields = new Map(ran.out.split("\n").flatMap((line) => (line.includes("=") ? [[line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)] as const] : [])));
+  const state = fields.get("ActiveState");
+  const lines: string[] = [];
+  if (ran.code !== 0 || state === undefined) lines.push(`Service: ${service.unit} is installed; its state could not be asked${ran.err === "" ? "" : ` (${ran.err.trim()})`}.`);
+  else if (state === "active") lines.push(`Service: ${service.unit} is running.`);
+  else if (fields.get("Result") === "start-limit-hit") lines.push(`Service: ${service.unit} is stopped at its start limit: its manager gave up starting it. Find why in its journal, then start it again with ${runLine(io, paths, "up")}.`);
+  else lines.push(`Service: ${service.unit} is installed and not running (${state}${fields.get("SubState") === undefined ? "" : `, ${fields.get("SubState")}`}).`);
+  const fell = await fellBackWords(appCopyPlaces(paths.root));
+  if (fell !== null) lines.push(`Service: ${fell}`);
+  return lines;
+}
 
 export async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, version: string): Promise<number> {
   io.out(`RPE ${version}`);
@@ -21,6 +39,7 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
   // Where RPE runs, it says its own keys, switches and builds; stopped, they are read from its database, which this process only reads.
   const running = await runningServer(paths, config, io);
   const said = running === null ? null : await running.ops.status();
+  for (const line of await serviceLines(paths, io)) io.out(line);
   if (said !== null && said.builds !== null) io.out(`Builds: ${said.builds}`);
   // The one file an update of RPE's installed copy comes from: where `rpe up` ran from.
   const source = await recordedSource(paths.root);

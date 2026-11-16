@@ -137,7 +137,7 @@ export async function installCopy(data: string, appFile: string, now: number): P
 }
 
 /** What the unit's pre-start step wrote when a swapped-in build did not come up, as words; null where it did nothing. */
-async function fellBackWords(places: AppCopyPlaces): Promise<string | null> {
+export async function fellBackWords(places: AppCopyPlaces): Promise<string | null> {
   const text = await readText(places.fellBack);
   if (text === null) return null;
   try {

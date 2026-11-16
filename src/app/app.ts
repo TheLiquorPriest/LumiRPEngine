@@ -26,6 +26,7 @@ import type { RunningServer } from "./server";
 import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
 import { RPE_UI, uiRoute } from "./ui";
+import { ServiceLog } from "./service-log";
 import { type AppFile, Builds, type BuildsStatus } from "./update";
 import { defaultThreads, Workers } from "./workers/pool";
 
@@ -94,6 +95,8 @@ export interface App {
   /** Where RPH's model layer keeps the connections and their secrets: the host's `Environment.models`. */
   readonly models: ModelsPort;
   readonly log: Log;
+  /** RPE's own newest log lines, which `log` keeps as it says them: what the Runtime page reads. */
+  readonly serviceLog: ServiceLog;
   /** The settings registry: every setting the areas list, in the order of the areas, which the Settings routes show and write. */
   readonly settings: readonly Setting[];
   /** What the areas add to each other's hooks, gathered from every area when the app opened. */
@@ -140,12 +143,12 @@ export function lineLog(write: (line: string) => void, now: () => number = Date.
 
 // What the app's own routes answer.
 const T = shape.text();
-const restartState = shape.named(
+export const restartState = shape.named(
   "RestartState",
   "Where a restart onto RPE's app file on disk stands: nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand.",
   shape.oneOf("none", "waiting", "restarting", "off", "by hand"),
 );
-const buildsStatus = shape.named(
+export const buildsStatus = shape.named(
   "BuildsStatus",
   "The builds that meet at RPE, as its builds route and \"Update now\" give them.",
   shape.object({
@@ -159,16 +162,20 @@ const buildsStatus = shape.named(
   }),
 );
 type BuildsMirrored = Holds<Exactly<Infer<typeof buildsStatus>, BuildsStatus>>;
-const statusReply = shape.named("Status", "That RPE answers here, and its build: nothing more.", shape.object({ name: shape.literal("rpe"), version: T }));
+const statusReply = shape.named(
+  "Status",
+  "That RPE answers here, its build, and the address of the Lumiverse it belongs to (null where it is set to none): nothing more, so a client sends a saved sign-in only to its own RPE.",
+  shape.object({ name: shape.literal("rpe"), version: T, lumiverse: shape.field(shape.nullable(T), "The address of the Lumiverse this RPE belongs to; null where none is set.") }),
+);
 
 /**
  * The app's own routes: its status to anyone, only that it answers and its build; its builds to a
  * page, which reads the app file again each time it is asked; "Update now", which answers what RPE
  * will do; when the page's own credential ends; the live socket; and the web app.
  */
-export function appRoutes(version: string, started: number, ui: string | null, builds: Builds, answers: Answers) {
+export function appRoutes(version: string, started: number, ui: string | null, builds: Builds, answers: Answers, lumiverse: string | null = null) {
   return [
-    route({ method: "GET", path: STATUS_PATH, access: "public", group: "service", does: "Says that RPE answers here, and its build; nothing more, and no work to say it.", reply: statusReply, handle: () => ({ name: "rpe" as const, version }) }),
+    route({ method: "GET", path: STATUS_PATH, access: "public", group: "service", does: "Says that RPE answers here, its build, and the address of the Lumiverse it belongs to; nothing more, and no work to say it.", reply: statusReply, handle: () => ({ name: "rpe" as const, version, lumiverse }) }),
     route({ method: "POST", path: UPDATE_PATH, access: "page", group: "service", does: '"Update now": RPE restarts onto its new app file once no turn or job runs, whatever update.restart says, and answers where that stands.', reply: buildsStatus, handle: () => builds.now() }),
     route({
       method: "GET",
@@ -205,7 +212,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const hooks = gatherHooks(areas);
   const liveKinds = gatherLiveKinds(areas);
   const now = options.now ?? Date.now;
-  const log = options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now);
+  const serviceLog = new ServiceLog(options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now), config.service.logLines, now);
+  const log = serviceLog.log;
   // No row is written without its user (R-179): with none named, the data folder is left as it was.
   const user = config.lumiverse.user;
   if (user === null || user === "") throw new Error(NO_OWNER);
@@ -246,7 +254,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   await ownModels(paths, secrets, user, log);
   const builds = new Builds({ version, file: options.appFile ?? null, log });
   await builds.start();
-  routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers));
+  routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers, config.lumiverse.url));
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
   routes.add("command", commandRoutes({ paths, secrets, db, user, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
   let running: RunningServer | null = null;
@@ -274,6 +282,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     secrets,
     models: modelsPort(paths, secrets, () => config.lumiverse.user),
     log,
+    serviceLog,
     settings,
     hooks,
     now,

@@ -32,9 +32,9 @@ export interface ApplyNowReply {
 
 /** Whether RPE took the build, and where it stands, in words. */
 export interface Arrived {
-  /** Whether RPE took the build: every file matched, and it started. */
+  /** Whether RPE took the build: every file matched, and it starts. */
   taken: boolean;
-  /** Where the builds stand, in a sentence or two, with why a build was not taken. */
+  /** Where it stands. */
   words: string;
 }
 
@@ -862,7 +862,7 @@ export interface LiveMissed {
 /** Where RPH found each slice of the preset's map in a turn's prompt: each slice's marker, kind, places and length; the text that belongs to no slice; the notices of what changed since the turn before; and how much of the prompt's front stayed the same. */
 export interface LocatedSlices {
   preset: { id: string; name?: string; revision?: string } | null;
-  slices: ({ marker: string; kind: "instructions" | "style" | "character" | "persona" | "world" | "note" | "lore" | "history" | "other"; at: { message: number; start: number; end: number }[]; length: number; hash: string })[];
+  slices: { marker: string; kind: SliceKind; at: { message: number; start: number; end: number }[]; length: number; hash: string }[];
   unclaimed: { message: number; start: number; end: number }[];
   notices: PromptNotice[];
   /** The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held. */
@@ -1148,8 +1148,68 @@ export interface PerceptionRow {
   of: { turn: TurnId; message: number | null };
 }
 
+/** Lumiverse's own clipping inside RPE's window: how many of the window's messages the prompt does not hold, and why (its memory's summary stands for them, its message limit, or the preset's context size; null where it could not be told). */
+export interface PromptClipped {
+  count: number;
+  by: "memory" | "message-limit" | "context-size" | null;
+}
+
+/** One of his edits to the prompt map: rename a marker, merge slices under one, split one where given words begin, correct a line, change a kind. */
+export type PromptEditAsk = { edit: "rename"; marker: string; to: string } | { edit: "merge"; markers: string[]; as: string } | { edit: "split"; marker: string; at: string; second: string } | { edit: "line"; marker: string; line: string } | { edit: "kind"; marker: string; to: SliceKind };
+
 /** What changed in the prompt's shape since the turn before, or that it is not mapped or could not be told apart. */
 export type PromptNotice = { kind: "changed"; marker: string } | { kind: "gone"; marker: string } | { kind: "unclaimed"; message: number; start: number; end: number } | { kind: "order"; markers: string[] } | { kind: "preset"; was: { id: string; name?: string; revision?: string } | null; now: { id: string; name?: string; revision?: string } | null } | { kind: "unmapped" } | { kind: "incomplete" };
+
+/** The prompt map of the chat's preset as found in one turn's prompt: its slices, the text no slice claims, the turn's notices and front, whether the prompt's text could be told apart, Lumiverse's clipping, and the old engines' blocks the preset still holds. */
+export interface PromptShown {
+  turn: TurnId;
+  preset: { id: string; name?: string; revision?: string } | null;
+  /** The slices are the learned map's; false: the raw layout's, named by the chat application's blocks and by place. */
+  mapped: boolean;
+  /** The prompt's text could be told apart; false: slices cannot be found in some of it. */
+  complete: boolean;
+  slices: PromptSliceShown[];
+  unclaimed: { message: number; start: number; end: number; text: string }[];
+  notices: PromptNotice[];
+  /** The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held. */
+  front: { length: number; brokenBy?: string };
+  /** Null where the window's messages are all in the prompt. */
+  clipped: PromptClipped | null;
+  /** The old engines' blocks the preset still holds: a block named `RPEngine · <step>` (its step), or an `{{outlet::lre_…}}` reference left in a block's text (the outlet), each with the block it stands in. */
+  old: ({ kind: "block" | "outlet"; name: string; in: string })[];
+}
+
+/** A slice of the preset's map as found in a turn's prompt: its marker, kind, line and behaviour as the map has them, whether he edited it, its text and places there, how it was found, and what the chat application's breakdown said of it. */
+export interface PromptSliceShown {
+  marker: string;
+  kind: SliceKind;
+  /** One line on what it is; absent where the map has none (a slice of the raw layout). */
+  line?: string;
+  /** How its text goes from turn to turn; absent as for `line`. */
+  behaviour?: "fixed" | "scene" | "turn";
+  /** He changed it on the Prompt page; a new mapping keeps it. */
+  edited?: true;
+  text: string;
+  length: number;
+  at: { message: number; start: number; end: number }[];
+  /** How it was found: by a signature of its text, by the chat application's block name, or by its place among its neighbours. */
+  found?: "signature" | "block" | "place";
+  /** What the chat application's own breakdown said there: it agreed with the map's finder, or the finder was corrected to it. */
+  breakdown?: "confirmed" | "corrected";
+  /** The breakdown's block the slice was found by. */
+  hint?: string;
+}
+
+/** One turn's notices and front, as the Prompt page lists them turn by turn: its number on the chat's path (null where it is not on it now), when its request came, and Lumiverse's clipping. */
+export interface PromptTurnShown {
+  turn: TurnId;
+  n: number | null;
+  at: number;
+  notices: PromptNotice[];
+  /** The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held. */
+  front: { length: number; brokenBy?: string };
+  clipped: PromptClipped | null;
+}
 
 /** A provider the Connections page offers, how its connections may sign their calls, the APIs it speaks, whether a connection of it must give its address, and whether it makes embeddings (for a connection that signs with a key or with nothing; one signed in makes none). */
 export interface ProviderOffer {
@@ -1344,6 +1404,37 @@ export interface Scope {
   turn?: string;
 }
 
+/** How RPE runs now: under its service (the unit's name) or started by hand, since when, the addresses it listens on, the build it runs, whether its service put the known-good copy back, and where a restart stands. */
+export interface ServiceHow {
+  /** Under RPE's own service unit, which starts it again when it exits, or started by hand, which nothing starts again. */
+  runs: "service" | "by hand";
+  /** The service unit's name, where it runs as one. */
+  unit: string | null;
+  /** When this process started, in milliseconds since 1970. */
+  since: number;
+  /** The addresses it answers on: the one set for it, and this machine's loopback, which its extension reaches it by. */
+  listens: string[];
+  /** The build this process runs. */
+  build: string;
+  /** What the service's pre-start step did when a build swapped in did not come up, in words; null where it did nothing. */
+  fellBack: string | null;
+  restart: RestartState;
+}
+
+/** RPE's own newest log lines. */
+export interface ServiceLog {
+  lines: ({ at: number; level: "debug" | "info" | "warn" | "error"; message: string; area: string | null; chat: string | null; turn: string | null; job: string | null; fields: JsonValue })[];
+  /** How many lines RPE keeps at most (`service.logLines`). */
+  kept: number;
+}
+
+/** Each part of a turn and how long it took across the latest turns. */
+export interface ServiceTimings {
+  /** How many turns were taken in. */
+  turns: number;
+  parts: { part: string; turns: number; median: number; slowest: number; latest: number }[];
+}
+
 /** A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password for the command line or the MCP server, the Lumiverse session token too, for the client to keep as it keeps its own. */
 export interface Session {
   /** The session's token: given as the bearer of every call, and traded again for a new one before it ends. */
@@ -1444,6 +1535,9 @@ export interface SignInState {
   ended: string | null;
 }
 
+/** A slice's kind, from the prompt map's fixed list. */
+export type SliceKind = "instructions" | "style" | "character" | "persona" | "world" | "note" | "lore" | "history" | "other";
+
 /** What a source bound to a character points at. */
 export type SourceBindingKind = "card" | "persona" | "entry" | "memory";
 
@@ -1489,10 +1583,12 @@ export interface StackReply {
   parts: StackPartRow[];
 }
 
-/** That RPE answers here, and its build: nothing more. */
+/** That RPE answers here, its build, and the address of the Lumiverse it belongs to (null where it is set to none): nothing more, so a client sends a saved sign-in only to its own RPE. */
 export interface Status {
   name: "rpe";
   version: string;
+  /** The address of the Lumiverse this RPE belongs to; null where none is set. */
+  lumiverse: string | null;
 }
 
 /** What stopped a run where it stood, its reply going out with what it had: one of RPH's limits (calls, tokens, time), or the hold of a reply asked for whole, in milliseconds from the request's arrival. */
@@ -2314,6 +2410,36 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** The prompt map of the chat's preset as found in a turn's prompt: each slice's marker, kind, line, behaviour, text, where and how it was found and what the breakdown said; the text no slice claims; the turn's notices and front; Lumiverse's clipping; and the old engines' blocks still in the preset. */
+  "GET /api/v1/chats/:chat/prompt": {
+    params: { chat: string };
+    query: { turn?: TurnId };
+    body: undefined;
+    reply: PromptShown;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** Makes one of his edits to the prompt map as found in a turn's prompt (rename a marker, merge slices, split one, correct a line, change a kind), kept as his for every chat on the preset, and answers the map as found again; a refusal is said in the prompt map's words. */
+  "POST /api/v1/chats/:chat/prompt/edit": {
+    params: { chat: string };
+    query: { turn?: TurnId };
+    body: PromptEditAsk;
+    reply: PromptShown;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.pageMost` give a page's length. */
+  "GET /api/v1/chats/:chat/prompt/history": {
+    params: { chat: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: { items: PromptTurnShown[]; next: string | null };
+    paged: true;
+    long: false;
+    joined: false;
+  };
   /** What waits in a chat for the next message, asked for beside his words: each request with its kind, what was asked and when. */
   "GET /api/v1/chats/:chat/requests": {
     params: { chat: string };
@@ -2614,7 +2740,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The extension's word that a new app file has arrived, with the hash stated for it: RPE reads the source it was set up from, takes the build only when every file matches, starts it for real, and swaps onto it once no turn or job runs. A word with no stated hash is not taken. */
+  /** The extension's word that a new app file has arrived, with the hash stated for it: RPE reads the source it was set up from, takes the build only when every file matches, starts it for real on a scratch copy of its data, and swaps onto it once no turn or job runs. */
   "POST /api/v1/ext/arrived": {
     params: Record<string, never>;
     query: Record<string, never>;
@@ -2814,6 +2940,46 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** How RPE runs: under its service or by hand, since when, where it listens, its build, and whether its service put the known-good copy back. */
+  "GET /api/v1/service": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: ServiceHow;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** RPE's own newest log lines, newest first, each with its level, time, area and the chat, turn or job it names, no secret in any; those of one area, chat, turn or job, or of one level and worse, when asked. */
+  "GET /api/v1/service/log": {
+    params: Record<string, never>;
+    query: { area?: string; chat?: string; turn?: string; job?: string; level?: "debug" | "info" | "warn" | "error"; limit?: number };
+    body: undefined;
+    reply: ServiceLog;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Restarts RPE for the values that hold only at a restart, once no turn and no job runs, as "Update now" restarts; says it waits while they run, and, run by hand, that it cannot. */
+  "POST /api/v1/service/restart": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: BuildsStatus;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** How long the parts of a turn took across the latest turns of a chat, or of all chats: for each part, how many turns it was seen in, the middle time, the slowest and the latest. */
+  "GET /api/v1/service/timings": {
+    params: Record<string, never>;
+    query: { chat?: string; limit?: number };
+    body: undefined;
+    reply: ServiceTimings;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect and what it does. */
   "GET /api/v1/settings": {
     params: Record<string, never>;
@@ -2864,7 +3030,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Says that RPE answers here, and its build; nothing more, and no work to say it. */
+  /** Says that RPE answers here, its build, and the address of the Lumiverse it belongs to; nothing more, and no work to say it. */
   "GET /api/v1/status": {
     params: Record<string, never>;
     query: Record<string, never>;
