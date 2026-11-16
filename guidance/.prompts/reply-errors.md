@@ -11,3 +11,4 @@ pass-no-connection: The request could not be passed on: RPE has no connection to
 pass-not-carried: The request was not sent, because something in it cannot be carried by the connection it goes to{{#detail}}: {{detail}}{{/detail}}{{^detail}}.{{/detail}} Nothing was sent with that part left out.
 pass-provider: The model's provider failed before an answer was written{{#detail}}: {{detail}}{{/detail}}{{^detail}}.{{/detail}}
 pass-stopped: The request was stopped before an answer was written.
+untagged-awaited: A request with no tag arrived while a reply was waiting for its tag. It was not passed on, because the setting lumiverse.untagged.whileAwaited says to fail it.

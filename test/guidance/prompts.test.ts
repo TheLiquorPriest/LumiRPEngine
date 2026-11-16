@@ -16,7 +16,7 @@ const SHIPPED = shippedTexts();
 const ASKS = /\b(must|should|always|never|please|make sure|remember to)\b/i;
 
 /** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), and the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`). */
-const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path"];
+const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract"];
 
 /** The notices of `notices.md`, by name, and the fields a use of each fills. Each is a fact; none asks. */
 const NOTICES: Record<string, Record<string, unknown>> = {
@@ -54,6 +54,13 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   cut_clipped_memory: { count: 4 },
   cut_clipped_message_limit: { count: 2 },
   cut_clipped_context_size: { count: 6 },
+  notice_unmapped: {},
+  notice_incomplete: {},
+  notice_changed: { marker: "style" },
+  notice_gone: { marker: "style" },
+  notice_unclaimed: { message: 3, length: 120 },
+  notice_order: { markers: "style, rules" },
+  notice_preset: { was: { name: "Harbour", revision: "2" }, now: { name: "Harbour", revision: "3" } },
 };
 
 /** The lines of `reply-errors.md` for a request passed on to a model, by name: each is said with and without the provider's or the layer's own words. */
@@ -107,7 +114,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
 
   test("prompt-frame.md introduces the assembled prompt, as the chat application sent it", async () => {
     const part = await template("prompt-frame");
-    expect(part.render().text.trim()).toBe("What follows is the prompt the chat application assembled for this reply, exactly as it was sent and in its own order. Its instructions are the contract for whatever is shown to the player.");
+    expect(part.render().text.trim()).toBe("What follows is the prompt the chat application assembled for this reply, exactly as it was sent and in its own order. Its instructions are the contract for whatever is shown to the player. Its user and assistant messages, this conversation's turns, are the chat's latest messages: the player's and the replies, as the chat saved them.");
   });
 
   test("briefing.md names only fields something fills, holds no copy of the reply contract and no block nothing fills, and keeps the turn's folder and intent file", async () => {
@@ -142,7 +149,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(part.render({ ...full, not_given: undefined }).text).not.toContain("Not given to you");
     expect(text).toContain("The same material is on disk for agents you delegate to: sessions/s-1/turns/t-1/");
     expect(text).toContain("This turn's intent file: `sessions/s-1/turns/t-1/scratch/intent.md`");
-    expect(text).not.toContain("CONTRACT TEXT");
+    expect(text).toContain("## How the reply is marked\n\nCONTRACT TEXT");
     expect(text).not.toContain("COUNT LINE");
     expect(text).not.toContain("How what you write now is marked");
     expect(text).not.toContain("Counts");
@@ -156,7 +163,8 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
   test("world-state.md and lore-map.md are the layouts of §6.9 and §9.2: each part of them appears only when there is something in it", async () => {
     const lore = await template("lore-map");
     const text = lore.render({ in_prompt: { lines: ["[e-1] The harbour"] }, changed: { lines: ["[e-2] The quay, as the story left it"] } }).text;
-    expect(text).toContain("### In the prompt\n\n- [e-1] The harbour");
+    expect(text).toContain("### In the prompt");
+    expect(text).toContain("- [e-1] The harbour");
     expect(text).toContain("### Changed by the story\n\n- [e-2] The quay, as the story left it");
     expect(text).not.toContain("From the world's own lore");
     expect(lore.render({}).text.trim()).toBe("");
@@ -218,6 +226,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
   test("reply-errors.md words each way a passed request has no answer, with the detail's words where there are some, and nothing is left unfilled without them", async () => {
     const part = await lines("reply-errors");
     expect(part.names).toEqual(expect.arrayContaining(PASS_ERRORS));
+    expect(part.line("untagged-awaited", {})?.trim()).toBe("A request with no tag arrived while a reply was waiting for its tag. It was not passed on, because the setting lumiverse.untagged.whileAwaited says to fail it.");
     for (const name of PASS_ERRORS) {
       for (const fields of [{ detail: "The key is missing." }, {}]) {
         const said = part.line(name, fields as never) ?? "";
