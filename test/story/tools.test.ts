@@ -52,7 +52,7 @@ interface Bench {
 
 async function bench(more: Partial<StoryDeps> = {}, table: TableOptions = {}): Promise<Bench> {
   const t = await openTable(table);
-  const deps: StoryDeps = { store: t.store, writes: t.writes, files: shippedTexts(), now: () => 7, ...more };
+  const deps: StoryDeps = { store: t.store, writes: t.writes, files: shippedTexts(), overlay: () => ({ unknown: "no lore here" }), now: () => 7, ...more };
   const tools = new Map((await storyTools(deps)).map((x) => [x.name, x]));
   const call = async (name: string, args: JsonObject, turn: string | null = null): Promise<ToolResult> => {
     const tool = tools.get(name);
@@ -237,13 +237,6 @@ describe("story_record", () => {
     wordsFromFiles(refused);
     expect(texts(refused).join("\n")).toContain("there is no lore entry e-404. Near: e-112.");
     expect(b.t.record(turn).of("beat").map((x) => x.fields.text)).toEqual(["The east wing burns."]);
-
-    const none = await bench();
-    const t2 = await none.t.begin();
-    const without = await none.call("story_record", { operations: [{ op: "overlay", entry: "e-112", text: "Burned." }, { op: "beat", text: "Ash falls." }] }, t2.id);
-    wordsFromFiles(without);
-    expect(texts(without).join("\n")).toContain("keeps no lore overlays yet");
-    expect(none.t.record(t2).of("beat")).toHaveLength(1);
   });
 
   test("a future's due time is read in story time, as the engine reads one, and shown in it", async () => {

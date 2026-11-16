@@ -41,6 +41,23 @@ export interface Rejection {
    * log says why (`gm`).
    */
   unseen?: true;
+  /**
+   * For a refusal of a value outside a list fixed in code, or of an id that names nothing: the list it is
+   * one of, which is also the candidates the near matches are drawn from. Data, so an answer gives it whole.
+   */
+  choices?: readonly string[];
+  /** The words the call gave for what was refused (a name, a value): the near matches are the choices nearest to them. */
+  said?: string;
+}
+
+/**
+ * What an event applies with all the same, and says did not add up (plan §6.7: validators "become advisers
+ * that return reports"): a code and its values. It reaches the answer of the call that recorded the event, as a
+ * report, and is kept with the change.
+ */
+export interface Advice {
+  code: string;
+  values?: Record<string, JsonValue>;
 }
 
 /** Read access to the pinned tables of the world revision in force. */
@@ -82,6 +99,12 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
   /** Applies the event to the working state. Must be total for any event `validate` accepted. */
   apply(event: E, state: WorldState, ctx: ReadContext): void;
   /**
+   * Advice on an event that validated and will apply: what did not add up, as a code with values, or null.
+   * It never refuses and never changes state. Asked on the state the event will see, by the working copy that
+   * records the event (`Working.advice`); the fold applies the event the same whether it advises or not.
+   */
+  advise?(event: E, ctx: ReadContext): Advice | null;
+  /**
    * One-line description, filtered by visibility by the caller. `viewer` is the POV a player's line
    * is worded for, so a describer can leave out what it can't see; it is absent for the GM's and
    * the author's lines, which name everything.
@@ -106,6 +129,8 @@ export interface EventGuardDef<E extends LedgerEvent = LedgerEvent> {
   type: E["type"];
   /** Null when the event may apply as far as this pack is concerned. Never changes state. */
   validate(event: E, ctx: ReadContext): Rejection | null;
+  /** Advice on an event that validated and will apply, as `EventTypeDef.advise`: the first that advises is the one kept. */
+  advise?(event: E, ctx: ReadContext): Advice | null;
 }
 
 export interface EffectContext extends ReadContext {

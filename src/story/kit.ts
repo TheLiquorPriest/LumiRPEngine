@@ -42,8 +42,8 @@ export interface StoryDeps {
   writes: Writes;
   /** The guidance files in force for the chat: the tools' descriptions and the answers' lines. */
   files: GuidanceFiles;
-  /** The lore lane's overlay; absent, an `overlay` operation is answered that there is none. */
-  overlay?: LoreOverlay;
+  /** The lore lane's overlay: what the story's `overlay` operation writes through. The live turn always gives it. */
+  overlay: LoreOverlay;
   /** Settings over `STORY_DEFAULTS`. */
   settings?: Partial<StorySettings>;
   /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */

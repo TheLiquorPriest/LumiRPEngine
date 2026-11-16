@@ -15,7 +15,7 @@ import { migrateStore } from "../../src/store/schema";
 import { openStore } from "../../src/store/store";
 import type { UserStore } from "../../src/store/store";
 import type { TurnRow } from "../../src/store/types";
-import { BESTIARY_SCHEMA, BESTIARY_TABLE, type DueList, type EngineDeps, engineTools, Lines, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../src/iface/index";
+import { BESTIARY_SCHEMA, BESTIARY_TABLE, type DueList, type EngineDeps, engineTools, gridMoves, Lines, mapView, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../src/iface/index";
 import { inventedWorld } from "../store/fixtures";
 
 export const USER = "user-a";
@@ -55,6 +55,9 @@ export const DUE: DueList = {
   },
 };
 
+/** The ports the live turn always gives: what falls due, squares on maps and the maps themselves (the map's own words are the shipped lines, none here). */
+export const PORTS = { due: DUE, grid: gridMoves(), map: mapView(Lines.none()) };
+
 export interface Rig {
   s: UserStore;
   writes: WriteQueue;
@@ -74,7 +77,7 @@ export async function rig(more: Partial<EngineDeps> = {}, doc: WorldDoc | "blank
   const s = store.user(USER);
   await writes.run(() => s.createChat(doc === "blank" ? { id: CHAT } : { id: CHAT, world: doc.id, revision }));
   const turn = await writes.run(() => s.beginTurn({ chat: CHAT, kind: "new" }));
-  const deps: EngineDeps = { store: s, env: store.env, writes, files: shippedTexts(), search: stateScan, due: DUE, ...more };
+  const deps: EngineDeps = { store: s, env: store.env, writes, files: shippedTexts(), search: stateScan, ...PORTS, ...more };
   const tools = new Map((await engineTools(deps)).map((t) => [t.name, t]));
   const call = async (name: string, args: JsonObject, agent = { id: "gm-1", definition: "gm", parent: "author-1" }): Promise<ToolResult> => {
     const tool = tools.get(name);

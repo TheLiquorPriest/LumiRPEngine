@@ -41,7 +41,7 @@ async function bench(): Promise<Bench> {
   const t = await openTable();
   await t.play();
   await t.play();
-  const tool = (await storyTools({ store: t.store, writes: t.writes, files: shippedTexts(), now: () => 7 })).find((x) => x.name === "story_record") as HostTool;
+  const tool = (await storyTools({ store: t.store, writes: t.writes, files: shippedTexts(), overlay: () => ({ unknown: "no lore here" }), now: () => 7 })).find((x) => x.name === "story_record") as HostTool;
   const play = (args: JsonObject, turn: string): Promise<ToolResult> =>
     tool.run(asHarnessPasses(tool, args), { scope: { user: USER, chat: CHAT, session: "s-1", turn }, agent: { id: "author-1", definition: "author" }, run: "run-1", callId: "call-1", signal: new AbortController().signal, onUpdate: () => undefined });
   return { t, play };

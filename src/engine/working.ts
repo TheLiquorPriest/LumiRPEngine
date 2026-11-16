@@ -4,8 +4,8 @@
 
 import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import { applyEvent, validateEvent } from "./events";
-import type { ReadContext, Rejection } from "./registry";
+import { adviseEvent, applyEvent, validateEvent } from "./events";
+import type { Advice, ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { WorldState } from "./state";
 
@@ -38,6 +38,8 @@ export class Working {
   readonly ctx: ReadContext;
   /** Events applied, in order. */
   readonly events: LedgerEvent[] = [];
+  /** What each applied event was advised, by its place among `events` (null: nothing): the event applied all the same. */
+  readonly advice: (Advice | null)[] = [];
   /** Events that failed validation and were not applied. */
   readonly dropped: Dropped[] = [];
 
@@ -60,8 +62,10 @@ export class Working {
       this.dropped.push({ event, rejection });
       return rejection;
     }
+    const advice = adviseEvent(this.reg, event, this.ctx);
     applyEvent(this.reg, event, this.state, this.ctx);
     this.events.push(event);
+    this.advice.push(advice);
     return null;
   }
 
@@ -117,6 +121,7 @@ export class Working {
       }
     }
     this.events.length = mark.events;
+    this.advice.length = mark.events;
     this.dropped.length = mark.dropped;
     // A checkpoint past where the events now end was taken on a path the restore left.
     if (this.checkpoint !== null && this.checkpoint.events > this.events.length) this.checkpoint = null;

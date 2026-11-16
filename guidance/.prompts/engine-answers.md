@@ -2,13 +2,16 @@
 description: The sentences the engine's tools answer with (world_query, world_search, world_apply, roll and the tools found by search). A tool's answer is data from the store and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named want_ (what a name was looked for as) and wants_ (what an argument takes) are words put inside the other lines. So is time_from_now, a time in a chat whose date nobody has set (a chat with no world, until the story sets the clock to a date and time), told as how long it is from now; with ahead or ago in minutes, or now.
 format: lines
 ---
-no_chat: There is no chat {{id}} in the engine's records.
-no_turn: There is no turn {{id}} in this chat.
-no_world: The world this chat plays ({{id}}) is not to hand, so nothing can be read.
+no_chat: There is no chat {{id}} in the engine's records.{{#exist}} There are: {{exist}}.{{/exist}}
+no_turn: There is no turn {{id}} in this chat.{{#exist}} Its latest are: {{exist}}.{{/exist}}
+scope_gone: This call belongs to {{what}} {{id}}, which takes no more changes: its staged changes were dropped, or its run has ended. Nothing was recorded.
+turn_joined: Turn {{id}} was joined to turn {{into}}, which holds its changes now; turn {{id}} itself is not read, so how things stand is not shown. Address turn {{into}}.
+engine_fault: {{tool}} failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.
+nothing_of_kind: Nothing that is {{sought}} is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.
 turn_needed: This call belongs to no turn, so nothing can be recorded. Reading needs no turn.
 needs_field: This call needs {{field}}.
 needs_one_field: This call needs one of {{fields}}, and only one.
-unknown: {{#n}}Operation {{n}} ({{op}}): {{/n}}there is nothing called {{name}} that is {{sought}}.{{#other}} By that name there is {{other}}.{{/other}}{{#near}} Near: {{near}}.{{/near}}
+unknown: {{#n}}Operation {{n}} ({{op}}): {{/n}}there is nothing called {{name}} that is {{sought}}.{{#other}} By that name there is {{other}}.{{/other}}{{#near}} Near: {{near}}.{{/near}}{{#nothing}} {{nothing}}{{/nothing}}
 several: {{#n}}Operation {{n}} ({{op}}): {{/n}}{{name}} fits more than one: {{several}}. Name one by its id.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
 unreadable_op: Operation {{n}}{{#op}} ({{op}}){{/op}}: {{field}} cannot be read{{#value}}, you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
@@ -54,9 +57,10 @@ wants_specs: a list of { label, value }
 wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
 time_from_now: {{#ahead}}{{ahead}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} from now{{/ahead}}{{#ago}}{{ago}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} before now{{/ago}}{{#now}}the time now{{/now}}
-not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply this at all ({{code}}).
+not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply this ({{code}}){{#reason}}: {{reason}}{{/reason}}.{{#choices}} It is one of: {{choices}}.{{#records}} Whatever the story meant by it, the {{records}} operation records it as given.{{/records}}{{/choices}}
 not_open: Operation {{n}} ({{op}}): {{what}} is {{status}}, and the books take no money out of an account that is not open, on any path.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
+outside_list: Operation {{n}} ({{op}}): {{field}} {{value}} is not one of what a {{field}} can hold: {{choices}}. Whatever you meant by it, the {{records}} operation records it as given.
 never: Operation {{n}} ({{op}}) was not applied: it writes to the {{lane}} lane, where the player allows no writes.
 declined: Operation {{n}} ({{op}}) was not applied: the player said no.{{#reason}} Their reason: {{reason}}{{/reason}}
 needs_held: Nothing was recorded: operation {{n}} ({{op}}) needs what the player held back, so the call cannot go ahead as it is.
@@ -88,14 +92,14 @@ closed_with_money: Operation {{n}} ({{op}}): {{what}} was closed with {{amount}}
 derived: Operation {{n}} ({{op}}): {{key}} is worked out from other values and is not set itself.
 follows_xp: Operation {{n}} ({{op}}): {{key}} follows {{xp}}; set {{xp}} instead.
 off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} is now {{value}}, outside what its sheet allows ({{type}}{{#min}}, at least {{min}}{{/min}}{{#max}}, at most {{max}}{{/max}}{{#choices}}, one of {{choices}}{{/choices}}).
-no_grid: Operation {{n}} ({{op}}): this host keeps no squares on maps yet, so a square, a neighbour or a zone cannot be given.
+not_numeric: Operation {{n}} ({{op}}): {{field}} of {{entity}} holds no number, so nothing was added to it and it stays as it was; the change is recorded as given.
+advised: Operation {{n}} ({{op}}) was recorded, and the engine advises on it ({{code}}).
 on_map: Operation {{n}} ({{op}}): {{said}}
 off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, which is not one of the ways on from {{from}}.
 time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{to}}.
 time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}, so it was left out and {{used}} was applied.{{#wants}} It takes {{wants}}.{{/wants}}
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the clock went back no further.
-due_unlisted: {{#n}}Operation {{n}} ({{op}}): {{/n}}what this span of time brings due is not listed by this host.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
 no_map: {{at}} has no map to show.

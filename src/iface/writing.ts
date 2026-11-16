@@ -15,16 +15,24 @@ import { calendarOf, formatClock } from "../engine/calendar";
 import { materializeIfNeeded } from "../engine/materialize";
 import { own } from "../engine/pack-kit";
 import { playedWorld } from "../engine/places-in-play";
-import type { Rejection } from "../engine/registry";
+import type { Advice, Rejection } from "../engine/registry";
 import type { EntityState, WorldState } from "../engine/state";
 import { Working } from "../engine/working";
 import { clockRecorded } from "../store/blank";
-import type { ChangeInput, ChangeRow, Lane, StoreState } from "../store/types";
-import type { Call, Reply } from "./kit";
+import { type ChangeInput, type ChangeRow, JoinedTurnError, type Lane, StoreInputError, type StoreState } from "../store/types";
+import type { TreeView } from "../store/view";
+import type { Call, KeptReport, Reply } from "./kit";
 import { fromNow } from "./ops-time";
-import { Reading } from "./reading";
+import { Reading, type Unreadable } from "./reading";
 import { citeOf, FILLED_IN, type Provenance, provenanceData } from "./source";
 import type { Lines } from "./texts";
+
+/** One piece of advice kept with an operation: a code with values, and the change (an index into the draft's inputs) it advised on. */
+export interface AdviceKept {
+  code: string;
+  values?: Record<string, JsonValue>;
+  input: number;
+}
 
 /** One operation's part of a draft: what it is, its lane and provenance, and where its changes sit among the draft's. */
 export interface Recorded {
@@ -34,6 +42,10 @@ export interface Recorded {
   prov: Provenance;
   /** Indexes into the draft's inputs. */
   inputs: number[];
+  /** What the engine advised on its changes: the events applied all the same. */
+  advice: AdviceKept[];
+  /** The reports its work made, as data with their words (`Reply.kept`), for the store to keep with its changes and list as unsettled. */
+  reports: KeptReport[];
   /** What the operation made, by id: a spawned person or thing. */
   made?: string;
 }
@@ -59,8 +71,16 @@ export class Draft {
   readonly recorded: Recorded[] = [];
   /** Store operations worked out beside the engine's state (the horizon), in order. */
   readonly storeState: { horizon: string[] };
-  /** The events the engine filled in from the world itself (`fill`), by identity: recorded with `FILLED_IN`, whichever operation records them. */
-  private readonly filled = new Set<LedgerEvent>();
+  /** The events the engine filled in from the world itself (`fill`), by identity, with the provenance each is recorded with, whichever operation records them. */
+  private readonly filled = new Map<LedgerEvent, Provenance>();
+  /** Advice that came with an operation, not with one of its events, by the operation's number, until the operation is recorded. */
+  private readonly advised = new Map<number, Advice[]>();
+  /** The engine's refusals the work met, by code. */
+  private readonly refusals = new Map<string, Rejection>();
+  /** The answer being made, when the work has one: advice becomes a report in it as the operation is recorded. */
+  reply: Reply | null = null;
+  /** The last handler of the engine's that threw while this draft was worked out: a fault, which the answer says is one. */
+  fault: { op: string; error: unknown } | null = null;
 
   constructor(
     readonly base: Reading,
@@ -75,10 +95,17 @@ export class Draft {
     return this.base.over({ ...this.base.state, world: this.w.state, horizon: this.storeState.horizon }, this.w.ctx);
   }
 
+  /** An error of the engine's own, met as a handler ran: logged by the store's sink, and kept so the call is answered as a fault. */
+  private broke(op: string, error: unknown): void {
+    this.fault = { op, error };
+    this.call.deps.env.failed?.({ op, error, turn: this.call.scope.turn ?? "", change: null });
+  }
+
   /**
    * Applies events in order on the working copy; the first that does not apply undoes the rest and is returned. A handler that throws
    * is an error in the engine, not in the story: the working copy is put back the same way, the error goes to the store's own sink
    * (`FoldEnv.failed`: the log and the live view), and the rejection carries only the code `failed`, which the answers file words.
+   * Each refusal is kept (`refusedBy`), so an answer that names its code gives the engine's reason and choices with it.
    */
   applyAll(events: readonly LedgerEvent[]): Rejection | null {
     const mark = this.w.lightMark();
@@ -88,15 +115,26 @@ export class Draft {
         rejection = this.w.apply(ev);
       } catch (error) {
         this.w.restore(mark);
-        this.call.deps.env.failed?.({ op: ev.type, error });
+        this.broke(ev.type, error);
         return { code: "failed", reason: "" };
       }
       if (rejection) {
         this.w.restore(mark);
-        return rejection;
+        return this.note(rejection);
       }
     }
     return null;
+  }
+
+  /** Keeps a refusal of the engine's, by its code, so the answer that names the code can give its reason and choices (`refusedBy`). It is returned. */
+  note(rejection: Rejection): Rejection {
+    this.refusals.set(rejection.code, rejection);
+    return rejection;
+  }
+
+  /** The engine's own refusal with this code, as the work on this draft last met it; undefined when none was. */
+  refusedBy(code: string): Rejection | undefined {
+    return this.refusals.get(code);
   }
 
   /**
@@ -106,30 +144,36 @@ export class Draft {
    * of its own, with `FILLED_IN`, whichever operation records it. A handler that throws is met as in
    * `applyAll`.
    */
-  fill(n: number, entity: EntityId, domain: DomainId): Rejection | null {
+  fill(n: number, entity: EntityId, domain: DomainId, prov: Provenance = FILLED_IN): Rejection | null {
     const mark = this.w.lightMark();
     try {
       materializeIfNeeded(this.base.registry, this.w, entity, domain, this.seed(n));
     } catch (error) {
       this.w.restore(mark);
-      this.call.deps.env.failed?.({ op: "materialize", error });
+      this.broke("materialize", error);
       return { code: "failed", reason: "" };
     }
-    for (const ev of this.w.events.slice(mark.events)) this.filled.add(ev);
+    for (const ev of this.w.events.slice(mark.events)) this.filled.set(ev, prov);
     return null;
   }
 
   /**
    * Applies what the engine works out from the world itself as the economy would post it (an
-   * account's authored opening), each event recorded as a change of its own with `FILLED_IN`, as
-   * `fill` records what it fills in. What does not apply undoes the rest and is returned.
+   * account's authored opening), each event recorded as a change of its own with `prov` (`FILLED_IN`
+   * when none is given: assumed, from the default), as `fill` records what it fills in; a world's
+   * authored value is given its own, established. What does not apply undoes the rest and is returned.
    */
-  fillWith(events: readonly LedgerEvent[]): Rejection | null {
+  fillWith(events: readonly LedgerEvent[], prov: Provenance = FILLED_IN): Rejection | null {
     const at = this.w.events.length;
     const bad = this.applyAll(events);
     if (bad) return bad;
-    for (const ev of this.w.events.slice(at)) this.filled.add(ev);
+    for (const ev of this.w.events.slice(at)) this.filled.set(ev, prov);
     return null;
+  }
+
+  /** Marks events an item op hands back as filled in from the world (`ItemOpApplied.filled`) to be recorded apart from the call's own, with `prov` (`FILLED_IN`: assumed, from the default, when none is given). */
+  markFilled(events: readonly LedgerEvent[], prov: Provenance = FILLED_IN): void {
+    for (const ev of events) this.filled.set(ev, prov);
   }
 
   /**
@@ -144,18 +188,46 @@ export class Draft {
     const own = events.filter((e) => !this.filled.has(e));
     const loose = own.length > 1 && own.every((e) => e.group === undefined);
     const group = loose ? `op:${hashParts(this.call.callId, String(n), JSON.stringify(own)).slice(0, 10)}` : undefined;
-    const rec: Recorded = { n, op, lane, prov, inputs: [], ...(extra.made !== undefined ? { made: extra.made } : {}) };
+    const rec: Recorded = { n, op, lane, prov, inputs: [], advice: [], reports: [], ...(extra.made !== undefined ? { made: extra.made } : {}) };
     events.forEach((ev, i) => {
-      if (this.filled.has(ev)) this.push(rec, lane, FILLED_IN, { op: ev.type, value: ev as unknown as JsonValue });
+      const filledWith = this.filled.get(ev);
+      if (filledWith !== undefined) this.push(rec, lane, filledWith, { op: ev.type, value: ev as unknown as JsonValue });
       else this.push(rec, lane, bookkeeping(events, i) ? FILLED_IN : prov, { op: ev.type, value: (group ? { ...ev, group } : ev) as unknown as JsonValue });
+      // What its validator advised of the event, kept with the change it advised on.
+      const advised = this.w.advice[from + i];
+      if (advised) this.advise(rec, advised, rec.inputs.length - 1);
     });
+    for (const advised of this.advised.get(n) ?? []) this.advise(rec, advised, rec.inputs.length - 1);
+    this.advised.delete(n);
     this.recorded.push(rec);
     return rec;
   }
 
+  /** Advice that comes with an operation rather than with one of its events (what an item op hands back): kept for the operation `n` when it is recorded. */
+  adviseOp(n: number, advice: Advice): void {
+    const list = this.advised.get(n) ?? [];
+    list.push(advice);
+    this.advised.set(n, list);
+  }
+
+  /** One piece of advice kept with an operation and said in the answer as a report: the line named by its code, else the general one. */
+  private advise(rec: Recorded, advice: Advice, input: number): void {
+    rec.advice.push({ code: advice.code, ...(advice.values !== undefined ? { values: advice.values } : {}), input });
+    const reply = this.reply;
+    if (reply === null) return;
+    const fields = { n: rec.n, op: rec.op, ...(advice.values ?? {}), code: advice.code };
+    if (reply.says(advice.code)) reply.report(advice.code, fields);
+    else reply.report("advised", fields);
+  }
+
+  /** Keeps with each recorded operation the reports its work made (`Reply.report`): data, with its words, for the store to list with the change. */
+  keepReports(reply: Reply): void {
+    for (const rec of this.recorded) rec.reports = reply.kept.filter((r) => r.n === rec.n);
+  }
+
   /** Records one of the store's own operations (the horizon), or a change the store's fact store applies (a fact, `src/store/facts.ts`). */
   recordStoreOp(n: number, opName: string, lane: Lane, prov: Provenance, change: Pick<ChangeInput, "op" | "value">): Recorded {
-    const rec: Recorded = { n, op: opName, lane, prov, inputs: [] };
+    const rec: Recorded = { n, op: opName, lane, prov, inputs: [], advice: [], reports: [] };
     this.push(rec, lane, prov, change);
     this.recorded.push(rec);
     return rec;
@@ -179,10 +251,12 @@ export interface Committed {
   state: StoreState;
 }
 
-/** What working a call out inside its write came to: what the work gave, and what was recorded (null when it gave nothing to record). */
+/** What working a call out inside its write came to: what the work gave, and what was recorded (null when it gave nothing to record, or the scope could not take it: `gone`). */
 export interface Worked<T> {
   out: T;
   done: Committed | null;
+  /** Why the write was not recorded when its scope could not take it: its turn's staged changes were dropped, its job has ended, or its turn was joined to another. */
+  gone?: Unreadable;
 }
 
 /**
@@ -190,6 +264,7 @@ export interface Worked<T> {
  * `work` runs inside the write, so it reads the state as it stands then: a call made at the same
  * time as another of the turn is worked out on what the other left, never on the state both read
  * before either was recorded. The draft it gives is recorded on that same state; none records nothing.
+ * A turn dropped, a job ended or a turn joined to another by the time it records is told (`gone`), never thrown.
  */
 export async function commit<T>(call: Call, work: () => { out: T; draft: Draft | null }): Promise<Worked<T>> {
   const { store, writes } = call.deps;
@@ -198,9 +273,19 @@ export async function commit<T>(call: Call, work: () => { out: T; draft: Draft |
     if (draft === null) return { out, done: null };
     const turn = draft.base.turn;
     if (turn === null) throw new Error("a draft is recorded only on a turn");
-    if (draft.inputs.length === 0) return { out, done: { rows: [], state: store.stateFor(turn.id, call.agent.job ?? null).state } };
-    const { changes, state } = store.addChanges(turn.id, draft.inputs);
-    return { out, done: { rows: changes, state } };
+    try {
+      if (draft.inputs.length === 0) return { out, done: { rows: [], state: store.stateFor(turn.id, call.agent.job ?? null).state } };
+      const { changes, state } = store.addChanges(turn.id, draft.inputs);
+      return { out, done: { rows: changes, state } };
+    } catch (error) {
+      if (error instanceof JoinedTurnError) return { out, done: null, gone: { missing: "joined", id: error.turn, into: error.joined } };
+      if (!(error instanceof StoreInputError)) throw error;
+      // What the store refuses for what is no longer there: a turn dropped with its staged changes, or a job that has ended.
+      if (store.turn(turn.id)?.status === "dropped") return { out, done: null, gone: { missing: "gone", id: turn.id, what: "turn" } };
+      const job = call.agent.job;
+      if (job !== undefined) return { out, done: null, gone: { missing: "gone", id: job, what: "job" } };
+      throw error;
+    }
   }, call.tool);
 }
 
@@ -308,14 +393,26 @@ export function touchedRefs(changed: readonly JsonObject[]): string[] {
   return changed.flatMap((c) => (typeof c.at === "string" && (c.at.startsWith("entity:") || c.at.startsWith("place:")) ? [c.at] : []));
 }
 
-/** The answer to a draft recorded: each operation with its lane and provenance, what changed, how it now stands, and what did not apply. */
+/**
+ * The answer to a draft recorded: each operation with its lane and provenance, what changed, how it now stands, and what did not apply.
+ * A turn joined to another after the write was recorded still says what it recorded; in place of how things now stand it says the fact
+ * (`turn_joined`), since nothing reads the turn it was joined to here.
+ */
 export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: { operations?: JsonObject[]; added?: ReadonlyMap<number, JsonObject> } = {}): Reply {
-  const view = draft.call.deps.store.viewAt(draft.base.turn?.id ?? "");
+  const store = draft.call.deps.store;
+  let view: TreeView | null = null;
+  try {
+    view = store.viewAt(draft.base.turn?.id ?? "");
+  } catch (error) {
+    if (!(error instanceof JoinedTurnError)) throw error;
+    reply.line("turn_joined", { id: error.turn, into: error.joined });
+  }
   const changed = changedBetween(draft.base.state, done.state, draft.base.doc, draft.inputs.map((i) => i.value), draft.base.lines);
   const operations: JsonObject[] = [...(extra.operations ?? [])];
   for (const rec of draft.recorded) {
     const rows = rec.inputs.map((i) => done.rows[i]).filter((r): r is ChangeRow => r !== undefined);
-    const applied = rows.every((r) => r.applied);
+    // An operation that recorded nothing did not apply.
+    const applied = rows.length > 0 && rows.every((r) => r.applied);
     const entry: JsonObject = { n: rec.n, op: rec.op, lane: rec.lane, applied, ...provenanceData(rec.prov) };
     if (rec.made !== undefined) entry.made = rec.made;
     Object.assign(entry, extra.added?.get(rec.n) ?? {});
@@ -332,10 +429,13 @@ export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: 
     }
   }
   operations.sort((a, b) => Number(a.n) - Number(b.n));
-  const now = touchedRefs(changed).flatMap((ref) => {
-    const node = view.node(ref);
-    return node ? [{ ref: node.ref, name: node.name, what: node.what, reflection: node.reflection, values: node.values.map((v) => ({ key: v.key, value: v.value, ...(v.from !== undefined ? { from: v.from } : {}) })) } as unknown as JsonObject] : [];
-  });
+  const now =
+    view === null
+      ? []
+      : touchedRefs(changed).flatMap((ref) => {
+          const node = view.node(ref);
+          return node ? [{ ref: node.ref, name: node.name, what: node.what, reflection: node.reflection, values: node.values.map((v) => ({ key: v.key, value: v.value, ...(v.from !== undefined ? { from: v.from } : {}) })) } as unknown as JsonObject] : [];
+        });
   reply.data({ operations, changed, now });
   reply.details = { ...reply.details, changes: done.rows.map((r) => r.id) };
   return reply;

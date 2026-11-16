@@ -9,17 +9,19 @@ import type { WorldDoc } from "../shared/world";
 import { placeAliases, placeKey } from "../engine/place-names";
 import { own } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
+import { orgTypeOf } from "../engine/org";
+import { isParty } from "../packs/economy/core/pay";
 import type { Registry } from "../engine/registry-impl";
 import { isGone, kindDef, kindIs } from "../engine/scope";
 import { resolveThing as resolveThingWords } from "../engine/thing-resolve";
 import { holdsOf, isThing } from "../engine/things";
 import type { TreeView } from "../store/view";
-import type { StoreState, TurnRow } from "../store/types";
-import type { Call } from "./kit";
-import type { Lines } from "./texts";
+import { JoinedTurnError, type StoreState, type TurnRow } from "../store/types";
+import type { Call, Reply } from "./kit";
+import { type Lines, textOf } from "./texts";
 
 /** What a name is wanted as. */
-export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track";
+export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track" | "party" | "organization";
 
 /** A name that was found. `ref` is its place in the tree (`entity:<id>`, `place:<id>`, `world`); a track's is `track:<id>`. */
 export interface Found {
@@ -35,12 +37,37 @@ export interface Near {
   what: string;
 }
 
-/** A name that was not found as wanted: the near matches, each of the several it fits, and what goes by that very name but is not what was wanted. */
+/**
+ * A name that was not found as wanted: the near matches (never none while anything of that kind exists), each of the several
+ * it fits, and what goes by that very name but is not what was wanted. `empty`: nothing of that kind exists to be near.
+ */
 export interface Missed {
   name: string;
   near: Near[];
   several: Near[];
   other: Near[];
+  empty?: true;
+}
+
+/**
+ * Why a call's scope has no state to read: the chat or the turn it names is not there (with what does exist), the turn's
+ * staged changes were dropped, or the turn was joined to another (`into`), which holds its changes now.
+ */
+export type Unreadable = { missing: "chat" | "turn"; id: string; exist: string[] } | { missing: "gone"; id: string; what: "turn" | "job" } | { missing: "joined"; id: string; into: string };
+
+/** A scope found unreadable after a reading was made (a turn joined to another in between): thrown to the tool wrapper, which tells it as the fact. */
+export class ScopeError extends Error {
+  constructor(readonly why: Unreadable) {
+    super(`scope unreadable: ${why.missing} ${why.id}`);
+    this.name = "ScopeError";
+  }
+}
+
+/** Says why a scope has no state to read, in lines of the answers' file: the id that does not exist with what does, the turn or job that is gone, the turn that was joined to another. */
+export function saysUnreadable(reply: Reply, why: Unreadable): Reply {
+  if (why.missing === "gone") return reply.line("scope_gone", { what: why.what, id: why.id }).fail();
+  if (why.missing === "joined") return reply.line("turn_joined", { id: why.id, into: why.into }).fail();
+  return reply.line(`no_${why.missing}`, { id: why.id, exist: textOf(why.exist) }).fail();
 }
 
 interface Candidate {
@@ -76,20 +103,32 @@ export class Reading {
   /**
    * The state the call reads: at its turn, with what the turn has staged, and for a job's agent with
    * what the job has recorded so far (plan §10.9: nobody else sees that until the job ends), or at the
-   * chat's head when the call belongs to no turn. Null when the scope names no chat, or a turn, the
-   * store does not have, or the chat's world revision is not to hand: the answer says which.
+   * chat's head when the call belongs to no turn. When the scope has none, why: the chat or turn it names
+   * is an id the store does not have (with what does exist), its staged changes were dropped, or it was
+   * joined to another turn (the fact is told, never followed: PlanTurn's one place resolves a join). A
+   * chat's world revision that is kept is loaded; one that cannot be is a fault, and throws.
    */
-  static of(call: Call): Reading | { missing: "chat" | "turn" | "world"; id: string } {
+  static of(call: Call): Reading | Unreadable {
     const { store, env } = call.deps;
-    if (store.chat(call.scope.chat) === null) return { missing: "chat", id: call.scope.chat };
+    const near = call.settings.nearMatches;
+    if (store.chat(call.scope.chat) === null) return { missing: "chat", id: call.scope.chat, exist: store.chats().slice(-near).map((c) => c.id) };
     let turn: TurnRow | null = null;
     if (call.scope.turn !== undefined) {
       turn = store.turn(call.scope.turn);
-      if (turn === null || turn.chat !== call.scope.chat) return { missing: "turn", id: call.scope.turn };
+      if (turn === null || turn.chat !== call.scope.chat) return { missing: "turn", id: call.scope.turn, exist: store.line(call.scope.chat).slice(-near).map((t) => t.turn) };
+      if (turn.joined !== null) return { missing: "joined", id: turn.id, into: turn.joined };
+      if (turn.status === "dropped") return { missing: "gone", id: turn.id, what: "turn" };
     }
-    const state = turn ? store.stateFor(turn.id, call.agent.job ?? null).state : store.headState(call.scope.chat).state;
+    let folded;
+    try {
+      folded = turn ? store.stateFor(turn.id, call.agent.job ?? null) : store.headState(call.scope.chat);
+    } catch (error) {
+      if (error instanceof JoinedTurnError) return { missing: "joined", id: error.turn, into: error.joined };
+      throw error;
+    }
+    const state = folded.state;
     const doc = env.worlds(state.world.revision);
-    if (doc === undefined) return { missing: "world", id: state.world.revision };
+    if (doc === undefined) throw new Error(`the world revision ${state.world.revision} of chat ${call.scope.chat} cannot be loaded`);
     return new Reading(call, state, doc, env.registry.context(doc, state.world), turn);
   }
 
@@ -112,9 +151,14 @@ export class Reading {
     return this.ctx.world;
   }
 
-  /** The tree over this state. */
+  /** The tree over this state. A turn joined to another since this reading was made is told as the fact (`ScopeError`), never thrown as the store's. */
   view(): TreeView {
-    this.tree ??= this.turn ? this.call.deps.store.viewFor(this.turn.id, this.call.agent.job ?? null) : this.call.deps.store.view(this.call.scope.chat);
+    try {
+      this.tree ??= this.turn ? this.call.deps.store.viewFor(this.turn.id, this.call.agent.job ?? null) : this.call.deps.store.view(this.call.scope.chat);
+    } catch (error) {
+      if (error instanceof JoinedTurnError) throw new ScopeError({ missing: "joined", id: error.turn, into: error.joined });
+      throw error;
+    }
     return this.tree;
   }
 
@@ -142,6 +186,8 @@ export class Reading {
         if (!gone && isGone(this.state.world, id)) continue;
         if (want === "person" && !this.isPerson(id)) continue;
         if (want === "thing" && this.isPerson(id)) continue;
+        if (want === "party" && !isParty(this.ctx, id)) continue;
+        if (want === "organization" && orgTypeOf(this.ctx, id) === null) continue;
         if (want === "holder" && !this.isPerson(id) && !(isThing(this.ctx, id) && holdsOf(this.ctx, id) !== null)) continue;
         const aliases = Array.isArray(e.fields.aliases) ? e.fields.aliases.filter((a): a is string => typeof a === "string") : [];
         out.push({ id, ref: `entity:${id}`, names: [e.name, ...aliases], what: this.whatOf(id), place: false });
@@ -197,7 +243,7 @@ export class Reading {
     // What goes by that very name but is not what was wanted (a weather region named as a place), so the answer can say what it is.
     const wanted = new Set(all.map((c) => c.ref));
     const other = this.candidates("point", gone).filter((c) => !wanted.has(c.ref) && rules.slice(0, 3).some((rule) => rule(c)));
-    return { name: said, near: this.nearest(bare, all), several: [], other: other.map((c) => this.near(c)) };
+    return { name: said, near: this.nearest(bare, all), several: [], other: other.map((c) => this.near(c)), ...(all.length === 0 ? { empty: true as const } : {}) };
   }
 
   private found(c: Candidate): Found {
@@ -208,25 +254,43 @@ export class Reading {
     return { id: c.id, name: c.names[0] ?? c.id, what: c.what };
   }
 
-  /** The candidates closest to words that named none: one holding the other, then shared words, then a small spelling distance. */
+  /**
+   * The candidates nearest to words that named none, nearest first: one holding the other, then shared words, then a spelling
+   * distance within `engine.nearDistance` of the name's length, then the rest by their distance: never none while any exists.
+   */
   private nearest(said: string, all: readonly Candidate[]): Near[] {
-    const s = spaced(said);
-    const saidWords = new Set(wordsOf(said));
-    const scored: { c: Candidate; score: number }[] = [];
-    for (const c of all) {
-      let score = 0;
-      for (const n of [c.id, ...c.names]) {
-        const t = spaced(n);
-        if (t === "" || s === "") continue;
-        if (t.includes(s) || s.includes(t)) score = Math.max(score, 3);
-        else if (wordsOf(n).some((w) => saidWords.has(w))) score = Math.max(score, 2);
-        else if (distance(t, s) <= Math.max(1, Math.floor(s.length / 4))) score = Math.max(score, 1);
-      }
-      if (score > 0) scored.push({ c, score });
-    }
-    scored.sort((a, b) => b.score - a.score || (a.c.names[0] ?? "").localeCompare(b.c.names[0] ?? "") || a.c.id.localeCompare(b.c.id));
-    return scored.slice(0, this.call.settings.nearMatches).map((x) => this.near(x.c));
+    const measured = all.map((c) => ({ c, ...measure(said, [c.id, ...c.names], this.call.settings.nearDistance) }));
+    measured.sort((a, b) => b.score - a.score || a.apart - b.apart || (a.c.names[0] ?? "").localeCompare(b.c.names[0] ?? "") || a.c.id.localeCompare(b.c.id));
+    return measured.slice(0, this.call.settings.nearMatches).map((x) => this.near(x.c));
   }
+}
+
+/** How near a candidate's names are to what was said: its score (one holding the other 3, shared words 2, a spelling distance within `fraction` of the said length 1) and its closest spelling distance. */
+function measure(said: string, names: readonly string[], fraction: number): { score: number; apart: number } {
+  const s = spaced(said);
+  const saidWords = new Set(wordsOf(said));
+  const allowed = Math.max(1, Math.floor(s.length * fraction));
+  let score = 0;
+  let apart = Number.POSITIVE_INFINITY;
+  for (const n of names) {
+    const t = spaced(n);
+    if (t === "") continue;
+    const d = distance(t, s);
+    apart = Math.min(apart, d);
+    if (s === "") continue;
+    if (t.includes(s) || s.includes(t)) score = Math.max(score, 3);
+    else if (wordsOf(n).some((w) => saidWords.has(w))) score = Math.max(score, 2);
+    else if (d <= allowed) score = Math.max(score, 1);
+  }
+  return { score, apart };
+}
+
+/** A list of choices ranked nearest first to what was said, by the reading's own measure: the list a refusal of a value outside a fixed list gives, cut as the near matches are. */
+export function nearestOf(said: string, choices: readonly string[], settings: { nearDistance: number }): string[] {
+  return choices
+    .map((c) => ({ c, ...measure(said, [c], settings.nearDistance) }))
+    .sort((a, b) => b.score - a.score || a.apart - b.apart || a.c.localeCompare(b.c))
+    .map((x) => x.c);
 }
 
 /** Whether a resolution found what it looked for. */
@@ -236,7 +300,6 @@ export function isFound(r: Found | Missed): r is Found {
 
 /** Levenshtein distance between two short texts. */
 function distance(a: string, b: string): number {
-  if (Math.abs(a.length - b.length) > 8) return Number.POSITIVE_INFINITY;
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     const row = [i];

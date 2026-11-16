@@ -16,8 +16,8 @@ import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { clockText, listDue, timeFrom } from "./ops-time";
-import { missed, unknownFields } from "./ops";
-import { type Found, isFound, Reading } from "./reading";
+import { missed, missedData, unknownFields } from "./ops";
+import { type Found, isFound, Reading, saysUnreadable, type Unreadable } from "./reading";
 import { textOf } from "./texts";
 import { commit, Draft } from "./writing";
 
@@ -25,8 +25,13 @@ import { commit, Draft } from "./writing";
 export function readingOr(call: Call, reply: Reply): Reading | null {
   const r = Reading.of(call);
   if (r instanceof Reading) return r;
-  reply.line(`no_${r.missing}`, { id: r.id }).fail();
+  saysUnreadable(reply, r);
   return null;
+}
+
+/** The reply that says why a write could not be recorded where it was made: its turn's changes dropped, its job ended, or its turn joined to another. */
+export function unreadable(call: Call, why: Unreadable): Reply {
+  return saysUnreadable(call.reply(), why);
 }
 
 /** A name a fixed tool's argument gives, found; or null, the reply having said it is not there or fits several. */
@@ -38,7 +43,7 @@ export function foundOr(reading: Reading, reply: Reply, field: string, said: Jso
   const r = reading.find(said, want);
   if (isFound(r)) return r;
   if (r.several.length > 0) reply.line("several", { field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) });
-  else reply.line("unknown", missed(reading.lines, field, r, want));
+  else reply.line("unknown", missed(reading.lines, field, r, want)).refusedWith({ field, ...missedData(r) });
   reply.fail();
   return null;
 }
@@ -68,14 +73,11 @@ export const WORLD_QUERY: ToolSpec = {
       if (to === null) return reply.line("unreadable", { field: "due", value: JSON.stringify(args.due), wants: reading.lines.line("wants_time") ?? "" }).fail();
       const from = reading.state.world.clock;
       const span = { from: clockText({ reading }, Math.min(from, to)), to: clockText({ reading }, Math.max(from, to)) };
-      const due = call.deps.due;
-      if (due === undefined) reply.data({ span }).line("due_unlisted", {});
-      else reply.data({ span, due: listDue({ reading, reply, call }, due.due(reading.state, { from: Math.min(from, to), to: Math.max(from, to) }, at.ref, call.settings.dueItems)) });
+      reply.data({ span, due: listDue({ reading, reply, call }, call.deps.due.due(reading.state, { from: Math.min(from, to), to: Math.max(from, to) }, at.ref, call.settings.dueItems)) });
     }
     if (args.map === true) {
-      const map = call.deps.map;
       const place = at.ref.startsWith("place:") ? at.id : null;
-      const text = map === undefined || place === null ? null : map.text({ state: reading.state, env: call.deps.env, place });
+      const text = place === null ? null : call.deps.map.text({ state: reading.state, env: call.deps.env, place });
       if (text === null) reply.line("no_map", { at: `${at.name} [${at.id}]` });
       else reply.tree(text);
     }
@@ -172,6 +174,7 @@ export const ROLL: ToolSpec = {
       const now = readingOr(call, missing);
       return now === null ? { out: missing, draft: null } : drawRoll(call, now, who, purpose, by, against);
     });
+    if (worked.gone) return unreadable(call, worked.gone);
     if (worked.out instanceof Reply) return worked.out;
     const id = worked.done?.rows[0]?.id;
     return reply.data({ roll: { ...(id !== undefined ? { id: String(id) } : {}), who: `${who.name} [${who.id}]`, ...worked.out } });

@@ -25,7 +25,6 @@ nothing_recorded: Nothing was recorded. Send the call again with that put right.
 already_closed: Operation {{n}} ({{op}}): {{id}} was already closed.
 due_now: Operation {{n}} ({{op}}): it falls due at {{due}}, which is not after now ({{now}}), so it is due at once.
 due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it is due at once.
-no_overlays: Operation {{n}} ({{op}}): this host keeps no lore overlays yet, so none was written.
 overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#near}} Near: {{near}}.{{/near}}
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.

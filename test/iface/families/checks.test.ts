@@ -41,7 +41,7 @@ describe("checks", () => {
     expect(said.split("It is one of:")).toHaveLength(2);
     expect(said).toContain("climb_wall");
     const nobody = await t.call("checks_odds", { action: "climb_wall", actor: "Brahm" });
-    expect(texts(nobody)[0]).toBe("there is nothing called Brahm that is a person. Near: Bram [bram].");
+    expect(texts(nobody)[0]).toBe("there is nothing called Brahm that is a person. Near: Bram [bram], Tam [tam], Wren [wren], Odile [odile].");
     for (const x of [r, nobody]) wordsFromFiles(x);
   });
 });

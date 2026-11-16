@@ -24,7 +24,7 @@ import { accessFor, assignFor } from "./access";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { orgPower, orgTypeOf } from "./org";
 import { labelOf, optionalQuery, optionalService, own, rowOf } from "./pack-kit";
-import type { ReadContext, Rejection } from "./registry";
+import type { Advice, ReadContext, Rejection } from "./registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "./scope";
 import { typeRowOf } from "./thing-index";
 import { findThings, meets } from "./thing-resolve";
@@ -51,6 +51,8 @@ export interface ItemOpOptions {
    * count, from Gear 2 (`packs.gear.config.containers`); never the story's read, an agent's or the GM's.
    */
   room?: boolean;
+  /** The caller takes advice: where the rules of things would refuse, the op applies and returns the advice (`ItemOpApplied.advice`) instead. */
+  advise?: true;
 }
 
 /** What a thing being made adds to a holder, before it is in the world: its volume and weight, its count's. */
@@ -59,10 +61,16 @@ export interface Adding {
   weightG: number;
 }
 
-/** What an applied op did beyond its events: the thing it made, and where the size rules put a thing other than asked. */
+/**
+ * What an applied op did beyond its events: the thing it made, where the size rules put a thing other than asked, what the
+ * engine advises on it when the caller opted in (`ItemOpOptions.advise`: the op applies and says what did not add up), and the
+ * events that fill in values from the world itself (`filled`: recorded apart from the call's own, with the provenance of a default).
+ */
 export interface ItemOpApplied {
   made?: EntityId;
   placed?: Spot;
+  advice?: Advice[];
+  filled?: readonly LedgerEvent[];
 }
 
 /** A refused op; a make that found what it would make names it (`exists`). */

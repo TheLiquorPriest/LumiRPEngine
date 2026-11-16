@@ -184,10 +184,6 @@ const passTime: OpDef = {
     // Told of the state as recorded: once this has set the clock, its times are dates.
     o.after((state): JsonObject => {
       const span: JsonObject = { from: clockText(o, Math.min(now, to), state), to: clockText(o, Math.max(now, to), state) };
-      if (due === undefined) {
-        o.reply.line("due_unlisted", { n: o.n, op: o.op });
-        return { span };
-      }
       const listing = due.due(state, { from: Math.min(now, to), to: Math.max(now, to) }, at?.ref ?? null, o.call.settings.dueItems);
       return { span, due: listDue(o, listing, { n: o.n, op: o.op }, state) };
     });

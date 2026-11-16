@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Lane, StoreState } from "../store/types";
 import type { ItemOpOptions } from "../engine/thing-ops";
 import type { Call, Reply } from "./kit";
-import { type Found, isFound, type Missed, type Reading, type Want } from "./reading";
+import { type Found, isFound, type Missed, nearestOf, type Reading, type Want } from "./reading";
 import { type Fields, type Lines, textOf } from "./texts";
 import type { Draft } from "./writing";
 import type { Provenance } from "./source";
@@ -18,6 +18,8 @@ export interface OpContext {
   /** Its place in the call's list, from 1. */
   n: number;
   op: string;
+  /** The lane this call records the operation in: the one the call names when the operation allows several, else the operation's own. */
+  lane: Lane;
   args: JsonObject;
   prov: Provenance;
   draft: Draft;
@@ -31,11 +33,16 @@ export interface OpContext {
   after(add: (state: StoreState) => JsonObject): void;
 }
 
-/** What an operation could not read: the line of the answers' file that says so, and its fields; for a name not found, what it was wanted as. */
+/**
+ * What an operation could not read: the line of the answers' file that says so, and its fields; for a name not found, what it
+ * was wanted as. `data` is what a refusal carries beside its words, as data: the `choices` a value was one of, or the `near`
+ * names its candidates were drawn from, so an answer gives them whole (`rejected`).
+ */
 export interface Unread {
   line: string;
   fields: Fields;
   want?: Want;
+  data?: JsonObject;
 }
 
 /** One everyday operation (plan §6.8): its name, the lane it writes, the arguments it needs, and its work. */
@@ -48,6 +55,8 @@ export interface OpDef {
   takes: readonly string[];
   /** False for the Author's own note that changes nothing in the world: it takes no provenance, so it is neither sourced nor unsourced. */
   provenance?: false;
+  /** The lanes the call may name for this operation (its `lane` argument); absent, it records in `lane` alone. */
+  lanes?: readonly Lane[];
   /** A worked example, for the operation reference. */
   example: JsonObject;
   /** Works the operation out on the draft and records it; what it could not read, when it could not. */
@@ -57,6 +66,19 @@ export interface OpDef {
 /** Whether an operation's work could not read its arguments. */
 export function isUnread(v: unknown): v is Unread {
   return typeof v === "object" && v !== null && "line" in v && "fields" in v;
+}
+
+/**
+ * An operation's refusal on a reply: its line, and what it carries as data (`data`: the choices a value was one of, or the near names
+ * a name was drawn from), kept in the answer's details (`Reply.refusedWith`) beside the sentence.
+ */
+export function tellUnread(reply: Reply, unread: Unread): Reply {
+  reply.line(unread.line, unread.fields);
+  if (unread.data !== undefined) {
+    const { n, op } = unread.fields;
+    reply.refusedWith({ ...(typeof n === "number" ? { n } : {}), ...(typeof op === "string" ? { op } : {}), ...unread.data });
+  }
+  return reply;
 }
 
 /** The text of an argument, when it is given as text and is not empty. */
@@ -76,6 +98,16 @@ export function notOneOf(o: OpContext, field: string, value: JsonValue, choices:
   return { line: "unreadable_op", fields: { n: o.n, op: o.op, field, value: JSON.stringify(value), choices: textOf(choices) } };
 }
 
+/**
+ * A value the story gave that is outside a list fixed in code (a tier, a tax status, a life state, a relation type): refused only
+ * because the typed field cannot hold it. The answer gives the list, nearest the value first, and names the operation that
+ * records what was meant whatever the story says (`fact`), so no story value is left with no way to be recorded (D-169).
+ */
+export function outsideList(o: OpContext, field: string, value: JsonValue, choices: readonly string[]): Unread {
+  const ranked = typeof value === "string" ? nearestOf(value, choices, o.call.settings) : [...choices];
+  return { line: "outside_list", fields: { n: o.n, op: o.op, field, value: JSON.stringify(value), choices: textOf(ranked), records: "fact" }, data: { field, choices: ranked } };
+}
+
 /** What an argument that is not of the shape it takes reads as: the shape in the answers' words, its `wants_<shape>` line. */
 export function notAs(o: OpContext, field: string, value: JsonValue, shape: string): Unread {
   return { line: "unreadable_op", fields: { n: o.n, op: o.op, field, value: JSON.stringify(value), wants: o.call.lines.line(`wants_${shape}`) ?? "" } };
@@ -84,15 +116,23 @@ export function notAs(o: OpContext, field: string, value: JsonValue, shape: stri
 /**
  * A name not found, as an answer's fields give it: what was wanted (`wanted`, the code's own name
  * for it, and `sought`, the answers' `want_<wanted>` line), the near names of that kind, and those
- * of another kind that go by that very name; each list put in as one text, so it is said once.
+ * of another kind that go by that very name; each list put in as one text, so it is said once. With
+ * nothing of that kind recorded at all (`empty`), `nothing` is the answers' `nothing_of_kind` line:
+ * the near list is never empty while anything of the kind exists (R-74).
  */
-export function unknownFields(lines: Lines, field: string, wanted: string, name: string, near: readonly string[], other: readonly string[] = []): Fields {
-  return { field, name, wanted, sought: lines.line(`want_${wanted}`) ?? "", near: textOf(near), other: textOf(other) };
+export function unknownFields(lines: Lines, field: string, wanted: string, name: string, near: readonly string[], other: readonly string[] = [], empty = false): Fields {
+  const sought = lines.line(`want_${wanted}`) ?? "";
+  return { field, name, wanted, sought, near: textOf(near), other: textOf(other), nothing: empty ? (lines.line("nothing_of_kind", { sought }) ?? "") : "" };
 }
 
 /** A name that was not found as wanted, as `unknownFields` gives it: each near or other one by its name and id, the other with what it is. */
 export function missed(lines: Lines, field: string, r: Missed, want: Want): Fields {
-  return unknownFields(lines, field, want, r.name, r.near.map((x) => `${x.name} [${x.id}]`), r.other.map((x) => `${x.name} [${x.id}] (${x.what})`));
+  return unknownFields(lines, field, want, r.name, r.near.map((x) => `${x.name} [${x.id}]`), r.other.map((x) => `${x.name} [${x.id}] (${x.what})`), r.empty === true);
+}
+
+/** What a name not found carries as data: the near matches, each by its id, name and what it is. */
+export function missedData(r: Missed): JsonObject {
+  return { near: r.near.map((x) => ({ id: x.id, name: x.name, what: x.what })) };
 }
 
 /** The name an argument gives (or `said`, one item of a list argument), found as wanted on the draft; or what says it is not there (with the near matches) or fits several. */
@@ -101,7 +141,7 @@ export function find(o: OpContext, field: string, want: Want, gone = false, said
   const r = o.reading.find(said, want, gone);
   if (isFound(r)) return r;
   if (r.several.length > 0) return { line: "several", fields: { n: o.n, op: o.op, field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) } };
-  return { line: "unknown", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want) }, want };
+  return { line: "unknown", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want) }, want, data: missedData(r) };
 }
 
 /** A name argument that may be left out: undefined when it is. */

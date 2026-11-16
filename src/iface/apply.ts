@@ -9,17 +9,18 @@
 // lane, so RPH's gate asks the user's setting for it before it runs, and it is not asked again here.
 
 import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
+import type { Rejection } from "../engine/registry";
 import { isRecord } from "../shared/json";
-import type { StoreState } from "../store/types";
+import type { Lane, StoreState } from "../store/types";
 import { type Call, NUMBER, OBJECT, Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
-import type { OpContext, OpDef, Unread } from "./ops";
+import { type OpContext, type OpDef, tellUnread, type Unread } from "./ops";
 import { THING_OPS } from "./ops-things";
 import { TIME_OPS } from "./ops-time";
 import { VALUE_OPS } from "./ops-values";
-import { readingOr } from "./fixed";
-import type { Reading } from "./reading";
+import { readingOr, unreadable } from "./fixed";
+import { nearestOf, type Reading } from "./reading";
 import { MARKS, PROVENANCE_PROPERTIES, type Provenance, provenanceOf } from "./source";
-import { textOf } from "./texts";
+import { type Fields, textOf } from "./texts";
 import { answerDraft, commit, Draft } from "./writing";
 
 /** The everyday operations, in the order the plan names them. */
@@ -84,13 +85,15 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   near: TEXT,
   zone: TEXT,
   why: TEXT,
+  lane: TEXT,
   ...PROVENANCE_PROPERTIES,
 };
 
-/** One operation a call asks for, read for its shape: its place in the call, what works it out, its arguments and its provenance. */
+/** One operation a call asks for, read for its shape: its place in the call, what works it out, the lane it records in, its arguments and its provenance. */
 export interface Asked {
   n: number;
   def: OpDef;
+  lane: Lane;
   args: JsonObject;
   prov: Provenance;
 }
@@ -103,18 +106,42 @@ interface Attempt {
   unread?: Unread;
 }
 
+/**
+ * What a refusal of the engine's says, given with its code: its reason, the list the value was one of (nearest first and no more than
+ * the near matches when the call's words are known), and the operation that records what was meant whatever the story says (`fact`).
+ */
+function refusalFields(call: Call, r: Rejection): { fields: Fields; data: JsonObject } {
+  const choices = r.choices === undefined ? [] : r.said === undefined ? [...r.choices] : nearestOf(r.said, r.choices, call.settings).slice(0, call.settings.nearMatches);
+  return {
+    fields: { reason: r.reason, choices: textOf(choices), ...(choices.length > 0 ? { records: "fact" } : {}) },
+    data: { code: r.code, ...(choices.length > 0 ? { choices } : {}) },
+  };
+}
+
+/** An operation that could not be read, as the call's answer gives it: the engine's own refusal with its reason and choices; a handler that threw as a fault. */
+function unreadAs(call: Call, draft: Draft, unread: Unread): Unread {
+  if (unread.line !== "not_applicable" || typeof unread.fields.code !== "string") return unread;
+  if (unread.fields.code === "failed" && draft.fault !== null) return { line: "engine_fault", fields: { tool: call.tool, ...(unread.fields.n !== undefined ? { n: unread.fields.n } : {}), ...(unread.fields.op !== undefined ? { op: unread.fields.op } : {}) } };
+  const refused = draft.refusedBy(unread.fields.code);
+  if (refused === undefined) return unread;
+  const said = refusalFields(call, refused);
+  return { ...unread, fields: { ...unread.fields, ...said.fields }, data: { ...(unread.data ?? {}), ...said.data } };
+}
+
 /** Works the operations out in order on a fresh copy of the state, those in `skip` left out. */
 function attempt(call: Call, base: Reading, asked: readonly Asked[], skip: ReadonlySet<number>): Attempt {
   const reply = call.reply();
   const draft = new Draft(base, call);
+  draft.reply = reply;
   const afters = new Map<number, (state: StoreState) => JsonObject>();
   for (const a of asked) {
     if (skip.has(a.n)) continue;
     const later = asked.filter((x) => x.n > a.n).map((x) => x.args);
-    const o: OpContext = { n: a.n, op: a.def.name, args: a.args, prov: a.prov, draft, reply, call, reading: draft.reading(), later, after: (add) => afters.set(a.n, add) };
+    const o: OpContext = { n: a.n, op: a.def.name, lane: a.lane, args: a.args, prov: a.prov, draft, reply, call, reading: draft.reading(), later, after: (add) => afters.set(a.n, add) };
     const unread = a.def.run(o);
-    if (unread) return { reply, draft, afters, unread };
+    if (unread) return { reply, draft, afters, unread: unreadAs(call, draft, unread) };
   }
+  draft.keepReports(reply);
   return { reply, draft, afters };
 }
 
@@ -126,9 +153,9 @@ async function approved(call: Call, asked: readonly Asked[], askArgs: (mine: rea
   const out = new Map<number, Held>();
   const approvals = call.deps.approvals;
   if (approvals === undefined) return out;
-  const lanes = [...new Set(asked.map((a) => a.def.lane))];
+  const lanes = [...new Set(asked.map((a) => a.lane))];
   for (const lane of lanes) {
-    const mine = asked.filter((a) => a.def.lane === lane);
+    const mine = asked.filter((a) => a.lane === lane);
     const permission = await approvals.permission(call.scope, lane);
     if (permission === "auto") continue;
     if (permission === "never") {
@@ -145,18 +172,28 @@ async function approved(call: Call, asked: readonly Asked[], askArgs: (mine: rea
 /** The provenance of an operation that takes none: nothing cited, nothing marked. */
 const NO_PROVENANCE: Provenance = { source: null, precision: null, standing: null, marks: [] };
 
+/** The lane an operation records in: the one the call names where the operation allows several, else its own; or what could not be read. */
+function laneOf(n: number, def: OpDef, args: JsonObject): Lane | Unread {
+  const named = args.lane;
+  if (def.lanes === undefined || named === undefined || named === null) return def.lane;
+  if (typeof named === "string" && def.lanes.includes(named as Lane)) return named as Lane;
+  return { line: "unreadable_op", fields: { n, op: def.name, field: "lane", value: JSON.stringify(named), choices: textOf(def.lanes) } };
+}
+
 /** An operation read for its shape: what it needs is there and its provenance reads; or what is wrong with it. */
 export function readOperation(n: number, def: OpDef, args: JsonObject, call: Call): Asked | Unread {
   const missing = def.needs.filter((f) => args[f] === undefined || args[f] === null || args[f] === "");
   if (missing.length > 0) return { line: "needs", fields: { n, op: def.name, fields: missing } };
+  const lane = laneOf(n, def, args);
+  if (typeof lane !== "string") return lane;
   const prov = def.provenance === false ? NO_PROVENANCE : provenanceOf(args, call.agent);
   if ("field" in prov) return { line: "unreadable_op", fields: { n, op: def.name, field: prov.field, value: JSON.stringify(prov.value), choices: textOf(prov.choices) } };
-  return { n, def, args, prov };
+  return { n, def, lane, args, prov };
 }
 
 /** What a kind of operation needs and takes, and which of the arguments it was sent it does not read: said after anything about it that could not be read. */
 function takesLine(reply: Reply, def: OpDef, args: JsonObject): void {
-  const read = new Set(["op", ...def.needs, ...def.takes, ...(def.provenance === false ? [] : Object.keys(PROVENANCE_PROPERTIES))]);
+  const read = new Set(["op", ...def.needs, ...def.takes, ...(def.lanes !== undefined ? ["lane"] : []), ...(def.provenance === false ? [] : Object.keys(PROVENANCE_PROPERTIES))]);
   reply.line("op_takes", { op: def.name, needs: textOf(def.needs), takes: textOf(def.takes.filter((f) => !def.needs.includes(f))), ignored: textOf(Object.keys(args).filter((k) => !read.has(k))) });
 }
 
@@ -203,16 +240,25 @@ function provenanceLines(reply: Reply, a: Asked): void {
   if (a.prov.marks.includes(MARKS.noConsent)) reply.line("invented_unconsented", fields);
 }
 
-/** A call refused: only what could not be read, and what `explain` adds; what the operations before it reported never stands, since nothing is recorded. */
-function refusal(call: Call, unread: Unread, explain?: (reply: Reply, unread: Unread) => void): Reply {
-  const refused = call.reply().line(unread.line, unread.fields);
-  explain?.(refused, unread);
+/**
+ * A call refused: only what could not be read, and what `explain` adds; what the operations before it reported never stands, since
+ * nothing is recorded. What the refusal carries as data (the choices a value was one of, the near names a name was drawn from) is
+ * given whole beside its words. A handler of the engine's that threw is a fault, said so and kept in the call's details, never the
+ * agent's call refused.
+ */
+function refusal(call: Call, run: Attempt, explain?: (reply: Reply, unread: Unread) => void): Reply {
+  const unread = run.unread as Unread;
+  const refused = tellUnread(call.reply(), unread);
+  if (unread.line === "engine_fault" && run.draft.fault !== null) {
+    const { error } = run.draft.fault;
+    refused.details = { fault: { tool: call.tool, error: error instanceof Error ? error.message : String(error) } };
+  } else explain?.(refused, unread);
   return refused.line("nothing_recorded", {}).fail();
 }
 
 /** Says why an operation the player held back was not applied; its entry for the answer's data. */
 function heldBack(reply: Reply, a: Asked, why: Held): JsonObject {
-  const lane = a.def.lane;
+  const lane = a.lane;
   if (why === "never") reply.line("never", { n: a.n, op: a.def.name, lane });
   else reply.line("declined", { n: a.n, op: a.def.name, ...(why.declined !== undefined ? { reason: why.declined } : {}) });
   return { n: a.n, op: a.def.name, lane, applied: false, held: why === "never" ? "never" : "declined" };
@@ -248,7 +294,7 @@ export async function runOperations(call: Call, asked: readonly Asked[], askArgs
   if (base.turn === null) return first.line("turn_needed", {}).fail();
   // Read first on the state as it stands, so the player is asked nothing about a call that cannot be read.
   const tried = attempt(call, base, asked, new Set());
-  if (tried.unread) return refusal(call, tried.unread, explain);
+  if (tried.unread) return refusal(call, tried, explain);
   const held = askArgs === undefined ? new Map<number, Held>() : await approved(call, asked, askArgs);
   const skip = new Set(held.keys());
   // Another call of the turn may be recorded while the player is asked, or at the same moment: the call is worked out again on what it left.
@@ -261,9 +307,10 @@ export async function runOperations(call: Call, asked: readonly Asked[], askArgs
     const needsHeld = run.unread !== undefined && skip.size > 0 && attempt(call, now, asked, new Set()).unread === undefined;
     return { out: { run, needsHeld }, draft: run.unread ? null : run.draft };
   });
+  if (worked.gone) return unreadable(call, worked.gone);
   if (worked.out instanceof Reply) return worked.out;
   const { run, needsHeld } = worked.out;
-  if (run.unread) return needsHeld ? heldRefusal(call, run.unread, asked, held) : refusal(call, run.unread, explain);
+  if (run.unread) return needsHeld ? heldRefusal(call, run.unread, asked, held) : refusal(call, run, explain);
   const done = worked.done;
   if (done === null) throw new Error("a call worked out in full is recorded");
   const reply = run.reply;

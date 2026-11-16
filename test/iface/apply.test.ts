@@ -169,13 +169,13 @@ describe("answers that say what would work", () => {
     });
     expect(r.error).toBe(true);
     expect(texts(r)).toEqual([
-      "Operation 2 (move): there is nothing called Skerry Rock that is a place. By that name there is Skerry Rock [skerry_rock] (Weather region).",
+      "Operation 2 (move): there is nothing called Skerry Rock that is a place. By that name there is Skerry Rock [skerry_rock] (Weather region). Near: The Far Road [far_road], The Cellar [cellar], The Common Room [common_room], Thornbury [thornbury], Hollow Vale [vale].",
       "A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.",
       "move needs who, to, and also takes with, square, near, zone, why.",
       "Nothing was recorded. Send the call again with that put right.",
     ]);
     const near = await t.call("world_apply", { operations: [{ op: "move", who: "bram", to: "Celler", source: src }] });
-    expect(texts(near)[0]).toBe("Operation 1 (move): there is nothing called Celler that is a place. Near: The Cellar [cellar].");
+    expect(texts(near)[0]).toContain("Operation 1 (move): there is nothing called Celler that is a place. Near: The Cellar [cellar]");
     wordsFromFiles(r);
   });
 
@@ -193,7 +193,7 @@ describe("answers that say what would work", () => {
     const edited = (await shipped.read("prompts", "engine-answers"))?.replace("want_place: a place", "want_place: somewhere on the map").replace(/^make_place: .*$/m, "make_place: Spawn it first.");
     const t = await rig({ files: { read: async (kind, name) => (kind === "prompts" && name === "engine-answers" ? edited : shipped.read(kind, name)) } });
     const r = await t.call("world_apply", { operations: [{ op: "move", who: "bram", to: "Gull Skerry", source: src }] });
-    expect(texts(r).slice(0, 2)).toEqual(["Operation 1 (move): there is nothing called Gull Skerry that is somewhere on the map.", "Spawn it first."]);
+    expect(texts(r).slice(0, 2)).toEqual(["Operation 1 (move): there is nothing called Gull Skerry that is somewhere on the map. Near: The Cellar [cellar], Hollow Vale [vale], Thornbury [thornbury], Market Square [market_square], The Common Room [common_room].", "Spawn it first."]);
     const off = await rig({ files: { read: async (kind, name) => (kind === "prompts" && name === "engine-answers" ? undefined : shipped.read(kind, name)) } });
     const calls: JsonObject[] = [{ operations: [{ op: "move", who: "bram", to: "Gull Skerry" }] }, { operations: [{ op: "spawn", kind: "building", name: "Mill" }] }, {}];
     for (const call of calls) {

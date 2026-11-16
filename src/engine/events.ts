@@ -35,7 +35,7 @@ import type {
 } from "../shared/ledger";
 import { APART_GROUP, UPGRADE_ASPECTS } from "../shared/ledger";
 import { unpinPause } from "./engine-pack";
-import type { EventTypeDef, ReadContext, Rejection } from "./registry";
+import type { Advice, EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { WorldState } from "./state";
 import { touch } from "./touched";
 import { migrate, type MarkerEnv } from "./upgrade";
@@ -86,15 +86,19 @@ const addDef: EventTypeDef<AddEvent> = {
   validate: (e, ctx) => {
     if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", `no entity ${e.entity}`);
     if (!safeKey(e.field)) return reject("bad_field", "not a field name");
-    const current = ctx.state.entities[e.entity]?.fields[e.field];
-    if (current !== undefined && typeof current !== "number") return reject("not_numeric", `${e.entity}.${e.field} is not a number`);
+    // A field that holds no number does not refuse the event: it applies and leaves the field as it is, and `advise` says so (plan §6.7).
     return Number.isFinite(e.delta) ? null : reject("bad_delta", "delta must be finite");
   },
   apply: (e, state) => {
     const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
     if (!entity || !safeKey(e.field)) return;
     const current = entity.fields[e.field];
-    entity.fields[e.field] = (typeof current === "number" ? current : 0) + e.delta;
+    if (current !== undefined && typeof current !== "number") return;
+    entity.fields[e.field] = (current ?? 0) + e.delta;
+  },
+  advise: (e, ctx) => {
+    const current = hasEntity(ctx.state, e.entity) && safeKey(e.field) ? ctx.state.entities[e.entity]?.fields[e.field] : undefined;
+    return current !== undefined && typeof current !== "number" ? { code: "not_numeric", values: { entity: e.entity, field: e.field } } : null;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${e.delta >= 0 ? "+" : ""}${e.delta}`,
@@ -248,6 +252,11 @@ export function validateEvent(types: EventTypes, event: LedgerEvent, ctx: ReadCo
   const def = types.get(event.type);
   if (!def) return reject("unknown_event", `unknown event type ${event.type}`);
   return def.validate(event, ctx);
+}
+
+/** What an event that validated will apply with, and says did not add up: asked on the state it will see, before it applies. Null when it advises nothing. */
+export function adviseEvent(types: EventTypes, event: LedgerEvent, ctx: ReadContext): Advice | null {
+  return types.get(event.type)?.advise?.(event, ctx) ?? null;
 }
 
 export function applyEvent(types: EventTypes, event: LedgerEvent, state: WorldState, ctx: ReadContext): void {

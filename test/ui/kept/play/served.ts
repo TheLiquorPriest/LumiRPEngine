@@ -11,6 +11,7 @@ import type { HostTool, JsonObject, ToolCtx } from "rp-harness/contract";
 import { LiveHub, RouteError } from "../../../../src/app";
 import { buildRoutes, BuildService } from "../../../../src/build";
 import { engineTools, shippedTexts, stateScan } from "../../../../src/iface/index";
+import { PORTS } from "../../../iface/rig";
 import { playRoutes, PlayService } from "../../../../src/play";
 import type { ResultBodies } from "../../../../src/shared/protocol";
 import type { Store } from "../../../../src/store";
@@ -118,7 +119,7 @@ export function servedRpe(): ServedRpe {
     },
     async apply(chat, turn, operations) {
       const s = bed.store.user(USER);
-      const tools = new Map((await engineTools({ store: s, env: bed.store.env, writes: bed.writes, files: shippedTexts(), search: stateScan })).map((t) => [t.name, t]));
+      const tools = new Map((await engineTools({ store: s, env: bed.store.env, writes: bed.writes, files: shippedTexts(), search: stateScan, ...PORTS })).map((t) => [t.name, t]));
       const tool = tools.get("world_apply") as HostTool;
       const call: ToolCtx = { scope: { user: USER, chat, session: "session-1", turn }, agent: { id: "author-1", definition: "author" }, run: turn, callId: `call-${++asked}`, signal: new AbortController().signal, onUpdate: () => undefined };
       const out = await tool.run(asHarnessPasses(tool, { operations }), call);

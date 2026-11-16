@@ -21,7 +21,7 @@ import type { Lane, StoreState } from "../../store/types";
 import { readOperation, runOperations } from "../apply";
 import { readingOr } from "../fixed";
 import type { Call, Reply, ToolSpec } from "../kit";
-import { find, isUnread, itemOptions, minorUnits, missed, named, type OpContext, type Unread } from "../ops";
+import { find, isUnread, itemOptions, minorUnits, missed, missedData, named, type OpContext, tellUnread, type Unread } from "../ops";
 import { openAuthored } from "../ops-values";
 import type { Found, Reading, Want } from "../reading";
 import { PROVENANCE_PROPERTIES } from "../source";
@@ -90,7 +90,7 @@ export function readTool(def: ReadDef): ToolSpec {
       const r = readingOr(call, reply);
       if (r === null) return reply;
       const unread = def.read(r, args, reply, call);
-      return unread ? reply.line(unread.line, unread.fields).fail() : reply;
+      return unread ? tellUnread(reply, unread).fail() : reply;
     },
   };
 }
@@ -118,16 +118,22 @@ export function notApplicable(o: OpContext, code: string): Unread {
 export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, lane: Lane, what: EntityId, more: { asked?: EntityId; bend?: (code: string) => Unread | null | undefined } = {}): Unread | undefined {
   const w = o.draft.w;
   const from = w.events.length;
-  const out = applyItemOp(w, op, itemOptions(o));
+  const out = applyItemOp(w, op, { ...itemOptions(o), advise: true });
   if ("code" in out) {
+    o.draft.note(out);
     if (isAlready(out.code)) o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, what) });
     else {
       const bent = more.bend !== undefined ? more.bend(out.code) : null;
       if (bent !== undefined) return bent ?? notApplicable(o, out.code);
     }
-  } else if (out.placed !== undefined) {
-    const at = "place" in out.placed ? out.placed.place : out.placed.in;
-    o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, what), asked: named(o.reading, more.asked ?? what), where: named(o.reading, at) });
+  } else {
+    // What the engine advises on the op (the op applied all the same) is said in the answer and kept with its change; what it filled in from the world is recorded apart, as a default.
+    for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
+    if (out.filled !== undefined) o.draft.markFilled(out.filled);
+    if (out.placed !== undefined) {
+      const at = "place" in out.placed ? out.placed.place : out.placed.in;
+      o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, what), asked: named(o.reading, more.asked ?? what), where: named(o.reading, at) });
+    }
   }
   o.draft.record(o.n, o.op, lane, o.prov, from);
   return undefined;
@@ -136,7 +142,7 @@ export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, 
 /** Today's GM edit of one operation (`engine/edits` `resolveEdit`), applied on the draft: its rejection, or null. */
 export function editChange(o: OpContext, op: FixOp): Rejection | null {
   const out = resolveEdit(o.reading.registry, o.reading.doc, o.draft.w.state, [op], { gm: true, runSeed: o.draft.seed(o.n), by: o.call.agent.definition, confirmed: true });
-  if ("rejection" in out) return out.rejection;
+  if ("rejection" in out) return o.draft.note(out.rejection);
   return o.draft.applyAll(out.events);
 }
 
@@ -146,7 +152,10 @@ export function effectChange(o: OpContext, spec: EffectSpec): Rejection | null {
   const mark = w.lightMark();
   const out = applyEffects(o.reading.registry, w, [spec], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
   const refused = out.rejected[0]?.rejection ?? null;
-  if (refused !== null) w.restore(mark);
+  if (refused !== null) {
+    w.restore(mark);
+    o.draft.note(refused);
+  }
   return refused;
 }
 
@@ -239,7 +248,7 @@ export interface EditDef {
   required: readonly string[];
   example: JsonObject;
   /** The edit the call asks for, with the id an answer names it by (`what`); or what could not be read. */
-  build(o: OpContext): { op: FixOp; what: EntityId } | Unread;
+  build(o: OpContext): { op: FixOp; what: EntityId; findings?: { code: string; values: Record<string, JsonValue> }[] } | Unread;
   /** What the answer shows besides the things it touched, from the state as recorded: a value kept apart from them (tags). */
   shows?(o: OpContext, state: StoreState): JsonObject;
 }
@@ -265,7 +274,7 @@ export function editTool(def: EditDef): ToolSpec {
       if (refused !== null) {
         if (!isAlready(refused.code)) return notApplicable(o, refused.code);
         o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, asked.what) });
-      }
+      } else for (const found of asked.findings ?? []) o.reply.report(found.code, { n: o.n, op: o.op, ...found.values });
       o.draft.record(o.n, o.op, def.lane, o.prov, from);
       return undefined;
     },
@@ -286,7 +295,7 @@ export function foundIn(r: Reading, field: string, said: JsonValue | undefined, 
   const f = r.find(said, want);
   if ("id" in f) return f;
   if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: textOf(f.several.map((x) => `${x.name} [${x.id}]`)) } };
-  return { line: "unknown", fields: missed(r.lines, field, f, want) };
+  return { line: "unknown", fields: missed(r.lines, field, f, want), data: missedData(f) };
 }
 
 /** A value an answer's data carries as it was given, for a report's field. */

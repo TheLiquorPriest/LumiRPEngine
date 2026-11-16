@@ -288,6 +288,7 @@ const set: OpDef = {
 const fact: OpDef = {
   name: "fact",
   lane: "engine",
+  lanes: ["engine", "story"],
   needs: ["about", "key", "value"],
   takes: ["about", "key", "value", "replaces"],
   example: { op: "fact", about: "wren", key: "coin", value: "spent most of what she had", precision: "vague", source: { from: "prose", message: "m-0019" } },
@@ -299,7 +300,7 @@ const fact: OpDef = {
     const value = textArg(o.args, "value");
     if (key === undefined || value === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["key", "value"] } };
     const replaces = textArg(o.args, "replaces");
-    o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, FACTS.change({ about: about.ref, key, value, ...(replaces !== undefined ? { replaces } : {}) }));
+    o.draft.recordStoreOp(o.n, o.op, o.lane, o.prov, FACTS.change({ about: about.ref, key, value, ...(replaces !== undefined ? { replaces } : {}) }));
     o.after((state) => ({ facts: FACTS.of(state, about.ref) }));
     return undefined;
   },

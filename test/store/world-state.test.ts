@@ -86,7 +86,7 @@ describe("the world state", () => {
     expect(block.sections.horizon?.[0]).toEqual({ kind: "horizon_words", depth: 0, fields: { text: storm } });
   });
 
-  test("a section switched off is absent, a moved one moves, and with no map or due list to hand the layout says so", () => {
+  test("a section switched off is absent, a moved one moves, and with no map or due list to hand there is nothing of either", () => {
     const { s, t2 } = played();
     const off = SHIPPED_LAYOUT.replace(/\{\{#due\}\}[\s\S]*?\{\{\/due\}\}\n/, "");
     const block = worldState(s, { chat: "c", turn: t2.id, layout: off, map: MAP, due: DUE });
@@ -96,9 +96,10 @@ describe("the world state", () => {
     for (const h of HEADINGS.filter((x) => x !== "### Due")) expect(block.text).toContain(h);
     const moved = SHIPPED_LAYOUT.replace(/(\{\{#unsettled\}\}[\s\S]*?\{\{\/unsettled\}\}\n)/, "").replace("{{#horizon}}", "{{#unsettled}}\n### Unsettled\n\n{{unsettled}}\n{{/unsettled}}\n{{#horizon}}");
     expect(worldState(s, { chat: "c", turn: t2.id, layout: moved }).text.startsWith("### Unsettled")).toBe(true);
-    const bare = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT }).text.split("\n");
-    expect(bare).toContain("  No map is drawn here: this world state has no maps to hand.");
-    expect(bare).toContain("What falls due is not listed here.");
+    const bare = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT }).text;
+    // With no source of what falls due or of maps, there is neither section nor line to say so.
+    expect(bare).not.toContain("### Due");
+    expect(bare).not.toContain("No map is drawn here");
   });
 
   test("a chat with no world compiles one from its first turn", () => {
@@ -110,7 +111,7 @@ describe("the world state", () => {
     // With no horizon, the outline opens on the world's own line, which says nothing is recorded yet.
     expect(block.sections.outline?.map((l) => l.kind)).toEqual(["level_world"]);
     expect(block.text).toContain("[world] (world) — nothing is recorded in it yet");
-    expect(block.text).toContain("What falls due is not listed here.");
+    expect(block.sections.due).toBeUndefined();
   });
 
   test("on a world of 5,000 things it fits the budget with the horizon whole, in a few milliseconds", () => {
@@ -134,7 +135,7 @@ describe("the world state", () => {
     // The horizon whole: the room and the group, every line of each as a full query gives it.
     const view = s.viewAt(t2.id);
     const whole = [view.query(room, "full"), view.query("group_3", "full")].flatMap((q) => q?.lines ?? []);
-    expect(block.sections.horizon?.filter((l) => l.kind !== "map" && l.kind !== "map_unavailable")).toEqual(whole);
+    expect(block.sections.horizon?.filter((l) => l.kind !== "map")).toEqual(whole);
     expect(renderView(whole, SHIPPED_PART).split("\n").length).toBeGreaterThan(50);
     // Everything else within the budget; a line for every level of the world; what did not fit opened by a query.
     expect(block.tokens).toBeLessThanOrEqual(WORLD_STATE_DEFAULTS.budget);

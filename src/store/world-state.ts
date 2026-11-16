@@ -78,9 +78,9 @@ export interface WorldStateInput {
   turn: string;
   /** The world state's layout as the chat has it: the part's text, or the part as read. */
   layout: string | Part;
-  /** Each place's map as text; absent, the horizon says by the layout's line that no map is to hand. */
+  /** Each place's map as text; absent, no map is shown. */
   map?: MapText;
-  /** What time brings due; absent, the due section says by the layout's line that it is not listed. */
+  /** What time brings due; absent, no due section is given. */
   due?: DueSource;
   settings?: Partial<WorldStateSettings>;
 }
@@ -178,14 +178,12 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
       beyond.passed = listed.more;
     }
   }
-  if (want("due")) {
-    if (input.due === undefined) sections.due = [{ kind: "due_unlisted", depth: 0, fields: {} }];
-    else {
-      // Its span is the user's own `dueAhead`.
-      const listed = dueShown(part, input.due, state, { from: now, to: now + settings.dueAhead }, budget, (d) => dueLine("due", d, { after: d.at - now }));
-      sections.due = listed.lines;
-      beyond.due = listed.more;
-    }
+  // Without a source of what falls due (a world state read where no clock runs) there is no section to give.
+  if (want("due") && input.due !== undefined) {
+    // Its span is the user's own `dueAhead`.
+    const listed = dueShown(part, input.due, state, { from: now, to: now + settings.dueAhead }, budget, (d) => dueLine("due", d, { after: d.at - now }));
+    sections.due = listed.lines;
+    beyond.due = listed.more;
   }
   if (want("open")) {
     sections.open = [];
@@ -306,12 +304,8 @@ function dueShown(part: Part, source: DueSource, state: StoreState, span: { from
 function horizonLines(view: TreeView, ref: string, map: MapText | undefined): ViewLine[] {
   const lines = view.query(ref, "full")?.lines ?? [];
   if (!ref.startsWith("place:")) return lines;
-  let mapLine: ViewLine | null;
-  if (map === undefined) mapLine = { kind: "map_unavailable", depth: 1, fields: {} };
-  else {
-    const text = map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
-    mapLine = text === null ? null : { kind: "map", depth: 1, fields: { text } };
-  }
+  const text = map === undefined ? null : map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
+  const mapLine: ViewLine | null = text === null ? null : { kind: "map", depth: 1, fields: { text } };
   if (mapLine === null) return lines;
   const at = lines.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
   return at < 0 ? [...lines, mapLine] : [...lines.slice(0, at), mapLine, ...lines.slice(at)];

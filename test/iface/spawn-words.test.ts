@@ -75,7 +75,7 @@ describe("spawn somewhere given in words", () => {
     const r = await t.call("world_apply", { operations: [{ op: "spawn", kind: "item", name: "Wet coat", on: "peg by the stove", source: SRC }] });
     expect(r.error).toBe(true);
     wordsFromFiles(r);
-    expect(texts(r)[0]).toBe("Operation 1 (spawn): there is nothing called peg by the stove that is a thing.");
+    expect(texts(r)[0]).toBe("Operation 1 (spawn): there is nothing called peg by the stove that is a thing. Nothing that is a thing is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.");
     expect(t.s.changes(t.turn.id)).toEqual([]);
   });
 });

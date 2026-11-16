@@ -10,19 +10,27 @@ import type { MapConfig } from "../shared/map-config";
 import type { UserStore } from "../store/store";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
+import { JoinedTurnError } from "../store/types";
 import type { Part } from "../store/words";
+import { saysUnreadable, ScopeError } from "./reading";
 import type { Fields, GuidanceFiles, Lines, ToolText } from "./texts";
 
 /** Every fixed value of the engine's tools, each a setting with this default. */
 export const IFACE_DEFAULTS = Object.freeze({
   /** How many near matches an answer about a name that is not there lists. */
   nearMatches: 5,
+  /** How far off in spelling a name may be and still be offered as a near match, as a part of the name's length (a quarter of it). */
+  nearDistance: 0.25,
   /** How many levels below its point `world_query` shows when it names no depth. */
   queryDepth: 1,
   /** How many things `world_search` answers with at most. */
   searchHits: 10,
   /** How many things falling due in a span an answer lists at most, soonest first; how many more fall in the span is said, not listed. */
   dueItems: 50,
+  /** The credit score the finance tables are read at for someone with no score recorded. */
+  creditScoreAssumed: 700,
+  /** The most operations one GM edit carries. */
+  editOps: 64,
 });
 
 export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: number };
@@ -33,10 +41,13 @@ export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: numb
  */
 export const IFACE_SETTING_DEFS = {
   nearMatches: { key: "engine.nearMatches", default: IFACE_DEFAULTS.nearMatches, takes: { type: "whole", least: 0 }, perConnection: false, name: "Near matches listed", about: "How many near matches an answer about a name that is not there lists.", effect: "turn" },
+  nearDistance: { key: "engine.nearDistance", default: IFACE_DEFAULTS.nearDistance, takes: { type: "number", least: 0 }, perConnection: false, name: "Spelling distance of a near match", about: "How far off in spelling a name may be and still be offered as a near match, as a part of the name's length: 0.25 lets a quarter of its letters differ.", effect: "turn" },
   queryDepth: { key: "engine.queryDepth", default: IFACE_DEFAULTS.queryDepth, takes: { type: "whole", least: 0 }, perConnection: false, name: "Depth of a world query", about: "How many levels below its point world_query shows when it names no depth.", effect: "turn" },
   // A search that may give no hit at all would answer nothing whatever it was asked.
   searchHits: { key: "engine.searchHits", default: IFACE_DEFAULTS.searchHits, takes: { type: "whole", least: 1 }, perConnection: false, name: "Hits a world search gives", about: "The most things one world_search answers with.", effect: "turn" },
   dueItems: { key: "engine.dueItems", default: IFACE_DEFAULTS.dueItems, takes: { type: "whole", least: 0 }, perConnection: false, name: "Things falling due listed", about: "The most things falling due in a span an answer lists, soonest first; how many more fall in it is said.", effect: "turn" },
+  creditScoreAssumed: { key: "engine.creditScoreAssumed", default: IFACE_DEFAULTS.creditScoreAssumed, takes: { type: "whole", least: 300, most: 850 }, perConnection: false, name: "Score assumed for someone with none", about: "The credit score the finance tables are read at for someone with no score recorded.", effect: "turn" },
+  editOps: { key: "engine.editOps", default: IFACE_DEFAULTS.editOps, takes: { type: "whole", least: 1 }, perConnection: false, name: "Operations one GM edit carries", about: "The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it.", effect: "turn" },
 } as const satisfies NumberSettings<keyof IfaceSettings>;
 
 /** Every setting the engine's tools read, as a config file writes it. */
@@ -144,12 +155,12 @@ export interface EngineDeps {
   search: StateSearch;
   /** The user's Auto / Confirm / Never per lane; absent, every lane is Auto (Appendix D.1). */
   approvals?: ApprovalsPort;
-  /** What time brings due; absent, an answer that lets time pass says that it is not listed. */
-  due?: DueList;
-  /** Squares on a map; absent, an operation that names a square is answered that there are none. */
-  grid?: GridMoves;
-  /** A place's map as text; absent, `world_query` answers that it has none to show. */
-  map?: MapView;
+  /** What time brings due, for an answer that lets time pass and for what a span of `world_query` lists. */
+  due: DueList;
+  /** Squares on a map, for the operations that name one. */
+  grid: GridMoves;
+  /** A place's map as text, for what `world_query` shows of a place. */
+  map: MapView;
   /** Settings over `IFACE_DEFAULTS`. */
   settings?: Partial<IfaceSettings>;
   /** The map's settings for the chat (`map:` in its config), for the map tools; absent, their defaults. */
@@ -163,6 +174,14 @@ export interface EngineDeps {
 /** How a part of an answer came to be, for the live view and for the test that holds words to files. */
 export type PartKind = "data" | "line" | "tree";
 
+/** A report kept as data: the line's name and its fields beside its words, and the operation it is about (the field `n`), so the store can keep it with the change. */
+export interface KeptReport {
+  line: string;
+  fields: Fields;
+  words: string;
+  n?: number;
+}
+
 /**
  * An answer being made: parts the model reads (data as JSON, the store's tree as it prints it, and
  * lines of the answers' file), reports (lines too), marks a rule can name, and details for the live
@@ -172,6 +191,8 @@ export class Reply {
   readonly parts: ToolContent[] = [];
   readonly kinds: PartKind[] = [];
   readonly reports: string[] = [];
+  /** Each report as data, in the order they were made. */
+  readonly kept: KeptReport[] = [];
   readonly marks = new Set<string>();
   details: JsonObject = {};
   failed = false;
@@ -210,7 +231,10 @@ export class Reply {
   /** A report, as a line of the answers' file. */
   report(name: string, fields: Fields = {}): this {
     const text = this.lines.line(name, fields);
-    if (text !== undefined && text.trim() !== "") this.reports.push(text);
+    if (text !== undefined && text.trim() !== "") {
+      this.reports.push(text);
+      this.kept.push({ line: name, fields, words: text, ...(typeof fields.n === "number" ? { n: fields.n } : {}) });
+    }
     return this;
   }
 
@@ -222,6 +246,15 @@ export class Reply {
   /** The call did not do what it was asked: the answer says why, in lines. */
   fail(): this {
     this.failed = true;
+    return this;
+  }
+
+  /**
+   * What a refusal carries as data (the `choices` a value was one of, or the `near` names a name was drawn from), kept in the
+   * answer's details beside the sentence the model reads: for the Turn page, a rule and the next tool to build on.
+   */
+  refusedWith(data: JsonObject): this {
+    this.details = { ...this.details, refused: data };
     return this;
   }
 
@@ -300,7 +333,23 @@ export function described(properties: Readonly<Record<string, JsonObject>>, requ
   };
 }
 
-/** A tool as RPH holds it: its spec with its file's words, run with the call's context. */
+/**
+ * What a call's thrown error is answered as, for any area's tool: a fault in RPE's own code, said in the words of the
+ * answers' file in force (the line `engine_fault`), handed to the store's own sink for the log and the live view (`turn`: the
+ * turn the call belongs to, "" when none), and kept in the call's details (`fault`) so the Turn page shows it as a fault,
+ * never as the agent's write refused.
+ */
+export function faultAnswer(lines: Lines, tool: string, error: unknown, failed: FoldEnv["failed"], turn: string): ToolResult {
+  failed?.({ op: tool, error, turn, change: null });
+  const reply = new Reply(lines).line("engine_fault", { tool }).fail();
+  reply.details = { fault: { tool, error: error instanceof Error ? error.message : String(error), ...(error instanceof Error && error.stack !== undefined ? { stack: error.stack } : {}) } };
+  return reply.result();
+}
+
+/**
+ * A tool as RPH holds it: its spec with its file's words, run with the call's context. A throw in its code is a fault, answered as
+ * one (`faultAnswer`); a scope found unreadable while it ran (a turn joined to another in between) is told as the fact.
+ */
 export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: EngineDeps): HostTool {
   const settings: IfaceSettings = { ...IFACE_DEFAULTS, ...(deps.settings ?? {}) };
   return {
@@ -313,7 +362,14 @@ export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: Eng
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
       const call: Call = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: words.lines, tree: words.tree, reply: () => new Reply(words.lines) };
-      return (await spec.run(given, call)).result();
+      try {
+        return (await spec.run(given, call)).result();
+      } catch (error) {
+        if (ctx.signal.aborted) throw error;
+        if (error instanceof ScopeError) return saysUnreadable(new Reply(words.lines), error.why).result();
+        if (error instanceof JoinedTurnError) return saysUnreadable(new Reply(words.lines), { missing: "joined", id: error.turn, into: error.joined }).result();
+        return faultAnswer(words.lines, spec.name, error, deps.env.failed, ctx.scope.turn ?? "");
+      }
     },
   };
 }

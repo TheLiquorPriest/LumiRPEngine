@@ -260,6 +260,15 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
         }
         return null;
       },
+      advise: (e, ctx) => {
+        const own = def.advise?.(e, ctx) ?? null;
+        if (own) return own;
+        for (const g of list) {
+          const advice = g.def.advise?.(e, ctx) ?? null;
+          if (advice) return advice;
+        }
+        return null;
+      },
     });
   }
   // Every type that writes entities' definitions keeps the touched record (an Upgrade's defaults); both folds apply these same types.

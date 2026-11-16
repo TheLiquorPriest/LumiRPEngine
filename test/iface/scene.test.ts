@@ -11,6 +11,7 @@ const src = { from: "prose", message: "m-1" };
 const ROCK = "Gull Skerry";
 const KITCHEN = "Gull Skerry keeper's kitchen";
 const PLACE_HINT = "A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.";
+const NOTHING_PLACE = "Nothing that is a place is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.";
 
 describe("the first turn of a chat with no world", () => {
   test("the scene is recorded in one call: a rock, the kitchen on it, two people there, a lamp, a fact and the horizon", async () => {
@@ -63,7 +64,7 @@ describe("the first turn of a chat with no world", () => {
       expect.arrayContaining([`Operation 2 (spawn): ${ROCK} [gull_skerry] (Weather region) holds nothing and is at no place, so ${KITCHEN} cannot be made in it.`, PLACE_HINT]),
     );
     expect(await refused({ operations: [region, { op: "spawn", kind: "place", name: KITCHEN, at: ROCK, source: src }] })).toEqual(
-      expect.arrayContaining([`Operation 2 (spawn): there is nothing called ${ROCK} that is a place. By that name there is ${ROCK} [gull_skerry] (Weather region).`, PLACE_HINT]),
+      expect.arrayContaining([`Operation 2 (spawn): there is nothing called ${ROCK} that is a place. By that name there is ${ROCK} [gull_skerry] (Weather region). ${NOTHING_PLACE}`, PLACE_HINT]),
     );
     // A fact with neither what it is about nor its key.
     expect(await refused({ operations: [{ op: "fact", subject: "Ada Lorne", value: "Keeps the light.", source: src }] })).toEqual([
@@ -75,7 +76,7 @@ describe("the first turn of a chat with no world", () => {
     expect(await refused({})).toEqual(["operations cannot be read. It is a list of operations, each with its op, one of: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn, horizon."]);
     // Someone moved to a place nobody had made.
     expect(await refused({ operations: [{ op: "spawn", kind: "person", name: "Ada Lorne", source: src }, { op: "move", who: "Ada Lorne", to: ROCK, source: src }] })).toEqual([
-      `Operation 2 (move): there is nothing called ${ROCK} that is a place.`,
+      `Operation 2 (move): there is nothing called ${ROCK} that is a place. ${NOTHING_PLACE}`,
       PLACE_HINT,
       "move needs who, to, and also takes with, square, near, zone, why.",
       "Nothing was recorded. Send the call again with that put right.",

@@ -100,7 +100,6 @@ function placeOnMap(o: OpContext, who: EntityId, place: string): Unread | undefi
   const zone = textArg(o.args, "zone");
   if (square === undefined && near === undefined && zone === undefined) return undefined;
   const grid = o.call.deps.grid;
-  if (grid === undefined) return { line: "no_grid", fields: { n: o.n, op: o.op } };
   const placed = grid.place({ state: { ...o.reading.state, world: o.draft.w.state }, env: o.call.deps.env, who, place, ...(square ? { square } : {}), ...(near ? { near: near.id } : {}), ...(zone !== undefined ? { zone } : {}) });
   if ("problem" in placed) return { line: placed.problem, fields: { n: o.n, op: o.op, ...placed.fields } };
   const bad = o.draft.applyAll(placed.events as unknown as LedgerEvent[]);

@@ -317,7 +317,6 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
       for (const r of read) {
         if (r.op === OVERLAY) {
           const o = r as PlannedOverlay;
-          if (overlay === undefined) continue;
           // An overlay is the writer's, as its rows are, and takes the next place among the turn's writes: a dropped sub-agent or a continue that saved nothing takes it back with them.
           const out = overlay(db, { user: call.scope.user, chat: call.scope.chat, turn, entry: o.entry, note: o.note, by: writer.by, agent: writer.agent, job: writer.job, ord: storyMark(db, writer.user, turn) + 1 });
           if ("unknown" in out) throw new OverlayRefused(o.n, out.unknown, out.near ?? []);
@@ -353,7 +352,6 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     if (r.op === OVERLAY) {
       const ov = r as PlannedOverlay;
       const done = written.overlays.get(ov.n);
-      if (done === undefined) reply.line("no_overlays", { n: ov.n, op: ov.op });
       operations.push({ n: ov.n, op: ov.op, entry: ov.entry, wrote: { text: ov.note }, ...(done !== undefined ? { written: done } : { recorded: false }) });
       continue;
     }
