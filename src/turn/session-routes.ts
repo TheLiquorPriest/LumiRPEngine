@@ -6,39 +6,45 @@
 // newest turn, and then RPH is told with that turn (`sessions.close` by the user), so the turn's Undo, a swipe or a delete of that
 // turn takes the closing back. Nothing is closed while a turn of the chat runs, since that turn reads the record the close changes.
 
-import type { Carry, CompactionView, SessionView } from "rp-harness/contract";
+import type { Carry, CompactionView, Log, SessionView } from "rp-harness/contract";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "../app";
 import type { WriteQueue } from "../app/database";
+import { harnessSettings } from "../app/setting-list";
 import { closeOpenScene } from "../story";
 import type { UserStore } from "../store";
 import type { Turns } from "./lane";
+import { globalConfig } from "./settings";
 
 const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
 const nullable = shape.nullable;
 
+/** A session's fields as RPH gives them (`SessionView`); the page's `SessionShown` adds the scene a scene's session was opened for. */
+const sessionFields = {
+  id: T,
+  user: T,
+  chat: T,
+  kind: shape.oneOf("scene", "agent", "job", "talk"),
+  parent: opt(shape.union(shape.object({ session: opt(T), turn: opt(T), agent: T, call: T }), shape.object({ owner: shape.literal(true) }))),
+  agent: opt(T),
+  offPath: opt(shape.literal(true)),
+  state: shape.oneOf("open", "closed"),
+  opened: N,
+  closedBy: opt(T),
+  by: opt(shape.literal("user")),
+  from: opt(shape.object({ chat: T, session: T, turn: T })),
+  turns: N,
+  compactAsked: opt(shape.literal(true)),
+};
+const sessionBase = shape.object(sessionFields);
+type SessionMirrored = Holds<Exactly<Infer<typeof sessionBase>, SessionView>>;
+
 const sessionShown = shape.named(
   "SessionShown",
-  "A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), and a compaction asked for that waits for its next turn.",
-  shape.object({
-    id: T,
-    user: T,
-    chat: T,
-    kind: shape.oneOf("scene", "agent", "job", "talk"),
-    parent: opt(shape.union(shape.object({ session: opt(T), turn: opt(T), agent: T, call: T }), shape.object({ owner: shape.literal(true) }))),
-    agent: opt(T),
-    offPath: opt(shape.literal(true)),
-    state: shape.oneOf("open", "closed"),
-    opened: N,
-    closedBy: opt(T),
-    by: opt(shape.literal("user")),
-    from: opt(shape.object({ chat: T, session: T, turn: T })),
-    turns: N,
-    compactAsked: opt(shape.literal(true)),
-  }),
+  "A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.",
+  shape.object({ ...sessionFields, scene: opt(T) }),
 );
-type SessionMirrored = Holds<Exactly<Infer<typeof sessionShown>, SessionView>>;
 
 const compactionShown = shape.named(
   "CompactionShown",
@@ -76,6 +82,11 @@ const reopenAsk = shape.named("SessionReopenAsk", "His Undo of a close: the chan
 const sessionOne = shape.named("SessionOne", "A session as it now stands.", shape.object({ session: sessionShown }));
 const uncompactAsk = shape.named("SessionUncompactAsk", "A compaction to undo, by its id.", shape.object({ id: shape.text({ blank: false }) }));
 const compactionsReply = shape.named("SessionCompactions", "A session's compactions after one was undone, in the order written.", shape.object({ compactions: shape.list(compactionShown) }));
+const sessionTurnRow = shape.named(
+  "SessionTurnRow",
+  "A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first.",
+  shape.object({ turn: shape.turnId(), n: nullable(shape.whole({ least: 1 })), at: N, runs: shape.list(T) }),
+);
 
 export const SESSIONS_PATH = "/api/v1/chats/:chat/sessions";
 export const SESSION_PATH = "/api/v1/chats/:chat/sessions/:session";
@@ -84,6 +95,9 @@ export interface SessionRoutesDeps {
   turns: Turns;
   /** The application's write queue: his close of a scene is written through it. */
   writes: WriteQueue;
+  /** The files folder and the log, for the page size the Sessions page's lists take (`sessions.page`, RPH's setting). */
+  files: string;
+  log: Log;
 }
 
 /** The turn the chat's path ends at, the one his close hangs after; null where the chat has played none. */
@@ -117,6 +131,14 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       throw new RouteError(409, error instanceof Error ? error.message : String(error));
     }
   };
+  /** A session as the page shows it: RPH's view, and for a scene's session the id of the scene it was opened for. */
+  const shown = (user: string, view: SessionView): Infer<typeof sessionShown> => {
+    const scene = view.kind === "scene" ? turns.store.user(user).session(view.id)?.scene : undefined;
+    return scene === undefined || scene === "" ? view : { ...view, scene };
+  };
+  /** The page size the turns of a session are listed in: RPH's `sessions.page`, at the global level. */
+  const pageDef = harnessSettings().find((s) => s.key === "sessions.page");
+  const pageSize = (): number => (pageDef === undefined ? 50 : Number(globalConfig(deps.files, deps.log).value(pageDef)));
 
   return [
     route({
@@ -130,7 +152,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       handle: async ({ user, params, query }) => {
         held(user, params.chat);
         const page = await sessions.list(user, params.chat, { ...(query.after === undefined ? {} : { after: query.after }), ...(query.limit === undefined ? {} : { limit: query.limit }) });
-        return { items: page.sessions, next: page.next ?? null };
+        return { items: page.sessions.map((s) => shown(user, s)), next: page.next ?? null };
       },
     }),
     route({
@@ -146,7 +168,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
         const scope = { user, chat: params.chat, session: view.id };
         const carry: Carry = query.carry ?? "continuing";
         const [carried, compactions] = await Promise.all([sessions.carried(scope, carry), sessions.compactions(scope)]);
-        return { session: view, carry, carried, compactions };
+        return { session: shown(user, view), carry, carried, compactions };
       },
     }),
     route({
@@ -174,7 +196,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
           if (closed !== null) await writes.run(() => turns.store.user(user).undo(closed.change, "player"), "taking back his close of a scene");
           throw error;
         }
-        return { session: after, scene: closed?.scene ?? null, change: closed?.change ?? null };
+        return { session: shown(user, after), scene: closed?.scene ?? null, change: closed?.change ?? null };
       },
     }),
     route({
@@ -191,7 +213,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
         if (turns.runs.chatsGoing().includes(params.chat)) throw new RouteError(409, `A turn of chat ${params.chat} is running: take the close back when it has ended.`);
         const change = body.change;
         if (change !== undefined) await writes.run(() => turns.store.user(user).undo(change, "player"), "taking back his close of a scene");
-        return { session: await asked(() => sessions.reopen({ user, chat: params.chat, session: view.id })) };
+        return { session: shown(user, await asked(() => sessions.reopen({ user, chat: params.chat, session: view.id }))) };
       },
     }),
     route({
@@ -204,7 +226,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       handle: async ({ user, params }) => {
         const view = await found(user, params.chat, params.session);
         if (view.state !== "open") throw new RouteError(409, `Session ${view.id} is closed: only an open session is compacted.`);
-        return { session: await asked(() => sessions.compact({ user, chat: params.chat, session: view.id })) };
+        return { session: shown(user, await asked(() => sessions.compact({ user, chat: params.chat, session: view.id }))) };
       },
     }),
     route({
@@ -218,6 +240,31 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       handle: async ({ user, params, body }) => {
         const view = await found(user, params.chat, params.session);
         return { compactions: await asked(() => sessions.uncompact({ user, chat: params.chat, session: view.id }, body.id)) };
+      },
+    }),
+    route({
+      method: "GET",
+      path: `${SESSION_PATH}/turns`,
+      access: "page",
+      group: "sessions",
+      does: "The turns played in a session, newest first, a page at a time: each with its number on the chat's path (none where it left the path), when RPE received it and the runs of RPE's that ran in this session on it.",
+      reply: shape.page(sessionTurnRow),
+      // The page's size is RPH's `sessions.page`, the global level's; the most the caller may name is ten pages.
+      paged: { sizes: () => ({ default: pageSize(), most: pageSize() * 10 }) },
+      handle: async ({ user, params, query }) => {
+        const s = held(user, params.chat);
+        const view = await found(user, params.chat, params.session);
+        const byTurn = new Map<string, { at: number; runs: string[] }>();
+        for (const r of turns.store.db.query<{ id: string; turn: string; received: number }, [string, string, string]>("SELECT id, turn, received FROM turn_run WHERE user = ? AND chat = ? AND session = ? ORDER BY received, rowid").all(user, params.chat, view.id)) {
+          const held = byTurn.get(r.turn);
+          if (held === undefined) byTurn.set(r.turn, { at: r.received, runs: [r.id] });
+          else held.runs.push(r.id);
+        }
+        const onPath = new Map(s.path(params.chat).flatMap((e) => (e.turn === null ? [] : [e.turn])).map((turn, i) => [turn, i + 1]));
+        const all = [...byTurn].map(([turn, w]) => ({ turn, n: onPath.get(turn) ?? null, at: w.at, runs: w.runs })).sort((a, b) => b.at - a.at || (a.turn < b.turn ? 1 : -1));
+        const from = query.after === undefined ? 0 : all.findIndex((r) => r.turn === query.after) + 1;
+        const items = all.slice(from, from + query.limit);
+        return { items, next: from + items.length < all.length ? (items[items.length - 1]?.turn ?? null) : null };
       },
     }),
   ] as const;

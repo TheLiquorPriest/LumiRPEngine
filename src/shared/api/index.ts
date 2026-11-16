@@ -1691,7 +1691,7 @@ export interface SessionReply {
   ends: number | null;
 }
 
-/** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), and a compaction asked for that waits for its next turn. */
+/** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for. */
 export interface SessionShown {
   id: string;
   user: string;
@@ -1707,6 +1707,15 @@ export interface SessionShown {
   from?: { chat: string; session: string; turn: string };
   turns: number;
   compactAsked?: true;
+  scene?: string;
+}
+
+/** A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first. */
+export interface SessionTurnRow {
+  turn: TurnId;
+  n: number | null;
+  at: number;
+  runs: string[];
 }
 
 /** A compaction to undo, by its id. */
@@ -1934,6 +1943,37 @@ export interface StorageReply {
   rest?: number;
 }
 
+/** An item of the record, by id, and the fields of it to correct, each as the item shows it (a message by its number, a time as the page shows it, names as a list): the player's own words, written as his own change after the chat's newest reply. */
+export interface StoryCorrectAsk {
+  id: string;
+  /** The fields to set: the item's own, as `story_record` reads them for its part, `close` and `drop` among them. */
+  fields: { [key: string]: JsonValue };
+}
+
+/** What a correction did: whether anything was recorded, what could not be read of it, and the item as it stands now, at the chat's newest turn. */
+export interface StoryCorrectReply {
+  changed: boolean;
+  /** Each thing sent that could not be read, was left out, or did not add up, in words. */
+  said: string[];
+  item: StoryItemRow;
+}
+
+/** What the record covers of the whole chat: every stretch of messages with the same marks, in and out of the prompt's window, and how many messages above the window's edge it does not cover. */
+export interface StoryCoverage {
+  chat: string;
+  /** How many messages the chat's path holds. */
+  messages: number;
+  /** The number of the first message the prompt's window keeps; null where it keeps them all, or none is known. */
+  edge: number | null;
+  /** The chat's setting: agents may read the messages the player hid, so an uncovered hidden message above the edge counts. */
+  hiddenReadable: boolean;
+  /** The numbers of the messages the player hid. */
+  hidden: number[];
+  /** How many messages above the window's edge the record does not cover: the window marker's count. */
+  above: number;
+  stretches: { from: number; to: number; covered: boolean; beats: boolean; summarized: boolean; window: boolean }[];
+}
+
 /** An item of the story record as it stands on the path read: its fields, where it lies in the chat by message number (null: nowhere, or an end the record cannot place), its first write, whether it is closed or struck, and every write. */
 export interface StoryItemRow {
   id: string;
@@ -1943,8 +1983,8 @@ export interface StoryItemRow {
   /** Where it lies in the chat, by message number: a beat's messages, a scene's or a chapter's span. Null for a part that lies nowhere, or an end the record cannot place. */
   from: number | null;
   to: number | null;
-  /** Its first write: the turn. */
-  turn: TurnId;
+  /** Its first write: the turn; null when that write was the player's own change, which belongs to no turn. */
+  turn: TurnId | null;
   /** That turn's reply on the path. */
   message: number | null;
   /** Whether a migration's import wrote that turn. */
@@ -1991,6 +2031,18 @@ export interface StoryReply {
   futures: StoryItems;
 }
 
+/** The story so far as the next briefing gives it to the Author, worked out at the chat's head: its text, its size against its budget, and what it left out. */
+export interface StorySoFarReply {
+  /** The block as laid out; empty when the window leaves nothing out or the record holds nothing for it. */
+  text: string;
+  /** Its size in tokens. */
+  tokens: number;
+  /** The most tokens it may fill. */
+  budget: number;
+  /** Each stretch it had no room for, with what of the record it holds. */
+  leftOut: { from: number; to: number; chapters: number; scenes: number; beats: number }[];
+}
+
 /** An item of the record, by id, struck (true) or its strike taken back (false); with a strike, why, where the player says. */
 export interface StoryStrikeAsk {
   id: string;
@@ -2005,9 +2057,28 @@ export interface StoryStrikeReply {
   item: StoryItemRow;
 }
 
+/** A page of the timeline: chapters, scenes and beats as one list in the chat's order, oldest first. */
+export interface StoryTimeline {
+  items: StoryTimelineRow[];
+  next: string | null;
+}
+
+/** One entry of the timeline: a chapter, a scene or a beat, with the chapter and the scene it lies in and, for a beat, the messages it stands for. */
+export interface StoryTimelineRow {
+  kind: "chapter" | "scene" | "beat";
+  item: StoryItemRow;
+  /** The id of the chapter it lies in; null for a chapter, or where none does. */
+  chapter: string | null;
+  /** The id of the scene it lies in; null for a chapter or a scene, or where none does. */
+  scene: string | null;
+  /** A beat's messages, each by its number on the chat's path and its id; empty for a chapter or a scene (their span is in `item`). */
+  messages: { number: number; id: string }[];
+}
+
 /** One write of an item, as the record keeps it: its turn, that turn's reply on the path (null: on none), whether a migration wrote that turn, who wrote it, and what it said. */
 export interface StoryWriteRow {
-  turn: TurnId;
+  /** The turn it was written on; null for the player's own change, which belongs to no turn. */
+  turn: TurnId | null;
   /** The number of that turn's reply on the chat's path, from 0; null while the turn is on no path (open, or left behind). */
   message: number | null;
   /** That turn was written by a migration's import, not played on RPE. */
@@ -2884,6 +2955,16 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The turns played in a session, newest first, a page at a time: each with its number on the chat's path (none where it left the path), when RPE received it and the runs of RPE's that ran in this session on it. */
+  "GET /api/v1/chats/:chat/sessions/:session/turns": {
+    params: { chat: string; session: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: { items: SessionTurnRow[]; next: string | null };
+    paged: true;
+    long: false;
+    joined: false;
+  };
   /** Undoes one compaction of a session by its id: from its next turn the turns the summary stood for are carried whole again, until a later compaction; the file keeps both. Answers the session's compactions. */
   "POST /api/v1/chats/:chat/sessions/:session/uncompact": {
     params: { chat: string; session: string };
@@ -2944,6 +3025,36 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** Corrects any field of any item of the story record (a beat's text, a thread's state, a summary, the premise, a reading of the player), read as `story_record` reads the same fields of its part, as the player's own change placed after the chat's newest reply on its own line: swiping that reply keeps it, a turn that is running goes on from the state it started with, and a fresh branch takes it on its own line. Says what of it could not be read and the item as it stands. */
+  "POST /api/v1/chats/:chat/story/correct": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: StoryCorrectAsk;
+    reply: StoryCorrectReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** What the record covers of the whole chat: every stretch of messages with the same marks, in and out of the prompt's window, each hidden message, the window's edge, and how many messages above that edge the record does not cover. */
+  "GET /api/v1/chats/:chat/story/coverage": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: StoryCoverage;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The story so far as the next briefing gives it to the Author, worked out at the chat's head: its text, its size against its budget, and each stretch it had no room for. */
+  "GET /api/v1/chats/:chat/story/so-far": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: StorySoFarReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Strikes an item of the story record, or takes its strike back, as the player's own change on the chat's newest turn; says whether anything was recorded and the item as it stands. */
   "POST /api/v1/chats/:chat/story/strike": {
     params: { chat: string };
@@ -2951,6 +3062,16 @@ export interface ApiRoutes {
     body: StoryStrikeAsk;
     reply: StoryStrikeReply;
     paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The chat's chapters, scenes and beats as one list in the chat's order, oldest first, a page at a time: each with the chapter and the scene it lies in, and a beat with the messages it stands for, by number and id. */
+  "GET /api/v1/chats/:chat/story/timeline": {
+    params: { chat: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: StoryTimeline;
+    paged: true;
     long: false;
     joined: false;
   };
