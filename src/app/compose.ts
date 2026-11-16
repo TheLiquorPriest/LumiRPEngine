@@ -22,6 +22,7 @@ import { loreBooks } from "../adapter/lumiverse/books";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import type { AdapterDeps, LumiverseDoor } from "../adapter/lumiverse/mount";
+import { agentsArea } from "../agents/area";
 import { buildArea } from "../build/area";
 import { castArea } from "../cast/area";
 import { ifaceArea } from "../iface/area";
@@ -263,6 +264,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       written: (saved) => listing.written(saved),
     })),
     turn.area,
+    // The Agents page: his definitions with what each runs on, and the tools an agent's requests declare, as the harness gives them.
+    agentsArea(() => ({ definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat ?? NO_CHAT) })),
     bootstrapArea({
       turns: made,
       carried: async (app, user) => (lastReport(app.db, user)?.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId),
