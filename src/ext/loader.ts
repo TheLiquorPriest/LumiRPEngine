@@ -92,34 +92,49 @@ function register(ctx: SpindleFrontendContext, surface: ChatSurface): () => void
   }
 }
 
+/** Whether the host opens a placement only with `ui_panels` (`placement-helper.ts`, `createFloatWidgetHandle` and the dock's): a revoke takes it down host-side. */
+const needsPanels = (placement: ChatSurface["placement"]): boolean => placement === "float-widget" || placement === "dock-panel";
+
+/** Hears whether `ui_panels` is granted, each time the extension learns the grants (at the page's start and at every change). */
+export type PanelsGrant = (listener: (granted: boolean) => void) => () => void;
+
 /**
  * Keeps the shell's surfaces registered: each key seen is registered once and taken off when the key goes, and every one is taken off by the cleanup returned. A surface the host
- * refuses (a permission not granted, its anchor gone) is left out and tried again at the next change of the list, so one refusal costs the others nothing.
+ * refuses (its anchor gone) is left out and tried again at the next change of the list, so one refusal costs the others nothing. With `panels`, the HUD and panels follow
+ * `ui_panels`: while it is not granted none is asked for; when it is revoked the host has taken them down and they are forgotten; when it is granted they are registered at once.
  */
-export function keepSurfaces(ctx: SpindleFrontendContext, list: SurfaceList): () => void {
-  const held = new Map<string, () => void>();
+export function keepSurfaces(ctx: SpindleFrontendContext, list: SurfaceList, panels?: PanelsGrant): () => void {
+  const held = new Map<string, { placement: ChatSurface["placement"]; remove: () => void }>();
+  let panelsGranted = true;
   const sync = (): void => {
     const now = list.current();
     const keys = new Set(now.map((s) => s.key));
-    for (const [key, remove] of held) {
-      if (keys.has(key)) continue;
+    for (const [key, { placement, remove }] of held) {
+      if (keys.has(key) && (panelsGranted || !needsPanels(placement))) continue;
       held.delete(key);
       remove();
     }
     for (const surface of now) {
-      if (held.has(surface.key)) continue;
+      if (held.has(surface.key) || (!panelsGranted && needsPanels(surface.placement))) continue;
       try {
-        held.set(surface.key, register(ctx, surface));
+        held.set(surface.key, { placement: surface.placement, remove: register(ctx, surface) });
       } catch (error) {
         console.warn(`RPE could not put "${surface.key}" in the chat: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   };
-  const off = list.subscribe(sync);
+  const offs = [
+    list.subscribe(sync),
+    panels?.((granted) => {
+      if (granted === panelsGranted) return;
+      panelsGranted = granted;
+      sync();
+    }),
+  ];
   sync();
   return () => {
-    off();
-    for (const remove of held.values()) remove();
+    for (const off of offs) off?.();
+    for (const { remove } of held.values()) remove();
     held.clear();
   };
 }
@@ -130,7 +145,8 @@ export function loader(mount: MountShell): (ctx: SpindleFrontendContext) => () =
     const road = pageRoad(ctx);
     const tab = ctx.ui.registerDrawerTab(TAB);
     const mounted = mount({ root: tab.root, ctx, road });
-    const surfaces = mounted.surfaces === undefined ? null : keepSurfaces(ctx, mounted.surfaces);
+    const panels: PanelsGrant = (listener) => road.onPermissions((missing) => listener(!missing.some((m) => m.permission === "ui_panels")));
+    const surfaces = mounted.surfaces === undefined ? null : keepSurfaces(ctx, mounted.surfaces, panels);
     return () => {
       surfaces?.();
       mounted.unmount();
