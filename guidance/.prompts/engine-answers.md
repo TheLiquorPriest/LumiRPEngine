@@ -44,7 +44,7 @@ want_schedule: a schedule of the world's
 wants_time: a date and time, YYYY-MM-DD HH:MM; a clock time, such as 22:00, 10pm, noon or midnight, or a part of this world's day by its id or label, as the next time the clock shows it, or tomorrow's after tomorrow; or a count and a unit for a span, such as two hours, thirty seconds or an hour and twenty minutes
 wants_minutes: a number of minutes, a part of one counted in seconds (0.5 is thirty seconds)
 wants_seconds: a number of seconds
-wants_rounds: a whole number of rounds above 0, counted by the grid of the scene, which must be a room-scale map that counts rounds; otherwise give seconds or minutes
+wants_rounds: a whole number of rounds above 0, counted by the grid of the scene, which counts rounds only on a room-scale map; otherwise give seconds or minutes
 wants_dice: dice such as 1d20+3 or 2d6
 wants_square: [column, row], two whole numbers counted from 1 at the top left, as the map prints them
 wants_fields: an object of field: value

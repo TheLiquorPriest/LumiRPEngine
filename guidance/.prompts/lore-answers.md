@@ -18,6 +18,7 @@ read_note: {{note}} (on turn {{turn}})
 secret_mark: {{text}} [secret {{id}}{{#holders}}; held by {{holders}}{{/holders}}{{^holders}}; held by no one yet{{/holders}}]
 batch_held: {{held}} entries are with another indexing job just now; none is left for you to index yet.
 batch_unreadable: The entries to index could not be read: {{reason}}
+no_chat: {{tool}} did nothing: this job belongs to no chat, so there is no chat's lore for it to index.
 job_brief: Index this chat's lore.
 job_refused_off: The indexing job was not started: jobs are switched off.
 job_refused_day_count: The indexing job was not started: {{value}} jobs have started in a day{{#connection}} on {{connection}}{{/connection}}, and {{max}} is the most allowed.

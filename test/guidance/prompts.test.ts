@@ -6,7 +6,7 @@
 // words (`NOTICES`, `REPLY_ERRORS`). Every name is invented.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { Guidance, LinesPart, TemplatePart } from "rp-harness";
+import type { Guidance, LinesPart, TemplatePart } from "../../src/app/guidance";
 import type { JsonValue } from "rp-harness/contract";
 import { openSet, type OpenSet, shippedTexts, split } from "./set";
 
@@ -92,7 +92,8 @@ async function lines(name: string): Promise<LinesPart> {
 
 /** A part's own words as written, without its header. */
 function written(part: TemplatePart | LinesPart): string {
-  return part.format === "lines" ? [...part.lines.values()].map((line) => line.text).join("\n") : part.template.text;
+  const body = split(SHIPPED.get(`.prompts/${part.name}.md`) ?? "").body;
+  return part.format === "lines" ? body.split("\n").map((line) => line.replace(/^[A-Za-z0-9_-]+:[ \t]?/, "")).join("\n") : body;
 }
 
 /** What a part says is its description, which every shipped part carries. */
@@ -123,7 +124,8 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
 
   test("briefing.md names only fields something fills, holds no copy of the reply contract and no block nothing fills, and keeps the turn's folder and intent file", async () => {
     const part = await template("briefing");
-    const named = [...new Set(part.template.fields.map((field) => field.split(".")[0] ?? field))].filter((field) => !["on_stage_views"].includes(field));
+    const body = split(SHIPPED.get(".prompts/briefing.md") ?? "").body;
+    const named = [...new Set([...body.matchAll(/\{\{[#^]?([A-Za-z0-9_][A-Za-z0-9_.-]*)\}\}/g)].map((tag) => (tag[1] ?? "").split(".")[0] ?? ""))].filter((field) => !["on_stage_views"].includes(field));
     expect(named.filter((field) => !BRIEFING_FILLED.includes(field))).toEqual([]);
     const full = {
       turn: { kind: "reply", speaker: "Wren", story_time: "dusk" },

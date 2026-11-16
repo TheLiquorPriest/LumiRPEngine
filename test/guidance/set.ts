@@ -6,7 +6,8 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, relative, sep } from "node:path";
-import { type Guidance, loadGuidance, SHIPPED_GUIDANCE } from "rp-harness";
+import { loadGuidance, type Guidance } from "../../src/app/guidance";
+import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
 import type { FactDef, FactValue, LayerLevel, Scope } from "rp-harness/contract";
 import { createFolderHost, type FolderHost } from "rp-harness/hosts/folder";
 import { shippedPlaces } from "../../src/tree/shipped";
