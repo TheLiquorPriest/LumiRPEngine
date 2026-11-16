@@ -539,13 +539,14 @@ describe("the merge on a grid", () => {
     expect(untouched.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 5, y: 3 });
   });
 
-  test("an Upgrade that turns the grid system on puts the POV on a cell, sees from there, and can walk", () => {
+  test("an Upgrade that turns the grid system on never puts the POV on a square: one it lacks on the new grid is cleared and the GM places it", () => {
     const c = between(inn(undefined, false), inn());
     upgrade(c);
-    const fresh = initialState(c.b, c.rb, reg);
-    expect(c.state.entities.you?.fields).toMatchObject({ x: fresh.entities.you?.fields.x, y: fresh.entities.you?.fields.y });
-    expect(cellsSeen(c.state, "inn", 12)).toBe(cellsSeen(fresh, "inn", 12));
-    expect(actionOdds(reg, c.b, c.state, { action: "step", params: { x: 4, y: 3 } }).available).toBe(true);
+    expect(c.state.entities.you?.fields.place).toBe("taproom");
+    expect(c.state.entities.you?.fields).not.toHaveProperty("x");
+    expect(c.state.entities.you?.fields).not.toHaveProperty("y");
+    expect(cellsSeen(c.state, "inn", 12)).toBeNull();
+    expect(actionOdds(reg, c.b, c.state, { action: "step", params: { x: 4, y: 3 } }).available).toBe(false);
   });
 });
 

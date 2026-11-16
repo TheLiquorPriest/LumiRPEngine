@@ -8,7 +8,7 @@
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { arrivalCell, areaPlaceAt, cellIndex, entranceCell, gridOf, standingGrid, type Cell } from "../../../shared/grid";
+import { areaPlaceAt, cellIndex, entranceCell, gridOf, standingGrid, type Cell } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
 import type { GridTrigger } from "../../../shared/world";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
@@ -73,21 +73,21 @@ export function sightFor(source: GroundSource, scope: PlaceId, from: Cell, radiu
 }
 
 /**
- * Where someone arriving at a place stands (the `space.arrival` service): from Space 3, the POV
- * on the cell the place is drawn at; with the grid system on, at a gridded place's entrance or the
- * middle of a room's area too, and off any grid (its cell cleared) when the place has none.
+ * Where someone arriving at a place stands (the `space.arrival` service): nobody has a square on a
+ * grid they did not set it on, so whoever changes place stands on no square of the new place until
+ * an agent's call or the owner's correction gives one, and a square they had is cleared (§8.2).
+ * The one exception is a map that is drawn, not walked (the grid system off): from Space 3 the POV
+ * stands on the cell its place is drawn at.
  */
 export function arrivalEvents(ctx: ReadContext, entity: EntityId, to: PlaceId): LedgerEvent[] {
   const e = own(ctx.state.entities, entity);
-  if (!e || entity !== ctx.world.pov || ctx.levelOf(entity, "space") < 3) return [];
-  if (!mapSettingsOf(ctx.world).grid.movement) {
+  if (!e) return [];
+  if (!mapSettingsOf(ctx.world).grid.movement && entity === ctx.world.pov && ctx.levelOf(entity, "space") >= 3) {
     const cell = own(ctx.world.places, to)?.cell;
-    return cell ? setCell(entity, e.fields, cell) : [];
+    if (cell) return setCell(entity, e.fields, cell);
   }
-  const from = spotOf(ctx.world, ctx.state, entity);
-  const at = arrivalCell(ctx.world, to);
-  if (at) return [posEvent(entity, { scope: at.scope, x: at.cell.x, y: at.cell.y }, from)];
-  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(entity, null, from)] : [];
+  const had = typeof e.fields.x === "number" || typeof e.fields.y === "number";
+  return had && placeOfEntity(ctx.state, entity) !== to ? [posEvent(entity, null, spotOf(ctx.world, ctx.state, entity))] : [];
 }
 
 /**

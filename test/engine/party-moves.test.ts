@@ -110,10 +110,13 @@ describe("a Timelapse record of moves on a grid", () => {
     const world = inn();
     const start = initialState(world, "seed", reg);
     const w = new Working(reg, world, start);
+    // Each move clears the square it leaves, and a call of the GM's then places the POV on one of the new place's.
+    const squares: Record<string, { scope: string; x: number; y: number }> = { stall: { scope: "market", x: 2, y: 1 }, kitchen: { scope: "inn", x: 8, y: 1 }, taproom: { scope: "inn", x: 2, y: 1 } };
     for (const to of ["stall", "kitchen", "stall", "kitchen", "stall", "taproom"]) {
       const events = relocate(w.ctx, "you", to);
       if (!Array.isArray(events)) throw new Error(events.reason);
       w.applyAll(events);
+      w.applyAll([{ type: "space.pos", data: { entity: "you", at: squares[to] ?? null, from: null } }]);
     }
     const coarse = coarsen(reg, world, start, w.events);
     const positions = (events: readonly LedgerEvent[]) => events.filter((e) => e.type === "space.pos").length;

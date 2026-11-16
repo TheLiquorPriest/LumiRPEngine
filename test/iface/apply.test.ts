@@ -27,14 +27,34 @@ describe("squares on a map", () => {
     const crossed = await t.call("world_apply", { operations: [{ op: "move", who: "bram", to: "common_room", square: [11, 3], source: src }] });
     expect(texts(crossed)).toContain("Operation 1 (move): Bram [bram]: from (4,3) to (11,3) is 7 squares (35 ft), 7 squares of movement, 2 rounds, 12 seconds.");
     const walled = await t.call("world_apply", { operations: [{ op: "move", who: "tam", to: "common_room", square: [1, 4], source: src }] });
-    expect(texts(walled)).toContain("Operation 1 (move): Tam [tam] stands on (1,4), which block the way; it was put there all the same.");
+    expect(walled.reports?.some((x) => x.includes("Tam [tam] stands on (1,4), which block the way; it was put there all the same."))).toBe(true);
     expect(t.s.stateAt(t.turn.id).state.world.entities.tam?.fields).toMatchObject({ place: "common_room", x: 0, y: 3 });
     const recorded = t.s.changes(t.turn.id).length;
     const zero = await t.call("world_apply", { operations: [{ op: "place", what: "tam", square: [0, 3], source: src }] });
     expect(zero.error).toBe(true);
     expect(texts(zero).some((x) => x.startsWith("Operation 1 (place): square cannot be read"))).toBe(true);
     expect(t.s.changes(t.turn.id).length).toBe(recorded);
-    for (const r of [crossed, walled, zero]) wordsFromFiles(r);
+    for (const r of [crossed, zero]) wordsFromFiles(r);
+  });
+
+  test("whoever changes place stands on no square of the new one; a companion named with a square gets it", async () => {
+    const t = await rig({ grid: gridMoves(await mapLines(shippedTexts())) }, mapped());
+    const src = { from: "prose", message: "m-7" };
+    const fieldsOf = (id: string): JsonObject => (t.s.stateAt(t.turn.id).state.world.entities[id]?.fields ?? {}) as JsonObject;
+    const set = await t.call("world_apply", { operations: [{ op: "place", what: "bram", square: [4, 3], source: src }, { op: "place", what: "tam", at: "common_room", square: [5, 3], source: src }] });
+    expect(set.error).toBeUndefined();
+    expect(fieldsOf("tam")).toMatchObject({ x: 4, y: 2 });
+    const left = await t.call("world_apply", { operations: [{ op: "move", who: "bram", to: "market_square", with: ["tam"], source: src }] });
+    expect(left.error).toBeUndefined();
+    for (const id of ["bram", "tam"]) {
+      expect(fieldsOf(id)).toMatchObject({ place: "market_square" });
+      expect(fieldsOf(id)).not.toHaveProperty("x");
+    }
+    const back = await t.call("world_apply", { operations: [{ op: "move", who: "bram", to: "common_room", with: [{ who: "tam", square: [6, 3] }], source: src }] });
+    expect(back.error).toBeUndefined();
+    expect(fieldsOf("tam")).toMatchObject({ place: "common_room", x: 5, y: 2 });
+    expect(fieldsOf("bram")).toMatchObject({ place: "common_room" });
+    expect(fieldsOf("bram")).not.toHaveProperty("x");
   });
 });
 

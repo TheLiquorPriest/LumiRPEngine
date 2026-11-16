@@ -23,9 +23,9 @@
 //   - a taken opening balance of an account whose holder's money is open posts the difference
 //     against the holder's outside account (the economy's `economy.reopen`);
 //   - a track at a stage the revision no longer has goes back to its start, with a Journal note;
-//   - a revision that turns the grid system on puts the POV on a cell and lets it see from there.
+//   - a revision that turns the grid system on leaves the POV on its square where that grid has it, clears one it lacks, and lets it see from there.
 
-import { arrivalCell, cellIndex, placedItems, standingGrid } from "../shared/grid";
+import { cellIndex, placedItems, standingGrid } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { EntityId, FieldId, RelationTypeId, RevisionId, StageId, TrackId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -500,15 +500,16 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
 
   setLag(state, null);
   state.revision = plan.to;
-  // A revision that turns the grid system on puts the POV on a cell of the grid it stands on, as a
-  // chat's first state does (its own cell there, else where its place is entered), and it sees from there.
+  // A revision that turns the grid system on leaves the POV on the square it had where that square is on the grid it stands on now; a square that is not on the new revision's grid is cleared, never moved to an arrival square (the GM places it); and it sees from where it stands.
   if (pov && mapSettingsOf(after).grid.movement) {
     const here = placeOfEntity(state, after.pov);
     const stand = standingGrid(after, here);
     const { x, y } = pov.fields;
     const onCell = stand !== null && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null;
-    const entry = onCell || here === null ? null : arrivalCell(after, here);
-    if (entry) Object.assign(pov.fields, { x: entry.cell.x, y: entry.cell.y });
+    if (!onCell) {
+      delete pov.fields.x;
+      delete pov.fields.y;
+    }
     observeCells(state, after, sightOf(env.types.context(after, state)));
   }
   return notes;

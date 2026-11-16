@@ -262,8 +262,11 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   if (opts.advise === true && twice) advice.push({ code: "in_two_places", values: { what: ref(ctx, thing), holder: ref(ctx, e.relations.find((r) => r.type === "in")?.to ?? ""), where: ref(ctx, String(e.fields.place)) } });
   const before = possessorOf(ctx, thing);
   const hidden = isDiscoverable(ctx.world, ctx.state, thing);
-  const moved = applyAll(w, [...locate(ctx, thing, where.spot), ...(where.noted ? [note(where.noted, thing)] : [])]);
+  const laid = locate(ctx, thing, where.spot);
+  const moved = applyAll(w, [...laid, ...(where.noted ? [note(where.noted, thing)] : [])]);
   if (moved) return moved;
+  // A square code gave it (it lies where whoever put it down stood) is recorded apart, as a default.
+  const squares = laid.filter((ev) => ev.type === "space.pos" && "data" in ev && ev.data.at !== null);
   const after = possessorOf(ctx, thing);
   const events: LedgerEvent[] = [];
   if (after !== before) {
@@ -285,7 +288,7 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   }
   const done = applyAll(w, events);
   if (done) return done;
-  return { ...(sameSpot(where.spot, to) ? {} : { placed: where.spot }), ...(advice.length > 0 ? { advice } : {}) };
+  return { ...(sameSpot(where.spot, to) ? {} : { placed: where.spot }), ...(advice.length > 0 ? { advice } : {}), ...(squares.length > 0 ? { filled: squares } : {}) };
 }
 
 /** Every use grant on a thing, and its overdue flag, ended (it is back with its owner, or has a new one). */

@@ -76,9 +76,12 @@ export function gridMoves(lines: Lines = Lines.none(), config: Readonly<MapConfi
       const moved = from ? move(drawn, moving, who, to) : null;
       const say: Say = { lines, world, state: state.world };
       const way = moved?.walk && moved.took && from ? lines.line("way_taken", { what: whoIs(say, who), from: spotText(say, from), to: spotText(say, to), distance: moved.walk.distance, far: farText(lines, drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say, moved.took) }) : undefined;
-      const reports = (moved ?? putAt(drawn, moving, who, to)).reports.map((r) => lines.line(`grid_${r.code}`, reportFields(say, r.values)));
-      const said = [way, ...reports].filter((t): t is string => t !== undefined && t.trim() !== "");
-      return { events: [positionEvent(drawn, who, to, from)], ...(said.length > 0 ? { said } : {}) };
+      const reports = (moved ?? putAt(drawn, moving, who, to)).reports.flatMap((r) => {
+        const fields = reportFields(say, r.values);
+        const words = lines.line(`grid_${r.code}`, fields);
+        return words !== undefined && words.trim() !== "" ? [{ line: `grid_${r.code}`, fields, words }] : [];
+      });
+      return { events: [positionEvent(drawn, who, to, from)], ...(way !== undefined && way.trim() !== "" ? { said: [way] } : {}), ...(reports.length > 0 ? { reports } : {}), ...(square === undefined ? { filled: true as const } : {}) };
     },
   };
 }

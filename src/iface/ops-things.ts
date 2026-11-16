@@ -52,6 +52,7 @@ export function putThing(o: OpContext, thing: EntityId, to: Spot, why: string): 
   const w = o.draft.w;
   const out = applyItemOp(w, { do: "move", item: thing, to, why }, itemOptions(o));
   if (!("code" in out)) {
+    if (out.filled !== undefined) o.draft.markFilled(out.filled);
     if (out.placed !== undefined) o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, thing), asked: spotName(o, to), where: spotName(o, out.placed) });
     return undefined;
   }
@@ -80,8 +81,8 @@ export function moveTo(o: OpContext, who: EntityId, place: string): Unread | und
 }
 
 /** A square on a map, as `[column, row]` counted from 1 at the top left, as the map prints it; undefined when none is given. */
-function squareArg(o: OpContext): [number, number] | Unread | undefined {
-  const v = o.args.square;
+function squareArg(o: OpContext, args: JsonObject = o.args): [number, number] | Unread | undefined {
+  const v = args.square;
   if (v === undefined || v === null) return undefined;
   if (Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === "number" && Number.isInteger(x) && x >= 1)) return [v[0] as number, v[1] as number];
   return notAs(o, "square", v, "square");
@@ -89,22 +90,26 @@ function squareArg(o: OpContext): [number, number] | Unread | undefined {
 
 /**
  * Puts someone or something at a square, beside someone, or in a zone of the place's map, through
- * the grid's own placing; what the grid says of it (the way taken and its time, a square in a wall,
- * a shut door) is said in the answer, each sentence as the map's part words it.
+ * the grid's own placing, as `args` say (the call's own, or a companion's entry of `with`). What the
+ * grid says of it (the way taken and its time) is said in the answer, as the map's part words it;
+ * what does not add up where it now stands (a square in a wall, over something that blocks, no way
+ * there) is a report kept with the change; and a square code chose is recorded as an assumption.
  */
-function placeOnMap(o: OpContext, who: EntityId, place: string): Unread | undefined {
-  const square = squareArg(o);
+function placeOnMap(o: OpContext, who: EntityId, place: string, args: JsonObject = o.args): Unread | undefined {
+  const square = squareArg(o, args);
   if (isUnread(square)) return square;
-  const near = findOptional(o, "near", "entity");
-  if (isUnread(near)) return near;
-  const zone = textArg(o.args, "zone");
+  const near = args.near === undefined || args.near === null ? undefined : find(o, "near", "entity", false, args.near);
+  if (near !== undefined && isUnread(near)) return near;
+  const zone = textArg(args, "zone");
   if (square === undefined && near === undefined && zone === undefined) return undefined;
   const grid = o.call.deps.grid;
   const placed = grid.place({ state: { ...o.reading.state, world: o.draft.w.state }, env: o.call.deps.env, who, place, ...(square ? { square } : {}), ...(near ? { near: near.id } : {}), ...(zone !== undefined ? { zone } : {}) });
   if ("problem" in placed) return { line: placed.problem, fields: { n: o.n, op: o.op, ...placed.fields } };
-  const bad = o.draft.applyAll(placed.events as unknown as LedgerEvent[]);
+  const events = placed.events as unknown as LedgerEvent[];
+  const bad = placed.filled === true ? o.draft.fillWith(events) : o.draft.applyAll(events);
   if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
   for (const said of placed.said ?? []) o.reply.line("on_map", { n: o.n, op: o.op, said });
+  for (const r of placed.reports ?? []) o.reply.reported(r.line, { n: o.n, op: o.op, ...r.fields }, r.words);
   return undefined;
 }
 
@@ -170,21 +175,25 @@ const move: OpDef = {
     if (isUnread(who)) return who;
     const to = find(o, "to", "place");
     if (isUnread(to)) return to;
-    const company: Found[] = [];
+    const company: { found: Found; where: JsonObject }[] = [];
     const given = o.args.with;
-    for (const said of Array.isArray(given) ? given : typeof given === "string" ? [given] : []) {
-      // An entry that is no name is not skipped: it is refused naming `with` and what it takes.
-      if (typeof said !== "string") return notAs(o, "with", said, "names");
-      const r = find(o, "with", "entity", false, said);
+    for (const said of Array.isArray(given) ? given : typeof given === "string" || (typeof given === "object" && given !== null) ? [given] : []) {
+      // A companion is a name, or an entry with its name as `who` and, as `who` has, a square, a zone or someone to be beside. An entry that is neither is not skipped: it is refused naming `with` and what it takes.
+      const entry = typeof said === "object" && said !== null && !Array.isArray(said) ? said : null;
+      const name = entry !== null ? entry.who : said;
+      if (typeof name !== "string") return notAs(o, "with", said, "names");
+      const r = find(o, "with", "entity", false, name);
       if (isUnread(r)) return r;
-      company.push(r);
+      company.push({ found: r, where: entry ?? {} });
     }
-    for (const [i, one] of [who, ...company].entries()) {
-      const failed = isThing(o.draft.w.ctx, one.id) ? putThing(o, one.id, { place: to.id }, textArg(o.args, "why") ?? "") : movePerson(o, one.id, to.id, i > 0);
+    for (const [i, one] of [{ found: who, where: o.args }, ...company].entries()) {
+      const failed = isThing(o.draft.w.ctx, one.found.id) ? putThing(o, one.found.id, { place: to.id }, textArg(o.args, "why") ?? "") : movePerson(o, one.found.id, to.id, i > 0);
       if (failed) return failed;
     }
-    const mapped = placeOnMap(o, who.id, to.id);
-    if (mapped) return mapped;
+    for (const one of [{ found: who, where: o.args }, ...company]) {
+      const mapped = placeOnMap(o, one.found.id, to.id, one.where);
+      if (mapped) return mapped;
+    }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },

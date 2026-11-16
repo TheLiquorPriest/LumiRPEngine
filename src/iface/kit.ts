@@ -223,6 +223,13 @@ export class Reply {
     return this;
   }
 
+  /** A report that came worded: another part's (the map's, for what the grid finds of a placing), its line's name, its fields and its words as that part's file says them. */
+  reported(name: string, fields: Fields, words: string): this {
+    this.reports.push(words);
+    this.kept.push({ line: name, fields, words, ...(typeof fields.n === "number" ? { n: fields.n } : {}) });
+    return this;
+  }
+
   mark(mark: string): this {
     this.marks.add(mark);
     return this;

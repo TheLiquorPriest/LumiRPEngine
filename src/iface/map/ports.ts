@@ -8,15 +8,23 @@ import type { FoldEnv } from "../../store/fold";
 import type { StoreState } from "../../store/types";
 import type { Fields } from "../texts";
 
+/** What the grid finds does not add up where something now stands, as a report to keep with its change: the answers' line it is (`grid_<code>`), its fields, and the map's words for it. */
+export interface GridFinding {
+  line: string;
+  fields: Fields;
+  words: string;
+}
+
 /**
  * Placing on a map's squares: the events that put someone or something at a square, beside someone,
- * or in a zone; and `said`, the sentences the answer gives of it, worded from the map's part: for one
- * that stood on the map before, the way it went and the time that took, and what does not add up
- * where it now stands (a square in a wall, over something that blocks, no way there). It is applied
- * all the same.
+ * or in a zone of the grid it stands on; `said`, the sentences the answer gives of it, worded from
+ * the map's part (for one that stood on the map before, the way it went and the time that took);
+ * and `reports`, what does not add up where it now stands (a square in a wall, over something that
+ * blocks, no way there), kept with the change. It is applied all the same. `filled` is true where
+ * code chose the square (beside someone, a free square of a zone): that change is an assumption.
  */
 export interface GridMoves {
-  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[]; said?: string[] } | { problem: string; fields: Fields };
+  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[]; said?: string[]; reports?: GridFinding[]; filled?: true } | { problem: string; fields: Fields };
 }
 
 /** The map's two layers: what is drawn (the title, the part shown, the picture, the legend) and what moves (who and what is where, the doors). */

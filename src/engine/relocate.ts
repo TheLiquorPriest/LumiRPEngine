@@ -1,7 +1,7 @@
 // The one move path (DESIGN §4.1, §9.4): every writer of where someone is (the `move` effect, the
 // reply's moves, driving, routines, schedules, trips, skip plans, GM and ✎ edits) asks here for the
 // events of a move, so they all leave the same state: out of whatever holds them (`in`), `place`
-// set, and where they then stand (the space pack's arrival cell, from Space 3), with the event
+// set, and no square of the new place (the space pack's arrival: a square they had is cleared, and a tool's call gives one; on a map drawn, not walked, the POV stands on the cell its place is drawn at, from Space 3), with the event
 // shapes rules and replay read (`unlink`, `set place`, `space.pos`). A narrated move also leaves its
 // old activity behind, and lands by any route or none. The player character's party (people who
 // `travels_with` it) comes along when the move says so, by tier (assess-party §6.1): its core, and
@@ -94,8 +94,8 @@ function moveEvents(ctx: ReadContext, who: EntityId, to: PlaceId): LedgerEvent[]
   const out: LedgerEvent[] = [];
   for (const r of own(ctx.state.entities, who)?.relations ?? []) if (r.type === "in") out.push({ type: "unlink", rel: "in", from: who, to: r.to });
   out.push({ type: "set", entity: who, field: "place", value: to });
-  // Where the mover stands there is the space pack's (DESIGN §7): from Space 3 the POV stands on
-  // the place's cell, and with the grid system on, at a gridded place's entrance.
+  // Where the mover stands there is the space pack's: no square, so none of the old place's is read there;
+  // on a map drawn, not walked, the POV from Space 3 stands on the cell its place is drawn at.
   out.push(...(optionalService(ctx, "space.arrival")?.(ctx, who, to) ?? []));
   return out;
 }
