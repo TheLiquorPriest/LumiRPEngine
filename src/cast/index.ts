@@ -15,7 +15,7 @@ export { REACHES } from "./perceive";
 export { CAST_FACT_DEFS, castFacts, type CastFacts, type OnStage, UNPERCEIVED_GROUPS } from "./facts";
 export { CAST_VIEWS, castPresentViews, castViews, type CastPresentView, type CastView, type CastViewInput, type CastViewName } from "./views";
 export { type SourceNow, type SourceReader } from "./sources";
-export { type BookReader } from "./secrets";
+export { type BookReader, personNamed, worldAt } from "./secrets";
 export { filesAttachedOn } from "./imported";
 export { castNow, type CastNow, type CastNowMemory, type CastNowPrincipal } from "./now";
 export { CAST_PATH, CHARACTER_BASE_PATH, CHARACTER_CASTING_PATH, CHARACTER_PATH, CHARACTER_PERCEPTIONS_PATH, CHARACTER_PERSON_PATH, CHARACTER_SOURCES_PATH, CHARACTER_STRIKE_PATH, castRoutes, PERCEPTIONS_PATH, type CastRoutesDeps } from "./routes";
@@ -33,6 +33,8 @@ export {
   importedItemId,
   MIND_KINDS,
   pinCasting,
+  renameCharacter,
+  setPerson,
   ROW_PARTS,
   SOURCE_KINDS,
   writeCast,
