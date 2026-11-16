@@ -389,7 +389,7 @@ describe("the swap, and going back", () => {
     expect(code).toBe(1);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, `systemctl --user disable --now ${UNIT}`, "systemctl --user daemon-reload", "systemctl --user start lumiah-home.service"]);
     expect(out).toContain(`The swap did not go through: RPE did not answer at http://127.0.0.1:${place.port} within 1 seconds of its service starting`);
-    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; lumiah-home.service runs again.`);
+    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; the swap's record is taken out; lumiah-home.service runs again.`);
     // Today's build answers again; RPE's service is gone; nothing of today's changed.
     expect(existsSync(flags.today)).toBe(true);
     expect(existsSync(join(unitFolder, UNIT))).toBe(false);
@@ -427,7 +427,7 @@ describe("the swap, and going back", () => {
     const { code, out } = await up({ RPE_SWAP_HANGUP: `restart ${UNIT}` });
     expect(code).toBe(1);
     expect(out).toContain("The swap did not go through: it was told to stop (SIGHUP).");
-    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; lumiah-home.service runs again.`);
+    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; the swap's record is taken out; lumiah-home.service runs again.`);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, `systemctl --user disable --now ${UNIT}`, "systemctl --user daemon-reload", "systemctl --user start lumiah-home.service"]);
     // Never both on: today's unit runs, and is still started at boot; RPE's is gone.
     expect(existsSync(flags.today)).toBe(true);
