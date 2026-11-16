@@ -13,6 +13,8 @@ batch_head: Entries to index: {{count}} of the {{left}} not indexed yet.{{#held}
 batch_entry: ### [{{id}}] {{title}} (from {{source}}; revision {{revision}}{{#keys}}; keys: {{keys}}{{/keys}})
 batch_text: {{text}}
 batch_none: Every entry of this chat's lore is indexed.
+joined: Turn {{turn}} was joined to turn {{joined}}; use that turn.
+read_note: {{note}} (on turn {{turn}})
 batch_held: {{held}} entries are with another indexing job just now; none is left for you to index yet.
 batch_unreadable: The entries to index could not be read: {{reason}}
 job_brief: Index this chat's lore.
@@ -28,9 +30,9 @@ known_none: No lore is bound to you.
 index_file_head: # Lore index
 index_file_count: The lore this chat reads: {{count}} entries{{#unindexed}}, {{unindexed}} of them not indexed yet{{/unindexed}}. Each line gives the entry's id, its title, where it is from, how it comes into the prompt and its size, then what the index says of it.
 index_file_entry: - [{{id}}] {{title}} ({{source}}; {{#activation}}{{activation}}{{/activation}}{{^activation}}never by itself{{/activation}}; {{size}} characters){{#kind}}: {{kind}}{{/kind}}{{#line}}. {{line}}{{/line}}{{#defines}} Defines: {{defines}}.{{/defines}}{{#related}} Related: {{related}}.{{/related}}{{#extras}} {{extras}}.{{/extras}}{{#stale}} Changed since it was indexed.{{/stale}}{{^indexed}}{{^stale}} Not indexed yet. Keys: {{keys}}.{{/stale}}{{/indexed}}
-map_in_prompt: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}}{{#defines}} Defines {{defines}}.{{/defines}}{{#extras}} {{extras}}.{{/extras}}{{#how_constant}} (on every turn){{/how_constant}}{{#how_keyword}} (by a key){{/how_keyword}}{{#how_vector}} (by meaning){{/how_vector}}{{#how_sticky}} (still sticky from an earlier turn){{/how_sticky}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
-map_changed: [{{id}}] {{title}}:{{#notes}} {{.}}{{/notes}}
-map_world: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}}{{#extras}} {{extras}}.{{/extras}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
-map_bound: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}} Bound to {{bound}}.{{#extras}} {{extras}}.{{/extras}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
+map_in_prompt: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}}{{#defines}} Defines {{defines}}.{{/defines}}{{#extras}} {{extras}}.{{/extras}}{{#notes}} {{note}} (on turn {{turn}}).{{/notes}}{{#how_constant}} (on every turn){{/how_constant}}{{#how_keyword}} (by a key){{/how_keyword}}{{#how_vector}} (by meaning){{/how_vector}}{{#how_sticky}} (still sticky from an earlier turn){{/how_sticky}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
+map_changed: [{{id}}] {{title}}:{{#notes}} {{note}} (on turn {{turn}}){{/notes}}
+map_world: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}}{{#extras}} {{extras}}.{{/extras}}{{#notes}} {{note}} (on turn {{turn}}).{{/notes}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
+map_bound: [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}} Bound to {{bound}}.{{#extras}} {{extras}}.{{/extras}}{{#notes}} {{note}} (on turn {{turn}}).{{/notes}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
 projection_book: RPE story notes for chat {{chat}}
 projection_entry: {{title}}, as this chat's story has it now:{{#notes}} {{.}}{{/notes}}

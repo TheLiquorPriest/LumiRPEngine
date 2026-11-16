@@ -45,7 +45,7 @@ async function started(b: TurnBed, turn: string): Promise<Record<string, { effor
 test("the Author starts on the effort its definition names", async () => {
   const b = (bed = await openTurnBed({ answers: [replying("Wren looks up.")] }));
   const turn = await play(b, "I wave.");
-  expect((await started(b, turn)).author).toMatchObject({ effort: "high" });
+  expect((await started(b, turn)).author).toMatchObject({ effort: "off" });
 });
 
 test("the indexer, which holds tools, is given the consent rule and the file for every agent in its first request", async () => {
@@ -93,12 +93,12 @@ test("`write_reply` hands the prose to the writer the Author's definition names"
   expect(narrator?.messages.at(-1)).toMatchObject({ role: "user" });
 });
 
-test("the reply contract is in the Author's opening block once: the briefing holds no copy of it, and still names the turn's folder", async () => {
+test("the reply contract is in the Author's opening block and again at the end of the briefing, as the files stand now, and the briefing names the turn's folder", async () => {
   const b = (bed = await openTurnBed({ answers: [replying("Wren looks up.")] }));
   await play(b, "I wave.");
   const first = textsOf(b.model.requests[0]);
-  expect(first.split("# The reply contract").length - 1).toBe(1);
-  expect(first).not.toContain("How what you write now is marked");
+  expect(first.split("# The reply contract").length - 1).toBe(2);
+  expect(first).toContain("## How the reply is marked");
   expect(first).toContain("# Briefing for this turn");
   expect(first).toContain("The same material is on disk for agents you delegate to:");
 });

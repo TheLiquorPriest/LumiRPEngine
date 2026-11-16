@@ -185,10 +185,12 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(answers.line("map_in_prompt", { id: "e-2", title: "Wharf", keys: "wharf, quay" } as never)).toBe("[e-2] Wharf (not indexed yet; keys: wharf, quay)");
     expect(answers.line("index_file_entry", { id: "e-1", title: "Harbour", source: "Book", size: 90, indexed: true, extras: ["tide: high"] } as never)).toContain("tide: high.");
     const lore = await template("lore-map");
-    const text = lore.render({ in_prompt: { entries: [entry] }, changed: { entries: [{ id: "e-3", title: "Quay", notes: ["Burnt down."] }] }, bound: { entries: [{ id: "e-4", title: "Tide table", bound: "Wren" }] } }).text;
-    expect(text).toContain("- [e-1] Harbour (place): The quay. tide: high. (by a key) (changed since it was indexed)");
-    expect(text).toContain("- [e-3] Quay: Burnt down.");
+    const text = lore.render({ in_prompt: { entries: [{ ...entry, notes: [{ note: "The roof is gone.", turn: 5 }] }] }, changed: { entries: [{ id: "e-3", title: "Quay", notes: [{ note: "Burnt down.", turn: 4 }] }] }, bound: { entries: [{ id: "e-4", title: "Tide table", bound: "Wren" }] } }).text;
+    expect(text).toContain("- [e-1] Harbour (place): The quay. tide: high. The roof is gone. (on turn 5). (by a key) (changed since it was indexed)");
+    expect(text).toContain("- [e-3] Quay: Burnt down. (on turn 4)");
     expect(text).toContain("- [e-4] Tide table Bound to Wren.");
+    expect(answers.line("read_note", { note: "The inn burned.", turn: 7 } as never)).toBe("The inn burned. (on turn 7)");
+    expect(answers.line("joined", { turn: 6, joined: 5 } as never)).toBe("Turn 6 was joined to turn 5; use that turn.");
     expect(answers.line("batch_head", { count: 5, left: 9, held: 4 } as never)).toBe("Entries to index: 5 of the 9 not indexed yet. 4 more are with another indexing job.");
     expect(answers.line("batch_held", { held: 4 } as never)).toBe("4 entries are with another indexing job just now; none is left for you to index yet.");
     expect(answers.line("batch_unreadable", { reason: "the store is closed" } as never)).toBe("The entries to index could not be read: the store is closed");
