@@ -1483,7 +1483,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const placeLines = placeLinesAt(u, this.#d.store.env, scope.chat, scope.turn, settings.places, settings.map);
         // With the chat's tidy-up on, the holds that cannot be, each with the fix the tidy-up would make: listed, never applied (R-173).
         const holds = tidyHolds(this.#d.store, scope.user, scope.turn, settings.taps.tidy);
-        const state = worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, holds, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
+        // The values the layout was rendered with are kept as the part's last fields (the Prompts preview reads them there).
+        const rendered = (fields: JsonObject): void => void this.#d.harness().parts.keep(scope, "prompt", PARTS.worldState, fields).catch((error: unknown) => this.#d.log.warn("The world state's rendered values could not be kept.", { turn: scope.turn, error: words(error) }));
+        const state = worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, holds, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken, rendered });
         this.#drawnAfter.set(`${scope.user}\n${scope.turn}`, { ...drawnGiven, ...state.drawnShown });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
