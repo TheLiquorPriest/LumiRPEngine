@@ -88,17 +88,22 @@ export function timeoutOf(text: string, name: string): number | null {
   return null;
 }
 
-/** Every hook of every level's hooks file as the chat's tree lists them, the pages of the search read one after another to its end. */
-async function readHooks(client: Pick<RpeClient, "call">, chat: string | null, limit: number): Promise<{ rows: HookRow[]; stopped: boolean }> {
+/** Every hook of every level's hooks file as the chat's tree lists them, and the hooks files RPH found something wrong with (one that will not parse names no hook), the pages of the search read one after another to its end. */
+async function readHooks(client: Pick<RpeClient, "call">, chat: string | null, limit: number): Promise<{ rows: HookRow[]; broken: TreeFileRow[]; stopped: boolean }> {
   const files = filesCalls(client, chat);
   const rows: HookRow[] = [];
+  const broken: TreeFileRow[] = [];
   let after: string | undefined;
   let stopped = false;
   for (;;) {
     const page = await files.folder("", "hooks.yml", after, limit);
-    for (const item of page.items) if (item.entry?.hooks !== undefined) for (const hook of item.entry.hooks) rows.push({ hook, file: item.entry });
+    for (const item of page.items) {
+      if (item.entry?.hooks === undefined) continue;
+      for (const hook of item.entry.hooks) rows.push({ hook, file: item.entry });
+      if ((item.entry.problems ?? []).length > 0) broken.push(item.entry);
+    }
     if (page.stopped !== null) stopped = true;
-    if (page.next === null || page.next === after) return { rows, stopped };
+    if (page.next === null || page.next === after) return { rows, broken, stopped };
     after = page.next;
   }
 }
@@ -110,7 +115,7 @@ export function useHooks(chat: string | null, again: number) {
   return useRead(() => readHooks(app.client, chat, limit), [chat, again]);
 }
 
-export function HooksList(props: { rows: readonly HookRow[]; loading: boolean; problem: string | null; stopped: boolean; open: HookRow | null; onOpen(row: HookRow): void }) {
+export function HooksList(props: { rows: readonly HookRow[]; broken: readonly TreeFileRow[]; loading: boolean; problem: string | null; stopped: boolean; open: HookRow | null; onOpen(row: HookRow): void }) {
   const rows = sortedHooks(props.rows);
   return (
     <Section id="hooks" title="Hooks">
@@ -120,7 +125,18 @@ export function HooksList(props: { rows: readonly HookRow[]; loading: boolean; p
           <span>{props.problem}</span>
         </Banner>
       )}
-      {rows.length === 0 && !props.loading && props.problem === null ? <p class="lre-muted rpe-line" data-hooks-none>No hooks file names a hook.</p> : null}
+      {props.broken.map((file) => (
+        <Banner key={file.path} tone="warn" icon="alert" title={`What RPH found wrong with ${file.path} (${LEVEL_WORDS[file.level]})`}>
+          <ul class="rpe-plain" data-hooks-file-problems={file.path}>
+            {(file.problems ?? []).map((p, i) => (
+              <li key={i} class="rpe-line">
+                {p}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      ))}
+      {rows.length === 0 && !props.loading && props.problem === null && props.broken.length === 0 ? <p class="lre-muted rpe-line" data-hooks-none>No hooks file names a hook.</p> : null}
       {props.loading && props.rows.length === 0 ? <p class="lre-muted rpe-line">Reading the hooks…</p> : null}
       <ul class="lre-list" data-hooks>
         {rows.map((row) => {
