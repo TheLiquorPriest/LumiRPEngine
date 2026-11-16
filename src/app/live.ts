@@ -241,7 +241,10 @@ export const LIVE_KINDS = {
     does: "A run's reply began to go out to the chat (its first text, or the harness's release, whichever came first), told at that moment while the run may go on.",
   },
   state: { data: shape.object({}), key: "state", does: "The chat's state changed, and a page reads it again." },
-  handler_failed: { data: shape.object({ op: T, error: T }), does: "An engine handler failed on a change, which is recorded as not applied: the operation, and the handler's error." },
+  handler_failed: {
+    data: shape.object({ op: T, error: T, turn: T, change: shape.nullable(N) }),
+    does: "An engine handler failed on a change of this chat, which is recorded as not applied: the operation, the handler's error, the turn and the change (null for one never kept).",
+  },
 } as const satisfies Readonly<Record<string, LiveKindDeclaration>>;
 
 export type LiveKind = keyof typeof LIVE_KINDS;

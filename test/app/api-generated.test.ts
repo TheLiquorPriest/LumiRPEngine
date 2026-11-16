@@ -86,7 +86,7 @@ describe("the generated types and the API reference", () => {
     expect(types).toContain('export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };');
     expect(types).toContain("export interface LiveMissed {\n  from: number;\n  to: number;\n}");
     expect(types).toContain("export interface LiveBatch {\n  chat: string;\n  events: LiveEvent[];\n  missed?: LiveMissed;\n}");
-    expect(types).toContain('kind: "handler_failed"; at: number; data: { op: string; error: string } }');
+    expect(types).toContain('kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } }');
     for (const line of ['export const LIVE_PATH = "/api/v1/live";', 'export const LIVE_PROTOCOL = "rpe.live";', 'export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";', "export const LIVE_TOKEN_ENDED = 4401;"]) expect(types).toContain(line);
     const section = reference.slice(reference.indexOf("## The live socket's messages"), reference.indexOf("## Types"));
     expect(section).toContain("offering the protocol `rpe.live`");

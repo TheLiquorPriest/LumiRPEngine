@@ -110,7 +110,7 @@ describe("the live hub", () => {
       { kind: "reply", data: { run: "turn-harbor", line: 0, progress: "Weighing what the stranger wants." } },
       { kind: "released", data: { run: "turn-harbor", at: 1_700 } },
       { kind: "state", data: {} },
-      { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } },
+      { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin.", turn: "turn-harbor", change: 7 } },
     ];
     for (const event of each) live.publish("chat-a", event);
     expect(new Set<string>(each.map((e) => e.kind))).toEqual(new Set(Object.keys(LIVE_KINDS)));
@@ -178,7 +178,7 @@ describe("the live socket", () => {
       { kind: "reply", data: { run: "turn-harbor", line: 0, progress: "Weighing what the stranger wants." } },
       { kind: "released", data: { run: "turn-harbor", at: 1_700 } },
       { kind: "state", data: {} },
-      { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } },
+      { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin.", turn: "turn-harbor", change: 7 } },
     ];
     for (const event of each) app.live.publish("chat-a", event);
     const eventsOf = (messages: readonly Record<string, unknown>[]): unknown[] => messages.flatMap((m) => (m.type === "events" && Array.isArray(m.events) ? m.events : []));

@@ -1120,7 +1120,7 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 | `reply` | [`ReplyPiece`](#replypiece) | What went to the chat as the reply was written: its text, and the progress lines of its thinking block. |
 | `released` | [`ReplyReleased`](#replyreleased) | A run's reply began to go out to the chat (its first text, or the harness's release, whichever came first), told at that moment while the run may go on. |
 | `state` | `Record<string, never>` | The chat's state changed, and a page reads it again. A newer one replaces one a page has not taken yet. |
-| `handler_failed` | `{ op: string; error: string }` | An engine handler failed on a change, which is recorded as not applied: the operation, and the handler's error. |
+| `handler_failed` | `{ op: string; error: string; turn: string; change: number | null }` | An engine handler failed on a change of this chat, which is recorded as not applied: the operation, the handler's error, the turn and the change (null for one never kept). |
 | `extension` | [`ExtensionStatusReply`](#extensionstatusreply) | The extension's status changed: as GET /api/v1/status/extension answers it. |
 
 ## The live socket's messages
@@ -2229,7 +2229,7 @@ export interface LiveBatch {
 One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
 
 ```ts
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 ```
 
 ### `LiveMessage`
