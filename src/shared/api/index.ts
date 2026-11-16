@@ -435,6 +435,17 @@ export interface DueShown {
   outcome: string | null;
 }
 
+/** One field of the World page's edit: a value or a fact at a level (world, place:<id>, entity:<id>), set or removed, with how exact and how sure he says a fact is. */
+export interface EditOpAsk {
+  op: "set" | "remove";
+  at: string;
+  key: string;
+  as: "value" | "fact";
+  value?: string;
+  precision?: "exact" | "approximate" | "vague" | "unknown";
+  standing?: "established" | "proposed" | "assumed";
+}
+
 /** When a change to a setting is in force: at its next use, from the next turn, or from RPE's next start. */
 export type Effect = "use" | "turn" | "start";
 
@@ -1719,6 +1730,22 @@ export interface TakenKeyAsk {
 /** What a level may set a setting to: one of RPH's shapes; a table of names, each to a value of `of` (with `whole`, such a value alone for every name); or a list of records, each holding every field. */
 export type Takes = SettingTakes | { type: "table"; of: SettingTakes; whole?: true } | { type: "records"; fields: readonly { name: string; takes: SettingTakes; about: string }[] };
 
+/** A tap that manages, recorded at once as his own edit: one of the world's actions done at once (money, a group, gear, a vehicle); one ✎ form (a hint, the time, a thing, things with a label, or a field); the World page's edit of values and facts; or an edit of operations ("Make this a property"). */
+export type TapAsk = { kind: "action"; action: string; params: { [key: string]: JsonValue }; source: string; text?: string; now?: boolean; tell?: boolean } | { kind: "fix"; fix: { hint: string } | { time: string } | { thing: JsonValue } | { things: JsonValue[]; label: string } | { entity: string; field: string; value: JsonValue }; tell?: boolean } | { kind: "edit"; ops: EditOpAsk[]; tell?: boolean } | { kind: "ops"; ops: JsonValue[]; tell?: boolean };
+
+/** What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words. */
+export interface TapReply {
+  applied: boolean;
+  reports: string[];
+  undo: string | null;
+  words: string;
+}
+
+/** The Undo of an edit of his, by the id its answer gave. */
+export interface TapUndoAsk {
+  undo: string;
+}
+
 /** A tool call a model made: the model's id for it, the tool, its arguments, and when the model began writing it, where the provider gave it in pieces. */
 export interface ToolCallView {
   id: string;
@@ -2319,6 +2346,26 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: false;
+  };
+  /** A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed. */
+  "POST /api/v1/chats/:chat/taps": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: TapAsk;
+    reply: TapReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The Undo of an edit of his, by the id its answer gave: all of it, or none and the answer says why. */
+  "POST /api/v1/chats/:chat/taps/undo": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: TapUndoAsk;
+    reply: TapReply;
+    paged: false;
+    long: false;
+    joined: true;
   };
   /** A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length. */
   "GET /api/v1/chats/:chat/turns": {

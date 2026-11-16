@@ -305,6 +305,33 @@ What a turn's time brought due, each thing with what the turn recorded for it.
 | Reply | [`DueReply`](#duereply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `POST /api/v1/chats/:chat/taps`
+
+A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`TapAsk`](#tapask) |
+| Reply | [`TapReply`](#tapreply) |
+
+### `POST /api/v1/chats/:chat/taps/undo`
+
+The Undo of an edit of his, by the id its answer gave: all of it, or none and the answer says why.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`TapUndoAsk`](#tapundoask) |
+| Reply | [`TapReply`](#tapreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
 ### `GET /api/v1/chats/:chat/world`
 
 The world's tree for a chat: the level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn.
@@ -2031,6 +2058,22 @@ export interface DueShown {
   when: string;
   at: string | null;
   outcome: string | null;
+}
+```
+
+### `EditOpAsk`
+
+One field of the World page's edit: a value or a fact at a level (world, place:<id>, entity:<id>), set or removed, with how exact and how sure he says a fact is.
+
+```ts
+export interface EditOpAsk {
+  op: "set" | "remove";
+  at: string;
+  key: string;
+  as: "value" | "fact";
+  value?: string;
+  precision?: "exact" | "approximate" | "vague" | "unknown";
+  standing?: "established" | "proposed" | "assumed";
 }
 ```
 
@@ -4026,6 +4069,37 @@ What a level may set a setting to: one of RPH's shapes; a table of names, each t
 
 ```ts
 export type Takes = SettingTakes | { type: "table"; of: SettingTakes; whole?: true } | { type: "records"; fields: readonly { name: string; takes: SettingTakes; about: string }[] };
+```
+
+### `TapAsk`
+
+A tap that manages, recorded at once as his own edit: one of the world's actions done at once (money, a group, gear, a vehicle); one ✎ form (a hint, the time, a thing, things with a label, or a field); the World page's edit of values and facts; or an edit of operations ("Make this a property").
+
+```ts
+export type TapAsk = { kind: "action"; action: string; params: { [key: string]: JsonValue }; source: string; text?: string; now?: boolean; tell?: boolean } | { kind: "fix"; fix: { hint: string } | { time: string } | { thing: JsonValue } | { things: JsonValue[]; label: string } | { entity: string; field: string; value: JsonValue }; tell?: boolean } | { kind: "edit"; ops: EditOpAsk[]; tell?: boolean } | { kind: "ops"; ops: JsonValue[]; tell?: boolean };
+```
+
+### `TapReply`
+
+What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words.
+
+```ts
+export interface TapReply {
+  applied: boolean;
+  reports: string[];
+  undo: string | null;
+  words: string;
+}
+```
+
+### `TapUndoAsk`
+
+The Undo of an edit of his, by the id its answer gave.
+
+```ts
+export interface TapUndoAsk {
+  undo: string;
+}
 ```
 
 ### `ToolCallView`
