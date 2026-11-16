@@ -354,6 +354,10 @@ export const turnReply = shape.named(
     carried: field(nullable(shape.object({ message: T, swipe: N, record: shape.json() })), "For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other."),
     card: field(T, "The route of the turn's review card, where each of its changes is reviewed and undone."),
     quests: field(shape.list(shape.object({ id: T, name: T, kind: T })), "The open quests the turn touched: opened, called a stage of, or wrote anything of."),
+    threads: field(
+      shape.list(shape.object({ id: T, text: nullable(T), state: nullable(T), stakes: nullable(T) })),
+      "The threads the turn opened or wrote anything of that stay open, each with its words, its state and its stakes as the story record holds them at the turn.",
+    ),
   }),
 );
 

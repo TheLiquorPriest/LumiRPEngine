@@ -33,6 +33,6 @@ test("the Build page's messages and the Migration page are answered by RPE as co
 
   const migration = await b.page<MigrationPage>("GET", "/api/v1/migration");
   expect(migration.status).toBe(200);
-  expect({ report: migration.body.report, text: migration.body.text, chats: migration.body.chats, waiting: migration.body.waiting }).toEqual({ report: null, text: null, chats: [], waiting: [] });
+  expect(migration.body.run).toBeNull();
   expect(migration.body.goingBack.steps.some((step) => step.includes(`(${EXTENSION_IDENTIFIER})`))).toBe(true);
 });

@@ -310,6 +310,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       carried: carriedOf(user, r.turn),
       card: `/api/v1/chats/${encodeURIComponent(r.chat)}/turns/${encodeURIComponent(r.turn)}/card`,
       quests: questsTouched(user, r.chat, r.turn),
+      threads: threadsTouched(user, r.chat, r.turn),
     };
   };
 
@@ -321,6 +322,16 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       const touched = q.opened === turn || q.touched === turn || marks.touched === turn || q.rows.some((row) => row.turn === turn);
       return marks.closed === null && touched ? [{ id: q.id, name: q.name, kind: q.kind }] : [];
     });
+  };
+
+  /** The threads a turn touched that stay open, read along its own line: one it opened or wrote anything of, with its words, state and stakes. */
+  const threadsTouched = (user: string, chat: string, turn: string): { id: string; text: string | null; state: string | null; stakes: string | null }[] => {
+    const record = StoryRecord.read(turns.store, user, storyAt(turns.store.user(user), chat, turn));
+    const said = (value: JsonValue | undefined): string | null => (typeof value === "string" ? value : null);
+    return record
+      .of("thread")
+      .filter((t) => t.closedBy === null && (t.opened === turn || t.touched === turn || t.rows.some((row) => row.turn === turn)))
+      .map((t) => ({ id: t.id, text: said(t.fields.text), state: said(t.fields.state), stakes: said(t.fields.stakes) }));
   };
 
   const runQuery = {
