@@ -13,6 +13,7 @@ import type { RpeClient } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { duration, errorWords, num } from "../../words";
 import { NO_SIGNIN, SignInPanel, type SignInShown, signInCalls, signInSteps } from "./signin";
+import { FORM_WORDS, formKey, NO_TAG_STATE, type ReplyForm, startedState, TagCheckShown, type TagCheckState } from "./tags";
 import { WebSearchSection } from "./web";
 
 const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
@@ -270,6 +271,8 @@ export interface ConnectionsViewProps {
   onTest(id: string): void;
   /** Each connection's sign-in, by its id, and the steps of it. */
   signIn(id: string): SignInHandle;
+  /** Each connection's tag check, by its id, and what the page does for it. */
+  tags?: { states: Readonly<Record<string, TagCheckState>>; onCheck(id: string): void; onForm(id: string, form: ReplyForm): void };
 }
 
 /**
@@ -338,7 +341,7 @@ export interface SignInHandle {
   out(id: string): void;
 }
 
-function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; test: ConnectionTestShown | undefined; signIn: SignInHandle; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void; onTest(id: string): void }) {
+function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; test: ConnectionTestShown | undefined; signIn: SignInHandle; tags: ConnectionsViewProps["tags"]; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void; onTest(id: string): void }) {
   const { view, action, signIn } = props;
   const said = [view.provider, view.model, view.effort === undefined ? null : `thinks at ${view.effort}`].filter((part) => part !== null && part !== undefined).join(" · ");
   return (
@@ -382,6 +385,7 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
           </div>
         )}
         {props.test === undefined ? null : <TestShown test={props.test} view={view} onTake={(fill) => props.onAction({ kind: "form", id: view.id, fill })} />}
+        {props.tags === undefined ? null : <TagCheckShown view={view} state={props.tags.states[view.id]} onCheck={props.tags.onCheck} onForm={props.tags.onForm} />}
       </div>
     </li>
   );
@@ -426,7 +430,7 @@ export function ConnectionsView(props: ConnectionsViewProps) {
       ) : (
         <ul class="lre-stack rpe-plain">
           {list.connections.map((view) => (
-            <ConnectionRow key={view.id} view={view} action={action} test={props.tests[view.id]} signIn={props.signIn(view.id)} onAction={props.onAction} onRemove={props.onRemove} onDefault={props.onDefault} onTest={props.onTest} />
+            <ConnectionRow key={view.id} view={view} action={action} test={props.tests[view.id]} signIn={props.signIn(view.id)} tags={props.tags} onAction={props.onAction} onRemove={props.onRemove} onDefault={props.onDefault} onTest={props.onTest} />
           ))}
         </ul>
       )}
@@ -454,6 +458,35 @@ export function ConnectionsPage() {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [tests, setTests] = useState<Readonly<Record<string, ConnectionTestShown>>>({});
   const [signins, setSignins] = useState<Readonly<Record<string, SignInShown>>>({});
+  const [tagStates, setTagStates] = useState<Readonly<Record<string, TagCheckState>>>({});
+  const readAgain = (): void => {
+    app.client.call("GET /api/v1/connections", {}).then(setList, () => undefined);
+  };
+  // A check is a job; when any job changes the connections are read again, so its result shows without a poll.
+  useEffect(
+    () =>
+      app.client.follow("~jobs", {
+        events(events) {
+          if (events.some((event) => String(event.kind) === "job")) readAgain();
+        },
+        reset: readAgain,
+        refused: () => undefined,
+      }),
+    [],
+  );
+  const checkTags = (id: string): void => {
+    setTagStates((now) => ({ ...now, [id]: { ...NO_TAG_STATE, busy: true } }));
+    app.client.call("POST /api/v1/connections/:id/tag-check", { id }).then(
+      (answer) => setTagStates((now) => ({ ...now, [id]: startedState(answer) })),
+      (error: unknown) => setTagStates((now) => ({ ...now, [id]: { ...NO_TAG_STATE, refusal: errorWords(error) } })),
+    );
+  };
+  const setForm = (id: string, form: ReplyForm): void => {
+    app.client.call("PUT /api/v1/settings", {}, { body: { level: "global", key: formKey(id), value: form } }).then(
+      () => setTagStates((now) => ({ ...now, [id]: { ...(now[id] ?? NO_TAG_STATE), refusal: null, said: `Saved: this connection's replies are marked with ${FORM_WORDS[form]} from the next turn.` } })),
+      (error: unknown) => setTagStates((now) => ({ ...now, [id]: { ...(now[id] ?? NO_TAG_STATE), said: null, refusal: errorWords(error) } })),
+    );
+  };
   useEffect(() => {
     let alive = true;
     app.client.call("GET /api/v1/connections", {}).then(
@@ -533,6 +566,7 @@ export function ConnectionsPage() {
         cancel: (key) => signAct(key, (was) => steps.cancel(key, was)),
         out: (key) => signAct(key, (was) => steps.out(key, was), true),
       })}
+      tags={{ states: tagStates, onCheck: checkTags, onForm: setForm }}
       onTest={(id) => {
         setTests((now) => ({ ...now, [id]: { busy: true } }));
         testConnection(app.client, id).then((test) => setTests((now) => ({ ...now, [id]: test })));
