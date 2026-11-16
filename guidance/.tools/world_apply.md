@@ -36,7 +36,7 @@ arguments:
   operations.reveal: "quest: true to show the player the stage."
   operations.axis: "relate: the regard that changes (trust, liking); leave it out for all."
   operations.change: "relate: how much, up or down."
-  operations.list: "horizon: the whole list the next turn is expected to need: places, people and things by name, or by place: or entity: and the id; anything else in your own words."
+  operations.list: "horizon: the whole list the next turn is expected to need: places, people and things by name, or by place: or entity: and the id; anything else in your own words. An entry may be {at, depth} instead: at is the name as above, depth is how many levels of it the world state prints, a whole number or full; with no depth it is printed in full. The scene itself is always printed in full."
   operations.name: "spawn: its name."
   operations.kind: "spawn: person (or the world's own kind), item, container, a vehicle or group kind; or place, which needs only its name (inside the place at, or in none); room, spot or venue needs at."
   operations.tier: "spawn: its tier."
