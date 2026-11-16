@@ -237,7 +237,7 @@ export class Draft {
   /** One change of an operation, with who made it, its lane, its provenance and what it cites. */
   private push(rec: Recorded, lane: Lane, prov: Provenance, change: Pick<ChangeInput, "op" | "value">): void {
     rec.inputs.push(this.inputs.length);
-    this.inputs.push({ lane, op: change.op, value: change.value, by: this.call.agent.id, standing: prov.standing, precision: prov.precision, source: prov.source?.from ?? null, cite: citeOf(prov), job: this.call.agent.job ?? null });
+    this.inputs.push({ lane, op: change.op, value: change.value, by: this.call.agent.definition, handle: this.call.agent.id, standing: prov.standing, precision: prov.precision, source: prov.source?.from ?? null, cite: citeOf(prov), job: this.call.agent.job ?? null });
   }
 
   /** A seed for what an operation draws (a made thing's id, a level-up's dice): the turn, the call and the operation. */

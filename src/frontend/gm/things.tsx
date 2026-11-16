@@ -25,7 +25,7 @@ import { TIDY_BOUNDS } from "../../shared/settings";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { GmThingExtras, HistorySource, KeepResult, LoanChoice, MadeInPlay, RestView, TidyFinding, TidyFix, TidyKind, TidyRun } from "../../shared/thing-gm";
 import type { HandoverBasis, ItemOp, Rest, SetKind, Size, SizeClass, Spot } from "../../shared/things";
-import { isSize, makeFieldsOf, SET_KIND_LABEL, SET_KINDS, SET_NAME_MAX, setsOf, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
+import { isSize, makeFieldsOf, SET_KIND_LABEL, SET_KINDS, SET_NAME_MAX, setsOf, SIZE_LABELS, SIZES } from "../../shared/things";
 import type { PartyRef, ThingPage, ThingPicks, ThingRow, ThingType, WhereChoice, WhereStep } from "../../shared/thing-view";
 import { GRANT_WORDS, partyPossessive, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
 import { vehicleSpecsOf, type VehicleClassChoice, type VehicleSpec } from "../../shared/vehicles";
@@ -668,7 +668,7 @@ function RenameSheet(props: { row: ThingRow; busy: boolean; onRename(name: strin
     >
       <label class="lre-field" data-lre-bulk-rename="">
         <span class="label">Name</span>
-        <input class="lre-input" value={name} maxLength={THING_NAME_MAX} onInput={(event) => setName(event.currentTarget.value)} />
+        <input class="lre-input" value={name} onInput={(event) => setName(event.currentTarget.value)} />
       </label>
     </FormSheet>
   );
@@ -1237,13 +1237,13 @@ function LabelForm(props: { id: EntityId; name: string; entity: GmEntity | undef
     ops.push({ op: "set", entity: props.id, field: key, value: next });
     parts.push(words);
   }
-  const ready = ops.length > 0 && trimmed !== "" && trimmed.length <= THING_NAME_MAX && !editor.busy;
+  const ready = ops.length > 0 && trimmed !== "" && !editor.busy;
   const sizes = [...(stored.size === null ? [{ value: "", label: props.size === "unknown" ? "Not set (nothing gives one)" : `As inferred: ${sizeLabel(props.size)}` }] : []), ...SIZES.map((s) => ({ value: s, label: SIZE_LABELS[s], sublabel: SIZE_WORDS[s].means }))];
   return (
     <div class="lre-stack" data-lre-label-form="">
       <label class="lre-field">
         <span class="label">Name</span>
-        <input class="lre-input" value={v.name} maxLength={THING_NAME_MAX} onInput={(event) => setV({ ...v, name: event.currentTarget.value })} />
+        <input class="lre-input" value={v.name} onInput={(event) => setV({ ...v, name: event.currentTarget.value })} />
       </label>
       <TextListEditor label="Also called" value={v.aliases} placeholder="Another name, as the story may say it" onChange={(aliases) => setV({ ...v, aliases })} />
       <label class="lre-field">
@@ -1312,7 +1312,7 @@ function AddInsideSheet(props: { holder: string; owner: EntityId | null; busy: b
   const [name, setName] = useState("");
   const [size, setSize] = useState<Size | null>(null);
   const trimmed = name.trim();
-  const ready = trimmed !== "" && trimmed.length <= THING_NAME_MAX && !props.busy;
+  const ready = trimmed !== "" && !props.busy;
   return (
     <FormSheet
       title="Add inside"
@@ -1327,7 +1327,7 @@ function AddInsideSheet(props: { holder: string; owner: EntityId | null; busy: b
       <div class="lre-stack" data-lre-add-inside="">
         <label class="lre-field">
           <span class="label">Name</span>
-          <input class="lre-input" value={name} maxLength={THING_NAME_MAX} placeholder="Spare fuse" onInput={(event) => setName(event.currentTarget.value)} />
+          <input class="lre-input" value={name} placeholder="Spare fuse" onInput={(event) => setName(event.currentTarget.value)} />
         </label>
         <span class="lre-small lre-muted">How big is it? Leave it, and its name may say.</span>
         <SizeChoices value={size} onPick={setSize} />

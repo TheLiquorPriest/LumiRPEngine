@@ -105,9 +105,6 @@ export type AccessBasis = (typeof ACCESS_BASES)[number];
 export const PERMIT_SCOPES = ["all", "home"] as const;
 export type PermitScope = (typeof PERMIT_SCOPES)[number];
 
-/** The longest name a thing is given in play, as a GM's spawn bounds one. */
-export const THING_NAME_MAX = 80;
-
 /** A use grant's basis as stored: its own, else (a link from before bases) a loan when it has an end, else an assignment. */
 export function grantBasisOf(fields: Readonly<Record<string, unknown>> | undefined, until: number | undefined): GrantBasis {
   const basis = fields?.basis;
@@ -194,7 +191,7 @@ export type PlaceKind = (typeof PLACE_KINDS)[number];
  * `set_apply` and `set_drop`.
  */
 export type ItemOp =
-  | { do: "make"; name: string; type?: string; class?: string; details?: VehicleDetails; size?: Size; holds?: Size; category?: string; description?: string; at: Spot; owner?: EntityId; home?: Rest; qty?: number; aliases?: string[]; hidden?: boolean; why: string }
+  | { do: "make"; name: string; type?: string; class?: string; details?: VehicleDetails; size?: Size; holds?: Size; category?: string; description?: string; at?: Spot; owner?: EntityId; home?: Rest; qty?: number; aliases?: string[]; hidden?: boolean; why: string }
   | { do: "move"; item: EntityId; to: Spot; why: string }
   | { do: "hand"; item: EntityId; to: EntityId; basis: HandoverBasis; until?: number; why: string }
   | { do: "own"; item: EntityId; owner: EntityId | null; why: string }

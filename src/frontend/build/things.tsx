@@ -15,7 +15,7 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonPatchOp, LintIssue, ResultBodies, ThingsRead } from "../../shared/protocol";
 import type { GrantBasis, Size, SizeClass, Spot } from "../../shared/things";
-import { isSize, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
+import { isSize, SIZE_LABELS, SIZES } from "../../shared/things";
 import type { GrantView, OwnerGroup, PartyRef, PersonThings, ThingPage as ThingPageView, ThingPicks, ThingRow, ThingType, WhereChoice } from "../../shared/thing-view";
 import { GRANT_WORDS, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
 import { vehicleClassChoices, vehicleSpecsOf, worldHasAir, type VehicleClassChoice, type VehiclePick } from "../../shared/vehicles";
@@ -464,7 +464,7 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
   const choice = where && "choice" in where ? where.choice : null;
   const tooBig = choice ? cannotHold(choice, size) : null;
   const trimmed = name.trim();
-  const ready = trimmed !== "" && trimmed.length <= THING_NAME_MAX && what !== null && choice !== null && tooBig === null && (!vehicle || choice.is === "place");
+  const ready = trimmed !== "" && what !== null && choice !== null && tooBig === null && (!vehicle || choice.is === "place");
   const presumes = owner === "" && choice ? presumedLine(choice.presumes) : null;
   const pickKind = (next: ThingKind): void => {
     if (next === kind) return;
@@ -475,7 +475,7 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
     setWhat(next);
     setChoosing(false);
     const named = suggestedName(next);
-    if (named !== null && trimmed === "") setName(named.slice(0, THING_NAME_MAX));
+    if (named !== null && trimmed === "") setName(named);
   };
   const create = () =>
     run(async () => {
@@ -514,7 +514,7 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
           <label class="label" for={nameId}>
             1. Name
           </label>
-          <input id={nameId} class="lre-input" value={name} maxLength={THING_NAME_MAX} placeholder={vehicle ? "Delivery van" : "Torque wrench"} onInput={(event) => setName(event.currentTarget.value)} />
+          <input id={nameId} class="lre-input" value={name} placeholder={vehicle ? "Delivery van" : "Torque wrench"} onInput={(event) => setName(event.currentTarget.value)} />
         </div>
         <div class="lre-field" data-lre-what="">
           <span class="label">2. What is it?</span>

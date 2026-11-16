@@ -18,7 +18,7 @@ import type { ChatId, EntityId, PlaceId } from "../../../shared/ids";
 import { FIX_THINGS_MAX } from "../../../shared/protocol";
 import type { StateView } from "../../../shared/state-view";
 import type { ItemFix, Size } from "../../../shared/things";
-import { SIZE_LABELS, THING_NAME_MAX } from "../../../shared/things";
+import { SIZE_LABELS } from "../../../shared/things";
 import type { LoanChoice } from "../../../shared/thing-gm";
 import { sizeLabel } from "../../../shared/thing-view";
 import { pushSheet, showPanel, useApp } from "../../../frontend/app";
@@ -581,7 +581,7 @@ export function RenameSheet(props: { item: GearItem; busy: boolean; onRename(nam
     >
       <label class="lre-field">
         <span class="label">Name</span>
-        <input class="lre-input" value={name} maxLength={THING_NAME_MAX} onInput={(event) => setName(event.currentTarget.value)} />
+        <input class="lre-input" value={name} onInput={(event) => setName(event.currentTarget.value)} />
         <span class="lre-field-help">What it is called from now on; the story keeps calling it by its old name too.</span>
       </label>
     </FormSheet>

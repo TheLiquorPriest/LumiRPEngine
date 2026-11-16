@@ -500,7 +500,7 @@ function scenePlace(o: OpContext): string | null {
  * nothing, or nothing that big), the thing is made where the holder is and put in it all the same,
  * and the answer reports the rule it bent. A thing of that name already there stands for it.
  */
-function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }>): EntityId | undefined | Unread {
+function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }> & { at: Spot }): EntityId | undefined | Unread {
   const w = o.draft.w;
   const made = (out: ItemOpApplied | ItemOpRefusal, spot: Spot): EntityId | undefined | Unread => {
     if (!("code" in out)) {

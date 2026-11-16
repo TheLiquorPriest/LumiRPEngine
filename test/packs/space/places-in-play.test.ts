@@ -60,7 +60,7 @@ describe("place ops (ITEMS-SPEC §6.2, the space pack's `space.place_op`)", () =
     const { state: after, id } = made(world, state, BOOTH);
     const ctx = reg.context(world, after);
     expect(id).toMatch(/^place_the_back_booth_[0-9a-f]{8}$/);
-    expect(ctx.world.places[id]).toMatchObject({ id, name: "The back booth", parent: "rusty_anchor", fields: {}, made: { as: "spot", by: "story", at: after.clock, why: "Jordan slides into it" } });
+    expect(ctx.world.places[id]).toMatchObject({ id, name: "the back booth", parent: "rusty_anchor", fields: {}, made: { as: "spot", by: "story", at: after.clock, why: "Jordan slides into it" } });
     expect(isMadePlace(ctx, id)).toBe(true);
     expect(isMadePlace(ctx, "rusty_anchor")).toBe(false);
     expect(canSeePlace(reg, ctx.world, after, "pov", id)).toBe(true);
@@ -100,7 +100,7 @@ describe("place ops (ITEMS-SPEC §6.2, the space pack's `space.place_op`)", () =
     const { state: after, id } = made(world, state, BOOTH);
     const out = op(world, after, { do: "label", place: id, name: "Jordan's booth", aliases: ["the back booth"], description: "Cracked red vinyl." });
     if (typeof out === "string") throw new Error(out);
-    expect(reg.context(world, out.state).world.places[id]).toMatchObject({ name: "Jordan's booth", fields: { aliases: ["The back booth"], description: "Cracked red vinyl." } });
+    expect(reg.context(world, out.state).world.places[id]).toMatchObject({ name: "Jordan's booth", fields: { aliases: ["the back booth"], description: "Cracked red vinyl." } });
     expect(op(world, out.state, { do: "label", place: id, name: "Jordan's booth" })).toBe("no_change");
     expect(op(world, after, { do: "label", place: "rusty_anchor", name: "The Anchor" })).toBe("not_made");
     const { state: two, id: office } = made(world, after, { ...BOOTH, name: "the front booth" });
@@ -151,7 +151,7 @@ describe("place ops (ITEMS-SPEC §6.2, the space pack's `space.place_op`)", () =
     const { state: one, id: back } = made(world, state, BOOTH);
     const { state: two, id: front } = made(world, one, { ...BOOTH, name: "the front booth", parent: "bluebird_coffee" });
     const ctx = reg.context(world, two);
-    expect(findPlaces(ctx, "the back booth")).toEqual([{ id: back, name: "The back booth", parent: "rusty_anchor", made: true, matched: "name" }]);
+    expect(findPlaces(ctx, "the back booth")).toEqual([{ id: back, name: "the back booth", parent: "rusty_anchor", made: true, matched: "name" }]);
     // Two booths answer "the booth": none, unless one is nearer.
     expect(findPlaces(ctx, "the booth")).toEqual([]);
     expect(findPlaces(ctx, "the booth", { near: "rusty_anchor" }).map((h) => h.id)).toEqual([back]);
@@ -264,10 +264,10 @@ describe("places the reply makes (ITEMS-SPEC §12 Phase 3)", () => {
     await rig.turn(chatId, "I grab a seat.", "Jordan slides into the back booth at the Rusty Anchor.");
     const { state, ctx } = await head(rig, chatId);
     const [booth] = madePlaces(state);
-    expect(booth).toMatchObject({ name: "The back booth", parent: "rusty_anchor", made: { as: "spot", by: "story", why: "Jordan slides into the back booth" } });
+    expect(booth).toMatchObject({ name: "the back booth", parent: "rusty_anchor", made: { as: "spot", by: "story", why: "Jordan slides into the back booth" } });
     expect(placeOfEntity(state, "pov")).toBe(booth?.id ?? "");
     expect(canSeePlace(rig.rt.registry, ctx.world, state, "pov", booth?.id ?? "")).toBe(true);
-    const chip = (await chips(rig, chatId)).find((c) => c.kind === "undo" && c.label === "You went to The back booth, in The Rusty Anchor (a new place)");
+    const chip = (await chips(rig, chatId)).find((c) => c.kind === "undo" && c.label === "You went to the back booth, in The Rusty Anchor (a new place)");
     expect(chip).toBeDefined();
     // The next reply's read is offered it, and its "the booth" is it.
     reads(rig, [{ type: "location", entity: "danny_okafor", place: "the booth" }]);
@@ -296,7 +296,7 @@ describe("places the reply makes (ITEMS-SPEC §12 Phase 3)", () => {
     // A swipe reads its reply again, on its own record; going back to the first folds as before.
     await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "Jordan slides into the back booth at the Rusty Anchor.");
     const swiped = await head(rig, chatId);
-    expect(madePlaces(swiped.state).map((p) => [p.name, p.parent])).toEqual([["The back booth", "rusty_anchor"]]);
+    expect(madePlaces(swiped.state).map((p) => [p.name, p.parent])).toEqual([["the back booth", "rusty_anchor"]]);
     expect(placeOfEntity(swiped.state, "pov")).toBe(madePlaces(swiped.state)[0]?.id ?? "");
     rig.host.navigate(chatId, reply.id, 0);
     await rig.host.settle();
@@ -307,7 +307,7 @@ describe("places the reply makes (ITEMS-SPEC §12 Phase 3)", () => {
     await rig.host.settle();
     expect(hashJson((await head(rig, branch)).state)).toBe(hashJson(first.state));
     // Undo takes the place and the move back together.
-    const chip = (await chips(rig, chatId)).find((c) => c.kind === "undo" && c.label.includes("The back booth"));
+    const chip = (await chips(rig, chatId)).find((c) => c.kind === "undo" && c.label.includes("the back booth"));
     if (!chip) throw new Error("no Undo");
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "undo" }));
     const undone = await head(rig, chatId);
@@ -321,12 +321,12 @@ describe("places the reply makes (ITEMS-SPEC §12 Phase 3)", () => {
     reads(rig, [{ type: "location", entity: "pov", place: "the Tin Cup", parent: "port_alder", why: "Jordan tries the new bar on Front Street" }]);
     await rig.turn(chatId, "I head out.", "Jordan tries the Tin Cup, the new bar on Front Street.");
     expect(madePlaces((await head(rig, chatId)).state)).toEqual([]);
-    const chip = (await chips(rig, chatId)).find((c) => c.kind === "confirm" && c.label === "You went to The Tin Cup, in Port Alder (a new place)");
+    const chip = (await chips(rig, chatId)).find((c) => c.kind === "confirm" && c.label === "You went to the Tin Cup, in Port Alder (a new place)");
     if (!chip) throw new Error(`no confirm chip: ${(await chips(rig, chatId)).map((c) => `${c.kind} ${c.label}`).join("; ")}`);
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "confirm" }));
     const { state } = await head(rig, chatId);
     const [bar] = madePlaces(state);
-    expect(bar).toMatchObject({ name: "The Tin Cup", parent: "port_alder", made: { as: "venue" } });
+    expect(bar).toMatchObject({ name: "the Tin Cup", parent: "port_alder", made: { as: "venue" } });
     expect(placeOfEntity(state, "pov")).toBe(bar?.id ?? "");
   });
 
@@ -340,7 +340,7 @@ describe("places the reply makes (ITEMS-SPEC §12 Phase 3)", () => {
     ]);
     await rig.turn(chatId, "I look around.", "Danny takes the back booth, Jess the dartboard corner, and Jordan the pool table.");
     const { state } = await head(rig, chatId);
-    expect(madePlaces(state).map((p) => p.name)).toEqual(["The back booth", "The dartboard corner"]);
+    expect(madePlaces(state).map((p) => p.name)).toEqual(["the back booth", "the dartboard corner"]);
     expect(placeOfEntity(state, "pov")).toBe("rusty_anchor");
     expect((await chips(rig, chatId)).some((c) => c.kind === "untracked" && (c.detail ?? "").includes("2 new places already"))).toBe(true);
   });

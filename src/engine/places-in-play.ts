@@ -20,7 +20,7 @@ import { nameKey, PLACE_KINDS, stem, type PlaceKind, type PlaceOp } from "../sha
 import { placeCapsOf, type PlaceDef, type WorldDoc } from "../shared/world";
 import { labelOf, own } from "./pack-kit";
 import { headSays, placeAliases, placeDistance, placeKey, placeSaid } from "./place-names";
-import type { ReadContext, Rejection } from "./registry";
+import type { Advice, ReadContext, Rejection } from "./registry";
 import { placeOfEntity, placeWithin } from "./scope";
 import type { WorldState } from "./state";
 import { chatDraftOf, draftedWorld, NO_DRAFT } from "./world-draft";
@@ -54,10 +54,7 @@ export interface MadePlace extends PlaceDef {
 export type PlaceOpRefusal = Rejection & { exists?: PlaceId };
 
 /** A place op's events and the place it made, or why not. */
-export type PlaceOpOutcome = { events: LedgerEvent[]; made?: PlaceId } | PlaceOpRefusal;
-
-/** The longest name, or alias, a place made in play takes. */
-export const PLACE_NAME_MAX = 60;
+export type PlaceOpOutcome = { events: LedgerEvent[]; made?: PlaceId; advice?: Advice[] } | PlaceOpRefusal;
 
 /** The most aliases a place made in play keeps. */
 const ALIASES_MAX = 8;
@@ -260,13 +257,12 @@ export function placeKindFor(world: Pick<WorldDoc, "places">, parent: PlaceId, n
 }
 
 /**
- * A name as a place made in play keeps it: trimmed, one space between words, its first letter a
- * capital, as the world's places are named ("the back booth" is "The back booth"); null when it says
- * nothing or runs past `PLACE_NAME_MAX`.
+ * A name as a place made in play keeps it: trimmed, one space between words, as given; null when it
+ * says nothing.
  */
 function cleanName(text: string): string | null {
   const name = text.trim().replace(/\s+/g, " ");
-  return name !== "" && name.length <= PLACE_NAME_MAX && placeKey(name) !== "" ? `${name.charAt(0).toUpperCase()}${name.slice(1)}` : null;
+  return name !== "" && placeKey(name) !== "" ? name : null;
 }
 
 /** The aliases a made place keeps: each a clean name, none its own name or another's twin, at most `ALIASES_MAX`. */
@@ -311,6 +307,10 @@ function madeId(ctx: Pick<ReadContext, "world" | "state">, name: string, parent:
 export interface PlaceOpOptions {
   by: string;
   salt: string;
+  /** A caller that takes advice: a place of the name already there, or past the chat's cap, is made all the same and the answer says so. */
+  advise?: boolean;
+  /** The places a chat makes before each further one is advised, where the world sets no `placeCap` (the setting `engine.placeCap`). */
+  cap?: number;
 }
 
 /**
@@ -336,20 +336,31 @@ export function placeOp(ctx: ReadContext, op: PlaceOp, opts: PlaceOpOptions): Pl
 
 function makePlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "make" }>, opts: PlaceOpOptions): PlaceOpOutcome {
   const name = cleanName(op.name);
-  if (name === null) return reject("bad_name", `a new place needs a name of at most ${PLACE_NAME_MAX} characters`);
-  if (!hasOwn(ctx.world.places, op.parent)) return reject("missing_place", `no place ${labelOf(ctx, op.parent)}`);
+  if (name === null) return reject("bad_name", "a new place needs a name");
+  if (!hasOwn(ctx.world.places, op.parent)) return { ...reject("missing_place", `no place ${labelOf(ctx, op.parent)}`), said: op.parent, choices: Object.keys(ctx.world.places) };
   const aliases = cleanAliases(name, op.aliases ?? []);
+  const advising = opts.advise === true;
+  const advice: Advice[] = [];
+  // Today's find-first: a place under the same parent by the name or an alias stands for it. With advice asked, a new place is made and the ones there are named.
+  const same = new Map<PlaceId, string>();
   for (const said of [name, ...aliases]) {
-    const found = findPlaces(ctx, said, { parent: op.parent })[0];
-    if (found) return { ...reject("exists", `${found.name} is there already`), exists: found.id };
+    for (const found of findPlaces(ctx, said, { parent: op.parent })) {
+      if (!advising) return { ...reject("exists", `${found.name} is there already`), exists: found.id };
+      same.set(found.id, `${found.name} [${found.id}]`);
+    }
   }
-  const cap = placeCapsOf(ctx.world).chat;
-  if (placesMade(ctx.state) >= cap) return reject("place_cap", cap === 0 ? "this world makes no places in play" : `this chat has made ${cap} places already, all its world allows`);
+  if (same.size > 0) advice.push({ code: "same_name", values: { name, same: [...same.values()].join(", ") } });
+  const cap = typeof ctx.world.placeCap === "number" || opts.cap === undefined ? placeCapsOf(ctx.world).chat : opts.cap;
+  const made = placesMade(ctx.state);
+  if (made >= cap) {
+    if (!advising) return reject("place_cap", cap === 0 ? "this world makes no places in play" : `this chat has made ${cap} places already, all its world allows`);
+    advice.push({ code: "place_past_cap", values: { name, cap, made } });
+  }
   const id = madeId(ctx, name, op.parent, opts.salt);
   const description = op.description?.trim() ?? "";
   const fields: JsonObject = { ...(description !== "" ? { description } : {}), ...(aliases.length > 0 ? { aliases } : {}), ...(op.entry !== undefined && isAudience(op.entry) ? { entry: op.entry } : {}) };
   const def: MadePlace = { id, name, parent: op.parent, fields, made: { as: op.as, by: opts.by, at: ctx.state.clock, why: op.why.trim() } };
-  return { events: [placeEvent(id, def)], made: id };
+  return { events: [placeEvent(id, def)], made: id, ...(advice.length > 0 ? { advice } : {}) };
 }
 
 function labelPlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "label" }>): PlaceOpOutcome {
@@ -358,7 +369,7 @@ function labelPlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "label" }>): Pl
   if (madeOf(def) === null) return reject("not_made", `${def.name} is the world's own place: Build changes it`);
   const made = def as MadePlace;
   const name = op.name === undefined ? made.name : cleanName(op.name);
-  if (name === null) return reject("bad_name", `a place needs a name of at most ${PLACE_NAME_MAX} characters`);
+  if (name === null) return reject("bad_name", "a place needs a name");
   const aliases = op.aliases === undefined ? placeAliases(made) : cleanAliases(name, op.aliases);
   for (const said of [name, ...aliases]) {
     const found = findPlaces(ctx, said, { parent: made.parent }).find((h) => h.id !== op.place && h.matched !== "head");
@@ -432,7 +443,7 @@ export function settlePlaceFact(ctx: ReadContext, p: JsonObject): PlaceFact {
   const found = findPlaces(ctx, said, { parent })[0];
   if (found) return { kind: "found", place: found.id };
   const name = cleanName(said);
-  if (name === null) return { kind: "refused", rejection: reject("bad_name", `a new place needs a name of at most ${PLACE_NAME_MAX} characters`) };
+  if (name === null) return { kind: "refused", rejection: reject("bad_name", "a new place needs a name") };
   const as = (PLACE_KINDS as readonly unknown[]).includes(p.as) ? (p.as as PlaceKind) : placeKindFor(ctx.world, parent, name);
   const aliases = Array.isArray(p.aliases) ? p.aliases.filter((a): a is string => typeof a === "string") : [];
   const description = typeof p.description === "string" ? p.description : "";

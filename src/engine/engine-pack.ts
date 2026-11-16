@@ -35,7 +35,6 @@ import { feedEvent } from "./feed";
 import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
 import { outLinesEvent, outSceneEvent } from "./outputs";
 import { draftEventDef } from "./world-draft";
-import { THING_NAME_MAX } from "../shared/things";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
@@ -460,7 +459,7 @@ const events: EventTypeDef<PackEvent>[] = [
     validate: (e, ctx) => {
       const name = str(e, "name");
       if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
-      return name.trim() !== "" && name.length <= THING_NAME_MAX ? null : { code: "bad_name", reason: `a name is 1–${THING_NAME_MAX} characters` };
+      return name.trim() !== "" ? null : { code: "bad_name", reason: "a name is not empty" };
     },
     apply: (e, state) => {
       const ent = own(state.entities, str(e, "entity"));

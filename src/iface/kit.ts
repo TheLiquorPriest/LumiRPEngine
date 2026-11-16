@@ -32,6 +32,8 @@ export const IFACE_DEFAULTS = Object.freeze({
   creditScoreAssumed: 700,
   /** The most operations one GM edit carries. */
   editOps: 64,
+  /** The places a chat makes in play before each further one is reported, where its world sets no `placeCap`. */
+  placeCap: 64,
 });
 
 export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: number };
@@ -49,6 +51,7 @@ export const IFACE_SETTING_DEFS = {
   dueItems: { key: "engine.dueItems", default: IFACE_DEFAULTS.dueItems, takes: { type: "whole", least: 0 }, perConnection: false, name: "Things falling due listed", about: "The most things falling due in a span an answer lists, soonest first; how many more fall in it is said.", effect: "turn" },
   creditScoreAssumed: { key: "engine.creditScoreAssumed", default: IFACE_DEFAULTS.creditScoreAssumed, takes: { type: "whole", least: 300, most: 850 }, perConnection: false, name: "Score assumed for someone with none", about: "The credit score the finance tables are read at for someone with no score recorded.", effect: "turn" },
   editOps: { key: "engine.editOps", default: IFACE_DEFAULTS.editOps, takes: { type: "whole", least: 1 }, perConnection: false, name: "Operations one GM edit carries", about: "The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it.", effect: "turn" },
+  placeCap: { key: "engine.placeCap", default: IFACE_DEFAULTS.placeCap, takes: { type: "whole", least: 0 }, perConnection: false, name: "Places a chat makes before each further one is reported", about: "The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same.", effect: "turn" },
 } as const satisfies NumberSettings<keyof IfaceSettings>;
 
 /** Every setting the engine's tools read, as a config file writes it. */

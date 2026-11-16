@@ -70,8 +70,6 @@ export function sizeOfDef(ctx: Pick<ThingContext, "registry" | "world" | "tables
   if (type?.table === "gear.containers" && type.row.location === "furniture") return { size: "furniture", from: "location" };
   const config = thingsConfigOf(ctx.world);
   if (typeof f.volume_l === "number" && Number.isFinite(f.volume_l) && f.volume_l > 0) return { size: sizeOfVolume(f.volume_l, config.sizes.byVolume), from: "volume" };
-  const named = nameSizeOf(config.sizes.byName, namesOf(f, name, type?.row));
-  if (named) return { size: named.entry.size, from: "name" };
   const category = typeof f.category === "string" ? f.category : typeof type?.row.category === "string" ? type.row.category : "";
   if (category !== "" && hasOwn(config.sizes.byCategory, category)) {
     const size = config.sizes.byCategory[category];

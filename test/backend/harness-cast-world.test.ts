@@ -936,7 +936,7 @@ describe("world_made and world_keep", () => {
     const places = made.places as { id: string; name: string; in: string; as: string; inDraft?: boolean }[];
     const things = made.things as { id: string; name: string; where: string; inDraft?: boolean }[];
     expect(places).toHaveLength(1);
-    expect(places[0]).toMatchObject({ name: "The back room", as: "room" });
+    expect(places[0]).toMatchObject({ name: "the back room", as: "room" });
     expect(places[0]?.inDraft).toBeUndefined();
     expect(places[0]?.in).toContain("114 Harbor Street");
     expect(things).toHaveLength(1);
@@ -958,7 +958,7 @@ describe("world_made and world_keep", () => {
     expect(String(kept.next)).toContain("world_commit");
     const draft = await draftOf(build);
     expect(draft.stored).toBe(true);
-    expect(draft.doc.places[id]).toMatchObject({ name: "The back room", parent: HOME });
+    expect(draft.doc.places[id]).toMatchObject({ name: "the back room", parent: HOME });
     expect(draft.doc.entities[scarf]).toMatchObject({ id: scarf });
     const after = await answer(env, "world_made");
     expect(after.places).toMatchObject([{ id, inDraft: true }]);

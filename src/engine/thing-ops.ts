@@ -18,7 +18,7 @@ import { hasOwn } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { Got, GotHow, ItemOp, Rest, SetOp, Size, SizeClass, Spot } from "../shared/things";
 import { typeFields } from "../shared/items-build";
-import { isSetOp, nameKey, sizeRank, SIZE_LABELS, THING_NAME_MAX, thingsConfigOf } from "../shared/things";
+import { isSetOp, nameKey, sizeRank, SIZE_LABELS, thingsConfigOf } from "../shared/things";
 import type { EntityDef, FieldDef } from "../shared/world";
 import { accessFor, assignFor } from "./access";
 import { calendarOf, formatClock } from "./calendar";
@@ -376,76 +376,100 @@ export function thingTypeFor(ctx: ReadContext, name: string, place: PlaceId | nu
 }
 
 /**
- * A vehicle made (§28.8, `make` with a `class`): the vehicles pack makes it of its class
- * (`vehicles.spawn`), its owner's, with its details, standing where it is made: at the place, on a
- * vehicle it rides on, or where the person it is made on stands. One of its name already standing
- * there is found, not made again.
+ * A vehicle made (§28.8, `make` with a `class`): the vehicles pack makes it of its class (`vehicles.spawn`), its owner's, with its
+ * details, standing where it is made: at the place, on a vehicle it rides on, or where the person it is made on stands. With no
+ * advice asked, one of its name already standing there is found, not made again; with it, a new one is made and the ones there
+ * are named in the advice. With advice asked, a world with no vehicles pack makes it as a plain thing with its class kept, and
+ * someone it is made on who is nowhere has it made with no place; each says so.
  */
 function makeVehicle(w: Working, op: Extract<ItemOp, { do: "make" }>, vehicleClass: string, opts: ItemOpOptions): ItemOpApplied | ItemOpRefusal {
   const ctx = w.ctx;
+  const advising = opts.advise === true;
   const spawn = optionalService(ctx, "vehicles.spawn");
-  if (!spawn) return reject("no_vehicles", "this world plays no vehicles");
   const name = op.name.trim();
-  if (name.length > THING_NAME_MAX) return reject("bad_name", `a name is at most ${THING_NAME_MAX} characters`);
+  if (!spawn) {
+    if (!advising) return reject("no_vehicles", "this world plays no vehicles");
+    const { class: _class, ...plain } = op;
+    const made = make(w, plain, opts, vehicleClass);
+    if ("code" in made) return made;
+    return { ...made, advice: [...(made.advice ?? []), { code: "made_as_thing", values: { name, class: vehicleClass } }] };
+  }
   const problem = (op.owner !== undefined ? partyProblem(ctx, op.owner) : null) ?? (op.home !== undefined && op.home !== "owner" && "place" in op.home ? restProblem(ctx, op.home) : null);
   if (problem) return problem;
-  let at: Spot;
-  if ("place" in op.at) {
-    if (!own(ctx.world.places, op.at.place)) return reject("missing_place", `no place ${labelOf(ctx, op.at.place)}`);
+  const advice: Advice[] = [];
+  let at: Spot | undefined;
+  if (op.at === undefined) at = undefined;
+  else if ("place" in op.at) {
+    if (!own(ctx.world.places, op.at.place)) return { ...reject("missing_place", `no place ${labelOf(ctx, op.at.place)}`), said: op.at.place, choices: Object.keys(ctx.world.places) };
     at = op.at;
   } else {
     const holder = own(ctx.state.entities, op.at.in);
-    if (!holder || isGone(ctx.state, op.at.in)) return reject("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
+    if (!holder || isGone(ctx.state, op.at.in)) return { ...reject("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`), said: op.at.in, choices: Object.keys(ctx.state.entities) };
     const place = placeOfEntity(ctx.state, op.at.in);
     if (kindIs(ctx.registry, ctx.world, holder.kind, "vehicle")) at = op.at;
     else if (place !== null) at = { place };
-    else return reject("missing_place", `${holder.name} is nowhere`);
+    else if (advising) {
+      at = undefined;
+      advice.push({ code: "holder_nowhere", values: { name, holder: ref(ctx, op.at.in) } });
+    } else return reject("missing_place", `${holder.name} is nowhere`);
   }
-  const place = "place" in at ? at.place : placeOfEntity(ctx.state, at.in);
+  const place = at === undefined ? null : "place" in at ? at.place : placeOfEntity(ctx.state, at.in);
   const viewer = opts.viewer ?? ctx.world.pov;
-  const seen = name === "" ? undefined : findThings(ctx, name, { actor: viewer, viewer, scope: "all" }).find((c) => c.full && !c.secret && sizeOf(ctx, c.id).size === "vehicle" && placeOfEntity(ctx.state, c.id) === place);
-  if (seen) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
-  const fields: JsonObject = { made: { by: opts.by, at } as unknown as JsonValue };
+  const same = name === "" || place === null ? [] : findThings(ctx, name, { actor: viewer, viewer, scope: "all" }).filter((c) => c.full && sizeOf(ctx, c.id).size === "vehicle" && placeOfEntity(ctx.state, c.id) === place);
+  const seen = same.find((c) => !c.secret);
+  if (seen && !advising) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
+  if (advising && same.length > 0) advice.push({ code: "same_name", values: { name, same: same.map((c) => ref(ctx, c.id)).join(", ") } });
+  const fields: JsonObject = { made: { by: opts.by, ...(at !== undefined ? { at } : {}) } as unknown as JsonValue };
   const description = op.description?.trim() ?? "";
   if (description !== "") fields.description = description;
   const aliases = (op.aliases ?? []).map((a) => a.trim()).filter((a) => a !== "");
   if (aliases.length > 0) fields.aliases = aliases;
   const home = op.home !== undefined && op.home !== "owner" && "place" in op.home ? op.home.place : undefined;
-  const made = spawn(ctx, { class: vehicleClass, ...(name !== "" ? { name } : {}), owner: op.owner ?? null, ...("in" in at ? { holder: at.in } : { place: at.place }), ...(home !== undefined ? { home } : {}), ...(op.details !== undefined ? { details: op.details } : {}), salt: opts.salt, fields });
+  const made = spawn(ctx, { class: vehicleClass, ...(name !== "" ? { name } : {}), owner: op.owner ?? null, ...(at === undefined ? {} : "in" in at ? { holder: at.in } : { place: at.place }), ...(home !== undefined ? { home } : {}), ...(op.details !== undefined ? { details: op.details } : {}), salt: opts.salt, fields });
   if ("code" in made) return made;
   const rejection = applyAll(w, made.events);
   if (rejection) return rejection;
-  return sameSpot(at, op.at) ? { made: made.entity } : { made: made.entity, placed: at };
+  return { made: made.entity, ...(at !== undefined && op.at !== undefined && !sameSpot(at, op.at) ? { placed: at } : {}), ...(advice.length > 0 ? { advice } : {}) };
 }
 
-function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptions): ItemOpApplied | ItemOpRefusal {
+/**
+ * A thing made (§5.3). Nothing about it is read from its name: no type, size, weight or room is guessed from words, and a name
+ * is any length. A type it is given comes back apart (`filled`): the row's values, for the caller to record as filled in. With no
+ * advice asked, a thing of its name already there stands for it (`exists`); with it, a new one is made and the ones there are named
+ * in the advice. With no spot (`at`), it is made with no place and no holder. `kept` is the class of a vehicle made as a plain thing.
+ */
+function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptions, kept?: string): ItemOpApplied | ItemOpRefusal {
   if (op.class !== undefined) return makeVehicle(w, op, op.class, opts);
   const ctx = w.ctx;
+  const advising = opts.advise === true;
   const name = op.name.trim();
-  if (name === "" || name.length > THING_NAME_MAX) return reject("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
+  if (name === "") return reject("bad_name", "a name is not empty");
   const problem = (op.owner !== undefined ? partyProblem(ctx, op.owner) : null) ?? (op.home !== undefined ? restProblem(ctx, op.home) : null);
   if (problem) return problem;
   if (op.qty !== undefined && !(Number.isInteger(op.qty) && op.qty >= 1)) return reject("bad_amount", "a quantity is a whole number of at least 1");
-  // Find first (§6.1): a thing it may be where it is made (on whoever holds it, or anywhere around
-  // the place, wherever the viewer is) stands for it.
-  const near = "in" in op.at ? (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, op.at.in)?.kind ?? "", "person") ? op.at.in : possessorOf(ctx, op.at.in)) : null;
-  const place = "place" in op.at ? op.at.place : placeOfEntity(ctx.state, op.at.in);
+  const at = op.at;
+  if (at !== undefined && "in" in at && !own(ctx.state.entities, at.in)) return { ...reject("missing_entity", `no holder ${labelOf(ctx, at.in)}`), said: at.in, choices: Object.keys(ctx.state.entities) };
+  // The things of that name where it is made (on whoever holds it, or anywhere around the place, wherever the viewer is).
+  const near = at !== undefined && "in" in at ? (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, at.in)?.kind ?? "", "person") ? at.in : possessorOf(ctx, at.in)) : null;
+  const place = at === undefined ? null : "place" in at ? at.place : placeOfEntity(ctx.state, at.in);
   const viewer = opts.viewer ?? ctx.world.pov;
-  const found = findThings(ctx, name, { actor: near ?? viewer, viewer, scope: near !== null ? "on" : "all", ...(op.owner !== undefined ? { owner: op.owner } : {}) }).filter((c) => c.full && (near !== null || (place !== null && placeOfEntity(ctx.state, c.id) === place)));
+  const found = at === undefined ? [] : findThings(ctx, name, { actor: near ?? viewer, viewer, scope: near !== null ? "on" : "all", ...(op.owner !== undefined ? { owner: op.owner } : {}) }).filter((c) => c.full && (near !== null || (place !== null && placeOfEntity(ctx.state, c.id) === place)));
   const seen = found.find((c) => !c.secret);
-  if (seen) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
-  // A make that says nothing of what it is (no type, size, holder size or category) takes the type its name reads as (`thingTypeFor`), as the reply's read does.
-  const type = op.type ?? (op.size === undefined && op.holds === undefined && op.category === undefined ? thingTypeFor(ctx, name, place).type : undefined);
-  const row = type !== undefined ? typeRowOf(ctx, { catalog: type }) : null;
+  if (seen && !advising) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
+  const advice: Advice[] = [];
+  if (advising && found.length > 0) advice.push({ code: "same_name", values: { name, same: found.map((c) => ref(ctx, c.id)).join(", ") } });
+  // A type is the caller's to give: none is read from the words of a name.
+  const row = op.type !== undefined ? typeRowOf(ctx, { catalog: op.type }) : null;
   if (op.type !== undefined && !row) return reject("missing_type", `no type ${op.type} in the catalogs`);
-  const typed = row && type !== undefined ? typeFields(row.table, type, row.row) : null;
+  const typed = row && op.type !== undefined ? typeFields(row.table, op.type, row.row) : null;
   // Said to hold things, a thing of no type of its own is a container.
   const kind = typed?.kind ?? (op.holds !== undefined ? "container" : "item");
-  const fields: JsonObject = { ...typed?.fields };
+  // What the call says, apart from what its type's row gives.
+  const fields: JsonObject = {};
   if (op.owner !== undefined) fields.owner = op.owner;
   if (op.size !== undefined) fields.size = op.size;
   if (op.holds !== undefined) fields.holds = op.holds;
-  if (op.category !== undefined && typeof fields.category !== "string") fields.category = op.category;
+  if (op.category !== undefined) fields.category = op.category;
   const description = op.description?.trim() ?? "";
   if (description !== "") fields.description = description;
   if (op.home !== undefined) fields.home = restValue(op.home);
@@ -453,26 +477,32 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   const aliases = (op.aliases ?? []).map((a) => a.trim()).filter((a) => a !== "");
   if (aliases.length > 0) fields.aliases = aliases;
   if (op.hidden === true) fields.visibility = "discoverable";
-  // A hidden one it may be (a player can't tell it is), weighed for Tidy up rather than found.
+  if (kept !== undefined) fields.vehicle_class = kept;
+  // A hidden one it may be (a player can't tell it is), weighed for Tidy up rather than found: only for a caller that takes no advice.
   const maybe = found.find((c) => c.secret);
-  if (maybe) fields.maybe_same_as = maybe.id;
-  if ("in" in op.at && !own(ctx.state.entities, op.at.in)) return reject("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
+  if (maybe && !advising) fields.maybe_same_as = maybe.id;
+  const rowFields = Object.fromEntries(Object.entries(typed?.fields ?? {}).filter(([key]) => !Object.hasOwn(fields, key)));
+  const whole = { ...rowFields, ...fields };
   const count = op.qty ?? 1;
-  const adding: Adding = { volumeL: (typeof fields.volume_l === "number" ? fields.volume_l : 0) * count, weightG: (typeof fields.weight_g === "number" ? fields.weight_g : 0) * count };
-  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false, adding);
-  if ("code" in where) return where;
+  const adding: Adding = { volumeL: (typeof whole.volume_l === "number" ? whole.volume_l : 0) * count, weightG: (typeof whole.weight_g === "number" ? whole.weight_g : 0) * count };
+  const where = at === undefined ? null : landing(ctx, name, sizeOfDef(ctx, kind, whole, name).size, at, opts, false, adding);
+  if (where !== null && "code" in where) return where;
   const id = madeId(ctx, name, opts.salt);
-  fields.made = { by: opts.by, at: where.spot } as unknown as JsonValue;
+  fields.made = { by: opts.by, ...(where !== null ? { at: where.spot } : {}) } as unknown as JsonValue;
   // Made on someone, it is theirs to have (`got`), as anything made in their hands.
-  const holder = "in" in where.spot ? where.spot.in : null;
+  const spot = where?.spot;
+  const holder = spot !== undefined && "in" in spot ? spot.in : null;
   const possessor = holder === null ? null : kindIs(ctx.registry, ctx.world, own(ctx.state.entities, holder)?.kind ?? "", "person") ? holder : possessorOf(ctx, holder);
   const why = whyOf(op.why, opts);
   if (possessor !== null) fields.got = { how: "made", at: ctx.state.clock, ...(why !== undefined ? { why } : {}) } as unknown as JsonValue;
-  if ("place" in where.spot) fields.place = where.spot.place;
+  if (spot !== undefined && "place" in spot) fields.place = spot.place;
   const entity: EntityDef = { id, kind, name, tier: "background", fields, relations: holder !== null ? [{ type: "in", to: holder }] : [] };
-  const rejection = applyAll(w, [{ type: "spawn", entity }, ...(where.noted ? [note(where.noted, id)] : [])]);
+  // The row's values are set after it is made, each its own change, so the caller records them as filled in.
+  const filled: LedgerEvent[] = Object.entries(rowFields).map(([field, value]): LedgerEvent => ({ type: "set", entity: id, field, value }));
+  const rejection = applyAll(w, [{ type: "spawn", entity }, ...(where?.noted ? [note(where.noted, id)] : []), ...filled]);
   if (rejection) return rejection;
-  return { made: id, ...(sameSpot(where.spot, op.at) ? {} : { placed: where.spot }), ...(where.advice !== undefined ? { advice: where.advice } : {}) };
+  if (where?.advice !== undefined) advice.push(...where.advice);
+  return { made: id, ...(spot !== undefined && at !== undefined && !sameSpot(spot, at) ? { placed: spot } : {}), ...(advice.length > 0 ? { advice } : {}), ...(filled.length > 0 ? { filled } : {}) };
 }
 
 /** The grant a hold or a loan brings: a loan to one who isn't an owner; a hold only to one who may not use it already (§3.4), so staff handed the shop's tool at the shop hold it as staff and no more. */
@@ -653,7 +683,7 @@ function label(w: Working, op: Extract<ItemOp, { do: "label" }>): ItemOpApplied 
   const events: LedgerEvent[] = [];
   if (op.name !== undefined) {
     const name = op.name.trim();
-    if (name === "" || name.length > THING_NAME_MAX) return reject("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
+    if (name === "") return reject("bad_name", "a name is not empty");
     if (name !== e.name) events.push({ type: ENGINE_EVENTS.rename, data: { entity: op.item, name, was: e.name } });
   }
   const aliases = op.aliases?.map((a) => a.trim()).filter((a) => a !== "");

@@ -8,7 +8,6 @@
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
 import { VehiclePicker } from "../../packs/vehicles/ui/picker";
-import { THING_NAME_MAX } from "../../shared/things";
 import type { ThingType, WhereChoice } from "../../shared/thing-view";
 import type { VehicleClassChoice, VehiclePick } from "../../shared/vehicles";
 import { FormSheet } from "../build/form-kit";
@@ -33,7 +32,6 @@ export const ADD_QTY_MAX = 999;
 export function addBlocked(parts: { name: string; kind: ThingKind; what: WhatItIs; at: WhereChoice | null; blocked?: string | null }): string | null {
   const name = parts.name.trim();
   if (name === "") return "Give it a name.";
-  if (name.length > THING_NAME_MAX) return `A name of at most ${THING_NAME_MAX} characters.`;
   if (parts.kind === "vehicle" && (parts.what === null || !("vehicle" in parts.what))) return "Pick what vehicle it is.";
   if (parts.at === null) return "Pick where it is.";
   if (parts.kind === "vehicle" && parts.at.is !== "place") return "A vehicle stands at a place.";
@@ -82,7 +80,7 @@ export function AddThingSheet(props: {
     setChoosing(false);
     setAsking(null);
     const named = suggestedName(next);
-    if (named !== null && name.trim() === "") setName(named.slice(0, THING_NAME_MAX));
+    if (named !== null && name.trim() === "") setName(named);
   };
   const submit = (): void => {
     if (!draft || props.busy) return;
@@ -124,7 +122,7 @@ export function AddThingSheet(props: {
           <label class="label" for={nameId}>
             Name
           </label>
-          <input id={nameId} class="lre-input" value={name} maxLength={THING_NAME_MAX} placeholder={vehicle ? "Dad's old pickup" : "Pocketknife"} onInput={(event) => setName(event.currentTarget.value)} />
+          <input id={nameId} class="lre-input" value={name} placeholder={vehicle ? "Dad's old pickup" : "Pocketknife"} onInput={(event) => setName(event.currentTarget.value)} />
         </div>
         <div class="lre-field" data-lre-add-kind="">
           <span class="label">What kind of thing</span>

@@ -33,7 +33,7 @@ function dressed(gear: Level = 4): Working {
   };
   add("jacket", "Rain jacket", { category: "clothing", slot: "torso_outer" }, [{ type: "in", to: JORDAN }, { type: "worn_by", to: JORDAN, fields: { slot: "torso_outer" } }]);
   add("boots", "Work boots", { category: "clothing", slot: "feet" }, [{ type: "in", to: JORDAN }, { type: "worn_by", to: JORDAN, fields: { slot: "feet" } }]);
-  add("wardrobe", "Oak wardrobe", { place: HOME });
+  add("wardrobe", "Oak wardrobe", { place: HOME, size: "furniture", holds: "armful" });
   add("sweater", "Wool sweater", { category: "clothing", slot: "torso_mid" }, [{ type: "in", to: "wardrobe" }]);
   add("jeans", "Jeans", { category: "clothing", slot: "legs", place: HOME });
   const state: WorldState = startState(world, reg);
