@@ -12,6 +12,7 @@ import { isRecord } from "../../shared/json";
 import { BUILDS_PATH } from "../app";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
+import { CONNECTIONS_PATH } from "../connections";
 import { readText, writeWhole } from "../disk";
 import { accountSystemctl, localUrl, type RpeService } from "../up";
 import type { Flags } from "./args";
@@ -109,7 +110,7 @@ async function connectionsWithoutLimits(paths: DataPaths, config: AppConfig, io:
   const server = await runningServer(paths, config, io);
   if (server === null) return [];
   try {
-    const body: unknown = await (await server.api("GET", "/api/v1/connections")).json();
+    const body: unknown = await (await server.api("GET", CONNECTIONS_PATH)).json();
     if (!isRecord(body) || !Array.isArray(body.connections)) return [];
     return body.connections.flatMap((c: unknown) => {
       if (!isRecord(c) || typeof c.name !== "string") return [];

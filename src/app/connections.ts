@@ -31,6 +31,10 @@ import { withTopLevelKey, yamlMapping } from "./yaml";
 
 /** The key of `RPE-global.yml` the connections documents are kept under, each under its user. */
 export const MODELS_KEY = "models";
+
+/** Where the connections are, on RPE's own server. */
+export const CONNECTIONS_PATH = "/api/v1/connections";
+
 const SECRETS_PART = "models";
 /**
  * Where this port once kept the headers' values itself, by connection id, taking them out of the
@@ -303,7 +307,7 @@ export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: 
   return [
     route({
       method: "GET",
-      path: "/api/v1/connections",
+      path: CONNECTIONS_PATH,
       access: "page",
       group: "connections",
       does: "The connections, each with whether a key is set (nothing of the key) and its model's limits as RPH uses them; the default; the providers offered.",
@@ -316,7 +320,7 @@ export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: 
     }),
     route({
       method: "POST",
-      path: "/api/v1/connections",
+      path: CONNECTIONS_PATH,
       access: "page",
       group: "connections",
       does: "Adds a connection, with its key when it has one.",
