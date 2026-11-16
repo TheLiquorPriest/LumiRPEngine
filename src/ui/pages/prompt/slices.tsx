@@ -7,27 +7,27 @@ import type { ComponentChildren } from "preact";
 import { Badge, Banner, Fold, Pre } from "../../atoms";
 import type { NoticeLines } from "../../notice-words";
 import { clippedWords, promptNoticeWords } from "../../notice-words";
-import type { ClippedShown, FrontShown, OldBlockShown, PromptShown, SliceShown, UnclaimedShown } from "../../wanted";
+import type { PromptClipped, PromptShown, PromptSliceShown } from "../../../shared/api";
 import { counted, num } from "../../words";
 
-const HOW_WORDS: Readonly<Record<NonNullable<SliceShown["how"]>, string>> = {
+const HOW_WORDS: Readonly<Record<NonNullable<PromptSliceShown["found"]>, string>> = {
   signature: "found by a signature of its text",
   block: "found by the chat application's block name",
   place: "found by its place among its neighbours",
 };
 
-const BREAKDOWN_WORDS: Readonly<Record<NonNullable<SliceShown["breakdown"]>, string>> = {
+const BREAKDOWN_WORDS: Readonly<Record<NonNullable<PromptSliceShown["breakdown"]>, string>> = {
   confirmed: "the chat application's breakdown confirmed it",
   corrected: "the chat application's breakdown corrected it",
 };
 
 /** What the page puts beside a slice: its edit controls, filled in by the page, which holds the state they need. */
 export interface SliceSlots {
-  tools?(slice: SliceShown, all: readonly SliceShown[]): ComponentChildren;
+  tools?(slice: PromptSliceShown, all: readonly PromptSliceShown[]): ComponentChildren;
 }
 
 /** One slice: what it is, where and how it was found, and its text when the spoiler gate is open. */
-export function SliceCard(props: { slice: SliceShown; all: readonly SliceShown[]; gateOpen: boolean; slots: SliceSlots }) {
+export function SliceCard(props: { slice: PromptSliceShown; all: readonly PromptSliceShown[]; gateOpen: boolean; slots: SliceSlots }) {
   const { slice } = props;
   return (
     <li class="lre-section" data-slice={slice.marker}>
@@ -35,17 +35,17 @@ export function SliceCard(props: { slice: SliceShown; all: readonly SliceShown[]
         <h3 class="lre-section-title lre-id">{slice.marker}</h3>
         <span class="lre-inline rpe-wrap">
           <Badge>{slice.kind}</Badge>
-          <Badge>{slice.behaviour}</Badge>
-          {slice.edited ? <Badge tone="accent">edited by you</Badge> : null}
+          {slice.behaviour === undefined ? null : <Badge>{slice.behaviour}</Badge>}
+          {slice.edited === true ? <Badge tone="accent">edited by you</Badge> : null}
         </span>
       </div>
       <div class="lre-section-body">
-        <p class="rpe-line">{slice.line}</p>
+        {slice.line === undefined ? null : <p class="rpe-line">{slice.line}</p>}
         <p class="rpe-meta">
-          {slice.how === null ? "Not found in this prompt." : `${counted(slice.length, "character")}, ${HOW_WORDS[slice.how]}${slice.breakdown === null ? "" : `; ${BREAKDOWN_WORDS[slice.breakdown]}`}.`}
-          {slice.found.length === 0 ? "" : ` In ${slice.found.map((at) => `message ${at.message}, ${at.start} to ${at.end}`).join("; ")}.`}
+          {slice.found === undefined ? "Not found in this prompt." : `${counted(slice.length, "character")}, ${HOW_WORDS[slice.found]}${slice.breakdown === undefined ? "" : `; ${BREAKDOWN_WORDS[slice.breakdown]}`}.`}
+          {slice.at.length === 0 ? "" : ` In ${slice.at.map((at) => `message ${at.message}, ${at.start} to ${at.end}`).join("; ")}.`}
         </p>
-        {slice.text === null ? null : props.gateOpen ? (
+        {slice.found === undefined ? null : props.gateOpen ? (
           <Fold summary="Its text" class="rpe-open">
             <Pre text={slice.text} mono={false} />
           </Fold>
@@ -59,7 +59,7 @@ export function SliceCard(props: { slice: SliceShown; all: readonly SliceShown[]
 }
 
 /** Text that belongs to no slice, each stretch by where it is. */
-export function Unclaimed(props: { unclaimed: readonly UnclaimedShown[]; gateOpen: boolean }) {
+export function Unclaimed(props: { unclaimed: PromptShown["unclaimed"]; gateOpen: boolean }) {
   if (props.unclaimed.length === 0) return null;
   return (
     <div class="lre-stack" data-unclaimed>
@@ -75,29 +75,28 @@ export function Unclaimed(props: { unclaimed: readonly UnclaimedShown[]; gateOpe
 }
 
 /** How much of the prompt's front was the same as the turn before, and the part that broke it. */
-export function FrontLine(props: { front: FrontShown }) {
+export function FrontLine(props: { front: PromptShown["front"] }) {
   const { front } = props;
   return (
     <p class="rpe-line" data-front>
-      {front.brokenBy === null ? `The whole of the prompt's front held (${counted(front.length, "character")}).` : `The prompt's front held for ${counted(front.length, "character")}; ${front.brokenBy} broke it.`}
+      {front.brokenBy === undefined ? `The whole of the prompt's front held (${counted(front.length, "character")}).` : `The prompt's front held for ${counted(front.length, "character")}; ${front.brokenBy} broke it.`}
     </p>
   );
 }
 
-/** What Lumiverse's own clipping cut inside RPE's window, in the notices file's words, with the turns it was on. */
-export function ClippedNote(props: { clipped: ClippedShown | null; lines: NoticeLines }) {
+/** What Lumiverse's own clipping cut inside RPE's window, in the notices file's words. */
+export function ClippedNote(props: { clipped: PromptClipped | null; lines: NoticeLines }) {
   const { clipped } = props;
   if (clipped === null) return null;
   return (
     <Banner tone="warn" icon="alert" title="Lumiverse cut the prompt inside RPE's window">
       <span>{clippedWords(props.lines, clipped)}</span>
-      {clipped.turns.length === 0 ? null : <span class="rpe-meta"> On turns {clipped.turns.join(", ")}.</span>}
     </Banner>
   );
 }
 
 /** The old engines' blocks the preset still holds, each by name; RPE does not edit presets. */
-export function OldBlocks(props: { old: readonly OldBlockShown[] }) {
+export function OldBlocks(props: { old: PromptShown["old"] }) {
   if (props.old.length === 0) return null;
   return (
     <Banner tone="warn" icon="alert" title="The old engines' blocks are still in this preset">

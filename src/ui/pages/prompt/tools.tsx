@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import { useApp } from "../../app";
 import { Banner, Button } from "../../atoms";
-import type { PromptEditAsk, PromptShown, SliceKind, SliceShown } from "../../wanted";
+import type { PromptEditAsk, PromptShown, PromptSliceShown, SliceKind, TurnId } from "../../../shared/api";
 import { errorWords } from "../../words";
 import { editPrompt } from "./read";
 
@@ -15,7 +15,7 @@ export const KINDS: readonly SliceKind[] = ["instructions", "style", "character"
 type Panel = "rename" | "line" | "merge" | "split" | null;
 
 /** One slice's edit controls: each opens its own small form, and what RPH answers is the page's map from then on. */
-export function SliceTools(props: { chat: string; slice: SliceShown; all: readonly SliceShown[]; onEdited(shown: PromptShown): void }) {
+export function SliceTools(props: { chat: string; turn: TurnId | null; slice: PromptSliceShown; all: readonly PromptSliceShown[]; onEdited(shown: PromptShown): void }) {
   const app = useApp();
   const { slice } = props;
   const [panel, setPanel] = useState<Panel>(null);
@@ -26,7 +26,7 @@ export function SliceTools(props: { chat: string; slice: SliceShown; all: readon
   const send = (edit: PromptEditAsk): void => {
     setBusy(true);
     setProblem(null);
-    editPrompt(app.client, props.chat, edit).then(
+    editPrompt(app.client, props.chat, edit, props.turn ?? undefined).then(
       (shown) => {
         setBusy(false);
         setPanel(null);
@@ -51,7 +51,7 @@ export function SliceTools(props: { chat: string; slice: SliceShown; all: readon
         <Button small kind="ghost" current={panel === "rename"} onClick={() => open("rename", slice.marker)}>
           Rename
         </Button>
-        <Button small kind="ghost" current={panel === "line"} onClick={() => open("line", slice.line)}>
+        <Button small kind="ghost" current={panel === "line"} onClick={() => open("line", slice.line ?? "")}>
           Correct its line
         </Button>
         <Button small kind="ghost" current={panel === "merge"} disabled={others.length === 0} onClick={() => open("merge", slice.marker)}>

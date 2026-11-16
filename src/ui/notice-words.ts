@@ -130,6 +130,7 @@ export function promptNoticeWords(lines: NoticeLines, notice: PromptNotice): str
 }
 
 /** What Lumiverse's own clipping left out of RPE's window, in the notices file's words (`cut_clipped_<reason>`); the facts as they came where the file holds no line. */
-export function clippedWords(lines: NoticeLines, clipped: { left: number; reason: string }): string {
-  return noticeLine(lines, `cut_clipped_${clipped.reason}`, { count: clipped.left }) ?? `${clipped.left} of the window's messages were left out: ${clipped.reason}`;
+export function clippedWords(lines: NoticeLines, clipped: { count: number; by: string | null }): string {
+  const reason = clipped.by === null ? null : clipped.by.replaceAll("-", "_");
+  return (reason === null ? null : noticeLine(lines, `cut_clipped_${reason}`, { count: clipped.count })) ?? `${clipped.count} of the window's messages were left out${reason === null ? "" : `: ${reason}`}`;
 }

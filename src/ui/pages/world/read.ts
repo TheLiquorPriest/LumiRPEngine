@@ -69,5 +69,5 @@ export function sendEdit(client: Pick<RpeClient, "call">, chat: string, op: Edit
 
 /** Takes an edit back, by the id its answer gave. */
 export function sendUndo(client: Pick<RpeClient, "call">, chat: string, undo: string): Promise<TapReply> {
-  return client.call("POST /api/v1/chats/:chat/taps/undo", { chat }, { body: { undo } }).then(replyOf);
+  return client.call("POST /api/v1/chats/:chat/edits/:edit/undo", { chat, edit: undo }).then(replyOf);
 }

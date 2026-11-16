@@ -11,24 +11,24 @@ import { createGate } from "../../src/ui/gate";
 import { parseNoticeLines } from "../../src/ui/notice-words";
 import { PromptView, type PromptViewProps } from "../../src/ui/pages/prompt";
 import { SliceTools } from "../../src/ui/pages/prompt/tools";
-import type { PromptShown, SliceShown } from "../../src/ui/wanted";
+import type { PromptShown, PromptSliceShown } from "../../src/shared/api";
 import { settle } from "./asking";
 import { openPage, PageEvent, type PageElement } from "./kept/dom";
 import { CHAT } from "./recorded";
 import { elements, expand, textOf } from "./vnodes";
 
-const slice = (marker: string, over: Partial<SliceShown> = {}): SliceShown => ({ marker, kind: "instructions", line: `What ${marker} is.`, behaviour: "fixed", edited: false, text: `The words of ${marker}.`, length: 20, found: [{ message: 0, start: 0, end: 20 }], how: "signature", breakdown: "confirmed", ...over });
+const slice = (marker: string, over: Partial<PromptSliceShown> = {}): PromptSliceShown => ({ marker, kind: "instructions", line: `What ${marker} is.`, behaviour: "fixed", text: `The words of ${marker}.`, length: 20, at: [{ message: 0, start: 0, end: 20 }], found: "signature", breakdown: "confirmed", ...over });
 
 const SHOWN: PromptShown = {
   preset: { id: "preset-1", name: "Harbor preset", revision: "r2" },
   mapped: true,
   complete: true,
   turn: "turn-9",
-  slices: [slice("preset.style", { kind: "style" }), slice("persona", { kind: "persona", edited: true, breakdown: "corrected", how: "block" })],
+  slices: [slice("preset.style", { kind: "style" }), slice("persona", { kind: "persona", edited: true, breakdown: "corrected", found: "block" })],
   unclaimed: [{ message: 2, start: 10, end: 30, text: "a stray line" }],
   notices: [{ kind: "changed", marker: "preset.style" }, { kind: "unclaimed", message: 2, start: 10, end: 30 }],
   front: { length: 4200, brokenBy: "persona" },
-  clipped: { left: 3, reason: "context_size", turns: ["turn-8", "turn-9"] },
+  clipped: { count: 3, by: "context-size" },
   old: [{ kind: "block", name: "RPEngine · world", in: "the main prompt" }, { kind: "outlet", name: "{{outlet::lre_state}}", in: "Scene block" }],
 };
 
@@ -87,7 +87,7 @@ describe("the Prompt page's edits", () => {
       const root = page.document.createElement("div") as PageElement;
       const edited: PromptShown[] = [];
       await act(() => {
-        render(h(AppContext.Provider, { value: { client, gate } as unknown as UiApp }, h(SliceTools, { chat: CHAT, slice: slice("persona"), all: SHOWN.slices, onEdited: (s) => edited.push(s) })), root as unknown as HTMLElement);
+        render(h(AppContext.Provider, { value: { client, gate } as unknown as UiApp }, h(SliceTools, { chat: CHAT, turn: null, slice: slice("persona"), all: SHOWN.slices, onEdited: (s) => edited.push(s) })), root as unknown as HTMLElement);
       });
       const click = async (label: string): Promise<void> => {
         const button = root.querySelectorAll("button").find((b) => b.textContent.trim() === label);

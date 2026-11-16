@@ -18,7 +18,7 @@ import { type NoticeLines, useNoticeLines } from "../../notice-words";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { useSelect } from "../../store";
-import type { PromptShown, PromptTurnShown } from "../../wanted";
+import type { PromptShown, PromptTurnShown } from "../../../shared/api";
 import { clock } from "../../words";
 import { readPrompt, readPromptHistory } from "./read";
 import { ClippedNote, FrontLine, NoticeList, OldBlocks, SliceCard, type SliceSlots, Unclaimed } from "./slices";
@@ -51,7 +51,7 @@ function HistoryLine(props: { entry: PromptTurnShown; lines: NoticeLines; curren
     <li class="rpe-entry" data-prompt-turn={entry.turn}>
       <div class="lre-spread">
         <span class="rpe-strong">
-          Turn {entry.n} · {clock(entry.at)}
+          {entry.n === null ? "A turn no longer on the path" : `Turn ${entry.n}`} · {clock(entry.at)}
         </span>
         <span class="lre-inline">
           <Button small kind="ghost" current={props.current} onClick={props.onPick}>
@@ -108,7 +108,7 @@ export function PromptView(props: PromptViewProps) {
           <Section id="parts" title={shown.preset?.name === undefined ? "The parts" : `The parts of ${shown.preset.name}`}>
             {shown.slices.length === 0 ? (
               <Empty icon="list" title="No part found">
-                <span>{shown.turn === null ? "No turn has been played on RPE in this chat yet, so no prompt has been laid out." : "No part was found in this turn's prompt."}</span>
+                <span>No part was found in this turn's prompt.</span>
               </Empty>
             ) : (
               <ul class="rpe-plain lre-stack">
@@ -179,7 +179,7 @@ export function PromptPage(props: { chat: string; actions?: ComponentChildren })
     history.again();
   }), [chat]);
   const shown = edited ?? read.value;
-  const slots: SliceSlots = { tools: (slice, all) => <SliceTools chat={chat} slice={slice} all={all} onEdited={setEdited} /> };
+  const slots: SliceSlots = { tools: (slice, all) => <SliceTools chat={chat} turn={turn} slice={slice} all={all} onEdited={setEdited} /> };
   return (
     <PromptView
       shown={shown}

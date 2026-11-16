@@ -7,10 +7,8 @@
 
 import type { FactPrecision, FactSource, FactStanding, JsonValue, TurnId } from "../../shared/api";
 import { type CallOptions, type ParamsOf, replyOf, type RpeClient } from "../client";
-import type { PromptRoutes } from "./prompt";
 import type { WorldRoutes } from "./world";
 
-export * from "./prompt";
 export * from "./world";
 
 /** One route as the generated types hold it. */
@@ -48,7 +46,7 @@ export interface ChangeShown {
 }
 
 /** The routes asked for and not yet in the table, by their key, each page's own together. */
-export type WantedRoutes = WorldRoutes & PromptRoutes;
+export type WantedRoutes = WorldRoutes;
 
 export type WantedKey = keyof WantedRoutes;
 
