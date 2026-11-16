@@ -32,6 +32,33 @@ interface FutureDue {
   text: string;
 }
 
+/** A principal out of view with an intention that has a story time, as the cast's area reads it. */
+interface AwayDue {
+  id: string;
+  character: string;
+  name: string | null;
+  /** The tree ref of the world's person the character is. */
+  ref: string | null;
+  whereabouts: string | null;
+  placeRef: string | null;
+  nameRefs: string[];
+  intention: string | null;
+  until: number;
+}
+
+/** The away principals with an intention meant for a time, as the cast's area reads them (the store names the area and imports nothing of it); none where the store opened without it. */
+function awayOf(store: Store, state: StoreState): AwayDue[] {
+  const area = store.env.areas?.get("cast");
+  const read = area?.reads && Object.hasOwn(area.reads, "away") ? area.reads.away : undefined;
+  const list = read?.(state.areas?.cast ?? area?.initial?.() ?? {}, {});
+  const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+  return (Array.isArray(list) ? list : []).flatMap((a) =>
+    isRecord(a) && typeof a.id === "string" && typeof a.character === "string" && typeof a.until_at === "number"
+      ? [{ id: a.id, character: a.character, name: text(a.name), ref: text(a.ref), whereabouts: text(a.whereabouts), placeRef: text(a.place_ref), nameRefs: Array.isArray(a.name_refs) ? a.name_refs.filter((r): r is string => typeof r === "string") : [], intention: text(a.intention), until: a.until_at }]
+      : [],
+  );
+}
+
 /** The open futures with a due time, as the story's area reads them (the store names the area and imports nothing of it); none where the store opened without it. */
 function futuresOf(store: Store, state: StoreState): FutureDue[] {
   const area = store.env.areas?.get("story");
@@ -75,6 +102,15 @@ function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeV
     if (!here(where, ...refs)) continue;
     const who = refs.flatMap((r) => (r !== null && r.startsWith("entity:") ? [r.slice("entity:".length)] : []));
     out.push({ at: f.due, kind: "future", ...(where !== null ? { where } : {}), ...(who.length > 0 ? { who } : {}), what: f.text });
+  }
+  // A principal out of view whose recorded intention has a time in the span: who, from where, and where it means to be. Nothing is applied: what it did meanwhile is the Author's to say.
+  for (const a of awayOf(store, state)) {
+    if (!(a.until > from && a.until <= to)) continue;
+    const to_ = a.nameRefs.find((r) => r.startsWith("place:")) ?? null;
+    const comes = a.ref !== null ? [a.ref] : [];
+    if (!here(a.ref, to_, a.placeRef)) continue;
+    const what: JsonValue = { character: a.name ?? a.character, ...(a.placeRef !== null ? { from: a.placeRef } : a.whereabouts !== null ? { from: a.whereabouts } : {}), ...(to_ !== null ? { to: to_ } : {}), ...(a.intention !== null ? { intention: a.intention } : {}) };
+    out.push({ at: a.until, kind: "arrival", ...(to_ !== null ? { where: to_ } : {}), ...(comes.length > 0 ? { who: comes.filter((r) => r.startsWith("entity:")).map((r) => r.slice("entity:".length)) } : {}), what });
   }
   const settings = needsSettingsOf(world);
   for (const [id, e] of Object.entries(state.world.entities)) {
