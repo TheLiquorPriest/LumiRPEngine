@@ -125,7 +125,8 @@ export function compose(options: ComposeOptions = {}): Composition {
     },
   };
   // His worlds, kept by the worlds area: Build edits them through its service, and a proposal for a world's entry is approved through its store, once mounted.
-  const worlds = worldsArea(() => ({ store: made().store }));
+  // The chats that play his worlds are listed with Lumiverse's name for each, where RPE is set up for a Lumiverse.
+  const worlds = worldsArea(() => ({ store: made().store, turning, chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null }));
   const build = buildArea(() => ({ store: made().store, worlds: worlds.service(), guidance: RPE_GUIDANCE }));
   const worldWrites = (): LoreWorldWrites => worldEntryWrites(worlds.service().worlds);
   // The agents' suggestions about lore, kept as proposals and written to his books only on his approval: one queue, made when first asked for.
