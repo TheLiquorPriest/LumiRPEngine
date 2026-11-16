@@ -11,7 +11,7 @@ import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loadGuidance } from "../app/guidance";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
-import type { CarriedPort } from "../iface/kit";
+import type { CarriedPort, EngineDeps } from "../iface/kit";
 import { mapRoutes } from "../iface/map/routes";
 import { harnessSettings } from "../app/setting-list";
 import type { LoreBooks, LoreProposals, ProjectionBooks } from "../lore";
@@ -46,6 +46,8 @@ export interface TurnTakes {
   clock?: Clock;
   /** A migrated turn's record as the old engine kept it, for the agents (the composition reads it from the migration's records). */
   carried?: (app: App) => CarriedPort;
+  /** The world service Build's routes call, for the agents' world tools (the worlds area's `service()`). */
+  worlds?: (app: App) => NonNullable<EngineDeps["worlds"]>;
   /** Tests only: the models agents run on, in place of the model layer's, and RPH's ids. */
   harness?: Pick<CreateHarnessOptions, "models" | "ids">;
 }
@@ -199,6 +201,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
         projectionBooks: takes.projectionBooks,
         ...(takes.harness !== undefined ? { harness: takes.harness } : {}),
         ...(takes.carried !== undefined ? { carried: takes.carried(at) } : {}),
+        ...(takes.worlds !== undefined ? { worlds: takes.worlds(at) } : {}),
       });
       at.routes.add("connections", connectionRoutes(turns.harness.models, turns.harness.jobs, owner, at.log));
       const { harness, lane, runs } = turns;

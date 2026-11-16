@@ -30,7 +30,7 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, CAST_PLAYER_MIND, castFacts, castTools, chatLine, findCharacter, playerMindOf, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording } from "../iface";
-import type { CarriedPort } from "../iface/kit";
+import type { CarriedPort, EngineDeps } from "../iface/kit";
 import { indexedSearch } from "../iface/search";
 import { bindingsInForce, EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretIds, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storedBindings, storePath, storeWorlds } from "../lore";
 import type { PlaceSourcesReader } from "../places";
@@ -204,6 +204,8 @@ export interface TurnsOptions {
   clock?: Clock;
   /** A migrated turn's record as the old engine kept it, which the agents read (supplied by the composition from the migration's records). */
   carried?: CarriedPort;
+  /** The world service Build's routes call, for the agents' world tools (supplied by the composition). */
+  worlds?: NonNullable<EngineDeps["worlds"]>;
 }
 
 /** Everything the turn lane made, for the composition and the routes. */
@@ -430,7 +432,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...(options.worlds !== undefined ? { worlds: options.worlds } : {}), ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
