@@ -3,7 +3,9 @@
 import { resolve } from "node:path";
 import { migrateCli } from "../../migrate/cli";
 import type { CliIO } from "../cli";
+import { compose } from "../compose";
 import { dataPaths, defaultDataFolder, loadConfig } from "../config";
+import { gatherSettings } from "../hooks";
 import { rpeServiceOf } from "../up";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
@@ -23,7 +25,12 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
   const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
   const folder = line[line.indexOf("--data") + 1];
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
-  const migrate = (): Promise<number> => migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout());
+  // Each carried setting is checked as the reader of its own key takes it: against the registry of every area's list, which reaches no Lumiverse.
+  const noLumiverse = (): never => {
+    throw new Error("The migration reaches no Lumiverse, and an area asked for it while its settings were listed.");
+  };
+  const registry = () => gatherSettings(compose({ fetch: async () => noLumiverse(), open: noLumiverse, sleep: async () => noLumiverse() }).areas);
+  const migrate = (): Promise<number> => migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry());
   if (rest.includes("--rehearse") || folder === undefined || folder.startsWith("--")) return await migrate();
   const paths = dataPaths(folder);
   const config = await loadConfig(paths, io.env);
