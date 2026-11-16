@@ -8,6 +8,7 @@ import { entry as chatsPage } from "./pages/chats";
 import { entry as connectionsPage } from "./pages/connections";
 import { entry as filesPage } from "./pages/files";
 import { entry as livePage } from "./pages/live";
+import { entry as lorePage } from "./pages/lore";
 import { entry as migrationPage } from "./pages/migration";
 import { entry as playPage } from "./pages/play";
 import { entry as promptPage } from "./pages/prompt";
@@ -17,4 +18,4 @@ import { entry as storyPage } from "./pages/story";
 import { entry as turnsPage } from "./pages/turns";
 import { entry as worldPage } from "./pages/world";
 
-export const PAGES: readonly PageEntry[] = [buildPage, castPage, chatsPage, connectionsPage, filesPage, livePage, migrationPage, playPage, promptPage, settingsPage, storagePage, storyPage, turnsPage, worldPage].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+export const PAGES: readonly PageEntry[] = [buildPage, castPage, chatsPage, connectionsPage, filesPage, livePage, lorePage, migrationPage, playPage, promptPage, settingsPage, storagePage, storyPage, turnsPage, worldPage].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
