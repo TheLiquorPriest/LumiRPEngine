@@ -93,11 +93,11 @@ export interface LoreIndexRoutesDeps {
   scope(user: string, chat: string): Scope;
 }
 
-/** A job that was not started, in the words of the lore's lines; its facts where the part has no line for it. */
+/** A job that was not started, in the words of the lore's lines: the line of its cause (`job_refused_day_count`), else the general one; its facts where the part has neither. */
 function refusedWords(lines: Parameters<typeof loreLine>[0], refusal: JobRefusal): string {
   const { refused, ...facts } = refusal;
   const fields: Record<string, string | number> = { refused, ...Object.fromEntries(Object.entries(facts).filter((entry): entry is [string, string | number] => typeof entry[1] === "string" || typeof entry[1] === "number")) };
-  return loreLine(lines, "job_refused", fields) ?? JSON.stringify(refusal);
+  return loreLine(lines, `job_refused_${refused.replaceAll("-", "_")}`, fields) ?? loreLine(lines, "job_refused", fields) ?? JSON.stringify(refusal);
 }
 
 export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
