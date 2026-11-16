@@ -39,7 +39,7 @@ import { isRecord } from "../shared/json";
 import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
-import { storySoFar } from "../story/sofar";
+import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
 import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
 import { type Attempt, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
@@ -858,6 +858,38 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
+   * The prompt's window for the chat as its latest prompt put it (the Story page's coverage): the first history message it kept, past
+   * what the model's own window trimmed (null where it kept them all, or no prompt was made yet), and whether agents may read the
+   * messages he hid.
+   */
+  async windowOf(user: string, chat: string): Promise<{ edge: string | null; hiddenReadable: boolean }> {
+    const { hiddenReadable } = await turnSettings(this.#d.files, { user, chat, session: NO_SESSION }, this.#d.log);
+    const cut = this.#d.prompts.latestCut(user, chat);
+    if (!isRecord(cut)) return { edge: null, hiddenReadable };
+    const keep = isRecord(cut.keep) && typeof cut.keep.id === "string" ? cut.keep.id : null;
+    const reads = this.#d.reads();
+    if (!isRecord(cut.trimmed) || reads === null) return { edge: keep, hiddenReadable };
+    const steps = await reads.path(chat);
+    return { edge: steps === null ? keep : (keptFirst(cut as unknown as TaggedTurn["cut"], steps)?.id ?? null), hiddenReadable };
+  }
+
+  /**
+   * The story so far at the chat's head, as the next briefing lays it out (the Story page's route): for the history the latest prompt's
+   * window left out, by the part `story-so-far` in force for the chat, within its share of the lead's window. Empty where the window left
+   * nothing out, the part is off, or RPE is not set up for a Lumiverse to read the chat's path from.
+   */
+  async soFarAt(user: string, chat: string): Promise<StorySoFar> {
+    const scope = { user, chat, session: NO_SESSION };
+    const [settings, part, { edge }] = await Promise.all([turnSettings(this.#d.files, scope, this.#d.log), loadGuidance(this.#d.files, scope).part(PARTS.storySoFar), this.windowOf(user, chat)]);
+    const window = this.#leadWindow(await this.#leadLimits(scope, settings.lead), settings.lead, null);
+    const reads = this.#d.reads();
+    const steps = edge === null || reads === null ? null : await reads.path(chat);
+    const kept = steps === null ? -1 : steps.findIndex((s) => s.id === edge);
+    if (part?.format !== "template" || kept <= 0) return { text: "", tokens: 0, budget: storySoFarBudget(window, settings.storySoFar), leftOut: [] };
+    return storySoFar({ record: storyRecordParts({ store: this.#d.store, user, chat, turn: null }), keptFrom: kept, contextWindow: window, settings: settings.storySoFar, tokens: tokenCount(settings.charsPerToken), layout: part });
+  }
+
+  /**
    * Stops a turn's run where it stands (plan §10.10 "Stop"); false when it is not going on. While its
    * reply is not out, Lumiverse is told first: its generation ends as stopped, keeping what it had, and
    * the run stops with the request Lumiverse drops. The run is stopped here in any case.
@@ -1411,18 +1443,18 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * The lead's model's limits, as the model layer gives them for the connection the harness runs the lead's definition on for the scope
    * (its own, else his default): its window, and whether it takes pictures. Null where the model layer cannot tell them; the log says so.
    */
-  async #leadLimits(scope: Scope & { turn: string }, lead: string | null): Promise<ModelLimits | null> {
+  async #leadLimits(scope: Scope, lead: string | null): Promise<ModelLimits | null> {
     try {
       const { models, definitions } = this.#d.harness();
       return await models.limits(scope.user, await leadConnection(definitions, scope, lead));
     } catch (error) {
-      this.#d.log.info("The lead's model's limits could not be read: its window is taken as unknown, and it is given no pictures.", { turn: scope.turn, lead, error: words(error) });
+      this.#d.log.info("The lead's model's limits could not be read: its window is taken as unknown, and it is given no pictures.", { chat: scope.chat, turn: scope.turn ?? null, lead, error: words(error) });
       return null;
     }
   }
 
   /** The lead's window in tokens, from its model's limits; where nobody can tell it, 0, so the story so far is given its floor, and the log says so. */
-  #leadWindow(limits: ModelLimits | null, lead: string | null, turn: string): number {
+  #leadWindow(limits: ModelLimits | null, lead: string | null, turn: string | null): number {
     const window = limits?.contextWindow ?? null;
     if (window !== null) return window.tokens;
     this.#d.log.info("The lead's window is not known, so the story so far is given its floor.", { turn, lead });

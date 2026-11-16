@@ -46,6 +46,8 @@ export interface TurnPrompts extends PromptPort {
   addLore(db: Database, user: string, turn: string, lore: readonly ActivatedEntry[]): void;
   /** The messages Lumiverse's memory stands in for with a summary in the chat's latest prompt. */
   summarized(user: string, chat: string): ReadonlySet<string>;
+  /** The receipt's cut (`Cut`, as JSON) the chat's latest kept prompt carried; null where no prompt of the chat is kept. */
+  latestCut(user: string, chat: string): unknown;
   /** The first history message a turn's prompt kept, by the cut its request carried; null where the window cut nothing, or none was kept. */
   keptFrom(user: string, turn: string): string | null;
   /** Where the slices of the chat's prompts were found, by turn, as RPH saved it; null for a turn that has none kept. */
@@ -143,6 +145,11 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
     summarized(user, chat) {
       const row = db.query<{ summarized: string }, [string, string]>("SELECT summarized FROM turn_prompt WHERE user = ? AND chat = ? ORDER BY received DESC LIMIT 1").get(user, chat);
       return new Set(row === null ? [] : (JSON.parse(row.summarized) as string[]));
+    },
+
+    latestCut(user, chat) {
+      const row = db.query<{ cut: string }, [string, string]>("SELECT cut FROM turn_prompt WHERE user = ? AND chat = ? ORDER BY received DESC LIMIT 1").get(user, chat);
+      return row === null ? null : (JSON.parse(row.cut) as unknown);
     },
 
     keptFrom(user, turn) {
