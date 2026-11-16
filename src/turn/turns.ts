@@ -1531,8 +1531,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const parent = this.#d.store.user(scope.user).turn(scope.turn)?.parent ?? null;
     const left = parent === null ? undefined : this.#drawnAfter.get(`${scope.user}\n${parent}`);
     if (left !== undefined && parent !== null && this.#d.runs.ofTurn(scope.user, parent).some((r) => r.session === scope.session)) return left;
-    const given = (await this.#d.harness().definitions.list(scope)).find((d) => d.name === lead)?.given ?? [];
-    const opening = given.includes(DRAWN_MAP) ? drawnLayer(this.#d.store, scope, map) : null;
+    // The lead's opening (`opening:` in its definition, R-163) lists each item as a `given` part of its stack.
+    const stack = lead === null ? [] : await this.#d.harness().definitions.stack(scope, lead);
+    const opening = stack.some((p) => p.kind === "given" && p.part === DRAWN_MAP && p.left === undefined) ? drawnLayer(this.#d.store, scope, map) : null;
     return opening === null ? {} : { [opening.grid]: opening.drawn };
   }
 
