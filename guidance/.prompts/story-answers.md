@@ -36,3 +36,5 @@ correction_empty: Nothing of that could be corrected: {{id}} takes {{fields}}.
 correction_ignored: {{id}} does not take {{fields}}, so {{fields}} was left out.
 timeline_gone: The timeline has no {{id}} any more, so the page after it cannot be told. Read the timeline again from its start.
 so_far_unavailable: The story so far is not worked out here.
+quest_gone: The quests have no {{id}} any more, so the page after it cannot be told. Read the quests again from their start.
+no_quest: The chat has no quest {{id}}.
