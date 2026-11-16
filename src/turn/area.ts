@@ -95,8 +95,12 @@ export function turnArea(takes: TurnTakes): TurnArea {
           const { window } = await chatSettings(ask.chat);
           return window.size === null ? null : historyWindow(await ask.path(), window, covered(ask.chat)).first;
         },
-        // Where a turn not yet begun will start on the question's path, from RPE's own store alone (R-5): the hidden marks it holds laid on the path.
-        start: async (ask) => made().store.user(owner()).turnStart(ask.chat, ask.path, ask.point),
+        // Where a turn not yet begun will start on the question's path, from RPE's own store alone (R-5): the hidden marks it holds laid on
+        // the path. A long fold runs on a worker (`afar`), so the question never stalls other chats.
+        start: async (ask) => {
+          const { store } = made();
+          return await store.afar(() => store.user(owner()).turnStart(ask.chat, ask.path, ask.point));
+        },
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
         ranges: async (chat) => namedStretches(made().store, owner(), chat),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
