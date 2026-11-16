@@ -2,7 +2,7 @@
 // Every job is the user's own; another user's id is not found. A page hears each change of a job on its live channel (`area.ts`), not by asking.
 
 import { route, RouteError, shape } from "../../app";
-import type { JobKind, JobSummary } from "../../shared/protocol";
+import type { JobKind, JobSummary } from "../../shared/jobs";
 import type { JsonObject } from "../../shared/json";
 import { JobError, type JobHome } from "./home";
 

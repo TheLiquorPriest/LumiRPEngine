@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { UserId } from "../../shared/ids";
-import type { JobSummary } from "../../shared/protocol";
+import type { JobSummary } from "../../shared/jobs";
 import { interruptedMessage } from "./home";
 
 export function writeCarriedJob(db: Database, user: UserId, job: JobSummary): void {

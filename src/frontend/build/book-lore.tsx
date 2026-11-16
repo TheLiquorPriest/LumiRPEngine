@@ -12,7 +12,8 @@
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { hasOwn, type JsonValue } from "../../shared/json";
 import { LORE_AUDIENCE, loreBooksOf, loreIsSecret, OLD_SECRECY_FIELDS, PROSE_STEPS, type BookFieldsEdit, type BookLoreFields } from "../../shared/lore";
-import type { LintIssue, LoreBookEntryView, LoreBookView, LoreMarkChange, LoreMarkView } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
+import type { LoreBookEntryView, LoreBookView, LoreMarkChange, LoreMarkView } from "../../shared/lore-views";
 import { markNameIssues, resolveMarkNames, secretMarkProblem } from "../../shared/secret-marks";
 import { STEP_LABEL } from "../../shared/steps";
 import type { StepPurpose, TrackDef, WorldDoc } from "../../shared/world";
@@ -513,22 +514,30 @@ export function BookEntriesSection() {
   const [entries, setEntries] = useState<LoreBookEntryView[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const bookId = useId();
+  /** The book's entries as they stand now, with the revision each write must name. */
+  const reload = (): void => void app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
   useEffect(() => {
     setEntries(null);
     setOpen(null);
     if (book === "") return;
-    void app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
+    reload();
   }, [book]);
   if (!draft) return null;
+  const revisionOf = (entryId: string): { revision?: number } => {
+    const revision = entries?.find((e) => e.id === entryId)?.revision;
+    return revision === undefined ? {} : { revision };
+  };
   const save = (entryId: string, fields: BookFieldsEdit | null) =>
     run(async () => {
-      const body = await app.request({ type: "lre.lore", op: "fields", bookId: book, entryId, fields });
+      const body = await app.request({ type: "lre.lore", op: "fields", bookId: book, entryId, fields, ...revisionOf(entryId) });
+      // A write refused (the entry changed in Lumiverse since it was read) leaves the book as it now stands to look at again.
       if (body?.entries) setEntries(body.entries);
+      else reload();
     });
   const mark = (entryId: string, change: LoreMarkChange, done: () => void) =>
     run(async () => {
-      const body = await app.request({ type: "lre.lore", op: "mark", bookId: book, entryId, change });
-      if (!body?.entries) return;
+      const body = await app.request({ type: "lre.lore", op: "mark", bookId: book, entryId, change, ...revisionOf(entryId) });
+      if (!body?.entries) return reload();
       setEntries(body.entries);
       done();
     });

@@ -1,8 +1,8 @@
 // Bulk changes to a list's selection (DESIGN §7, §4.1): what a multi-select's bar applies to everyone
-// picked. In GM mode a change is the existing GM edit ops, one per entity, sent in chunks of
-// `EDIT_OPS_MAX`: each chunk is one `lre.edit`, all or none, with its own Undo. In Build it is a JSON
-// Patch on the draft, worked out from the draft as it stands, so it writes only what changes. Each
-// op goes through the same checks a single edit or write does.
+// picked. In GM mode a change is the existing GM edit ops, one per entity, sent in chunks of the
+// setting `engine.editOps`: each chunk is one `lre.edit`, all or none, with its own Undo. In Build it is a JSON
+// Patch on the draft, worked out from the draft as it stands, so it writes only what changes, sent in chunks of
+// `engine.editOps` and never more than `worlds.patchOps`. Each op goes through the same checks a single edit or write does.
 
 import type { DomainId, EntityId, Level, PlaceId, TierId } from "../shared/ids";
 import { pointerOf } from "../shared/json-patch";
@@ -10,8 +10,8 @@ import { lorePinKey, lorePinsJson, lorePinsOf } from "../shared/lore";
 import type { Fidelity, MindApproach } from "../shared/minds";
 import { FIDELITIES } from "../shared/minds";
 import type { PartyTier } from "../shared/party";
-import type { EditOp, JsonPatchOp } from "../shared/protocol";
-import { EDIT_OPS_MAX } from "../shared/protocol";
+import type { EditOp } from "../shared/edit-ops";
+import type { JsonPatchOp } from "../shared/json-patch";
 import type { RoutineRole } from "../shared/routines";
 import type { GmView } from "../shared/state-view";
 import type { LorePin, WorldDoc } from "../shared/world";
@@ -37,8 +37,8 @@ export function tierGroups(doc: Pick<WorldDoc, "tiers" | "entities">): SelectGro
     .filter((g) => g.ids.length > 0);
 }
 
-/** Splits a batch into chunks of at most `size`, in order. */
-export function chunks<T>(items: readonly T[], size = EDIT_OPS_MAX): T[][] {
+/** Splits a batch into chunks of at most `size`, in order; the size is the caller's (a setting of RPE's), never a default. */
+export function chunks<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
@@ -49,7 +49,7 @@ export function chunks<T>(items: readonly T[], size = EDIT_OPS_MAX): T[][] {
  * draft write); stops at the first one refused, so what applied is the chunks before it. Resolves how
  * many applied.
  */
-export async function sendInChunks<T>(items: readonly T[], send: (chunk: T[]) => Promise<boolean>, size?: number): Promise<{ applied: number; of: number }> {
+export async function sendInChunks<T>(items: readonly T[], send: (chunk: T[]) => Promise<boolean>, size: number): Promise<{ applied: number; of: number }> {
   const all = chunks(items, size);
   let applied = 0;
   for (const chunk of all) {

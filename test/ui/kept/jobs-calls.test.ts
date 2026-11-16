@@ -45,8 +45,9 @@ describe("Build's jobs through the kept App", () => {
   test("a job told on RPE's live feed is today's lre.job.update; one read back as interrupted is told as a failure", () => {
     const data = { jobId: "job1", kind: "check_world", worldId: "w", progress: 0.5 };
     const event = (rest: Record<string, unknown>) => ({ chat: "", seq: 1, kind: "build_job", at: 0, data: { ...data, ...rest } }) as never;
-    expect(jobsFile.live?.(event({ status: "running" }))).toEqual([{ lre: expect.any(Number), type: "lre.job.update", jobId: "job1", kind: "check_world", status: "running", progress: 0.5 }]);
-    expect(jobsFile.live?.(event({ status: "interrupted", message: "Interrupted by a restart. Run it again." }))).toMatchObject([{ status: "failed", message: "Interrupted by a restart. Run it again." }]);
-    expect(jobsFile.live?.({ chat: "", seq: 1, kind: "world", at: 0, data: {} } as never)).toEqual([]);
+    const ctx = {} as never;
+    expect(jobsFile.live?.(event({ status: "running" }), ctx)).toEqual([{ lre: expect.any(Number), type: "lre.job.update", jobId: "job1", kind: "check_world", status: "running", progress: 0.5 }]);
+    expect(jobsFile.live?.(event({ status: "interrupted", message: "Interrupted by a restart. Run it again." }), ctx)).toMatchObject([{ status: "failed", message: "Interrupted by a restart. Run it again." }]);
+    expect(jobsFile.live?.({ chat: "", seq: 1, kind: "world", at: 0, data: {} } as never, ctx)).toEqual([]);
   });
 });

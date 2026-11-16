@@ -7,7 +7,7 @@ import { writeCarriedJob } from "../../src/build/index";
 import { JobError, JobHome } from "../../src/build/jobs/home";
 import { labRunners } from "../../src/build/jobs/lab";
 import { JOB_LIMIT_DEFAULTS, type JobLimits } from "../../src/build/jobs/limits";
-import type { JobProposal, JobSummary } from "../../src/shared/protocol";
+import type { JobProposal, JobSummary } from "../../src/shared/jobs";
 import { WorldService } from "../../src/worlds/service";
 import { makeBed, OTHER, USER } from "./bed";
 

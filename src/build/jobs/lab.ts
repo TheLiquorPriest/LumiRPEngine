@@ -7,7 +7,7 @@ import type { Workers } from "../../app/workers/pool";
 import type { Store } from "../../store";
 import { initialStoreState } from "../../store/fold";
 import type { JsonObject } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import type { PlaytestTurn } from "../../engine/authoring";
 import type { WorldService } from "../../worlds/service";
 import { JobError, type JobRunner } from "./home";

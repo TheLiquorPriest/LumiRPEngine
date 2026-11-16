@@ -13,7 +13,7 @@ import type { DomainId, Level } from "../../shared/ids";
 import { DOMAINS } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { lorePinKey, lorePinsOf } from "../../shared/lore";
-import type { LoreBookEntryView, LoreBookView } from "../../shared/protocol";
+import type { LoreBookEntryView, LoreBookView } from "../../shared/lore-views";
 import type { LorePin, WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import type { DraftChange } from "../batch";
@@ -93,8 +93,12 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
       if (!current) return;
       const ops = draftPatch(current.doc, props.collection, targets, change);
       if (ops.length === 0) return setOutcome("Nothing to change: everyone selected has it already.");
+      // The size is RPE's setting: `engine.editOps` operations at a time, never more than one patch of a draft may carry (`worlds.patchOps`).
+      const limits = (await app.request({ type: "lre.world", op: "limits" }))?.limits;
+      if (!limits) return;
+      const size = Math.min(limits.editOps, limits.patchOps);
       // `draftSend` writes against the draft as it stands, so each chunk follows the one before.
-      const done = await sendInChunks(ops, async (chunk) => (await send({ type: "lre.editor", worldId: current.worldId, base: current.base, op: "patch", ops: chunk })).type === "lre.result");
+      const done = await sendInChunks(ops, async (chunk) => (await send({ type: "lre.editor", worldId: current.worldId, base: current.base, op: "patch", ops: chunk })).type === "lre.result", size);
       if (done.applied === done.of) props.onClose();
       else setOutcome(done.applied === 0 ? "Nothing was saved." : `${done.applied} of ${done.of} writes saved; the next was refused, so the rest weren't sent.`);
     });

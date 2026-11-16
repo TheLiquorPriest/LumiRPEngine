@@ -5,7 +5,7 @@ import type { App } from "../../app";
 import { LIVE_USER, liveKind, shape } from "../../app";
 import { diskTexts, readConfig } from "../../app/config-read";
 import type { Store } from "../../store";
-import type { JobKind } from "../../shared/protocol";
+import type { JobKind } from "../../shared/jobs";
 import type { WorldService } from "../../worlds/service";
 import { JobHome, type JobRunner } from "./home";
 import { labRunners } from "./lab";

@@ -56,9 +56,7 @@ import { cachedChain } from "./chain-cache";
 import { JobError, type JobRunner } from "./jobs";
 import { saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
-import { markBookEntry, MarkChangeError, markChangeOf, writeBookFields } from "./book-lore";
 import { LoreIndexError } from "./lore-routing";
-import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, replyReadKey, Runtime, unpricedChip } from "./runtime";
 import { readRun } from "../migrate/today/run";
@@ -905,29 +903,7 @@ export class Dispatcher {
           reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
           return;
         }
-        if (r.op === "fields" || r.op === "mark") {
-          // Build's own edits of one of the user's entries, each on the user's press (DESIGN §4.2).
-          const { bookId, entryId } = r;
-          if (typeof bookId !== "string" || bookId === "" || typeof entryId !== "string" || entryId === "") throw new RequestError("bad_request", "name the book and its entry");
-          const host = this.rt.host;
-          const fields = r.op === "fields" && r.fields !== null ? bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } }) : null;
-          if (r.op === "fields" && r.fields !== null && fields === null) throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
-          if (fields && OLD_SECRECY_FIELDS.some((key) => fields[key] !== undefined)) throw new RequestError("bad_request", "an entry is made secret by a secret mark in its text, not by fields: use Make secret (the mark op)");
-          const change = r.op === "mark" ? markChangeOf(r.change) : null;
-          if (r.op === "mark" && change === null) throw new RequestError("bad_request", 'give the change: {"kind": "secret" | "add" | "names" | "public", …}');
-          const entry = await host.books.entry(entryId, userId);
-          if (!entry || entry.bookId !== bookId) throw new RequestError("not_found", "that book has no such entry");
-          if (engineWroteEntry(entry.extensions)) throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
-          try {
-            if (change) await markBookEntry(host, entry, change, userId);
-            else await writeBookFields(host, entry, fields, userId);
-          } catch (error) {
-            if (error instanceof MarkChangeError) throw new RequestError("bad_request", error.message);
-            throw error;
-          }
-          reply("lre.lore", { entries: await pinEntries(host, bookId, userId) });
-          return;
-        }
+        if (r.op === "fields" || r.op === "mark") throw new RequestError("unavailable", "Build writes to a book on RPE's own routes now");
         if (r.op === "pins") {
           // The world's draft (Build), or the revision the chat plays (GM view).
           if (typeof r.worldId === "string") {

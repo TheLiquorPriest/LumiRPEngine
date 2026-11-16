@@ -4,7 +4,8 @@
 
 import type { RequestBody } from "../../../frontend/registry";
 import type { LiveEvent } from "../../../shared/api";
-import { type JobKind, type JobResult, type JobSummary, PROTOCOL_VERSION, type ResultBodies } from "../../../shared/protocol";
+import type { JobKind, JobResult, JobSummary } from "../../../shared/jobs";
+import { PROTOCOL_VERSION, type ResultBodies } from "../../../shared/protocol";
 import type { CallContext, CallFile, ServedBody } from "../client";
 import { Refusal } from "../client";
 

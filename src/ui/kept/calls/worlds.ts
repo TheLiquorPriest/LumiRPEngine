@@ -8,7 +8,9 @@
 import type { RequestBody } from "../../../frontend/registry";
 import type { LiveEvent } from "../../../shared/api";
 import type { JsonValue } from "../../../shared/json";
-import { PROTOCOL_VERSION, type LintIssue, type ResultBodies, type UpgradePreview } from "../../../shared/protocol";
+import { PROTOCOL_VERSION, type ResultBodies } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
+import type { UpgradePreview } from "../../../shared/upgrade";
 import type { CallContext, CallFile, ServedBody } from "../client";
 import { Refusal } from "../client";
 /** What a route answers, as the result body today's components read: the routes carry documents as JSON, whose shapes the world service holds. */
@@ -67,6 +69,16 @@ async function world(request: Of<"lre.world">, ctx: CallContext): Promise<Result
     case "upgrade": {
       const done = await call("POST /api/v1/chats/:chat/upgrade", { chat: request.chatId }, { body: { to: request.to, ...(request.merge === undefined ? {} : { merge: request.merge as unknown as JsonValue }) } });
       return { revision: done.revision, ...(done.waiting ? { pending: true } : {}), ...(done.edit === null ? {} : { undo: done.edit }) };
+    }
+    case "limits": {
+      // The sizes Build's "Change the selected" writes its patch in: `engine.editOps` operations at a time, never more than one patch of a draft may carry.
+      const read = await call("GET /api/v1/settings", {});
+      const whole = (key: string): number => {
+        const value = read.settings.find((s) => s.key === key)?.value;
+        if (typeof value !== "number") throw new Refusal("internal", `RPE gave no value for ${key}.`);
+        return value;
+      };
+      return { limits: { editOps: whole("engine.editOps"), patchOps: whole("worlds.patchOps") } };
     }
     case "undo_upgrade": {
       const done = await call("POST /api/v1/chats/:chat/upgrade/undo", { chat: request.chatId }, { body: { edit: request.edit } });

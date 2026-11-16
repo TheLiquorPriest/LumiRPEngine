@@ -9,7 +9,7 @@ import type { Log } from "rp-harness/contract";
 import type { WriteQueue } from "../../app";
 import type { UserId, WorldId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
-import type { JobKind, JobResult, JobSummary } from "../../shared/protocol";
+import type { JobKind, JobResult, JobSummary } from "../../shared/jobs";
 import type { JobLimits } from "./limits";
 
 /** A job request the home refuses: the code the route answers with and the words that name why. */

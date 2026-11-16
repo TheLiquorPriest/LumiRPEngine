@@ -14,7 +14,9 @@ import { editRequest, partyOf } from "../../src/frontend/requests";
 import { FIDELITY_LABEL } from "../../src/packs/minds/ui/ops";
 import { lorePinsOf } from "../../src/shared/lore";
 import { MIND_LENGTH_DEFAULTS } from "../../src/shared/minds";
-import type { EditOp, JsonPatchOp, ResultBodies } from "../../src/shared/protocol";
+import type { ResultBodies } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
+import type { JsonPatchOp } from "../../src/shared/json-patch";
 import { EDIT_OPS_MAX } from "../../src/shared/protocol";
 import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -73,7 +75,7 @@ describe("GM batch edits", () => {
     const change = { kind: "tier", tier: "background" } as const;
     const ops = bulkOps(bulkTargets({ gm }, people, change.kind), change, gm);
     if (!ops) throw new Error("no ops");
-    expect(await sendInChunks(ops, editor(rig, chatId, sent))).toEqual({ applied: 1, of: 1 });
+    expect(await sendInChunks(ops, editor(rig, chatId, sent), EDIT_OPS_MAX)).toEqual({ applied: 1, of: 1 });
     expect(sent.map((s) => s.length)).toEqual([3]);
     expect(await tierOf()).toEqual(["background", "background", "background"]);
     const chips = await undoChips(rig, chatId);
@@ -93,8 +95,8 @@ describe("GM batch edits", () => {
     const sent: EditOp[][] = [];
     const ops = bulkOps(ids, { kind: "tier", tier: "supporting" }, gm);
     if (!ops) throw new Error("no ops");
-    expect(chunks(ops).map((c) => c.length)).toEqual([EDIT_OPS_MAX, 70 - EDIT_OPS_MAX]);
-    expect(await sendInChunks(ops, editor(rig, chatId, sent))).toEqual({ applied: 2, of: 2 });
+    expect(chunks(ops, EDIT_OPS_MAX).map((c) => c.length)).toEqual([EDIT_OPS_MAX, 70 - EDIT_OPS_MAX]);
+    expect(await sendInChunks(ops, editor(rig, chatId, sent), EDIT_OPS_MAX)).toEqual({ applied: 2, of: 2 });
     expect(sent.map((s) => s.length)).toEqual([64, 6]);
     expect((await undoChips(rig, chatId)).length).toBe(chipsBefore.length + 2);
     const after = await gmView(rig, chatId);
@@ -108,7 +110,7 @@ describe("GM batch edits", () => {
     expect(ids.length).toBe(70);
     const ops = bulkOps(ids, { kind: "tier", tier: "supporting" }, before);
     if (!ops) throw new Error("no ops");
-    const sent = await sendEdits((send) => sendInChunks(ops, send), request(rig, chatId));
+    const sent = await sendEdits((send) => sendInChunks(ops, send, EDIT_OPS_MAX), request(rig, chatId));
     expect([sent.applied, sent.of, sent.count]).toEqual([2, 2, 70]);
     const after = await gmView(rig, chatId);
     const notice = editNotice(sent.undo, after.edits);
@@ -223,9 +225,15 @@ describe("GM batch edits", () => {
     expect(mix(back)).toEqual({ shown: [{ label: "world", count: 2 }, { label: "enforced", count: 1 }], rest: 0 });
   });
 
+  test("chunks split by the size given, and by no other", () => {
+    const items = Array.from({ length: 25 }, (_, i) => i);
+    expect(chunks(items, 10).map((c) => c.length)).toEqual([10, 10, 5]);
+    expect(chunks(items, 100).map((c) => c.length)).toEqual([25]);
+  });
+
   test("a chunk refused stops the batch: the chunks before it stay applied, the rest are never sent", async () => {
     const sent: number[] = [];
-    const result = await sendInChunks(Array.from({ length: 150 }, (_, i) => i), async (chunk) => (sent.push(chunk.length), sent.length < 2));
+    const result = await sendInChunks(Array.from({ length: 150 }, (_, i) => i), async (chunk) => (sent.push(chunk.length), sent.length < 2), EDIT_OPS_MAX);
     expect([result, sent]).toEqual([{ applied: 1, of: 3 }, [64, 64]]);
   });
 
@@ -256,7 +264,7 @@ describe("GM batch edits", () => {
     const change = { kind: "move", to } as const;
     const ops = bulkOps(bulkTargets({ gm }, people, change.kind), change, gm);
     if (!ops) throw new Error("no ops");
-    expect(await sendInChunks(ops, editor(rig, chatId, sent))).toEqual({ applied: 1, of: 1 });
+    expect(await sendInChunks(ops, editor(rig, chatId, sent), EDIT_OPS_MAX)).toEqual({ applied: 1, of: 1 });
     expect(sent).toEqual([people.map((entity) => ({ op: "move", entity, to }))]);
     const after = await gmView(rig, chatId);
     expect(people.map((id) => after.entities.find((e) => e.id === id)?.place)).toEqual([to, to]);

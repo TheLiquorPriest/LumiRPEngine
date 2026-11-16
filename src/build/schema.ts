@@ -9,9 +9,11 @@
 //               as that run put them, so a later run tells a copy changed in RPE from one it may
 //               replace (`seed.ts`)
 //   build_job   each job Build ran or runs, with its status, progress, input and result (`jobs/schema.ts`)
+//   build_secrecy  each book a secrecy move was made on, with every move of it for Restore (`lore/schema.ts`)
 
 import type { Migration } from "../app/migrations";
 import { JOB_MIGRATION } from "./jobs/schema";
+import { SECRECY_MIGRATION } from "./lore/schema";
 
 export const BUILD_MIGRATIONS: readonly Migration[] = [
   {
@@ -32,4 +34,5 @@ CREATE TABLE build_seed (
 ) WITHOUT ROWID`,
   },
   JOB_MIGRATION,
+  SECRECY_MIGRATION,
 ];
