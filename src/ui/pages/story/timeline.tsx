@@ -43,6 +43,7 @@ export function TimelineSection(props: { chat: string; current: { chapter: strin
   const app = useApp();
   const { chat } = props;
   const perPage = useUiSetting("rowsAtOnce");
+  const messagesAtOnce = useUiSetting("messagesAtOnce");
   const [changed, setChanged] = useState<ReadonlyMap<string, StoryItemRow>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export function TimelineSection(props: { chat: string; current: { chapter: strin
   useEffect(() => {
     if (missing.length === 0) return;
     let alive = true;
-    app.client.call("GET /api/v1/chats/:chat/messages", { chat }, { query: { ids: missing.slice(0, 100).join(",") } }).then(
+    app.client.call("GET /api/v1/chats/:chat/messages", { chat }, { query: { ids: missing.slice(0, messagesAtOnce).join(",") } }).then(
       (answer) => {
         if (alive) setMessages((held) => new Map([...held, ...answer.messages.map((m) => [m.id, m] as const)]));
       },

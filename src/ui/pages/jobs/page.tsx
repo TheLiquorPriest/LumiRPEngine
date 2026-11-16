@@ -9,7 +9,7 @@ import { Badge, Banner, Button, Empty, PageHeader } from "../../atoms";
 import { walk } from "../../client";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
-import { counted, tokenWords, when } from "../../words";
+import { counted, cut, tokenWords, when } from "../../words";
 import { JobOpen } from "./open";
 import { StartSection } from "./start";
 import { SwitchesSection } from "./switches";
@@ -29,6 +29,7 @@ export function listedJobs(jobs: readonly JobView[], chat: string | null, state:
 
 function JobLine(props: { job: JobView; open: boolean; withChat: boolean; onOpen(): void }) {
   const { job } = props;
+  const briefChars = useUiSetting("briefChars");
   const state = JOB_STATE_WORDS[job.state];
   return (
     <li class="lre-listrow">
@@ -37,7 +38,7 @@ function JobLine(props: { job: JobView; open: boolean; withChat: boolean; onOpen
           <span class="lre-listrow-text">
             <span class="lre-listrow-title">{job.agent}</span>
             <span class="lre-listrow-sub">
-              {job.brief.length > 90 ? `${job.brief.slice(0, 87)}…` : job.brief} · {when(job.started)} · {counted(job.usage.calls, "call")} · {tokenWords(job.usage)}
+              {cut(job.brief, briefChars)} · {when(job.started)} · {counted(job.usage.calls, "call")} · {tokenWords(job.usage)}
               {props.withChat && chatOfJob(job) !== null ? ` · chat ${chatOfJob(job)}` : ""}
             </span>
           </span>

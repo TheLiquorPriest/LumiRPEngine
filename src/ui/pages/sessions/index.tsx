@@ -11,7 +11,7 @@ import { Badge, Empty, PageHeader } from "../../atoms";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
-import { counted, when } from "../../words";
+import { counted, cut, when } from "../../words";
 import { parentWords, SessionOpen } from "./open";
 import { replyOf } from "../../client";
 
@@ -20,10 +20,10 @@ export { parentWords } from "./open";
 /** The scenes' own names by their id, from the story record's timeline. */
 export type SceneNames = ReadonlyMap<string, string>;
 
-function words(item: StoryItemRow): string | null {
+function words(item: StoryItemRow, most: number): string | null {
   for (const key of ["name", "title", "summary"]) {
     const value = item.fields[key];
-    if (typeof value === "string" && value.trim() !== "") return value.length > 60 ? `${value.slice(0, 57)}…` : value;
+    if (typeof value === "string" && value.trim() !== "") return cut(value, most);
   }
   return null;
 }
@@ -133,6 +133,7 @@ export function SessionsPage(props: { chat: string; at: readonly string[] | unde
   const { chat } = props;
   const [changed, setChanged] = useState<ReadonlyMap<string, SessionShown>>(new Map());
   const perPage = useUiSetting("rowsAtOnce");
+  const titleChars = useUiSetting("titleChars");
   const list = usePaged((cursor) => app.client.call("GET /api/v1/chats/:chat/sessions", { chat }, { query: { limit: perPage, ...(cursor === undefined ? {} : { cursor }) } }), [chat]);
   // The route lists in the order opened; the newest are shown first, so the list is read to its end.
   useEffect(() => {
@@ -140,7 +141,7 @@ export function SessionsPage(props: { chat: string; at: readonly string[] | unde
   }, [list.more, list.loading, list.problem, list.items.length]);
   const story = useRead(() => app.client.call("GET /api/v1/chats/:chat/story", { chat }).then((answer) => replyOf(answer)), [chat]);
   const scenes: SceneNames = new Map((story.value?.timeline.scene.items ?? []).flatMap((item) => {
-    const name = words(item);
+    const name = words(item, titleChars);
     return name === null ? [] : [[item.id, name] as const];
   }));
   const openId = props.at?.[0] ?? null;

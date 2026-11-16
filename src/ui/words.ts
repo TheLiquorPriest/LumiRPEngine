@@ -16,6 +16,11 @@ export function counted(n: number, one: string, many = `${one}s`): string {
   return `${num(n)} ${n === 1 ? one : many}`;
 }
 
+/** A text cut to `most` characters, the cut shown by an ellipsis in the last of them. */
+export function cut(text: string, most: number): string {
+  return text.length > most ? `${text.slice(0, most - 1)}…` : text;
+}
+
 /** A file's size: "512 bytes", "2.0 KB", "1.4 MB". */
 export function bytesWords(n: number): string {
   if (n < 1024) return counted(n, "byte");

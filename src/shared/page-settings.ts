@@ -39,6 +39,9 @@ export const PAGE_SETTING_DEFS = {
   toastMs: { key: "pages.toastMs", default: 3500, least: 500, most: 120_000, name: "Any other toast shows for", about: "Milliseconds any other toast shows in the kept views." },
   downloadRevokeMs: { key: "pages.downloadRevokeMs", default: 1000, least: 100, most: 60_000, name: "A download link is kept for", about: "Milliseconds the kept views keep a download's link before the browser lets it go." },
   previewWaitMs: { key: "pages.previewWaitMs", default: 300, least: 50, most: 10_000, name: "Wait after typing before a prompt part is rendered again", about: "Milliseconds the Files page waits after he stops typing in a prompt part before it asks RPH to render the draft again for its preview." },
+  briefChars: { key: "pages.briefChars", default: 90, least: 20, most: 2000, name: "Characters of a job's brief shown in the Jobs list", about: "Characters of a job's brief the Jobs list shows on its line before it cuts the rest with an ellipsis; the job open shows its brief whole." },
+  titleChars: { key: "pages.titleChars", default: 60, least: 20, most: 500, name: "Characters of a scene's name shown on Sessions", about: "Characters of a scene's name (its name, title or summary in the story record) the Sessions list shows before it cuts the rest with an ellipsis." },
+  messagesAtOnce: { key: "pages.messagesAtOnce", default: 100, least: 1, most: 1000, name: "Messages read at once for the Story timeline", about: "Messages whose text the Story timeline asks Lumiverse's door for in one read, for the beats it has listed; the rest are read straight after." },
 } as const satisfies Record<string, PageSettingDef>;
 
 /** The page's settings by the name the page reads each under; every value is a whole number: milliseconds, or a count where the setting's words say so. */
