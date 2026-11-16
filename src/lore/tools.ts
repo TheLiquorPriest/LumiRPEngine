@@ -114,12 +114,13 @@ export function entryFields(lines: LinesPart | undefined, e: IndexedEntry): Fiel
 /**
  * The next batch, as an indexing run is given it: a head line counting it and what is left, then each
  * entry's lines and its text. A line the part does not have is not shown; with nothing left, the part's
- * line that says so.
+ * line that says so, or, where another job holds the rest, the line that says that.
  */
-export function batchText(lines: LinesPart | undefined, batch: { entries: readonly IndexedEntry[]; left: number }): string {
-  if (batch.entries.length === 0) return loreLine(lines, "batch_none") ?? "";
+export function batchText(lines: LinesPart | undefined, batch: { entries: readonly IndexedEntry[]; left: number; held?: number }): string {
+  const held = batch.held ?? 0;
+  if (batch.entries.length === 0) return (held > 0 ? loreLine(lines, "batch_held", { held }) : undefined) ?? loreLine(lines, "batch_none") ?? "";
   const out: string[] = [];
-  const head = loreLine(lines, "batch_head", { count: batch.entries.length, left: batch.left });
+  const head = loreLine(lines, "batch_head", { count: batch.entries.length, left: batch.left, held });
   if (head !== undefined) out.push(head);
   for (const e of batch.entries) {
     const fields = { ...entryFields(lines, e), text: e.text };
@@ -129,9 +130,19 @@ export function batchText(lines: LinesPart | undefined, batch: { entries: readon
   return out.join("\n\n");
 }
 
-/** The `index:batch` block for a scope: the next batch of the chat's lore, worded by the lines in force. */
-export async function loreBatchBlock(index: LoreIndex, at: LoreAt, guidance: Guidance): Promise<string> {
-  return batchText(await loreLines(guidance), await index.batch(at));
+/**
+ * The `index:batch` block for a scope: the next batch of the chat's lore, worded by the lines in force, held for the job the agent
+ * runs in. A batch that cannot be read (no Lumiverse set up, a book that fails) is told to the run in the part's line for it,
+ * with the reason, so the run is never given an empty block it takes for "all indexed".
+ */
+export async function loreBatchBlock(index: LoreIndex, at: LoreAt, guidance: Guidance, agent?: AgentRef): Promise<string> {
+  const lines = await loreLines(guidance);
+  try {
+    return batchText(lines, await index.batch(at, undefined, agent?.job));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return loreLine(lines, "batch_unreadable", { reason }) ?? reason;
+  }
 }
 
 /**
@@ -277,13 +288,13 @@ export const LORE_INDEX_WRITE: LoreToolSpec = {
       else if ("needs" in read) answer.line("needs", { n, fields: read.needs });
       else answer.line("unreadable", { n, field: read.unreadable, value: read.value });
     }
-    const outcomes = await deps.index.write(at, inputs.map((i) => i.input), ctx.agent.definition);
+    const outcomes = await deps.index.write(at, inputs.map((i) => i.input), ctx.agent.definition, ctx.agent.job);
     const kept: JsonObject[] = [];
     for (const [i, outcome] of outcomes.entries()) {
       if ("unknown" in outcome) answer.line("unknown_entry", { n: inputs[i]?.n ?? 0, id: outcome.id });
       else kept.push({ id: outcome.id, title: outcome.kept.title, kind: outcome.kept.kind, line: outcome.kept.line, defines: outcome.kept.defines.map((b) => ({ what: b.what, aspect: b.aspect })), related: outcome.kept.related, ...outcome.kept.fields });
     }
-    const next = await deps.index.batch(at);
+    const next = await deps.index.batch(at, undefined, ctx.agent.job);
     answer.data({ kept, left: next.left });
     answer.line("kept", { count: kept.length, left: next.left });
     if (kept.length === 0) answer.fail();

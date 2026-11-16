@@ -17,6 +17,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { LinesPart } from "rp-harness";
 import type { ActivatedLore, FactDef, FactValue, LoreEntry, Log, Scope } from "rp-harness/contract";
 import { readText, writeWhole } from "../app/disk";
 import type { LoreSettingsFor } from "./chat-settings";
@@ -35,6 +36,10 @@ export const LORE_INDEX_DEFAULTS = Object.freeze({
   batch: 20,
   /** Entries the lore map lists as bound to the horizon and not in the prompt (plan Appendix D.1). */
   bound: 12,
+  /** The most characters of entry text in one batch an indexing run is handed, so twenty long entries never overrun a small model's window (plan §9.1; a batch always holds one entry at least). */
+  batchChars: 48_000,
+  /** Entries one page of the index as the Lore page shows it holds. */
+  page: 50,
 });
 
 export type LoreIndexSettings = { -readonly [K in keyof typeof LORE_INDEX_DEFAULTS]: number };
@@ -150,6 +155,18 @@ function placeOf(entry: Pick<LoreCatalogEntry, "world" | "id">): string {
   return `${entry.world}\u0000${entry.id}`;
 }
 
+/** What a job is handed is held by the user, the entry's place and its revision: an entry changed meanwhile is another claim. */
+function claimOf(user: string, entry: Pick<LoreCatalogEntry, "world" | "id" | "revision">): string {
+  return `${user}\u0000${placeOf(entry)}\u0000${entry.revision}`;
+}
+
+/** The next entries an indexing run is handed, and the counts the answer tells: `left` still to be handed to a run, `held` those another job has now. */
+export interface LoreBatch {
+  entries: IndexedEntry[];
+  left: number;
+  held: number;
+}
+
 /** What the table holds for one entry: a run's lines at each revision it was run at, newest first, and the user's own. */
 interface Held {
   runs: IndexRow[];
@@ -190,6 +207,8 @@ export interface LoreIndexDeps {
   now?: () => number;
   /** Where a readable index that could not be kept is said. */
   log?: Log;
+  /** Whether the user's job is still going (waiting, held, running or asking): an entry handed to a job that has ended is handed out again. Absent, a job is taken to be going until it writes or `release`s. */
+  jobRunning?: (user: string, job: string) => Promise<boolean>;
 }
 
 /** An entry Lumiverse activated for a turn's prompt, as the lore map read it: what the turn's folder lays out, reading nothing again. */
@@ -209,9 +228,16 @@ export class LoreIndex {
   readonly settings: Readonly<LoreIndexSettings>;
   /** The chats whose readable index this index has kept, which a run in another chat that changed lines they share brings up to date. */
   readonly #kept = new Map<string, { user: string; chat: string }>();
+  /** Entries handed to an indexing job, by where each is kept and its revision: the job's until it writes lines for them or ends. */
+  readonly #claims = new Map<string, string>();
 
   constructor(private readonly deps: LoreIndexDeps) {
     this.settings = Object.freeze({ ...LORE_INDEX_DEFAULTS, ...deps.settings });
+  }
+
+  /** The answers' lines in force for the chat (`.prompts/lore-answers.md`), by the one reader the readable index is worded with; undefined where the part is off or no file is set up. */
+  async lines(at: LoreAt): Promise<LinesPart | undefined> {
+    return this.deps.file?.lines(at);
   }
 
   /**
@@ -277,10 +303,54 @@ export class LoreIndex {
     return catalog.map((entry) => joined(entry, held.get(placeOf(entry))));
   }
 
-  /** The next entries no run has indexed as they stand now, in the catalog's order: at most `size`, the setting's when absent. */
-  async batch(at: LoreAt, size: number = this.settings.batch): Promise<{ entries: IndexedEntry[]; left: number }> {
+  /**
+   * The next entries no run has indexed as they stand now, in the catalog's order: at most `size` (the setting's when absent) and
+   * at most the characters of text the chat's setting allows in one batch (one entry at least, however long). With `job`, the
+   * batch is that job's: held for it until it writes lines for them or it ends, so a second job at the same time is handed the
+   * next entries and none is indexed twice at once. `left` counts the entries still to be handed to a run; `held`, those another
+   * job has now.
+   */
+  async batch(at: LoreAt, size: number = this.settings.batch, job?: string): Promise<LoreBatch> {
     const unindexed = (await this.entries(at)).filter((e) => !e.indexed);
-    return { entries: unindexed.slice(0, Math.max(0, Math.floor(size))), left: unindexed.length };
+    const going = new Map<string, boolean>();
+    const free: IndexedEntry[] = [];
+    let held = 0;
+    for (const e of unindexed) {
+      const by = this.#claims.get(claimOf(at.user, e));
+      if (by !== undefined && by !== job && (await this.going(at.user, by, going))) held += 1;
+      else free.push(e);
+    }
+    const room = (await this.deps.settingsFor?.(at))?.batchChars ?? this.settings.batchChars;
+    const entries: IndexedEntry[] = [];
+    let chars = 0;
+    for (const e of free) {
+      if (entries.length >= Math.max(0, Math.floor(size)) || (entries.length > 0 && chars + e.text.length > room)) break;
+      entries.push(e);
+      chars += e.text.length;
+    }
+    if (job !== undefined) for (const e of entries) this.#claims.set(claimOf(at.user, e), job);
+    return { entries, left: free.length, held };
+  }
+
+  /** How many entries of the chat's lore no run has indexed as they stand now, those another job holds included. */
+  async unindexed(at: LoreAt): Promise<number> {
+    return (await this.entries(at)).filter((e) => !e.indexed).length;
+  }
+
+  /** Gives back what a job was handed and has not written lines for: it ended. */
+  release(job: string): void {
+    for (const [key, by] of this.#claims) if (by === job) this.#claims.delete(key);
+  }
+
+  /** Whether the job still holds what it was handed: one that has ended gives it back. `known` keeps the answer for one batch. */
+  private async going(user: string, job: string, known: Map<string, boolean>): Promise<boolean> {
+    let now = known.get(job);
+    if (now === undefined) {
+      now = this.deps.jobRunning === undefined ? true : await this.deps.jobRunning(user, job);
+      known.set(job, now);
+      if (!now) this.release(job);
+    }
+    return now;
   }
 
   /**
@@ -301,9 +371,9 @@ export class LoreIndex {
    * Keeps a run's lines for entries of the chat's lore, each for the revision the run read the entry
    * at, in one write: an entry changed since its batch was handed out keeps them as an earlier
    * revision's, and is handed out again. The user's own lines are left as they are. An id that names
-   * no entry of the chat's lore keeps nothing, and says so.
+   * no entry of the chat's lore keeps nothing, and says so. What `job` wrote lines for is no longer held for it.
    */
-  async write(at: LoreAt, lines: readonly LoreIndexInput[], by: string): Promise<LoreIndexOutcome[]> {
+  async write(at: LoreAt, lines: readonly LoreIndexInput[], by: string, job?: string): Promise<LoreIndexOutcome[]> {
     const catalog = new Map((await this.deps.lore.catalog(at)).map((e) => [e.id, e]));
     const now = (this.deps.now ?? Date.now)();
     const kept = lines.flatMap((l) => {
@@ -317,6 +387,8 @@ export class LoreIndex {
       );
       for (const { entry, lines: l } of kept) put.run(at.user, entry.world, entry.id, l.revision, l.kind, l.line, JSON.stringify(l.defines), JSON.stringify(l.related), JSON.stringify(l.fields ?? {}), by, now);
     }, "keeping lore index lines");
+    // What was written is no longer held for the job that was handed it.
+    if (job !== undefined) for (const { entry, lines: l } of kept) this.#claims.delete(claimOf(at.user, { ...entry, revision: l.revision }));
     await this.keepFiles(at);
     const held = this.rows(at.user, kept.map((k) => k.entry));
     return lines.map((l): LoreIndexOutcome => {
@@ -362,8 +434,7 @@ export class LoreIndex {
       defs: [{ name: UNINDEXED, counts: "Entries of the chat's lore (its attached books' and its world's own) that no indexing run has written lines for as they stand now." }],
       read: async (scope, names): Promise<Record<string, FactValue>> => {
         if (!names.includes(UNINDEXED)) return {};
-        const { left } = await this.batch({ user: scope.user, chat: scope.chat, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, 0);
-        return { [UNINDEXED]: { count: left } };
+        return { [UNINDEXED]: { count: await this.unindexed({ user: scope.user, chat: scope.chat, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }) } };
       },
     };
   }

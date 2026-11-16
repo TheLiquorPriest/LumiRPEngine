@@ -5,7 +5,7 @@
 // the lore it is part of.
 
 import type { ConfigRead } from "../app/config-read";
-import { LORE_INDEX_ENTRY_DEF } from "./settings";
+import { LORE_INDEX_ENTRY_DEF, LORE_INDEX_SETTING_DEFS } from "./settings";
 
 /** The levels of the chat a read is for. */
 export interface LoreScope {
@@ -17,6 +17,8 @@ export interface LoreScope {
 export interface LoreChatSettings {
   /** His own lore index entry, by its id in Lumiverse; null for none (`lore.index.entry`). */
   indexEntry: string | null;
+  /** The most characters of entry text one batch an indexing run is handed holds (`lore.index.batchChars`). */
+  batchChars: number;
 }
 
 /** The lore's settings for one chat, read when asked. */
@@ -27,6 +29,6 @@ export function loreSettingsFor(config: (at: LoreScope) => Promise<ConfigRead>):
   return async (at) => {
     const read = await config(at);
     const entry = read.value(LORE_INDEX_ENTRY_DEF);
-    return { indexEntry: typeof entry === "string" && entry.trim() !== "" ? entry.trim() : null };
+    return { indexEntry: typeof entry === "string" && entry.trim() !== "" ? entry.trim() : null, batchChars: read.value(LORE_INDEX_SETTING_DEFS.batchChars) as number };
   };
 }

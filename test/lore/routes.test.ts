@@ -51,7 +51,7 @@ async function openBed(): Promise<Bed> {
     numbers,
     prompts,
     deps,
-    keep: (turn, chat, lore, user = USER) => t.writes.run((d) => prompts.keep(d, { user, turn, chat, layout: LAYOUT, lore, cut: null, summarized: [], at: 1_000 })),
+    keep: (turn, chat, lore, user = USER) => t.writes.run((d) => prompts.keep(d, { user, turn, chat, layout: LAYOUT, lore, cut: null, summarized: [], speaker: null, persona: null, at: 1_000 })),
     ask: async (turn, chat = CHAT, user = USER) => (await callRoute(route, { params: { chat, turn }, user })).entries,
   };
 }

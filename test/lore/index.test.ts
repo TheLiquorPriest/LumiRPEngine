@@ -95,7 +95,7 @@ describe("the lore index", () => {
     expect(second.left).toBe(7);
     await index.write(AT, second.entries.map(linesFor), "indexer");
     await index.write(AT, (await index.batch(AT)).entries.map(linesFor), "indexer");
-    expect(await index.batch(AT)).toEqual({ entries: [], left: 0 });
+    expect(await index.batch(AT)).toEqual({ entries: [], left: 0, held: 0 });
 
     // The tide bell is edited in Lumiverse, and the world's tithe is rewritten: those two, and only they, are handed out again.
     Object.assign(shelfEntry("entry-tide"), { content: "The bell rings at low water too.", revision: 2 });
@@ -125,6 +125,16 @@ describe("the lore index", () => {
     const kept = (await index.entries(AT)).find((e) => e.id === W.tithe_law);
     expect([kept?.line, kept?.indexed, kept?.stale]).toEqual(["The harbor tithe: as the entry says.", false, true]);
     expect((await index.batch(AT)).entries.map((e) => e.id)).toEqual([W.tithe_law, W.keeper_log, "e-1", "e-2"]);
+  });
+
+  test("two jobs at once are handed different entries, and a job that ends gives its entries back", async () => {
+    await fresh(2);
+    const a = await index.batch(AT, 2, "job-a");
+    const b = await index.batch(AT, 2, "job-b");
+    expect(b.entries.map((e) => e.id).filter((id) => a.entries.some((e) => e.id === id))).toEqual([]);
+    expect([a.entries.length, b.entries.length, b.held]).toEqual([2, 2, 2]);
+    index.release("job-a");
+    expect((await index.batch(AT, 2, "job-c")).entries.map((e) => e.id)).toEqual(a.entries.map((e) => e.id));
   });
 
   test("lore_index_write keeps what it can read, says what it could not, and answers with the next batch", async () => {
