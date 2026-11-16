@@ -10,7 +10,7 @@ import type { JsonObject, ToolResult } from "rp-harness/contract";
 import { ENGINE_TOOLS, Lines, SHIPPED_GUIDANCE } from "../../src/iface/index";
 import { splitFile } from "../../src/iface/texts";
 import { readPart, renderView } from "../../src/store/words";
-import { CHAT, dataOf, rig, texts } from "./rig";
+import { CHAT, DUE, dataOf, rig, texts } from "./rig";
 
 const lines = Lines.parse(await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "engine-answers.md")).text(), "engine-answers");
 const patterns = lines.patterns();
@@ -206,7 +206,7 @@ describe("world_query, world_search and roll", () => {
     const t = await rig();
     const r = await t.call("world_query", { at: "Thornbury", depth: 1, due: "six hours" });
     expect(r.error).toBeUndefined();
-    const tree = renderView(t.s.view(CHAT).query("place:thornbury", 1) ?? { lines: [] }, treePart);
+    const tree = renderView(t.s.view(CHAT).query("place:thornbury", 1, { due: DUE, ahead: 360 }) ?? { lines: [] }, treePart);
     expect(tree).toContain("Thornbury [thornbury] (place)");
     expect(texts(r)[0]).toBe(tree);
     expect((dataOf(r).due as JsonObject[])[0]?.where).toBe("place:thornbury");

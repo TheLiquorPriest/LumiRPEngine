@@ -7,6 +7,7 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Lane, StoreState } from "../store/types";
 import type { ItemOpOptions } from "../engine/thing-ops";
+import type { Rejection } from "../engine/registry";
 import type { Call, Reply } from "./kit";
 import { type Found, isFound, type Missed, nearestOf, type Reading, type Want } from "./reading";
 import { type Fields, type Lines, textOf } from "./texts";
@@ -141,12 +142,31 @@ export function find(o: OpContext, field: string, want: Want, gone = false, said
   const r = o.reading.find(said, want, gone);
   if (isFound(r)) return r;
   if (r.several.length > 0) return { line: "several", fields: { n: o.n, op: o.op, field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) } };
+  const later = typeof said === "string" ? o.later.findIndex((a) => a.op === "spawn" && typeof a.name === "string" && a.name.trim().toLowerCase() === said.trim().toLowerCase()) : -1;
+  if (later >= 0) return { line: "not_yet", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want), later: o.n + 1 + later }, want, data: missedData(r) };
   return { line: "unknown", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want) }, want, data: missedData(r) };
 }
 
 /** A name argument that may be left out: undefined when it is. */
 export function findOptional(o: OpContext, field: string, want: Want): Found | Unread | undefined {
   return o.args[field] === undefined || o.args[field] === null ? undefined : find(o, field, want);
+}
+
+/** What an engine refusal names that is not there (an id gone between reading and applying): answered as not there, with the near ones of that kind. */
+const NOT_THERE: Readonly<Record<string, true>> = { missing_entity: true, missing_place: true, gone: true };
+
+/**
+ * An engine refusal as the answer to an operation: what names an id that is not there is answered as not there, with the near ones of
+ * `want` (the words the call gave for it, else the engine's); any other as the engine's own refusal, kept so the answer gives its reason
+ * and its list of choices.
+ */
+export function refusedAs(o: OpContext, out: Rejection, field: string, want: Want): Unread {
+  o.draft.note(out);
+  if (NOT_THERE[out.code]) {
+    const missing = find(o, field, want, false, out.said ?? o.args[field]);
+    if (isUnread(missing) && missing.line === "unknown") return missing;
+  }
+  return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
 }
 
 /** How the engine's item ops run for an agent's write: the agent's, confirmed, with the say of the GM's edits, made things drawn from the call. */

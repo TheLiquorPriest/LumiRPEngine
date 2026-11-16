@@ -145,6 +145,8 @@ export interface EngineDeps {
   approvals?: ApprovalsPort;
   /** What time brings due, for an answer that lets time pass and for what a span of `world_query` lists. */
   due: DueList;
+  /** Minutes of story time ahead that what `world_query` shows of a level says what falls due in (the user's `worldState.dueAhead`); absent, that setting's default. */
+  dueAhead?: number;
   /** Squares on a map, for the operations that name one. */
   grid: GridMoves;
   /** A place's map as text, for what `world_query` shows of a place. */

@@ -50,14 +50,13 @@ describe("spawn somewhere given in words", () => {
     wordsFromFiles(r);
     const kitchen = String(entityNamed(t, "Ida Pell").fields.place);
     const shed = String(entityNamed(t, "Ada Lorne").fields.place);
-    expect(r.reports).toBeUndefined();
-    expect(texts(r).filter((x) => x.includes("nothing goes by"))).toEqual([
+    expect(r.reports).toEqual([
       `Operation 5 (spawn): nothing goes by peg by the stove, so Wet coat was made at Keeper's kitchen [${kitchen}], which is recorded as assumed, and those words are kept on it as where it was said to be.`,
       `Operation 6 (spawn): nothing goes by the hat box by the door, so Oilskin hat was made at Boat shed [${shed}], which is recorded as assumed, and those words are kept on it as where it was said to be.`,
     ]);
-    expect(entityNamed(t, "Wet coat").fields).toMatchObject({ place: kitchen, said_on: "peg by the stove" });
+    expect(entityNamed(t, "Wet coat").fields).toMatchObject({ place: kitchen });
     // Where its owner is, when the call names who it is for.
-    expect(entityNamed(t, "Oilskin hat").fields).toMatchObject({ place: shed, said_in: "the hat box by the door" });
+    expect(entityNamed(t, "Oilskin hat").fields).toMatchObject({ place: shed });
     expect(entityNamed(t, "Tin mug").fields.place).toBe(kitchen);
     // Each change of a spawn code placed stands as assumed, with the call's own source; one the call placed stands as the call gave it.
     const rows = t.s.changes(t.turn.id);
@@ -70,12 +69,12 @@ describe("spawn somewhere given in words", () => {
     expect(recorded("Tin mug")).toEqual(["prose/null"]);
   });
 
-  test("with no one named and no scene to put it in, the words cannot be read, and the call says what would work", async () => {
+  test("with no one named and no scene to put it in, the thing is made at no place, its words kept, and the call says so", async () => {
     const t = await rig({}, "blank");
     const r = await t.call("world_apply", { operations: [{ op: "spawn", kind: "item", name: "Wet coat", on: "peg by the stove", source: SRC }] });
-    expect(r.error).toBe(true);
+    expect(r.error).toBeUndefined();
     wordsFromFiles(r);
-    expect(texts(r)[0]).toBe("Operation 1 (spawn): there is nothing called peg by the stove that is a thing. Nothing that is a thing is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.");
-    expect(t.s.changes(t.turn.id)).toEqual([]);
+    expect(r.reports?.[0]).toContain("Wet coat was made at no place");
+    expect(entityNamed(t, "Wet coat").fields.place).toBeUndefined();
   });
 });

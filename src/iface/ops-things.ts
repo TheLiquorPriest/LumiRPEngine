@@ -1,11 +1,11 @@
 // The everyday operations on people and things (the skills `items-and-wardrobe`, `vehicles`,
 // `places-and-maps`): `move`, `place`, `give`, `wear`, `store` and `spawn`. Each runs through
 // today's things model and moves (`engine/thing-ops`, `engine/relocate`), which keep a thing's four
-// facts apart. Where today's rules would refuse a change for what it means (a thing too big for
-// what it goes into, a return to someone who is not its owner, a giver who does not hold it), the
-// change is applied all the same and the answer reports it. A name that is not recorded is answered
-// as not there, with its near matches: only `spawn` makes anything, and a name an operation names
-// that no recorded thing goes by is never made for it.
+// facts apart, asked for advice: where its rules would refuse a change for what it means (a thing too
+// big for what it goes into, a return to someone who is not its owner, a giver who does not hold it,
+// a loan ending before now, a second thing of a name), the change is applied as given and the answer
+// reports it. A name that is not recorded is answered as not there, with its near matches: only
+// `spawn` makes anything, and a name an operation names that no recorded thing goes by is never made for it.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { ownersIn } from "../shared/finance";
@@ -19,15 +19,16 @@ import { own } from "../engine/pack-kit";
 import { baseWorld, findPlaces, placeOp } from "../engine/places-in-play";
 import { relocate, relocateInto, relocateOnto } from "../engine/relocate";
 import { createRng } from "../engine/rng";
-import { placeOfEntity } from "../engine/scope";
+import { kindIs, placeOfEntity } from "../engine/scope";
 import { putAwaySpot } from "../engine/thing-gm";
-import { applyItemOp, type ItemOpApplied, type ItemOpRefusal, locate } from "../engine/thing-ops";
+import { applyItemOp, type ItemOpApplied } from "../engine/thing-ops";
 import { isThing, possessorOf, restOf, spotOf, supportOf } from "../engine/things";
+import { thingTypes } from "../engine/thing-view";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { bestiaryOf, bestiaryRow } from "./bestiary";
-import { find, findOptional, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, type OpDef, textArg, type Unread, unknownFields } from "./ops";
+import { find, findOptional, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, type OpDef, refusedAs, textArg, type Unread, unknownFields } from "./ops";
 import { hasWhere, whereEvent } from "./map/record";
-import type { Found, Want } from "./reading";
+import { nearestOf, type Found, type Want } from "./reading";
 import { PROVENANCE_PROPERTIES } from "./source";
 import { textOf } from "./texts";
 import { timeArg } from "./ops-time";
@@ -43,37 +44,34 @@ function spotName(o: OpContext, spot: Spot | Support): string {
   return named(o.reading, "place" in spot ? spot.place : "in" in spot ? spot.in : spot.on);
 }
 
+/** What an applied item op says beyond its events: what the engine advised is a report on the operation, and what it filled in from the world is recorded as filled in. */
+function reportItem(o: OpContext, out: ItemOpApplied): void {
+  if (out.filled !== undefined) o.draft.markFilled(out.filled);
+  for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
+}
+
 /**
- * Puts a thing at a spot through today's one location writer and its size rules; where those
- * rules would refuse (it does not fit, it is built in, it would sit inside itself), it is put there
- * all the same and the answer reports which rule it bent. A thing already there changes nothing,
- * and the answer says so.
+ * Puts a thing at a spot through today's one location writer, asked for advice: what its size rules, a part or a built-in, a cycle or
+ * an owner would refuse is applied as given and comes back as a report on the operation. A thing already there changes nothing, and
+ * the answer says so.
  */
 export function putThing(o: OpContext, thing: EntityId, to: Spot | Support, why: string): Unread | undefined {
-  const w = o.draft.w;
-  const out = applyItemOp(w, { do: "move", item: thing, to, why }, itemOptions(o));
-  if (!("code" in out)) {
-    if (out.filled !== undefined) o.draft.markFilled(out.filled);
-    if (out.placed !== undefined) o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, thing), asked: spotName(o, to), where: spotName(o, out.placed) });
-    return undefined;
-  }
-  if (out.code === "no_change") {
+  const out = applyItemOp(o.draft.w, { do: "move", item: thing, to, why }, { ...itemOptions(o), advise: true });
+  if ("code" in out) {
+    if (out.code !== "no_change") return refusedAs(o, out, "place" in to ? "at" : "on" in to ? "on" : "in", "place" in to ? "place" : "on" in to ? "thing" : "holder");
     o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, thing) });
     return undefined;
   }
-  if (!BENT_RULES[out.code]) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
-  const bad = o.draft.applyAll(locate(w.ctx, thing, to));
-  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-  o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, thing), where: spotName(o, to), code: out.code });
+  reportItem(o, out);
   return undefined;
 }
 
 /** Moves a person (or a group, or anything that is not a thing) to a place, out of whatever holds them, through today's one move path. */
 function movePerson(o: OpContext, who: EntityId, to: string, along: boolean): Unread | undefined {
   const events = relocate(o.draft.w.ctx, who, to, along ? { along: true } : {});
-  if ("code" in events) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: events.code } };
+  if ("code" in events) return refusedAs(o, events, "to", "place");
   const bad = o.draft.applyAll(events);
-  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+  return bad ? refusedAs(o, bad, "to", "place") : undefined;
 }
 
 /** Puts someone on a support (seated on a table, riding on a cart) through the engine's support path (`relocateOnto`): they stand where it stands and go where it goes; nothing of a holder's rules applies. */
@@ -83,9 +81,9 @@ export function putOnSupport(o: OpContext, who: EntityId, support: EntityId): Un
     return undefined;
   }
   const events = relocateOnto(o.draft.w.ctx, who, support);
-  if ("code" in events) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: events.code } };
+  if ("code" in events) return refusedAs(o, events, "on", "thing");
   const bad = o.draft.applyAll(events);
-  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+  return bad ? refusedAs(o, bad, "on", "thing") : undefined;
 }
 
 /** Moves someone or something to a place: a thing through the things model, anyone else through the move path. */
@@ -326,37 +324,23 @@ const give: OpDef = {
     const what = find(o, "what", "thing");
     if (isUnread(what)) return what;
     const to = find(o, "to", "person");
-    if (isUnread(to)) return to;
+    // Something that is no person is not given to: the answer names the operation that puts a thing in a holder.
+    if (isUnread(to)) return to.line === "unknown" && to.fields.other !== "" ? { ...to, line: "use_store" } : to;
     const giver = findOptional(o, "from", "entity");
     if (isUnread(giver)) return giver;
     const how = textArg(o.args, "how");
     if (how === undefined || !Object.hasOwn(HOW_GIVEN, how)) return notOneOf(o, "how", o.args.how ?? null, Object.keys(HOW_GIVEN));
-    let basis = HOW_GIVEN[how] as HandoverBasis;
-    let until = timeArg(o, "until");
+    const basis = HOW_GIVEN[how] as HandoverBasis;
+    const until = timeArg(o, "until");
     if (isUnread(until)) return until;
-    if (until !== undefined && !(until > w.state.clock)) {
-      o.reply.report("past_until", { n: o.n, op: o.op, until: String(o.args.until) });
-      until = undefined;
-    }
     const holder = possessorOf(w.ctx, what.id);
     if (giver !== undefined && holder !== giver.id) o.reply.report("not_holding", { n: o.n, op: o.op, from: named(o.reading, giver.id), what: named(o.reading, what.id), holder: holder === null ? "" : named(o.reading, holder) });
-    // A return to someone who is not among its owners hands it over to hold; whose it is stays as it was.
-    if (basis === "return" && !ownersIn(own(w.state.entities, what.id)?.fields ?? {}).some((x) => x.party === to.id)) {
-      o.reply.report("not_owner", { n: o.n, op: o.op, to: named(o.reading, to.id), what: named(o.reading, what.id) });
-      basis = "hold";
-    }
-    const why = textArg(o.args, "why") ?? "";
-    const op: ItemOp = { do: "hand", item: what.id, to: to.id, basis, why, ...(until !== undefined ? { until } : {}) };
-    const out = applyItemOp(w, op, itemOptions(o));
+    // A loan ending before now, a return to someone who is not an owner, a thing too big to carry, a vehicle taken by hand: each is recorded as given and comes back as a report.
+    const out = applyItemOp(w, { do: "hand", item: what.id, to: to.id, basis, why: textArg(o.args, "why") ?? "", ...(until !== undefined ? { until } : {}) }, { ...itemOptions(o), advise: true });
     if ("code" in out) {
-      if (out.code === "no_change") o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, what.id) });
-      else if (BENT_RULES[out.code]) {
-        // A vehicle taken by hand, a thing too big to carry: it goes to them all the same, as held.
-        const failed = putThing(o, what.id, { in: to.id }, why);
-        if (failed) return failed;
-        o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, what.id), where: named(o.reading, to.id), code: out.code });
-      } else return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
-    } else if (out.placed !== undefined) o.reply.report("placed_instead", { n: o.n, op: o.op, what: named(o.reading, what.id), asked: named(o.reading, to.id), where: spotName(o, out.placed) });
+      if (out.code !== "no_change") return refusedAs(o, out, "to", "person");
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, what.id) });
+    } else reportItem(o, out);
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
@@ -386,17 +370,17 @@ const wear: OpDef = {
     // Put on from out of reach (someone else has it, or it is beyond a short walk): on them all the same, and reported, as a change of clothes reports a piece not to hand.
     const holder = possessorOf(w.ctx, what.id);
     const away = o.args.off !== true && holder !== who.id && (holder !== null || reachOf(w.ctx, who.id, what.id).reach === "away");
-    const out = applyItemOp(w, { do: "wear", item: what.id, who: who.id, ...(o.args.off === true ? { off: true } : {}), ...(slot !== undefined ? { slot } : {}) }, itemOptions(o));
+    const out = applyItemOp(w, { do: "wear", item: what.id, who: who.id, ...(o.args.off === true ? { off: true } : {}), ...(slot !== undefined ? { slot } : {}) }, { ...itemOptions(o), advise: true });
     if ("code" in out) {
       if (out.code === "no_change" || out.code === "not_worn") o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, what.id) });
       else if (out.code === "bad_slot") return notOneOf(o, "slot", o.args.slot ?? null, Object.keys(w.ctx.tables.get("gear.slots")?.rows ?? {}).concat("ready"));
-      else if (BENT_RULES[out.code]) {
+      else if (out.code === "no_slot") {
         // Not worn in any slot of its own: it is on them all the same, carried.
         const failed = putThing(o, what.id, { in: who.id }, "");
         if (failed) return failed;
         o.reply.report("not_wearable", { n: o.n, op: o.op, what: named(o.reading, what.id), who: named(o.reading, who.id), code: out.code });
-      } else return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
-    }
+      } else return refusedAs(o, out, "what", "thing");
+    } else reportItem(o, out);
     if (away) o.reply.report("not_to_hand", { n: o.n, op: o.op, what: named(o.reading, what.id), who: named(o.reading, who.id), brought: true });
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
@@ -411,9 +395,9 @@ function putPerson(o: OpContext, who: EntityId, into: EntityId, driver: boolean)
     return undefined;
   }
   const boarded = relocateInto(o.draft.w.ctx, who, into, { driver });
-  if ("code" in boarded) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: boarded.code } };
+  if ("code" in boarded) return refusedAs(o, boarded, "in", "holder");
   const bad = o.draft.applyAll(boarded.events);
-  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+  if (bad) return refusedAs(o, bad, "in", "holder");
   for (const advice of boarded.advice) o.draft.adviseOp(o.n, advice);
   return undefined;
 }
@@ -478,20 +462,25 @@ function freshId(o: OpContext, base: string): string {
 /** Where something is made, as the call says it, and the words of each way of saying where that named nothing there is, with what says so. */
 interface SpawnSpot {
   spot: Spot | null;
+  /** The thing it is made on, when the call says `on`: it is put on it once made. */
+  on?: EntityId;
   said: SaidWhere[];
 }
 
 /**
- * Where something is made, as the call says it: `on` a thing, `in` someone, something or a place,
- * else `at` a place; null when it says nowhere. Each is read on the draft as it stands, so it may
- * name what an earlier operation of the call made. Words that name nothing there is, nor anything
- * of another kind, are kept, and the next way of saying where is read.
+ * Where something is made, as the call says it: `on` a thing (made where that stands, then put on it), `in` someone, something or a
+ * place, else `at` a place; null when it says nowhere. Each is read on the draft as it stands, so it may name what an earlier
+ * operation of the call made. Words that name nothing there is, nor anything of another kind, are kept, and the next way of saying
+ * where is read.
  */
 function spawnSpot(o: OpContext): SpawnSpot | Unread {
   const said: SaidWhere[] = [];
   const on = whereNamed(o, "on", "thing", said);
   if (isUnread(on)) return on;
-  if (on) return { spot: { in: on.id }, said };
+  if (on) {
+    const there = placeOfEntity(o.draft.w.state, on.id);
+    return { spot: there === null ? null : { place: there }, on: on.id, said };
+  }
   const into = whereNamed(o, "in", "point", said);
   if (isUnread(into)) return into;
   if (into?.ref.startsWith("entity:")) return { spot: { in: into.id }, said };
@@ -512,90 +501,75 @@ function scenePlace(o: OpContext): string | null {
 }
 
 /**
- * A thing made at a spot by today's things model. Where its rules would refuse the holder (it holds
- * nothing, or nothing that big), the thing is made where the holder is and put in it all the same,
- * and the answer reports the rule it bent. A thing of that name already there stands for it.
+ * A thing made at a spot, or at none, by today's things model asked for advice: the ones of its name already there, a holder that holds
+ * nothing or a rule bent are reports on the operation, and what the catalog's row gives it comes back apart, to be recorded as filled in.
  */
-function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }> & { at: Spot }): EntityId | undefined | Unread {
-  const w = o.draft.w;
-  const made = (out: ItemOpApplied | ItemOpRefusal, spot: Spot): EntityId | undefined | Unread => {
-    if (!("code" in out)) {
-      if (out.placed !== undefined) o.reply.report("placed_instead", { n: o.n, op: o.op, what: op.name, asked: spotName(o, spot), where: spotName(o, out.placed) });
-      return out.made;
-    }
-    // Today's find-first: what the words name is there already, and that one stands for it.
-    if (out.code === "exists" && out.exists !== undefined) {
-      o.reply.line("exists", { n: o.n, op: o.op, name: named(o.reading, out.exists) });
-      return out.exists;
-    }
-    if (out.code === "missing_type") return notOneOf(o, "type", o.args.type ?? null, []);
-    return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
-  };
-  const out = applyItemOp(w, op, itemOptions(o));
-  if (!("code" in out && BENT_RULES[out.code] && "in" in op.at)) return made(out, op.at);
-  const place = placeOfEntity(w.state, op.at.in);
-  // What holds nothing and stands nowhere (a weather region is no place) leaves the thing nowhere to be made: a place may have been meant.
-  if (place === null) return { line: "holds_nothing", fields: { n: o.n, op: o.op, what: op.name, holder: `${named(o.reading, op.at.in)} (${o.reading.whatOf(op.at.in)})` }, want: "place" };
-  const there = made(applyItemOp(w, { ...op, at: { place } }, itemOptions(o)), { place });
-  if (isUnread(there)) return there;
-  if (there === undefined) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
-  return putThing(o, there, op.at, op.why) ?? there;
+function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }>): EntityId | undefined | Unread {
+  const out = applyItemOp(o.draft.w, op, { ...itemOptions(o), advise: true });
+  if ("code" in out) {
+    if (out.code === "missing_type") return unknownType(o, op.type ?? "");
+    return refusedAs(o, out, op.at !== undefined && "in" in op.at ? "in" : "at", op.at !== undefined && "in" in op.at ? "holder" : "place");
+  }
+  reportItem(o, out);
+  return out.made;
+}
+
+/** A type no catalog has, answered as not there with the nearest types, by their names and ids. */
+function unknownType(o: OpContext, said: string): Unread {
+  const types = thingTypes(o.draft.w.ctx);
+  const names = new Map(types.map((t) => [t.id, t.name]));
+  const near = nearestOf(said, [...names.keys()], o.call.settings).slice(0, o.call.settings.nearMatches);
+  return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "type", "type", said, near.map((id) => `${names.get(id) ?? id} [${id}]`), [], types.length === 0) }, want: "entity", data: { near: near.map((id) => ({ id, name: names.get(id) ?? id })) } };
 }
 
 /** The kinds a place is made as: `place`, a place of the chat's own world, inside another or in none; a room, a spot or a venue, made in play inside a place. */
 export const PLACE_SPAWN_KINDS: readonly string[] = ["place", ...PLACE_KINDS];
 
 /** What `spawn` reads of a place: its name and kind, where it is, its description, its fields, and why a place made in play was made. */
-const PLACE_READS: readonly string[] = ["op", "name", "kind", "at", "in", "description", "fields", "why", ...Object.keys(PROVENANCE_PROPERTIES)];
+const PLACE_READS: readonly string[] = ["op", "name", "kind", "at", "in", "description", "fields", "owner", "why", ...Object.keys(PROVENANCE_PROPERTIES)];
 
 /**
  * A place made by `spawn`, inside the place `at` (or `in`) names, which an earlier operation of the
- * call may have made, with the fields the call gives. A `place` is written into this chat's own
+ * call may have made, with the fields the call gives and its owner. A `place` is written into this chat's own
  * world, as today's world_place writes one, so it needs nothing to be in: the first place of a world
- * with none. A room, a spot or a venue is made in play inside a place (today's place ops, with the
- * world's cap on them). A place of that name already in the same place stands for it, and the answer
- * says so; what a place has none of (a tier, an owner) is said not to be kept.
+ * with none. A room, a spot or a venue is made in play inside a place (today's place ops). A place
+ * of that name already in the same place is told of in a report, never taken for it, and so is one
+ * past the chat's number; the name is kept as given; what a place has none of (a tier, a type) is reported as not kept.
  */
 function spawnPlace(o: OpContext, name: string, kind: string): Unread | undefined {
   const w = o.draft.w;
   const field = o.args.at !== undefined && o.args.at !== null ? "at" : o.args.in !== undefined && o.args.in !== null ? "in" : null;
   const within = field === null ? undefined : find(o, field, "place");
   if (isUnread(within)) return within;
+  const owner = findOptional(o, "owner", "entity");
+  if (isUnread(owner)) return owner;
   const description = textArg(o.args, "description");
   const given = o.args.fields;
   if (given !== undefined && given !== null && !isRecord(given)) return notAs(o, "fields", given, "fields");
-  const fields: JsonObject = isRecord(given) ? given : {};
+  const fields: JsonObject = { ...(isRecord(given) ? given : {}), ...(owner ? { owner: owner.id } : {}) };
   const from = w.events.length;
   let made: string | undefined;
   if (kind === "place") {
     const parent = within?.id ?? null;
-    const twin = findPlaces(w.ctx, name, parent !== null ? { parent } : {}).find((h) => h.matched !== "head" && h.parent === parent);
-    if (twin) {
-      o.reply.line("exists", { n: o.n, op: o.op, name: named(o.reading, twin.id) });
-      made = twin.id;
-    } else {
-      made = freshId(o, name);
-      const value: JsonObject = { id: made, name, ...(parent !== null ? { parent } : {}), fields: { ...fields, ...(description !== undefined ? { description } : {}) } };
-      const bad = o.draft.applyAll([draftEvent(baseWorld(w.ctx.world), chatDraftOf(w.state), { collection: "places", id: made, value })]);
-      if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-    }
+    const twins = findPlaces(w.ctx, name, parent !== null ? { parent } : {}).filter((h) => h.matched !== "head" && h.parent === parent);
+    made = freshId(o, name);
+    const value: JsonObject = { id: made, name, ...(parent !== null ? { parent } : {}), fields: { ...fields, ...(description !== undefined ? { description } : {}) } };
+    const bad = o.draft.applyAll([draftEvent(baseWorld(w.ctx.world), chatDraftOf(w.state), { collection: "places", id: made, value })]);
+    if (bad) return refusedAs(o, bad, field ?? "at", "place");
+    if (twins.length > 0) o.draft.adviseOp(o.n, { code: "same_name", values: { name, same: twins.map((t) => `${t.name} [${t.id}]`).join(", ") } });
   } else {
     if (within === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
-    const out = placeOp(w.ctx, { do: "make", name, parent: within.id, as: kind as PlaceKind, why: textArg(o.args, "why") ?? "", ...(description !== undefined ? { description } : {}) }, { by: o.call.agent.definition, salt: o.draft.seed(o.n) });
-    if ("code" in out) {
-      if (out.code !== "exists" || out.exists === undefined) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
-      o.reply.line("exists", { n: o.n, op: o.op, name: named(o.reading, out.exists) });
-      made = out.exists;
-    } else {
-      // The call's fields go on the place with what today's place op writes (its description, aliases, entry), which stands where both name one.
-      const events = out.events.map((e): LedgerEvent => ("data" in e && isRecord(e.data.def) ? { ...e, data: { ...e.data, def: { ...e.data.def, fields: { ...fields, ...(isRecord(e.data.def.fields) ? e.data.def.fields : {}) } } } } : e));
-      const bad = o.draft.applyAll(events);
-      if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-      made = out.made;
-    }
+    const out = placeOp(w.ctx, { do: "make", name, parent: within.id, as: kind as PlaceKind, why: textArg(o.args, "why") ?? "", ...(description !== undefined ? { description } : {}) }, { by: o.call.agent.definition, salt: o.draft.seed(o.n), advise: true, cap: o.call.settings.placeCap });
+    if ("code" in out) return refusedAs(o, out, field ?? "at", "place");
+    // The call's fields go on the place with what today's place op writes (its description, aliases, entry), which stands where both name one.
+    const events = out.events.map((e): LedgerEvent => ("data" in e && isRecord(e.data.def) ? { ...e, data: { ...e.data, def: { ...e.data.def, fields: { ...fields, ...(isRecord(e.data.def.fields) ? e.data.def.fields : {}) } } } } : e));
+    const bad = o.draft.applyAll(events);
+    if (bad) return refusedAs(o, bad, field ?? "at", "place");
+    made = out.made;
+    for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
   }
   const unread = Object.keys(o.args).filter((k) => !PLACE_READS.includes(k));
-  if (unread.length > 0) o.reply.line("place_unread", { n: o.n, op: o.op, unread: textOf(unread) });
+  if (unread.length > 0) o.draft.adviseOp(o.n, { code: "place_unread", values: { unread: textOf(unread) } });
   o.draft.record(o.n, o.op, "engine", o.prov, from, made !== undefined ? { made } : {});
   return undefined;
 }
@@ -620,18 +594,15 @@ const spawn: OpDef = {
     if (isUnread(where)) return where;
     const owner = findOptional(o, "owner", "entity");
     if (isUnread(owner)) return owner;
-    // Said to be somewhere in words that name nothing there is: made where its owner is, else at the scene's place; with no place either, those words cannot be read.
+    // Said to be somewhere in words that name nothing there is: made where its owner is, else at the scene's place; with no place either, made at none.
     let spot = where.spot;
     const [first] = where.said;
-    // Where code puts it, no call said: the spawn is recorded as assumed, the call's own words kept on it.
+    // Where code puts it, no call said: the spawn is recorded as assumed, the call's own words kept as its position.
     const chosen = spot === null && first !== undefined;
     if (chosen) {
       const place = placeThere(o, owner ? placeOfEntity(w.state, owner.id) : null) ?? scenePlace(o);
-      if (place === null) return first.unread;
-      spot = { place };
+      spot = place === null ? null : { place };
     }
-    // The words are kept on what is made, as where it was said to be.
-    const saidWhere: JsonObject = Object.fromEntries(where.said.map((s) => [`said_${s.field}`, s.words]));
     const asked = textArg(o.args, "bestiary");
     const row = asked === undefined ? undefined : bestiaryRow(o.reading.doc, asked);
     if (asked !== undefined && row === undefined) return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "bestiary", "bestiary", asked, bestiaryOf(o.reading.doc).map((r) => `${r.name} [${r.id}]`)) } };
@@ -640,51 +611,58 @@ const spawn: OpDef = {
     const fields = o.args.fields;
     if (fields !== undefined && (typeof fields !== "object" || fields === null || Array.isArray(fields))) return notAs(o, "fields", fields, "fields");
     const from = w.events.length;
+    const why = textArg(o.args, "why") ?? "";
     let made: string | undefined;
-    if (isThingKind(o, kind) && row === undefined) {
-      if (spot === null) return { line: "spawn_nowhere", fields: { n: o.n, op: o.op, name, kind } };
+    const isMadeThing = kindIs(o.reading.registry, o.reading.doc, kind, "item") && row === undefined;
+    if (isMadeThing) {
       const qty = typeof o.args.qty === "number" ? o.args.qty : undefined;
       const type = textArg(o.args, "type");
       const vclass = textArg(o.args, "class");
       const description = textArg(o.args, "description");
-      const thing = makeThing(o, { do: "make", name, at: spot, why: textArg(o.args, "why") ?? "", ...(type !== undefined ? { type } : {}), ...(vclass !== undefined ? { class: vclass } : {}), ...(owner ? { owner: owner.id } : {}), ...(qty !== undefined ? { qty } : {}), ...(description !== undefined ? { description } : {}) });
+      const thing = makeThing(o, { do: "make", name, why, ...(spot !== null ? { at: spot } : {}), ...(type !== undefined ? { type } : {}), ...(vclass !== undefined ? { class: vclass } : {}), ...(owner ? { owner: owner.id } : {}), ...(qty !== undefined ? { qty } : {}), ...(description !== undefined ? { description } : {}) });
       if (isUnread(thing)) return thing;
       made = thing;
-      const set = { ...((fields as JsonObject | undefined) ?? {}), ...saidWhere };
-      if (thing !== undefined && Object.keys(set).length > 0) {
-        const bad = o.draft.applyAll(Object.entries(set).map(([field, value]): LedgerEvent => ({ type: "set", entity: thing, field, value })));
-        if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+      if (thing !== undefined) {
+        // Said to be on a thing, it is made where that stands and put on it.
+        const onto = where.on === undefined ? undefined : putThing(o, thing, { on: where.on }, why);
+        if (onto) return onto;
+        const set = (fields as JsonObject | undefined) ?? {};
+        const bad = Object.keys(set).length === 0 ? null : o.draft.applyAll(Object.entries(set).map(([field, value]): LedgerEvent => ({ type: "set", entity: thing, field, value })));
+        if (bad) return refusedAs(o, bad, "fields", "thing");
       }
     } else {
-      // A person, a group or anything else that is not a thing: today's core `spawn` effect, its sheet from the bestiary row and the call.
+      // A person, a group or anything else that is not a thing: today's core `spawn` effect, its sheet from the bestiary row and the call; its values stand as given.
       const id = freshId(o, name);
       made = id;
       const holder = spot !== null && "in" in spot ? spot.in : null;
       const at = spot === null ? null : "place" in spot ? spot.place : placeOfEntity(w.state, spot.in);
-      const args: Record<string, JsonValue> = { id, kind, name, fields: { ...(row?.fields ?? {}), ...((fields as JsonObject | undefined) ?? {}), ...saidWhere }, ...(holder !== null ? { relations: [{ type: "in", to: holder }] } : {}) };
+      const args: Record<string, JsonValue> = { id, kind, name, fields: { ...(row?.fields ?? {}), ...((fields as JsonObject | undefined) ?? {}) }, ...(holder !== null ? { relations: [{ type: "in", to: holder }] } : {}) };
       const tier = textArg(o.args, "tier") ?? row?.tier;
       if (tier !== undefined) args.tier = tier;
       if (at !== null && holder === null) args.place = at;
       const description = textArg(o.args, "description") ?? row?.description;
       if (description !== undefined) (args.fields as JsonObject).description = description;
-      const out = applyEffects(o.reading.registry, w, [{ type: "spawn", args }], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
+      const out = applyEffects(o.reading.registry, w, [{ type: "spawn", args }], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true, asGiven: true });
       const failed = out.rejected[0];
-      if (failed) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: failed.rejection.code } };
+      if (failed) return refusedAs(o, failed.rejection, "kind", "entity");
+      if (out.filled !== undefined) o.draft.markFilled(out.filled);
+      for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
     }
-    if (first !== undefined && spot !== null) o.reply.line("made_where_said", { n: o.n, op: o.op, what: name, where: spotName(o, spot), said: textOf(where.said.map((s) => s.words)), assumed: chosen });
+    // Words that name nothing are kept as its position's words, never as a field; and said as what they are.
+    if (made !== undefined) {
+      const kept = keepWhere(o, made, { ...noSoft(), said: where.said });
+      if (kept) return kept;
+    }
+    const saidWords = textOf(where.said.map((s) => s.words));
+    // A thing is made nowhere when nothing recorded says where; a person with no place yet is the horizon's to place, and needs no word.
+    if (spot === null) {
+      if (isMadeThing) o.draft.adviseOp(o.n, { code: "made_nowhere", values: { what: name, said: saidWords } });
+    } else if (first !== undefined) o.draft.adviseOp(o.n, { code: "made_where_said", values: { what: name, where: spotName(o, spot), said: saidWords, assumed: chosen } });
     o.draft.record(o.n, o.op, "engine", chosen ? { ...o.prov, standing: "assumed" } : o.prov, from, made !== undefined ? { made } : {});
     return undefined;
   },
 };
 
-/** Whether a kind is a thing's: an item, or one built on it (a container, a kit, a vehicle). */
-function isThingKind(o: OpContext, kind: string): boolean {
-  for (let k: string | undefined = kind, guard = 0; k !== undefined && guard < 16; guard++) {
-    if (k === "item") return true;
-    k = (own(o.reading.doc.kinds, k) ?? o.reading.registry.kinds.get(k))?.extends;
-  }
-  return false;
-}
 
 /** Every kind spawn makes, the world's own first, then the packs', then a place's; each with its label where the label says more than its name (region: Weather region). */
 function kindChoices(o: OpContext): string[] {

@@ -55,14 +55,8 @@ describe("the first turn of a chat with no world", () => {
       wordsFromFiles(r);
       return texts(r);
     };
-    // A region made as the packs' weather region, then the kitchen with no kind and nowhere, in it, and at it.
+    // A region made as the packs' weather region, then a place made at it, which it is not.
     const region = { op: "spawn", kind: "region", name: ROCK, source: src };
-    expect(await refused({ operations: [region, { op: "spawn", name: KITCHEN, source: src }] })).toContain(
-      `Operation 2 (spawn): ${KITCHEN} is made as item, a thing, which needs at, in or on to say where it is. A place is made with kind place, and needs none of them.`,
-    );
-    expect(await refused({ operations: [region, { op: "spawn", name: KITCHEN, in: ROCK, source: src }] })).toEqual(
-      expect.arrayContaining([`Operation 2 (spawn): ${ROCK} [gull_skerry] (Weather region) holds nothing and is at no place, so ${KITCHEN} cannot be made in it.`, PLACE_HINT]),
-    );
     expect(await refused({ operations: [region, { op: "spawn", kind: "place", name: KITCHEN, at: ROCK, source: src }] })).toEqual(
       expect.arrayContaining([`Operation 2 (spawn): there is nothing called ${ROCK} that is a place. By that name there is ${ROCK} [gull_skerry] (Weather region). ${NOTHING_PLACE}`, PLACE_HINT]),
     );

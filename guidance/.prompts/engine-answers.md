@@ -12,6 +12,8 @@ turn_needed: This call belongs to no turn, so nothing can be recorded. Reading n
 needs_field: This call needs {{field}}.
 needs_one_field: This call needs one of {{fields}}, and only one.
 unknown: {{#n}}Operation {{n}} ({{op}}): {{/n}}there is nothing called {{name}} that is {{sought}}.{{#other}} By that name there is {{other}}.{{/other}}{{#near}} Near: {{near}}.{{/near}}{{#nothing}} {{nothing}}{{/nothing}}
+not_yet: Operation {{n}} ({{op}}): {{name}} is not recorded yet: operation {{later}} of this call makes it, and comes after this one. Put that one first.{{#near}} Near it now: {{near}}.{{/near}}
+use_store: Operation {{n}} ({{op}}): {{name}} is {{other}}, not a person, and a thing is given only to a person.{{#near}} The persons nearest that name: {{near}}.{{/near}} A thing is put in something that holds things with the store operation.
 several: {{#n}}Operation {{n}} ({{op}}): {{/n}}{{name}} fits more than one: {{several}}. Name one by its id.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
 unreadable_op: Operation {{n}}{{#op}} ({{op}}){{/op}}: {{field}} cannot be read{{#value}}, you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
@@ -20,9 +22,7 @@ needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs one of {{fields}}, and only one.
 needs_any: Operation {{n}} ({{op}}) needs one of {{fields}}.
 op_takes: {{op}} needs {{needs}}{{#takes}}, and also takes {{takes}}{{/takes}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
-spawn_nowhere: Operation {{n}} ({{op}}): {{name}} is made as {{kind}}, a thing, which needs at, in or on to say where it is. A place is made with kind place, and needs none of them.
 place_unread: Operation {{n}} ({{op}}): a place has no {{unread}}, so that was not kept.
-holds_nothing: Operation {{n}} ({{op}}): {{holder}} holds nothing and is at no place, so {{what}} cannot be made in it.
 make_place: A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.
 make_person: Someone can be made earlier in this same call: spawn with kind person and their name, before the operation that names them.
 make_thing: A thing can be made earlier in this same call: spawn with its name and where it is (at, in or on), before the operation that names it.
@@ -38,6 +38,7 @@ want_place: a place
 want_point: a place, a person or a thing
 want_track: a quest
 want_bestiary: a row of the world's bestiary
+want_type: a type of the catalogs
 want_check: a check of the world's
 want_schedule: a schedule of the world's
 wants_time: a date and time, YYYY-MM-DD HH:MM; a time of day, such as midnight, dawn or 22:00, as the next time the clock shows it; or words for a span, such as two hours
@@ -89,17 +90,16 @@ level_beside_xp: Operation {{n}} ({{op}}): {{who}}'s {{field}} is {{level}}, as 
 level_past_bounds: Operation {{n}} ({{op}}): {{who}}'s {{field}} is {{level}}, which the field's bounds ({{bounds}}) do not allow; it is set all the same.
 off_the_scale: Operation {{n}} ({{op}}): {{who}}'s {{axis}} toward {{toward}} is now {{value}}, past the axis's range of {{least}} to {{most}}; it is kept as given.
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
+made_nowhere: Operation {{n}} ({{op}}): {{what}} was made at no place, since nothing recorded says where{{#said}}; {{said}} is kept as where it was said to be{{/said}}.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
 against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).{{#class}} It is a {{class}}{{#score}} and their score is {{score}}{{/score}}.{{/class}}{{#reason}} The rules' reason: {{reason}}.{{/reason}}
 past_until: Operation {{n}} ({{op}}): {{until}} is not after now, so the loan was recorded with no end.
 not_holding: Operation {{n}} ({{op}}): {{from}} did not hold {{what}}{{#holder}}; {{holder}} did{{/holder}}. It was given all the same.
-not_owner: Operation {{n}} ({{op}}): {{to}} is not among the owners of {{what}}, so it was handed over to hold and whose it is did not change.
 not_wearable: Operation {{n}} ({{op}}): {{what}} has no place to be worn ({{code}}), so {{who}} carries it.
 not_to_hand: Operation {{n}} ({{op}}): {{what}} was not to hand{{#brought}}, and was put on {{who}} all the same{{/brought}}{{^brought}} and is gone or lost, so {{who}} went without it{{/brought}}.
 used_past_held: Operation {{n}} ({{op}}): {{qty}} of {{what}} were used and there were only {{held}}; all of it is used up.
 kept_nowhere: Operation {{n}} ({{op}}): nothing says where {{what}} is kept, so nothing moved.
-exists: Operation {{n}} ({{op}}): {{name}} is there already and stands for it; no second one was made.
 nothing_filled: Operation {{n}} ({{op}}): nothing was filled in for {{what}}: it was filled in before, or the world keeps no more detail of it at its level.
 paid_past_held: Operation {{n}} ({{op}}): {{payer}} paid {{amount}} and could pay at most {{held}} from any one way; the payment is recorded all the same.
 paid_from_outside: Operation {{n}} ({{op}}): the world keeps no accounts for {{payer}}, so it was paid from their money outside the world's accounts.

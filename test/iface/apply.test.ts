@@ -97,7 +97,7 @@ describe("one call builds on itself", () => {
       ],
     });
     expect(r.error).toBe(true);
-    expect(texts(r).some((x) => x.startsWith("Operation 1 (move): there is nothing called Pell Ardent"))).toBe(true);
+    expect(texts(r).some((x) => x.startsWith("Operation 1 (move): Pell Ardent is not recorded yet"))).toBe(true);
     expect(t.s.changes(t.turn.id)).toEqual([]);
     wordsFromFiles(r);
   });
@@ -132,13 +132,13 @@ describe("a world with nothing in it", () => {
     expect((data.now as JsonObject[]).some((n) => n.ref === `place:${id("Keeper's kitchen")}`)).toBe(true);
     wordsFromFiles(r);
 
-    // Made again, a place of that name in the same place stands for it, and no second one is made.
+    // Made again, a place of that name in the same place is a second one, and the first is told of in a report.
     const again = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: "Gull Skerry", source: src }] });
     expect(again.error).toBeUndefined();
-    expect(again.reports).toBeUndefined();
-    expect(texts(again).some((x) => x.startsWith("Operation 1 (spawn): Gull Skerry") && x.includes("is there already"))).toBe(true);
+    expect(again.reports).toHaveLength(1);
+    expect(again.reports?.[0]).toContain("stood under that name already");
     const after = t.s.stateAt(t.turn.id).state;
-    expect(Object.values(playedWorld(doc, after.world).places).filter((p) => p.name === "Gull Skerry")).toHaveLength(1);
+    expect(Object.values(playedWorld(doc, after.world).places).filter((p) => p.name === "Gull Skerry")).toHaveLength(2);
   });
 
   test("a place is made with the fields the call gives, and what a place has none of is said not to be kept", async () => {
@@ -151,9 +151,8 @@ describe("a world with nothing in it", () => {
       ],
     });
     expect(r.error).toBeUndefined();
-    expect(r.reports).toBeUndefined();
-    expect(texts(r)).toContain("Operation 1 (spawn): a place has no tier, so that was not kept.");
-    expect(texts(r).filter((x) => x.includes("so that was not kept"))).toHaveLength(1);
+    expect(r.reports).toEqual(["Operation 1 (spawn): a place has no tier, so that was not kept."]);
+    expect(r.reports?.filter((x) => x.includes("so that was not kept"))).toHaveLength(1);
     const state = t.s.stateAt(t.turn.id).state;
     const doc = t.deps.env.worlds(state.world.revision);
     if (!doc) throw new Error("no blank world");

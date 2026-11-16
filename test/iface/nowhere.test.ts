@@ -34,15 +34,15 @@ describe("never at a place that is not there", () => {
     if (!doc) throw new Error("no blank world");
     const places = new Set(Object.keys(playedWorld(doc, state.world).places));
     for (const r of [person, thing]) {
-      // With nowhere the world has to put them, the words are answered as naming no place, and nothing is made.
-      expect(r.error).toBe(true);
+      // With nowhere the world has to put them, they are made at no place, their words kept, and nothing is refused.
+      expect(r.error).toBeUndefined();
       wordsFromFiles(r);
     }
     for (const e of Object.values(state.world.entities)) {
       const at = e.fields.place;
       if (typeof at === "string") expect(places.has(at)).toBe(true);
     }
-    expect(Object.values(state.world.entities).map((e) => e.name)).not.toContain("Ida Pell");
+    expect(Object.values(state.world.entities).map((e) => e.name)).toEqual(expect.arrayContaining(["Ida Pell", "Wet coat"]));
     expect(state.horizon).toEqual(["place:keepers_kitchen"]);
   });
 });

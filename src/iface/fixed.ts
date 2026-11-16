@@ -12,6 +12,7 @@ import { checkOf, readyCheck, rollCheck } from "../engine/checks";
 import { DiceError, rollDice } from "../engine/dice";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { createRng } from "../engine/rng";
+import { WORLD_STATE_DEFAULTS } from "../store/world-state";
 import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
@@ -66,7 +67,7 @@ export const WORLD_QUERY: ToolSpec = {
     const at = foundOr(reading, reply, "at", args.at, "point");
     if (at === null) return reply;
     const depth = args.depth === "full" ? "full" : typeof args.depth === "number" && Number.isInteger(args.depth) && args.depth >= 0 ? args.depth : call.settings.queryDepth;
-    const view = reading.view().query(at.ref, depth);
+    const view = reading.view().query(at.ref, depth, { due: call.deps.due, ahead: call.deps.dueAhead ?? WORLD_STATE_DEFAULTS.dueAhead });
     if (view !== null) reply.tree(renderView(view, call.tree));
     if (typeof args.due === "string") {
       const to = timeFrom(reading, reading.state.world, args.due);
