@@ -15,8 +15,8 @@ const SHIPPED = shippedTexts();
 /** Words that ask an agent to do something: a part that lays things out holds none of them. */
 const ASKS = /\b(must|should|always|never|please|make sure|remember to)\b/i;
 
-/** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), and the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`). */
-const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract"];
+/** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), and the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`); `path`, `id` and `title` are the fields of the items of the cache's lists. */
+const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract", "cache", "path", "id", "title"];
 
 /** The notices of `notices.md`, by name, and the fields a use of each fills. Each is a fact; none asks. */
 const NOTICES: Record<string, Record<string, unknown>> = {
@@ -156,6 +156,14 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(text).not.toContain("COUNT LINE");
     expect(text).not.toContain("How what you write now is marked");
     expect(text).not.toContain("Counts");
+    // What the scene has already looked up and where it is kept, only when the session's cache holds something.
+    const cached = part.render({ ...full, cache: { folder: "sessions/s-1/cache/", carried: [{ path: "sessions/s-1/turns/t-3/scratch/scene.md" }], lore: [{ id: "e-12", title: "The Gilded Hart", path: "sessions/s-1/cache/lore/e-12.md" }], prompt_map: "sessions/s-1/cache/prompt-map.md", host: [{ path: "sessions/s-1/cache/base/wren.md" }] } }).text;
+    expect(cached).toContain("## What this scene has already looked up\n\nIt is kept in the session's cache folder, sessions/s-1/cache/, to be read from there; nothing writes in it.");
+    expect(cached).toContain("- Carried into this turn as it stood: sessions/s-1/turns/t-3/scratch/scene.md");
+    expect(cached).toContain("- Lore entry [e-12] The Gilded Hart, read in full: sessions/s-1/cache/lore/e-12.md");
+    expect(cached).toContain("- The prompt map as this scene has it: sessions/s-1/cache/prompt-map.md");
+    expect(cached).toContain("- From the host: sessions/s-1/cache/base/wren.md");
+    expect(text).not.toContain("already looked up");
     // In the tags form there is no intent file to name.
     const tagged = part.render({ ...full, intent_path: undefined }).text;
     expect(tagged).not.toContain("intent file");

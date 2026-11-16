@@ -96,6 +96,24 @@ The reply already begins with these words. The chat application puts them in fro
 
 {{story_brief}}
 {{/story_brief}}
+{{#cache}}
+
+## What this scene has already looked up
+
+It is kept in the session's cache folder, {{cache.folder}}, to be read from there; nothing writes in it.
+{{#cache.carried}}
+- Carried into this turn as it stood: {{path}}
+{{/cache.carried}}
+{{#cache.lore}}
+- Lore entry [{{id}}] {{title}}, read in full: {{path}}
+{{/cache.lore}}
+{{#cache.prompt_map}}
+- The prompt map as this scene has it: {{cache.prompt_map}}
+{{/cache.prompt_map}}
+{{#cache.host}}
+- From the host: {{path}}
+{{/cache.host}}
+{{/cache}}
 {{#turn_files}}
 
 The same material is on disk for agents you delegate to: {{turn_files}}
