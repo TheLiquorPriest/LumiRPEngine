@@ -37,6 +37,9 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   job_interrupted: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_off_path: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   panel_request: { what: "Add a quay", on: "the harbour", from: "palette", values: "name: Quay", action: "add-place" },
+  depth_asked: { depth: "full" },
+  swipe_asked: { mode: "afresh" },
+  change_awaiting: { what: "Wren's purse goes to the harbour master" },
   settle_asked: {},
   previous_run_stopped: {},
   saved_differs: { message: 4, released: "Wren waved.", saved: "Wren waved twice." },
@@ -269,6 +272,19 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const notices = await lines("notices");
     expect(notices.line("panel_request", { what: "Walk here", on: "the quay", from: "map", values: "square: 4,7", action: "walk" } as never)).toBe("From a panel (map): Walk here, on the quay, with square: 4,7 (action walk)");
     expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
+  });
+
+  test("the composer's choices are the depths of TURN.md's header and the modes of SWIPE.md's, each described, and a swipe, a depth and a change awaiting the player are told as asked", async () => {
+    const depths = split(SHIPPED.get("TURN.md") ?? "").header?.["depths"] as Record<string, unknown>;
+    const modes = split(SHIPPED.get("SWIPE.md") ?? "").header?.["modes"] as Record<string, unknown>;
+    expect(Object.keys(depths)).toEqual(["direct", "assisted", "full"]);
+    expect(Object.keys(modes)).toEqual(["another-telling", "afresh"]);
+    for (const said of [...Object.values(depths), ...Object.values(modes)]) expect(typeof said === "string" && said.length > 0).toBe(true);
+    // Each depth the header names is the one section 3 describes, by name.
+    for (const depth of Object.keys(depths)) expect((SHIPPED.get("TURN.md") ?? "").toLowerCase()).toContain(`**${depth}.**`);
+    const attempt = await template("turn-attempt");
+    expect(attempt.render({ n: 1, turn: "t-2", reply: "Wren waved.", feedback: "Less talk, more quay." }).text).toContain("## What the player said about it\n\nLess talk, more quay.");
+    expect(attempt.render({ n: 1, turn: "t-2", reply: "Wren waved." }).text).not.toContain("What the player said");
   });
 
   test("judge.md and engine-answers.md stay, the build's own for the owner's approval: the judge's question and the engine's sentences", async () => {

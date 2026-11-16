@@ -12,8 +12,8 @@ import { HOMES, type Row } from "./homes";
 
 const SHIPPED = shippedTexts();
 
-/** E.7's figure was 21,003 characters at the start of the build; the Author's stack as the loader builds it stood at 22,927 after G0's fix, at 23,771 after wave 2's texts and at 24,455 after wave 3's. This is the size it may not pass. */
-const STACK_CEILING = 24_500;
+/** E.7's figure was 21,003 characters at the start of the build; the Author's stack as the loader builds it stood at 22,927 after G0's fix, at 23,771 after wave 2's texts, at 24,455 after wave 3's first and at 25,414 with the composer's choices, the redraw and the story choice in `TURN.md`. This is the size it may not pass. */
+const STACK_CEILING = 25_500;
 
 /** A text as the checks compare it: lower case, every run of white space one space. */
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase();

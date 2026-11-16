@@ -13,7 +13,7 @@ How you go about it is yours to judge. The chat can be played while you work, an
 - **The lore index,** which the `indexer` builds. It is cheap, and everything else leans on it.
 - **The chat,** by range with `chat_read` and by search with `chat_search`. Hand long ranges to the historian with `delegate`: one range and one purpose each, several at once.
 - **Summaries and memories that already exist.** Search the archive with `archive_search` before you read raw messages. Where the player kept a book of summaries, start there, and check a summary against the messages only where the next turns will lean on it.
-- **For a chat carried over from the earlier build:** the state, the cast and the beats it left, its notebook, and each character's old mind files. Trust the carried state. Your work there is filing, below.
+- **For a chat carried over from the earlier build:** the state, the cast and the beats it left, its notebook, and each character's old mind files. Your work there is filing, below.
 
 ## What you are given
 
@@ -34,7 +34,7 @@ Stop when all six hold. They are in the order to do them. Whether each holds is 
 ## Filing a chat that was carried over
 
 - **The notebook** (threads, questions, setups, arcs, the player, futures, the scene): move each note into its place in the story model with `story_record`. Keep the note's own words.
-- **Mind files:** hand each principal's files to its own agent, and have it file them into its mind, its memories and its relationships, in its own voice. File a supporting character's files yourself, into its base, relationships and knowledge.
+- **Mind files:** a principal's `core.md` and `outline.md`, and whatever else in its mind files belongs to its base, you file into its base yourself; its `arcs.md` goes into its history. Hand the rest of its files to its own agent, and have it file them into its mind, its memories and its relationships, in its own voice, because only it can say how it lived them. File a supporting character's files yourself, into its base, relationships and knowledge.
 - **Marking files filed:** until a character's old mind files are marked filed, they are given whole every turn: to its own agent, or to you while a supporting character is on stage. Once what matters in them is filed, mark those files filed with `cast_update`'s `filed` operation, naming each file (`core.md`). They stay on the character's record.
 - **Beats without scenes:** the earlier build recorded beats and no scenes. Group them into scenes and chapters, and summarize each. The skills `scene-end` and `chapter-pass` say what a summary holds.
 
@@ -49,7 +49,7 @@ To relive a stretch of the past is to have a principal's own agent take it in as
 
 ## Limits
 
-The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. The job is stopped when it reaches it, and ends with what is recorded by then. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
+The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. When the job reaches it, it pauses and asks the player whether to go on, and ends with what is recorded by then if the player says no. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
 
 ## What you end with
 

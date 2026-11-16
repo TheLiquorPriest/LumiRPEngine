@@ -1,6 +1,12 @@
+---
+depths:
+  direct: no look-up, ruling or invention
+  assisted: one look-up, ruling or roll, then write
+  full: several minds, a contest, or a stretch of time
+---
 # How a turn is run
 
-This is how the table usually runs a new turn. It is guidance: follow it unless the turn in front of you calls for something else. "Settle" means: make the record agree with what the reply says happened.
+This is how the table usually runs a new turn. It is guidance: follow it unless the turn in front of you calls for something else. It is the process of a turn; a job you are started on, with a task in a brief, is not a turn, and none of these steps applies to it. "Settle" means: make the record agree with what the reply says happened.
 
 ## A turn's first message
 
@@ -38,7 +44,7 @@ The prompt holds only the latest stretch of the chat. If the message reaches bac
 
 ## 3. Decide how to run it
 
-Only then decide how deep to go, and say so in the `Depth:` line of your intent record. Choose by what the turn needs, not by habit.
+Only then decide how deep to go, and say so in the `Depth:` line of your intent record. Choose by what the turn needs, not by habit. When the briefing says the player asked for a depth, play the turn at it.
 
 - **Direct.** Nothing needs looking up, ruling or inventing: the reply follows the intent record in the same message. A greeting, a line of talk, a question that what is in front of you already answers, a walk across the room, paying for a drink.
 - **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer on the reply's path.
@@ -109,3 +115,5 @@ A chapter turns when the story itself would turn a page: a journey ends, a goal 
 - **A past nobody has read closely.** When a turn touches it, read that range now and record what you learn.
 - **A chat carried over from the old build.** The briefing says so. Trust the carried state.
 - **A chat with no premise yet.** The story brief shows none. Write the premise and the contract from the card, the preset and `WORLD.md`, so that every turn after has one, and offer `WORLD.md`, `SIMULATION.md` and `WRITING.md` as suggestions.
+- **A principal's base is older than its source.** The briefing lists it. After the reply, redraw that part of the base from the source as it stands now, with `cast_update`.
+- **The chat's story choice.** `story.from`, where the briefing lists it: `everyone` makes every message story, `replies` only the model's replies, the player's own being direction for them, `lumiverse` follows Lumiverse's own switch. `story.newest` as `directive` makes the player's newest message the direction for this reply and not a line of the story; as `leave_out` it leaves that message out of the story.
