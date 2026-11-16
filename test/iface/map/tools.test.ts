@@ -242,9 +242,9 @@ describe("map_lay and map_edit", () => {
     const t = await mapRig(worldWith(TOWN));
     const kettle = await t.call("map_lay", { place: "The Crooked Kettle", over: "Thornbury", square: [3, 2], width: 8, height: 6, doors: [[1, 3]], ...SRC });
     expect(kettle.error).toBeUndefined();
-    expect(texts(kettle)).toContain("The Crooked Kettle [crooked_kettle] has a map now: 8 by 6 squares of 5 ft, counted in rounds of 6 seconds.");
+    expect(texts(kettle)).toContain("The Crooked Kettle [crooked_kettle] has a map now: 8 by 6 squares of 5 ft (nobody gave a width, so the setting's is taken as an assumption), counted in rounds of 6 seconds.");
     const mill = await t.call("map_lay", { place: "The Old Mill", over: "Thornbury", square: [2, 3], width: 6, height: 5, ...SRC });
-    expect(texts(mill)).toContain("The Old Mill [the_old_mill] has a map now: 6 by 5 squares of 5 ft, counted in rounds of 6 seconds.");
+    expect(texts(mill)).toContain("The Old Mill [the_old_mill] has a map now: 6 by 5 squares of 5 ft (nobody gave a width, so the setting's is taken as an assumption), counted in rounds of 6 seconds.");
     const placed = await t.call("map_place", { at: "The Old Mill", pieces: [{ who: "Wren", square: [3, 3] }], ...SRC });
     expect(opOf(placed)).toMatchObject({ applied: true, pieces: [{ who: "Wren [wren]", at: [3, 3] }] });
     wordsFromFiles(mill);
@@ -273,8 +273,8 @@ describe("map_lay and map_edit", () => {
     const t = await mapRig(worldWith(INN));
     const laid = await t.call("map_lay", { place: "The Far Road", width: 12, height: 8, doors: [[1, 4]], standing: "assumed", ...SRC });
     expect(laid.error).toBeUndefined();
-    expect(texts(laid)).toContain("The Far Road [far_road] has a map now: 12 by 8 squares of 5 ft, counted in rounds of 6 seconds.");
-    expect(opOf(laid).laid).toMatchObject({ width: 12, height: 8, feet: 5, step: { per: "round", seconds: 6, squares: 6 } });
+    expect(texts(laid)).toContain("The Far Road [far_road] has a map now: 12 by 8 squares of 5 ft (nobody gave a width, so the setting's is taken as an assumption), counted in rounds of 6 seconds.");
+    expect(opOf(laid).laid).toMatchObject({ width: 12, height: 8, size: { amount: 5, unit: "feet" }, sizeAssumed: true, step: { per: "round", seconds: 6, squares: 6 } });
     wordsFromFiles(laid);
 
     const brought = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", square: [2, 2] }], ...SRC });

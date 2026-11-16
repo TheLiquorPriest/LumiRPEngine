@@ -10,9 +10,10 @@
 
 import type { EntityId, PlaceId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import { gridOf, standingGrid, type Cell } from "../../shared/grid";
+import { DEFAULT_CELL_METRES, gridOf, standingGrid, type Cell } from "../../shared/grid";
+import { MAP_DEFAULTS, METRES_PER_FOOT, type Diagonal, type MapConfig, type Unit } from "../../shared/map-config";
 import { compileMaps, DEFAULT_LEGEND, VOID_TERRAIN } from "../../shared/maps";
-import type { GridDef, MapCellDef, MapDoc, WorldDoc } from "../../shared/world";
+import type { GridDef, MapCellDef, MapDoc, RulesetDef, WorldDoc } from "../../shared/world";
 import type { Registry } from "../../engine/registry-impl";
 import { isGone, kindIs } from "../../engine/scope";
 import type { WorldState } from "../../engine/state";
@@ -25,38 +26,7 @@ export type { DoorState } from "../../packs/space/core/grid-play";
 /** A square as the map prints it and the tools take it: [column, row], from 1 at the top left. */
 export type Square = readonly [number, number];
 
-/** How a diagonal step counts: as one square, or every second one in a row as two. */
-export type Diagonal = "one" | "alternate";
-
-/** The grid's settings, each with its default (Appendix D.1). */
-export interface GridSettings {
-  /** How a diagonal step counts (the ruleset's rule; as shipped, one square). */
-  diagonal: Diagonal;
-  /** A grid laid in play: how wide a square is, in feet. */
-  laidFeet: number;
-  /** A room-scale grid's time step: a round, in seconds. */
-  roundSeconds: number;
-  /** How far someone moves in a round, in feet. */
-  roundFeet: number;
-  /** The world state prints a map whole up to this many columns… */
-  printColumns: number;
-  /** …and rows; a larger one around a centre. */
-  printRows: number;
-}
-
-export const GRID_DEFAULTS: Readonly<GridSettings> = Object.freeze({
-  diagonal: "one",
-  laidFeet: 5,
-  roundSeconds: 6,
-  roundFeet: 30,
-  printColumns: 40,
-  printRows: 30,
-});
-
-export const METRES_PER_FOOT = 0.3048;
-
-/** Today's cell when a map gives none (`shared/grid.ts costMinutes`): a block of a town. */
-const TODAY_CELL_METRES = 80;
+export { METRES_PER_FOOT, type Diagonal, type Unit };
 
 /**
  * A grid's time step: as its map gives it (`step`), or following the square. On a grid whose
@@ -65,28 +35,31 @@ const TODAY_CELL_METRES = 80;
  */
 export type TimeStep = MapStep;
 
-/** A grid's scale: how wide a square is, how a diagonal counts, and how time passes on it. */
+/** A grid's scale: how wide a square is, how a diagonal counts, what its distances are told in, and how time passes on it. */
 export interface Scale {
   metres: number;
   feet: number;
   diagonal: Diagonal;
+  unit: Unit;
   step: TimeStep;
 }
 
 /** How wide a square of a grid laid in play is, in metres (the map's `cellMeters`). */
-export function laidMetres(settings: Readonly<GridSettings> = GRID_DEFAULTS): number {
-  return settings.laidFeet * METRES_PER_FOOT;
+export function laidMetres(config: Readonly<MapConfig> = MAP_DEFAULTS): number {
+  return config.laidFeet * METRES_PER_FOOT;
 }
 
 /**
  * The scale of a grid whose square is `metres` wide. Today's maps carry no time step, so it
- * follows the square: when a round's move crosses at least one square, the grid counts rounds.
+ * follows the square: when a round's move crosses at least one square, the grid counts rounds. The
+ * world's ruleset, where it says how a diagonal counts or whether distances are feet or metres,
+ * says it over the settings.
  */
-export function scaleOf(metres: number, settings: Readonly<GridSettings> = GRID_DEFAULTS): Scale {
+export function scaleOf(metres: number, config: Readonly<MapConfig> = MAP_DEFAULTS, ruleset?: Pick<RulesetDef, "diagonal" | "distances">): Scale {
   // A hair over the quotient, so that 30 ft over 5 ft squares is six squares, not 5.999….
-  const squares = Math.floor((settings.roundFeet * METRES_PER_FOOT) / metres + 1e-9);
-  const step: TimeStep = squares >= 1 ? { per: "round", seconds: settings.roundSeconds, squares } : { per: "minute" };
-  return { metres, feet: metres / METRES_PER_FOOT, diagonal: settings.diagonal, step };
+  const squares = Math.floor((config.roundFeet * METRES_PER_FOOT) / metres + 1e-9);
+  const step: TimeStep = squares >= 1 ? { per: "round", seconds: config.roundSeconds, squares } : { per: "minute" };
+  return { metres, feet: metres / METRES_PER_FOOT, diagonal: ruleset?.diagonal ?? config.diagonal, unit: ruleset?.distances ?? config.distances, step };
 }
 
 /** What is drawn on a place's grid: the fixed layer. Indexes are row by row, from 0. */
@@ -163,7 +136,7 @@ function edited(world: WorldDoc, map: MapDoc, edits: SquareEdits): { map: MapDoc
  * squares play drew anew in `play` (the chat's state) laid over its map; null when the place has
  * none.
  */
-export function drawnOf(world: WorldDoc, scope: PlaceId, settings: Readonly<GridSettings> = GRID_DEFAULTS, play?: Readonly<WorldState>): Drawn | null {
+export function drawnOf(world: WorldDoc, scope: PlaceId, config: Readonly<MapConfig> = MAP_DEFAULTS, play?: Readonly<WorldState>): Drawn | null {
   let grid = gridOf(world, scope);
   if (!grid) return null;
   let map = grid.map !== undefined && hasOwn(world.maps, grid.map) ? world.maps[grid.map] : undefined;
@@ -190,7 +163,7 @@ export function drawnOf(world: WorldDoc, scope: PlaceId, settings: Readonly<Grid
     const s = symbols[i] ?? "";
     if (hasOwn(legend, s) && seesThrough(legend[s])) seeThrough.add(i);
   }
-  const scale = scaleOf(grid.cellMeters ?? TODAY_CELL_METRES, settings);
+  const scale = scaleOf(grid.cellMeters ?? DEFAULT_CELL_METRES, config, world.ruleset);
   const step = map ? mapStepOf(map) : null;
   return {
     id: grid.id,

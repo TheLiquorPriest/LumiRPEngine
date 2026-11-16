@@ -5,7 +5,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../../src/engine/places-in-play";
-import { drawnOf, footprint, GRID_DEFAULTS, movingOf, blockersOf, indexOf, type Drawn, type Moving } from "../../../src/iface/map/grid";
+import { drawnOf, footprint, movingOf, blockersOf, indexOf, type Drawn, type Moving } from "../../../src/iface/map/grid";
+import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import { sees } from "../../../src/iface/map/measure";
 import { walk } from "../../../src/iface/map/path";
 import { doorEvent, positionEvent, shapeEvent, squaresEvent } from "../../../src/iface/map/record";
@@ -33,7 +34,7 @@ function chatOn(world: WorldDoc) {
 /** The grid of `place` and who stands on it, as the chat's state has them. */
 function layers(world: WorldDoc, state: StoreState, place: string): { drawn: Drawn; moving: Moving } {
   const played = playedWorld(world, state.world);
-  const drawn = drawnOf(played, place, GRID_DEFAULTS, state.world);
+  const drawn = drawnOf(played, place, MAP_DEFAULTS, state.world);
   if (!drawn) throw new Error(`${place} has no grid`);
   return { drawn, moving: movingOf(registry(), played, state.world, drawn).moving };
 }

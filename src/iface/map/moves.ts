@@ -11,11 +11,12 @@ import { nearestMiddle, standingGrid } from "../../shared/grid";
 import { playedWorld } from "../../engine/places-in-play";
 import type { GridMoves } from "../kit";
 import { Lines } from "../texts";
-import { blockersOf, drawnOf, footprint, GRID_DEFAULTS, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type GridSettings, type Moving, type Square } from "./grid";
+import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
+import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type Moving, type Square } from "./grid";
 import { between } from "./measure";
 import { move } from "./path";
 import { positionEvent } from "./record";
-import { feetOf, reportFields, type Say, spotText, timeText, whoIs } from "./words";
+import { farText, reportFields, type Say, spotText, timeText, whoIs } from "./words";
 
 /** The squares nobody may be put on: what blocks the way, and every footprint on the grid. */
 function takenSquares(drawn: Drawn, moving: Moving): Set<number> {
@@ -55,14 +56,14 @@ export function inZone(drawn: Drawn, moving: Moving, zone: string): Square | nul
  * `lines` (the map's part in force for the chat; with none, nothing is said), and the grid's
  * settings. A square in a wall, or one with no way to it, is applied all the same and said.
  */
-export function gridMoves(lines: Lines = Lines.none(), settings: Readonly<GridSettings> = GRID_DEFAULTS): GridMoves {
+export function gridMoves(lines: Lines = Lines.none(), config: Readonly<MapConfig> = MAP_DEFAULTS): GridMoves {
   return {
     place({ state, env, who, place, square, near, zone }) {
       const doc = env.worlds(state.world.revision);
       if (!doc) return { problem: "not_applicable", fields: { code: "no_world" } };
       const world = playedWorld(doc, state.world);
       const stand = standingGrid(world, place);
-      const drawn = stand ? drawnOf(world, stand.scope, settings, state.world) : null;
+      const drawn = stand ? drawnOf(world, stand.scope, config, state.world) : null;
       if (!drawn) return { problem: "not_applicable", fields: { code: "no_map" } };
       const { moving } = movingOf(env.registry, world, state.world, drawn);
       const others = lift(moving, who);
@@ -74,7 +75,7 @@ export function gridMoves(lines: Lines = Lines.none(), settings: Readonly<GridSe
       // One that stood on the grid goes there along the cheapest way, which the answer gives with its time.
       const moved = from ? move(drawn, moving, who, to) : null;
       const say: Say = { lines, world, state: state.world };
-      const way = moved?.walk && moved.took && from ? lines.line("way_taken", { what: whoIs(say, who), from: spotText(say, from), to: spotText(say, to), distance: moved.walk.distance, feet: feetOf(drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say, moved.took) }) : undefined;
+      const way = moved?.walk && moved.took && from ? lines.line("way_taken", { what: whoIs(say, who), from: spotText(say, from), to: spotText(say, to), distance: moved.walk.distance, far: farText(lines, drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say, moved.took) }) : undefined;
       const reports = (moved ?? putAt(drawn, moving, who, to)).reports.map((r) => lines.line(`grid_${r.code}`, reportFields(say, r.values)));
       const said = [way, ...reports].filter((t): t is string => t !== undefined && t.trim() !== "");
       return { events: [positionEvent(drawn, who, to, from)], ...(said.length > 0 ? { said } : {}) };

@@ -44,15 +44,17 @@ off_map: {{field}}: square ({{column}},{{row}}) is off the map of {{place}}, whi
 not_on_map: {{field}}: {{name}} stands on no square of the map of {{place}}.
 spot: {{#name}}{{name}} {{/name}}({{column}},{{row}})
 time: {{#round}}{{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}}, {{seconds}} seconds{{/round}}{{^round}}{{minutes}} minutes{{/round}}
-measure_distance: From {{from}} to {{to}}: {{squares}} squares, {{feet}} ft.
+far_feet: {{amount}} ft
+far_metres: {{amount}} m
+measure_distance: From {{from}} to {{to}}: {{squares}} squares, {{far}}.
 measure_sees: {{from}} and {{to}} can see each other.
 measure_blind: {{from}} and {{to}} cannot see each other: a wall, a door that is not open, or something that blocks the view is between them.
-measure_way: The way from {{from}} to {{to}} is {{distance}} squares ({{feet}} ft) and costs {{cost}} squares of movement: {{time}}.
+measure_way: The way from {{from}} to {{to}} is {{distance}} squares ({{far}}) and costs {{cost}} squares of movement: {{time}}.
 measure_no_way: There is no way from {{from}} to {{to}} as the map stands: walls, doors that are not open, or what blocks the way close it.
-measure_within: Within {{range}} squares ({{feet}} ft) of {{from}}: {{who}}.
-measure_within_none: No one and nothing stands within {{range}} squares ({{feet}} ft) of {{from}}.
-measure_area: The {{area}} from {{from}}{{#toward}} toward {{toward}}{{/toward}}, {{size}} squares ({{feet}} ft), covers {{count}} squares.{{#who}} In it: {{who}}.{{/who}}
-map_title: Map: {{place}}. {{width}} by {{height}} squares of {{feet}} ft{{#round}}, counted in rounds of {{seconds}} seconds{{/round}}. North is up.
+measure_within: Within {{range}} squares ({{far}}) of {{from}}: {{who}}.
+measure_within_none: No one and nothing stands within {{range}} squares ({{far}}) of {{from}}.
+measure_area: The {{area}} from {{from}}{{#toward}} toward {{toward}}{{/toward}}, {{size}} squares ({{far}}), covers {{count}} squares.{{#who}} In it: {{who}}.{{/who}}
+map_title: Map: {{place}}. {{width}} by {{height}} squares of {{size}}{{#round}}, counted in rounds of {{seconds}} seconds{{/round}}. North is up.
 map_part: Shown: columns {{fromColumn}} to {{toColumn}}, rows {{fromRow}} to {{toRow}}. map_view with another centre shows the rest.
 map_legend:    {{#legend}}{{.}}   {{/legend}}
 legend_wall: {{symbol}} wall
@@ -66,13 +68,13 @@ legend_room_door: {{symbol}} door to {{name}}
 legend_zone: {{symbol}} {{zone}}
 map_who: Who and what is where:
 map_you:    you, {{name}} [{{id}}] ({{column}},{{row}})
-map_piece:    {{name}} [{{id}}]{{#on}}, on {{on}}{{/on}} ({{column}},{{row}}){{#size}}, {{columns}} by {{rows}} squares{{/size}}{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}{{#feet}}, {{feet}} ft from you{{/feet}}{{^shown}}, outside the part shown{{/shown}}
+map_piece:    {{name}} [{{id}}]{{#on}}, on {{on}}{{/on}} ({{column}},{{row}}){{#size}}, {{columns}} by {{rows}} squares{{/size}}{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}{{#far}}, {{far}} from you{{/far}}{{^shown}}, outside the part shown{{/shown}}
 map_unplaced:    {{name}} [{{id}}], here with no square yet
 map_doors:    {{doors}}
 map_door: door ({{column}},{{row}}) {{state}}
 piece_at: {{what}} stands at {{square}}.
-piece_walked: {{what}} walked from {{from}} to {{to}}: {{distance}} squares ({{feet}} ft), {{cost}} squares of movement, {{time}}.
-way_taken: {{what}}: from {{from}} to {{to}} is {{distance}} squares ({{feet}} ft), {{cost}} squares of movement, {{time}}.
+piece_walked: {{what}} walked from {{from}} to {{to}}: {{distance}} squares ({{far}}), {{cost}} squares of movement, {{time}}.
+way_taken: {{what}}: from {{from}} to {{to}} is {{distance}} squares ({{far}}), {{cost}} squares of movement, {{time}}.
 piece_on: {{what}} lies on {{holder}}{{#square}}, at {{square}}{{/square}}.
 piece_lifted: {{what}} was taken off {{square}} and stands on no square now.
 piece_shape: {{what}} covers {{columns}} by {{rows}} squares{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}.
@@ -84,7 +86,7 @@ not_a_door: {{op}}: there is no door at {{square}} on the map of {{place}}.{{#do
 door_already: {{op}}: the door at {{square}} was {{state}} already; nothing changed.
 door_set: The door at {{square}} is {{state}} now{{#was}}; it was {{was}}{{/was}}.
 place_elsewhere: {{op}}: {{place}} is not the place drawn on square {{square}} of that map.
-laid: {{place}} has a map now: {{width}} by {{height}} squares of {{feet}} ft{{#round}}, counted in rounds of {{seconds}} seconds{{/round}}.
+laid: {{place}} has a map now: {{width}} by {{height}} squares of {{size}}{{#defaulted}} (nobody gave a width, so the setting's is taken as an assumption){{/defaulted}}{{#round}}, counted in rounds of {{seconds}} seconds{{/round}}.
 laid_off: {{who}} stood on the square the map was laid over, and stand on no square of the new map yet.
 edited: {{count}} squares of the map of {{place}} were drawn anew{{#symbols}}, and its legend changed for {{symbols}}{{/symbols}}.
 legend_read_floor: {{op}}: {{symbol}} was read as floor named {{words}}; with "blocks": true it would be a square nobody walks through.

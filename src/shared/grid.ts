@@ -88,9 +88,15 @@ export function findPath(grid: GridShape, from: Cell, to: Cell, cap = ASTAR_CAP)
   return null;
 }
 
-/** Walking minutes for a path's cost: the cost × the cell size, at 80 m per minute (a cell is 80 m by default). */
+/** How wide a cell is, in metres, where a map gives none: a block of a town. The one home of this default; the grid and the walking minutes read it here. */
+export const DEFAULT_CELL_METRES = 80;
+
+/** How far someone walks in a minute, in metres. */
+export const WALK_METRES_PER_MINUTE = 80;
+
+/** Walking minutes for a path's cost: the cost × the cell size, at the walking speed (a cell is `DEFAULT_CELL_METRES` where its map gives none). */
 export function costMinutes(grid: Pick<GridDef, "cellMeters">, cost: number): number {
-  return Math.round(((grid.cellMeters ?? 80) * cost) / 80);
+  return Math.round(((grid.cellMeters ?? DEFAULT_CELL_METRES) * cost) / WALK_METRES_PER_MINUTE);
 }
 
 /** Walking minutes along a grid path, at least one for any step. */

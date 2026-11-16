@@ -26,18 +26,19 @@ import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { isThing } from "../engine/things";
 import { DOOR_STATES, MAP_SIDE_MAX, type DoorState } from "../packs/space/core/grid-play";
-import type { Report } from "../store/types";
+import type { ChangeInput, Report } from "../store/types";
 import { foundIn, readTool, writeTool, type ReadDef, type WriteDef } from "./families/run";
-import { NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, WHOLE, YES_NO, type ToolSpec } from "./kit";
+import { NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, WHOLE, YES_NO, type Call, type ToolSpec } from "./kit";
 import { editMap, type Stroke } from "./map/edit";
-import { doorState, GRID_DEFAULTS, indexOf, laidMetres, lift, METRES_PER_FOOT, place, setDoor, squareAt, standsAt, type Piece, type Square } from "./map/grid";
+import { MAP_DEFAULTS, type MapConfig } from "../shared/map-config";
+import { doorState, indexOf, lift, METRES_PER_FOOT, place, setDoor, squareAt, standsAt, type Piece, type Square } from "./map/grid";
 import { layForPlace, layOverSquare, plainRows, type Laid, type Laying } from "./map/lay";
 import { between, burst, cone, line, sees, within, type Spot } from "./map/measure";
 import { beside, inZone } from "./map/moves";
 import { move, walk } from "./map/path";
 import { doorEvent, positionEvent, shapeEvent } from "./map/record";
 import { moveTime, type Took } from "./map/time";
-import { feetOf, layersAt, mapLines, mapWords, reportFields, type Say, spotText, squareGiven, stepFields, timeText, whoIs, type Layers } from "./map/words";
+import { distanceData, farText, layersAt, mapLines, mapWords, reportFields, type Say, spotText, squareGiven, stepFields, timeText, whoIs, type Layers } from "./map/words";
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
 import { putThing } from "./ops-things";
 import { type Found, isFound, type Reading } from "./reading";
@@ -79,10 +80,15 @@ function tookData(took: Took): JsonObject {
   return { seconds: took.seconds, ...(took.rounds !== undefined ? { rounds: took.rounds } : {}) };
 }
 
+/** The map's settings for the chat a call is in. */
+function configOf(call: Call): MapConfig {
+  return call.deps.mapSettings ?? MAP_DEFAULTS;
+}
+
 /** The grid of the place `at` names, or the one the someone or something it names stands on, as `state` has it; or the line that says there is none. */
-function layersOn(r: Reading, state: Readonly<WorldState>, at: Found): Layers | Unread {
+function layersOn(r: Reading, state: Readonly<WorldState>, at: Found, call: Call): Layers | Unread {
   const placeId = at.ref.startsWith("place:") ? at.id : placeOfEntity(state, at.id);
-  const layers = placeId === null ? null : layersAt(r.registry, r.doc, state, placeId, GRID_DEFAULTS);
+  const layers = placeId === null ? null : layersAt(r.registry, r.doc, state, placeId, configOf(call));
   return layers ?? { line: "no_grid", fields: { at: `${at.name} [${at.id}]` } };
 }
 
@@ -116,6 +122,24 @@ function applied(o: OpContext, events: readonly JsonObject[]): Unread | undefine
   const ledger = events as unknown as readonly LedgerEvent[];
   const bad = o.draft.applyAll(ledger);
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+}
+
+/**
+ * The changes of a laying applied on the draft. One that stands as assumed from the default (a
+ * grid laid with no square's width given) is filled in: recorded as a change of its own, with
+ * standing assumed and source default (`FILLED_IN`), whatever the call's own provenance.
+ */
+function applyLaid(o: OpContext, changes: readonly ChangeInput[]): Unread | undefined {
+  for (const c of changes) {
+    if (c.standing === "assumed" && c.source === "default") {
+      const bad = o.draft.fillWith([c.value as unknown as LedgerEvent]);
+      if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+    } else {
+      const bad = applied(o, [c.value as JsonObject]);
+      if (bad) return bad;
+    }
+  }
+  return undefined;
 }
 
 /** What the grid says that only tells how something was read or done as asked (brought to the place first, a symbol no legend names read as floor): part of the answer, not a report. */
@@ -208,12 +232,12 @@ const view: ReadDef = {
   read(r, args, reply, call) {
     const at = foundIn(r, "at", args.at, "point");
     if (isUnread(at)) return at;
-    const layers = layersOn(r, r.state.world, at);
+    const layers = layersOn(r, r.state.world, at, call);
     if (isUnread(layers)) return layers;
     const say: Say = { lines: call.lines, world: layers.world, state: r.state.world };
     const centre = args.centre === undefined || args.centre === null ? undefined : spotOn(say, layers, "centre", args.centre, (s) => foundIn(r, "centre", s, "entity"));
     if (isUnread(centre)) return centre;
-    const { text, printed } = mapWords(call.lines, layers, r.state.world, centre ? { centre: centre.square } : {});
+    const { text, printed } = mapWords(call.lines, layers, r.state.world, { config: configOf(call), ...(centre ? { centre: centre.square } : {}) });
     reply.tree(text);
     reply.data({ map: printed.grid, place: whoIs(say, printed.scope), from: [...printed.from], to: [...printed.to], whole: printed.whole });
     return undefined;
@@ -231,7 +255,7 @@ const measure: ReadDef = {
   read(r, args, reply, call) {
     const where = args.at !== undefined && args.at !== null ? foundIn(r, "at", args.at, "point") : typeof args.from === "string" ? foundIn(r, "from", args.from, "entity") : { line: "needs_field", fields: { field: "at" } };
     if (isUnread(where)) return where;
-    const layers = layersOn(r, r.state.world, where);
+    const layers = layersOn(r, r.state.world, where, call);
     if (isUnread(layers)) return layers;
     const say: Say = { lines: call.lines, world: layers.world, state: r.state.world };
     const named = (field: string) => (s: string) => foundIn(r, field, s, "entity");
@@ -259,22 +283,22 @@ const measure: ReadDef = {
       const squares = between(drawn, moving, spot(from), spot(to)) ?? 0;
       const seen = sees(drawn, moving, spot(from), spot(to)) === true;
       const way = walk(drawn, moving, from.square, to.square, from.id, to.id);
-      reply.line("measure_distance", { from: fromText, to: toText, squares, feet: feetOf(drawn, squares) });
+      reply.line("measure_distance", { from: fromText, to: toText, squares, far: farText(call.lines, drawn, squares) });
       reply.line(seen ? "measure_sees" : "measure_blind", { from: fromText, to: toText });
       const took = way ? moveTime(drawn.scale, way.cost, speed !== undefined && speed > 0 ? speed : undefined) : null;
-      if (way && took) reply.line("measure_way", { from: fromText, to: toText, distance: way.distance, feet: feetOf(drawn, way.distance), cost: way.cost, time: timeText(say, took) });
+      if (way && took) reply.line("measure_way", { from: fromText, to: toText, distance: way.distance, far: farText(call.lines, drawn, way.distance), cost: way.cost, time: timeText(say, took) });
       else reply.line("measure_no_way", { from: fromText, to: toText });
-      Object.assign(data, { to: atData(say, to), squares, feet: feetOf(drawn, squares), sees: seen, way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
+      Object.assign(data, { to: atData(say, to), squares, distance: distanceData(drawn, squares), sees: seen, way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
     }
     if (typeof range === "number") {
       const who = within(drawn, moving, spot(from), range).map((id) => whoIs(say, id));
-      reply.line(who.length > 0 ? "measure_within" : "measure_within_none", { from: fromText, range, feet: feetOf(drawn, range), who });
+      reply.line(who.length > 0 ? "measure_within" : "measure_within_none", { from: fromText, range, far: farText(call.lines, drawn, range), who });
       data.within = { range, who };
     }
     if ((area === "burst" || area === "cone" || area === "line") && typeof size === "number") {
       const covered = area === "burst" ? burst(drawn, moving, from.square, size) : area === "cone" ? cone(drawn, moving, from.square, toward?.square ?? from.square, size) : line(drawn, moving, from.square, toward?.square ?? from.square, size);
       const who = covered.who.map((id) => whoIs(say, id));
-      reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, feet: feetOf(drawn, size), count: covered.squares.length, who: textOf(who) });
+      reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, far: farText(call.lines, drawn, size), count: covered.squares.length, who: textOf(who) });
       data.area = { kind: area, size, squares: covered.squares.map((s) => [...s]), who };
     }
     reply.data(data);
@@ -355,7 +379,7 @@ function relocated(o: OpContext, who: EntityId, to: PlaceId): Unread | undefined
 function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: JsonObject[]): Unread | undefined {
   const w = o.draft.w;
   const id = p.who.id;
-  let layers = layersOn(o.reading, w.state, at);
+  let layers = layersOn(o.reading, w.state, at, o.call);
   if (isUnread(layers)) return layers;
   const say = (): Say => ({ lines: o.call.lines, world: isUnread(layers) ? o.reading.world : layers.world, state: w.state });
   const entry: JsonObject = { who: whoIs(say(), id) };
@@ -368,7 +392,7 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
       const bad = applied(o, [positionEvent(layers.drawn, id, null, null)]);
       if (bad) return bad;
     }
-    layers = layersOn(o.reading, w.state, at);
+    layers = layersOn(o.reading, w.state, at, o.call);
     if (isUnread(layers)) return layers;
     const s = standsAt(layers.moving, id);
     if (s === null) reportAll(o, say(), [{ code: "holder_off_grid", values: { what: id, holder: p.on.id } }]);
@@ -411,7 +435,7 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
           if (bad) return bad;
         }
       }
-      layers = layersOn(o.reading, w.state, at);
+      layers = layersOn(o.reading, w.state, at, o.call);
       if (isUnread(layers)) return layers;
     }
     const before = layers.moving;
@@ -423,7 +447,7 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
     if (bad) return bad;
     entry.at = [...to];
     if (moved?.walk && moved.took && from !== null) {
-      o.reply.line("piece_walked", { what: whoIs(say(), id), from: spotText(say(), from), to: spotText(say(), to), distance: moved.walk.distance, feet: feetOf(layers.drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say(), moved.took) });
+      o.reply.line("piece_walked", { what: whoIs(say(), id), from: spotText(say(), from), to: spotText(say(), to), distance: moved.walk.distance, far: farText(o.call.lines, layers.drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say(), moved.took) });
       entry.way = { squares: moved.walk.squares.map((s) => [...s]), distance: moved.walk.distance, cost: moved.walk.cost, ...tookData(moved.took) };
     } else o.reply.line("piece_at", { what: whoIs(say(), id), square: spotText(say(), to) });
   }
@@ -491,7 +515,7 @@ const doorDef: WriteDef = {
     const state = o.args.state;
     if (!(DOOR_STATES as readonly unknown[]).includes(state)) return notOneOf(o, "state", state ?? null, DOOR_STATES);
     const now = state as DoorState;
-    const layers = layersOn(o.reading, o.draft.w.state, at);
+    const layers = layersOn(o.reading, o.draft.w.state, at, o.call);
     if (isUnread(layers)) return layers;
     const say: Say = { lines: o.call.lines, world: layers.world, state: o.draft.w.state };
     const square = squareOn(say, layers, "door", o.args.door);
@@ -568,7 +592,7 @@ const layDef: WriteDef = {
       rows,
       ...(Object.keys(given.legend).length > 0 ? { legend: given.legend as Record<string, MapCellDef> } : {}),
       ...(textArg(o.args, "title") !== undefined ? { title: textArg(o.args, "title") ?? "" } : {}),
-      metres: feet !== undefined ? feet * METRES_PER_FOOT : laidMetres(GRID_DEFAULTS),
+      ...(feet !== undefined ? { metres: feet * METRES_PER_FOOT } : {}),
     });
     let laid: Laid;
     if (o.args.over !== undefined && o.args.over !== null) {
@@ -590,17 +614,17 @@ const layDef: WriteDef = {
     const first = laid.reports[0];
     if (laid.changes.length === 0 || laid.scope === null) return first ? { line: `grid_${first.code}`, fields: { n: o.n, op: o.op, ...reportFields(say, first.values) } } : { line: "nothing_recorded", fields: {} };
     const from = w.events.length;
-    const bad = applied(o, laid.changes.map((c) => c.value as JsonObject));
+    const bad = applyLaid(o, laid.changes);
     if (bad) return bad;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const scope = laid.scope;
-    const now = layersAt(r.registry, r.doc, w.state, scope, GRID_DEFAULTS);
+    const now = layersAt(r.registry, r.doc, w.state, scope, configOf(o.call));
     if (now !== null) {
       const after: Say = { lines: o.call.lines, world: now.world, state: w.state };
       const off = laid.changes.filter((c) => c.op === "space.pos").map((c) => (isRecord(c.value) && isRecord(c.value.data) && typeof c.value.data.entity === "string" ? whoIs(after, c.value.data.entity) : ""));
-      o.reply.line("laid", { place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, feet: feetOf(now.drawn, 1), ...stepFields(now.drawn) });
+      o.reply.line("laid", { place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, size: farText(o.call.lines, now.drawn, 1), ...(laid.sizeDefaulted ? { defaulted: true } : {}), ...stepFields(now.drawn) });
       if (off.length > 0) o.reply.line("laid_off", { who: off });
-      o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, feet: feetOf(now.drawn, 1), step: { ...now.drawn.scale.step } } }));
+      o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, size: distanceData(now.drawn, 1), ...(laid.sizeDefaulted ? { sizeAssumed: true } : {}), step: { ...now.drawn.scale.step } } }));
     }
     sayRead(o, given.read);
     return undefined;
@@ -652,7 +676,7 @@ const editDef: WriteDef = {
     const w = o.draft.w;
     const at = find(o, "at", "point");
     if (isUnread(at)) return at;
-    const layers = layersOn(o.reading, w.state, at);
+    const layers = layersOn(o.reading, w.state, at, o.call);
     if (isUnread(layers)) return layers;
     const strokes = strokesOf(o);
     if (isUnread(strokes)) return strokes;

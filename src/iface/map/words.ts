@@ -15,7 +15,8 @@ import type { Registry } from "../../engine/registry-impl";
 import type { WorldState } from "../../engine/state";
 import type { MapView } from "../kit";
 import { Lines, type GuidanceFiles } from "../texts";
-import { drawnOf, GRID_DEFAULTS, movingOf, standsAt, type Drawn, type GridSettings, type Moving, type Square } from "./grid";
+import { MAP_DEFAULTS, type MapConfig, type Unit } from "../../shared/map-config";
+import { drawnOf, movingOf, standsAt, type Drawn, type Moving, type Square } from "./grid";
 import { between } from "./measure";
 import { printMap, type LegendEntry, type Printed } from "./print";
 import type { Took } from "./time";
@@ -38,18 +39,28 @@ export interface Layers {
 }
 
 /** The grid someone at `place` stands on (its own, or the one its parent draws it on), as the chat's state has it; null where there is none. */
-export function layersAt(registry: Registry, doc: WorldDoc, state: Readonly<WorldState>, place: PlaceId, settings: Readonly<GridSettings> = GRID_DEFAULTS): Layers | null {
+export function layersAt(registry: Registry, doc: WorldDoc, state: Readonly<WorldState>, place: PlaceId, config: Readonly<MapConfig> = MAP_DEFAULTS): Layers | null {
   const world = playedWorld(doc, state);
   const stand = standingGrid(world, place);
-  const drawn = stand ? drawnOf(world, stand.scope, settings, state) : null;
+  const drawn = stand ? drawnOf(world, stand.scope, config, state) : null;
   if (!drawn) return null;
   const { moving, unplaced } = movingOf(registry, world, state, drawn);
   return { world, drawn, moving, unplaced };
 }
 
-/** How many feet `squares` squares are on a grid, to a tenth. */
-export function feetOf(drawn: Drawn, squares: number): number {
-  return Math.round(squares * drawn.scale.feet * 10) / 10;
+/** How many of the unit in force `squares` squares are on a grid, to a tenth. */
+export function amountOf(drawn: Drawn, squares: number): number {
+  return Math.round(squares * (drawn.scale.unit === "feet" ? drawn.scale.feet : drawn.scale.metres) * 10) / 10;
+}
+
+/** A distance as an answer's data gives it: how much, in which unit. */
+export function distanceData(drawn: Drawn, squares: number): { amount: number; unit: Unit } {
+  return { amount: amountOf(drawn, squares), unit: drawn.scale.unit };
+}
+
+/** `squares` squares in words, in the unit in force: the map's `far_feet` or `far_metres` line, filled ("15 ft", "3 m"). */
+export function farText(lines: Lines, drawn: Drawn, squares: number): string {
+  return lines.line(`far_${drawn.scale.unit}`, { amount: amountOf(drawn, squares) }) ?? "";
 }
 
 /** The name an id goes by: an entity's, a place's, else the id. */
@@ -124,7 +135,7 @@ function legendWords(lines: Lines, world: WorldDoc, state: Readonly<WorldState>,
  * character as `map_you`, the others with how far they are from it), who is at the place with no
  * square yet, and the doors. `centre` picks the part a large grid shows.
  */
-export function mapWords(lines: Lines, layers: Layers, state: Readonly<WorldState>, opts: { centre?: Square; settings?: Readonly<GridSettings> } = {}): { text: string; printed: Printed } {
+export function mapWords(lines: Lines, layers: Layers, state: Readonly<WorldState>, opts: { centre?: Square; around?: readonly EntityId[]; config?: Readonly<MapConfig> } = {}): { text: string; printed: Printed } {
   const { world, drawn, moving } = layers;
   const printed = printMap(drawn, moving, opts);
   const out: string[] = [];
@@ -133,7 +144,7 @@ export function mapWords(lines: Lines, layers: Layers, state: Readonly<WorldStat
     const text = lines.line(name, fields);
     if (text !== undefined && text.trim() !== "") into.push(text.trimEnd());
   };
-  sayIn(out, "map_title", { place: nameIn(world, state, drawn.scope), id: drawn.scope, width: drawn.width, height: drawn.height, feet: feetOf(drawn, 1), metres: Math.round(drawn.scale.metres * 100) / 100, ...stepFields(drawn) });
+  sayIn(out, "map_title", { place: nameIn(world, state, drawn.scope), id: drawn.scope, width: drawn.width, height: drawn.height, size: farText(lines, drawn, 1), ...stepFields(drawn) });
   if (!printed.whole) sayIn(out, "map_part", { fromColumn: printed.from[0], fromRow: printed.from[1], toColumn: printed.to[0], toRow: printed.to[1] });
   out.push(printed.picture);
   sayIn(out, "map_legend", { legend: printed.legend.map((e) => legendWords(lines, world, state, e)).filter((t) => t.trim() !== "") });
@@ -159,7 +170,7 @@ export function mapWords(lines: Lines, layers: Layers, state: Readonly<WorldStat
       ...(size ? { size } : {}),
       blocksWay: p.blocks?.way === true,
       blocksView: p.blocks?.view === true,
-      ...(apart !== null ? { squares: apart, feet: feetOf(drawn, apart) } : {}),
+      ...(apart !== null ? { squares: apart, far: farText(lines, drawn, apart) } : {}),
     });
   }
   for (const id of noSquare) sayIn(listed, "map_unplaced", { id, name: nameIn(world, state, id) });
@@ -180,15 +191,15 @@ export function mapWords(lines: Lines, layers: Layers, state: Readonly<WorldStat
  * on it, else around the place's own square, worded by `lines`; null for a place with no grid. The
  * turn lane gives it as `deps.map`, with `lines` read by `mapLines` from the chat's files.
  */
-export function mapView(lines: Lines, settings: Readonly<GridSettings> = GRID_DEFAULTS): MapView {
+export function mapView(lines: Lines, config: Readonly<MapConfig> = MAP_DEFAULTS): MapView {
   return {
     text({ state, env, place }) {
       const doc = env.worlds(state.world.revision);
-      const layers = doc ? layersAt(env.registry, doc, state.world, place, settings) : null;
+      const layers = doc ? layersAt(env.registry, doc, state.world, place, config) : null;
       if (!layers) return null;
       const cell = layers.drawn.scope !== place && hasOwn(layers.world.places, place) ? layers.world.places[place]?.cell : undefined;
       const centre = standsAt(layers.moving, layers.world.pov) ?? (cell ? ([cell.x + 1, cell.y + 1] as const) : undefined);
-      return mapWords(lines, layers, state.world, { settings, ...(centre ? { centre } : {}) }).text;
+      return mapWords(lines, layers, state.world, { config, ...(centre ? { centre } : {}) }).text;
     },
   };
 }

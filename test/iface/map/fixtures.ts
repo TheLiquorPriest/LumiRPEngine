@@ -2,7 +2,8 @@
 // plan §8.2 prints it, two cellar rooms with a door between them, and the town drawn a block to a
 // square. Every name here is made up.
 
-import { drawnOf, GRID_DEFAULTS, type Drawn, type GridSettings } from "../../../src/iface/map/grid";
+import { drawnOf, type Drawn } from "../../../src/iface/map/grid";
+import { MAP_DEFAULTS, type MapConfig } from "../../../src/shared/map-config";
 import { compileMaps } from "../../../src/shared/maps";
 import type { MapDoc, WorldDoc } from "../../../src/shared/world";
 import { inventedWorld } from "../../store/fixtures";
@@ -74,8 +75,8 @@ export function worldWith(...maps: MapDoc[]): WorldDoc {
 }
 
 /** What `map` draws, on the invented world with that map alone. */
-export function drawn(map: MapDoc, settings: Readonly<GridSettings> = GRID_DEFAULTS): Drawn {
-  const d = drawnOf(worldWith(map), map.scope, settings);
+export function drawn(map: MapDoc, config: Readonly<MapConfig> = MAP_DEFAULTS): Drawn {
+  const d = drawnOf(worldWith(map), map.scope, config);
   if (!d) throw new Error(`${map.scope} has no grid`);
   return d;
 }

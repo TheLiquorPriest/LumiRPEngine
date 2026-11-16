@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { blockersOf, GRID_DEFAULTS, indexOf, NOTHING_MOVES, place, setDoor, standsAt, type Drawn, type Moving, type Square } from "../../../src/iface/map/grid";
+import { blockersOf, indexOf, NOTHING_MOVES, place, setDoor, standsAt, type Drawn, type Moving, type Square } from "../../../src/iface/map/grid";
+import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import { move, walk, type Walk } from "../../../src/iface/map/path";
 import type { MapDoc } from "../../../src/shared/world";
 import { CELLAR, drawn, HALL, OPEN, PILLAR, SEALED } from "./fixtures";
@@ -31,7 +32,7 @@ describe("paths in eight directions", () => {
       [5, 5],
     ];
     expect(walk(drawn(OPEN), NOTHING_MOVES, [1, 1], [5, 5])).toEqual({ squares: corner, distance: 4, cost: 4 });
-    expect(walk(drawn(OPEN, { ...GRID_DEFAULTS, diagonal: "alternate" }), NOTHING_MOVES, [1, 1], [5, 5])).toEqual({ squares: corner, distance: 6, cost: 6 });
+    expect(walk(drawn(OPEN, { ...MAP_DEFAULTS, diagonal: "alternate" }), NOTHING_MOVES, [1, 1], [5, 5])).toEqual({ squares: corner, distance: 6, cost: 6 });
   });
 
   test("along a row, the way reads straight", () => {

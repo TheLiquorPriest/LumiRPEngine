@@ -17,7 +17,8 @@ import { playedWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { spotOf } from "../../packs/space/core/positions";
 import type { ChangeInput, Report } from "../../store/types";
-import { cellOf, GRID_DEFAULTS, indexOf, laidMetres, scaleOf, squareOf, type GridSettings, type Square, type TimeStep } from "./grid";
+import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
+import { cellOf, indexOf, laidMetres, scaleOf, squareOf, type Square, type TimeStep } from "./grid";
 import { draftChange, positionChange } from "./record";
 
 /** A grid to lay. */
@@ -40,6 +41,8 @@ export interface Laid {
   changes: ChangeInput[];
   scope: PlaceId | null;
   reports: Report[];
+  /** The square's width was not given: it is the setting's, an assumption (standing assumed, source default, plan §6.6). */
+  sizeDefaulted?: true;
 }
 
 /** Rows for a walled room of `width` by `height` squares, floor inside, with a door on each square given. */
@@ -57,11 +60,11 @@ function refused(scope: PlaceId | null, report: Report): Laid {
 }
 
 /** `laying` as the grid of `scope`, after the changes `before`; what stood on a square at `scope` taken off it. */
-function layOn(world: WorldDoc, state: Readonly<WorldState>, played: WorldDoc, scope: PlaceId, laying: Laying, settings: Readonly<GridSettings>, before: ChangeInput[]): Laid {
+function layOn(world: WorldDoc, state: Readonly<WorldState>, played: WorldDoc, scope: PlaceId, laying: Laying, config: Readonly<MapConfig>, before: ChangeInput[]): Laid {
   const has = gridOf(played, scope);
   if (has) return refused(scope, { code: "has_grid", values: { place: scope, grid: has.id } });
   if (hasOwn(played.maps, laying.id) || hasOwn(played.grids, laying.id)) return refused(scope, { code: "id_taken", values: { id: laying.id } });
-  const metres = laying.metres ?? laidMetres(settings);
+  const metres = laying.metres ?? laidMetres(config);
   const drawn: MapDoc = {
     id: laying.id,
     scope,
@@ -71,16 +74,18 @@ function layOn(world: WorldDoc, state: Readonly<WorldState>, played: WorldDoc, s
     cellMeters: metres,
   };
   // `step` is the map format's own field (`lre-map-v1`), which today's map type does not name.
-  const map: MapDoc = Object.assign(drawn, { step: laying.step ?? scaleOf(metres, settings).step });
+  const map: MapDoc = Object.assign(drawn, { step: laying.step ?? scaleOf(metres, config, played.ruleset).step });
   const { problems } = readMap(map);
   if (problems.length > 0) return { changes: [], scope, reports: problems.map((p) => ({ code: "bad_map", values: { at: p.path } })) };
-  const changes = [...before, draftChange(world, state, { collection: "maps", id: laying.id, value: map as unknown as JsonObject })];
+  // A square's width nobody gave is the setting's: that change stands as assumed, from the default (plan §6.6).
+  const mapChange = draftChange(world, state, { collection: "maps", id: laying.id, value: map as unknown as JsonObject });
+  const changes = [...before, laying.metres === undefined ? { ...mapChange, standing: "assumed" as const, source: "default" as const } : mapChange];
   for (const id of Object.keys(state.entities).sort()) {
     if (state.entities[id]?.fields.place !== scope) continue;
     const spot = spotOf(played, state, id);
     if (spot) changes.push(positionChange({ scope: spot.scope }, id, null, squareOf(spot)));
   }
-  return { changes, scope, reports: [] };
+  return { changes, scope, reports: [], ...(laying.metres === undefined ? { sizeDefaulted: true as const } : {}) };
 }
 
 /**
@@ -88,7 +93,7 @@ function layOn(world: WorldDoc, state: Readonly<WorldState>, played: WorldDoc, s
  * square (at it, or with it in its area), else for a place `laying.place` makes there. `world` is
  * the revision the chat plays, `state` the chat's state now.
  */
-export function layOverSquare(world: WorldDoc, state: Readonly<WorldState>, coarse: PlaceId, square: Square, laying: Laying & { place?: { id: PlaceId; name: string } }, settings: Readonly<GridSettings> = GRID_DEFAULTS): Laid {
+export function layOverSquare(world: WorldDoc, state: Readonly<WorldState>, coarse: PlaceId, square: Square, laying: Laying & { place?: { id: PlaceId; name: string } }, config: Readonly<MapConfig> = MAP_DEFAULTS): Laid {
   const played = playedWorld(world, state);
   const grid = gridOf(played, coarse);
   if (!grid) return refused(null, { code: "no_grid", values: { place: coarse } });
@@ -102,17 +107,17 @@ export function layOverSquare(world: WorldDoc, state: Readonly<WorldState>, coar
       return p?.parent === coarse && p.cell?.x === cell.x && p.cell.y === cell.y;
     });
   const drawnHere = at ?? areaPlaceAt(played, coarse, grid, index);
-  if (drawnHere !== null) return layOn(world, state, played, drawnHere, laying, settings, []);
+  if (drawnHere !== null) return layOn(world, state, played, drawnHere, laying, config, []);
   const made = laying.place;
   if (!made) return refused(null, { code: "needs_place", values: { square: [...square] } });
   if (hasOwn(played.places, made.id)) return refused(null, { code: "id_taken", values: { id: made.id } });
   const place = draftChange(world, state, { collection: "places", id: made.id, value: { id: made.id, name: made.name, parent: coarse, cell: { ...cell }, fields: {} } });
-  return layOn(world, state, played, made.id, laying, settings, [place]);
+  return layOn(world, state, played, made.id, laying, config, [place]);
 }
 
 /** A grid laid for `place`, which has none of its own. `world` is the revision the chat plays, `state` the chat's state now. */
-export function layForPlace(world: WorldDoc, state: Readonly<WorldState>, place: PlaceId, laying: Laying, settings: Readonly<GridSettings> = GRID_DEFAULTS): Laid {
+export function layForPlace(world: WorldDoc, state: Readonly<WorldState>, place: PlaceId, laying: Laying, config: Readonly<MapConfig> = MAP_DEFAULTS): Laid {
   const played = playedWorld(world, state);
   if (!hasOwn(played.places, place)) return refused(null, { code: "no_place", values: { place } });
-  return layOn(world, state, played, place, laying, settings, []);
+  return layOn(world, state, played, place, laying, config, []);
 }

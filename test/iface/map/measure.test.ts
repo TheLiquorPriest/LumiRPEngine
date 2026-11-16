@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { GRID_DEFAULTS, NOTHING_MOVES, place, setDoor, type Drawn, type Moving, type Piece, type Square } from "../../../src/iface/map/grid";
+import { NOTHING_MOVES, place, setDoor, type Drawn, type Moving, type Piece, type Square } from "../../../src/iface/map/grid";
+import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import { between, burst, cone, distance, line, sees, within } from "../../../src/iface/map/measure";
 import { CELLAR, drawn, HALL, INN, OPEN, PILLAR, SEALED } from "./fixtures";
 
@@ -158,7 +159,7 @@ describe("areas", () => {
   });
 
   test("under the alternating rule a diagonal burst reaches less far", () => {
-    const d = drawn(OPEN, { ...GRID_DEFAULTS, diagonal: "alternate" });
+    const d = drawn(OPEN, { ...MAP_DEFAULTS, diagonal: "alternate" });
     expect(burst(d, NOTHING_MOVES, [3, 3], 2).squares).toHaveLength(21);
   });
 });

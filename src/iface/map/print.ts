@@ -8,7 +8,8 @@
 import type { EntityId, PlaceId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import type { MapCellDef } from "../../shared/world";
-import { doorState, footprint, GRID_DEFAULTS, squareAt, standsAt, type DoorState, type Drawn, type GridSettings, type Moving, type Piece, type Scale, type Square } from "./grid";
+import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
+import { doorState, footprint, squareAt, standsAt, type DoorState, type Drawn, type Moving, type Piece, type Scale, type Square } from "./grid";
 
 /** One symbol of the picture: what the map's legend says it is, and the squares shown that carry it. */
 export interface LegendEntry {
@@ -56,18 +57,34 @@ function windowStart(length: number, size: number, centre: number): number {
   return Math.min(Math.max(1, centre - Math.floor((size - 1) / 2)), length - size + 1);
 }
 
+/** Where a window of `size` squares starts so that it holds squares `lo` to `hi`, they in its middle as far as the edges allow; null when they do not fit. */
+function windowAround(length: number, size: number, lo: number, hi: number): number | null {
+  const held = hi - lo + 1;
+  return held > size ? null : Math.min(Math.max(1, lo - Math.floor((size - held) / 2)), length - size + 1);
+}
+
 /**
  * The grid as text, with its legend, who and what stands where, and its doors. Whole when it fits
- * the settings' size; otherwise the part of that size around `centre` (the grid's middle when none
- * is given).
+ * the settings' size; otherwise the part of that size that holds everyone and everything `around`
+ * names and stands on the grid, when they fit in it (the horizon's); else the part around `centre`
+ * (the player's character, else the scene's place; the grid's middle when none is given).
  */
-export function printMap(drawn: Drawn, moving: Moving, opts: { centre?: Square; settings?: Readonly<GridSettings> } = {}): Printed {
-  const settings = opts.settings ?? GRID_DEFAULTS;
-  const cols = Math.min(drawn.width, settings.printColumns);
-  const rows = Math.min(drawn.height, settings.printRows);
+export function printMap(drawn: Drawn, moving: Moving, opts: { centre?: Square; around?: readonly EntityId[]; config?: Readonly<MapConfig> } = {}): Printed {
+  const config = opts.config ?? MAP_DEFAULTS;
+  const cols = Math.min(drawn.width, config.printColumns);
+  const rows = Math.min(drawn.height, config.printRows);
   const centre = opts.centre ?? [Math.ceil(drawn.width / 2), Math.ceil(drawn.height / 2)];
-  const c0 = windowStart(drawn.width, cols, centre[0]);
-  const r0 = windowStart(drawn.height, rows, centre[1]);
+  const held = (opts.around ?? []).map((id) => standsAt(moving, id)).filter((s): s is Square => s !== null);
+  const around =
+    held.length > 0
+      ? {
+          c: windowAround(drawn.width, cols, Math.min(...held.map((s) => s[0])), Math.max(...held.map((s) => s[0]))),
+          r: windowAround(drawn.height, rows, Math.min(...held.map((s) => s[1])), Math.max(...held.map((s) => s[1]))),
+        }
+      : null;
+  const fits = around !== null && around.c !== null && around.r !== null;
+  const c0 = fits ? (around.c ?? 1) : windowStart(drawn.width, cols, centre[0]);
+  const r0 = fits ? (around.r ?? 1) : windowStart(drawn.height, rows, centre[1]);
   const c1 = c0 + cols - 1;
   const r1 = r0 + rows - 1;
 

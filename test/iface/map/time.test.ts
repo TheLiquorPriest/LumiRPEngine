@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { initialState } from "../../../src/engine/world-state";
-import { GRID_DEFAULTS, NOTHING_MOVES, place, scaleOf } from "../../../src/iface/map/grid";
+import { NOTHING_MOVES, place, scaleOf } from "../../../src/iface/map/grid";
+import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import { move } from "../../../src/iface/map/path";
 import { positionChanges } from "../../../src/iface/map/record";
 import { clockChange, moveTime, roundsTime } from "../../../src/iface/map/time";
@@ -13,7 +14,7 @@ describe("each grid's time step", () => {
     expect(drawn(INN).scale.step).toEqual({ per: "round", seconds: 6, squares: 6 });
     expect(drawn(TOWN).scale.step).toEqual({ per: "minute" });
     expect(scaleOf(3).step).toEqual({ per: "round", seconds: 6, squares: 3 });
-    expect(scaleOf(1.524, { ...GRID_DEFAULTS, roundSeconds: 10 }).step).toEqual({ per: "round", seconds: 10, squares: 6 });
+    expect(scaleOf(1.524, { ...MAP_DEFAULTS, roundSeconds: 10 }).step).toEqual({ per: "round", seconds: 10, squares: 6 });
   });
 
   test("a move takes whole rounds on a room grid, and today's walking minutes on a coarse one", () => {

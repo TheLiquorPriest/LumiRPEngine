@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../../src/engine/places-in-play";
 import { initialState } from "../../../src/engine/world-state";
 import { editMap } from "../../../src/iface/map/edit";
-import { drawnOf, GRID_DEFAULTS, NOTHING_MOVES } from "../../../src/iface/map/grid";
+import { drawnOf, NOTHING_MOVES } from "../../../src/iface/map/grid";
+import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import { walk } from "../../../src/iface/map/path";
 import { printMap } from "../../../src/iface/map/print";
 import { isRecord } from "../../../src/shared/json";
@@ -45,7 +46,7 @@ describe("changing part of a grid", () => {
     const data = changes[0]?.value;
     expect(isRecord(data) && isRecord(data.data) && Array.isArray(data.data.squares) ? data.data.squares.length : 0).toBe(7);
     expect(JSON.stringify(data)).not.toContain("layout");
-    const d = drawnOf(playedWorld(world, state.world), "cellar", GRID_DEFAULTS, state.world);
+    const d = drawnOf(playedWorld(world, state.world), "cellar", MAP_DEFAULTS, state.world);
     if (!d) throw new Error("the cellar lost its grid");
     expect(printMap(d, NOTHING_MOVES).picture).toBe(["      1 2 3 4 5 6 7 8 9", "   1  # # # # # # # # #", "   2  # ~ . . # t t . #", "   3  # . ~ . # . . . #", "   4  # . . ~ # . . ? #", "   5  # # # # # # # # #"].join("\n"));
     expect([d.doors.size, walk(d, NOTHING_MOVES, [2, 3], [8, 3])]).toEqual([0, null]);
@@ -53,7 +54,7 @@ describe("changing part of a grid", () => {
     expect(drawnOf(world, "cellar")?.doors.size).toBe(1);
     // The world's own map edited later, elsewhere: its change shows through, and the chat's stays over it.
     const later = worldWith({ ...CELLAR, layout: ["#########", "#...#..c#", "#...+...#", "#...#...#", "#########"], legend: { c: { terrain: "crate", blocked: true } } });
-    const both = drawnOf(later, "cellar", GRID_DEFAULTS, state.world);
+    const both = drawnOf(later, "cellar", MAP_DEFAULTS, state.world);
     expect(printMap(both ?? d, NOTHING_MOVES).picture.split("\n")[2]).toBe("   2  # ~ . . # t t c #");
   });
 

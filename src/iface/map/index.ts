@@ -7,7 +7,6 @@ export {
   doorState,
   drawnOf,
   footprint,
-  GRID_DEFAULTS,
   indexOf,
   laidMetres,
   lift,
@@ -26,7 +25,6 @@ export {
   type Diagonal,
   type DoorState,
   type Drawn,
-  type GridSettings,
   type Moving,
   type Piece,
   type Placed,
@@ -43,4 +41,5 @@ export { editMap, type Stroke } from "./edit";
 export { clockChange, moveTime, roundsTime, type Took } from "./time";
 export { doorEvent, draftChange, positionChange, positionChanges, positionEvent, shapeEvent, squaresEvent } from "./record";
 export { beside, gridMoves, inZone } from "./moves";
-export { feetOf, layersAt, MAP_ANSWERS, mapLines, mapView, mapWords, type Layers } from "./words";
+export { amountOf, distanceData, farText, layersAt, MAP_ANSWERS, mapLines, mapView, mapWords, type Layers } from "./words";
+export { DIAGONALS, MAP_DEFAULTS, MAP_SETTING_DEFS, MAP_SETTINGS, mapConfigRead, UNITS, type MapConfig, type Unit } from "./settings";

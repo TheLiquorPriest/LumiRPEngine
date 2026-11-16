@@ -6,6 +6,7 @@
 import type { Database } from "bun:sqlite";
 import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonSchema, JsonValue, Scope, ToolContent, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
 import type { NumberSettings, Setting } from "../app/setting-list";
+import type { MapConfig } from "../shared/map-config";
 import type { UserStore } from "../store/store";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
@@ -151,6 +152,8 @@ export interface EngineDeps {
   map?: MapView;
   /** Settings over `IFACE_DEFAULTS`. */
   settings?: Partial<IfaceSettings>;
+  /** The map's settings for the chat (`map:` in its config), for the map tools; absent, their defaults. */
+  mapSettings?: MapConfig;
   /** Milliseconds since 1970, for an approval's question; `Date.now` when absent. */
   now?: () => number;
 }

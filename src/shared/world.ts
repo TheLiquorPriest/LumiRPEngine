@@ -1202,6 +1202,10 @@ export interface RulesetDef {
   adjudication?: AdjudicationDef;
   /** The world's default for inferred checks: how a typed attempt no catalog action with its own check covers is read as a check of its sheet (DESIGN §11). */
   inferred?: InferredChecks;
+  /** What the world's distances on a grid are told in (plan §8.2): feet or metres. Absent: the chat's setting (`map.distances`). */
+  distances?: "feet" | "metres";
+  /** How a diagonal step counts on the world's grids: as one square, or every second one in a row as two. Absent: the chat's setting (`map.diagonal`). */
+  diagonal?: "one" | "alternate";
   /** The profile the ruleset last started from (Build → Ruleset → Start from a profile), by id; nothing reads it as rules. */
   profile?: string;
 }
