@@ -11,7 +11,7 @@ import { runCli } from "../../src/app/cli";
 import { withWriter } from "../../src/app/commands/writer";
 import { DataFolderBusy, lockHolder, takeFolderLock } from "../../src/app/data-folder";
 import { isRecord } from "../../src/shared/json";
-import { type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
+import { type Bed, cliIo, freePort, LUMIVERSE, makeBed, NO_TAG_CHECKS, OWNER, testModelLayer, writeConfig } from "./helpers";
 
 describe("one writer", () => {
   let bed: Bed;
@@ -177,7 +177,7 @@ describe("one writer, while RPE runs", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", connectionRoutes(testModelLayer(a.models), () => ACCOUNT.id, a.log));
+            a.routes.add("probe", connectionRoutes(testModelLayer(a.models), NO_TAG_CHECKS, () => ACCOUNT.id, a.log));
             captured.resolve(a);
           },
         },

@@ -27,7 +27,7 @@
 // `liveSocket.chatIdChars` is refused.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
-import type { TraceDelta, TraceRecord } from "rp-harness/contract";
+import type { JobRefusal, TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import { type AnyShape, type CallAuth, type Exactly, type Holds, type Infer, problemsOf, rawRoute, shape } from "./routes";
 
@@ -141,6 +141,7 @@ const jobLimits = shape.named(
   "Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on.",
   shape.object({ calls: opt(N), tokensIn: opt(N), tokensOut: opt(N), tokens: opt(N), time: opt(N), askAt: opt(N) }),
 );
+const jobState = shape.named("JobState", "Where a job stands.", shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted"));
 export const jobView = shape.named(
   "JobView",
   "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.",
@@ -148,7 +149,7 @@ export const jobView = shape.named(
     id: T,
     agent: T,
     brief: T,
-    state: shape.named("JobState", "Where a job stands.", shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted")),
+    state: jobState,
     scope: runScope,
     startedBy: shape.union(agentRef, shape.literal("user")),
     started: N,
@@ -166,6 +167,24 @@ export const jobView = shape.named(
     check: opt(shape.object({ connection: T }), "For a tag check: the connection it measures, by id."),
   }),
 );
+export const jobRefusal = shape.named(
+  "JobRefusal",
+  "Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs.",
+  shape.union(
+    shape.object({ refused: shape.literal("off") }),
+    shape.object({ refused: shape.literal("day-count"), max: N, value: N, connection: opt(T) }),
+    shape.object({ refused: shape.literal("day-tokens"), max: N, value: N }),
+    shape.object({ refused: shape.literal("limit"), limit: shape.oneOf("calls", "tokensIn", "tokensOut", "tokens", "time", "askAt"), value: N }),
+    shape.object({ refused: shape.literal("agent"), agent: T }),
+    shape.object({ refused: shape.literal("no-job"), id: T }),
+    shape.object({ refused: shape.literal("state"), id: T, state: jobState, applies: shape.list(jobState) }),
+    shape.object({ refused: shape.literal("not-at-limit"), id: T }),
+    shape.object({ refused: shape.literal("hook"), hook: T, reason: T }),
+    shape.object({ refused: shape.literal("connection"), connection: T }),
+    shape.object({ refused: shape.literal("part"), part: shape.oneOf("tag-check", "reply-contract") }),
+  ),
+);
+type RefusalMirrored = Holds<Exactly<Infer<typeof jobRefusal>, JobRefusal>>;
 export const replyError = shape.object({
   code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed", "no-definition", "no-tags", "hook"),
   hook: opt(T, "For hook: the turn-start hook that blocked the turn; detail is its reason."),

@@ -22,7 +22,7 @@ import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
 import { readSession } from "../../src/ui/pages/runtime/builds";
 import { signinDeps, signinRoutes } from "../../src/app/signin-routes";
 import { browserDeps, probeDirect } from "../../src/ui/roads";
-import { testModelLayer } from "../app/helpers";
+import { NO_TAG_CHECKS, testModelLayer } from "../app/helpers";
 import { CHAT, RECORDED, RECORDS, turnListAt, USER } from "./recorded";
 import { askOf, keyOf } from "../app/asking";
 import { replyProblems } from "../app/call";
@@ -89,7 +89,7 @@ beforeAll(async () => {
     areas: [
       { name: "turns", mount: (at) => at.routes.add("turns", [turnsRoute]) },
       { name: "settings", mount: (at) => at.routes.add("settings", settingsRoutes({ settings: [CALLS], levels: async () => [global], connections: async () => [], facts: () => [] })) },
-      { name: "connections", mount: (at) => at.routes.add("connections", connectionRoutes(testModelLayer(at.models), () => at.config.lumiverse.user ?? "", at.log)) },
+      { name: "connections", mount: (at) => at.routes.add("connections", connectionRoutes(testModelLayer(at.models), NO_TAG_CHECKS, () => at.config.lumiverse.user ?? "", at.log)) },
       { name: "probe", mount: (at) => at.routes.add("probe", [places]) },
       // The proof a page asks for before it sends its token is the sign-in routes', which the app's own area mounts.
       { name: "signin", mount: (at) => at.routes.add("signin", signinRoutes(signinDeps(at, null))) },

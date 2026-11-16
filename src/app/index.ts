@@ -21,13 +21,13 @@ export {
   type DataPaths,
   type Env,
 } from "./config";
-export { connectionRoutes, MODELS_KEY, modelsPort, type ConnectionShown, type ConnectionsApi, type ConnectionsShown, type ConnectionTested, type SaveConnection } from "./connections";
+export { connectionRoutes, MODELS_KEY, modelsPort, type ConnectionShown, type ConnectionsApi, type ConnectionsShown, type ConnectionTested, type SaveConnection, type TagChecks } from "./connections";
 export { openDatabase, WriteQueue, WritesClosed, WriteWaited } from "./database";
 export { IndexFile, INDEXES, type ColumnKind, type ColumnValue, type IndexDoc, type IndexHit, type IndexName, type TableDef, type TableRow } from "./index-file/index-file";
 export { TaskFailed, TaskTimedOut, Workers } from "./workers/pool";
 export { type GrepAsk, type GrepLines, grepLines } from "./workers/grep";
 export type { TaskInput, TaskName, TaskOutput } from "./workers/tasks";
-export { agentRef, effort, Following, hookEvent, jobView, layerLevel, limitHit, LIVE_ADDRESS_PREFIX, LIVE_JOBS, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LIVE_USER, LiveHub, liveKind, presetRef, promptNotice, replyError, ruleFiring, runScope, scope, TOKEN_PROTOCOL_PREFIX, traceRecord, usage, type AddressHolder, type AreaLiveKind, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader, type LiveSocketDeclaration } from "./live";
+export { agentRef, effort, Following, hookEvent, jobRefusal, jobView, layerLevel, limitHit, LIVE_ADDRESS_PREFIX, LIVE_JOBS, LIVE_KINDS, LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LIVE_USER, LiveHub, liveKind, presetRef, promptNotice, replyError, ruleFiring, runScope, scope, TOKEN_PROTOCOL_PREFIX, traceRecord, usage, type AddressHolder, type AreaLiveKind, type LiveBatch, type LiveData, type LiveEvent, type LiveKind, type LiveKindDeclaration, type LivePublish, type LiveReader, type LiveSocketDeclaration } from "./live";
 export { ANSWER_STATUS, ANSWERS_PATH } from "./answers";
 export { migrate, MIGRATION_AREAS, MigrationError, Migrations, type Migration, type MigrationArea, type MigrationOutcome } from "./migrations";
 export {

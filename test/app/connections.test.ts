@@ -19,7 +19,7 @@ import { createFolderHost } from "rp-harness/hosts/folder";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes, prepareDataFolder } from "../../src/app";
 import { walk } from "../../src/app/archive";
-import { bearer, type Bed, makeBed, makeKey, OWNER, storedKey, testModelLayer } from "./helpers";
+import { bearer, type Bed, makeBed, makeKey, NO_TAG_CHECKS, OWNER, storedKey, testModelLayer } from "./helpers";
 
 const KEY = "sk-invented-key-0123456789abcdef";
 const HEADER_VALUE = "proxy-secret-value-fedcba9876543210";
@@ -42,7 +42,7 @@ async function treeText(app: App): Promise<string> {
 
 /** The connection routes as the composition mounts them: over a layer, for the user the app's config names. */
 function routesOf(app: App) {
-  return connectionRoutes(testModelLayer(app.models), () => app.config.lumiverse.user ?? "", app.log);
+  return connectionRoutes(testModelLayer(app.models), NO_TAG_CHECKS, () => app.config.lumiverse.user ?? "", app.log);
 }
 
 describe("connections", () => {

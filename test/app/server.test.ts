@@ -11,7 +11,7 @@ import { secretHash } from "../../src/app/auth";
 import { startServer } from "../../src/app/server";
 import { Builds } from "../../src/app/update";
 import { JoinedTurnError } from "../../src/store/types";
-import { bearer, type Bed, LUMIVERSE, makeBed, makeKey, testModelLayer } from "./helpers";
+import { bearer, type Bed, LUMIVERSE, makeBed, makeKey, NO_TAG_CHECKS, testModelLayer } from "./helpers";
 
 /** A page route that says how much it was sent, held to 1 KiB. */
 const echo = route({
@@ -190,7 +190,7 @@ describe("the server", () => {
       config: { hosts: ["rpe.example"], origins: ["https://lumiverse.example"] },
       areas: [
         { name: "probe", mount: (a) => a.routes.add("probe", [echo, ...notes, places, moored, lights, ...joinedProbes]) },
-        { name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models), () => a.config.lumiverse.user ?? "", a.log)) },
+        { name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models), NO_TAG_CHECKS, () => a.config.lumiverse.user ?? "", a.log)) },
       ],
     });
     server = await app.start();

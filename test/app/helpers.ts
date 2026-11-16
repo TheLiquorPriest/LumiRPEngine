@@ -9,7 +9,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConnectionsDoc, ConnectionView, ModelsPort, SecretsDoc, StoredConnection } from "rp-harness/contract";
-import type { App, AppConfig, Area, ConnectionsApi, DataPaths, RunningServer } from "../../src/app";
+import type { App, AppConfig, Area, ConnectionsApi, DataPaths, RunningServer, TagChecks } from "../../src/app";
 import { dataPaths, lineLog, openApp } from "../../src/app";
 import type { KeyKind } from "../../src/app/auth";
 import type { CliIO } from "../../src/app/cli";
@@ -104,6 +104,9 @@ export function storedKey(port: ModelsPort): (user: string, id: string) => Promi
     return typeof key === "string" ? key : null;
   };
 }
+
+/** Tag checks for a bed with no harness: none ever ran, and one asked for is refused as jobs switched off. */
+export const NO_TAG_CHECKS: TagChecks = { tagCheck: async () => ({ refused: "off" }), tagChecks: async () => [] };
 
 /**
  * A stand-in for RPH's model layer, for the routes' tests: it keeps each user's two documents through

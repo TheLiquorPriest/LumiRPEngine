@@ -7,7 +7,7 @@ import { afterEach, expect, test } from "bun:test";
 import type { ModelLimits } from "rp-harness/contract";
 import { type ConnectionShown, type ConnectionsShown, type ConnectionTested, connectionRoutes } from "../../src/app";
 import { openTurnBed, type TurnBed } from "../turn/bed";
-import { bearer, makeBed, makeKey, testModelLayer } from "./helpers";
+import { bearer, makeBed, makeKey, NO_TAG_CHECKS, testModelLayer } from "./helpers";
 
 const KEY = "sk-invented-stand-in-key-9q8w7e6r";
 const MODEL = "stand-in-model";
@@ -66,7 +66,7 @@ test("a catalogue that throws shows its reason, not 'no limit known', and is log
   try {
     const why = "The model catalogue could not be read: its file is not JSON (invented).";
     const app = await bed.open({
-      areas: [{ name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes({ ...testModelLayer(a.models), limits: async () => Promise.reject(new Error(why)) }, () => a.config.lumiverse.user ?? "", a.log)) }],
+      areas: [{ name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes({ ...testModelLayer(a.models), limits: async () => Promise.reject(new Error(why)) }, NO_TAG_CHECKS, () => a.config.lumiverse.user ?? "", a.log)) }],
     });
     const server = await app.start();
     const page = { ...bearer(await makeKey(app, "web")), "content-type": "application/json" };

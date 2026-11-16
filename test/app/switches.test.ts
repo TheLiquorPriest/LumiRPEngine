@@ -10,7 +10,7 @@ import { connectionRoutes, METHODS, route, shape } from "../../src/app";
 import { runCli } from "../../src/app/cli";
 import { Switches } from "../../src/app/switches";
 import { switchesRoutes } from "../../src/app/switches-routes";
-import { bearer, type Bed, cliIo, LUMIVERSE, makeBed, makeKey, OWNER, testModelLayer, writeConfig } from "./helpers";
+import { bearer, type Bed, cliIo, LUMIVERSE, makeBed, makeKey, NO_TAG_CHECKS, OWNER, testModelLayer, writeConfig } from "./helpers";
 
 describe("the switches", () => {
   let bed: Bed;
@@ -45,7 +45,7 @@ describe("the switches", () => {
               reply: shape.object({ changed: shape.number() }),
               handle: async ({ body }) => ({ changed: await a.writes.run((db) => db.run(body.sql).changes) }),
             });
-            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), () => OWNER, a.log)]);
+            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), NO_TAG_CHECKS, () => OWNER, a.log)]);
             // The app area's own route, as it registers it.
             a.routes.add("switches", switchesRoutes(a.db));
           },

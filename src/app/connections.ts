@@ -20,11 +20,12 @@
 // logged; and tested with one small call, whose answer never carries the key: RPH's model layer
 // takes every secret out of a provider's words, and nothing here does it again.
 
-import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, Log, ModelLimits, ModelsApi, ModelsPort, SignInProvider, SignInStart, SignInState, UserScope } from "rp-harness/contract";
+import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, JobsApi, Log, ModelLimits, ModelsApi, ModelsPort, SignInProvider, SignInStart, SignInState, TagCheck, UserScope } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { DataPaths } from "./config";
 import { OneAtATime, oneFileAtATime, readText, writeWhole } from "./disk";
+import { jobRefusal, jobView } from "./live";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
 import type { SecretsFile } from "./secrets";
 import { withTopLevelKey, yamlMapping } from "./yaml";
@@ -149,6 +150,8 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile, owner: () => 
 
 /** What the routes need of the model layer: `harness.models`. */
 export type ConnectionsApi = Pick<ModelsApi, "list" | "save" | "remove" | "setDefault" | "test" | "limits" | "signIn">;
+/** RPH's tag checks (C-20): one started as a job on the owner's press, and the newest record of each connection's. */
+export type TagChecks = Pick<JobsApi, "tagCheck" | "tagChecks">;
 
 // What the routes take and answer. A connection is the model layer's (`rp-harness/contract`): each of its
 // types the routes carry is declared field by field here, so the pages' types and the reference say what a
@@ -220,12 +223,24 @@ type LimitsMirrored = Holds<Exactly<Infer<typeof limits>, ModelLimits>>;
 type InputMirrored = Holds<Exactly<Infer<typeof connectionInput>, ConnectionInput>>;
 
 const limitsProblem = opt(shape.nullable(T), "Why its model's limits could not be read; null where they were read, each of them known or not.");
+const tagCheck = shape.named(
+  "TagCheck",
+  "A tag check's record for a connection: the simple turns it played on it, how many came back with the reply and the intent record each in its tags, against the count the tag form needs, the model that answered, the reply form that set for the connection (his global config's, his to change after; not set where the file could not be written), when it ended and the job that ran it.",
+  shape.object({ connection: T, name: T, model: T, tried: N, kept: N, needed: N, form: shape.oneOf("tags", "two-step"), set: shape.yesNo(), at: N, job: T }),
+);
+type TagCheckMirrored = Holds<Exactly<Infer<typeof tagCheck>, TagCheck>>;
 const connectionShown = shape.named(
   "ConnectionShown",
-  "A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read, where they could not.",
-  shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo(), waiting: opt(shape.yesNo(), "The key is kept and waits until the owner allows the place it now goes to; its calls fail in words until then.") })), limitsInForce: shape.nullable(limits), limitsProblem }),
+  "A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; why they could not be read, where they could not; and its newest tag check, whether it keeps the reply's tags and the reply form it got.",
+  shape.object({
+    ...viewFields,
+    key: shape.nullable(shape.object({ set: shape.yesNo(), waiting: opt(shape.yesNo(), "The key is kept and waits until the owner allows the place it now goes to; its calls fail in words until then.") })),
+    limitsInForce: shape.nullable(limits),
+    limitsProblem,
+    tagCheck: opt(shape.nullable(tagCheck), "Its newest tag check; null where none was run on it."),
+  }),
 );
-/** A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read. */
+/** A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; why they could not be read; and its newest tag check. */
 export type ConnectionShown = Infer<typeof connectionShown>;
 
 const connectionsShown = shape.named("ConnectionsShown", "The connections as shown, the default, and the providers offered.", shape.object({ connections: shape.list(connectionShown), ...providers }));
@@ -239,6 +254,12 @@ const connectionTested = shape.named(
 /** A connection's test: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them, or why they could not be read. */
 export type ConnectionTested = Infer<typeof connectionTested>;
 
+const tagCheckStarted = shape.named(
+  "TagCheckStarted",
+  "A tag check asked for: the job it runs as, at once; or why none was started (jobs off, the day's count or tokens reached, no such connection, the check's part missing or not as it needs, his job-start hook).",
+  shape.union(shape.object({ job: jobView }), shape.object({ refusal: jobRefusal })),
+);
+
 /** A model's limits as RPH uses them, or why they could not be read (a provider no longer offered, a catalogue that failed), which is logged. */
 async function limitsOf(api: ConnectionsApi, log: Log, user: string, id: string, model?: string): Promise<{ limits: ModelLimits | null; problem: string | null }> {
   try {
@@ -250,10 +271,10 @@ async function limitsOf(api: ConnectionsApi, log: Log, user: string, id: string,
   }
 }
 
-async function shown(api: ConnectionsApi, log: Log, user: string, view: ConnectionView): Promise<ConnectionShown> {
+async function shown(api: ConnectionsApi, log: Log, user: string, view: ConnectionView, checks: readonly TagCheck[]): Promise<ConnectionShown> {
   const { key, ...rest } = view;
   const read = view.model === undefined ? { limits: null, problem: null } : await limitsOf(api, log, user, view.id);
-  return { ...rest, key: key === null ? null : { set: key.set, waiting: key.waiting }, limitsInForce: read.limits, limitsProblem: read.problem };
+  return { ...rest, key: key === null ? null : { set: key.set, waiting: key.waiting }, limitsInForce: read.limits, limitsProblem: read.problem, tagCheck: checks.find((c) => c.connection === view.id) ?? null };
 }
 
 const saveConnection = shape.named(
@@ -299,23 +320,23 @@ async function signInProvider(api: ConnectionsApi, user: string, id: string): Pr
 }
 
 /**
- * The routes to list, add, change and remove a connection, choose the default and test one, and to sign one in to its provider
- * and out, over the model layer, each for the user this RPE belongs to (`owner`), whoever the caller's credential names. `log`
- * hears of a model's limits that could not be read.
+ * The routes to list, add, change and remove a connection, choose the default, test one and check whether it keeps the reply's tags,
+ * and to sign one in to its provider and out, over the model layer and RPH's tag checks, each for the user this RPE belongs to
+ * (`owner`), whoever the caller's credential names. `log` hears of a model's limits that could not be read.
  */
-export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: Log) {
+export function connectionRoutes(api: ConnectionsApi, checks: TagChecks, owner: () => string, log: Log) {
   return [
     route({
       method: "GET",
       path: CONNECTIONS_PATH,
       access: "page",
       group: "connections",
-      does: "The connections, each with whether a key is set (nothing of the key) and its model's limits as RPH uses them; the default; the providers offered.",
+      does: "The connections, each with whether a key is set (nothing of the key), its model's limits as RPH uses them and its newest tag check; the default; the providers offered.",
       reply: connectionsShown,
       handle: async () => {
         const user = owner();
-        const list = await api.list(user);
-        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, log, user, c))) };
+        const [list, checked] = await Promise.all([api.list(user), checks.tagChecks(user)]);
+        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, log, user, c, checked))) };
       },
     }),
     route({
@@ -328,7 +349,7 @@ export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: 
       reply: connectionShown,
       handle: async ({ body }) => {
         if (body.connection.id !== undefined) throw new RouteError(400, "A new connection has no id: to change one, PUT /api/v1/connections/<its id>.");
-        return await shown(api, log, owner(), await layer(() => api.save(owner(), body.connection, body.key)));
+        return await shown(api, log, owner(), await layer(() => api.save(owner(), body.connection, body.key)), await checks.tagChecks(owner()));
       },
     }),
     route({
@@ -339,7 +360,7 @@ export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: 
       does: "Changes a connection, whole: a field left out is cleared; its key stays when the body leaves it out, and goes when it is null.",
       body: saveConnection,
       reply: connectionShown,
-      handle: async ({ params, body }) => await shown(api, log, owner(), await layer(() => api.save(owner(), { ...body.connection, id: params.id }, body.key))),
+      handle: async ({ params, body }) => await shown(api, log, owner(), await layer(() => api.save(owner(), { ...body.connection, id: params.id }, body.key)), await checks.tagChecks(owner())),
     }),
     route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", group: "connections", does: "Removes a connection, and its key.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.remove(owner(), params.id)) }),
     route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", group: "connections", does: "Makes a connection the default.", reply: shape.nothing(), handle: ({ params }) => layer(() => api.setDefault(owner(), params.id)) }),
@@ -356,6 +377,18 @@ export function connectionRoutes(api: ConnectionsApi, owner: () => string, log: 
         if (!test.ok) return { ...test, limits: null };
         const read = await limitsOf(api, log, user, params.id, test.model);
         return { ...test, limits: read.limits, limitsProblem: read.problem };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/connections/:id/tag-check",
+      access: "page",
+      group: "connections",
+      does: "Checks whether a connection keeps the reply's tags: simple turns played on it as a job, whose id is answered at once; the connection's view then shows the result, when it was checked and the reply form it got.",
+      reply: tagCheckStarted,
+      handle: async ({ params }) => {
+        const started = await checks.tagCheck(owner(), params.id);
+        return "refused" in started ? { refusal: started } : { job: started };
       },
     }),
     route({

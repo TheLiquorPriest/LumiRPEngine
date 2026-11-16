@@ -14,7 +14,7 @@ import { connectionRoutes, rawRoute } from "../../src/app";
 import { invokedAs, runLine } from "../../src/app/commands/run-line";
 import { dataPaths, defaultDataFolder } from "../../src/app/config";
 import { runCli, USAGE } from "../../src/app/cli";
-import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
+import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, NO_TAG_CHECKS, OWNER, testModelLayer, writeConfig } from "./helpers";
 
 describe("rpe", () => {
   let bed: Bed;
@@ -45,7 +45,7 @@ describe("rpe", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", group: "provider", does: "A test's provider endpoint.", answers: "a chat completion", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), () => OWNER, a.log)]);
+            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", group: "provider", does: "A test's provider endpoint.", answers: "a chat completion", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), NO_TAG_CHECKS, () => OWNER, a.log)]);
           },
         },
       ],
