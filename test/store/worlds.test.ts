@@ -136,6 +136,21 @@ describe("world documents by revision", () => {
     expect(w.history(world.id)).toEqual([{ revision, at: 5, source: "create" }]);
   });
 
+  test("a listener added to the store hears each world change after the store's own notice, and one that throws stops no other", () => {
+    const db = storeDb();
+    const order: string[] = [];
+    const store = openStore({ db, registry: registry(), worlds: storedWorlds(db), worldChanged: (c) => order.push(`own ${c.part}`), log: () => undefined });
+    store.onWorld(() => {
+      throw new Error("a listener that fails");
+    });
+    const stop = store.onWorld((c) => order.push(`heard ${c.part}`));
+    const w = store.user(USER).worlds;
+    w.putIndex(world.id, "{}");
+    stop();
+    w.writeDraft(world.id, "{}", 0);
+    expect(order).toEqual(["own index", "heard index", "own draft"]);
+  });
+
   test("carried and Build's world files move in byte for byte, checksums equal", () => {
     const db = new Database(":memory:");
     for (const m of [...MIGRATE_TABLES].sort((a, b) => a.version - b.version)) if ("sql" in m) db.run(m.sql);

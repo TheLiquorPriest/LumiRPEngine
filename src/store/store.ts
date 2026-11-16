@@ -398,7 +398,7 @@ export class Store {
   readonly branchHops: number;
   readonly viewOptions: { ownOnly: readonly string[]; notable: number; placeDepth: number };
   readonly now: () => number;
-  /** @internal */ readonly worldChanged: ((change: WorldChange) => void) | undefined;
+  private readonly worldTold: ((change: WorldChange) => void) | undefined;
   /** The log, for what the store says for people (a walk cut short); null when none was given. */
   readonly log: ((message: string, data: Record<string, unknown>) => void) | null;
   /** Whether the store opened the database itself: then it brought the tables up, and it closes it. */
@@ -469,7 +469,7 @@ export class Store {
     this.fingerprint = usual ? given : hashParts(given, "walks", String(walks.kindChain), String(walks.holderDepth), String(walks.visitDepth));
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)), placeDepth: whole(options.placeDepth, STORE_DEFAULTS.placeDepth, 1) };
     this.now = options.now ?? Date.now;
-    this.worldChanged = options.worldChanged;
+    this.worldTold = options.worldChanged;
   }
 
   /**
@@ -515,6 +515,29 @@ export class Store {
         listener(user, chats);
       } catch (error) {
         this.log?.("A listener of the store's writes failed.", { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+
+  private readonly worldListeners = new Set<(change: WorldChange) => void>();
+
+  /**
+   * Tells `listener` of each change to a user's worlds (a revision put, the index, the draft written or dropped, a history note, a world
+   * removed), once it is durable, by whoever made it: the store's own `StoreOptions.worldChanged` first, then each listener in the order added.
+   * Build's world service tells its open pages by it. Returns what stops it.
+   */
+  onWorld(listener: (change: WorldChange) => void): () => void {
+    this.worldListeners.add(listener);
+    return () => void this.worldListeners.delete(listener);
+  }
+
+  /** @internal What each `UserWorlds` calls when it has written: the store's own notice, then every listener; one that throws is logged and the rest are still told. */
+  worldChanged(change: WorldChange): void {
+    for (const told of [this.worldTold, ...this.worldListeners]) {
+      try {
+        told?.(change);
+      } catch (error) {
+        this.log?.("A listener of the store's world changes failed.", { error: error instanceof Error ? error.message : String(error) });
       }
     }
   }
@@ -2595,7 +2618,7 @@ export class UserStore {
    * a chat's caller makes of a document it has parsed.
    */
   get worlds(): UserWorlds {
-    return new UserWorlds(this.db, this.id, (fn) => this.write(false, fn), this.store.now, this.store.worldChanged);
+    return new UserWorlds(this.db, this.id, (fn) => this.write(false, fn), this.store.now, (change) => this.store.worldChanged(change));
   }
 
   /**
