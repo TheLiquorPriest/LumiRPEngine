@@ -8,7 +8,7 @@
 // the Author settles an edit then, and nothing is written to the chat.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { SettleReply, StageTurn, TurnLoreRow, TurnReply, TurnRow } from "../../../shared/api";
+import type { CarriedTurnsReply, SettleReply, StageTurn, TurnLoreRow, TurnReply, TurnRow } from "../../../shared/api";
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
 import { replyOf, type RpeClient, RpeError } from "../../client";
@@ -25,13 +25,23 @@ import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "..
 import { useRead } from "../../reading";
 import { readFolder } from "./folder";
 import { type ReviewShown, useReview } from "./review";
+import { CarriedRecord, ENGINE_WORDS } from "./sections/carried";
 import { TURN_SECTIONS } from "./sections/list";
 import { type FolderShown, NO_FOLDER, type RequestShown, type TurnParts, type TurnSection } from "./types";
 
 export { NO_FOLDER, readFolder, TURN_SECTIONS };
 export type { FolderShown, OpenShown, RequestShown, TurnParts, TurnSection } from "./types";
 
-function TurnLine(props: { turn: TurnRow; onOpen: () => void }) {
+/** A turn the migration carried, as the carried route lists it. */
+export type CarriedRow = CarriedTurnsReply["turns"][number];
+
+/** What the migration kept of one carried turn, in a line: the engine that played it, why no turn was played, how many lines say something against it. */
+export function carriedWords(row: CarriedRow): string {
+  const engine = row.engine === null ? "engine not read" : ENGINE_WORDS[row.engine];
+  return `carried from today's build, played by ${engine}${row.unplayed === null ? "" : `; no turn was played: ${row.unplayed}`}${row.departures === 0 ? "" : `; ${counted(row.departures, "line")} say something against its turn`}`;
+}
+
+function TurnLine(props: { turn: TurnRow; carried?: CarriedRow | undefined; onOpen: () => void }) {
   const { turn } = props;
   const status = statusWords(turn.kind, turn.status);
   const end = turn.timings.ended ?? turn.timings.released;
@@ -47,13 +57,54 @@ function TurnLine(props: { turn: TurnRow; onOpen: () => void }) {
               {end === null ? "" : `${duration(end - turn.timings.received)} · `}
               {counted(turn.usage.calls, "call")} · {tokenWords(turn.usage)}
             </span>
+            {props.carried === undefined ? null : <span class="lre-listrow-sub" data-carried-line>{carriedWords(props.carried)}</span>}
           </span>
           <span class="lre-inline">
+            {props.carried === undefined ? null : <Badge title={carriedWords(props.carried)}>carried</Badge>}
             {turn.onPath ? null : <Badge>off the path</Badge>}
             <Badge tone={status.tone}>{status.words}</Badge>
           </span>
         </span>
       </button>
+    </li>
+  );
+}
+
+/** What an old engine recorded on a carried turn, read when it is opened and the spoiler gate is open. */
+function CarriedBody(props: { chat: string; turn: string }) {
+  const app = useApp();
+  const { chat, turn } = props;
+  const gate = useSelect(app.gate, (open) => open.has(chat));
+  const read = useRead(gate ? () => app.client.call("GET /api/v1/chats/:chat/turns/:turn/carried", { chat, turn }).then(replyOf) : null, [chat, turn, gate]);
+  if (!gate) {
+    return (
+      <Banner tone="gm" icon="eye-off" title="What the old engine recorded is hidden" actions={<Button onClick={() => app.gate.open(chat)}>Show it for this chat</Button>}>
+        <span>It can give away what comes next.</span>
+      </Banner>
+    );
+  }
+  if (read.problem !== null) return <p class="rpe-line">{read.problem}</p>;
+  return read.value === null ? <p class="lre-muted rpe-line">Reading the old record…</p> : <CarriedRecord carried={read.value} />;
+}
+
+/** A turn the migration carried that the chat's list of runs does not hold: the engine that played it and why no turn was played; opened, what the old record kept of it. */
+function CarriedLine(props: { chat: string; row: CarriedRow }) {
+  const { row } = props;
+  const [open, setOpen] = useState(false);
+  return (
+    <li class="lre-listrow">
+      <button type="button" class="lre-listrow-hit" onClick={() => setOpen(!open)} data-carried-turn={row.turn} aria-expanded={open}>
+        <span class="lre-listrow-content">
+          <span class="lre-listrow-text">
+            <span class="lre-listrow-title">Message {row.message}, swipe {row.swipe + 1}</span>
+            <span class="lre-listrow-sub">
+              {carriedWords(row)} · {counted(row.texts, "text")} kept
+            </span>
+          </span>
+          <Badge>carried</Badge>
+        </span>
+      </button>
+      {open ? <CarriedBody chat={props.chat} turn={row.turn} /> : null}
     </li>
   );
 }
@@ -121,9 +172,13 @@ export interface TurnsViewProps {
   turns: readonly TurnRow[];
   more: boolean;
   loading: boolean;
+  /** The chat the list is of, where it lists carried turns that open in place. */
+  chat?: string;
   problem: string | null;
   /** How many turns of this chat the last migration carried from today's build; null where it carried none, or that is not known. */
   carried?: number | null;
+  /** The turns the migration carried into this chat, each as the carried route lists it. */
+  carriedTurns?: readonly CarriedRow[];
   settle?: { shown: SettleShown; onSettle(): void };
   /** The chat's jobs, with Cancel. */
   jobs?: { shown: JobsShown; onCancel(job: string): void };
@@ -135,6 +190,10 @@ export function TurnsView(props: TurnsViewProps) {
   const { settle } = props;
   const running = props.turns.some((turn) => turn.status === "running");
   const carried = props.carried ?? null;
+  const carriedById = new Map((props.carriedTurns ?? []).map((row) => [row.turn, row] as const));
+  const listed = new Set(props.turns.map((t) => t.id));
+  // Older turns of the list may yet hold some of them: the rest are listed once the list has been read to its oldest.
+  const unlisted = props.more || props.chat === undefined ? [] : (props.carriedTurns ?? []).filter((row) => !listed.has(row.turn));
   return (
     <div class="lre-stack rpe-page" data-page="turns">
       <PageHeader title="Turns" sub="Every turn RPE has played in this chat, newest first." actions={settle === undefined || (props.turns.length === 0 && carried === null) ? undefined : <SettleControl shown={settle.shown} running={running} onSettle={settle.onSettle} />} />
@@ -150,17 +209,27 @@ export function TurnsView(props: TurnsViewProps) {
         ) : props.problem === null ? (
           <Empty icon="list" title="No turn played on RPE yet">
             <span>A turn shows here once RPE plays a reply in this chat.</span>
-            {carried === null ? null : <span>The migration carried {counted(carried, "turn")} of it from today's build: they made its world, cast and story as they stand, and are not runs of RPE's, so none is listed here.</span>}
+            {carried === null ? null : <span>The migration carried {counted(carried, "turn")} of it from today's build: they made its world, cast and story as they stand{unlisted.length > 0 ? ", and each is listed below." : ", and are not runs of RPE's, so none is listed here."}</span>}
           </Empty>
         ) : null
       ) : (
         <div class="lre-section flush">
           <ul class="lre-section-body lre-rowlist rpe-turns">
             {props.turns.map((turn) => (
-              <TurnLine key={turn.id} turn={turn} onOpen={() => props.onOpen(turn.id)} />
+              <TurnLine key={turn.id} turn={turn} carried={carriedById.get(turn.id)} onOpen={() => props.onOpen(turn.id)} />
             ))}
           </ul>
         </div>
+      )}
+      {unlisted.length === 0 ? null : (
+        <Section id="carried" title="Carried from today's build">
+          <p class="rpe-meta">Turns the migration carried that RPE holds no run of: each opens to what the old engine recorded of it.</p>
+          <ul class="lre-rowlist" data-carried-turns>
+            {unlisted.map((row) => (
+              <CarriedLine key={row.turn} chat={props.chat ?? ""} row={row} />
+            ))}
+          </ul>
+        </Section>
       )}
       {props.more ? (
         <Button busy={props.loading} onClick={props.onMore}>
@@ -242,13 +311,24 @@ export function readTurns(client: Pick<RpeClient, "call">, chat: string, limit: 
   };
 }
 
+/** Every turn the migration carried into a chat, its pages read one after another to the end. */
+export async function readCarried(client: Pick<RpeClient, "call">, chat: string, limit: number): Promise<{ rows: CarriedRow[]; total: number }> {
+  const rows: CarriedRow[] = [];
+  for (;;) {
+    const page = await client.call("GET /api/v1/chats/:chat/carried", { chat }, { query: { from: rows.length, limit } });
+    rows.push(...page.turns);
+    if (!page.more || page.turns.length === 0) return { rows, total: page.total };
+  }
+}
+
 export function TurnsPage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
   const turnsAtATime = useUiSetting("turnsAtATime");
   const [read, setRead] = useState<TurnsRead>({ turns: [], more: false, loading: true, problem: null });
   const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
-  const [carried, setCarried] = useState<number | null>(null);
+  // The turns a migration carried into the chat, read to the end: each marks its row in the list, and the rest are listed after it. A chat none was carried into answers none.
+  const carriedRead = useRead(() => readCarried(app.client, chat, turnsAtATime), [chat]);
   const reader = useRef<{ more(): void } | null>(null);
   const [jobs, setJobs] = useState<JobsShown>(NO_JOBS);
   const jobsReader = useRef<JobsReader | null>(null);
@@ -270,27 +350,13 @@ export function TurnsPage(props: { chat: string }) {
       jobsReading.stop();
     };
   }, [chat, turnsAtATime]);
-  const none = !read.loading && read.problem === null && read.turns.length === 0;
-  useEffect(() => {
-    setCarried(null);
-    if (!none) return;
-    // A chat with no run of RPE's yet may have come with a migration: what it carried of it is said, not "no turns".
-    let alive = true;
-    app.client.call("GET /api/v1/migration", {}).then(
-      (shown) => {
-        const turns = shown.chats.find((c) => c.chat === chat && (c.outcome === "imported" || c.outcome === "replaced"))?.turns ?? 0;
-        if (alive) setCarried(turns > 0 ? turns : null);
-      },
-      () => undefined,
-    );
-    return () => {
-      alive = false;
-    };
-  }, [chat, none]);
+  const total = carriedRead.value?.total ?? 0;
   return (
     <TurnsView
       {...read}
-      carried={carried}
+      chat={chat}
+      carried={total > 0 ? total : null}
+      carriedTurns={carriedRead.value?.rows ?? []}
       settle={{ shown: settle, onSettle: () => settleNow(app.client, chat, setSettle) }}
       jobs={{ shown: jobs, onCancel: (job) => jobsReader.current?.cancel(job) }}
       onOpen={(turn) => app.go({ page: "turns", chat, at: [turn] })}
