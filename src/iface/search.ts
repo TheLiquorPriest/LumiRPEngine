@@ -10,7 +10,7 @@
 // one state taken apart from any chat (the gap check's searcher).
 
 import { type Found, ordered, readingOf, refsOf, scoreThing, thingOf, wordsOf, type StateIndex } from "../store/search";
-import type { SearchKind, StateHit, StateSearch } from "./kit";
+import type { StateHit, StateKind, StateSearch } from "./kit";
 
 const hitOf = ({ score: _score, ...hit }: Found): StateHit => hit;
 
@@ -36,7 +36,7 @@ export const stateScan: { search: (...args: Parameters<StateSearch["search"]>) =
 /** The search over a chat's state index (`StateIndex.search`), for the user and chat the host's tools are made for. */
 export function indexedSearch(index: StateIndex, who: { user: string; chat: string }): StateSearch {
   return {
-    async search(state, env, words, opts: { kind?: SearchKind; limit: number }) {
+    async search(state, env, words, opts: { kind?: StateKind; limit: number }) {
       return (await index.search(who.user, who.chat, state, env, words, opts)).map(hitOf);
     },
   };

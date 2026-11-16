@@ -21,7 +21,7 @@ describe("spawn of what is there already", () => {
 
   test("a place sent a name its parent has is made beside it and the one there is told of", async () => {
     const t = await rig();
-    const r = await t.call("world_apply", { operations: [{ op: "spawn", kind: "room", name: "The Cellar", at: "lamp_ladle", source: src }] });
+    const r = await t.call("world_apply", { operations: [{ op: "place", kind: "room", name: "The Cellar", at: "lamp_ladle", source: src }] });
     expect(r.error).toBeUndefined();
     expect(r.reports?.[0]).toContain("[cellar]");
   });

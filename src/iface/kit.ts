@@ -117,11 +117,13 @@ export interface StateHit {
 
 /** The search over a chat's state by words (plan §6.8 `world_search`). */
 export interface StateSearch {
-  search(state: StoreState, env: FoldEnv, words: string, opts: { kind?: SearchKind; limit: number }): StateHit[] | Promise<StateHit[]>;
+  search(state: StoreState, env: FoldEnv, words: string, opts: { kind?: StateKind; limit: number }): StateHit[] | Promise<StateHit[]>;
 }
 
 export const SEARCH_KINDS = ["person", "thing", "place", "group", "quest"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
+/** The kinds the state's own search finds: a quest is found from the quest records, beside it. */
+export type StateKind = Exclude<SearchKind, "quest">;
 
 /** A statement about a thing, as the `fact` operation gives it to the fact store (plan §6.6). */
 export interface FactWrite {

@@ -111,9 +111,9 @@ describe("a world with nothing in it", () => {
     const src = { from: "prose", message: "m-1" };
     const r = await t.call("world_apply", {
       operations: [
-        { op: "spawn", kind: "place", name: "Gull Skerry", description: "A bare rock with a light on it.", source: src },
-        { op: "spawn", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: src },
-        { op: "spawn", kind: "room", name: "Lamp room", at: "Gull Skerry", source: src },
+        { op: "place", kind: "place", name: "Gull Skerry", description: "A bare rock with a light on it.", source: src },
+        { op: "place", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: src },
+        { op: "place", kind: "room", name: "Lamp room", at: "Gull Skerry", source: src },
         { op: "spawn", kind: "person", name: "Ada Lorne", at: "Keeper's kitchen", source: src },
         { op: "horizon", list: ["Keeper's kitchen", "Ada Lorne", "Lamp room"], source: { from: "author" } },
       ],
@@ -135,7 +135,7 @@ describe("a world with nothing in it", () => {
     wordsFromFiles(r);
 
     // Made again, a place of that name in the same place is a second one, and the first is told of in a report.
-    const again = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: "Gull Skerry", source: src }] });
+    const again = await t.call("world_apply", { operations: [{ op: "place", kind: "place", name: "Gull Skerry", source: src }] });
     expect(again.error).toBeUndefined();
     expect(again.reports).toHaveLength(1);
     expect(again.reports?.[0]).toContain("stood under that name already");
@@ -148,19 +148,19 @@ describe("a world with nothing in it", () => {
     const src = { from: "prose", message: "m-3" };
     const r = await t.call("world_apply", {
       operations: [
-        { op: "spawn", kind: "place", name: "Gull Skerry", fields: { law: "curfew at dusk" }, tier: "notable", source: src },
-        { op: "spawn", kind: "room", name: "Lamp room", at: "Gull Skerry", description: "Glass on every side.", fields: { smell: "paraffin", description: "never read over the call's own" }, source: src },
+        { op: "place", kind: "place", name: "Gull Skerry", fields: { law: "curfew at dusk" }, tier: "notable", source: src },
+        { op: "place", kind: "room", name: "Lamp room", at: "Gull Skerry", description: "Glass on every side.", fields: { smell: "paraffin", description: "never read over the call's own" }, source: src },
       ],
     });
     expect(r.error).toBeUndefined();
-    expect(r.reports).toEqual(["Operation 1 (spawn): a place has no tier, so that was not kept."]);
+    expect(r.reports).toEqual(["Operation 1 (place): a place has no tier, so that was not kept."]);
     expect(r.reports?.filter((x) => x.includes("so that was not kept"))).toHaveLength(1);
     const state = t.s.stateAt(t.turn.id).state;
     const doc = t.deps.env.worlds(state.world.revision);
     if (!doc) throw new Error("no blank world");
     const places = Object.values(playedWorld(doc, state.world).places);
     expect(places.find((p) => p.name === "Gull Skerry")?.fields).toEqual({ law: "curfew at dusk" });
-    expect(places.find((p) => p.name === "Lamp room")?.fields).toEqual({ smell: "paraffin", description: "Glass on every side." });
+    expect(places.find((p) => p.name === "Lamp room")?.fields).toEqual({ smell: "paraffin" });
     wordsFromFiles(r);
   });
 });
@@ -174,7 +174,7 @@ describe("answers that say what would work", () => {
     expect(r.error).toBe(true);
     const said = texts(r).join("\n");
     expect(said.split("It is one of:")).toHaveLength(2);
-    expect(said).toMatch(/kind cannot be read, you sent "building"\. It is one of: character, thing, person, .*, region \(Weather region\), .*, place, room, spot, venue\./);
+    expect(said).toMatch(/kind cannot be read, you sent "building"\. It is one of: character, thing, person, .*, region \(Weather region\), .*\./);
     expect(said).toContain("spawn needs name, and also takes kind, at, in, on, tier, fields, bestiary, type, class, qty, owner, description, why.");
     expect(t.s.changes(t.turn.id)).toEqual([]);
     wordsFromFiles(r);
@@ -191,7 +191,7 @@ describe("answers that say what would work", () => {
     expect(r.error).toBe(true);
     expect(texts(r)).toEqual([
       "Operation 2 (move): there is nothing called Skerry Rock that is a place. By that name there is Skerry Rock [skerry_rock] (Weather region). Near: The Far Road [far_road], The Cellar [cellar], The Common Room [common_room], Thornbury [thornbury], Hollow Vale [vale].",
-      "A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.",
+      "A place can be made earlier in this same call: place with a kind of place and its name, before the operation that names it.",
       "move needs who, to, and also takes with, square, near, zone, why.",
       "Nothing was recorded. Send the call again with that put right.",
     ]);
@@ -203,7 +203,7 @@ describe("answers that say what would work", () => {
   test("an operation sent without what it needs says what that kind needs and takes, and what it was sent that it does not read", async () => {
     const t = await rig();
     const r = await t.call("world_apply", { operations: [{ op: "fact", subject: "bram", value: "Keeps a ledger of every debt.", source: src }] });
-    expect(texts(r)).toEqual(["Operation 1 (fact) needs about, key.", "fact needs about, key, value, and also takes replaces. It does not read subject.", "Nothing was recorded. Send the call again with that put right."]);
+    expect(texts(r)).toEqual(["Operation 1 (fact) needs about, key.", "fact needs about, key, value, and also takes replaces, part, beat. It does not read subject.", "Nothing was recorded. Send the call again with that put right."]);
     const empty = await t.call("world_apply", {});
     expect(texts(empty)).toEqual(["operations cannot be read. It is a list of operations, each with its op, one of: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn, horizon."]);
     for (const x of [r, empty]) wordsFromFiles(x);

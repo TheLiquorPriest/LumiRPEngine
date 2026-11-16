@@ -13,7 +13,7 @@ const src = { from: "prose", message: "m-60" };
 describe("never at a place that is not there", () => {
   test("a horizon entry written as a reference to a place that is not there is not there, and nothing is recorded", async () => {
     const t = await rig({}, "blank");
-    const r = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: "Gull Skerry", source: src }, { op: "horizon", list: ["place:keepers_kitchen"] }] });
+    const r = await t.call("world_apply", { operations: [{ op: "place", kind: "place", name: "Gull Skerry", source: src }, { op: "horizon", list: ["place:keepers_kitchen"] }] });
     expect(r.error).toBe(true);
     expect(texts(r).some((x) => x.startsWith("Operation 2 (horizon): there is nothing called place:keepers_kitchen"))).toBe(true);
     expect(texts(r).some((x) => x.includes("kept on the horizon as words"))).toBe(false);
@@ -23,7 +23,7 @@ describe("never at a place that is not there", () => {
 
   test("a horizon recorded with a place that is not there sends nothing made in words to it", async () => {
     const t = await rig({}, "blank");
-    const made = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: "Gull Skerry", source: src }] });
+    const made = await t.call("world_apply", { operations: [{ op: "place", kind: "place", name: "Gull Skerry", source: src }] });
     expect(made.error).toBeUndefined();
     // As a horizon recorded before entries like this were refused, or by any other way in.
     await t.writes.run(() => t.s.addChanges(t.turn.id, [{ lane: "story", op: HORIZON.op, value: { list: [{ at: "place:keepers_kitchen", depth: "full" }] }, by: "author-1" }]));

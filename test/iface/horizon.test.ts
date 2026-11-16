@@ -12,9 +12,9 @@ const SRC = { from: "prose", message: "m-1" };
 
 /** Seven good operations setting the scene from nothing, in one call. */
 const SCENE: JsonObject[] = [
-  { op: "spawn", kind: "place", name: "Gull Skerry", source: SRC },
-  { op: "spawn", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: SRC },
-  { op: "spawn", kind: "room", name: "Lamp room", at: "Gull Skerry", source: SRC },
+  { op: "place", kind: "place", name: "Gull Skerry", source: SRC },
+  { op: "place", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: SRC },
+  { op: "place", kind: "room", name: "Lamp room", at: "Gull Skerry", source: SRC },
   { op: "spawn", kind: "person", name: "Ada Lorne", at: "Keeper's kitchen", source: SRC },
   { op: "spawn", kind: "person", name: "Tobin Lorne", at: "Keeper's kitchen", source: SRC },
   { op: "spawn", name: "Oil lamp", at: "Lamp room", source: SRC },

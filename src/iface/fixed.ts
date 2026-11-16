@@ -15,7 +15,7 @@ import { createRng } from "../engine/rng";
 import { WORLD_STATE_DEFAULTS } from "../store/world-state";
 import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
-import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
+import { type Call, oneOf, Reply, SEARCH_KINDS, type StateKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { baseOf, isPlaceFactPart, PLACE_FACT_PARTS, PLACES_DEFAULTS, placeAtState, placeSliceOf, sourcesNow, sourcesOf, withPlaceLines } from "../places";
 import { queryQuests, searchedQuests } from "../quests/query";
 import { clockText, listDue, timeFrom } from "./ops-time";
@@ -133,7 +133,7 @@ export const WORLD_SEARCH: ToolSpec = {
     if (asked === undefined || !Number.isInteger(asked) || asked < 1) return reply.line("unreadable", { field: "limit", value: JSON.stringify(args.limit), wants: reading.lines.line("wants_qty") ?? "" }).fail();
     // At most what the setting allows, with how many more were found beyond what is listed.
     // (S17Story, quests) A quest is found by the words of its name, objective and stages, beside what the state's search finds; the state's own kinds are asked of it alone.
-    const stateKind = args.kind === undefined || args.kind === "quest" ? undefined : (args.kind as SearchKind);
+    const stateKind = args.kind === undefined || args.kind === "quest" ? undefined : (args.kind as StateKind);
     const fromState = args.kind === "quest" ? [] : await call.deps.search.search(reading.state, call.deps.env, words, { ...(stateKind !== undefined ? { kind: stateKind } : {}), limit: Number.MAX_SAFE_INTEGER });
     const found = [...fromState, ...(args.kind === undefined || args.kind === "quest" ? searchedQuests(reading, words) : [])];
     if (found.length === 0) return reply.line("none_found", { words });

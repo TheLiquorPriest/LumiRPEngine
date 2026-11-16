@@ -14,9 +14,9 @@ async function scene(): Promise<Rig> {
   const t = await rig({}, "blank");
   const r = await t.call("world_apply", {
     operations: [
-      { op: "spawn", kind: "place", name: "Gull Skerry", source: SRC },
-      { op: "spawn", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: SRC },
-      { op: "spawn", kind: "place", name: "Boat shed", at: "Gull Skerry", source: SRC },
+      { op: "place", kind: "place", name: "Gull Skerry", source: SRC },
+      { op: "place", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: SRC },
+      { op: "place", kind: "place", name: "Boat shed", at: "Gull Skerry", source: SRC },
       { op: "spawn", kind: "person", name: "Ada Lorne", at: "Boat shed", source: SRC },
       { op: "horizon", list: ["Keeper's kitchen", "Ada Lorne"] },
     ],

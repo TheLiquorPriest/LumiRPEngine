@@ -11,7 +11,7 @@ import { dataOf, rig, texts, wordsFromFiles } from "./rig";
 const src = { from: "prose", message: "m-1" };
 const ROCK = "Gull Skerry";
 const KITCHEN = "Gull Skerry keeper's kitchen";
-const PLACE_HINT = "A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.";
+const PLACE_HINT = "A place can be made earlier in this same call: place with a kind of place and its name, before the operation that names it.";
 const NOTHING_PLACE = "Nothing that is a place is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.";
 
 describe("the first turn of a chat with no world", () => {
@@ -19,8 +19,8 @@ describe("the first turn of a chat with no world", () => {
     const t = await rig({}, "blank");
     const r = await t.call("world_apply", {
       operations: [
-        { op: "spawn", kind: "place", name: ROCK, description: "A rock in the sea with a lighthouse on it.", source: src },
-        { op: "spawn", kind: "place", name: KITCHEN, at: ROCK, source: src },
+        { op: "place", kind: "place", name: ROCK, description: "A rock in the sea with a lighthouse on it.", source: src },
+        { op: "place", kind: "place", name: KITCHEN, at: ROCK, source: src },
         { op: "spawn", kind: "person", name: "Ada Lorne", at: KITCHEN, source: src },
         { op: "spawn", kind: "person", name: "Tobin Lorne", source: src },
         { op: "move", who: "Tobin Lorne", to: KITCHEN, source: src },
@@ -58,13 +58,13 @@ describe("the first turn of a chat with no world", () => {
     };
     // A region made as the packs' weather region, then a place made at it, which it is not.
     const region = { op: "spawn", kind: "region", name: ROCK, source: src };
-    expect(await refused({ operations: [region, { op: "spawn", kind: "place", name: KITCHEN, at: ROCK, source: src }] })).toEqual(
-      expect.arrayContaining([`Operation 2 (spawn): there is nothing called ${ROCK} that is a place. By that name there is ${ROCK} [gull_skerry] (Weather region). ${NOTHING_PLACE}`, PLACE_HINT]),
+    expect(await refused({ operations: [region, { op: "place", kind: "place", name: KITCHEN, at: ROCK, source: src }] })).toEqual(
+      expect.arrayContaining([`Operation 2 (place): there is nothing called ${ROCK} that is a place. By that name there is ${ROCK} [gull_skerry] (Weather region). ${NOTHING_PLACE}`, PLACE_HINT]),
     );
     // A fact with neither what it is about nor its key.
     expect(await refused({ operations: [{ op: "fact", subject: "Ada Lorne", value: "Keeps the light.", source: src }] })).toEqual([
       "Operation 1 (fact) needs about, key.",
-      "fact needs about, key, value, and also takes replaces. It does not read subject.",
+      "fact needs about, key, value, and also takes replaces, part, beat. It does not read subject.",
       "Nothing was recorded. Send the call again with that put right.",
     ]);
     // Nothing at all.
@@ -77,7 +77,7 @@ describe("the first turn of a chat with no world", () => {
       "Nothing was recorded. Send the call again with that put right.",
     ]);
     // The place itself, which was refused as a kind that could not be read, is now made.
-    const made = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: ROCK, source: src }] });
+    const made = await t.call("world_apply", { operations: [{ op: "place", kind: "place", name: ROCK, source: src }] });
     expect(made.error).toBeUndefined();
     expect((dataOf(made).changed as JsonObject[]).some((c) => c.at === "place:gull_skerry" && c.new === true)).toBe(true);
   });

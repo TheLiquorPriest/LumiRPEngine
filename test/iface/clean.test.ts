@@ -16,7 +16,7 @@ async function kitchen(): Promise<Rig> {
   const t = await rig({}, "blank");
   const r = await t.call("world_apply", {
     operations: [
-      { op: "spawn", kind: "place", name: "Keeper's kitchen", source: SRC },
+      { op: "place", kind: "place", name: "Keeper's kitchen", source: SRC },
       { op: "spawn", kind: "person", name: "Traveller", at: "Keeper's kitchen", source: SRC },
       { op: "spawn", kind: "person", name: "Marta Venn", at: "Keeper's kitchen", source: SRC },
       { op: "spawn", name: "hand lantern", at: "Keeper's kitchen", source: SRC },
