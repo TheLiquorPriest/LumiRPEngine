@@ -9,6 +9,7 @@
 // said in the client's own words until a read succeeds, and the last state read stays shown.
 
 import type { SyncState } from "../../../frontend/protocol-client";
+import type { LiveEvent } from "../../../shared/api";
 import { createStore, type Readable } from "../../store";
 import { replyOf, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
@@ -23,7 +24,7 @@ export interface ChatState extends Readable<SyncState> {
   stop(): void;
 }
 
-export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: string): ChatState {
+export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: string, heard?: (events: readonly LiveEvent[]) => void): ChatState {
   // Before anything is read: no view, and a read on its way.
   const state = createStore<SyncState>({ chatId: chat, rev: null, view: null, status: "syncing", resyncs: 0, activity: null, canStop: null, failed: null });
   let alive = true;
@@ -63,6 +64,7 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
 
   const unfollow = client.follow(chat, {
     events(events, missed) {
+      heard?.(events);
       if (missed !== null || events.some((event) => event.kind === STATE_CHANGED)) read();
     },
     reset: read,

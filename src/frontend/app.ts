@@ -5,7 +5,6 @@
 
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
-import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
 import type { AgentsView } from "../shared/agents";
 import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
@@ -18,6 +17,61 @@ import type { RequestBody, Send } from "./registry";
 import type { Readable, Store } from "../ui/store";
 import { useSelect } from "../ui/store";
 import type { UiCatalog } from "./ui-registry";
+
+/** What a control the host draws hands back: its element, a way to change its options, and a way to take it away. */
+export interface ControlHandle<O> {
+  readonly componentId: string;
+  readonly element: HTMLElement;
+  update(patch: Partial<O>): void;
+  destroy(): void;
+}
+
+/** A control's place: the element itself, or a selector naming it. */
+export type ControlTarget = Element | string;
+
+export interface SwitchOptions {
+  checked?: boolean;
+  disabled?: boolean;
+  ariaLabel?: string;
+  onChange?(checked: boolean): void;
+}
+
+export interface SelectOptions {
+  value?: string;
+  options?: readonly { value: string; label: string; sublabel?: string; disabled?: boolean }[];
+  placeholder?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+  onChange?(value: string): void;
+}
+
+export interface SliderOptions {
+  min: number;
+  max: number;
+  value?: number;
+  step?: number;
+  integer?: boolean;
+  label?: string;
+  hint?: string;
+  format?: { suffix?: string };
+  disabled?: boolean;
+  onCommit?(value: number): void;
+  onDragValue?(value: number | null): void;
+}
+
+export interface ModelPickerOptions {
+  value?: string;
+  connection?: { kind: "llm"; id?: string };
+  onChange?(model: string): void;
+}
+
+/** The four controls the kept views mount through the host, each drawn by the shell they run in: Lumiverse's own in the drawer, the page's in the web shell. */
+export interface HostControls {
+  mountSwitch(target: ControlTarget, options?: SwitchOptions): ControlHandle<SwitchOptions> & { getValue(): boolean };
+  mountSelect(target: ControlTarget, options: SelectOptions): ControlHandle<SelectOptions> & { getValue(): string };
+  mountRangeSlider(target: ControlTarget, options: SliderOptions): ControlHandle<SliderOptions> & { getValue(): number };
+  mountModelCombobox(target: ControlTarget, options: ModelPickerOptions): ControlHandle<ModelPickerOptions>;
+}
 
 /** The drawer's modes. `harness` holds the harness's own pages and is offered only while the open chat plays on the harness (`harness/mode.ts`). */
 export type Mode = "play" | "gm" | "build" | "settings" | "harness";
@@ -214,7 +268,7 @@ export interface DrawerState {
 export interface HostBridge {
   viewport: Readable<Viewport>;
   drawer: Readable<DrawerState>;
-  components: SpindleComponentsHelper;
+  components: HostControls;
   confirm(title: string, message: string, variant: "info" | "warning" | "danger", confirmLabel: string): Promise<boolean>;
   worldBooks(): Promise<{ id: string; name: string }[]>;
   connections(): Promise<{ id: string; name: string; model: string | null }[]>;

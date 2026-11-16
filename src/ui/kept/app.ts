@@ -1,31 +1,55 @@
-// Today's `App` (`frontend/app.ts`) for the part of today's frontend this build keeps, Build mode,
-// made as today's `setup` makes it (`frontend/setup.tsx`) over a transport to RPE: the protocol client,
-// send and request, the packs' catalog, the UI state (in Build), the toasts and their toast, the draft
-// and its tracking, and the host bridge the shell gives. What this build no longer has is left out:
-// prepared replies and restart, swipe-ask, LumiAH's pages, the MCP notice, the chat's state sync, the
-// drawer tab, the HUD and the float overlays. The App's type still names the chat's state, the agents
-// and the overlays: the state is the client's own, which no hello ever opens; the agents stay unheard
-// of; and no overlay exists to open.
+// Today's `App` (`frontend/app.ts`) for the part of today's frontend this build keeps: Build and the
+// Play view, made as today's `setup` makes it (`frontend/setup.tsx`), and made once, for both. One
+// protocol client over one transport (client.ts: the call files' typed routes, and the old road for what
+// none takes yet), send and request, the packs' catalog, the UI state, the toasts and their one toast,
+// the draft and its tracking, and the host bridge the shell gives. The state the App's `sync` holds is
+// RPE's (chat-state.ts), for the chat the App is for: Play's chat, or the chat Lumiverse has open.
+// What RPE's live feed says of that chat reaches today's client as the pushes today's backend sent
+// (each call file's `live`), so today's components react unchanged.
 //
-// What RPE answers `unavailable` to a tool it does not serve (transport.ts) is said once, where it was
-// asked for: on the Build page that asked, in RPE's own words, and never as a toast.
+// A refusal RPE answers on the old road (`unavailable` to a request no route serves yet) is said once on
+// the page, in RPE's own words, and never toasted: it is held back by the request it answers (the
+// transport knows which), not by what its words are. Nothing is remembered: the same request asked again
+// is asked again. A road failure is not a refusal and toasts as the road's.
 
 import type { AgentsView } from "../../shared/agents";
-import type { ErrorMessage } from "../../shared/protocol";
-import { type App, type Draft, initialUi, makeRequest, type Overlays, SHOW_IDS_KEY, type Toast, type UiState } from "../../frontend/app";
-import type { Send } from "../../frontend/registry";
-import { trackDraft } from "../../frontend/build/draft";
+import { type App, type Draft, initialUi, type Overlays, playAt, type Toast, type UiState } from "../../frontend/app";
 import { UI_PACKS } from "../../frontend/packs";
+import { trackDraft } from "../../frontend/build/draft";
 import { ProtocolClient } from "../../frontend/protocol-client";
-import { createStore, type Readable } from "../store";
+import type { Send } from "../../frontend/registry";
 import { buildCatalog } from "../../frontend/ui-registry";
+import type { ChatId } from "../../shared/ids";
+import type { ErrorMessage, ResultMessage } from "../../shared/protocol";
+import { SHOW_IDS_KEY } from "../../frontend/app";
+import type { RpeClient } from "../client";
 import type { Timers } from "../roads";
+import { createStore, type Readable, type Store } from "../store";
+import { openChatState } from "./chat-state";
+import { type CallFile, type OldRoad, keptTransport } from "./client";
 import type { KeptHost } from "./host";
-import type { BuildTransport } from "./transport";
+import type { ChatState } from "./play/source";
 
-/** As today's setup shows toasts: the newest three, an error for 6 s and anything else for 3.5 s. */
-export const TOASTS_SHOWN = 3;
-export const TOAST_MS: Readonly<Record<Toast["tone"], number>> = { error: 6000, info: 3500 };
+/** What the toasts read of the page's settings, at each toast: how many show at once and for how long (`pages.toastsShown`, `pages.errorToastMs`, `pages.toastMs`). */
+export interface ToastSettings {
+  readonly toastsShown: number;
+  readonly errorToastMs: number;
+  readonly toastMs: number;
+}
+
+/** What the page says of an overlay this build has nowhere to open, when one of today's buttons asks for it. */
+export const NOT_HERE = {
+  /** Act, Actions, Timelapse and a fight's turn open today's actions sheet. */
+  palette: "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE.",
+  /** The map's Full screen, asked on Places, where the map already shows. */
+  map: "The map does not open full screen in this build of RPE; Places shows it here.",
+  world: "The World sheet does not open in this build of RPE.",
+} as const;
+
+/** What the page says once Attach gave the chat a world, named as the worlds' list named it. */
+export function attachedWords(world: string): string {
+  return `${world} is attached to this chat.`;
+}
 
 /** Only Play's map, place sheet, calendar and combat panels open an overlay; Build opens none, and this build has none to open. */
 export const NO_OVERLAYS: Overlays = {
@@ -38,17 +62,28 @@ export const NO_OVERLAYS: Overlays = {
 };
 
 export interface KeptDeps {
-  /** Today's messages, to RPE and back (transport.ts). */
-  transport: BuildTransport;
+  client: Pick<RpeClient, "call" | "follow">;
+  /** The chat the App is for: Play's chat, or the chat Lumiverse has open (the page sets it as the chat changes); null for none. */
+  chat: Store<string | null>;
+  /** Which kept view the App is for. */
+  mode: "build" | "play";
+  /** The road a request no call file takes yet goes by. */
+  oldRoad: OldRoad;
   host: KeptHost;
   timers: Timers;
+  /** The toasts' count and times, read at each toast. */
+  settings(): ToastSettings;
+  /** Shows the shell's Build page, where today's Play would switch to Build mode. */
+  openBuild?(): void;
+  /** The call files; the folder's list unless a test gives its own. */
+  calls?: readonly CallFile[];
 }
 
 export interface Kept {
   app: App;
-  /** RPE's own answers to the tools it does not serve that the Build page now showing asked for, each once, in the order asked. */
-  said: Readable<readonly ErrorMessage[]>;
-  /** Takes everything back: the client's hearing, the draft's tracking, the toasts' timers. */
+  /** What the page says once, in the order said: RPE's own words for a request it does not serve yet that the page asked, an Undo's sentence, and what an overlay's button does not open. */
+  said: Readable<readonly string[]>;
+  /** Takes everything back: the client's hearing, the chat's state, the draft's tracking, the toasts' timers. */
   stop(): void;
 }
 
@@ -61,28 +96,87 @@ export function showIdsChosen(): boolean {
   }
 }
 
+/** Today's client, but the chat's view comes from RPE's state route: asking for it afresh reads it again (chat-state.ts). */
+class KeptClient extends ProtocolClient {
+  constructor(
+    transport: ConstructorParameters<typeof ProtocolClient>[0],
+    options: ConstructorParameters<typeof ProtocolClient>[1],
+    private readonly chatView: ChatState,
+  ) {
+    super(transport, options);
+  }
+
+  /**
+   * RPE has no hello: the view it would ask for is read again from RPE and shows when it comes. The App shows the one chat the
+   * page names, so nothing is switched; and nothing the page shows waits on the hello's own answer (today's callers drop it), so
+   * none is given.
+   */
+  override open(_chatId: ChatId | null): Promise<ResultMessage | ErrorMessage> {
+    this.chatView.read();
+    return new Promise(() => undefined);
+  }
+
+  override retry(): void {
+    this.chatView.read();
+  }
+
+  override resync(): void {
+    this.chatView.read();
+  }
+}
+
+/** The overlays as Play has them for now: the map is Play's Places; the rest say, once, that they do not open. */
+function playOverlays(ui: Store<UiState>, say: (text: string) => void): Overlays {
+  return {
+    openMap: async () => {
+      const at = ui.get();
+      if (at.mode === "play" && at.play.dest === "places" && at.play.stack.length === 0) say(NOT_HERE.map);
+      else ui.update((state) => playAt(state, "places"));
+    },
+    closeMap: () => undefined,
+    openPalette: async () => say(NOT_HERE.palette),
+    closePalette: () => undefined,
+    openWorld: async () => say(NOT_HERE.world),
+    closeWorld: () => undefined,
+  };
+}
+
 export function keptApp(deps: KeptDeps): Kept {
   const { timers } = deps;
   const clock = { set: (run: () => void, ms: number) => timers.setTimeout(run, ms), clear: (handle: unknown) => timers.clearTimeout(handle) };
   const stops: (() => void)[] = [];
-  const client = new ProtocolClient(deps.transport, { timers: clock });
+  const transport = keptTransport({ client: deps.client, chat: () => deps.chat.get(), oldRoad: deps.oldRoad, ...(deps.calls === undefined ? {} : { calls: deps.calls }) });
+  stops.push(() => transport.close());
+  // What RPE's live feed says of the chat the App is for reaches today's client as the pushes today's backend sent (each call file's `live`).
+  const state = openChatState(deps.client, deps.chat, (events) => {
+    for (const event of events) transport.live(event);
+  });
+  stops.push(() => state.stop());
+  const client = new KeptClient(transport, { timers: clock }, state);
   stops.push(() => client.dispose());
 
   const toasts = createStore<Toast[]>([]);
+  const said = createStore<readonly string[]>([]);
   const showing = new Set<unknown>();
   let toastId = 0;
   let stopped = false;
-  const refused = (text: string): boolean => deps.transport.refusals().some((answer) => answer.message === text);
+  const say = (text: string): void => {
+    if (!stopped && text !== "" && !said.get().includes(text)) said.update((all) => [...all, text]);
+  };
   const toast = (text: string, tone: Toast["tone"] = "info"): void => {
-    // Once the page is left, nothing more shows (the client answers what was still out as it stops); RPE's word on a tool it does not serve is said on the page instead.
-    if (stopped || (tone === "error" && refused(text))) return;
+    // Once the page is left, nothing more shows (the client answers what was still out as it stops); a refusal's words were blanked, and said on the page.
+    if (stopped || text === "") return;
+    const { toastsShown, errorToastMs, toastMs } = deps.settings();
     toastId += 1;
     const id = toastId;
-    toasts.update((all) => [...all.slice(1 - TOASTS_SHOWN), { id, text, tone }]);
-    const handle = timers.setTimeout(() => {
-      showing.delete(handle);
-      toasts.update((all) => all.filter((entry) => entry.id !== id));
-    }, TOAST_MS[tone]);
+    toasts.update((all) => [...all.slice(Math.max(0, all.length - (toastsShown - 1))), { id, text, tone }]);
+    const handle = timers.setTimeout(
+      () => {
+        showing.delete(handle);
+        toasts.update((all) => all.filter((entry) => entry.id !== id));
+      },
+      tone === "error" ? errorToastMs : toastMs,
+    );
     showing.add(handle);
   };
   stops.push(() => {
@@ -91,39 +185,83 @@ export function keptApp(deps: KeptDeps): Kept {
   });
   stops.push(client.onError((error) => toast(error.message, "error")));
 
-  const ui = createStore<UiState>({ ...initialUi(showIdsChosen()), mode: "build" });
-  const said = createStore<readonly ErrorMessage[]>([]);
-  let place = JSON.stringify(ui.get().build);
-  stops.push(
-    ui.subscribe((state) => {
-      const next = JSON.stringify(state.build);
-      if (next === place) return;
-      place = next;
-      said.set([]);
-    }),
-  );
+  const ui = createStore<UiState>({ ...initialUi(showIdsChosen()), mode: deps.mode });
+  if (deps.mode === "build") {
+    // A place Build opens at, then said once for the place it is on: what a refusal said stays only while the same page shows.
+    let place = JSON.stringify(ui.get().build);
+    stops.push(
+      ui.subscribe((held) => {
+        const next = JSON.stringify(held.build);
+        if (next === place) return;
+        place = next;
+        said.set([]);
+      }),
+    );
+  } else {
+    stops.push(
+      ui.subscribe((held) => {
+        if (held.mode !== "build") return;
+        // The page stays Play's; Build is a page of the shell.
+        ui.update((now) => ({ ...now, mode: "play" }));
+        deps.openBuild?.();
+      }),
+    );
+  }
+
+  // The worlds' names, as the picker's list gave them, so an attach can be said with its world's name.
+  const worldNames = new Map<string, string>();
+  // RPE's words for each refusal `send` blanked, by the answer it blanked.
+  const refusals = new WeakMap<object, string>();
   const send: Send = async (body) => {
-    const asked = place;
+    if (deps.mode === "play" && body.type === "lre.chat.knowledge" && body.engines === true) {
+      // Which engine plays the chat, which today's picker asks after its Attach to word its toast: RPE plays every chat one way, and today's words name another. Nothing comes back, so the picker shows no toast; the attach is said in the page's words instead.
+      return new Promise(() => undefined);
+    }
     const answer = await client.send(body);
-    if (answer.type === "lre.error" && asked === place && refused(answer.message) && !said.get().some((s) => s.message === answer.message)) said.update((all) => [...all, answer]);
+    if (answer.type === "lre.error") {
+      // RPE's refusal of a request it does not serve yet: its words are the page's, said once by `request`; what a component gets back from `send` has none, so nothing toasts them.
+      if (!transport.takeRefusal(answer.reqId)) return answer;
+      const blanked = { ...answer, message: "" };
+      refusals.set(blanked, answer.message);
+      return blanked;
+    }
+    if (deps.mode === "play") {
+      if (answer.request === "lre.world") {
+        for (const world of answer.body.worlds ?? []) worldNames.set(world.id, world.name);
+        if (body.type === "lre.world" && body.op === "attach") say(attachedWords(worldNames.get(body.worldId) ?? body.worldId));
+      }
+      // An Undo's answer may say what it left as it was; today's Undo keeps only whether it applied.
+      if (answer.request === "lre.chip" && answer.body.said !== undefined && answer.body.said !== "") say(answer.body.said);
+    }
     return answer;
+  };
+  /** Sends a request; an error is shown, as a toast, or said on the page where it is RPE's refusal of a request it does not serve yet, and the request resolves null. */
+  const request: App["request"] = async (body) => {
+    const message = await send(body);
+    if (message.type === "lre.error") {
+      const refusal = refusals.get(message);
+      if (refusal !== undefined) say(refusal);
+      else toast(message.lint && message.lint.length > 0 ? `${message.message} (${message.lint.length} issue${message.lint.length === 1 ? "" : "s"})` : message.message, "error");
+      return null;
+    }
+    return message.body as never;
   };
   const app: App = {
     client,
     send,
-    sync: { get: () => client.getState(), subscribe: (listener) => client.subscribe(listener) },
+    sync: state,
     catalog: buildCatalog(UI_PACKS),
     ui,
     toasts,
     host: deps.host,
-    overlays: NO_OVERLAYS,
+    overlays: deps.mode === "play" ? playOverlays(ui, say) : NO_OVERLAYS,
     drafts: createStore<Draft | null>(null),
     agents: createStore<AgentsView | null>(null),
     toast,
-    request: makeRequest(send, toast),
+    request,
   };
-  // A push that the draft moved past the one Build holds has it read again (DESIGN §23); RPE sends a request's pushes with its answer.
-  stops.push(trackDraft(app, clock));
+  // A push that the draft moved past the one Build holds has it read again (DESIGN §23).
+  if (deps.mode === "build") stops.push(trackDraft(app, clock));
   return {
     app,
     said,

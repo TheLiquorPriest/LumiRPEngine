@@ -15,7 +15,7 @@ import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
 import { Frame, PagesBar, routeFor } from "./frame";
 import { createGate } from "./gate";
-import { type LumiverseContext, lumiverseHost } from "./kept/host";
+import { type LumiverseContext, lumiverseHost } from "../frontend/host";
 import { browserDeps, type RelayChannel, type RoadDeps } from "./roads";
 import { UI_CSS } from "./styles";
 import { createUiSettings, siteStorage, UiSettingsContext } from "./ui-settings";
@@ -116,7 +116,7 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
   const offs: (() => void)[] = [remember];
   if (ctx.state !== undefined) offs.push(ctx.state.subscribe<{ chatId?: string | null } | null>("chat.active", (value) => place(value?.chatId ?? null)));
   else for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"]) offs.push(ctx.events.on(event, () => place(ctx.getActiveChat().chatId)));
-  const app: UiApp = { shell: "drawer", client, gate, route, timers: deps.timers, keptHost: () => lumiverseHost(ctx), go: (next) => route.set(next) };
+  const app: UiApp = { shell: "drawer", client, gate, route, timers: deps.timers, keptHost: () => lumiverseHost(ctx, { revokeMs: () => settings.values.get().downloadRevokeMs }), go: (next) => route.set(next) };
   render(
     <UiSettingsContext.Provider value={settings}>
       <AppContext.Provider value={app}>

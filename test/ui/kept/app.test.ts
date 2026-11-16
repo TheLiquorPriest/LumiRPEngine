@@ -1,18 +1,15 @@
-// The App kept for Build, as today's setup makes it but over RPE's Build route: Build is where its UI
-// starts, a request gives its result's body, and RPE's refusal shows as today's toast for as long as
-// today's. A tool RPE does not serve (the background tools, lore, secrecy) is said once, on the Build
-// page that asked for it, in RPE's own words, never as a toast, and not asked of RPE again; a road
-// that failed is not RPE's word, and is asked again. Stopping it leaves nothing behind.
+// The one App the kept views share (src/ui/kept/app.ts), over the one transport (client.ts): a request a
+// call file takes reaches its typed route with no envelope, one no file takes goes the old road, an answer
+// is never remembered, a road failure is the road's and not RPE's refusal, a refusal is held back from the
+// toasts by the request it answers, and the toasts' count and times are the page's settings.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { BuildRoute } from "../../../src/frontend/app";
-import type { RequestBody } from "../../../src/frontend/registry";
-import type { RpeClient } from "../../../src/ui/client";
-import { RpeError } from "../../../src/ui/client";
-import { keptApp } from "../../../src/ui/kept/app";
+import { type RpeClient, RpeError } from "../../../src/ui/client";
+import { keptApp, type ToastSettings } from "../../../src/ui/kept/app";
+import type { CallFile } from "../../../src/ui/kept/client";
 import { webHost } from "../../../src/ui/kept/host";
-import { buildTransport } from "../../../src/ui/kept/transport";
-import { counted, handTimers, routeClient, words } from "./bed";
+import { createStore } from "../../../src/ui/store";
+import { handTimers, routeClient } from "./bed";
 import { openPage, type Page } from "./dom";
 
 let page: Page;
@@ -21,85 +18,102 @@ beforeAll(() => {
 });
 afterAll(() => page.close());
 
-describe("the App kept for Build", () => {
-  test("its UI starts in Build; a request gives its result's body, and RPE's refusal is today's toast, for as long as today's", async () => {
-    const timers = handTimers();
-    const host = webHost();
-    const kept = keptApp({ transport: buildTransport(routeClient().client), host, timers });
-    expect({ mode: kept.app.ui.get().mode, build: kept.app.ui.get().build }).toEqual({ mode: "build", build: { view: "worlds" } });
+const SETTINGS: ToastSettings = { toastsShown: 3, errorToastMs: 6000, toastMs: 3500 };
+const host = (): ReturnType<typeof webHost> => webHost({ revokeMs: () => 1000 });
+const quiet = { follow: () => () => undefined };
 
+/** A call file that serves `lre.world list` from a typed route of its own, and records what it was asked. */
+function worldsFile(asked: unknown[], answer: () => Promise<unknown>): CallFile {
+  return {
+    name: "worlds",
+    takes: (request) => request.type === "lre.world" && request.op === "list",
+    serve: async (request) => {
+      asked.push(request);
+      return (await answer()) as never;
+    },
+  };
+}
+
+describe("the App kept for Build and Play", () => {
+  test("requests reach typed routes: a call file takes what it serves with no envelope, and what none takes goes the old road", async () => {
+    const rpe = routeClient();
+    const asked: unknown[] = [];
+    const calls = [worldsFile(asked, async () => ({ worlds: [] }))];
+    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS, calls });
+    expect(await kept.app.request({ type: "lre.world", op: "list" })).toEqual({ worlds: [] });
+    expect(asked).toEqual([{ type: "lre.world", op: "list" }]);
+    expect(rpe.asked).toEqual([]);
     const templates = await kept.app.request({ type: "lre.world", op: "templates" });
     expect(templates?.templates?.map((t) => t.id)).toContain("fantasy_town");
-    const missing: RequestBody = { type: "lre.world", op: "get", worldId: "w-nowhere" };
-    const refusal = await kept.app.send(missing);
-    expect(refusal).toMatchObject({ type: "lre.error", code: "not_found" });
+    expect(rpe.asked.map((a) => a.key)).toEqual([rpe.route]);
+    kept.stop();
+  });
+
+  test("asked again: a request refused once and then served is shown served, and nothing remembers the refusal", async () => {
+    const answers: (() => Promise<unknown>)[] = [() => Promise.reject(new RpeError(409, "Not yet.")), async () => ({ worlds: [] })];
+    const asked: unknown[] = [];
+    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS, calls: [worldsFile(asked, () => (answers.shift() as () => Promise<unknown>)())] });
+    expect(await kept.app.send({ type: "lre.world", op: "list" })).toMatchObject({ type: "lre.error", code: "conflict", message: "Not yet." });
+    expect(await kept.app.send({ type: "lre.world", op: "list" })).toMatchObject({ type: "lre.result", body: { worlds: [] } });
+    expect(asked).toHaveLength(2);
+    kept.stop();
+  });
+
+  test("a road failure is said as the road's, never coded as RPE's refusal, and is toasted; RPE's own refusal is said on the page, not toasted, held back by the request it answers", async () => {
+    const reason = "RPE did not answer: the connection was refused.";
+    const failing = keptApp({ client: { call: (async () => Promise.reject(new RpeError(0, reason))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
+    const failed = await failing.app.send({ type: "lre.job", op: "list", worldId: "w-fernwick" });
+    expect(failed).toMatchObject({ type: "lre.error", message: reason });
+    expect(failed.type === "lre.error" ? failed.code : "").not.toBe("unavailable");
+    expect(await failing.app.request({ type: "lre.job", op: "list", worldId: "w-fernwick" })).toBeNull();
+    expect(failing.app.toasts.get().map((t) => t.text)).toEqual([reason]);
+    failing.stop();
+
+    // RPE's `unavailable` for a request it does not serve is said on the page; another error with the very same words is toasted.
+    const rpe = routeClient();
+    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
+    const worldId = "w-fernwick";
+    expect(await kept.app.request({ type: "lre.job", op: "list", worldId })).toBeNull();
+    const said = kept.said.get();
+    expect(said).toHaveLength(1);
     expect(kept.app.toasts.get()).toEqual([]);
-    expect(await kept.app.request({ type: "lre.world", op: "get", worldId: "w-nowhere" })).toBeNull();
-    expect(kept.app.toasts.get()).toEqual([{ id: 1, text: refusal.type === "lre.error" ? refusal.message : "", tone: "error" }]);
-    timers.advance(5999);
+    kept.app.toast(said[0] as string, "error");
+    expect(kept.app.toasts.get().map((t) => t.text)).toEqual([...said]);
+    kept.stop();
+  });
+
+  test("the toasts' count and times are the page's settings, read at each toast", () => {
+    const timers = handTimers();
+    let settings: ToastSettings = SETTINGS;
+    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers, settings: () => settings });
+    for (const text of ["one", "two", "three", "four"]) kept.app.toast(text);
+    expect(kept.app.toasts.get().map((t) => t.text)).toEqual(["two", "three", "four"]);
+    settings = { toastsShown: 1, errorToastMs: 100, toastMs: 200 };
+    kept.app.toast("five", "error");
+    expect(kept.app.toasts.get().map((t) => t.text)).toEqual(["five"]);
+    timers.advance(99);
     expect(kept.app.toasts.get()).toHaveLength(1);
     timers.advance(1);
     expect(kept.app.toasts.get()).toEqual([]);
     kept.stop();
-    host.dispose();
   });
 
-  test("a tool RPE does not serve is said once on the page that asked, in RPE's words, never as a toast, and is not asked of RPE again", async () => {
-    const rpe = routeClient();
-    const host = webHost();
-    const kept = keptApp({ transport: buildTransport(rpe.client), host, timers: handTimers() });
-    const go = (build: BuildRoute): void => kept.app.ui.update((ui) => ({ ...ui, build }));
-    const said = (): string[] => kept.said.get().map((answer) => answer.message);
-    const asked = (type: string): number => rpe.asked.filter(({ body }) => body !== null && typeof body === "object" && "type" in body && body.type === type).length;
-    const worldId = "w-fernwick";
-
-    go({ view: "world", worldId });
-    expect(await kept.app.request({ type: "lre.job", op: "list", worldId })).toBeNull();
-    expect(await kept.app.request({ type: "lre.job", op: "list", worldId })).toBeNull();
-    expect(said()).toEqual([words("job")]);
-
-    go({ view: "secrecy", worldId });
-    expect(said()).toEqual([]);
-    expect(await kept.app.request({ type: "lre.secrecy", op: "books" })).toBeNull();
-    expect(await kept.app.request({ type: "lre.lore", op: "books" })).toBeNull();
-    expect(said()).toEqual([words("secrecy"), words("lore")]);
-
-    go({ view: "world", worldId });
-    expect(await kept.app.request({ type: "lre.job", op: "list", worldId })).toBeNull();
-    expect(said()).toEqual([words("job")]);
-    expect({ job: asked("lre.job"), secrecy: asked("lre.secrecy"), lore: asked("lre.lore"), toasts: kept.app.toasts.get() }).toEqual({ job: 1, secrecy: 1, lore: 1, toasts: [] });
+  test("the open chat's view follows the chat the page names", async () => {
+    const chat = createStore<string | null>("c1");
+    const read: string[] = [];
+    const call = (async (key: string, params: { chat: string }) => {
+      read.push(params.chat);
+      return { status: "not_world" } as unknown;
+    }) as RpeClient["call"];
+    const kept = keptApp({ client: { call, ...quiet }, chat, mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(kept.app.sync.get().chatId).toBe("c1");
+    chat.set("c2");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect({ chat: kept.app.sync.get().chatId, read }).toEqual({ chat: "c2", read: ["c1", "c2"] });
+    chat.set(null);
+    expect(kept.app.sync.get()).toMatchObject({ chatId: null, view: null });
     kept.stop();
-    host.dispose();
-  });
-
-  test("a road that failed under a tool is not RPE's word: it is today's toast, and the tool is asked of RPE again", async () => {
-    const reason = "RPE did not answer: the connection was refused.";
-    let calls = 0;
-    const call = async (): Promise<unknown> => {
-      calls += 1;
-      throw new RpeError(0, reason);
-    };
-    const host = webHost();
-    const kept = keptApp({ transport: buildTransport({ call: call as RpeClient["call"] }), host, timers: handTimers() });
-    expect(await kept.app.request({ type: "lre.job", op: "list", worldId: "w-fernwick" })).toBeNull();
-    expect(await kept.app.request({ type: "lre.job", op: "list", worldId: "w-fernwick" })).toBeNull();
-    expect({ calls, said: kept.said.get(), toasts: kept.app.toasts.get().map((t) => t.text) }).toEqual({ calls: 2, said: [], toasts: [reason, reason] });
-    kept.stop();
-    host.dispose();
-  });
-
-  test("stopping it leaves nothing behind: nobody hears the transport, no timer waits, and a request still out is answered", async () => {
-    const timers = handTimers();
-    const road = counted(buildTransport({ call: () => Promise.withResolvers<never>().promise }));
-    const host = webHost();
-    const kept = keptApp({ transport: road.transport, host, timers });
-    const out = kept.app.send({ type: "lre.world", op: "list" });
-    kept.app.toast("Committed a new revision.");
-    expect({ hearers: road.hearers(), waiting: timers.waiting() > 0 }).toEqual({ hearers: 1, waiting: true });
-
-    kept.stop();
-    host.dispose();
-    expect({ hearers: road.hearers(), waiting: timers.waiting(), listening: page.listening() }).toEqual({ hearers: 0, waiting: 0, listening: 0 });
-    expect(await out).toMatchObject({ type: "lre.error", code: "unavailable" });
   });
 });
+

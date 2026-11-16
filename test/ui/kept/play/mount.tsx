@@ -54,7 +54,7 @@ export async function openPlay(document: PageDocument, client: Pick<RpeClient, "
   const root = document.createElement("div");
   document.body.append(root);
   const route = createStore<Route>({ page: "play", chat });
-  const app: UiApp = { shell: "web", client: client as RpeClient, gate: createGate(), route, timers, keptHost: webHost, go: (next) => route.set(next) };
+  const app: UiApp = { shell: "web", client: client as RpeClient, gate: createGate(), route, timers, keptHost: () => webHost({ revokeMs: () => 1000 }), go: (next) => route.set(next) };
   await act(() => {
     render(
       <AppContext.Provider value={app}>

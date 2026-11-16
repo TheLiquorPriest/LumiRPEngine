@@ -2,7 +2,7 @@
 // this process over a fresh database (test/build-mode/bed.ts), and timers the test moves by hand.
 
 import { buildRoutes, BuildService } from "../../../src/build";
-import type { BuildTransport } from "../../../src/ui/kept/transport";
+import type { KeptTransport } from "../../../src/ui/kept/client";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
 import type { Timers } from "../../../src/ui/roads";
 import { GUIDANCE, makeBed, USER, words } from "../../build-mode/bed";
@@ -34,7 +34,7 @@ export function routeClient(): RouteClient {
 }
 
 /** A transport that counts who subscribed and has not let go, so a test can see none is left (closing it lets nobody go). */
-export function counted(transport: BuildTransport): { transport: BuildTransport; hearers(): number } {
+export function counted(transport: KeptTransport): { transport: KeptTransport; hearers(): number } {
   let hearers = 0;
   return {
     transport: {
@@ -50,7 +50,9 @@ export function counted(transport: BuildTransport): { transport: BuildTransport;
           off();
         };
       },
-      refusals: () => transport.refusals(),
+      takeRefusal: (reqId) => transport.takeRefusal(reqId),
+      push: (payload) => transport.push(payload),
+      live: (event) => transport.live(event),
       close: () => transport.close(),
     },
     hearers: () => hearers,

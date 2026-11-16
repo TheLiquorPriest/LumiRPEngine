@@ -1,6 +1,9 @@
 // The host capabilities the UI uses, over `SpindleFrontendContext` with the runtime `ctx.ui`
-// shape from `spindle-augment` (DESIGN §18.6). Optional host APIs are feature-detected.
+// shape from `spindle-augment` (DESIGN §18.6). Optional host APIs are feature-detected. The kept
+// views take Spindle's context only here and in the extension shell's mount: what they are given is
+// `HostBridge` (app.ts), whose controls are the four named there.
 
+import { PAGE_SETTING_DEFS } from "../shared/page-settings";
 import { isRecord } from "../shared/json";
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { HostUi } from "../spindle-augment";
@@ -8,9 +11,17 @@ import type { DrawerState, HostBridge } from "./app";
 import type { Viewport } from "./layout";
 import { createStore } from "../ui/store";
 
+/** Lumiverse's frontend context, which the extension shell hands the loader's mount and makes the bridge from. */
+export type LumiverseContext = SpindleFrontendContext;
+
 export interface Host extends HostBridge {
   ui: HostUi;
   dispose(): void;
+}
+
+export interface HostOptions {
+  /** How long a download's link is kept before the browser lets it go (ms), read at each download: the page's `pages.downloadRevokeMs`. */
+  revokeMs: () => number;
 }
 
 function readViewport(ui: HostUi): Viewport {
@@ -18,7 +29,7 @@ function readViewport(ui: HostUi): Viewport {
   return { width: Math.round(size.width), height: Math.round(size.height), coarse: window.matchMedia?.("(pointer: coarse)").matches === true };
 }
 
-export function createHost(ctx: SpindleFrontendContext): Host {
+export function createHost(ctx: SpindleFrontendContext, options: HostOptions = { revokeMs: () => PAGE_SETTING_DEFS.downloadRevokeMs.default }): Host {
   const ui = ctx.ui as unknown as HostUi;
   const viewport = createStore<Viewport>(readViewport(ui));
   const drawer = createStore<DrawerState>({ open: ui.events.getDrawerState().open });
@@ -63,7 +74,7 @@ export function createHost(ctx: SpindleFrontendContext): Host {
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTimeout(() => URL.revokeObjectURL(url), options.revokeMs());
     },
     activeChat: () => ctx.getActiveChat().chatId,
     async generate(as) {
@@ -91,4 +102,9 @@ export function createHost(ctx: SpindleFrontendContext): Host {
       offDrawer();
     },
   };
+}
+
+/** The bridge in Lumiverse's drawer: over Lumiverse's own context, and its own way to add a stylesheet. */
+export function lumiverseHost(ctx: LumiverseContext, options: HostOptions): Host & { addStyle(css: string): () => void } {
+  return { ...createHost(ctx, options), addStyle: (css) => ctx.dom.addStyle(css) };
 }

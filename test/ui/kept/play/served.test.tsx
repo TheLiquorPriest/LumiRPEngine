@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { act } from "preact/test-utils";
 import type { StateView } from "../../../../src/shared/state-view";
 import { replyOf } from "../../../../src/ui/client";
-import { attachedWords, NOT_HERE } from "../../../../src/ui/kept/play/app";
+import { attachedWords, NOT_HERE } from "../../../../src/ui/kept/app";
 import { handTimers } from "../bed";
 import { openPage, type Page, PageElement } from "../dom";
 import { button, leave, openPlay, said, until, words } from "./mount";
