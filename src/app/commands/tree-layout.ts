@@ -1,11 +1,20 @@
 // The file tree's layout as the migration takes it.
 
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
+import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
 import type { TreeLayout } from "../../migrate/own-files";
 import { TREE_TABLES, TreeChats } from "../../tree/chats";
 import { CHATS_FOLDER, GLOBAL_FOLDERS, NOTES_FOLDER } from "../../tree/layout";
 import { TreeNotes } from "../../tree/notes";
+import { RPE_GUIDANCE } from "../../tree/shipped";
+
+/** The tools a folder of tools' files names: each file's name without `.md` or `.json`; none where the folder is not there. */
+async function toolsIn(folder: string): Promise<string[]> {
+  const names = await readdir(folder).catch(() => [] as string[]);
+  return names.flatMap((name) => (/\.(md|json)$/.test(name) ? [name.replace(/\.(md|json)$/, "")] : []));
+}
 
 /** The tree's notes over the run's own database: the run is the one writer of RPE's database while it runs, so the tree's writes go to it directly. */
 function notesOf(db: Database, files: string): TreeNotes {
@@ -28,5 +37,7 @@ export function treeLayout(): TreeLayout {
     },
     recordVersion: (db, files, user, chat, turn, path, before, after, by, at, stands) => notesOf(db, files).recordVersion(user, chat, turn, path, before, after, by, at, stands),
     forgetVersions: (db, files, user, chat) => notesOf(db, files).forgetCarried(user, chat),
+    // Every tool a file names at the shipped levels (RPH's and RPE's) and among his own: a tool a carried agent names outside them is gone.
+    toolNames: async (files) => [...new Set((await Promise.all([SHIPPED_GUIDANCE, RPE_GUIDANCE, files].map((root) => toolsIn(join(root, GLOBAL_FOLDERS.tools))))).flat())],
   };
 }
