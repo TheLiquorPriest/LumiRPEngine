@@ -273,6 +273,8 @@ declare module "../../../engine/registry" {
     "economy.price": (ctx: ReadContext, ref: PriceRef, rng?: Rng) => Price | null;
     /** What `who` can buy where they are (the palette's Buy options): catalog items the place sells, quoted at the place, stable order, at most 24. */
     "economy.offers": (ctx: ReadContext, who: EntityId) => Offer[];
+    /** What a place sells, quoted there: `economy.offers` for a place, not a person. */
+    "economy.offers_at": (ctx: ReadContext, place: string) => Offer[];
     /** The range a Buy recorded as "Bought `name`" can be charged for `qty` where `who` is: its catalog row's (else its category's) regional band. Null for an item neither prices. */
     "economy.bought_band": (ctx: ReadContext, name: string, qty: number, who: EntityId) => { min: number; max: number } | null;
     /** Catalog items to pick for a purchase nothing priced: rows sharing a word with `item` first, then what `who` can buy where they are; at most 12, quoted where `who` is. */
@@ -647,6 +649,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
+  r.query("economy.offers_at", (ctx, place) => offersAtPlace(ctx, place));
   r.query("economy.item_choices", (ctx, text, who) => {
     const place = placeOfEntity(ctx.state, who);
     const item = itemName(text);
