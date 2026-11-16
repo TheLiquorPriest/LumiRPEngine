@@ -35,6 +35,7 @@ import { levelFiles, NO_CHAT, RPE_GUIDANCE, treeReader } from "../tree";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { bootstrapArea } from "../turn/bootstrap/area";
+import { sessionRoutes } from "../turn/session-routes";
 import { guidanceTexts } from "../turn/texts";
 import { appArea } from "./area";
 import type { TurnTimes } from "./service-timings";
@@ -159,7 +160,7 @@ export function compose(options: ComposeOptions = {}): Composition {
     }),
     storeArea(),
     loreArea(() => ({ store: made().store, turns: made().prompts.lore, indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) }, secrecy: { settingsFor: made().secretSettings, wording: made().secretMarks, log: (message) => made().env.log.warn(message) } })),
-    ifaceArea(),
+    ifaceArea(() => ({ store: made().store })),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
     // The tree lays the shipped files before the areas after it read them.
     treeArea(() => ({
@@ -195,6 +196,13 @@ export function compose(options: ComposeOptions = {}): Composition {
         return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps };
       },
     })),
+    // The Sessions page's routes, over the turn lane's harness and store once the turn area is mounted.
+    {
+      name: "sessions",
+      mounted: (at) => {
+        at.routes.add("sessions", sessionRoutes({ turns: made(), writes: at.writes }));
+      },
+    },
     door.area,
   ];
 
