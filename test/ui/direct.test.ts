@@ -19,7 +19,7 @@ import { SESSION_PATH } from "../../src/ui/roads";
 import { createClient, isJoined, KEY_LET_GO, replyOf, type RpeClient, RpeError, walk, webConnector } from "../../src/ui/client";
 import type { JsonValue } from "../../src/shared/json";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
-import { readSession } from "../../src/ui/pages/builds";
+import { readSession } from "../../src/ui/pages/runtime/builds";
 import { signinDeps, signinRoutes } from "../../src/app/signin-routes";
 import { browserDeps, probeDirect } from "../../src/ui/roads";
 import { testModelLayer } from "../app/helpers";

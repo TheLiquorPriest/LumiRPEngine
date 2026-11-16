@@ -1,4 +1,4 @@
-// The builds line on Settings (plan §4.6): which build RPE runs, which its app file on disk is, and which
+// The builds line on Runtime (plan §4.6): which build RPE runs, which its app file on disk is, and which
 // the extension in Lumiverse said it is, in the status's own words; and "Update now" where the build on
 // disk is another one and nothing else will restart RPE onto it (its restart is off, or none is under
 // way). While RPE waits or restarts it is already on its way, and started by hand it cannot be.
@@ -7,10 +7,10 @@
 // key with no end. The drawer's page token is renewed by the extension as it runs out, so its end is
 // nothing the player acts on, and the drawer does not show it.
 
-import type { BuildsReply, BuildsStatus } from "../../shared/api";
-import { Banner, Button, Row, Section } from "../atoms";
-import type { RpeClient } from "../client";
-import { errorWords, when } from "../words";
+import type { BuildsReply, BuildsStatus } from "../../../shared/api";
+import { Banner, Button, Row, Section } from "../../atoms";
+import type { RpeClient } from "../../client";
+import { errorWords, when } from "../../words";
 
 export interface BuildsShown {
   reply: BuildsReply | null;

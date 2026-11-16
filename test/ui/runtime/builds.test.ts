@@ -1,17 +1,17 @@
-// The builds line on Settings: which build RPE runs, which is on disk, which the extension is, in the
+// The builds line on Runtime: which build RPE runs, which is on disk, which the extension is, in the
 // status's own words; "Update now" only where the build on disk is another one and nothing else will
 // restart RPE onto it; its answer shown; refusals in RPE's words. And the line that says when the web
 // key ends, read from the session route: nothing for a key with no end.
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { BuildsStatus, RestartState } from "../../src/shared/api";
-import { type BuildsShown, BuildsView, canUpdate, NO_BUILDS, readBuilds, readSession } from "../../src/ui/pages/builds";
-import { NO_SETTINGS, SettingsView } from "../../src/ui/pages/settings";
-import { when } from "../../src/ui/words";
-import { askingClient, settle } from "./asking";
-import { AGREE, buildsReply as reply, NEWER } from "./bootstrap-recorded";
-import { banners, elements, expand, press, textOf } from "./vnodes";
+import type { BuildsStatus, RestartState } from "../../../src/shared/api";
+import { type BuildsShown, BuildsView, canUpdate, NO_BUILDS, readBuilds, readSession } from "../../../src/ui/pages/runtime/builds";
+import { RuntimeView } from "../../../src/ui/pages/runtime";
+import { when } from "../../../src/ui/words";
+import { askingClient, settle } from "../asking";
+import { AGREE, buildsReply as reply, NEWER } from "../bootstrap-recorded";
+import { banners, elements, expand, press, textOf } from "../vnodes";
 
 function view(shown: Partial<BuildsShown>) {
   let pressed = 0;
@@ -71,16 +71,14 @@ describe("the builds line", () => {
     expect(banners(view(shown.at(-1) ?? {}).tree)[0]).toEqual({ title: "Not updated", text: "Not updatedThis needs a page token or the web UI's token." });
   });
 
-  test("the web key's end is said on Settings with its date and how to make a new key; a key with no end, or one not read, says nothing; the route is read once, and its answer let go once the page left", async () => {
+  test("the web key's end is said on Runtime with its date and how to make a new key; a key with no end, or one not read, says nothing; the route is read once, and its answer let go once the page left", async () => {
     const ENDS = 1_800_000_000_000;
-    const settingsWith = (sessionEnds: number | null | undefined) => {
-      const ignore = () => undefined;
-      const tree = expand(h(SettingsView, { chat: null, shown: { ...NO_SETTINGS, loading: false }, onEdit: ignore, onDraft: ignore, onSave: ignore, onNone: ignore, onTakeAway: ignore, sessionEnds }));
+    const runtimeWith = (sessionEnds: number | null) => {
+      const tree = expand(h(RuntimeView, { builds: { ...NO_BUILDS, loading: false }, onUpdate: () => undefined, sessionEnds }));
       return elements(tree).filter((e) => e.props["data-session"] !== undefined).map((e) => textOf(e.props.children));
     };
-    expect(settingsWith(ENDS)).toEqual([`This browser's web key ends on ${when(ENDS)}. Make a new one with rpe key web on the machine RPE runs on before then.`]);
-    expect(settingsWith(null)).toEqual([]);
-    expect(settingsWith(undefined)).toEqual([]);
+    expect(runtimeWith(ENDS)).toEqual([`This browser's web key ends on ${when(ENDS)}. Make a new one with rpe key web on the machine RPE runs on before then.`]);
+    expect(runtimeWith(null)).toEqual([]);
 
     const { client, asked } = askingClient();
     const heard: (number | null)[] = [];
