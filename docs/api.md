@@ -16,10 +16,13 @@ A route that pages takes `limit` and `cursor` in its query and answers `{ items,
 - [State](#state)
 - [Cast](#cast)
 - [Story](#story)
+- [Quests](#quests)
 - [Lore](#lore)
 - [Files](#files)
 - [Sessions](#sessions)
 - [Jobs](#jobs)
+- [Agents](#agents)
+- [Rules](#rules)
 - [Connections](#connections)
 - [Settings](#settings)
 - [Worlds](#worlds)
@@ -248,6 +251,34 @@ One file of a turn's folder, by its path below the folder, as text; no path leav
 | Reply | [`FileReply`](#filereply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `GET /api/v1/chats/:chat/turns/:turn/live`
+
+Whether a turn runs now and whether his pause holds it, read at once, for a page opened while it runs.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`TurnLiveState`](#turnlivestate) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `POST /api/v1/chats/:chat/turns/:turn/pause`
+
+Holds a turn's run before its next model call (the call in flight finishes; Stop still stops it).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`TurnControlled`](#turncontrolled) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
 ### `GET /api/v1/chats/:chat/turns/:turn/requests`
 
 What a turn was told beside his words and keeps, and what was played as its message.
@@ -274,6 +305,34 @@ One model call's request, by its file below the turn's folder (a run's `requests
 | Query | none |
 | Body | none |
 | Reply | [`RequestReply`](#requestreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `POST /api/v1/chats/:chat/turns/:turn/resume`
+
+Lets a turn's run go on where his pause held it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`TurnControlled`](#turncontrolled) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `POST /api/v1/chats/:chat/turns/:turn/say`
+
+Says something to the Author while the turn runs: the lead hears it at its next model call as his words, and the trace shows it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | [`TurnSay`](#turnsay) |
+| Reply | [`TurnControlled`](#turncontrolled) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/turns/:turn/stop`
@@ -359,6 +418,19 @@ What a turn's time brought due, each thing with what the turn recorded for it.
 | Body | none |
 | Reply | [`DueReply`](#duereply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/chats/:chat/state/export`
+
+A chat's head as one document, for the command line's sandbox to open a scratch copy of the chat from: the world as played, the engine's state as plain JSON, the revision in force, the engine that folded it, the run's seed and the clock. Read from the store alone, nothing is written. It holds everything the engine knows of the chat, secrets included, so it answers the owner's page alone.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`ChatExportReply`](#chatexportreply) |
 
 ### `GET /api/v1/chats/:chat/state/history`
 
@@ -578,6 +650,48 @@ The chat's chapters, scenes and beats as one list in the chat's order, oldest fi
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | [`StoryTimeline`](#storytimeline), a page at a time |
+
+## Quests
+
+### `GET /api/v1/chats/:chat/journal`
+
+The player's journal: each quest he may see, at the chat's newest turn or as it stood at one of its turns, with the stages he may see, each with what the Author called on it and why. A quest the Author set to show him nothing is absent, with no count.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the journal as it stood at that turn; left out, at the chat's newest |
+| Body | none |
+| Reply | [`Journal`](#journal) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/chats/:chat/quests`
+
+The chat's quests, the world's and those opened in play, in brief, a page at a time: each with what it is, its stages and what was called on them, who and where, its stakes, how it was shown to the player and whether it is open.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | [`QuestRecords`](#questrecords), a page at a time |
+
+### `GET /api/v1/chats/:chat/quests/:quest`
+
+One quest of the chat in full, by its id or its name: its record, and every write made to it in the order made.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `quest` |
+| Query | none |
+| Body | none |
+| Reply | [`QuestRecord`](#questrecord) |
 
 ## Lore
 
@@ -859,7 +973,7 @@ Renames or moves a file or folder of the user's to a path nothing stands at; a f
 
 ### `PUT /api/v1/files-off/*`
 
-Switches a file's name off or on again in the `off:` list of a level's config, which is what "Delete" on a shipped file does; says the file as the listing now shows it.
+Switches a file's name off or on again in the `off:` list of a level's config, which is what "Delete" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it.
 
 | | |
 |---|---|
@@ -895,6 +1009,19 @@ Every pin the levels' configs hold for a chat (with no chat, the global level's)
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
 | Body | none |
 | Reply | [`FilePins`](#filepins) |
+
+### `POST /api/v1/files-preview`
+
+A prompt part or a tool's description rendered as RPH renders it for a chat, as saved or as he drafts it, its fields filled from its last use there, with any problem in it; nothing is written.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ path: string; chat?: string; text?: string }` |
+| Reply | [`PartPreviewReply`](#partpreviewreply) |
 
 ### `POST /api/v1/files-prune`
 
@@ -1238,11 +1365,120 @@ What a job he started (which belongs to no turn) was told as it went: its gap ch
 | Body | none |
 | Reply | [`JobToldReply`](#jobtoldreply) |
 
+## Agents
+
+### `GET /api/v1/agents`
+
+Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its tools, what it reads and is given, and what it runs on (its connection, its model and its effort) as RPH resolves them.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, The chat whose stack of definitions is read; left out, the shipped level and the user's own |
+| Body | none |
+| Reply | [`AgentsReply`](#agentsreply) |
+
+### `GET /api/v1/agents/:agent/tools`
+
+The fixed list of tools an agent's requests carry in a chat, as declared and counted in tokens, and every tool the registry holds there, so one a definition lists and nobody registers can be told.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `agent` |
+| Query | `chat` (may be left out): `string`, The chat whose stack of definitions is read; left out, the shipped level and the user's own |
+| Body | none |
+| Reply | [`AgentToolsReply`](#agenttoolsreply) |
+
+### `GET /api/v1/chats/:chat/given`
+
+What each agent definition in force for a chat is given by name, each name's kind and whether it resolves at the chat's newest turn as the turn would give it, and the names nothing provides.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`GivenReply`](#givenreply) |
+
+## Rules
+
+### `POST /api/v1/chats/:chat/rules/:name/test`
+
+Runs a rule, as it reads now, against a past turn of the chat, with that turn's facts; writes nothing. A turn joined to another is answered as such.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `name` |
+| Query | none |
+| Body | [`RuleTestAsk`](#ruletestask) |
+| Reply | [`RuleTest`](#ruletest) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
+### `GET /api/v1/chats/:chat/rules/firings`
+
+The rules that fired in a chat, newest first, a page at a time (a job's of his among them), each with what the agent did next; `cursor` is the last id read. The setting `turns.page` gives a page's length.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `rule` (may be left out): `string`, Only this rule's firings<br>`limit` (may be left out): `number`, How many to give: the setting `turns.page` when left out, and at most `turns.pageMost`<br>`cursor` (may be left out): `string`, The id of the last firing read: older ones follow it |
+| Body | none |
+| Reply | [`FiringsReply`](#firingsreply) |
+
+### `GET /api/v1/rules`
+
+Every rule of a chat's stack, in force or not and why; with no chat, those of the shipped and global levels, as a new chat takes them.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, The chat whose stack is read; left out, the shipped and global levels |
+| Body | none |
+| Reply | [`RulesReply`](#rulesreply) |
+
+### `POST /api/v1/rules/:name/switch`
+
+Switches a rule on or off at a chat's level or the global one (the level's off: list); one switched off at a farther level stays off.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `name` |
+| Query | none |
+| Body | [`RuleSwitch`](#ruleswitch) |
+| Reply | [`RuleSwitched`](#ruleswitched) |
+
+### `GET /api/v1/rules/facts`
+
+Every fact a rule's trigger can name, RPH's and RPE's, with its value in the chat where RPE counts it and the rules whose text names it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, The chat whose values are read; left out, no value is given |
+| Body | none |
+| Reply | [`FactsReply`](#factsreply) |
+
 ## Connections
 
 ### `GET /api/v1/connections`
 
-The connections, each with whether a key is set (nothing of the key) and its model's limits as RPH uses them; the default; the providers offered.
+The connections, each with whether a key is set (nothing of the key), its model's limits as RPH uses them and its newest tag check; the default; the providers offered.
 
 | | |
 |---|---|
@@ -1371,6 +1607,19 @@ Finishes a sign-in with what the user pasted back, and says how it stands; the t
 | Reply | [`SignInState`](#signinstate) |
 | Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
 
+### `POST /api/v1/connections/:id/tag-check`
+
+Checks whether a connection keeps the reply's tags: simple turns played on it as a job, whose id is answered at once; the connection's view then shows the result, when it was checked and the reply form it got.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | [`TagCheckStarted`](#tagcheckstarted) |
+
 ### `POST /api/v1/connections/:id/test`
 
 Tests a connection with one small call: how long it took, and the model that answered or the provider's words with its key taken out; and that model's limits.
@@ -1383,6 +1632,32 @@ Tests a connection with one small call: how long it took, and the model that ans
 | Query | none |
 | Body | none |
 | Reply | [`ConnectionTested`](#connectiontested) |
+
+### `GET /api/v1/connections/web`
+
+The web search provider web_search asks: its address, and whether a key is kept for it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`WebProviderShown`](#webprovidershown) |
+
+### `PUT /api/v1/connections/web`
+
+Sets the web search provider web_search asks, or takes it away; a key follows the address it was given for.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`WebProviderSet`](#webproviderset) |
+| Reply | [`WebProviderShown`](#webprovidershown) |
 
 ## Settings
 
@@ -1862,6 +2137,8 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 | `state` | `Record<string, never>` | The chat's state changed, and a page reads it again. A newer one replaces one a page has not taken yet. |
 | `handler_failed` | `{ op: string; error: string; turn: string; change: number | null }` | An engine handler failed on a change of this chat, which is recorded as not applied: the operation, the handler's error, the turn and the change (null for one never kept). |
 | `requests` | `{ waiting: number }` | What waits in the chat, asked for beside the player's words, changed: how many requests wait now; a page reads them again. |
+| `folder` | `{ turn: string; path: string }` | A turn's folder gained or changed a file: the turn and the file's path; a page reads the folder again. |
+| `job` | `{ job: JobView }` | One of his jobs changed: the job as RPH keeps it now. |
 | `extension` | [`ExtensionStatusReply`](#extensionstatusreply) | The extension's status changed: as GET /api/v1/status/extension answers it. |
 
 ## The live socket's messages
@@ -1890,6 +2167,54 @@ export interface AgentRef {
   parent?: string;
   job?: string;
   plays?: string;
+}
+```
+
+### `AgentShown`
+
+A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile and effort as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on.
+
+```ts
+export interface AgentShown {
+  name: string;
+  description: string;
+  path: string;
+  level: LayerLevel;
+  replaces: { level: LayerLevel; path: string }[];
+  off: boolean;
+  model?: string;
+  effort?: Effort;
+  toolsAs?: ToolsAs;
+  tools: string[];
+  reads: string[];
+  given: string[];
+  writer?: string;
+  runsOn: DefinitionRun;
+}
+```
+
+### `AgentsReply`
+
+Every definition in force for a chat, or for none: the shipped and global levels as a new chat takes them.
+
+```ts
+export interface AgentsReply {
+  chat: string | null;
+  agents: AgentShown[];
+}
+```
+
+### `AgentToolsReply`
+
+What an agent's requests carry as its fixed list for a chat, as declared (each tool's name and description), the whole's size in tokens against the most the user allows (`tools.fixedTokens`; a list over it is marked, nothing is refused), and every tool the registry holds.
+
+```ts
+export interface AgentToolsReply {
+  agent: string;
+  declared: { name: string; description: string }[];
+  tokens: number;
+  most: number;
+  registered: RegisteredTool[];
 }
 ```
 
@@ -2107,10 +2432,10 @@ export interface CallPermission {
 
 ### `CallRefusal`
 
-Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, or a permission or rule that could not be asked.
+Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, a permission or rule that could not be asked, or a hook of his that blocked it with its reason.
 
 ```ts
-export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: number } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string };
+export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: number } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string } | { by: "hook"; hook: string; reason: string };
 ```
 
 ### `CarriedText`
@@ -2278,6 +2603,23 @@ export interface CharacterReply {
   history: EntryRow[];
   perceptions: PerceptionRow[];
   files: MindFileRow[];
+}
+```
+
+### `ChatExportReply`
+
+A chat's head as one document: the chat and the world it plays (null where it plays none), the revision in force, the engine that folded it, the run's seed, the clock in minutes since the world's epoch, the world as played (its document) and the engine's state as plain JSON.
+
+```ts
+export interface ChatExportReply {
+  chat: string;
+  world: string | null;
+  revision: string;
+  engine: string;
+  seed: string;
+  clock: number;
+  worldDoc: JsonValue;
+  state: JsonValue;
 }
 ```
 
@@ -2468,7 +2810,7 @@ export interface ConnectionInput {
 
 ### `ConnectionShown`
 
-A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; and why they could not be read, where they could not.
+A connection as the routes show it: whether a key is set and nothing of the key; its model's limits as RPH uses them, null where nobody knows them; why they could not be read, where they could not; and its newest tag check, whether it keeps the reply's tags and the reply form it got.
 
 ```ts
 export interface ConnectionShown {
@@ -2504,6 +2846,8 @@ export interface ConnectionShown {
   limitsInForce: ModelLimits | null;
   /** Why its model's limits could not be read; null where they were read, each of them known or not. */
   limitsProblem?: string | null;
+  /** Its newest tag check; null where none was run on it. */
+  tagCheck?: TagCheck | null;
 }
 ```
 
@@ -2541,6 +2885,18 @@ export interface ConsentGrant {
   bounds?: string;
   /** The gap check it rests on; absent when none was cited. */
   gapCheck?: string;
+}
+```
+
+### `DefinitionRun`
+
+What a definition runs on, resolved among the user's connections for the chat it is listed for: the connection its header names (his default where it names none), that connection's model, and the effort it thinks at: its definition's, else its connection's own.
+
+```ts
+export interface DefinitionRun {
+  connection: { id: string; name: string } | null;
+  model: string | null;
+  effort: Effort | null;
 }
 ```
 
@@ -2663,7 +3019,7 @@ export interface EntryCounts {
 The parts of a character's record kept as rows tied to turns, the casting aside.
 
 ```ts
-export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory";
+export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away";
 ```
 
 ### `EntryRow`
@@ -2747,12 +3103,39 @@ How exact a value or a fact is.
 export type FactPrecision = "exact" | "approximate" | "vague" | "unknown";
 ```
 
+### `FactShown`
+
+A fact a rule's trigger can name, RPH's or RPE's: what it counts, its groups and fields, its value in the open chat where RPE counts it (null with no chat, or for one of RPH's), and the rules whose text names it.
+
+```ts
+export interface FactShown {
+  name: string;
+  counts: string;
+  by?: string[];
+  fields?: string[];
+  from: "rph" | "host";
+  clash?: true;
+  value: { count: number; names?: string[]; by?: { [key: string]: number }; namesBy?: { [key: string]: string[] }; fields?: { [key: string]: JsonValue } } | null;
+  rules: string[];
+}
+```
+
 ### `FactSource`
 
 Where a value or a fact came from.
 
 ```ts
 export type FactSource = "prose" | "lore" | "author" | "gm" | "character" | "player" | "import" | "default" | "invented";
+```
+
+### `FactsReply`
+
+The facts a trigger can name.
+
+```ts
+export interface FactsReply {
+  facts: FactShown[];
+}
 ```
 
 ### `FactStanding`
@@ -2832,6 +3215,8 @@ export interface FileSwitchAsk {
   level: "global" | "chat";
   chat?: string | null;
   off: boolean;
+  /** For a hooks file: the hook of it switched, by its name. */
+  hook?: string;
 }
 ```
 
@@ -2871,6 +3256,33 @@ export interface FindStopped {
   cut?: { lines: number; chars: number };
   /** It ran out of the `ms` milliseconds it was given. */
   time?: { ms: number };
+}
+```
+
+### `FiringShown`
+
+A rule that fired in the chat, as kept: the firing whole, with its id, when, and the turn or the job of his it was told in (run and talk: not kept, so null).
+
+```ts
+export interface FiringShown {
+  firing: RuleFiring;
+  id: string;
+  at: number;
+  turn: string | null;
+  run: string | null;
+  job: string | null;
+  talk: string | null;
+}
+```
+
+### `FiringsReply`
+
+A page of a chat's firings, newest first, and the cursor of the next page (null: none).
+
+```ts
+export interface FiringsReply {
+  items: FiringShown[];
+  next: string | null;
 }
 ```
 
@@ -2937,12 +3349,45 @@ export interface GapCheck {
 }
 ```
 
+### `GivenName`
+
+A name a definition's `given:` lists: what kind of thing it is, who finds it (RPH its own kinds, RPE its views), and whether RPE gives it at the chat's newest turn (null for RPH's, found at the run).
+
+```ts
+export interface GivenName {
+  name: string;
+  kind: "file" | "chat" | "lore" | "prompt" | "world" | "story" | "cast" | "turn" | "index" | "ruleset" | "map" | "view";
+  by: "rph" | "rpe";
+  found: boolean | null;
+}
+```
+
+### `GivenReply`
+
+What each agent definition in force for a chat is given by name, read at the chat's newest turn (null: it has none yet), and the names of RPE's that nothing provides.
+
+```ts
+export interface GivenReply {
+  chat: string;
+  turn: string | null;
+  definitions: { name: string; off: boolean; given: GivenName[]; missing: string[] }[];
+}
+```
+
 ### `GuidanceKind`
 
 A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools.
 
 ```ts
 export type GuidanceKind = "agents" | "skills" | "rules" | "hooks" | "prompts" | "tools";
+```
+
+### `HookEvent`
+
+A moment a hook of his runs at, as his hooks file writes it.
+
+```ts
+export type HookEvent = "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end";
 ```
 
 ### `HorizonEntryRow`
@@ -2997,6 +3442,14 @@ export interface JobLimits {
 }
 ```
 
+### `JobRefusal`
+
+Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs.
+
+```ts
+export type JobRefusal = { refused: "off" } | { refused: "day-count"; max: number; value: number; connection?: string } | { refused: "day-tokens"; max: number; value: number } | { refused: "limit"; limit: "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "askAt"; value: number } | { refused: "agent"; agent: string } | { refused: "no-job"; id: string } | { refused: "state"; id: string; state: JobState; applies: JobState[] } | { refused: "not-at-limit"; id: string } | { refused: "hook"; hook: string; reason: string } | { refused: "connection"; connection: string } | { refused: "part"; part: "tag-check" | "reply-contract" };
+```
+
 ### `JobsReply`
 
 The user's jobs (of every chat, or of one) as RPH last kept each, the newest started first.
@@ -3028,7 +3481,7 @@ export interface JobToldReply {
 
 ### `JobView`
 
-A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, and where it asks.
+A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.
 
 ```ts
 export interface JobView {
@@ -3036,7 +3489,7 @@ export interface JobView {
   agent: string;
   brief: string;
   state: JobState;
-  scope: Scope;
+  scope: RunScope;
   startedBy: AgentRef | "user";
   started: number;
   ended?: number;
@@ -3055,6 +3508,10 @@ export interface JobView {
   repeats?: string;
   /** For a job that asks: the ask point it reached, and the tokens it had spent when it did. */
   asks?: { at: number; tokens: number };
+  /** What the owner gave it beyond its limits by carrying it on, added up over every time he did. */
+  more?: JobLimits;
+  /** For a tag check: the connection it measures, by id. */
+  check?: { connection: string };
 }
 ```
 
@@ -3077,6 +3534,54 @@ What a route that takes a turn's id answers, with status 409, for a turn that wa
 ```ts
 export interface JoinedAnswer {
   joined: { turn: TurnId; joined: TurnId };
+}
+```
+
+### `Journal`
+
+The player's journal: each quest he may see, at the chat's newest turn or as it stood at one of its turns. A quest set to show him nothing is absent: no row, no count.
+
+```ts
+export interface Journal {
+  chat: string;
+  /** The turn read at; null: the chat's newest. */
+  turn: TurnId | null;
+  /** How many of the quests he may see are open. */
+  open: number;
+  quests: JournalQuestRow[];
+}
+```
+
+### `JournalQuestRow`
+
+A quest the player may see, as his journal shows it: whole, with what it is and its stakes, or only its name and the stages the Author showed him.
+
+```ts
+export interface JournalQuestRow {
+  id: string;
+  kind: "quest" | "secret" | "puzzle" | "agenda";
+  name: string;
+  /** The world defines the quest: its labels and conditions are as the world wrote them. */
+  world: boolean;
+  /** What it is. */
+  objective: string | null;
+  /** Why it matters. */
+  why: string | null;
+  stakes: string | null;
+  rewards: string | null;
+  stages: QuestStageRow[];
+  /** Who it involves, as tree refs. */
+  who: string[];
+  /** Where it takes place, as tree refs. */
+  where: string[];
+  /** What it involves, as tree refs. */
+  things: string[];
+  /** How it closed; null while it is open. */
+  closed: QuestClosedRow | null;
+  /** The player sees the whole quest; false: only its name and the stages named. */
+  whole: boolean;
+  /** The thread of the story it belongs to, for a quest seen whole; never given for one seen by stages. */
+  thread: string | null;
 }
 ```
 
@@ -3280,7 +3785,7 @@ export interface LiveBatch {
 One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
 
 ```ts
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 ```
 
 ### `LiveMessage`
@@ -3652,7 +4157,7 @@ export interface MigrationChatRow {
   why: string | null;
   turns: number;
   shares: { chat: string; messages: number } | null;
-  check: { matched: { head: boolean; swipes: number; of: number }; differences: FoldDifference[]; placed: { own: number; shown: number; lost: number; head: number } };
+  check: { matched: { head: boolean; swipes: number; of: number }; differences: FoldDifference[]; placed: { own: number; shown: number; lost: number } };
   /** What the run that imported it carried of it, over its whole path (a document the migration kept as JSON); null for a chat no run of this build imported. */
   carried: JsonValue | null;
 }
@@ -3873,6 +4378,22 @@ The proof of a page's nonce, keyed by the hash of its page token.
 export interface PageProof {
   /** HMAC-SHA-256 of the nonce, keyed by the token's hash, as lowercase hex. */
   proof: string;
+}
+```
+
+### `PartPreviewReply`
+
+A prompt part or a tool's description rendered as RPH renders it for the chat: which it is, every field it names, the values of its last use in the chat (null before it was ever used there), its text with them filled in (none where it does not read), the fields it put in that had no value, and why it does not read or what of it is shown as written, each with its line.
+
+```ts
+export interface PartPreviewReply {
+  kind: "prompt" | "tool";
+  name: string;
+  values: JsonValue | null;
+  fields: string[];
+  text?: string;
+  missing: string[];
+  problems: { line?: number; message: string }[];
 }
 ```
 
@@ -4099,6 +4620,104 @@ export interface PruneItem {
 }
 ```
 
+### `QuestClosedRow`
+
+How a quest closed: its outcome and the reason given.
+
+```ts
+export interface QuestClosedRow {
+  outcome: string;
+  why: string | null;
+}
+```
+
+### `QuestRecord`
+
+One quest in full: its record, and every write made to it in the order made (those of a quest opened in play; the world's own quest has none).
+
+```ts
+export interface QuestRecord {
+  quest: QuestRecordRow;
+  history: ({ turn: TurnId | null; by: string | null; op: string; value: { [key: string]: JsonValue } })[];
+}
+```
+
+### `QuestRecordRow`
+
+A quest of the chat as the record holds it, whatever the player may see (the Quests page keeps it behind its spoiler gate): what it is, its stages with their calls, who and where, its stakes, how it was shown to the player and where it came from.
+
+```ts
+export interface QuestRecordRow {
+  id: string;
+  kind: "quest" | "secret" | "puzzle" | "agenda";
+  name: string;
+  /** The world defines the quest: its labels and conditions are as the world wrote them. */
+  world: boolean;
+  /** What it is. */
+  objective: string | null;
+  /** Why it matters. */
+  why: string | null;
+  stakes: string | null;
+  rewards: string | null;
+  stages: QuestStageRow[];
+  /** Who it involves, as tree refs. */
+  who: string[];
+  /** Where it takes place, as tree refs. */
+  where: string[];
+  /** What it involves, as tree refs. */
+  things: string[];
+  /** How it closed; null while it is open. */
+  closed: QuestClosedRow | null;
+  thread: string | null;
+  /** The quest's own visibility; null where it was not said. */
+  visibility: "public" | "known_by" | "secret" | null;
+  /** What the Author set the player to be shown: all, none, the stages named; null: as the quest's own visibility says. */
+  shown: "all" | "none" | string[] | null;
+  open: boolean;
+}
+```
+
+### `QuestRecords`
+
+A page of the chat's quests, the world's and those opened in play, in the order they are kept.
+
+```ts
+export interface QuestRecords {
+  items: QuestRecordRow[];
+  next: string | null;
+}
+```
+
+### `QuestStageRow`
+
+A stage of a quest: its label, the condition that moves the quest past it in words, what the story called on it (null: nothing yet) and why, and whether the quest stands on it now.
+
+```ts
+export interface QuestStageRow {
+  id: string;
+  label: string;
+  condition: string;
+  /** What the Author or the GM called on the stage; null where nothing was called. */
+  state: "met" | "failed" | "open" | null;
+  /** The reason given with that call. */
+  why: string | null;
+  /** Whether the quest stands on this stage now; null for a quest the story opened, which has no single place to stand. */
+  current: boolean | null;
+}
+```
+
+### `RegisteredTool`
+
+A tool the registry holds for a chat: its name, its family, and whose it is: RPH's own, the host's, or his own from a manifest.
+
+```ts
+export interface RegisteredTool {
+  name: string;
+  family: string;
+  from: "rph" | "host" | "owner";
+}
+```
+
 ### `Release`
 
 The reply's release: whose text, in which form, the file for a file released, and its length.
@@ -4252,6 +4871,82 @@ export interface RuleFiring {
 }
 ```
 
+### `RulesReply`
+
+The rules of a chat's stack, or of the levels every chat shares.
+
+```ts
+export interface RulesReply {
+  chat: string | null;
+  rules: RuleView[];
+}
+```
+
+### `RuleSwitch`
+
+On or off, at which level, and the chat for the chat's level.
+
+```ts
+export interface RuleSwitch {
+  on: boolean;
+  level: "chat" | "global";
+  chat?: string;
+}
+```
+
+### `RuleSwitched`
+
+The rule as it stands after the switch.
+
+```ts
+export interface RuleSwitched {
+  rule: RuleView;
+}
+```
+
+### `RuleTest`
+
+A rule run against a past turn: whether it would have fired, and each firing with what matched.
+
+```ts
+export interface RuleTest {
+  rule: string;
+  turn: string;
+  fired: boolean;
+  firings: RuleFiring[];
+}
+```
+
+### `RuleTestAsk`
+
+The past turn to run the rule against.
+
+```ts
+export interface RuleTestAsk {
+  turn: string;
+}
+```
+
+### `RuleView`
+
+A rule as the Rules page lists it: where it is, whom it is for, how it is triggered, a command rule's command and where its switch stands, whether it is in force and why not, and the farther files it replaces.
+
+```ts
+export interface RuleView {
+  name: string;
+  path: string;
+  level: LayerLevel;
+  description: string;
+  agents: "all" | string[];
+  trigger?: "always" | "pattern" | "question" | "moment" | "command" | "interval";
+  command?: { runs: string; state: "on" | "waiting" | "off" };
+  inForce: boolean;
+  why?: "off" | "needs" | "example" | "broken" | "judge";
+  judge?: "part" | "yes" | "connection";
+  replaces: { level: LayerLevel; path: string }[];
+}
+```
+
 ### `RunOutcome`
 
 How a run ended, whether a reply was released, the limit or the failure, and what every agent of it spent.
@@ -4261,9 +4956,17 @@ export interface RunOutcome {
   status: "released" | "no-reply" | "stopped" | "limit" | "failed";
   released: boolean;
   limit?: LimitHit;
-  error?: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string };
+  error?: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook"; hook?: string; limit?: LimitHit; detail?: string; agent?: string; text?: string };
   usage: Usage;
 }
+```
+
+### `RunScope`
+
+Where a run's work happens: a chat's, or that of a job of no chat.
+
+```ts
+export type RunScope = Scope | UserSessionScope;
 ```
 
 ### `RunShown`
@@ -4291,7 +4994,7 @@ export interface RunShown {
   /** What Lumiverse saved for it where that is not what was released (beyond the prefill in front and a continue's join): the saved text whole, beside `reply`; null where it is the same, or nothing is saved yet. */
   saved: string | null;
   /** Why the reply failed, when it did. */
-  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
+  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook"; hook?: string; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
   /** What stopped it where it stood; null for neither a limit nor the hold. */
   stoppedBy: StoppedBy | null;
   /** What went out as its reply is the Author's last plain text, sent by the setting `reply.lastText` in place of the error line. */
@@ -4496,6 +5199,8 @@ export interface SessionShown {
   from?: { chat: string; session: string; turn: string };
   turns: number;
   compactAsked?: true;
+  held?: { hook: string; reason: string };
+  hooked?: string;
   scene?: string;
 }
 ```
@@ -5281,6 +5986,33 @@ export interface SystemsReply {
 }
 ```
 
+### `TagCheck`
+
+A tag check's record for a connection: the simple turns it played on it, how many came back with the reply and the intent record each in its tags, against the count the tag form needs, the model that answered, the reply form that set for the connection (his global config's, his to change after; not set where the file could not be written), when it ended and the job that ran it.
+
+```ts
+export interface TagCheck {
+  connection: string;
+  name: string;
+  model: string;
+  tried: number;
+  kept: number;
+  needed: number;
+  form: "tags" | "two-step";
+  set: boolean;
+  at: number;
+  job: string;
+}
+```
+
+### `TagCheckStarted`
+
+A tag check asked for: the job it runs as, at once; or why none was started (jobs off, the day's count or tokens reached, no such connection, the check's part missing or not as it needs, his job-start hook).
+
+```ts
+export type TagCheckStarted = { job: JobView } | { refusal: JobRefusal };
+```
+
 ### `TakenKeyAsk`
 
 The hash of the provider key today's connection holds, which RPE takes over at the swap.
@@ -5348,6 +6080,14 @@ export interface ToolResult {
 }
 ```
 
+### `ToolsAs`
+
+How a definition's tools are offered to its model: as the connection does best (`auto`), as native tool calls, or as text.
+
+```ts
+export type ToolsAs = "auto" | "native" | "text";
+```
+
 ### `TraceDelta`
 
 Text of a model call as it streams: what arrived since the last piece, never numbered.
@@ -5368,7 +6108,7 @@ export interface TraceDelta {
 What RPH did; each kind's fields are the facts of it.
 
 ```ts
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 ```
 
 ### `TraceRecord`
@@ -5379,7 +6119,7 @@ An event of RPH's, numbered within its run, with who did it and where; for a sub
 export interface TraceRecord {
   seq: number;
   run: string;
-  scope: Scope;
+  scope: RunScope;
   at: number;
   agent?: AgentRef;
   parent?: { agent: string; run: string; call: string };
@@ -5481,6 +6221,25 @@ export interface TreeFileRow {
   problems?: string[];
   /** The agents whose stacks it joins: a file `instructions:` names or an agent reads. */
   joins?: string[];
+  /** For a level's hooks file (`hooks.yml` in its hooks folder): each hook it names, as RPH's hook reader takes it. */
+  hooks?: TreeHook[];
+}
+```
+
+### `TreeHook`
+
+A hook as a hooks file names it: its name (an `off:` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on.
+
+```ts
+export interface TreeHook {
+  name: string;
+  on: HookEvent;
+  runs: string;
+  off: boolean;
+  offIn: LayerLevel[];
+  replacedBy: string | null;
+  applies: boolean;
+  state?: "on" | "waiting" | "off";
 }
 ```
 
@@ -5549,6 +6308,16 @@ export interface TurnChange {
 }
 ```
 
+### `TurnControlled`
+
+Whether the control took: false when the turn's run is not going on (or, for resume, was not held by his pause; for say, the words were empty).
+
+```ts
+export interface TurnControlled {
+  done: boolean;
+}
+```
+
 ### `TurnId`
 
 A turn's id: the id RPE gives a turn when it begins it.
@@ -5563,6 +6332,17 @@ What a generation asks for.
 
 ```ts
 export type TurnKind = "new" | "swipe" | "regenerate" | "continue" | "impersonate";
+```
+
+### `TurnLiveState`
+
+Whether a turn runs now, and whether his pause holds its run.
+
+```ts
+export interface TurnLiveState {
+  running: boolean;
+  paused: boolean;
+}
 ```
 
 ### `TurnLoreReply`
@@ -5659,7 +6439,7 @@ export interface TurnReply {
   /** What its latest run sent to the chat so far. */
   reply: ReplySoFar;
   /** Why the reply failed, when it did. */
-  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags"; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
+  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook"; hook?: string; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
   /** Its runs' events as far as the read reaches, in order: of the run asked for (the turn's first when none), those numbered `from` on; and every record of each run that began after it. */
   trace: TraceRecord[];
   /** The lore of the turn's prompt, by id, as its intake kept it: the entries Lumiverse activated for it (Lumiverse's ids), and the entries its lore map showed the Author (RPE's ids, as the map writes them). */
@@ -5711,6 +6491,16 @@ A run's kind: the kind of turn Lumiverse asked for, or a Settle now run, where t
 
 ```ts
 export type TurnRunKind = "new" | "swipe" | "regenerate" | "continue" | "impersonate" | "settle";
+```
+
+### `TurnSay`
+
+What he says to the Author while the turn runs: it reaches the lead at its next model call, as his words.
+
+```ts
+export interface TurnSay {
+  text: string;
+}
 ```
 
 ### `TurnsReply`
@@ -5837,6 +6627,28 @@ One thing the last run left waiting on the user, by what it is.
 
 ```ts
 export type WaitingOnUser = { kind: "guidance"; path: string } | { kind: "connection"; setting: string; connection: string } | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean } | { kind: "own"; agents: number; skills: number; texts: number } | { kind: "filing"; chat: string; characters: number; notes: boolean } | { kind: "world"; world: string; name: string | null };
+```
+
+### `WebProviderSet`
+
+The web search provider he sets: its address (null takes it away and web_search is off), and a key for it (left out: the kept key stays only if the address is the same; null: no key).
+
+```ts
+export interface WebProviderSet {
+  address: string | null;
+  key?: string | null;
+}
+```
+
+### `WebProviderShown`
+
+The web search provider he set, as the Connections page shows it: its address (null: none, so web_search is off) and whether a key is kept for it; never the key.
+
+```ts
+export interface WebProviderShown {
+  address: string | null;
+  key: boolean;
+}
 ```
 
 ### `WorldReply`

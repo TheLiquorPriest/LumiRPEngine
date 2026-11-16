@@ -108,8 +108,12 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `pages.filePieceBytes` | `65536` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Bytes of a file read per piece: Bytes of a file the Files page reads from RPE at a time, so a file of any size opens its first piece at once and goes on when asked. |
 | `pages.chatsAtATime` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chats read at a time on Storage: Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take. |
 | `pages.logLines` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Log lines shown per page on Runtime: Lines of RPE's own log the Runtime page reads at a time, the newest first; older lines are read on request (RPE keeps service.logLines of them). |
-| `pages.sessionsAtATime` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Sessions and their turns read at a time: Sessions of a chat, and turns of one session, the Sessions page reads from RPE at a time (the list goes on until every session is read, since the newest are shown first). |
-| `pages.lorePerPage` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore proposals and writes read at a time: Proposals and writes to his lore the Lore page reads from RPE at a time; more are read on request. |
+| `pages.rowsAtOnce` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Rows read at once: Rows the Sessions, Rules and Lore pages' lists read from RPE at a time (sessions and their turns, firings of a rule, proposals and writes to his lore); more are read on request. |
+| `pages.toastsShown` | `3` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Toasts shown at once: Toasts the kept views (Build, Play, the chat's toolbar) show at once; a new one pushes the oldest out. |
+| `pages.errorToastMs` | `6000` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | An error toast shows for: Milliseconds an error toast shows in the kept views. |
+| `pages.toastMs` | `3500` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Any other toast shows for: Milliseconds any other toast shows in the kept views. |
+| `pages.downloadRevokeMs` | `1000` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | A download link is kept for: Milliseconds the kept views keep a download's link before the browser lets it go. |
+| `pages.previewWaitMs` | `300` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Wait after typing before a prompt part is rendered again: Milliseconds the Files page waits after he stops typing in a prompt part before it asks RPH to render the draft again for its preview. |
 
 ## The store
 
@@ -277,6 +281,22 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `jobs.run.agents` | none (no limit) | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Sub-agents in a job's run: Sub-agents the agents of one job's run may start in all; 0 starts none. |
 | `jobs.keepDays` | `90` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Days a job is kept: Days the record of a job is kept; the older ones are removed when the next job starts. |
 
+## The turn
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `lead` | none (the asking agent's own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | The Author: The definition that leads the chat's turns, the Author: in a job, its connection judges a rule's question where neither the rule nor rules.judge names one. |
+| `chat.hiddenReadable` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hidden messages readable by agents | Hidden messages readable: Agents may read the messages the player hid from the prompt. |
+| `since.editedBudget` | none (every one in full) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Edited replies in the briefing: Off as shipped, every edited reply is told with both its texts whole. Set, the tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named by message in one line, with no text. |
+| `since.deletedBudget` | `1000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Deleted turns in the briefing: The tokens the briefing spends naming the turns a delete took with the first words of each one's reply, the newest first; the rest are named by message number in one line. |
+| `since.deletedWords` | `24` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Words quoted of a deleted turn: How many of the first words of each deleted turn's reply the briefing quotes to name it. |
+| `since.notAppliedBudget` | `1500` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a flip stopped, in the briefing: The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them. |
+| `history.window` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: History window | History window: The latest this many of the chat's messages stay in the prompt. |
+| `history.step` | none (off) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The window's step | Window step: Lets the window grow by this many messages before it is cut back to its size. |
+| `history.hold.on` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold uncovered messages: Keeps a message the story record does not cover yet in the prompt. |
+| `history.hold.cap` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold's most: The most messages the hold keeps past the window. |
+| `passConnection` | none (the default connection) | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Connection for requests with no tag: The connection a request with no tag is passed on to. |
+
 ## Model calls
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -320,6 +340,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `reply.form` | `tags` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: How a connection marks its reply | Reply form: How a connection marks its reply: with tags, or in two steps for a connection that does not keep them. |
 | `reply.forms.<connection>` | none (as reply.form says) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Reply form of a connection: The reply form of this connection, in place of the one every connection takes. |
+| `reply.check.turns` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Turns a tag check plays: Simple turns a tag check plays on a connection to see whether it keeps the reply's tags. |
+| `reply.check.kept` | `28` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Turns that must keep the tags: Turns of a tag check that must come back with the reply and the intent record in their tags for the connection to be given the tag form; fewer give it the two-step form. |
 | `reply.streamAnyway` | `[]` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Two-step connections that stream: Two-step connections whose replies are shown as they are written, not when their message ends. |
 | `reply.heldSentences` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Reply held back when a rule that interrupts covers it | Sentences held back: Sentences the reply is held back by while a rule that interrupts covers it. |
 | `reply.tailSentences` | `3` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Sentences shown again to an agent that goes on after a rule stopped it | Sentences shown again: Sentences of what was already shown that go with the line an agent goes on under after a rule stopped it. |
@@ -345,7 +367,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `rules.patternTime` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a rule's pattern may run: Milliseconds one rule's pattern may run on one text; past it the run is stopped, counts as no match, and is shown on the Turn page. |
 | `rules.interrupt` | `stop` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A stream rule that interrupts: What a stream rule that interrupts does: stop the call where it matched, or remind the agent after it instead. |
 | `rules.interrupts.<connection>` | none (as rules.interrupt says) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A stream rule that interrupts, on a connection: Stop or remind, for one connection whose stopped reply cannot go on cleanly. |
-| `rules.judge` | none (the asking agent's own connection) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The model that answers a `question:` rule | Connection that judges questions: The connection that answers a rule's question, by its name or id, where the rule names none. |
+| `rules.judge` | none (the Author's connection) | RPE-global.yml | from the next turn | Appendix D.1: The model that answers a `question:` rule | Connection that judges questions: The connection that answers a rule's question, by its name or id, where the rule names none. |
 | `rules.commandTimeout` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a rule's command may take: Seconds a rule's command may take to answer yes or no; past them it is stopped and the rule is shown as unable to work, never as a no. |
 
 ## `mcp`
@@ -354,6 +376,15 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `mcp.startTimeout` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time an MCP server may take to start: Seconds one of your MCP servers may take to start, or to answer at its address, and list its tools; past them it is stopped and its tools are not offered this time. |
 | `mcp.callTimeout` | `60` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time an MCP tool may take: Seconds one call of an MCP server's tool may take; past them the call is given up and the agent is told. |
+
+## `hooks`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `hooks.timeout` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a hook may take: Seconds one of your hooks may take where hooks.yml names no timeout of its own; past them it is stopped, blocks nothing, and is shown as timed out. |
+| `hooks.blockExit` | `2` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Exit code that blocks: The exit code with which a hook blocks, its error output as the reason; any other failing code blocks nothing and is shown as failed. |
+| `hooks.answerMax` | `1048576` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Most of a hook's answer read: Bytes read of what a hook answers; an answer past them is cut, blocks nothing, and is shown as failed. |
+| `hooks.reasonChars` | `2000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Most of a hook's reason kept: Characters of a hook's error output kept as its reason or as why it failed; the last of them are kept. |
 
 ## What is kept of a turn
 
@@ -388,22 +419,6 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `sessions.held` | `8` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sessions kept read: Sessions whose file stays read in memory between their turns, so a turn starts without reading it again; past this many, the one used least recently is let go and read whole when next asked for. |
 | `sessions.page` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sessions a page: Sessions listed in one page of the Sessions page when it asks for no number. |
 
-## The turn
-
-| Setting | Default | Where | In force | Appendix D.1 | What it does |
-|---|---|---|---|---|---|
-| `lead` | none (no lead: no turn is played) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lead agent: The agent definition that leads a turn; the shipped config names the Author. |
-| `chat.hiddenReadable` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hidden messages readable by agents | Hidden messages readable: Agents may read the messages the player hid from the prompt. |
-| `since.editedBudget` | none (every one in full) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Edited replies in the briefing: Off as shipped, every edited reply is told with both its texts whole. Set, the tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named by message in one line, with no text. |
-| `since.deletedBudget` | `1000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Deleted turns in the briefing: The tokens the briefing spends naming the turns a delete took with the first words of each one's reply, the newest first; the rest are named by message number in one line. |
-| `since.deletedWords` | `24` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Words quoted of a deleted turn: How many of the first words of each deleted turn's reply the briefing quotes to name it. |
-| `since.notAppliedBudget` | `1500` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a flip stopped, in the briefing: The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them. |
-| `history.window` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: History window | History window: The latest this many of the chat's messages stay in the prompt. |
-| `history.step` | none (off) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The window's step | Window step: Lets the window grow by this many messages before it is cut back to its size. |
-| `history.hold.on` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold uncovered messages: Keeps a message the story record does not cover yet in the prompt. |
-| `history.hold.cap` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold's most: The most messages the hold keeps past the window. |
-| `passConnection` | none (the default connection) | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Connection for requests with no tag: The connection a request with no tag is passed on to. |
-
 ## `turns`
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -424,6 +439,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `story.from` | `lumiverse` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Whose messages are the story: Whose messages the chat's story is made of: as Lumiverse has it (lumiverse), everyone's, or the replies alone (replies). A briefing fact the guidance reads. |
 | `story.newest` | `directive` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | His newest message: With the story made of the replies: whether his newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads. |
 | `story.queryItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Items a story query gives: The most items one story_query answers with; the answer says how many more match. |
+| `story.nearMatches` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Near ids listed: How many near ids an answer about an id the story record does not hold lists. |
+| `story.nearDistance` | `0.25` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Spelling distance of a near id: How far off in spelling an id may be and still be listed as a near one, as a part of its length: 0.25 lets a quarter of its letters differ. |
 | `story.ahead` | `2` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Messages ahead of a turn: Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and the player's next message), where the story record is measured. |
 | `story.soFar.share` | `0.05` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: share of the window: The share of the Author's window the briefing's story so far may fill. |
 | `story.soFar.floor` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: fewest tokens: The fewest tokens the briefing's story so far may fill, however small the window. |
@@ -472,6 +489,13 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `taps.tell.governance` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Governance: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.things` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Things: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.paymentsFrom` | `0` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Payments told from: A payment to someone else is told to the next turn's Author from this amount, in whole units of the world's money (0: every one). |
+
+## `web`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `web.hits` | `10` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Web search hits: The hits a web search gives when the agent names no number. |
+| `web.timeout` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Web search wait: Seconds a web search waits for the provider's answer before it says the search failed. |
 
 ## Bootstrap
 
