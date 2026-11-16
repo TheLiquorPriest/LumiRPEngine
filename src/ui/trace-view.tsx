@@ -9,7 +9,7 @@ import { Icon, type IconName } from "./icons";
 import { markdown } from "./markdown";
 import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
 import { Badge, Fold, Pre, type Tone } from "./atoms";
-import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
+import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
 import { counted, duration, json, num, tokenWords } from "./words";
 
@@ -42,6 +42,10 @@ const AGENT_WORDS: Readonly<Record<AgentState, { words: string; tone?: Tone }>> 
 };
 
 const FORM_WORDS: Readonly<Record<ReleaseForm, string>> = { tags: "its own text, in the reply tags", message: "a message of its own", narrator: "the narrator's draft", "narrator-live": "the narrator, live", file: "a finished file" };
+
+const COMPACTED_WORDS: Readonly<Record<EventOf<"compacted">["reason"], string>> = { "would-not-fit": "it would not have fit", refused: "the model refused it", asked: "asked for", fold: "its records passed their size" };
+
+const UNHELD_WORDS: Readonly<Record<EventOf<"tool_unheld">["reason"], string>> = { unregistered: "its definition lists it, and nobody registered it", shadowed: "a host's tool took a name of the harness's own and was left out", withdrawn: "the host withdrew it since the session opened, and it answers that it is gone" };
 
 const REPLY_ERROR_WORDS: Readonly<Record<ReplyError["code"], string>> = {
   "no-reply": "The lead's run ended with no reply released.",
@@ -127,12 +131,22 @@ export function ReplyBox(props: { run: RunNode }) {
 
 // ---------------------------------------------------------------- the tree
 
-/** The run's agents as a tree: the lead first, each agent under the one that started it. `notices` are the words of the notices file, for the records that are notices. */
+/** The run's agents as a tree: the lead first, each agent under the one that started it, and above them what the host said of the run that is about no agent. `notices` are the words of the notices file, for the records that are notices. */
 export function AgentTree(props: { run: RunNode; now: number; notices?: NoticeLines }) {
+  const notices = props.notices ?? NO_NOTICES;
   return (
     <div class="rpe-tree">
+      {props.run.host.length === 0 ? null : (
+        <ol class="rpe-steps" aria-label="What the harness said of the run" data-host>
+          {props.run.host.map((step) => (
+            <li key={step.key} class="rpe-step note" data-seqs={step.seqs.join(",")}>
+              <NoteView step={step} notices={notices} />
+            </li>
+          ))}
+        </ol>
+      )}
       {props.run.roots.map((id) => (
-        <AgentBox key={id} run={props.run} id={id} now={props.now} depth={0} notices={props.notices ?? NO_NOTICES} />
+        <AgentBox key={id} run={props.run} id={id} now={props.now} depth={0} notices={notices} />
       ))}
     </div>
   );
@@ -420,9 +434,13 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
     case "released":
       return <NoteHead icon="send" title={`Released the reply: ${FORM_WORDS[event.release.form]}, ${counted(event.release.length, "character")}${event.release.path === undefined ? "" : ` (${event.release.path})`}`} />;
     case "compacted":
-      return <NoteHead icon="shrink" title={`Compacted session ${event.session}: ${num(event.before)} to ${num(event.after)} tokens, ${counted(event.keptTurns, "turn")} kept as they were`} />;
+      return <NoteHead icon="shrink" title={`Compacted session ${event.session}: ${num(event.before)} to ${num(event.after)} tokens (${COMPACTED_WORDS[event.reason]}; ${event.of === "turns" ? "its earlier turns" : "the run's older calls"}${event.keptTurns === undefined ? "" : `, ${counted(event.keptTurns, "turn")} kept as they were`})`} />;
     case "session":
-      return <NoteHead icon="book" title={`Session ${event.session} ${event.change}${event.from === undefined ? "" : ` from ${event.from}`}`} />;
+      return <NoteHead icon="book" title={`Session ${event.session} ${event.change}${event.from === undefined ? "" : ` from ${event.from}`}${event.turn === undefined ? "" : `, for turn ${event.turn}`}${event.by === undefined ? "" : ", by your press"}${event.reason === undefined ? "" : `: ${event.reason}`}`} />;
+    case "tool_unheld":
+      return <NoteHead icon="alert" title={`Tool ${event.tool} of ${event.definition}: ${UNHELD_WORDS[event.reason]}`} />;
+    case "rule_failed":
+      return <NoteHead icon="alert" title={`Rule ${event.rule} (${event.path}) ran out of time on a text of ${counted(event.length, "character")}: counted as no match`} />;
     case "job":
       return (
         <div class="lre-stack">

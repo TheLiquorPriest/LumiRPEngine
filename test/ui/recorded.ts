@@ -265,13 +265,15 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
     notGiven: [],
     target: null,
     held: null,
+    saved: null,
     trace,
-    requests: records.flatMap((r) => (r.event.kind === "call_started" ? [{ agent: r.agent.id, definition: r.agent.definition, call: r.event.call, file: requestFile(r.agent, r.event.call) }] : [])),
+    requests: records.flatMap((r) => (r.event.kind === "call_started" && r.agent !== undefined ? [{ agent: r.agent.id, definition: r.agent.definition, call: r.event.call, file: requestFile(r.agent, r.event.call) }] : [])),
   };
   return {
     id: options.run,
     chat: options.chat,
     kind: "new",
+    marks: [],
     onPath: true,
     message: outcome?.released === true ? "msg-0412" : null,
     status,
@@ -297,14 +299,14 @@ export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): 
 }
 
 export function summaryOf(detail: TurnReply): TurnRow {
-  return { id: detail.id, kind: detail.kind, onPath: detail.onPath, message: detail.message, status: detail.status, timings: detail.timings, usage: detail.usage };
+  return { id: detail.id, kind: detail.kind, onPath: detail.onPath, message: detail.message, status: detail.status, timings: detail.timings, usage: detail.usage, marks: [] };
 }
 
 /** The chat's earlier turns: a swipe that stands, the attempt it replaced (off the path now), and one stopped by the player. */
 export const EARLIER: readonly TurnRow[] = [
-  { id: "turn-30", kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(3, 24_100, 19_456, 512, 88) },
-  { id: "turn-29", kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(4, 30_870, 22_528, 640, 120) },
-  { id: "turn-28", kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(2, 11_920, 8_192, 301, 64) },
+  { id: "turn-30", marks: [], kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(3, 24_100, 19_456, 512, 88) },
+  { id: "turn-29", marks: [], kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(4, 30_870, 22_528, 640, 120) },
+  { id: "turn-28", marks: [], kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(2, 11_920, 8_192, 301, 64) },
 ];
 
 const EARLIER_WORDS: Readonly<Record<string, { intent: string; reply: string }>> = {
@@ -321,7 +323,7 @@ export function earlierTurn(id: string, chat = CHAT): TurnReply | null {
   const error = summary.status === "stopped" ? { code: "stopped" as const } : null;
   const reply = { text: words.reply, progress: [] };
   // The recording names a run by its turn, as RPH did before each run had an id of its own.
-  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], target: null, held: null, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
+  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], target: null, held: null, saved: null, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
   return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run], ...NOTHING_MORE };
 }
 

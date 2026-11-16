@@ -92,6 +92,8 @@ export interface RunNode {
   readonly agents: ReadonlyMap<string, AgentNode>;
   /** Agents no agent of this run started: the lead, first. */
   readonly roots: readonly string[];
+  /** The records of the run that are about no agent (the host's word: a session opened, closed or forked), in order. */
+  readonly host: readonly NoteStep[];
   readonly released: Release | null;
   readonly releasedAt: number | null;
   readonly outcome: RunOutcome | null;
@@ -116,7 +118,7 @@ const NO_STREAM = { text: "", thinking: "" } as const;
 const NO_REPLY: ReplySoFar = { text: "", progress: [], held: [] };
 
 function emptyRun(run: string, turn: string | null = null): RunNode {
-  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
+  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], host: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
 }
 
 function withRun(model: LiveModel, next: RunNode): LiveModel {
@@ -151,7 +153,7 @@ export function readTrace(value: unknown): TraceRecord | null {
   if (!isRecord(value)) return null;
   const { seq, run, at, agent, scope, event, parent } = value;
   if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1 || typeof run !== "string" || typeof at !== "number") return null;
-  if (!isRecord(agent) || typeof agent.id !== "string" || typeof agent.definition !== "string") return null;
+  if (agent !== undefined && (!isRecord(agent) || typeof agent.id !== "string" || typeof agent.definition !== "string")) return null;
   if (!isRecord(scope) || typeof scope.chat !== "string" || !isRecord(event) || typeof event.kind !== "string") return null;
   if (parent !== undefined && !(isRecord(parent) && typeof parent.agent === "string" && typeof parent.run === "string" && typeof parent.call === "string")) return null;
   return value as unknown as TraceRecord;
@@ -218,25 +220,29 @@ function adopt(parent: AgentNode, child: string, call: string | undefined): Agen
   return { ...parent, children: [...parent.children, child], steps };
 }
 
-/** The run with the record that follows its last one folded in. */
+/** The run with the record that follows its last one folded in; one about no agent is a note of the run's own. */
 function fold(run: RunNode, record: TraceRecord): RunNode {
   const { event, at } = record;
-  const id = record.agent.id;
   const agents = new Map(run.agents);
   let roots = run.roots;
-  let agent = agents.get(id);
-  if (agent === undefined) {
-    const startedBy = record.parent ?? null;
-    agent = { ref: record.agent, startedBy, info: null, at, lastAt: at, steps: [], children: [], todo: null, ended: null, endedAt: null };
-    // A sub-agent's records name the agent and call that started it; an agent of a job started from another run is a root of its own run.
-    const parentId = startedBy !== null ? (startedBy.run === record.run ? startedBy.agent : undefined) : record.agent.parent;
-    const parent = parentId === undefined ? undefined : agents.get(parentId);
-    if (parent === undefined) roots = [...roots, id];
-    else agents.set(parent.ref.id, adopt(parent, id, startedBy?.call));
+  let host = run.host;
+  if (record.agent === undefined) host = [...host, noteOf(record)];
+  else {
+    const id = record.agent.id;
+    let agent = agents.get(id);
+    if (agent === undefined) {
+      const startedBy = record.parent ?? null;
+      agent = { ref: record.agent, startedBy, info: null, at, lastAt: at, steps: [], children: [], todo: null, ended: null, endedAt: null };
+      // A sub-agent's records name the agent and call that started it; an agent of a job started from another run is a root of its own run.
+      const parentId = startedBy !== null ? (startedBy.run === record.run ? startedBy.agent : undefined) : record.agent.parent;
+      const parent = parentId === undefined ? undefined : agents.get(parentId);
+      if (parent === undefined) roots = [...roots, id];
+      else agents.set(parent.ref.id, adopt(parent, id, startedBy?.call));
+    }
+    agents.set(id, stepInto(agent, record));
   }
-  agents.set(id, stepInto(agent, record));
   const startedBy = run.firstAt === null && record.parent !== undefined && record.parent.run !== record.run ? record.parent : run.startedBy;
-  const next: RunNode = { ...run, agents, roots, startedBy, seq: record.seq, scope: run.scope ?? record.scope, firstAt: run.firstAt ?? at, lastAt: at };
+  const next: RunNode = { ...run, agents, roots, host, startedBy, seq: record.seq, scope: run.scope ?? record.scope, firstAt: run.firstAt ?? at, lastAt: at };
   switch (event.kind) {
     case "run_started":
       return { ...next, started: event, startedAt: at };
@@ -430,7 +436,7 @@ export interface RunTotals {
 export function runTotals(run: RunNode): RunTotals {
   let calls = 0;
   let tools = 0;
-  let rules = 0;
+  let rules = run.host.filter((step) => step.record.event.kind === "rule_fired").length;
   let usage = ZERO;
   for (const agent of run.agents.values()) {
     usage = addUsage(usage, agentUsage(agent));
