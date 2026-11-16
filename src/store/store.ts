@@ -1739,6 +1739,14 @@ export class UserStore {
    * turn's number. What of the later turns no longer applies is listed by thing and value (`NotApplied`), and the stretch from the turn to the
    * head is reported as a swipe flipped on an earlier message is; both are kept with each chat whose path runs through the turn, for that chat's
    * next turn's start to tell once (`sync`), and returned here, per chat, for the caller's own answer.
+    // The write drops every state held from the turn on, in each chat through it; those held for the turns before it change in nothing
+    // and stay held (PlanStore-S2 item 3), under the marks the write leaves.
+    const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, turn.node)?.prev ?? null;
+    const kept = (prev === null ? [] : this.chainRows(prev)).flatMap((r) => {
+      const held = this.store.cached(this.cacheKey(r.key), this.store.markOf(this.id, r.chat));
+      return held === null ? [] : [{ key: r.key, chat: r.chat, held }];
+    });
+    for (const k of kept) this.store.keep(this.cacheKey(k.key), k.held.folded, k.held.upto, this.id, k.chat, this.store.markOf(this.id, k.chat));
    */
   addEarlier(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; landed: EarlierLanded[] } {
     const turn = this.turnToWrite(turnId);
