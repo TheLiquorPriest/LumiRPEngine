@@ -17,6 +17,7 @@
 // swipe's date and hash are the ones a comparison of the chat's rows finds.
 
 import { isRecord } from "../../shared/json";
+import type { FeedbackPosition } from "./feedback";
 import type { LumiverseReads, LvStep } from "./reads";
 import { type LvMessage, messageFrom } from "./rows";
 import type { LumiverseSocket } from "./socket";
@@ -49,7 +50,12 @@ export type ChatChange =
    * stats}`, sent after the interceptors and before the provider is called, and only when something activated,
    * `generate.service.ts:2868-2879`): the turn's activated lore. None heard is none activated.
    */
-  | { kind: "lore-activated"; chat: string; lore: TagLore[] };
+  | { kind: "lore-activated"; chat: string; lore: TagLore[] }
+  /**
+   * Lumiverse stored the breakdown of a saved reply's prompt and pushed it (`GENERATION_BREAKDOWN_READY`): `feedback` is the regenerate dialog's feedback as it names it ("Regen Feedback") and where it
+   * stood, or null where the breakdown has none, so none was typed. It confirms or corrects what RPE separated at the turn's start, or completes it.
+   */
+  | { kind: "feedback-told"; chat: string; generation: string; message: string | null; feedback: { position: FeedbackPosition; text: string } | null };
 
 /** What the turn lane implements to hear Lumiverse's changes. */
 export interface ChatChanges {
@@ -57,6 +63,9 @@ export interface ChatChanges {
   /** The event socket opened again after it was closed: events may have been missed meanwhile. */
   reopened(): void;
 }
+
+/** The name Lumiverse gives the feedback's entry in the breakdown (`services/prompt-assembly.service.ts:3932-3936`). */
+export const REGEN_FEEDBACK_NAME = "Regen Feedback";
 
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 
@@ -127,6 +136,16 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
         lore.push({ id: e.id, book: str(e.bookId), bookName: str(e.bookName), title: typeof e.comment === "string" ? e.comment : "", how: said ?? (e.source === "vector" ? "vector" : e.source === "keyword" ? "keyword" : null), told: said !== null });
       }
       return { kind: "lore-activated", chat, lore };
+    }
+    case "GENERATION_BREAKDOWN_READY": {
+      // Lumiverse's breakdown of the saved reply's prompt, which names the feedback typed in its regenerate dialog (`prompt-assembly.service.ts:3932-3936`, `:3965-3977`): the word on where it stood.
+      const chat = str(payload.chatId);
+      const generation = str(payload.generationId);
+      if (chat === null || generation === null) return null;
+      const entries = isRecord(payload.breakdown) && Array.isArray(payload.breakdown.entries) ? payload.breakdown.entries : [];
+      const found = entries.find((e) => isRecord(e) && e.name === REGEN_FEEDBACK_NAME && typeof e.content === "string");
+      const feedback = isRecord(found) && typeof found.content === "string" ? { position: found.role === "system" ? ("system" as const) : ("user" as const), text: found.content } : null;
+      return { kind: "feedback-told", chat, generation, message: str(payload.messageId), feedback };
     }
     default:
       return null;

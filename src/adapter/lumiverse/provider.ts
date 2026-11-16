@@ -14,6 +14,7 @@ import type { Clock, PassError, PassRequest, PassSink, PromptRole, Usage as Pass
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
 import type { HeardGenerations } from "./heard";
+import type { Feedback, FeedbackFor } from "./feedback";
 import type { LoreCheck } from "./lore-check";
 import { rawLayout } from "./layout";
 import type { HintFor } from "./hint";
@@ -45,6 +46,8 @@ export interface TaggedTurn {
   lore: TagLore[];
   /** The request's other fields as Lumiverse sent them: sampling, anything a preset or extension added. */
   parameters: JsonObject;
+  /** For a regeneration (a regenerate or a swipe): the feedback typed in Lumiverse's dialog, separated from the prompt where RPE could tell it apart for certain, else where it stands (`feedback.ts`). Absent for any other reply. */
+  feedback?: Feedback;
 }
 
 /** What the turn lane (`src/turn/`) implements: one turn per tagged reply. */
@@ -84,6 +87,8 @@ export interface ProviderDeps {
   holdMs(): number;
   /** RPE's check of the lore in a prompt, where the extension applied its own verdict (`lore-check.ts`). */
   lore: LoreCheck;
+  /** The feedback typed in Lumiverse's regenerate dialog, told apart from a regeneration's prompt where that is certain (`feedback.ts`). */
+  feedback: FeedbackFor;
   /** The generations the event socket heard (`heard.ts`): a tagged request's activated lore, and whether one on RPE's connection awaits its tag. */
   heard: Pick<HeardGenerations, "tagged" | "untagged">;
   /** `lumiverse.untagged.whileAwaited`, read at each untagged request. */
@@ -161,15 +166,18 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
       return { hint: null, revision: null };
     });
     const { messages: _messages, model, stream, [TAG_FIELD]: _tag, ...parameters } = body;
+    // The feedback typed in Lumiverse's regenerate dialog, told apart where that is certain (`feedback.ts`); none for a reply that is not a regeneration.
+    const feedback = await deps.feedback(received.tag, checked.messages);
     const turn: TaggedTurn = {
       tag: received.tag,
       prompt: checked.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as PromptRole) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
-      layout: rawLayout(received.tag, checked.messages, received.cut.told, hint, revision),
+      layout: rawLayout(received.tag, checked.messages, received.cut.told, hint, revision, feedback),
       cut: { ...received.cut, lore: checked.record },
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),
       lore,
       parameters: parameters as JsonObject,
+      ...(feedback !== null ? { feedback } : {}),
     };
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };
     const run = (out: ReplyStream, signal: AbortSignal): Promise<void> => deps.turns.play(turn, out, signal);

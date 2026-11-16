@@ -6,6 +6,7 @@
 
 import type { PromptRole, RawBlock, RawLayout, RawMessage, RawPart, SliceKind } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
+import { apartFromLine, type Feedback } from "./feedback";
 import type { LaidMessage } from "./overlay";
 import { textHash, type Role, type Tag } from "./wire";
 
@@ -116,9 +117,9 @@ function placeBlocks(messages: RawMessage[], texts: readonly string[], blocks: r
  * carried whole as one part no listed message accounts for, so the Author still gets the whole prompt. A message Lumiverse added after
  * its interceptors is such a part in a told prompt too.
  */
-export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: boolean, hint: BlocksHint | null, revision: string | null = null): RawLayout {
+export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: boolean, hint: BlocksHint | null, revision: string | null = null, feedback: Feedback | null = null): RawLayout {
   const out: RawMessage[] = messages.map((m) => {
-    const parts: RawPart[] = !told || m.places.length === 0
+    const whole: RawPart[] = !told || m.places.length === 0
       ? [{ start: 0, end: m.text.length, role: role(m.role) ?? "user", hash: textHash(m.text), kind: "unknown", blocks: [] }]
       : m.places.map((p) => {
           const listed = tag.messages[p.member]!;
@@ -134,6 +135,8 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: bool
             blocks: [],
           };
         });
+    // The feedback typed in Lumiverse's dialog and appended to his last line is a part of its own: his line is not read as edited for it.
+    const parts = told && feedback?.found === "separated" && feedback.position === "user" ? apartFromLine(whole, m.text, tag, feedback.text) : whole;
     // A role Lumiverse's chat format does not have is read as input to the model. Thinking sent back with an earlier reply is told apart from the text.
     const thinking = m.thinking === undefined ? {} : { thinking: { length: m.thinking.length, hash: textHash(m.thinking) } };
     return { role: role(m.role) ?? "user", length: m.text.length, hash: textHash(m.text), ...(m.media > 0 ? { images: m.media } : {}), ...thinking, parts };

@@ -31,6 +31,7 @@ import { HeardGenerations } from "./heard";
 import { Hints } from "./hint";
 import { createHttpReads } from "./http-reads";
 import { type LumiverseCalls, lumiverseCalls } from "./lumiverse-calls";
+import { createFeedback, type EarlierPrompt } from "./feedback";
 import { createLoreCheck } from "./lore-check";
 import { CHAT_MESSAGES_PATH, readMessages } from "./messages";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
@@ -42,7 +43,7 @@ import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
 import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from "./settings";
 import { chatMessagesReply, EXTENSION_KIND, extensionStatusReply } from "./shapes";
 import { createStores, type Stores } from "./stores";
-import { QUESTION_PATH } from "./wire";
+import { QUESTION_PATH, type Tag } from "./wire";
 import { createWrites, type Writes } from "./writes";
 
 /** What other lanes answer for the adapter. */
@@ -73,6 +74,11 @@ export interface AdapterLanes {
   passWords(key: string, fields: { detail?: string }): Promise<string>;
   /** The turn lane, which reads the shipped files: one line on what a store of Lumiverse's holds (`databank`, `memory`), for `archive_search`'s list of them; the store's name where the file has none. */
   storeLine(store: string): Promise<string>;
+  /**
+   * The turn lane: the prompt RPE passed on for the attempt a regenerate or a swipe replaces, as its turn's record keeps it, to tell the feedback typed in Lumiverse's regenerate dialog
+   * apart from the prompt (`feedback.ts`); null where there is no prompt of RPE's own for it.
+   */
+  replaced(tag: Tag): Promise<EarlierPrompt | null>;
 }
 
 export interface AdapterDeps {
@@ -333,6 +339,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             passWords: lanes.passWords,
             holdMs: () => settings().wholeHoldMs,
             lore: createLoreCheck({ user, reads: p.reads, secrecy: lanes.secrecy, start: lanes.start, answers, macros: p.calls.macros }),
+            feedback: createFeedback({ reads: p.reads, replaced: lanes.replaced }),
             heard,
             untaggedWhileAwaited: () => settings().untaggedWhileAwaited,
             modelNames: rpeModels,

@@ -197,6 +197,7 @@ export class Rig {
       window: onReceipt,
       // RPE's check of the lore on receipt, over the stand-in's books as Lumiverse reads them, with the rig's own secrecy rules.
       lore: createLoreCheck({ user: USER, reads: loreReads, secrecy, start, answers, macros: { resolve: async (text) => ({ text, diagnostics: [] }), resolveBatch: async (templates) => ({ ...templates }) } }),
+      feedback: async () => null,
       // No model's window is known to the rig: nothing is trimmed past the window's cut.
       room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
       reads: {

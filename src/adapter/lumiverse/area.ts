@@ -52,6 +52,8 @@ const UNFILLED: UnfilledLanes = {
   passConnection: () => null,
   passWords: async (key) => key,
   storeLine: async (store) => store,
+  // No prompt of RPE's own kept to compare with: nothing is separated, and the turn says where feedback stands if he typed any.
+  replaced: async () => null,
 };
 
 /** The door, its lanes read from the app's hooks each time one is used. Mounting it reads what the areas filled. */
@@ -78,6 +80,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     passConnection: () => lane("passConnection")(),
     passWords: (key, fields) => lane("passWords")(key, fields),
     storeLine: (store) => lane("storeLine")(store),
+    replaced: (tag) => lane("replaced")(tag),
   };
   const door = lumiverseDoor(lanes, deps);
   return {
