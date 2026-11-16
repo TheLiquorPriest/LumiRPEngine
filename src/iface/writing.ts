@@ -235,14 +235,19 @@ export class Draft {
     }
   }
 
-  /** Records one of the store's own operations (the horizon), or a change the store's fact store applies (a fact, `src/store/facts.ts`). */
+  /**
+   * Records one of the store's own operations (the horizon), or a change the store's fact store applies (a fact, `src/store/facts.ts`).
+   * An operation that writes several changes of the store's areas (a quest's open, its what, its stage) is recorded once, each change
+   * added to the record it already has.
+   */
   recordStoreOp(n: number, opName: string, lane: Lane, prov: Provenance, change: Pick<ChangeInput, "op" | "value">): Recorded {
-    const rec: Recorded = { n, op: opName, lane, prov, inputs: [], advice: [], reports: [] };
+    const known = this.recorded.find((r) => r.n === n);
+    const rec: Recorded = known ?? { n, op: opName, lane, prov, inputs: [], advice: [], reports: [] };
     this.push(rec, lane, prov, change);
     // What the operation advised (a value past its scale, one the world's setup does not list) is kept with the change.
     for (const advised of this.advised.get(n) ?? []) this.advise(rec, advised, rec.inputs.length - 1);
     this.advised.delete(n);
-    this.recorded.push(rec);
+    if (known === undefined) this.recorded.push(rec);
     return rec;
   }
 
