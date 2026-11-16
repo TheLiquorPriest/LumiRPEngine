@@ -6,6 +6,7 @@ import type { LumiverseReads } from "../../src/adapter/lumiverse/reads";
 import { FakeClock } from "../standin/clock";
 import { StandInDb } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
+import { StandIn } from "../standin/lumiverse";
 
 export interface StoresBed {
   db: StandInDb;
@@ -29,7 +30,11 @@ export async function createChatReadsStub(closing: (() => void)[], tokenizedMode
     message_breakdowns: [],
   });
   const clock = new FakeClock();
-  const server = new LumiverseServer({ clock, db, tokenizedModels, accounts: [{ id: "user-tamsin", username: "reader", password: "lamp oil lamp" }] });
+  // The stand-in Lumiverse holds the chat beside its rows, as its write routes need (`test/standin/chatwrites.ts`).
+  const host = new StandIn();
+  host.db = db;
+  host.chats.set("chat-1", { id: "chat-1", user: "user-tamsin", character: { id: "char-a", name: "Mara" }, name: "One", metadata: {}, messages: [] });
+  const server = new LumiverseServer({ clock, db, host, tokenizedModels, accounts: [{ id: "user-tamsin", username: "reader", password: "lamp oil lamp" }] });
   const session = new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => "user-tamsin", clock, log: () => undefined });
   await session.signIn("reader", "lamp oil lamp");
   const reads = createDbReader({ path: db.path, user: "user-tamsin", sleep: async () => undefined, log: () => undefined });

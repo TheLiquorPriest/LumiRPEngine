@@ -173,6 +173,10 @@ export function createHttpReads(session: LumiverseSession, settings: () => HttpR
         return body === null ? null : mapped(`chat ${chat}`, () => chatFrom(rowOf(body, `chat ${chat}`)));
       });
     },
+    // `GET /api/v1/chats` (`routes/chats.routes.ts:154-159`), every page: the user's chats as Lumiverse lists them, read fresh.
+    async chats() {
+      return (await everyRow("/api/v1/chats", "the chats")).map((r) => mapped("a chat", () => chatFrom(r)));
+    },
     // `GET /api/v1/chats/:id/messages` (`routes/chats.routes.ts:792-821`), every page.
     async path(chat, signal) {
       const messages = await lightMessages(chat, signal);

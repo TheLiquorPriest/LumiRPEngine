@@ -125,6 +125,7 @@ const ENTRY = "e.id, e.world_book_id, e.uid, e.key, e.keysecondary, e.content, e
 const CHARACTER = "id, name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, tags, alternate_greetings, extensions, updated_at";
 const Q = {
   chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
+  chats: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, rowid",
   path: `SELECT ${STEP} ${OF_CHAT} ${ORDER}`,
   messages: `SELECT ${MESSAGE} ${OF_CHAT} ${ORDER} LIMIT ? OFFSET ?`,
   messagesById: `SELECT ${MESSAGE} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
@@ -327,6 +328,10 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
     async chat(chat) {
       const r = await step(`chat ${chat}`, (db) => db.query(Q.chat).get(chat, user));
       return r === null ? null : mapped(`chat ${chat}`, () => chatFrom(row(r)));
+    },
+    async chats() {
+      const rows = await step("the user's chats", (db) => db.query(Q.chats).all(user));
+      return rows.map((r) => mapped("a chat", () => chatFrom(row(r))));
     },
     async path(chat) {
       const steps = await ofChat(chat, "path", () =>

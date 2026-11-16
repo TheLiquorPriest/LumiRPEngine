@@ -42,6 +42,7 @@ import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from ".
 import { chatMessagesReply, EXTENSION_KIND, extensionStatusReply } from "./shapes";
 import { createStores, type Stores } from "./stores";
 import { QUESTION_PATH } from "./wire";
+import { createWrites, type Writes } from "./writes";
 
 /** What other lanes answer for the adapter. */
 export interface AdapterLanes {
@@ -104,6 +105,8 @@ export interface Lumiverse {
   dropChat(chat: string): Promise<void>;
   /** Macros resolved and tokens counted as Lumiverse does it. */
   calls: LumiverseCalls;
+  /** What RPE writes to Lumiverse, as the signed-in user: a lore entry with a revision check, the projection book, a message of his appended, a generation started. */
+  writes: Writes;
   /**
    * Lumiverse's Stop (`routes/generate.routes.ts:45-65`) as RPE's user, for the generation named alone:
    * true when Lumiverse stopped it, false when it was not going (it ended, or it is another user's,
@@ -277,7 +280,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       await fed.dropChat(id);
     };
     const hints = new Hints({ reads, session, log, dryRunMs: () => settings().dryRunMs });
-    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, hints, calls: lumiverseCalls(session), stopGeneration };
+    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, hints, writes: createWrites({ session, reads, user }), calls: lumiverseCalls(session), stopGeneration };
   }
 
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */
