@@ -341,6 +341,11 @@ const READS: NonNullable<StoreArea["reads"]> = {
   },
   /** The threads still open: `[{ id, who, place, fields }]`. */
   threads: (slice) => openThreadsOf(asSlice(slice)) as unknown as JsonValue,
+  /** The futures still open that fall due at a time: `[{ id, due, who, place, text }]`, for the store's due list. */
+  futures: (slice) =>
+    Object.values(asSlice(slice).items)
+      .filter((i) => i.part === "future" && i.closedBy === null && !i.dropped && typeof i.fields.due === "number")
+      .map((i) => ({ id: i.id, due: i.fields.due as number, who: namesIn(i.fields.who), place: placeIn(i), text: typeof i.fields.text === "string" ? i.fields.text : "" })) as unknown as JsonValue,
 };
 
 /** The story's area, as the store opens with it. */
