@@ -40,6 +40,11 @@ export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hol
 function spotName(o: OpContext, spot: Spot | Support): string {
   return named(o.reading, "place" in spot ? spot.place : "in" in spot ? spot.in : spot.on);
 }
+/** What an applied item op says beyond its events: what the engine advised is a report on the operation, and what it filled in from the world is recorded as filled in. */
+function reportItem(o: OpContext, out: ItemOpApplied): void {
+  if (out.filled !== undefined) o.draft.markFilled(out.filled);
+  for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
+}
 
 /** What an applied item op says beyond its events: what the engine advised is a report on the operation, and what it filled in from the world is recorded as filled in. */
 function reportItem(o: OpContext, out: ItemOpApplied): void {
