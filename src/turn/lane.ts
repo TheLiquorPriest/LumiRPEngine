@@ -32,7 +32,8 @@ import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import type { StoreFailure } from "../store/store";
-import { STORY_FACT_SETTING_DEFS, STORY_STORE_AREA, storyFacts, storyTools } from "../story";
+import type { FoldJob, StoreBrief } from "../store/away";
+import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
@@ -41,6 +42,7 @@ import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } f
 import { TurnMarks } from "./marks";
 import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
+import { STORE_AREAS } from "./store-areas";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
 import { SinceKept } from "./since";
@@ -134,7 +136,7 @@ export const MACHINE_CLOCK: Clock = {
  * or not a run goes on there; the change's report, all a model is shown, says only that it failed. Its
  * limits are the global level's settings, read once: the store is made once for every chat.
  */
-export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths">): Store {
+export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths" | "workers">): Store {
   const handlerFailed = (failure: StoreFailure): void => {
     const { op, chat, turn, change, user } = failure;
     const error = failure.error instanceof Error ? failure.error.message : String(failure.error);
@@ -144,7 +146,9 @@ export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | 
   const global = globalConfig(app.paths.files, app.log);
   const worlds = storedWorlds(app.db, global.numbers(WORLD_DOCS_SETTING_DEFS));
   // A walk the store's settings cut short (`engine.kindChain`, `holderDepth`, `space.visitDepth`) is logged, once for each chain.
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), ...global.numbers(STORE_SETTING_DEFS) });
+  // A fold over more changes than `store.workerFoldAt` runs on a worker thread, which reads the same file and folds with the same areas (`workers/tasks.ts`).
+  const away = { path: app.paths.database, run: (brief: StoreBrief, job: FoldJob) => app.workers.run("fold", { brief, job }) };
+  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, ...global.numbers(STORE_SETTING_DEFS) });
 }
 
 export interface TurnsOptions {
@@ -245,7 +249,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const loreSettings = loreSettingsFor(config);
   const secretSettings = secretSettingsFor(config);
   // The lore-answers lines in force for the chat word the secrets in an entry's text when an agent reads it.
-  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings, lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })) });
+  // A library past `lore.workerCatalogueAt` entries has its catalogue made on a worker thread (`workers/tasks.ts`).
+  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings, lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })), away: (input) => app.workers.run("catalogue", input) });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
     lore,
