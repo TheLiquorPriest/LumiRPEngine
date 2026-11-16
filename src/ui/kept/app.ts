@@ -153,7 +153,8 @@ export function keptApp(deps: KeptDeps): Kept {
   const { timers } = deps;
   const clock = { set: (run: () => void, ms: number) => timers.setTimeout(run, ms), clear: (handle: unknown) => timers.clearTimeout(handle) };
   const stops: (() => void)[] = [];
-  const transport = keptTransport({ client: deps.client, chat: () => deps.chat.get(), oldRoad: deps.oldRoad, ...(deps.calls === undefined ? {} : { calls: deps.calls }) });
+  // The world is read from the chat's state when a call asks for it, so it is the state's as it stands then (`state` is made below).
+  const transport = keptTransport({ client: deps.client, chat: () => deps.chat.get(), world: () => state.get().view?.worldId ?? null, oldRoad: deps.oldRoad, ...(deps.calls === undefined ? {} : { calls: deps.calls }) });
   stops.push(() => transport.close());
   // What RPE's live feed says of the chat the App is for reaches today's client as the pushes today's backend sent (each call file's `live`).
   const state = openChatState(deps.client, deps.chat, (events) => {

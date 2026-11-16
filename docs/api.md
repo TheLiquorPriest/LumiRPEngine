@@ -459,6 +459,97 @@ The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): a
 | Body | none |
 | Reply | [`TapReply`](#tapreply) |
 
+### `GET /api/v1/chats/:chat/gm/parts/:part`
+
+One part of the GM view of the chat at its head (everything, secrets included): one of the view's parts, the roster, or the outline of them all; with `id`, of the entities, money or organizations that one (by id or name), with `ids` those, with `kind` those of the kind. With `since` the key of an answer held: `same` while the head is still there.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `part` |
+| Query | `id` (may be left out): `string`, One entity, party or organization, by its id or name<br>`ids` (may be left out): `string`, Several, by their ids, joined by commas<br>`kind` (may be left out): `string`, Only those of this kind or one extending it<br>`since` (may be left out): `string`, The key of the answer held<br>`bytes` (may be left out): `string`, `true`: the outline tells each part's bytes |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/gm/people/:entity/things`
+
+A person's things as the GM reads them, with the pickers.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/gm/things`
+
+GM → Things' list of the chat at its head: each thing with who has it and where, where the player character is, and why each thing someone has is theirs.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/gm/things/:entity`
+
+A thing's page as the GM reads it: the page, the pickers, and what the GM's adds (its rest, why it is had, its history in this chat over the path's events, its findings).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `POST /api/v1/chats/:chat/made`
+
+What the chat made in play (things, places, the grids laid or changed) that the world's draft sent does not have, or has already.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | `{ draft: JsonValue }` |
+| Reply | `JsonValue` |
+
+### `POST /api/v1/chats/:chat/made/keep`
+
+Keep in the world: the draft patch that copies the picked places, then things, into the world's draft sent, each under its own id, with what would be kept, what skipped and why. The page sends the patch to Build's draft route.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | `{ draft: JsonValue; things: string[]; places: string[] }` |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/people/:entity/day`
+
+A person's usual day at the chat's head: as far as the player character may know them (`view=player`; one he does not know reads as no one), or the GM's, with why each block is there (`view=gm`, at `day` where given).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `entity` |
+| Query | `view`: `"player" | "gm"`<br>`day` (may be left out): `string`, The day's index, for the GM's view; today's where left out |
+| Body | none |
+| Reply | `JsonValue` |
+
 ### `GET /api/v1/chats/:chat/people/:entity/things`
 
 A person's things: what they carry, wear and keep, and where each is; none for an id that is no person.
@@ -497,6 +588,19 @@ A panel's tap for his next message (the palette, Walk here, any tap with no word
 | Query | none |
 | Body | [`PanelTapAsk`](#paneltapask) |
 | Reply | [`PanelHeldReply`](#panelheldreply) |
+
+### `GET /api/v1/chats/:chat/routines/changed`
+
+Whose routines or schedules this chat changed, by him or by the story.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
 
 ### `GET /api/v1/chats/:chat/state`
 
@@ -642,6 +746,32 @@ The catalog the player's + Add offers: the types of things and the vehicle class
 | Params | `chat` |
 | Query | none |
 | Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/tidy`
+
+Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.tidyRunMost`; with the switch on or off. Nothing is changed.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `POST /api/v1/chats/:chat/tidy/left`
+
+Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.tidyLeftMost`), or taken out; then Tidy up's run as it stands.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | `{ key: string; left: boolean }` |
 | Reply | `JsonValue` |
 
 ### `GET /api/v1/chats/:chat/walk`

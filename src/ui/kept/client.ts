@@ -28,6 +28,8 @@ export interface CallContext {
   readonly client: Pick<RpeClient, "call">;
   /** The chat the App is for now (Play's chat, the chat Build has open), or null. */
   chat(): string | null;
+  /** The world the open chat plays, as its state was last read; null before it is read, or for a chat that plays none. */
+  world(): string | null;
 }
 
 /** A call file refuses a request in RPE's words, with the code today's components read. */
@@ -74,6 +76,8 @@ export interface KeptTransport extends Transport {
 export interface TransportDeps {
   client: Pick<RpeClient, "call">;
   chat(): string | null;
+  /** The world the open chat plays (`CallContext.world`); none where left out. */
+  world?(): string | null;
   oldRoad: OldRoad;
   /** The call files; the folder's list unless a test gives its own. */
   calls?: readonly CallFile[];
@@ -110,7 +114,7 @@ export function failureOf(reqId: string, error: unknown): ErrorMessage {
 /** The transport of one kept App. */
 export function keptTransport(deps: TransportDeps): KeptTransport {
   const calls = deps.calls ?? CALLS;
-  const ctx: CallContext = { client: deps.client, chat: deps.chat };
+  const ctx: CallContext = { client: deps.client, chat: deps.chat, world: deps.world ?? (() => null) };
   const hearers = new Set<(payload: unknown) => void>();
   const refused = new Set<string>();
   let closed = false;

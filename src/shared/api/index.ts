@@ -4196,6 +4196,46 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** One part of the GM view of the chat at its head (everything, secrets included): one of the view's parts, the roster, or the outline of them all; with `id`, of the entities, money or organizations that one (by id or name), with `ids` those, with `kind` those of the kind. With `since` the key of an answer held: `same` while the head is still there. */
+  "GET /api/v1/chats/:chat/gm/parts/:part": {
+    params: { chat: string; part: string };
+    query: { id?: string; ids?: string; kind?: string; since?: string; bytes?: string };
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A person's things as the GM reads them, with the pickers. */
+  "GET /api/v1/chats/:chat/gm/people/:entity/things": {
+    params: { chat: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** GM → Things' list of the chat at its head: each thing with who has it and where, where the player character is, and why each thing someone has is theirs. */
+  "GET /api/v1/chats/:chat/gm/things": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A thing's page as the GM reads it: the page, the pickers, and what the GM's adds (its rest, why it is had, its history in this chat over the path's events, its findings). */
+  "GET /api/v1/chats/:chat/gm/things/:entity": {
+    params: { chat: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** He starts a job of the chat, as his own and tied to no turn, with any agent definition, its brief, what it is given and limits of its own. */
   "POST /api/v1/chats/:chat/jobs": {
     params: { chat: string };
@@ -4296,6 +4336,26 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** What the chat made in play (things, places, the grids laid or changed) that the world's draft sent does not have, or has already. */
+  "POST /api/v1/chats/:chat/made": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { draft: JsonValue };
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Keep in the world: the draft patch that copies the picked places, then things, into the world's draft sent, each under its own id, with what would be kept, what skipped and why. The page sends the patch to Build's draft route. */
+  "POST /api/v1/chats/:chat/made/keep": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { draft: JsonValue; things: string[]; places: string[] };
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** The grids of a chat: each place that has one, the grid's id and the map that draws it, whether it is the world's own, laid in play or the world's own changed in play, its size and how wide a square is. */
   "GET /api/v1/chats/:chat/maps": {
     params: { chat: string };
@@ -4375,6 +4435,16 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
+  };
+  /** A person's usual day at the chat's head: as far as the player character may know them (`view=player`; one he does not know reads as no one), or the GM's, with why each block is there (`view=gm`, at `day` where given). */
+  "GET /api/v1/chats/:chat/people/:entity/day": {
+    params: { chat: string; entity: string };
+    query: { view: "player" | "gm"; day?: string };
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** A person's things: what they carry, wear and keep, and where each is; none for an id that is no person. */
   "GET /api/v1/chats/:chat/people/:entity/things": {
@@ -4532,6 +4602,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: PanelTapAsk;
     reply: PanelHeldReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Whose routines or schedules this chat changed, by him or by the story. */
+  "GET /api/v1/chats/:chat/routines/changed": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
     paged: false;
     long: false;
     joined: false;
@@ -4801,6 +4881,26 @@ export interface ApiRoutes {
     params: { chat: string };
     query: Record<string, never>;
     body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.tidyRunMost`; with the switch on or off. Nothing is changed. */
+  "GET /api/v1/chats/:chat/tidy": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.tidyLeftMost`), or taken out; then Tidy up's run as it stands. */
+  "POST /api/v1/chats/:chat/tidy/left": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { key: string; left: boolean };
     reply: JsonValue;
     paged: false;
     long: false;

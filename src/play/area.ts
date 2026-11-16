@@ -2,6 +2,7 @@
 // tables: they read and write the chat's state through the store.
 
 import type { Area } from "../app";
+import { gmRoutes } from "./gm-read";
 import { mapWalkRoutes } from "./map-walk";
 import { playRoutes } from "./routes";
 import { thingsRoutes } from "./things";
@@ -23,6 +24,7 @@ export function playArea(takes: () => PlayTakes): Area {
       at.routes.add("play", playRoutes(new PlayService({ writes: at.writes, live: at.live, log: at.log, db: at.db, ...taken })));
       at.routes.add("play-things", thingsRoutes(taken.store));
       at.routes.add("play-map-walk", mapWalkRoutes(taken.store));
+      at.routes.add("play-gm", gmRoutes(taken));
     },
   };
 }
