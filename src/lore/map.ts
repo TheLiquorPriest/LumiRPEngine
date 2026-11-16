@@ -38,6 +38,8 @@ export interface LoreMapLine {
   notes?: OverlayNote[];
   /** Bound to the horizon: the names of who and what on it the entry is bound to. */
   bound?: string[];
+  /** The secrets it holds, each by the id a perception names and who holds it. */
+  secrets?: { id: string; holders: string[] }[];
 }
 
 export interface LoreMap {
@@ -85,6 +87,8 @@ function lineFields(lines: LinesPart | undefined, l: LoreMapLine): Fields {
     keys: l.keys === undefined ? undefined : listField(l.keys),
     // Each note beside the turn it was written on: a line reads the note as `{{.}}` or `{{note}}` and the turn as `{{turn}}`.
     notes: l.notes?.map((n) => ({ ".": n.note, note: n.note, turn: n.turn })),
+    // Each secret it holds, by the id a perception names and who holds it: a line reads them as `{{#secrets}}{{id}} held by {{holders}}{{/secrets}}`.
+    secrets: l.secrets?.map((s) => ({ id: s.id, holders: listField(s.holders) })),
     bound: listField(l.bound ?? []),
     // How an entry came into the prompt: the word, and a flag for each of the four, so a line can word each its own way.
     how: l.how,

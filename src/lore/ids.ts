@@ -120,6 +120,18 @@ export class EntryNumbers {
     return this.db.query<{ world: string; key: string }, [string, number]>("SELECT world, key FROM lore_world_number WHERE user = ? AND n = ?").get(user, n);
   }
 
+  /**
+   * The number of the world entry with this key that the user's numbers hold: in `world` where one is named, else in whichever world
+   * holds it. Null for a key never numbered, or one several worlds hold when none is named.
+   */
+  worldNumberOf(user: string, key: string, world?: string): number | null {
+    const rows =
+      world === undefined
+        ? this.db.query<{ n: number }, [string, string]>("SELECT n FROM lore_world_number WHERE user = ? AND key = ?").all(user, key)
+        : this.db.query<{ n: number }, [string, string, string]>("SELECT n FROM lore_world_number WHERE user = ? AND key = ? AND world = ?").all(user, key, world);
+    return rows.length === 1 ? (rows[0]?.n ?? null) : null;
+  }
+
   private known(user: string, entries: readonly string[]): Map<string, number> {
     const out = new Map<string, number>();
     for (let i = 0; i < entries.length; i += ASK_AT_ONCE) {

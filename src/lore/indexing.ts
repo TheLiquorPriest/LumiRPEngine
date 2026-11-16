@@ -340,11 +340,13 @@ export class LoreIndex {
       const e = byId.get(id);
       return e === undefined ? [] : [{ ...described({ id, title: e.title }), bound: to }];
     });
-    // The story's notes travel with the entry: every part that shows an entry shows what the story has moved past in it, each note with the turn it was written on.
+    // The story's notes travel with the entry: every part that shows an entry shows what the story has moved past in it, each note with the turn it was written on. So do its secrets, each by id with who holds it.
     const notes = overlayNoted(this.deps.db, ask.user, turns, [...first1, ...first3, ...bound4].map((l) => l.id));
+    const secrets = new Map((await this.deps.lore.read(ask, [...new Set([...first1, ...first3, ...bound4].map((l) => l.id))])).flatMap((e) => (e.secrets === undefined || e.secrets.length === 0 ? [] : [[e.id, e.secrets.map((s) => ({ id: s.id, holders: s.heldBy }))] as const])));
     const noted = (l: LoreMapLine): LoreMapLine => {
       const n = notes.get(l.id);
-      return n === undefined ? l : { ...l, notes: n };
+      const s = secrets.get(l.id);
+      return n === undefined && s === undefined ? l : { ...l, ...(n === undefined ? {} : { notes: n }), ...(s === undefined ? {} : { secrets: s }) };
     };
     const inPrompt = first1.map(noted);
     const world = first3.map(noted);

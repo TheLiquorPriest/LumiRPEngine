@@ -40,7 +40,7 @@ async function laid(seed: KitSeed, place: string): Promise<KitPorts<"lore">> {
           people[id] = name;
           return id;
         });
-        Object.assign(def, { secret: true, gate: "false", holders });
+        Object.assign(def, { secret: true, holders });
       } else if (e.knowing !== undefined) throw new Error(`The kit's entry ${e.id} is known ${e.knowing.by}, which this laying does not lay`);
       lore[key] = def;
       keyed.push([ref.n, key]);

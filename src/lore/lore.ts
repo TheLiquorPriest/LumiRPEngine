@@ -18,22 +18,25 @@
 // the copies of secrets) is the secrets' to carry (§9.6): until then its marked parts are left out
 // of what any reader is given, and a book entry is given to no character.
 
-import type { ActivatedLore, LoreEntry, LoreHit, LoreKnowing, LoreQuery } from "rp-harness/contract";
+import type { LinesPart } from "rp-harness";
+import type { ActivatedLore, LoreEntry, LoreHit, LoreKnowing, LoreQuery, LoreSecret } from "rp-harness/contract";
 import { blankWorld } from "../engine/authoring";
 import { loreReadable, loreSearch, SEARCH_LIMITS, type SearchLimits, wordsOf } from "../engine/lore";
-import { isGone, kindIs } from "../engine/scope";
+import { kindIs } from "../engine/scope";
 import { loreGateReader } from "../engine/visibility";
 import { initialState } from "../engine/world-state";
 import { hashJson } from "../shared/hash";
 import type { EntityId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
-import { bookLoreFieldsOf, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf } from "../shared/lore";
-import { publicText } from "../shared/secret-marks";
+import { bookLoreFieldsOf, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf, withoutOldSecrecy } from "../shared/lore";
+import { hasSecretMarks, publicText, unreadableMarks } from "../shared/secret-marks";
 import type { LoreEntryDef, StepPurpose } from "../shared/world";
-import type { LoreSettingsFor } from "./chat-settings";
+import type { LoreScope, LoreSettingsFor } from "./chat-settings";
 import { bookEntryId, type EntryNumbers, loreRefOf, worldEntryId } from "./ids";
 import { foldName, type KeyMatching, keysFound, LUMIVERSE_KEY_MATCHING } from "./keys";
 import type { LoreMap, LoreMapLine } from "./map";
+import { HoldersAt, peopleOf } from "./secrets/holders";
+import { bookRead, type SecretWords, secretWords } from "./secrets/shown";
 import type { ActivatedEntry, LoreBook, LoreBookEntry, LoreBookListing, LoreBooks, LoreTurns, LoreWorlds, WorldAt } from "./sources";
 
 /** The lore's settings: the numbers; the stop words and his choice of books are read for the chat (`LoreChatSettings`). */
@@ -68,6 +71,8 @@ export interface LoreOptions {
   settings?: Partial<LoreSettings>;
   /** What a chat's levels set of the lore's settings, read at each call; absent, only `settings` and every book. */
   settingsFor?: LoreSettingsFor;
+  /** The lines of `.prompts/lore-answers.md` in force for a chat, which word a secret in an entry the lead reads; absent, no secret's text is shown. */
+  lines?: (at: LoreScope) => Promise<LinesPart | undefined>;
 }
 
 /** Whose lore, which chat, and where on its path: at a turn, with what it has staged, else at the head. */
@@ -129,14 +134,6 @@ function searchDef(key: string, row: LoreBookEntry, title: string, text: string)
   return { id: key, title, content: text, keys: row.keys.filter((k) => k.trim() !== ""), links: fields?.links ?? [], ...(aliases.length > 0 ? { aliases } : {}) };
 }
 
-/** The world's people, who may know an entry: those whose kind is a person's and who are still in the world, as today's knowers are (`backend/agents/tools/read-view.ts:223-233`). */
-function peopleOf(at: WorldAt): EntityId[] {
-  return Object.keys(at.state.entities).filter((id) => {
-    const e = at.state.entities[id];
-    return e !== undefined && kindIs(at.registry, at.world, e.kind, "person") && !isGone(at.state, id);
-  });
-}
-
 /**
  * The person of the world `said` names, as the cast finds a secret's holder (`cast/secrets.ts`
  * `personNamed`): the one person with that id, else the one person of that name, names compared as the
@@ -150,30 +147,61 @@ function personNamedIn(at: WorldAt, said: string): EntityId | null {
 }
 
 /**
- * Who may know a world entry, as the lead sees it marked: nothing for an entry anyone may know; else
- * the people of the world who may know it now, each asked by today's rule as a character. An entry
- * is held to some when it is a secret, awaits review, or is not public: the cases in which today's
- * rule can refuse a character.
+ * Who may know an entry, as the lead sees it marked: nothing for an entry anyone may know. A secret with a gate is marked with its gate
+ * and whether it holds now; any other entry held to some (a secret with no gate, one awaiting review, one not public) with the people of
+ * the world who may know it now, each asked by today's rule as a character. `readers` are those people by name, whichever the mark: an
+ * entry that is a secret is held by them.
  */
-function knowingOf(at: WorldAt, entry: LoreEntryDef, open: (entry: LoreEntryDef) => boolean, people: readonly EntityId[]): LoreKnowing | undefined {
+function knowingOf(at: WorldAt, entry: LoreEntryDef, open: (entry: LoreEntryDef) => boolean, people: readonly EntityId[]): { knowing?: LoreKnowing; readers: string[] } {
   const source = loreSourceOf(entry.source);
   const visibility: unknown = entry.visibility;
-  if (!loreIsSecret(entry) && !(source.kind === "ai" && source.status === "pending") && (visibility === undefined || visibility === "public")) return undefined;
-  const names = people.filter((who) => loreReadable(at.registry, at.world, at.state, entry, AS_CHARACTER, false, open, who)).map((who) => at.state.entities[who]?.name ?? who);
-  return { by: "characters", names };
+  if (!loreIsSecret(entry) && !(source.kind === "ai" && source.status === "pending") && (visibility === undefined || visibility === "public")) return { readers: [] };
+  const readers = people.filter((who) => loreReadable(at.registry, at.world, at.state, entry, AS_CHARACTER, false, open, who)).map((who) => at.state.entities[who]?.name ?? who);
+  const gate = typeof entry.gate === "string" ? entry.gate.trim() : "";
+  return { knowing: loreIsSecret(entry) && gate !== "" ? { by: "gate", gate, open: open(entry) } : { by: "characters", names: readers }, readers };
 }
 
-function worldEntry(at: WorldAt, n: number, key: string, entry: LoreEntryDef, knowing?: LoreKnowing): LoreEntry {
+/** Who may know a book entry as the lead sees it marked, by the fields it carries: the same rule as a world entry's, an entry whose marks hold its secrecy asking only for its visibility. */
+function bookKnowing(at: WorldAt, open: (entry: LoreEntryDef) => boolean, people: readonly EntityId[], row: LoreBookEntry): { knowing?: LoreKnowing; readers: string[] } {
+  const marked = hasSecretMarks(row.content) || unreadableMarks(row.content).length > 0;
+  const own = bookLoreFieldsOf(row.extensions);
+  const fields = marked ? withoutOldSecrecy(own) : own;
+  if (fields === null) return { readers: [] };
+  const def: LoreEntryDef = {
+    id: `${row.book}/${row.id}`,
+    title: "",
+    content: "",
+    keys: [],
+    links: fields.links ?? [],
+    ...(fields.secret === undefined ? {} : { secret: fields.secret }),
+    ...(fields.gate === undefined ? {} : { gate: fields.gate }),
+    ...(fields.holders === undefined ? {} : { holders: fields.holders }),
+    ...(fields.visibility === undefined ? {} : { visibility: fields.visibility }),
+  };
+  return knowingOf(at, def, open, people);
+}
+
+function worldEntry(at: WorldAt, n: number, key: string, entry: LoreEntryDef, held?: { knowing?: LoreKnowing; readers: string[] }): LoreEntry {
   const title = worldTitle(entry, key);
   const keys = Array.isArray(entry.keys) ? entry.keys.filter((k): k is string => typeof k === "string") : [];
   const content = typeof entry.content === "string" ? entry.content : "";
-  return { id: worldEntryId(n), source: at.world.name, title, keys, text: publicText(content), revision: hashJson([title, keys, content]), ...(knowing ? { knowing } : {}) };
+  const id = worldEntryId(n);
+  return {
+    id,
+    source: at.world.name,
+    title,
+    keys,
+    text: publicText(content),
+    revision: hashJson([title, keys, content]),
+    ...(held?.knowing ? { knowing: held.knowing } : {}),
+    ...(held !== undefined && loreIsSecret(entry) ? { secrets: [{ id, heldBy: held.readers }] } : {}),
+  };
 }
 
-/** A book entry as `lore_read` gives it: its revision is Lumiverse's own, the one the catalog, the batch, the index and the map give. */
-function bookEntry(n: number, row: LoreBookEntry, book: LoreBook, title: string): LoreEntry {
+/** A book entry as `lore_read` gives it: its revision is Lumiverse's own, the one the catalog, the batch, the index and the map give. `read` is its text with its secrets worded as such, and the secrets. */
+function bookEntry(n: number, row: LoreBookEntry, book: LoreBook, title: string, read: { text: string; secrets: LoreSecret[] }, knowing?: LoreKnowing): LoreEntry {
   const keys = row.keys.filter((k) => k.trim() !== "");
-  return { id: bookEntryId(n), source: book.name, title, keys, text: publicText(row.content), revision: String(row.revision) };
+  return { id: bookEntryId(n), source: book.name, title, keys, text: read.text, revision: String(row.revision), ...(knowing ? { knowing } : {}), ...(read.secrets.length > 0 ? { secrets: read.secrets } : {}) };
 }
 
 /** The words around the first of `words` in `text`, each side cut at a word; the start of the text where none of them is in it. */
@@ -247,6 +275,7 @@ export class Lore {
   private readonly numbers: EntryNumbers;
   private readonly settings: Readonly<LoreSettings>;
   private readonly settingsFor: LoreSettingsFor | undefined;
+  private readonly lines: LoreOptions["lines"];
   private blank: WorldAt | null = null;
 
   constructor(options: LoreOptions) {
@@ -256,6 +285,7 @@ export class Lore {
     this.numbers = options.numbers;
     this.settings = Object.freeze({ ...LORE_DEFAULTS, ...options.settings });
     this.settingsFor = options.settingsFor;
+    this.lines = options.lines;
   }
 
   /**
@@ -376,6 +406,9 @@ export class Lore {
     // A book entry is read only from a book the chat reads, as its search reads them.
     let books: Promise<Set<string>> | null = null;
     let people: EntityId[] | null = null;
+    // What the lead reads of a book entry's secrets: who holds them in the chat's world, and how a secret is worded in a text.
+    let holders: HoldersAt | null | undefined;
+    let words: SecretWords | undefined;
     const out: LoreEntry[] = [];
     for (const ref of refs) {
       if (ref?.kind === "world") {
@@ -394,7 +427,12 @@ export class Lore {
         books ??= this.booksOf(at, world, s.books).then((read) => new Set(read.map((b) => b.id)));
         if (row === null || !(await books).has(row.book)) continue;
         const book = await this.books.book(at.user, row.book);
-        if (book !== null) out.push(bookEntry(ref.n, row, book, bookTitle(row, s.lore.titleWords)));
+        if (book === null) continue;
+        words ??= secretWords(await this.lines?.({ user: at.user, chat: at.chat }));
+        if (holders === undefined) holders = world === null ? null : new HoldersAt(world);
+        people ??= world === null ? [] : peopleOf(world);
+        const knowing = world === null || open === null ? undefined : bookKnowing(world, open, people, row).knowing;
+        out.push(bookEntry(ref.n, row, book, bookTitle(row, s.lore.titleWords), bookRead(row, bookEntryId(ref.n), holders, words), knowing));
       }
     }
     return out;

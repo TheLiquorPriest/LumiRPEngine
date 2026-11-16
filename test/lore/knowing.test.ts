@@ -104,7 +104,7 @@ describe("who may know a world entry", () => {
     expect(lead.map((e) => [e.id, e.knowing])).toEqual([
       [W.tithe_law, undefined],
       [W.cove_route, { by: "characters", names: ["Sefa Moor", "Tobin Reed"] }],
-      [W.drowned_crown, { by: "characters", names: ["Orrin Pell"] }],
+      [W.drowned_crown, { by: "gate", gate: "self.place == 'lighthouse'", open: true }],
       [W.ferry_draft, { by: "characters", names: [] }],
     ]);
     expect(lead.map((e) => e.text)).toEqual([
