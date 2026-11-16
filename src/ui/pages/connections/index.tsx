@@ -4,6 +4,7 @@
 // model shows its limits as RPH uses them and where each comes from, and the form sets the user's own in
 // their place. What the layer or the provider refuses is shown in its own words.
 
+import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ConnectionAuth, ConnectionShown, ConnectionsShown, ConnectionTested, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer, SaveConnection } from "../../../shared/api";
 import { useApp } from "../../app";
@@ -12,6 +13,7 @@ import type { RpeClient } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { duration, errorWords, num } from "../../words";
 import { NO_SIGNIN, SignInPanel, type SignInShown, signInCalls, signInSteps } from "./signin";
+import { WebSearchSection } from "./web";
 
 const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
 
@@ -255,6 +257,8 @@ export interface ConnectionsViewProps {
   problem: string | null;
   action: ConnectionsAction;
   saving: boolean;
+  /** What stands after the connections: the web search provider. */
+  extra?: ComponentChildren;
   /** RPE's refusal of the last change asked of it, in its words. */
   refusal: string | null;
   onAction(action: ConnectionsAction): void;
@@ -426,6 +430,7 @@ export function ConnectionsView(props: ConnectionsViewProps) {
           ))}
         </ul>
       )}
+      {props.extra}
     </div>
   );
 }
@@ -505,6 +510,7 @@ export function ConnectionsPage() {
   };
   return (
     <ConnectionsView
+      extra={<WebSearchSection />}
       list={list}
       loading={read.loading}
       problem={read.problem}
