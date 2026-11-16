@@ -9,7 +9,7 @@
 // left how much out, how Lumiverse joined the prompt, how many of the window's messages Lumiverse's own
 // clipping left out, and a notice for each thing in the body that is not as the tag listed it.
 
-import { pointOf, type HistoryWindow, type TurnStarts, type WindowStep } from "./answer";
+import { pointOf, type HistoryWindow, type PathStart, type TurnStarts, type WindowStep } from "./answer";
 import { joiningOf, overlay, partialCut, readBodyMessages, rebuild, type Joining, type LaidMessage, type Overlay } from "./overlay";
 import type { LumiverseReads } from "./reads";
 import type { LvRole } from "./rows";
@@ -41,7 +41,8 @@ export interface ModelRoom {
   /** Tokens the prompt may take; null where nobody knows the model's window, and nothing is trimmed. */
   room: number | null;
   count(prompt: readonly { role: string; content: string | unknown[] }[]): Promise<number>;
-  covered(messages: readonly string[]): Promise<boolean>;
+  /** Whether the story record covers these messages, read along the line of `turn` (the turn the reply follows), so a swipe or a branch is told by its own story; at the chat's head for null. */
+  covered(messages: readonly string[], turn: string | null): Promise<boolean>;
 }
 
 /** The Author's room for this chat's turn; `reply`: the request's own room for the reply (`max_tokens`), null where it names none. */
@@ -252,18 +253,19 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
   let rowsRead: Promise<readonly ChatRow[] | null> | null = null;
   const rows = (): Promise<readonly ChatRow[] | null> => (rowsRead ??= own.reads.rows(tag.chat, signal));
   let keep: KeepPoint | null;
+  const generation = generationOf(tag);
+  // The turn this reply follows, as RPE's own state reads it from the history the tag lists, asked once at most: where the story's record is read, for the window's hold and for what the model's room trims.
+  let following: Promise<PathStart["at"]> | null = null;
+  const follows = (): Promise<PathStart["at"]> => {
+    const listed = pathOf(tag);
+    return (following ??= own.start({ user: tag.user, chat: tag.chat, path: listed, point: pointOf(generation, listed) }, signal).then((start) => start.at));
+  };
   if (tag.cut.answered) keep = tag.cut.keep;
   else {
-    const generation = generationOf(tag);
     const path = async (): Promise<WindowStep[]> => {
       const read = await rows();
       if (read === null) throw new Refused(404, "RPE found no chat of yours in Lumiverse by this reply's chat, so it could not count your history window, and sent nothing.");
       return windowPath(tag, read);
-    };
-    // The turn this reply follows, as RPE's own state reads it from the history the tag lists: where the story's record is read for the window's hold.
-    const follows = async () => {
-      const listed = pathOf(tag);
-      return (await own.start({ user: tag.user, chat: tag.chat, path: listed, point: pointOf(generation, listed) }, signal)).at;
     };
     keep = await own.window({ user: tag.user, chat: tag.chat, generation, path, follows }, signal);
   }
@@ -290,7 +292,7 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
         sent = cutOut(new Set([...left, ...gone])).messages;
       }
       const sources = gone.map((i) => tag.messages[i]!.source!);
-      if (sources.length > 0) trimmed = { from: sources[0]!, to: sources.at(-1)!, count: sources.length, covered: await model.covered(sources.map((s) => s.id)) };
+      if (sources.length > 0) trimmed = { from: sources[0]!, to: sources.at(-1)!, count: sources.length, covered: await model.covered(sources.map((s) => s.id), (await follows())?.turn ?? null) };
     }
   } catch (error) {
     // The room could not be told: the prompt goes as the window left it, and the turn's notice says so.
