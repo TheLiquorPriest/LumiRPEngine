@@ -3,7 +3,8 @@
 // so a thread folds a change of an area exactly as the store does. An area added to the store is added here and nowhere else.
 
 import { CAST_STORE_AREA } from "../cast";
+import { QUEST_STORE_AREA } from "../quests";
 import type { StoreArea } from "../store";
 import { STORY_STORE_AREA } from "../story";
 
-export const STORE_AREAS: readonly StoreArea[] = [CAST_STORE_AREA, STORY_STORE_AREA];
+export const STORE_AREAS: readonly StoreArea[] = [CAST_STORE_AREA, STORY_STORE_AREA, QUEST_STORE_AREA];
