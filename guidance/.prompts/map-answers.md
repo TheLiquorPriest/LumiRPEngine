@@ -35,6 +35,28 @@ store_no_handler: {{#op}}{{op}}: {{/op}}nothing in the engine applies it, so it 
 store_tied: {{#op}}{{op}}: {{/op}}it was tied to a change that did not apply, so it did not apply either.
 store_marker_note: {{#op}}{{op}}: {{/op}}{{note}}
 already_so: {{op}}: {{what}} was already so; nothing changed.
+world_map_made: Made {{what}}.
+world_map_changed: Changed {{what}}: {{members}}.
+world_map_removed: Removed {{what}}.
+world_map_same: {{what}} stands as it is; nothing changed.
+a_map_place: the place {{name}} ({{id}}) on the map {{map}}
+a_map_link: the link between {{from}} and {{to}} on the map {{map}}
+the_map_settings: the map settings
+no_map_named: {{op}}: this chat's world has no map with the id or title {{map}}. Its maps, by id: {{maps}}.
+no_map_place: {{op}}: the map {{map}} has no place with the id or name {{name}}. Its places, by id: {{places}}.
+no_map_link: {{op}}: the map {{map}} has no link between {{from}} and {{to}}{{#mode}} ({{mode}}){{/mode}}, so there is nothing to remove. Its links: {{links}}.
+map_links_many: {{op}}: {{from}} and {{to}} have several links on the map {{map}}, one for each of: {{modes}}. Say which with mode.
+no_map_to_take_out: {{op}}: {{place}} has no map in this chat's world to take out.
+lay_removed: Took the map {{map}} of {{place}} out of this chat's world.{{#off}} {{off}} stood on it and stand on no square now.{{/off}}
+keep_names: Nothing was named to keep.{{#changes}} This chat has changed: {{changes}}. Name them in maps, places, paths or settings.{{/changes}}{{^changes}} This chat has changed nothing of its world's maps, places, paths or settings.{{/changes}}
+keep_done: Kept in the world's draft, now at version {{version}}: {{kept}}.
+keep_nothing: Nothing was written to the world's draft.
+keep_not_changed: {{id}}: this chat has not changed it, so there is nothing of it to keep.
+keep_in_draft_already: {{id}}: the world's draft has it so already.
+keep_no_map: {{id}}: the world's draft has no such map to lay the squares on.
+keep_no_world: This chat's world is not one the store keeps a draft for, so nothing could be kept.
+keep_unreadable: The world's draft could not be read, so nothing was kept.
+keep_busy: The world's draft kept changing while it was written, so nothing was kept; try again.
 placed_instead: {{op}}: {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: {{op}}: {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
 no_grid: {{at}}{{#place}}, at {{place}},{{/place}} has no map of squares yet. map_lay lays one for it.{{#soft}} Kept there by a zone or words: {{soft}}.{{/soft}}{{#maps}} Places near it that have a map: {{maps}}.{{/maps}}{{^maps}} No place has a map yet.{{/maps}}

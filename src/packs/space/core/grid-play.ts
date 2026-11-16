@@ -4,22 +4,28 @@
 // within its place besides its square, a zone or words (`space.where`), a change to some squares of a
 // map and to its legend (`space.squares`), kept as that change over the map so that a later edit of
 // the map shows through wherever the change did not touch it. None writes an entity's definition, so
-// none declares `touches`: an Upgrade to a new revision carries each record as it stands, to play
-// over what that revision draws. Two optional fields of the map format (`lre-map-v1`) carry what a
+// none declares `touches`: an Upgrade to a new revision carries the records on (`carrySpace`): a
+// square the new revision took in (it draws the symbol the chat drew there, and gives it the
+// meaning the chat gave it) is dropped from the chat's record, so the world's later edit of it shows
+// in the chat; any other plays on over what that revision draws. A record whose map, place or
+// thing the revision no longer has is kept, shows nothing while its target is gone, is named in the
+// Upgrade's notes, and shows again if a later revision brings the target back. Two optional fields of the map format (`lre-map-v1`) carry what a
 // map draws once: a terrain that blocks the way and not the view (`seeThrough`), and the grid's time
 // step (`step`). A record is replaced, never changed in place, so a reader may keep what it works out
 // from one by its identity. None is told in a line, as a step on a grid is not (`space.pos`): the
 // grid's tools report them.
 
-import { hasOwn, isRecord, safeKey } from "../../../shared/json";
+import { hasOwn, isRecord, safeKey, type JsonObject } from "../../../shared/json";
+import { hashJson } from "../../../shared/hash";
 import type { PackEvent } from "../../../shared/ledger";
 import type { EntityId, MapId, PlaceId } from "../../../shared/ids";
 import { readMap } from "../../../shared/maps";
 import mapFormat from "../../../shared/lre-map-v1.schema.json";
-import type { MapCellDef, MapDoc } from "../../../shared/world";
+import type { MapCellDef, MapDoc, WorldDoc } from "../../../shared/world";
 import { labelOf, mutableSlice, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
+import { chatDraftOf, draftedWorld } from "../../../engine/world-draft";
 
 export const DOOR_EVENT = "space.door";
 export const SHAPE_EVENT = "space.shape";
@@ -118,6 +124,71 @@ export function editedMap(map: MapDoc, edits: SquareEdits): MapDoc {
   if (Object.keys(legend).length > 0) out.legend = legend;
   else delete out.legend;
   return out;
+}
+
+/** The maps (and authored grids) play has changed the squares of, by id. */
+export function squaredMaps(state: Readonly<WorldState>): string[] {
+  return Object.keys(record(state, "squares"));
+}
+
+/** `edits` as they stay over `doc`, the map of the revision a chat moves to: a square the map draws as the chat drew it, with the symbol meaning what the chat made it mean, and a symbol the legend gives as the chat did, are taken in and go. The same record where nothing goes, null where all does. */
+function leftOver(doc: MapDoc, edits: SquareEdits): SquareEdits | null {
+  const rows = (doc.layout ?? []).map((row) => [...row]);
+  const same = (a: unknown, b: unknown): boolean => (a === undefined || b === undefined ? a === b : hashJson(a) === hashJson(b));
+  const cells: Record<string, string> = {};
+  for (const [key, symbol] of Object.entries(edits.cells)) {
+    const [x = -1, y = -1] = key.split(",").map(Number);
+    const meant = hasOwn(edits.legend, symbol) ? edits.legend[symbol] : undefined;
+    const meansAsDrawn = meant === undefined || (meant === null ? doc.legend?.[symbol] === undefined : same(meant, doc.legend?.[symbol]));
+    if (rows[y]?.[x] === symbol && meansAsDrawn) continue;
+    cells[key] = symbol;
+  }
+  const legend: Record<string, MapCellDef | null> = {};
+  for (const [symbol, cell] of Object.entries(edits.legend)) {
+    const held = doc.legend?.[symbol];
+    if (!(cell === null ? held === undefined : held !== undefined && same(held, cell))) legend[symbol] = cell;
+  }
+  const kept = Object.keys(cells).length + Object.keys(legend).length;
+  if (kept === 0) return null;
+  return kept === Object.keys(edits.cells).length + Object.keys(edits.legend).length ? edits : { cells, legend };
+}
+
+/**
+ * A chat's records of what it changed on grids, as an Upgrade carries them to the revision `to` (a
+ * `migrate` marker's step, `upgrade.ts`, beside `carryDraft`): the squares `to` took in leave the
+ * chat's record, what `to` left alone or drew otherwise plays on over it, and a record whose map or
+ * place `to` (with this chat's own draft laid over it) no longer has is kept as it was. The notes
+ * name each of those, so they are seen; nothing is dropped for it.
+ */
+export function carrySpace(state: WorldState, to: WorldDoc): string[] {
+  const squares = record(state, "squares");
+  const doors = record(state, "doors");
+  if (Object.keys(squares).length === 0 && Object.keys(doors).length === 0) return [];
+  const played = draftedWorld(to, chatDraftOf(state));
+  const notes: string[] = [];
+  const kept: Record<string, unknown> = {};
+  let moved = false;
+  for (const [id, raw] of Object.entries(squares)) {
+    const doc = own(to.maps, id);
+    if (doc !== undefined && isRecord(raw)) {
+      const left = leftOver(doc, raw as unknown as SquareEdits);
+      if ((left as unknown) !== raw) moved = true;
+      if (left !== null) kept[id] = left;
+      continue;
+    }
+    kept[id] = raw;
+    if (own(played.maps, id) === undefined && own(played.grids, id) === undefined) notes.push(`the squares drawn on the map ${id} are kept: this revision has no such map, and they show again if a later one brings it back`);
+  }
+  if (moved) {
+    const slice = mutableSlice(state, "space");
+    if (Object.keys(kept).length > 0) slice.squares = kept as JsonObject;
+    else delete slice.squares;
+  }
+  const drawn = (place: PlaceId): boolean => own(played.grids, place) !== undefined || Object.values(played.maps).some((m) => m.scope === place && m.layout !== undefined);
+  for (const place of Object.keys(doors)) {
+    if (!drawn(place)) notes.push(`the doors set at ${own(played.places, place)?.name ?? place} are kept: this revision draws no map there, and they show again if a later one does`);
+  }
+  return notes;
 }
 
 // ---------------------------------------------------------------- the map format's own fields

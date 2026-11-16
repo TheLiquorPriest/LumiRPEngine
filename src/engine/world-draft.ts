@@ -151,6 +151,28 @@ export function draftChanges(base: WorldDoc, draft: Readonly<WorldDraft>): Draft
 }
 
 /**
+ * `working` (a world's draft as the world keeps it) with `edits` written into it, each over the item the
+ * draft has now, its maps compiled again: what Keep makes of this chat's changes (`iface/map/keep.ts`).
+ * An item is written whole, whatever the draft held, so a change the draft made elsewhere to another
+ * item stands beside it.
+ */
+export function keptWorld(working: WorldDoc, edits: readonly DraftEdit[]): WorldDoc {
+  const draft: Record<string, unknown> = {};
+  for (const edit of edits) {
+    if ("part" in edit) {
+      const held = working[edit.part];
+      draft[edit.part] = { ...("value" in edit ? { value: edit.value } : { gone: true }), over: held === undefined ? null : digestOf(held) };
+      continue;
+    }
+    const held = heldIn(working, edit.collection, edit.id);
+    const items = isRecord(draft[edit.collection]) ? (draft[edit.collection] as Record<string, unknown>) : {};
+    items[edit.id] = { ...("value" in edit ? { value: edit.value } : { gone: true }), over: held === undefined ? null : digestOf(held) };
+    draft[edit.collection] = items;
+  }
+  return draftedWorld(working, draft as WorldDraft);
+}
+
+/**
  * The event that makes `edit` in the draft over `base` (the revision the chat plays, as authored):
  * made over what the change it replaces was made over, where that one still plays, else over the
  * world's own item as it is now.

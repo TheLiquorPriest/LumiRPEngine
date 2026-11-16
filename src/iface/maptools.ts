@@ -39,8 +39,9 @@ import { between, burst, cone, coverOf, cube, line, sees, within, type Spot } fr
 import { doorState, indexOf, lift, moveTime, place, runsOf, setDoor, squareAt, standsAt, type Piece, type Square, type Took } from "../packs/space/core/grid-model";
 import { move, walk } from "../packs/space/core/grid-path";
 import { idFrom, layForPlace, layOverSquare, plainRows, type Laid, type Laying, type Named } from "./map/lay";
+import { TODAY_TOOLS } from "./map/today";
 import { beside, inZone, softPositions, stackedOn } from "./map/moves";
-import { doorEvent, positionEvent, shapeEvent } from "./map/record";
+import { doorEvent, draftChange, positionEvent, shapeEvent } from "./map/record";
 import { distanceData, farText, layersAt, mapsNear, mapWording, mapWords, reportFields, type MapWording, type Say, spotText, squareGiven, stepFields, timeText, whereWords, whoIs, type Layers } from "./map/words";
 import { NO_LAYOUT } from "./map/layout";
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
@@ -699,14 +700,39 @@ function rowsOf(o: OpContext): string[] | Unread {
   return plainRows(width, height, doors);
 }
 
+/**
+ * Takes the map of a place out of this chat's world (today's "take one out"): the map in the chat's
+ * own draft of its world, gone, with whoever stood on its squares on none. Its records of squares and
+ * doors stay as they are, so they show again if the map is laid again. A map the world draws is
+ * changed square by square (`map_edit`), which the tool's file says; the engine decides whether it may go.
+ */
+function takeOut(o: OpContext): Unread | undefined {
+  const w = o.draft.w;
+  const r = o.reading;
+  const at = find(o, "place", "place");
+  if (isUnread(at)) return at;
+  const held = Object.entries(r.world.maps).find(([, m]) => m.scope === at.id);
+  const say: Say = { lines: o.call.lines, world: r.world, state: w.state };
+  if (held === undefined) return { line: "no_map_to_take_out", fields: { n: o.n, op: o.op, place: whoIs(say, at.id) } };
+  const [id] = held;
+  const from = w.events.length;
+  const layers = layersAt(r.registry, r.doc, w.state, at.id, configOf(o.call));
+  const off = Object.entries(layers?.moving.pieces ?? {}).flatMap(([who, p]) => (p.at !== undefined && layers !== null ? [{ who, at: p.at, grid: layers.drawn }] : []));
+  const bad = applied(o, [...off.map((p) => positionEvent(p.grid, p.who, null, p.at)), draftChange(r.doc, w.state, { collection: "maps", id, gone: true }).value as JsonObject]);
+  if (bad) return bad;
+  o.draft.record(o.n, o.op, "engine", o.prov, from);
+  o.reply.line("lay_removed", { place: whoIs(say, at.id), map: id, ...(off.length > 0 ? { off: off.map((p) => whoIs(say, p.who)) } : {}) });
+  return undefined;
+}
 const layDef: WriteDef = {
   name: "map_lay",
   family: FAMILY,
   lane: "engine",
-  properties: { place: TEXT, rows: TEXTS, width: WHOLE, height: WHOLE, doors: SQUARES, legend: OBJECT, feet: NUMBER, title: TEXT, over: TEXT, square: SQUARE },
+  properties: { place: TEXT, rows: TEXTS, width: WHOLE, height: WHOLE, doors: SQUARES, legend: OBJECT, feet: NUMBER, title: TEXT, over: TEXT, square: SQUARE, remove: YES_NO },
   required: ["place"],
   example: { place: "The Far Road", width: 12, height: 8, source: { from: "prose", message: "m-0042" }, standing: "assumed" },
   run(o) {
+    if (o.args.remove === true) return takeOut(o);
     const w = o.draft.w;
     const r = o.reading;
     const rows = rowsOf(o);
@@ -869,4 +895,4 @@ const editDef: WriteDef = {
 };
 
 /** The map tools, as RPH's search finds them. */
-export const MAP_TOOLS: readonly ToolSpec[] = [readTool(view), readTool(measure), writeTool(placeDef), writeTool(doorDef), writeTool(layDef), writeTool(editDef)].map(mapTool);
+export const MAP_TOOLS: readonly ToolSpec[] = [readTool(view), readTool(measure), writeTool(placeDef), writeTool(doorDef), writeTool(layDef), writeTool(editDef), ...TODAY_TOOLS].map(mapTool);

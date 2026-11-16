@@ -48,6 +48,7 @@ import { observeCells, sightOf } from "./seen";
 import { forget, touchedAnyRelation, touchedAspect, touchedField, touchedRelation } from "./touched";
 import { visibilityOf } from "./visibility";
 import { carryDraft, chatDraftOf, NO_DRAFT } from "./world-draft";
+import { carrySpace } from "../packs/space/core/grid-play";
 import { clampLevels } from "./world-state";
 
 /** What the merge needs from the registry: event types (an account's posting), relation types and read contexts. */
@@ -518,15 +519,21 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
 /**
  * A `migrate` marker's step: with picks, the revision's definition changes merge into the state
  * (returning the Journal notes it makes); without, only the revision switches, and the state notes
- * which revision its definitions still come from.
+ * which revision its definitions still come from. The chat's records of what it changed on grids
+ * go with it (`carrySpace`), the squares the revision took in dropped, and what names a map or place the
+ * revision lacks kept and named in the notes.
  */
 export function migrate(state: WorldState, body: Extract<MarkerBody, { kind: "migrate" }>, env: MarkerEnv): string[] {
   // This chat's own changes to the world go with it to the new revision (`world-draft.ts`).
   if (chatDraftOf(state) !== NO_DRAFT) carryDraft(state, revisionDoc(env, body.to));
-  if (body.merge) return applyUpgrade(state, planUpgrade(state, env, body.to), body.merge, env);
+  if (body.merge) {
+    const notes = applyUpgrade(state, planUpgrade(state, env, body.to), body.merge, env);
+    return [...notes, ...carrySpace(state, revisionDoc(env, body.to))];
+  }
   const lag = definitionsLag(state);
   if (lag === null && body.to !== state.revision) setLag(state, state.revision);
   else if (lag === body.to) setLag(state, null);
   state.revision = body.to;
-  return [];
+  const to = env.worlds(body.to);
+  return to === undefined ? [] : carrySpace(state, to);
 }
