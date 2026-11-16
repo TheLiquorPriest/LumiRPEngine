@@ -48,6 +48,7 @@ const SECTIONS: Readonly<Record<string, string>> = {
   store: "The store",
   worldState: "The world state",
   lore: "Lore",
+  migration: "The migration",
   engine: "The engine's tools",
   retention: "Files and notes",
   files: "Files and notes",
