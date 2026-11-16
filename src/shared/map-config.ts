@@ -14,6 +14,10 @@ export type Unit = (typeof UNITS)[number];
 export const AREA_STARTS = ["corner", "middle"] as const;
 export type AreaStart = (typeof AREA_STARTS)[number];
 
+/** What a place's light is: it is lit, or it is dark (plan §8.2, "what is lit"). */
+export const LIGHTS = ["lit", "dark"] as const;
+export type Light = (typeof LIGHTS)[number];
+
 /** Where an area starts, and the share of a square it must cover for the square to count (a share of 0 counts any square it covers any of). */
 export interface AreaRule {
   start: AreaStart;
@@ -60,6 +64,8 @@ export interface MapConfig {
   coverTotal: number;
   /** Whether creatures obstruct the lines, where the world's ruleset says nothing. */
   coverCreatures: boolean;
+  /** What a place with no light recorded (and none above it that has) reads as. */
+  lightUnset: Light;
 }
 
 /** Appendix D.1: squares of 5 ft, rounds of 6 seconds, a map printed whole up to 40 by 30, a diagonal as one square, feet. */
@@ -80,4 +86,6 @@ export const MAP_DEFAULTS: Readonly<MapConfig> = Object.freeze({
   coverThreeQuarters: 3,
   coverTotal: 4,
   coverCreatures: true,
+  // A place nobody has said is dark is lit.
+  lightUnset: "lit",
 });

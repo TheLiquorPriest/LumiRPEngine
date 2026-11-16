@@ -5,9 +5,9 @@
 
 import type { ConfigRead } from "../../app/config-read";
 import type { Setting } from "../../app/setting-list";
-import { AREA_STARTS, DIAGONALS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map-config";
+import { AREA_STARTS, DIAGONALS, LIGHTS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map-config";
 
-export { AREA_STARTS, DIAGONALS, MAP_DEFAULTS, UNITS, type AreaStart, type Diagonal, type MapConfig, type Unit } from "../../shared/map-config";
+export { AREA_STARTS, DIAGONALS, LIGHTS, MAP_DEFAULTS, UNITS, type AreaStart, type Diagonal, type Light, type MapConfig, type Unit } from "../../shared/map-config";
 
 // D.1's rows name the width of a square laid in play, how a diagonal counts, a round's seconds and the size printed whole; a round's move, the unit and the picture are beyond D.1.
 
@@ -142,6 +142,15 @@ export const MAP_SETTING_DEFS = {
     perConnection: false,
     name: "Creatures give cover",
     about: "Whether other people and things standing between an attacker and a target obstruct the lines, as D&D has it. A world's ruleset that says otherwise wins.",
+    effect: "turn",
+  },
+  lightUnset: {
+    key: "map.lightUnset",
+    default: MAP_DEFAULTS.lightUnset,
+    takes: { type: "oneOf", values: LIGHTS },
+    perConnection: false,
+    name: "A place with no light recorded reads",
+    about: "lit or dark: how a place reads, on the grid and to sight, when neither it nor any place above it has had its light set (world_apply, set, key light).",
     effect: "turn",
   },
 } as const satisfies Record<keyof MapConfig, Setting>;

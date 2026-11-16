@@ -107,10 +107,11 @@ function standIn(world: Pick<WorldDoc, "places">, n: number): PlaceId {
  * What a grid shows beyond its terrain, from the geometry as the chat plays it (`grid-model.ts`): every
  * person and thing the POV may see standing on it (in its sight on the grid it stands on, else in its
  * place), with its square, footprint, what it blocks, what it lies on or in and its life state; the
- * unplaced of the POV's place with where they are kept; each door as it stands; and, on the grid the
- * POV stands on with the grid system on, the squares it sees now (lit) and the shown squares it does
- * not (dark). Someone the POV cannot see is not there, a square it is not shown holds none, and the
- * scale and time step go with the grid.
+ * unplaced of the POV's place with where they are kept; each door as it stands; the squares in the
+ * dark (a place's light, lit or dark, over its area: only the squares the POV is shown); and, on the
+ * grid the POV stands on with the grid system on, the squares it sees now (`sight`). Someone the POV
+ * cannot see is not there, a square it is not shown holds none, and the scale and time step go with
+ * the grid.
  */
 function sceneOf(ctx: ReadContext, drawn: Drawn, ground: StoredMoving, cells: CellView, sight: ReadonlySet<number> | null, standing: boolean, here: PlaceId | null): GridScene {
   const { world, state } = ctx;
@@ -147,14 +148,15 @@ function sceneOf(ctx: ReadContext, drawn: Drawn, ground: StoredMoving, cells: Ce
     const at = doorState(drawn, ground.moving, index);
     if (at !== null && shown(index)) doors.push({ ...cellOf(squareAt(drawn, index)), state: at });
   }
-  const lit = standing && sight !== null ? [...sight].filter(shown).sort((a, b) => a - b) : null;
-  const dark = lit === null ? null : Array.from({ length: drawn.width * drawn.height }, (_, i) => i).filter((i) => shown(i) && !sight?.has(i));
+  const seen = standing && sight !== null ? [...sight].filter(shown).sort((a, b) => a - b) : null;
+  const dark = [...drawn.dark].filter(shown).sort((a, b) => a - b);
   const { metres, feet, unit, diagonal, step } = drawn.scale;
   return {
     ...(pieces.length > 0 ? { pieces } : {}),
     ...(unplaced.length > 0 ? { unplaced } : {}),
     ...(doors.length > 0 ? { doors } : {}),
-    ...(lit !== null && dark !== null ? { lit, dark } : {}),
+    ...(seen !== null ? { sight: seen } : {}),
+    ...(dark.length > 0 ? { dark } : {}),
     scale: { metres, feet, unit, diagonal, step },
   };
 }

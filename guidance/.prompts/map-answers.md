@@ -70,6 +70,8 @@ far_feet: {{amount}} ft
 far_metres: {{amount}} m
 measure_distance: From {{from}} to {{to}}: {{squares}} squares, {{far}}.
 measure_sees: {{from}} and {{to}} can see each other.
+measure_sees_dark: There is a clear line between {{from}} and {{to}}, within the world's sight, and {{to}} stands in the dark.
+measure_sees_beyond: There is a clear line between {{from}} and {{to}}, but {{to}} is farther than the {{radius}} squares ({{farRadius}}) the world's sight reaches{{#dark}}, and stands in the dark{{/dark}}.
 measure_blind: {{from}} and {{to}} cannot see each other: a wall, a door that is not open, or something that blocks the view is between them.
 measure_cover: {{to}} has {{degree}} cover from {{from}}{{#by}}, given by {{by}}{{/by}}.
 measure_no_cover: {{to}} has no cover from {{from}}.
@@ -121,6 +123,7 @@ grid_no_map: {{#op}}{{op}}: {{/op}}{{place}} has no map drawn row by row to chan
 grid_bad_symbol: {{#op}}{{op}}: {{/op}}{{symbol}} is not one character.
 grid_not_in_legend: {{#op}}{{op}}: {{/op}}no legend names {{symbol}}, so it reads as floor, and what was drawn with it is recorded as assumed. Give it an entry in the legend to say what it is.
 grid_nothing_drawn: {{#op}}{{op}}: {{/op}}nothing was drawn on the map of {{place}}.
+grid_light_unreadable: {{#op}}{{op}}: {{/op}}{{place}}: the light {{value}} is neither lit nor dark, so it was recorded as given and the place reads as {{reads}}. Set light to lit or dark.
 grid_kept_no_map: {{#op}}{{op}}: {{/op}}{{what}} could not be put on a square: {{place}} has no map of squares. It is kept as where {{what}} is: {{kept}}.
 grid_kept_no_zone: {{#op}}{{op}}: {{/op}}{{what}} could not be put in {{zone}}: the map of {{place}} has no zone by that name. It is kept as where {{what}} is.
 grid_kept_nowhere: {{#op}}{{op}}: {{/op}}{{what}} could not be put beside {{near}}, who stands on no square of the map of {{place}}. It is kept as where {{what}} is: {{kept}}.

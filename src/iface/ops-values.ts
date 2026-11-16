@@ -22,6 +22,7 @@ import { isThing, possessorOf } from "../engine/things";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { accountsOf, balance, classOf, external, hasLedger, holdersOf, statusOf, traitsOf } from "../packs/economy/core/model";
 import { asUnit, cashAccount, isParty, type PayMethod, payeeSide, posting, waysOf, wayFor } from "../packs/economy/core/pay";
+import { LIGHT_FIELD } from "../packs/space/core/light";
 import { axesOf } from "../packs/relationships/core/index";
 import { findQuest, newQuestId, QUEST_KINDS, QUEST_OPS, QUEST_STORE_AREA, type QuestDoc, type QuestOp, type QuestSlice, questSliceOf } from "../quests";
 import { storySliceOf } from "../story";
@@ -351,7 +352,13 @@ function setPlaceField(o: OpContext, placeId: string, key: string, value: JsonVa
   else fields[key] = value;
   const event = draftEvent(baseWorld(played), chatDraftOf(w.state), { collection: "places", id: placeId, value: { ...(def as unknown as JsonObject), fields } });
   const bad = o.draft.applyAll([event]);
-  return bad ? refusedAs(o, bad, "at", "place") : undefined;
+  if (bad) return refusedAs(o, bad, "at", "place");
+  // A light that is neither lit nor dark is recorded as given, and said to read as unset (`packs/space/core/light.ts`).
+  if (key === LIGHT_FIELD) {
+    const found = o.call.deps.grid.light({ state: { ...o.reading.state, world: w.state }, env: o.call.deps.env, place: placeId, value: fields[key] });
+    if (found) o.reply.reported(found.line, { n: o.n, op: o.op, ...found.fields }, found.words);
+  }
+  return undefined;
 }
 
 /**

@@ -2,12 +2,14 @@
 // is within a range, the squares an area covers (a radius, a cone, a line, a cube) and who stands in
 // it, cover, and line of sight. What blocks is worked out as play stands (`blockersOf`): walls,
 // every door that is not open, and the footprints that block. Something bigger than a square is
-// measured from its nearest square, and is seen when a square along its edge is (a line out of it
-// crosses its edge), so sight between two footprints follows no more lines than the map's sides
-// allow. An area is a shape laid over the squares from a point of origin, and a square counts by the
-// rule the world's ruleset (or the settings) gives (`Scale.areas`): where the area starts, and the
-// share of the square it must cover. Cover is the least of the four corners of the attacker's square
-// by how many of the four lines to the corners of the target's square something blocks (`Scale.cover`).
+// measured from its nearest square, and sees and is seen from any square it covers (a line between
+// the squares of one and the squares of the other that nothing blocking the view cuts). Sight is
+// bounded by the world's sight radius, and says whether the target stands lit or dark, as facts: the
+// one who rules decides what is seen. An area is a shape laid over the squares from a point of
+// origin, and a square counts by the rule the world's ruleset (or the settings) gives
+// (`Scale.areas`): where the area starts, and the share of the square it must cover. Cover is the
+// least of the four corners of the attacker's square by how many of the four lines to the corners of
+// the target's square something blocks (`Scale.cover`).
 
 import type { EntityId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
@@ -121,40 +123,115 @@ function clear(drawn: Drawn, blocked: Uint8Array, a: Square, b: Square): boolean
   return seen;
 }
 
-/**
- * The squares along the edge of a rectangle, the part of it on the grid: every line out of it
- * leaves through one of them, and however large it is they are no more than the map's own edge.
- */
-function edgeOf(drawn: Drawn, r: Rect): Square[] {
-  const c0 = Math.max(1, r.c0);
-  const r0 = Math.max(1, r.r0);
-  const c1 = Math.min(drawn.width, r.c1);
-  const r1 = Math.min(drawn.height, r.r1);
-  const out: Square[] = [];
-  for (let row = r0; row <= r1; row++) {
-    if (row === r0 || row === r1) for (let col = c0; col <= c1; col++) out.push([col, row]);
-    else {
-      out.push([c0, row]);
-      if (c1 > c0) out.push([c1, row]);
-    }
-  }
-  return out;
+/** The part of a rectangle that is on the grid; null where none is. */
+function clipped(drawn: Drawn, r: Rect): Rect | null {
+  const out = { c0: Math.max(1, r.c0), r0: Math.max(1, r.r0), c1: Math.min(drawn.width, r.c1), r1: Math.min(drawn.height, r.r1) };
+  return out.c0 > out.c1 || out.r0 > out.r1 ? null : out;
 }
 
 /**
- * Whether one spot can see the other: a straight line from some square along the edge of one to
- * some square along the edge of the other that walls, doors not open and footprints that block the
- * view leave clear. The two spots' own footprints never block, and a line out of a footprint
- * crosses its edge, so its edge is where it is seen from; only what lies on the grid sees. Null when
- * one stands nowhere.
+ * Whether a run of squares leads from the rectangle `a` to the rectangle `b` that a line of sight could follow: each square a view
+ * does not block, a step across a corner only where the two squares beside it are not both blocked. A necessary condition of a
+ * clear line, no more, but worked out over the grid once, so that two large footprints with a wall between them are told apart
+ * without a line being followed from every square of one to every square of the other.
  */
+function leads(drawn: Drawn, view: Uint8Array, a: Rect, b: Rect): boolean {
+  const { width, height } = drawn;
+  const reached = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let tail = 0;
+  for (let r = a.r0; r <= a.r1; r++) {
+    for (let c = a.c0; c <= a.c1; c++) {
+      const i = (r - 1) * width + (c - 1);
+      reached[i] = 1;
+      queue[tail++] = i;
+    }
+  }
+  for (let head = 0; head < tail; head++) {
+    const at = queue[head] ?? 0;
+    const [c, r] = [(at % width) + 1, Math.floor(at / width) + 1];
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const [nc, nr] = [c + dc, r + dr];
+        if ((dc === 0 && dr === 0) || nc < 1 || nr < 1 || nc > width || nr > height) continue;
+        const next = (nr - 1) * width + (nc - 1);
+        if (reached[next] === 1) continue;
+        if (dc !== 0 && dr !== 0 && view[(r - 1) * width + (nc - 1)] === 1 && view[(nr - 1) * width + (c - 1)] === 1) continue;
+        if (nc >= b.c0 && nc <= b.c1 && nr >= b.r0 && nr <= b.r1) return true;
+        if (view[next] === 1) continue;
+        reached[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether some square of one rectangle and some square of the other have a clear line between them
+ * (and, when `radius` is given, lie within it, as `sightFrom` counts: a round disc). Squares they
+ * share see each other; the first pair that does decides.
+ */
+function lineBetween(drawn: Drawn, view: Uint8Array, a: Rect, b: Rect, radius: number | null): boolean {
+  const ra = clipped(drawn, a);
+  const rb = clipped(drawn, b);
+  if (!ra || !rb) return false;
+  if (ra.c0 <= rb.c1 && rb.c0 <= ra.c1 && ra.r0 <= rb.r1 && rb.r0 <= ra.r1) return true;
+  if ((ra.c1 > ra.c0 || ra.r1 > ra.r0 || rb.c1 > rb.c0 || rb.r1 > rb.r0) && !leads(drawn, view, ra, rb)) return false;
+  const reach = radius === null ? Infinity : radius * radius + radius;
+  for (let r0 = ra.r0; r0 <= ra.r1; r0++) {
+    for (let c0 = ra.c0; c0 <= ra.c1; c0++) {
+      for (let r1 = rb.r0; r1 <= rb.r1; r1++) {
+        const dy = r1 - r0;
+        for (let c1 = rb.c0; c1 <= rb.c1; c1++) {
+          const dx = c1 - c0;
+          if (dx * dx + dy * dy <= reach && clear(drawn, view, [c0, r0], [c1, r1])) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/** Whether a clear line runs between two spots, from any square one covers to any the other covers (walls, doors not open and footprints that block the view leave it clear; the two spots' own footprints never block); the radius of sight is not asked. Null when one stands nowhere. */
 export function sees(drawn: Drawn, moving: Moving, a: Spot, b: Spot): boolean | null {
   const ra = rectOf(moving, a);
   const rb = rectOf(moving, b);
   if (!ra || !rb) return null;
+  return lineBetween(drawn, maskOf(drawn, blockersOf(drawn, moving, [a, b].filter((s): s is EntityId => typeof s === "string")).view), ra, rb, null);
+}
+
+/** What there is to say of one spot looking at another. */
+export interface Sight {
+  /** A clear line runs between them (`sees`), whatever the distance. */
+  clear: boolean;
+  /** One of them is within the world's sight radius of the other, by a clear line: as far as the grid goes, the one sees the other. */
+  seen: boolean;
+  /** How many squares apart they are, from the nearest square of one to the nearest of the other. */
+  apart: number;
+  /** The radius of sight, in squares. */
+  radius: number;
+  /** That the target stands lit: some square it covers does not read dark. */
+  lit: boolean;
+}
+
+/**
+ * Sight from `a` to `b` as facts: whether a clear line runs between them, whether one runs within the
+ * world's sight radius (`Drawn.radius`, today's), how far apart they are and whether the target
+ * stands lit. Whether it is seen is the ruling of whoever rules; none is made here. Null when one
+ * stands nowhere.
+ */
+export function sightOf(drawn: Drawn, moving: Moving, a: Spot, b: Spot): Sight | null {
+  const ra = rectOf(moving, a);
+  const rb = rectOf(moving, b);
+  const apart = between(drawn, moving, a, b);
+  if (!ra || !rb || apart === null) return null;
   const view = maskOf(drawn, blockersOf(drawn, moving, [a, b].filter((s): s is EntityId => typeof s === "string")).view);
-  const to = edgeOf(drawn, rb);
-  return edgeOf(drawn, ra).some((sa) => to.some((sb) => clear(drawn, view, sa, sb)));
+  const seen = lineBetween(drawn, view, ra, rb, drawn.radius);
+  const target = clipped(drawn, rb);
+  let lit = false;
+  if (target) for (let row = target.r0; row <= target.r1 && !lit; row++) for (let column = target.c0; column <= target.c1 && !lit; column++) lit = !drawn.dark.has((row - 1) * drawn.width + (column - 1));
+  return { clear: seen || lineBetween(drawn, view, ra, rb, null), seen, apart, radius: drawn.radius, lit };
 }
 
 /** The squares an area covers, and who and what stands in it. */

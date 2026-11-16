@@ -15,13 +15,14 @@ import { hasOwn, isRecord } from "../../../shared/json";
 import type { JsonObject } from "../../../shared/json";
 import { cellIndex, costMinutes, DEFAULT_CELL_METRES, doorTerrainsOf, gridOf, isDoorTerrain, standingGrid, type Cell } from "../../../shared/grid";
 import { MAP_DEFAULTS, METRES_PER_FOOT, type AreaRule, type CoverRule, type Diagonal, type MapConfig, type Unit } from "../../../shared/map-config";
-import { compileMaps, DEFAULT_LEGEND, VOID_TERRAIN } from "../../../shared/maps";
+import { compileMaps, DEFAULT_LEGEND, mapSettingsOf, VOID_TERRAIN } from "../../../shared/maps";
 import type { GridDef, MapCellDef, MapDoc, RulesetDef, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
 import type { Registry } from "../../../engine/registry-impl";
 import { isGone, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { doorsAt, editedMap, mapStepOf, seesThrough, shapeOf, squareEditsOf, type DoorState, type MapStep, type SquareEdits } from "./grid-play";
+import { darkOn, type DarkArea } from "./light";
 
 export type { DoorState } from "./grid-play";
 
@@ -104,6 +105,12 @@ export interface Drawn {
   legend: Readonly<Record<string, MapCellDef>>;
   /** The things the map draws, each at the square it is drawn on. */
   items: Readonly<Record<EntityId, number>>;
+  /** The squares in the dark, by index: those that read the light of the place or the room drawn over them (`light.ts`). */
+  dark: ReadonlySet<number>;
+  /** The places whose light is out on this grid, each with its squares. */
+  darkAreas: readonly DarkArea[];
+  /** How far a viewer sees on this grid, in squares: the world's sight radius. */
+  radius: number;
   scale: Scale;
 }
 
@@ -256,6 +263,7 @@ export function drawnOf(world: WorldDoc, scope: PlaceId, config: Readonly<MapCon
   }
   const scale = scaleOf(grid.cellMeters ?? DEFAULT_CELL_METRES, config, world.ruleset);
   const step = map ? mapStepOf(map) : null;
+  const { dark, areas: darkAreas } = darkOn(world, scope, zones, grid.width, grid.height, config);
   return {
     id: grid.id,
     scope,
@@ -270,6 +278,9 @@ export function drawnOf(world: WorldDoc, scope: PlaceId, config: Readonly<MapCon
     zones,
     legend,
     items,
+    dark,
+    darkAreas,
+    radius: mapSettingsOf(world).grid.sightRadius,
     scale: step ? { ...scale, step } : scale,
   };
 }

@@ -17,6 +17,7 @@ import type { WorldState } from "../../engine/state";
 import type { GridFinding, GridMoves, GridPlaced } from "./ports";
 import { Lines } from "../texts";
 import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
+import { lightOf, lightRead } from "../../packs/space/core/light";
 import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type Moving, type Square } from "../../packs/space/core/grid-model";
 import { move } from "../../packs/space/core/grid-path";
 import { between } from "../../packs/space/core/grid-measure";
@@ -93,6 +94,15 @@ export function softPositions(world: WorldDoc, state: Readonly<WorldState>, plac
  */
 export function gridMoves(lines: Lines = Lines.none(), config: Readonly<MapConfig> = MAP_DEFAULTS): GridMoves {
   return {
+    light({ state, env, place, value }) {
+      if (value === null || value === undefined || lightRead(value) !== null) return null;
+      const doc = env.worlds(state.world.revision);
+      if (!doc) return null;
+      const world = playedWorld(doc, state.world);
+      const fields = reportFields({ lines, world, state: state.world }, { place, value: JSON.stringify(value), reads: lightOf(world, place, config) });
+      const words = lines.line("grid_light_unreadable", fields);
+      return words !== undefined && words.trim() !== "" ? { line: "grid_light_unreadable", fields, words } : null;
+    },
     place({ state, env, who, place, square, near, zone, nearMatches = Infinity }) {
       const doc = env.worlds(state.world.revision);
       if (!doc) return { problem: "not_applicable", fields: { code: "no_world" } };

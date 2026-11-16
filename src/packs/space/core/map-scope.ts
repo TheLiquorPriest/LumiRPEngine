@@ -113,18 +113,19 @@ export interface MapGridView {
   seen?: string;
   /** Things lying at cells of this grid where the POV sees them now: in its sight on the grid it stands on with the grid system, else in its place. */
   items?: MapItemView[];
-  /** What the grid shows beyond its terrain, when the geometry draws it (`view.ts`): who and what is on it, the doors as they stand, what is lit and dark, and the scale and time step. */
+  /** What the grid shows beyond its terrain, when the geometry draws it (`view.ts`): who and what is on it, the doors as they stand, what the POV sees now and what is in the dark, and the scale and time step. */
   pieces?: MapPieceView[];
   unplaced?: MapUnplacedView[];
   doors?: MapDoorView[];
-  /** The squares (indexes, row by row) the POV sees now, and the squares it is shown that it does not: only on the grid it stands on, with the grid system on. */
-  lit?: number[];
+  /** The squares (indexes, row by row) the POV sees now, by its sight radius and what blocks the view: only on the grid it stands on, with the grid system on. */
+  sight?: number[];
+  /** The squares (indexes, row by row) in the dark: those that read the light of a place or a room drawn over them (a place's `light`, `lit` or `dark`) and that the POV is shown. Everything else shown is lit. */
   dark?: number[];
   scale?: MapScaleView;
 }
 
 /** What a grid's scene adds to the grid as the view draws it. */
-export type GridScene = Pick<MapGridView, "pieces" | "unplaced" | "doors" | "lit" | "dark" | "scale">;
+export type GridScene = Pick<MapGridView, "pieces" | "unplaced" | "doors" | "sight" | "dark" | "scale">;
 
 /** Which cells of a scope's grid the viewer isn't shown: blank ones (in fog, never seen) and void ones (of places it can't see). */
 export interface CellView {

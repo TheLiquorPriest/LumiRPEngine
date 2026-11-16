@@ -84,6 +84,8 @@ export function worldWith(...maps: MapDoc[]): WorldDoc {
   w.entities.chest = thing("chest", "container", "Iron-bound chest");
   w.entities.lantern = thing("lantern", "item", "Lantern", [{ type: "on", to: "long_table" }]);
   w.maps = Object.fromEntries(maps.map((m) => [m.id, m]));
+  // A world whose sight reaches the length of these rooms, so a line between two squares of them is within it.
+  w.mapSettings ??= { display: "knowledge", grid: { movement: false, sightRadius: 12 } };
   return compileMaps(w);
 }
 

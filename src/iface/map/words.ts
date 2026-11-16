@@ -19,7 +19,7 @@ import { hashJson } from "../../shared/hash";
 import { MAP_DEFAULTS, type MapConfig, type Unit } from "../../shared/map-config";
 import { kindFields } from "../../engine/scope";
 import type { Fact } from "../../store/types";
-import { drawnOf, movingOf, standsAt, type Drawn, type Moving, type Square, type Took } from "../../packs/space/core/grid-model";
+import { drawnOf, movingOf, runsOf, squareAt, standsAt, type Drawn, type Moving, type Square, type Took } from "../../packs/space/core/grid-model";
 import { between } from "../../packs/space/core/grid-measure";
 import { whereOf } from "../../packs/space/core/grid-play";
 import { layoutLine, MAP_LAYOUT, NO_LAYOUT, parseLayout, type MapLayout } from "./layout";
@@ -285,8 +285,12 @@ export function mapWords(wording: MapWording, layers: Layers, state: Readonly<Wo
     if (said !== undefined) listed.push(said);
   }
   const doors = printed.doors.map((d) => sayAs("map_door", { column: d.at[0], row: d.at[1], state: d.state }) ?? "").filter((t) => t.trim() !== "");
+  // What is dark, by the place whose light is out (the map's whole, or a room drawn on it with its squares by row): state that moves with the turn, so the layer that moves lists it.
+  const dark = drawn.darkAreas
+    .map((a) => sayAs("map_dark_area", { id: a.place, name: nameIn(world, state, a.place), whole: a.whole, count: a.squares.length, ...(a.whole ? {} : { squares: runsText({ lines, world, state }, runsOf(a.squares.map((i) => squareAt(drawn, i)))) }) }) ?? "")
+    .filter((t) => t.trim() !== "");
   const drawnFields = { title, part, picture, legend };
-  const movingFields = { who: listed.length > 0 ? sayAs("map_who", {}) : undefined, list: listed.length > 0 ? listed.join("\n") : undefined, doors: doors.length > 0 ? sayAs("map_doors", { doors }) : undefined };
+  const movingFields = { who: listed.length > 0 ? sayAs("map_who", {}) : undefined, list: listed.length > 0 ? listed.join("\n") : undefined, doors: doors.length > 0 ? sayAs("map_doors", { doors }) : undefined, dark: dark.length > 0 ? sayAs("map_dark", { areas: dark }) : undefined };
   const fields = opts.layer === "drawn" ? drawnFields : opts.layer === "moving" ? movingFields : { ...drawnFields, ...movingFields };
   const text = layout.body === null ? "" : layout.body.render(layout.header, fields).replace(/^\n+/, "").trimEnd();
   // The drawn layer's version: what it is made of, and the world's revision; never who stands where or which door is open.

@@ -3,7 +3,7 @@
 // world state and `world_query` print it (`MapView`). The engine's tools are given both by the host
 // (`EngineDeps`, the turn lane); the world state's own declaration of the second is `MapText`.
 
-import type { JsonObject } from "../../shared/json";
+import type { JsonObject, JsonValue } from "../../shared/json";
 import type { FoldEnv } from "../../store/fold";
 import type { StoreState } from "../../store/types";
 import type { Fields } from "../texts";
@@ -30,6 +30,12 @@ export type GridPlaced = { events: JsonObject[]; said?: string[]; reports?: Grid
 
 export interface GridMoves {
   place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string; nearMatches?: number }): GridPlaced;
+  /**
+   * What the grid finds of a place's light that was just set (`world_apply`'s `set`, key `light`): a value
+   * that is neither lit nor dark is recorded as given and reads as unset, which the finding says, with
+   * what the place now reads as. Null where the light reads, or was cleared.
+   */
+  light(input: { state: StoreState; env: FoldEnv; place: string; value: JsonValue | undefined }): GridFinding | null;
 }
 
 /** The map's two layers: what is drawn (the title, the part shown, the picture, the legend) and what moves (who and what is where, the doors). */

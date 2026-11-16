@@ -35,7 +35,7 @@ import { NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, WHOLE, YES_NO, type Call, ty
 import { editMap, type Stroke } from "./map/edit";
 import { type Fixture, fixtureAt } from "./map/fixture";
 import { MAP_DEFAULTS, METRES_PER_FOOT, type MapConfig } from "../shared/map-config";
-import { between, burst, cone, coverOf, cube, line, sees, within, type Spot } from "../packs/space/core/grid-measure";
+import { between, burst, cone, coverOf, cube, line, sightOf, within, type Spot } from "../packs/space/core/grid-measure";
 import { doorState, indexOf, lift, moveTime, place, runsOf, setDoor, squareAt, standsAt, type Piece, type Square, type Took } from "../packs/space/core/grid-model";
 import { move, walk } from "../packs/space/core/grid-path";
 import { idFrom, layForPlace, layOverSquare, plainRows, type Laid, type Laying, type Named } from "./map/lay";
@@ -337,10 +337,13 @@ const measure: ReadDef = {
       if (end !== undefined) {
         const toText = spotText(say, end.square, end.id);
         const squares = between(drawn, moving, spot(start), spot(end)) ?? 0;
-        const seen = sees(drawn, moving, spot(start), spot(end)) === true;
+        const sight = sightOf(drawn, moving, spot(start), spot(end));
         const way = walk(drawn, moving, start.square, end.square, start.id, end.id);
         reply.line("measure_distance", { from: fromText, to: toText, squares, far: farText(call.lines, drawn, squares) });
-        reply.line(seen ? "measure_sees" : "measure_blind", { from: fromText, to: toText });
+        // Sight as facts: a clear line, within the sight radius, to a target that stands lit; what is seen is the GM's ruling.
+        if (sight === null || !sight.clear) reply.line("measure_blind", { from: fromText, to: toText });
+        else if (!sight.seen) reply.line("measure_sees_beyond", { from: fromText, to: toText, radius: sight.radius, farRadius: farText(call.lines, drawn, sight.radius), dark: !sight.lit });
+        else reply.line(sight.lit ? "measure_sees" : "measure_sees_dark", { from: fromText, to: toText });
         // What stands between them: the cover the one has from the other, by the rule in force.
         const cover = coverOf(drawn, moving, spot(start), spot(end));
         const by = (cover?.by ?? []).map((b) => (own(say.state.entities, b) !== undefined ? whoIs(say, b) : b));
@@ -348,7 +351,7 @@ const measure: ReadDef = {
         const took = way ? moveTime(drawn.scale, way.cost, speed !== undefined && speed > 0 ? speed : undefined) : null;
         if (way && took) reply.line("measure_way", { from: fromText, to: toText, distance: way.distance, far: farText(call.lines, drawn, way.distance), cost: way.cost, time: timeText(say, took) });
         else reply.line("measure_no_way", { from: fromText, to: toText });
-        Object.assign(data, { to: atData(say, end), squares, distance: distanceData(drawn, squares), sees: seen, ...(cover ? { cover: { degree: cover.degree, blocked: cover.blocked, of: 4, by } } : {}), way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
+        Object.assign(data, { to: atData(say, end), squares, distance: distanceData(drawn, squares), sees: sight?.seen === true, clear: sight?.clear === true, lit: sight?.lit === true, radius: sight?.radius ?? drawn.radius, ...(cover ? { cover: { degree: cover.degree, blocked: cover.blocked, of: 4, by } } : {}), way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
       }
       if (typeof range === "number") {
         const who = within(drawn, moving, spot(start), range).map((id) => whoIs(say, id));
