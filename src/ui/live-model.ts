@@ -377,6 +377,17 @@ export function holeIn(run: RunNode): number | null {
   return run.waiting.length > 0 || run.reply.held.length > 0 ? run.seq + 1 : null;
 }
 
+/** Whether the run is held by his pause, by the newest `paused` or `resumed` record it holds; null where it holds neither (the page then asks RPE). */
+export function pausedIn(run: RunNode): boolean | null {
+  let newest: { seq: number; paused: boolean } | null = null;
+  const notes = [...run.host, ...[...run.agents.values()].flatMap((agent) => agent.steps.filter((s): s is NoteStep => s.kind === "note"))];
+  for (const { record } of notes) {
+    const { kind } = record.event;
+    if ((kind === "paused" || kind === "resumed") && (newest === null || record.seq > newest.seq)) newest = { seq: record.seq, paused: kind === "paused" };
+  }
+  return newest === null ? null : newest.paused;
+}
+
 /** The runs the Live page shows, in the order it shows them: those going on first, as each began, then those that ended, the one that ended last first. */
 export function shownRuns(model: LiveModel): RunNode[] {
   const began = (run: RunNode): number => run.startedAt ?? run.firstAt ?? 0;

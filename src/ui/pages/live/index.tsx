@@ -8,7 +8,7 @@
 // says so in the notices file's words.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { RefObject } from "preact";
+import type { ComponentChildren, RefObject } from "preact";
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
 import { replyOf } from "../../client";
@@ -16,6 +16,7 @@ import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../../at
 import { type Follow, useFollowNewest } from "../../live-follow";
 import { type RunNode, shownRuns, stopOf } from "../../live-model";
 import { type FailureShown, type LetGo, NOTHING_WATCHED, watchChat, type Watched } from "../../live-watch";
+import { RunExtras } from "./controls";
 import { FailureLines } from "./failures";
 import { type NoticeLines, useNoticeLines } from "../../notice-words";
 import { AgentTree, ReplyBox, RunHead, runTitle, STATUS_WORDS } from "../../trace-view";
@@ -51,6 +52,8 @@ export interface LiveViewProps {
   onCloseGate(): void;
   onDismiss?(seq: number): void;
   onOpenTurn(turn: string): void;
+  /** What stands under a running run's head: its controls, its files and sessions. The page's own; a plain draw has none. */
+  extras?: (run: RunNode) => ComponentChildren;
   /** The notices file's words, for the records of the tree that are notices (a turn held to under ten minutes for want of a keep-alive line). */
   notices?: NoticeLines;
   /** Keeping a long tree in reach (`useFollowNewest`), and the view's root it moves the page by; a plain draw has neither. */
@@ -59,7 +62,7 @@ export interface LiveViewProps {
 }
 
 /** One run: its head and Stop, and what it sent to the chat. */
-function RunBlock(props: { chat: string; run: RunNode; now: number; stops: readonly StopPress[]; onStop(run: RunNode): void; onOpenTurn(turn: string): void }) {
+function RunBlock(props: { chat: string; run: RunNode; now: number; stops: readonly StopPress[]; onStop(run: RunNode): void; onOpenTurn(turn: string): void; extras?: (run: RunNode) => ComponentChildren }) {
   const { run } = props;
   const running = run.outcome === null;
   const pressed = props.stops.find((s) => s.chat === props.chat && s.run === run.run);
@@ -92,6 +95,7 @@ function RunBlock(props: { chat: string; run: RunNode; now: number; stops: reado
           </Banner>
         )}
         <RunHead run={run} now={props.now} />
+        {props.extras?.(run)}
       </Section>
       <Section id={`reply-${run.run}`} title="What went to the chat">
         <ReplyBox run={run} />
@@ -163,7 +167,7 @@ export function LiveView(props: LiveViewProps) {
       ) : (
         <>
           {runs.map((run) => (
-            <RunBlock key={run.run} chat={props.chat} run={run} now={props.now} stops={props.stops} onStop={props.onStop} onOpenTurn={props.onOpenTurn} />
+            <RunBlock key={run.run} chat={props.chat} run={run} now={props.now} stops={props.stops} onStop={props.onStop} onOpenTurn={props.onOpenTurn} extras={props.extras} />
           ))}
           {props.letGo.length === 0 ? null : <LetGoList letGo={props.letGo} onOpenTurn={props.onOpenTurn} />}
           <Gated open={props.gateOpen} onOpen={props.onOpenGate} onClose={props.onCloseGate}>
@@ -257,6 +261,7 @@ export function LivePage(props: { chat: string }) {
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onOpenTurn={(turn) => app.go({ page: "turns", chat, at: [turn] })}
+      extras={(run) => <RunExtras chat={chat} run={run} gateOpen={gateOpen} />}
       follow={follow}
       root={root}
     />

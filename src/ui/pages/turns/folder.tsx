@@ -6,6 +6,14 @@ import { replyOf, type RpeClient } from "../../client";
 import { bytesWords, errorWords } from "../../words";
 import { type FolderShown, NO_FOLDER, type OpenShown, type RequestShown } from "./types";
 
+/** What the page does with a turn's folder once it reads it: opens a file or a model call's request, closes it, and lets everything that comes back after it go. */
+export interface FolderReader {
+  open(name: string): void;
+  openRequest(name: string, held: string | null): void;
+  close(): void;
+  stop(): void;
+}
+
 /**
  * Reads a turn's folder: its list at once, a file each time one is opened, by its path below the folder,
  * and a model call's request each time one is, by the file the run names it by (the harness keeps it as
@@ -13,7 +21,7 @@ import { type FolderShown, NO_FOLDER, type OpenShown, type RequestShown } from "
  * for one opened before it is let go, and so is all that comes back once `stop()` is called (the page has
  * left the turn, or shut the spoiler gate).
  */
-export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): { open(name: string): void; openRequest(name: string, held: string | null): void; close(): void; stop(): void } {
+export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): FolderReader {
   let shown = NO_FOLDER;
   let alive = true;
   const show = (next: FolderShown): void => {
