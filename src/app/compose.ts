@@ -31,6 +31,7 @@ import { loreArea } from "../lore/area";
 import { EntryNumbers, type LoreBooks, LoreProposals, type LoreWorldWrites, worldEntryWrites } from "../lore";
 import { LORE_PROPOSAL_SETTING_DEFS } from "../lore/settings";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
+import { oldRecord } from "../migrate/old-records";
 import { migrateArea } from "../migrate/area";
 import { lastReport } from "../migrate/tables";
 import { playArea } from "../play/area";
@@ -88,6 +89,8 @@ export function compose(options: ComposeOptions = {}): Composition {
   const turn = turnArea({
     lumiverse: door.lumiverse,
     migrated: (app, store) => ({ part: MIGRATED_PART, notice: MIGRATED_NOTICE, fields: (user, chat) => migratedChat({ db: app.db, store, user, chat }) }),
+    // The earlier engine's record of a carried turn, as the migration kept it, for the engine's tools: the turn lane may not import the migration.
+    carried: (app) => ({ record: (user, turn) => oldRecord(app.db, user, turn) }),
     proposals: () => proposals(),
     // The projection book is written to his books through the door's writes, once it is set up for a Lumiverse.
     projectionBooks: {
