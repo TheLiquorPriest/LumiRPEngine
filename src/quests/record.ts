@@ -147,9 +147,9 @@ function json(slice: QuestSlice): JsonObject {
   return slice as unknown as JsonObject;
 }
 
-/** The id the first change of a new quest gives it. */
-export function newQuestId(firstChange: number): string {
-  return `q-${firstChange}`;
+/** The id a new quest is given: from its first change's number, or, for one opened in a call not yet recorded, from what the call stands on. */
+export function newQuestId(key: number | string): string {
+  return `q-${key}`;
 }
 
 const text = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";

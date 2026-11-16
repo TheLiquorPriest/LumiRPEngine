@@ -23,10 +23,14 @@ import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { accountsOf, balance, classOf, external, hasLedger, holdersOf, statusOf, traitsOf } from "../packs/economy/core/model";
 import { asUnit, cashAccount, isParty, type PayMethod, payeeSide, posting, waysOf, wayFor } from "../packs/economy/core/pay";
 import { axesOf } from "../packs/relationships/core/index";
+import { findQuest, newQuestId, QUEST_KINDS, QUEST_OPS, QUEST_STORE_AREA, type QuestDoc, type QuestOp, type QuestSlice, questSliceOf } from "../quests";
+import { storySliceOf } from "../story";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import { HORIZON } from "../store/view";
 import type { FactStore } from "./kit";
+import type { Want } from "./reading";
+import type { Draft } from "./writing";
 import { find, findOptional, isUnread, itemOptions, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, outsideList, refusedAs, textArg, type Unread } from "./ops";
 import type { Provenance } from "./source";
 import { textOf } from "./texts";
@@ -436,47 +440,212 @@ const fact: OpDef = {
 };
 
 const OUTCOMES = ["met", "failed"] as const;
+/** What a stage is called on an opened quest: met, failed, or open again. */
+const CALLS = [...OUTCOMES, "open"] as const;
+
+/** The quests' slice as this call stands: what the turn's base held, with what the call's earlier operations wrote. */
+const QUESTS_IN_CALL = new WeakMap<Draft, QuestSlice>();
+
+function questsOf(o: OpContext): QuestSlice {
+  return QUESTS_IN_CALL.get(o.draft) ?? questSliceOf(o.draft.base.state);
+}
+
+/** Records one change of the quests' area on the draft, in the engine lane, and carries the call's own slice on. */
+function writeQuest(o: OpContext, op: QuestOp, value: JsonObject): void {
+  o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, { op: QUEST_OPS[op], value });
+  const out = QUEST_STORE_AREA.ops[op]?.apply(questsOf(o) as unknown as JsonObject, { op, value, turn: "", n: 0, by: null, standing: null, precision: null, source: null, cite: null });
+  if (out !== undefined && !("applied" in out)) QUESTS_IN_CALL.set(o.draft, out.slice as unknown as QuestSlice);
+}
+
+/** The refs a list of names names (one name, or a list), found as `want`; the first that names nothing, as the operation could not read it. */
+function refsOf(o: OpContext, field: string, want: Want): string[] | Unread | undefined {
+  const given = o.args[field];
+  if (given === undefined || given === null) return undefined;
+  const refs: string[] = [];
+  for (const name of Array.isArray(given) ? given : [given]) {
+    const r = find(o, field, want, false, name);
+    if (isUnread(r)) return r;
+    refs.push(r.ref);
+  }
+  return refs;
+}
+
+/** The thread a quest belongs to, by its id in the story record; one the record does not hold is answered with the ids it does. */
+function threadArg(o: OpContext): string | Unread | undefined {
+  const thread = textArg(o.args, "thread");
+  if (thread === undefined) return undefined;
+  const items = storySliceOf(o.draft.base.state).items;
+  if (isRecord(items) && Object.hasOwn(items, thread) && (items[thread] as { part: string }).part === "thread") return thread;
+  const near = Object.values(items).filter((i) => i.part === "thread").map((i) => i.id);
+  return { line: "unknown_thread", fields: { n: o.n, op: o.op, thread, near: textOf(near) } };
+}
+
+/** One stage a call names, as an object with its `stage` id (or `id`), and its label, condition and place among the stages. */
+function stageList(o: OpContext): { stage: string; label?: string; condition?: string; after?: string | null; drop?: true }[] | Unread | undefined {
+  const given = o.args.stages;
+  if (given === undefined || given === null) return undefined;
+  if (!Array.isArray(given)) return notAs(o, "stages", given, "list");
+  const out: { stage: string; label?: string; condition?: string; after?: string | null; drop?: true }[] = [];
+  for (const s of given) {
+    const id = isRecord(s) ? (typeof s.stage === "string" ? s.stage : typeof s.id === "string" ? s.id : "") : "";
+    if (!isRecord(s) || id.trim() === "") return notAs(o, "stages", s ?? null, "stage");
+    out.push({
+      stage: id.trim(),
+      ...(typeof s.label === "string" ? { label: s.label } : {}),
+      ...(typeof s.condition === "string" ? { condition: s.condition } : {}),
+      ...(s.after === null || typeof s.after === "string" ? { after: s.after } : {}),
+      ...(s.drop === true ? { drop: true as const } : {}),
+    });
+  }
+  return out;
+}
+
+/** What the player is shown, as the call says it: `all`, `none`, a list of stages, or `default` to leave it to the quest's own visibility. */
+function shownArg(o: OpContext): "all" | "none" | string[] | null | Unread | undefined {
+  const given = o.args.show;
+  if (given === undefined) return o.args.reveal === true ? "all" : undefined;
+  if (given === "all" || given === "none") return given;
+  if (given === "default" || given === null) return null;
+  if (Array.isArray(given) && given.every((s) => typeof s === "string" && s.trim() !== "")) return given.map((s) => String(s).trim());
+  return notAs(o, "show", given, "stage_list");
+}
+
+/** The stage of an opened quest a word names: its id, or its label. */
+function stageOf(stages: readonly { id: string; label: string }[], said: string): string | undefined {
+  const lower = said.toLowerCase();
+  return stages.find((s) => s.id === said)?.id ?? stages.find((s) => s.id.toLowerCase() === lower || s.label.toLowerCase() === lower)?.id;
+}
+
+/**
+ * What a call writes to a quest of the story's: what it is, its stakes and rewards, its thread, its stages, who and where and what it
+ * involves, a stage called, what the player is shown, how it closed. Everything is read first; nothing is recorded if something cannot be.
+ */
+function writeParts(o: OpContext, id: string, name: string, opened: boolean): Unread | undefined {
+  const plan: [QuestOp, JsonObject][] = [];
+  const parts: string[] = [];
+  const add = (op: QuestOp, part: string, value: JsonObject): void => {
+    plan.push([op, { quest: id, ...value }]);
+    parts.push(part);
+  };
+  const objective = textArg(o.args, "objective");
+  const matters = textArg(o.args, "matters");
+  if (objective !== undefined || matters !== undefined) add("what", "what", { ...(objective !== undefined ? { objective } : {}), ...(matters !== undefined ? { why: matters } : {}) });
+  const stakes = textArg(o.args, "stakes");
+  const rewards = textArg(o.args, "rewards");
+  if (stakes !== undefined || rewards !== undefined) add("stakes", "stakes", { ...(stakes !== undefined ? { stakes } : {}), ...(rewards !== undefined ? { rewards } : {}) });
+  const thread = threadArg(o);
+  if (isUnread(thread)) return thread;
+  if (thread !== undefined) add("thread", "thread", { thread });
+  const stages = stageList(o);
+  if (isUnread(stages)) return stages;
+  for (const s of stages ?? []) add("stage", `stage ${s.stage}`, s);
+  const unbind = o.args.unbind === true;
+  for (const [field, want, key] of [["who", "entity", "who"], ["where", "place", "where"], ["things", "thing", "things"]] as const) {
+    const refs = refsOf(o, field, want);
+    if (isUnread(refs)) return refs;
+    if (refs !== undefined) add("bind", field, { [key]: refs, ...(unbind ? { unbind: true } : {}) });
+  }
+  const outcome = textArg(o.args, "outcome");
+  const said = textArg(o.args, "stage");
+  const why = textArg(o.args, "why");
+  if (opened && said !== undefined) {
+    if (outcome === undefined || !(CALLS as readonly string[]).includes(outcome)) return outcome === undefined ? { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["outcome"] } } : notOneOf(o, "outcome", outcome, CALLS);
+    // The stages the call itself wrote count: a stage can be written and called in one call.
+    const known = [...(questsOf(o).quests[id]?.stages ?? []), ...(stages ?? []).map((s) => ({ id: s.stage, label: s.label ?? s.stage }))];
+    const stage = stageOf(known, said);
+    if (stage === undefined) return notOneOf(o, "stage", said, known.map((s) => `${s.label} [${s.id}]`));
+    add("call", `stage ${stage} ${outcome}`, { stage, state: outcome, ...(why !== undefined ? { why } : {}) });
+  }
+  const shown = shownArg(o);
+  if (isUnread(shown)) return shown;
+  if (shown !== undefined) add("show", "show", { shown });
+  const closing = textArg(o.args, "close");
+  if (closing !== undefined) add("close", closing === "reopen" ? "reopen" : `close ${closing}`, { outcome: closing === "reopen" ? null : closing, ...(why !== undefined ? { why } : {}) });
+  for (const [op, value] of plan) writeQuest(o, op, value);
+  if (parts.length > 0) o.reply.line("quest_written", { n: o.n, op: o.op, what: `${name} [${id}]`, parts: textOf(parts) });
+  return undefined;
+}
+
+/** What a call may carry that only a quest of the story's takes. */
+const OPENED_ONLY = ["objective", "matters", "stakes", "rewards", "thread", "stages", "who", "where", "things", "unbind"] as const;
+
+/** Opens a quest the story starts, with what the same call writes to it; a name a quest already has stands for it. */
+function openQuest(o: OpContext, said: string, kind: string, mine: QuestDoc | undefined): Unread | undefined {
+  if (!(QUEST_KINDS as readonly string[]).includes(kind)) return notOneOf(o, "open", kind, QUEST_KINDS);
+  const lower = said.toLowerCase();
+  const world = Object.values(o.draft.w.ctx.world.tracks).find((t) => t.id === said || t.label.toLowerCase() === lower);
+  if (mine !== undefined || world !== undefined) {
+    o.reply.line("quest_exists", { n: o.n, op: o.op, what: `${mine?.name ?? world?.label ?? said} [${mine?.id ?? world?.id ?? said}]` });
+    return mine !== undefined ? writeParts(o, mine.id, mine.name, true) : worldQuest(o);
+  }
+  // Checked before the quest is made: what a call that names a thread the record lacks would leave is nothing.
+  const thread = threadArg(o);
+  if (isUnread(thread)) return thread;
+  const id = newQuestId(o.draft.seed(o.n).slice(0, 10));
+  writeQuest(o, "open", { quest: id, kind, name: said });
+  o.reply.line("quest_opened", { n: o.n, op: o.op, what: `${said} [${id}]`, kind });
+  return writeParts(o, id, said, true);
+}
+
+/** A call on a quest the world defines: today's stage move, with its reason and outcome kept as the stage's call, and what the player is shown or how it closed. */
+function worldQuest(o: OpContext): Unread | undefined {
+  const track = find(o, "quest", "track");
+  if (isUnread(track)) return track;
+  const w = o.draft.w;
+  const def = own(w.ctx.world.tracks, track.id);
+  if (!def) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_track" } };
+  const current = own(w.state.tracks, track.id)?.stage ?? def.start;
+  const said = textArg(o.args, "stage");
+  const outcome = textArg(o.args, "outcome");
+  if (outcome !== undefined && !(OUTCOMES as readonly string[]).includes(outcome)) return notOneOf(o, "outcome", outcome, OUTCOMES);
+  const shown = shownArg(o);
+  if (isUnread(shown)) return shown;
+  const closing = textArg(o.args, "close");
+  if (said === undefined && shown === undefined && closing === undefined) return { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["stage", "show", "close"] } };
+  const what = `${def.label} [${track.id}]`;
+  const apart = OPENED_ONLY.filter((f) => o.args[f] !== undefined && o.args[f] !== null);
+  if (apart.length > 0) o.reply.report("quest_world_part", { n: o.n, op: o.op, what, fields: textOf(apart) });
+  let stage: string | undefined;
+  if (said !== undefined) {
+    const lower = said.toLowerCase();
+    stage = Object.keys(def.stages).find((id) => id === said) ?? Object.entries(def.stages).find(([id, s]) => id.toLowerCase() === lower || s.label.toLowerCase() === lower)?.[0];
+    if (stage === undefined) return notOneOf(o, "stage", said, Object.entries(def.stages).map(([id, s]) => `${s.label} [${id}]`));
+  }
+  const why = textArg(o.args, "why");
+  const from = w.events.length;
+  const events: LedgerEvent[] = [];
+  if (stage !== undefined) {
+    if (stage === current) o.reply.line("already_so", { n: o.n, op: o.op, what });
+    else {
+      // The reason and how it went are kept with the move, and as the stage's call in the quests' record; the engine's move holds only where the quest stands now.
+      events.push({ type: "stage", track: track.id, to: stage, from: current, ...(why !== undefined ? { why } : {}), ...(outcome !== undefined ? { outcome } : {}) } as LedgerEvent);
+      const paths = own(def.stages, current)?.next.map((n) => n.to) ?? [];
+      if (!paths.includes(stage)) o.reply.report("off_path", { n: o.n, op: o.op, quest: what, from: own(def.stages, current)?.label ?? current, to: own(def.stages, stage)?.label ?? stage });
+    }
+  }
+  if (o.args.reveal === true) events.push({ type: ENGINE_EVENTS.revealed, data: { track: track.id, stage: stage ?? current } });
+  const bad = o.draft.applyAll(events);
+  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+  o.draft.record(o.n, o.op, "engine", o.prov, from);
+  if (stage !== undefined && outcome !== undefined) writeQuest(o, "call", { quest: track.id, stage, state: outcome, ...(why !== undefined ? { why } : {}) });
+  if (shown !== undefined) writeQuest(o, "show", { quest: track.id, shown });
+  if (closing !== undefined) writeQuest(o, "close", { quest: track.id, outcome: closing === "reopen" ? null : closing, ...(why !== undefined ? { why } : {}) });
+  return undefined;
+}
 
 const quest: OpDef = {
   name: "quest",
   lane: "engine",
   needs: ["quest"],
-  takes: ["quest", "stage", "outcome", "why", "reveal"],
+  takes: ["quest", "open", "stage", "outcome", "why", "reveal", "show", "close", "objective", "matters", "stakes", "rewards", "thread", "stages", "who", "where", "things", "unbind"],
   example: { op: "quest", quest: "errand", stage: "done", outcome: "met", why: "The letter reached the warden's hand.", reveal: true, source: { from: "prose", message: "m-0020" } },
   run(o) {
-    const track = find(o, "quest", "track");
-    if (isUnread(track)) return track;
-    const w = o.draft.w;
-    const def = own(w.ctx.world.tracks, track.id);
-    if (!def) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_track" } };
-    const current = own(w.state.tracks, track.id)?.stage ?? def.start;
-    const said = textArg(o.args, "stage");
-    const outcome = textArg(o.args, "outcome");
-    if (outcome !== undefined && !(OUTCOMES as readonly string[]).includes(outcome)) return notOneOf(o, "outcome", outcome, OUTCOMES);
-    if (said === undefined && o.args.reveal !== true) return { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["stage", "reveal"] } };
-    let stage: string | undefined;
-    if (said !== undefined) {
-      const lower = said.toLowerCase();
-      stage = Object.keys(def.stages).find((id) => id === said) ?? Object.entries(def.stages).find(([id, s]) => id.toLowerCase() === lower || s.label.toLowerCase() === lower)?.[0];
-      if (stage === undefined) return notOneOf(o, "stage", said, Object.entries(def.stages).map(([id, s]) => `${s.label} [${id}]`));
-    }
-    const from = w.events.length;
-    const events: LedgerEvent[] = [];
-    if (stage !== undefined) {
-      if (stage === current) o.reply.line("already_so", { n: o.n, op: o.op, what: `${def.label} [${track.id}]` });
-      else {
-        const why = textArg(o.args, "why");
-        // The reason and how it went are kept with the move; the move holds only where the quest stands now, as today's stage moves do.
-        events.push({ type: "stage", track: track.id, to: stage, from: current, ...(why !== undefined ? { why } : {}), ...(outcome !== undefined ? { outcome } : {}) } as LedgerEvent);
-        const paths = own(def.stages, current)?.next.map((n) => n.to) ?? [];
-        if (!paths.includes(stage)) o.reply.report("off_path", { n: o.n, op: o.op, quest: `${def.label} [${track.id}]`, from: own(def.stages, current)?.label ?? current, to: own(def.stages, stage)?.label ?? stage });
-      }
-    }
-    if (o.args.reveal === true) events.push({ type: ENGINE_EVENTS.revealed, data: { track: track.id, stage: stage ?? current } });
-    const bad = o.draft.applyAll(events);
-    if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-    o.draft.record(o.n, o.op, "engine", o.prov, from);
-    return undefined;
+    const said = textArg(o.args, "quest") ?? "";
+    const kind = textArg(o.args, "open");
+    const mine = findQuest(questsOf(o), said);
+    if (kind !== undefined) return openQuest(o, said, kind, mine);
+    if (mine !== undefined) return writeParts(o, mine.id, mine.name, true);
+    return worldQuest(o);
   },
 };
 

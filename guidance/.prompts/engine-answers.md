@@ -221,3 +221,10 @@ service_memo: Service: {{what}}
 repair_memo: Repair: {{what}}
 no_effect: No effect the GM may run has {{search}} in its name. Call gm_effects with no search for all of them.
 unknown_effect: Operation {{n}} ({{op}}): {{effect}} is not an effect the GM may run. Near it: {{effects}}. gm_effects lists them all, with the arguments each reads.
+quest_opened: Operation {{n}} ({{op}}): opened the {{kind}} {{what}}.
+quest_exists: Operation {{n}} ({{op}}): {{what}} is already a quest, so the call writes to it.
+quest_written: Operation {{n}} ({{op}}): {{what}} was written: {{parts}}.
+quest_world_part: Operation {{n}} ({{op}}): {{what}} is the world's own quest, so {{fields}} was left out; only its stages, what the player is shown and how it closes are written to it.
+unknown_thread: Operation {{n}} ({{op}}): the story record holds no thread {{thread}}.{{#near}} Its threads: {{near}}.{{/near}}
+wants_stage_list: a list of stage ids, or all, none, or default
+wants_stage: an object with the stage's id in `stage`, and its `label`, `condition` and where it stands in `after`
