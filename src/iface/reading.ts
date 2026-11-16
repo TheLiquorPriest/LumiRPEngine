@@ -17,7 +17,7 @@ import { resolveThing as resolveThingWords } from "../engine/thing-resolve";
 import { holdsOf, isThing } from "../engine/things";
 import type { TreeView } from "../store/view";
 import { JoinedTurnError, type StoreState, type TurnRow } from "../store/types";
-import type { Call, Reply } from "./kit";
+import type { Call, EngineDeps, IfaceSettings, Reply } from "./kit";
 import { type Lines, textOf } from "./texts";
 
 /** What a name is wanted as. */
@@ -89,11 +89,14 @@ const wordsOf = (s: string): string[] =>
 /** The tree's own points besides places and entities. */
 const POINTS: Readonly<Record<string, string>> = { world: "world", groups: "groups", elsewhere: "elsewhere" };
 
+/** What a reading needs of a call: its scope and agent, the answers' lines, the store and what it folds with, and how near a near match is. A call of an engine tool fits it, and so does what another area makes to read the world by the same names. */
+export type ReadingCall = Pick<Call, "scope" | "agent" | "lines"> & { deps: Pick<EngineDeps, "store" | "env">; settings: Pick<IfaceSettings, "nearMatches" | "nearDistance"> };
+
 export class Reading {
   private tree: TreeView | null = null;
 
   private constructor(
-    private readonly call: Call,
+    private readonly call: ReadingCall,
     readonly state: StoreState,
     readonly doc: WorldDoc,
     readonly ctx: ReadContext,
@@ -108,7 +111,7 @@ export class Reading {
    * joined to another turn (the fact is told, never followed: PlanTurn's one place resolves a join). A
    * chat's world revision that is kept is loaded; one that cannot be is a fault, and throws.
    */
-  static of(call: Call): Reading | Unreadable {
+  static of(call: ReadingCall): Reading | Unreadable {
     const { store, env } = call.deps;
     const near = call.settings.nearMatches;
     if (store.chat(call.scope.chat) === null) return { missing: "chat", id: call.scope.chat, exist: store.chats().slice(-near).map((c) => c.id) };
