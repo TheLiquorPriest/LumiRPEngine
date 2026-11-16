@@ -22,7 +22,7 @@ import type { Registry } from "../engine/registry-impl";
 import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { aboutOf, applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, inventedUnchecked, laterWrite, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
-import { draft } from "./working";
+import { baseOf, draft } from "./working";
 import { Areas, type StoreArea } from "./areas";
 import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
 import { reversal, type UndoPlan } from "./undo";
@@ -760,10 +760,17 @@ export class Store {
     return fn(state.areas?.[area] ?? a.initial?.() ?? {}, args);
   }
 
-  /** @internal */ viewOf(state: StoreState): TreeView {
+  /**
+   * The tree over `state`, held with it. A state folded from one whose tree is held (along the drafts it was made over) has its tree
+   * made from that one, kept current with what changed rather than built afresh (PlanStore-S2 item 5).
+   * @internal
+   */
+  viewOf(state: StoreState): TreeView {
     let view = this.views.get(state);
     if (!view) {
-      view = new TreeView(this.env, state, this.viewOptions);
+      let prev: TreeView | undefined;
+      for (let at = baseOf(state); at !== undefined && prev === undefined; at = baseOf(at)) prev = this.views.get(at);
+      view = new TreeView(this.env, state, this.viewOptions, prev);
       this.views.set(state, view);
     }
     return view;
@@ -2239,12 +2246,15 @@ export class UserStore {
     // Start from the latest state held in memory, else the stored snapshot, else the chat's start.
     let from = -1;
     let start: { state: StoreState; upto: number; notApplied: Folded["notApplied"]; rebased: string[] } | null = null;
+    // The held state the fold starts from, itself: a fold that adds nothing to it gives it back, with the view held over it.
+    let base: StoreState | null = null;
     for (let i = chain.length - 2; i >= 0; i--) {
       const c = chain[i];
       const held = c === undefined ? null : this.store.cached(this.cacheKey(c.key), c.mark ?? "");
       if (!held) continue;
       from = i;
       start = { state: draft(held.folded.state), upto: held.upto, notApplied: [...held.folded.notApplied], rebased: [...held.folded.rebased] };
+      base = held.folded.state;
       break;
     }
     const first = chain[0];
@@ -2295,7 +2305,10 @@ export class UserStore {
       snaps.push([step.node, upto, snapshotRows(doc), of.chat, of.mark]);
     });
     this.store.hold(this.id, snaps);
-    const folded: Folded = { node, state: result.state, notApplied: [...start.notApplied, ...result.notApplied], rebased: [...start.rebased, ...result.rebased] };
+    // A turn that adds nothing (one just begun) holds the same state as the one before it: the same object, so the tree held over it
+    // answers the world state at the turn's start from memory, with no tree built at the compile (PlanStore-S2 item 4).
+    const same = base !== null && steps.every((s) => s.changes.length === 0 && (s.jobs?.length ?? 0) === 0 && (s.owner?.length ?? 0) === 0);
+    const folded: Folded = { node, state: same && base !== null ? base : result.state, notApplied: [...start.notApplied, ...result.notApplied], rebased: [...start.rebased, ...result.rebased] };
     this.store.keep(this.cacheKey(node), folded, result.upto, this.id, own.chat, mark);
     return { folded, upto: result.upto };
   }

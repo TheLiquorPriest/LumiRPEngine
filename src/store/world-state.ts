@@ -157,6 +157,11 @@ export interface WorldStateInput {
    * store by user, chat and part, where RPH keeps its own parts' and `parts.lastFields` reads them (the Prompts preview).
    */
   rendered?: (fields: JsonObject) => void;
+  /**
+   * Given the lines of a place the horizon shows in full, its lines with the host's record of the place added (since when it stands,
+   * its features, its access): they stand with the place's own values, before its map and what is in it.
+   */
+  placeLines?(ref: string, lines: readonly ViewLine[]): ViewLine[];
 }
 
 export interface WorldStateBlock {
@@ -226,7 +231,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   if (want("horizon")) {
     const left = new Set<string>(horizon);
     const maps: Maps = { port: input.map, given: input.drawnGiven ?? {}, shown: drawnShown, grids: new Set(), around: horizon };
-    const show = (ref: string): ViewLine[] => (left.delete(ref) ? horizonLines(view, ref, depthOf.get(ref) ?? "full", maps, reading) : []);
+    const show = (ref: string): ViewLine[] => (left.delete(ref) ? horizonLines(view, ref, depthOf.get(ref) ?? "full", maps, reading, input.placeLines) : []);
     const said = new Set<string>();
     sections.horizon = [
       ...(scenePlace === null ? [] : show(scenePlace)),
@@ -550,13 +555,14 @@ function mapLine(view: TreeView, place: string, maps: Maps): ViewLine | null {
 }
 
 /** A horizon entry at its depth; one shown in full that is a place, with its map after its own values. */
-function horizonLines(view: TreeView, ref: string, depth: number | "full", maps: Maps, reading: ViewReading | undefined): ViewLine[] {
+function horizonLines(view: TreeView, ref: string, depth: number | "full", maps: Maps, reading: ViewReading | undefined, placeLines: WorldStateInput["placeLines"]): ViewLine[] {
   const lines = view.query(ref, depth, reading)?.lines ?? [];
   if (depth !== "full" || !ref.startsWith("place:")) return lines;
+  const given = placeLines?.(ref, lines) ?? lines;
   const map = mapLine(view, ref, maps);
-  if (map === null) return lines;
-  const at = lines.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
-  return at < 0 ? [...lines, map] : [...lines.slice(0, at), map, ...lines.slice(at)];
+  if (map === null) return given;
+  const at = given.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
+  return at < 0 ? [...given, map] : [...given.slice(0, at), map, ...given.slice(at)];
 }
 
 /**

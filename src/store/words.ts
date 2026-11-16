@@ -232,10 +232,9 @@ export function wordLine(part: Part, line: ViewLine): string | null {
   if (!template) return null;
   const text = template.render(part.header, fieldsFor(part, line.fields));
   if (text.trim() === "") return null;
-  return text
-    .split("\n")
-    .map((l) => INDENT.repeat(line.depth) + l)
-    .join("\n");
+  if (line.depth === 0) return text;
+  const pad = INDENT.repeat(line.depth);
+  return text.includes("\n") ? pad + text.replaceAll("\n", `\n${pad}`) : pad + text;
 }
 
 /** A view as indented text, worded by a part (its text, or as read). */

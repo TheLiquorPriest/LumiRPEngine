@@ -32,6 +32,14 @@ interface Draft {
 
 const drafts = new WeakMap<WorldState, Draft>();
 
+/** The state each draft was made over, held weakly: what the tree over a draft is made from (`baseOf`). */
+const bases = new WeakMap<StoreState, WeakRef<StoreState>>();
+
+/** The state `state` was made over as a draft, while it is still held anywhere; undefined for one that is no draft. */
+export function baseOf(state: StoreState): StoreState | undefined {
+  return bases.get(state)?.deref();
+}
+
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null;
 
 /**
@@ -41,7 +49,9 @@ const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null;
 export function draft(base: StoreState): StoreState {
   const world: WorldState = { ...base.world };
   drafts.set(world, { fresh: new WeakSet(), whole: new WeakSet(), all: false, trial: null });
-  return { ...base, world, notes: { ...base.notes }, touched: { ...base.touched }, marks: { ...base.marks }, facts: { ...base.facts } };
+  const out: StoreState = { ...base, world, notes: { ...base.notes }, touched: { ...base.touched }, marks: { ...base.marks }, facts: { ...base.facts } };
+  bases.set(out, new WeakRef(base));
+  return out;
 }
 
 /** Notes, while a unit is tried, that `parent[key]` is about to change: put back if the unit does not land. */

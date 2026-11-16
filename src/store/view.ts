@@ -34,6 +34,8 @@ import { isOpened } from "../packs/economy/core/journal";
 import { openerOf } from "../packs/economy/core/model";
 import { cashAccount } from "../packs/economy/core/pay";
 import { regionOf } from "../packs/weather/core/index";
+import { madePlacesOf } from "../engine/places-in-play";
+import { chatDraftOf } from "../engine/world-draft";
 import { whereOf } from "../packs/space/core/grid-play";
 import { BLANK_REVISION, clockRecorded } from "./blank";
 import { settled, standing } from "./facts";
@@ -255,18 +257,35 @@ export class TreeView {
   private reading: ViewReading | null = null;
   /** The story's open threads with the levels each names, read once (`threads`). */
   private openThreads: { id: string; refs: string[]; fields: JsonObject }[] | null = null;
+  /** Each query with no reading, answered once (`query`). */
+  private readonly asked = new Map<string, ViewLine[]>();
+  /** Whether a chain of holders looped and a level was put elsewhere to break it: a tree made from this one is built afresh. */
+  private loopsBroken = false;
 
+  /**
+   * `prev`, a tree over a state this one was folded from, lets the tree be made from it where the world's places are the same (`update`):
+   * kept current as changes land, rather than built afresh over each state.
+   */
   constructor(
     readonly env: FoldEnv,
     readonly state: StoreState,
     private readonly options: ViewOptions,
+    prev?: TreeView,
   ) {
     const doc = env.worlds(state.world.revision);
     if (!doc) throw new Error(`the world revision ${state.world.revision} is not available`);
     this.ctx = env.registry.context(doc, state.world);
-    // The world as this chat plays it: its own places and those play made or changed.
-    this.doc = this.ctx.world;
-    readPass(() => this.build());
+    const was = prev?.state.world;
+    const same = was !== undefined && was.revision === state.world.revision && madePlacesOf(was) === madePlacesOf(state.world) && chatDraftOf(was) === chatDraftOf(state.world);
+    // The world as this chat plays it: its own places and those play made or changed (`prev`'s, where those are the same).
+    this.doc = same && prev !== undefined ? prev.doc : this.ctx.world;
+    readPass(() => {
+      if (same && prev !== undefined && this.update(prev)) this.readNotes();
+      else {
+        this.nodes.clear();
+        this.build();
+      }
+    });
   }
 
   /** The world as the chat plays it. */
@@ -306,26 +325,20 @@ export class TreeView {
     for (const id of Object.keys(entities).sort()) {
       const e = entities[id] as EntityState;
       const category = this.categoryOf(e);
-      const holder = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
-      const place = typeof e.fields.place === "string" ? e.fields.place : "";
-      let parent: string;
-      if (holder !== undefined && own(entities, holder)) parent = `entity:${holder}`;
-      else if (place !== "" && own(doc.places, place)) parent = `place:${place}`;
-      else if (category === "group") {
-        const within = e.relations.find((r) => r.type === "member_of" && own(entities, r.to) && this.categoryOf(entities[r.to] as EntityState) === "group")?.to;
-        parent = within !== undefined ? `entity:${within}` : "groups";
-        if (within === undefined) this.addGroups();
-      } else {
-        parent = "elsewhere";
-        this.addElsewhere();
-      }
-      const label = kindDef(this.env.registry, doc, e.kind)?.label ?? e.kind;
-      this.add({ ref: `entity:${id}`, id, kind: "entity", name: e.name, what: label, parent, category, gone: isGone(this.state.world, id) });
+      const parent = this.entityParent(e, category);
+      if (parent === "groups") this.addGroups();
+      if (parent === "elsewhere") this.addElsewhere();
+      this.add({ ref: `entity:${id}`, id, kind: "entity", name: e.name, what: this.labelOf(e), parent, category, gone: isGone(this.state.world, id) });
     }
     this.breakLoops();
     for (const node of this.nodes.values()) if (node.parent !== null) this.nodes.get(node.parent)?.children.push(node.ref);
     for (const node of this.nodes.values()) node.children.sort((a, b) => this.compare(a, b));
     this.aggregate();
+    this.readNotes();
+  }
+
+  /** Agents' own lines, each at the level it names now. */
+  private readNotes(): void {
     for (const [at, note] of Object.entries(this.state.notes)) {
       const ref = this.resolve(at);
       if (ref !== null) this.notes.set(ref, note.text);
@@ -354,6 +367,7 @@ export class TreeView {
         const last = seen.at(-1);
         if (!last) break;
         last.parent = "elsewhere";
+        this.loopsBroken = true;
       }
     }
   }
@@ -387,10 +401,27 @@ export class TreeView {
     return this.openThreads;
   }
 
-  /** Counts, names of note, what is open and the last change, summed up the tree from the leaves. */
-  private aggregate(): void {
-    // What is open under each level (plan §6.4): each quest in progress, at its owner, and each open thread, at what it names; the
-    // whole world's where it names nothing in the tree. Each counts once at every level above what it names.
+  /** Where a thing sits in the tree: in or on what holds it, else at its place, else (a group) in the group it belongs to, else elsewhere. */
+  private entityParent(e: EntityState, category: Category): string {
+    const entities = this.state.world.entities;
+    const holder = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
+    const place = typeof e.fields.place === "string" ? e.fields.place : "";
+    if (holder !== undefined && own(entities, holder)) return `entity:${holder}`;
+    if (place !== "" && own(this.doc.places, place)) return `place:${place}`;
+    if (category !== "group") return "elsewhere";
+    const within = e.relations.find((r) => r.type === "member_of" && own(entities, r.to) && this.categoryOf(entities[r.to] as EntityState) === "group")?.to;
+    return within !== undefined ? `entity:${within}` : "groups";
+  }
+
+  private labelOf(e: EntityState): string {
+    return kindDef(this.env.registry, this.doc, e.kind)?.label ?? e.kind;
+  }
+
+  /**
+   * What is open under each level (plan §6.4): each quest in progress, at its owner, and each open thread, at what it names; the whole
+   * world's where it names nothing in the tree. Each counts once at every level above what it names.
+   */
+  private opensOf(): Map<string, number> {
     const opens = new Map<string, number>();
     const count = (refs: readonly string[]): void => {
       const under = new Set<string>();
@@ -404,6 +435,42 @@ export class TreeView {
       count(owner !== undefined && this.nodes.has(`entity:${owner}`) ? [`entity:${owner}`] : []);
     }
     for (const t of this.threads()) count(t.refs);
+    return opens;
+  }
+
+  /** A level's counts, names of note and last change, from its children's (each summed already) and its own last change. */
+  private sumUp(node: Node): void {
+    node.people = node.things = node.places = node.groups = node.records = 0;
+    let changed: Touched | null = null;
+    const names: { rank: number; name: string }[] = [];
+    for (const c of node.children) {
+      const child = this.nodes.get(c) as Node;
+      node.people += child.people;
+      node.things += child.things;
+      node.places += child.places;
+      node.groups += child.groups;
+      node.records += child.records;
+      if (child.changed && (!changed || child.changed.n > changed.n)) changed = child.changed;
+      names.push(...child.notable);
+      if (child.gone) continue;
+      if (child.kind === "place") node.places++;
+      else if (child.category === "person") {
+        node.people++;
+        const e = this.state.world.entities[child.id] as EntityState;
+        const band = tierBand(this.doc, e.tier);
+        const rank = band === "principal" ? 0 : band === "supporting" ? 1 : e.agent ? 2 : -1;
+        if (rank >= 0) names.push({ rank, name: child.name ?? child.id });
+      } else if (child.category === "group") node.groups++;
+      else if (child.category === "thing") node.things++;
+      else if (child.category === "record") node.records++;
+    }
+    const own = this.state.touched[node.ref];
+    node.changed = own && (!changed || own.n > changed.n) ? own : changed;
+    node.notable = names.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)).slice(0, this.options.notable);
+  }
+
+  /** Counts, names of note, what is open and the last change, summed up the tree from the leaves. */
+  private aggregate(): void {
     const order: Node[] = [];
     const stack: Node[] = [this.nodes.get("world") as Node];
     while (stack.length > 0) {
@@ -411,34 +478,81 @@ export class TreeView {
       order.push(node);
       for (const c of node.children) stack.push(this.nodes.get(c) as Node);
     }
-    for (const node of order.reverse()) {
-      node.open = opens.get(node.ref) ?? 0;
-      const own = this.state.touched[node.ref];
-      if (own && (!node.changed || own.n > node.changed.n)) node.changed = own;
-      const parent = node.parent === null ? undefined : this.nodes.get(node.parent);
-      if (!parent) continue;
-      parent.people += node.people;
-      parent.things += node.things;
-      parent.places += node.places;
-      parent.groups += node.groups;
-      parent.records += node.records;
-      if (node.changed && (!parent.changed || node.changed.n > parent.changed.n)) parent.changed = node.changed;
-      let names = [...parent.notable, ...node.notable];
-      if (!node.gone) {
-        if (node.kind === "place") parent.places++;
-        else if (node.category === "person") {
-          parent.people++;
-          const e = this.state.world.entities[node.id] as EntityState;
-          const band = tierBand(this.doc, e.tier);
-          const rank = band === "principal" ? 0 : band === "supporting" ? 1 : e.agent ? 2 : -1;
-          if (rank >= 0) names.push({ rank, name: node.name ?? node.id });
-        } else if (node.category === "group") parent.groups++;
-        else if (node.category === "thing") parent.things++;
-        else if (node.category === "record") parent.records++;
-      }
-      names = names.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
-      parent.notable = names.slice(0, this.options.notable);
+    for (const node of order.reverse()) this.sumUp(node);
+    const opens = this.opensOf();
+    for (const node of order) node.open = opens.get(node.ref) ?? 0;
+  }
+
+  /**
+   * The tree over this state made from `prev`'s, the tree over a state this one was folded from (PlanStore-S2 item 5): the levels
+   * nothing changed are `prev`'s own; each thing that changed is placed again, and every level above where it was and where it is, or
+   * whose own last change moved, is summed again. False, with nothing kept, where a thing's presence, kind or being gone changed, a
+   * level the tree adds emptied, or a chain of holders loops: the tree is built afresh, as it gives the same.
+   */
+  private update(prev: TreeView): boolean {
+    const before = prev.state.world.entities;
+    const now = this.state.world.entities;
+    const ids = Object.keys(now);
+    if (prev.loopsBroken || ids.length !== Object.keys(before).length) return false;
+    for (const [ref, node] of prev.nodes) this.nodes.set(ref, node);
+    // A level is `prev`'s until this tree writes it: copied then, once.
+    const mine = new Set<string>();
+    const take = (ref: string): Node => {
+      const node = this.nodes.get(ref) as Node;
+      if (mine.has(ref)) return node;
+      const copy = { ...node, children: [...node.children] };
+      this.nodes.set(ref, copy);
+      mine.add(ref);
+      return copy;
+    };
+    const dirty = new Set<string>();
+    const sorted = new Set<string>();
+    for (const id of ids) {
+      const e = now[id] as EntityState;
+      if (e === before[id]) continue;
+      const ref = `entity:${id}`;
+      const was = prev.nodes.get(ref);
+      const category = this.categoryOf(e);
+      if (was === undefined || was.category !== category || was.gone !== isGone(this.state.world, id)) return false;
+      const parent = this.entityParent(e, category);
+      if (!this.nodes.has(parent)) return false;
+      const node = take(ref);
+      if (node.parent !== parent) {
+        const from = take(node.parent as string);
+        from.children = from.children.filter((c) => c !== ref);
+        if (from.children.length === 0 && (from.kind === "groups" || from.kind === "elsewhere")) return false;
+        dirty.add(from.ref);
+        take(parent).children.push(ref);
+        sorted.add(parent);
+        node.parent = parent;
+      } else if (node.name !== e.name) sorted.add(parent);
+      node.name = e.name;
+      node.what = this.labelOf(e);
+      dirty.add(ref);
     }
+    for (const ref of sorted) take(ref).children.sort((a, b) => this.compare(a, b));
+    for (const key of new Set([...Object.keys(this.state.touched), ...Object.keys(prev.state.touched)])) if (this.state.touched[key] !== prev.state.touched[key] && this.nodes.has(key)) dirty.add(key);
+    // Every dirty level and those above it, deepest first; a chain that does not reach the world loops.
+    const depth = new Map<string, number>();
+    const depthOf = (ref: string): number => {
+      const chain: string[] = [];
+      let at: string | null = ref;
+      while (at !== null && !depth.has(at)) {
+        if (chain.includes(at)) return -1;
+        chain.push(at);
+        at = this.nodes.get(at)?.parent ?? null;
+      }
+      let d = at === null ? -1 : (depth.get(at) as number);
+      for (const r of chain.reverse()) depth.set(r, ++d);
+      return depth.get(ref) as number;
+    };
+    for (const ref of dirty) if (depthOf(ref) < 0) return false;
+    const up = new Set<string>();
+    for (const ref of dirty) for (let at: string | null = ref; at !== null && !up.has(at); at = this.nodes.get(at)?.parent ?? null) up.add(at);
+    for (const ref of [...up].sort((a, b) => (depth.get(b) ?? 0) - (depth.get(a) ?? 0))) this.sumUp(take(ref));
+    const opens = this.opensOf();
+    for (const [ref, node] of this.nodes) if (node.open !== (opens.get(ref) ?? 0)) take(ref).open = opens.get(ref) ?? 0;
+    return true;
   }
 
   /** The tree ref `at` names: `world`, `groups`, `elsewhere`, `place:<id>`, `entity:<id>`, or a bare id (a place before an entity). */
@@ -773,12 +887,15 @@ export class TreeView {
    * at its own depth, so the world at depth 1 has a line for each region and each group. Null when
    * nothing in the tree is called `at`. An engine walk cut short by its setting in this state or its
    * world adds a line saying where it stopped. With a reading, each reflection says what falls due
-   * under its level in the time ahead.
+   * under its level in the time ahead. A query with no reading is answered once per tree, and again from memory.
    */
   query(at: string, depth: number | "full", reading?: ViewReading): View | null {
     const ref = this.resolve(at);
     if (ref === null) return null;
     const max = depth === "full" ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(depth));
+    const key = reading === undefined ? `${ref}\n${max}` : null;
+    const asked = key === null ? undefined : this.asked.get(key);
+    if (asked !== undefined) return { lines: [...asked] };
     const lines: ViewLine[] = [];
     this.stopsSeen = new Map();
     this.withReading(reading, () =>
@@ -799,7 +916,8 @@ export class TreeView {
     this.stopsSeen = null;
     for (const s of stops.values()) lines.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.placeDepth" } });
     for (const cut of walkCuts(this.state.world, this.doc)) lines.push({ kind: "walk_stopped", depth: 0, fields: { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit } });
-    return { lines };
+    if (key !== null) this.asked.set(key, lines);
+    return { lines: [...lines] };
   }
 
   /** The horizon as the Author left it (`horizonOf`), each entry with the level it names now (null: none) and the depth it is shown at. */
