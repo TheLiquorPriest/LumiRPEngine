@@ -88,6 +88,15 @@ describe("a run made again", () => {
     expect(s.swipes(PLAYED.deleted, "px-a4").map((t) => t.hash)).toEqual([textHash("The Gull's lamps are lit.")]);
   });
 
+  test("a later run replaces what was imported and keeps what he and his jobs wrote there since, tied to the same replies, in a chat not yet played", async () => {
+    const clock = s.headState(PLAYED.classic).state.world.clock;
+    s.addOwnerChanges(PLAYED.classic, [{ lane: "engine", op: "clock", value: { type: "clock", minutes: 7, cause: "tick" }, by: "gm", source: "gm" }]);
+    expect(s.headState(PLAYED.classic).state.world.clock).toBe(clock + 7);
+    const reports = await run();
+    expect(reports.find((r) => r.chatId === PLAYED.classic)).toMatchObject({ outcome: "replaced", own: { placed: 1, lost: 0 } });
+    expect(s.headState(PLAYED.classic).state.world.clock).toBe(clock + 7);
+  });
+
   test("a chat played on RPE is left as it is by the next run, which says so", async () => {
     // A turn played on RPE, after the chat's last reply.
     const turn = s.beginTurn({ chat: PLAYED.paused, kind: "normal" });

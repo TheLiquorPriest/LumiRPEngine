@@ -10,10 +10,9 @@ import { join } from "node:path";
 import { MIGRATED_PART, migratedChat } from "../../src/migrate/briefing";
 import { migrate } from "../../src/migrate/migrate";
 import { migrationPage } from "../../src/migrate/page";
-import { removedList } from "../../src/migrate/own-files";
 import { reportText, type MigrationReport } from "../../src/migrate/report";
 import { AREAS, buildFixture, CHAT, IDENT, PEOPLE, STRAY, USER, type Fixture } from "./fixture";
-import { accounted, look, mindAt, notesOf, turnOf } from "./look";
+import { accounted, look, mindAt, notesOf, turnOf, versionsOf } from "./look";
 import { shippedParts } from "./parts";
 import { branchChat, editRecord, headOf, putArea, showSwipe } from "./today-edits";
 import { TREE as tree } from "./tree";
@@ -56,7 +55,8 @@ describe("a turn's area as LumiAH reads it", () => {
         expect(reportText(report)).not.toContain("in areas no imported turn ended with");
         // The reply's document holds the very area its turn ended with: no version of the notes is kept under its generation.
         const notes = await notesOf(data, CHAT.harness);
-        expect([...(notes?.keys() ?? [])].filter((p) => p.startsWith("turns/generation-"))).toEqual([]);
+        // The chat's area before any turn is the one document no turn ended with.
+        expect(report.carried?.ownFiles?.untied).toBe(1);
         expect(notes?.get("notebook.md")).toBe(AREAS["gen-3"]["notebook.md"]);
       },
     );
@@ -69,12 +69,12 @@ describe("a turn's area as LumiAH reads it", () => {
         showSwipe(fixture, "m-h6", 0);
         await putArea(fixture, CHAT.harness, "gen-stopped", { ...AREAS["gen-3"], "notebook.md": "Half a thought, stopped." }, 9);
       },
-      async (data) => {
+      async (data, report) => {
         const notes = await notesOf(data, CHAT.harness);
         expect(notes?.get("notebook.md")).toBe(AREAS["gen-2"]["notebook.md"]);
         look(data, (db, s) => expect(mindAt(db, s, CHAT.harness, PEOPLE.ada.name, null)["core.md"]?.text).toBe(AREAS["gen-2"]["minds/e-ada/core.md"]));
-        // The stopped generation's area is kept as a version only, under its generation.
-        expect(notes?.get("turns/generation-gen-stopped/notebook.md")).toBe("Half a thought, stopped.");
+        // The stopped generation's area, with the area before any turn, no imported turn ended with: in the backup only, counted.
+        expect(report.carried?.ownFiles?.untied).toBe(2);
       },
     );
   });
@@ -89,10 +89,10 @@ describe("a turn's area as LumiAH reads it", () => {
         const notes = await notesOf(data, branch);
         expect(notes?.get("notebook.md")).toBe(AREAS["gen-1"]["notebook.md"]);
         expect(notes?.get("author/prepare.md")).toBe(AREAS["gen-1"]["author/prepare.md"]);
-        expect(notes?.get("turns/message-1-swipe-0/notebook.md")).toBe(AREAS["gen-1"]["notebook.md"]);
+        expect(versionsOf(data, branch).find((v) => v.path === "notebook.md")).toMatchObject({ before: null, after: AREAS["gen-1"]["notebook.md"], stands: true });
         expect(notes?.get("learned/notes.md")).toBe("The pier floods at high tide.");
         // Nothing of what the harness chat played after the branch was made.
-        expect([...(notes?.keys() ?? [])].filter((p) => p.startsWith("turns/message-5"))).toEqual([]);
+        expect(versionsOf(data, branch).length).toBeGreaterThan(0);
         const shipped = await shippedParts([MIGRATED_PART]);
         try {
           const fields = look(data, (db, s, store) => {
@@ -106,7 +106,7 @@ describe("a turn's area as LumiAH reads it", () => {
             `- ${PEOPLE.ada.name}: core.md, memory.md`,
             `- ${PEOPLE.bo.name}: profile.md`,
             "From the earlier build's story record: 1 beat(s) and 0 strike(s) on the timeline, 1 draft(s) as proposed futures, 1 casting(s) in the cast.",
-            "The Author's notes from the earlier build are in `persistent-workspace/imported`, as they stood at its last turn; each earlier version is in `persistent-workspace/imported/turns`, by the turn that wrote it; what it had learned is in `persistent-workspace/imported/learned`.",
+            "The Author's notes from the earlier build are in `persistent-workspace`, as they stood at its last turn; each earlier version is in `persistent-workspace`, by the turn that wrote it; what it had learned is in `persistent-workspace/learned`.",
           ]);
         } finally {
           shipped.remove();
@@ -118,7 +118,7 @@ describe("a turn's area as LumiAH reads it", () => {
     );
   });
 
-  test("a note a turn removed shows in the notes' versions: listed beside the folder of the turn that removed it", async () => {
+  test("a note a turn removed is a version of that turn with no text after it, and the swipe that kept it has none", async () => {
     await migrated(
       async (fixture) => {
         // The shown swipe of the last reply also removed prepare.md.
@@ -127,11 +127,11 @@ describe("a turn's area as LumiAH reads it", () => {
       },
       async (data, report) => {
         const notes = await notesOf(data, CHAT.harness);
-        expect(notes?.get(`turns/${removedList("message-5-swipe-1")}`)).toBe("author/prepare.md\n");
         expect(notes?.has("author/prepare.md")).toBe(false);
-        // The swipe that kept it lists nothing; the reply that wrote it still holds it.
-        expect(notes?.has(`turns/${removedList("message-5-swipe-0")}`)).toBe(false);
-        expect(notes?.get("turns/message-1-swipe-0/author/prepare.md")).toBe(AREAS["gen-1"]["author/prepare.md"]);
+        const mine = versionsOf(data, CHAT.harness).filter((v) => v.path === "author/prepare.md");
+        // Written by the first reply's turn, removed by the last reply's shown swipe; nothing else touched it.
+        expect(mine.map((v) => [v.before === null, v.after === null])).toEqual([[true, false], [false, true]]);
+        expect(mine[0]?.after).toBe(AREAS["gen-1"]["author/prepare.md"]);
         expect(report.carried?.ownFiles?.removals).toBe(1);
       },
     );

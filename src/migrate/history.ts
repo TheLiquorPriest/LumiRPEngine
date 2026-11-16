@@ -45,11 +45,12 @@ export function carriedAreas(items: readonly Item[]): Set<string> {
   return new Set(items.filter((i) => i.where === "user storage" && (i.fate === "carried" || i.fate === "attached") && AREA_DOC.test(i.path)).map((i) => i.path));
 }
 
-/** One file of an area: its path there, the SHA-256 of its text as LumiAH names its body, and the text. */
+/** One file of an area: its path there, the SHA-256 of its text as LumiAH names its body, the text, and the definitions it is pinned for. */
 export interface AreaFile {
   path: string;
   hash: string;
   text: string;
+  pins: string[];
 }
 
 function json(text: string | null): unknown {
@@ -77,7 +78,7 @@ async function indexFiles(today: Today, head: string | null): Promise<AreaFile[]
   const files: AreaFile[] = [];
   for (const f of index) {
     const body = await today.userView.read(blob(f.hash));
-    if (body !== null) files.push({ path: f.path, hash: f.hash, text: body });
+    if (body !== null) files.push({ path: f.path, hash: f.hash, text: body, pins: f.pins });
   }
   return files;
 }
@@ -157,10 +158,11 @@ export function pathTurns(db: Database, s: UserStore, chat: string): PathTurn[] 
   );
 }
 
-/** A file a turn changed: its text as the turn left it, or null where the turn removed it. */
+/** A file a turn changed: its text as the turn left it, or null where the turn removed it, and as the turn before it left it (null: it was not there). */
 export interface AreaChange {
   path: string;
   now: AreaFile | null;
+  was: AreaFile | null;
 }
 
 /**
@@ -268,8 +270,8 @@ export class TurnAreas {
     if (now === null) return null;
     const was = await this.before(turn);
     const out: AreaChange[] = [];
-    for (const [path, file] of now) if (which(path) && was.get(path)?.hash !== file.hash) out.push({ path, now: file });
-    for (const path of was.keys()) if (which(path) && !now.has(path)) out.push({ path, now: null });
+    for (const [path, file] of now) if (which(path) && was.get(path)?.hash !== file.hash) out.push({ path, now: file, was: was.get(path) ?? null });
+    for (const [path, file] of was) if (which(path) && !now.has(path)) out.push({ path, now: null, was: file });
     return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 }

@@ -14,7 +14,6 @@ import type { Store, UserStore } from "../store";
 import type { ChatEngine } from "./chats";
 import { pathTurns } from "./history";
 import { attachedOn } from "./minds";
-import { VERSIONS } from "./own-files";
 import type { MigrationReport } from "./report";
 import { type StoryCounts, storyOn } from "./story-record";
 import { chatRecord } from "./tables";
@@ -93,6 +92,6 @@ export function migratedChat(input: { db: Database; store: Store; user: string; 
     ...(c.marked ? { marked: true } : {}),
     ...(c.characters.length > 0 ? { characters: { items: c.characters.map((p) => ({ name: p.name, files: { ".": p.files } })) } } : {}),
     ...(story !== undefined ? { story } : {}),
-    ...(c.notes !== null ? { notes: { folder: c.notes.folder, latest: c.notes.latest, versions: `${c.notes.folder}/${VERSIONS}`, ...(c.notes.learned > 0 ? { learned: { folder: `${c.notes.folder}/learned` } } : {}) } } : {}),
+    ...(c.notes !== null ? { notes: { folder: c.notes.folder, latest: c.notes.latest, versions: c.notes.folder, ...(c.notes.learned > 0 ? { learned: { folder: `${c.notes.folder}/learned` } } : {}) } } : {}),
   };
 }

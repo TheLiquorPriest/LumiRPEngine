@@ -63,13 +63,23 @@ export function mindAt(db: Database, s: UserStore, chat: string, name: string, t
   );
 }
 
-/** A chat's notes the run wrote, as its own agents read them: each by its path under `imported/`, with its text; null where the chat has no folders. */
+/** A chat's notes as its own agents read them: each by its path under the notes folder, with its text; null where the chat has no folders. */
 export async function notesOf(data: string, chat: string): Promise<Map<string, string> | null> {
   const files = dataPaths(data).files;
   const own = look(data, (db) => new TreeChats(db, { run: async (write) => write(db) }, files).folders(USER, chat));
   if (own === null) return null;
-  const prefix = `${NOTES_FOLDER}/imported/`;
+  const prefix = `${NOTES_FOLDER}/`;
   return new Map([...(await readable({ files, ...own }))].flatMap(([path, text]) => (path.startsWith(prefix) ? [[path.slice(prefix.length), text] as const] : [])));
+}
+
+/** The versions of a chat's notes the run recorded in RPE's own history of notes: each note by its path, with its text before and after (null: none) and whether it stands on the chat's path. */
+export function versionsOf(data: string, chat: string): { turn: string; path: string; before: string | null; after: string | null; stands: boolean }[] {
+  return look(data, (db) =>
+    db
+      .query<{ turn: string; path: string; before: string | null; text: string | null; stands: number }, [string, string, string]>("SELECT v.turn, v.path, v.before, v.text, EXISTS(SELECT 1 FROM tree_applied a WHERE a.user = v.user AND a.chat = v.chat AND a.write_id = v.id) AS stands FROM note_version v WHERE v.user = ? AND v.chat = ? AND json_extract(v.agent, '$.id') = ? ORDER BY v.id")
+      .all(USER, chat, "carried")
+      .map((v) => ({ turn: v.turn, path: v.path, before: v.before, after: v.text, stands: v.stands === 1 })),
+  );
 }
 
 /** The report's two rows found inside other rows' things, each part of what the run did with them against the total the rehearsal found: they add up to it. */

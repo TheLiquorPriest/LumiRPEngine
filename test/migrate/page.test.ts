@@ -52,7 +52,7 @@ describe("the Migration page's data", () => {
       { name: PEOPLE.ada.name, files: ["core.md", "memory.md"] },
       { name: PEOPLE.bo.name, files: ["profile.md"] },
     ]);
-    expect(harness?.carried?.notes).toEqual({ folder: "persistent-workspace/imported", latest: 2, versions: 4, learned: 1 });
+    expect(harness?.carried?.notes).toEqual({ folder: "persistent-workspace", latest: 2, versions: 3, learned: 1 });
   });
 
   test("holds the backup with its checksum, and says when it is no longer there", async () => {

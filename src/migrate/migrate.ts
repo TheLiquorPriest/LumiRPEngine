@@ -29,7 +29,7 @@ import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
 import { carry } from "./carry";
 import { chatsToImport, importChats } from "./import-chats";
-import { type ChatNames, IMPORTED, type TreeLayout } from "./own-files";
+import { type ChatNames, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, type MigrationReport } from "./report";
@@ -155,13 +155,25 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run });
       step = "carrying the worlds, files, settings and connections";
       const layout = options.tree;
-      const tree = layout ? { root: paths.files, agents: layout.agents, skills: layout.skills, prompts: layout.prompts, notes: layout.notes, chat: (chat: string, names: ChatNames) => layout.chatFolder(db, paths.files, sources.userId, chat, names), played: (chat: string) => s.chat(chat) !== null && s.isPlayed(chat) } : null;
+      const tree = layout
+        ? {
+            root: paths.files,
+            agents: layout.agents,
+            skills: layout.skills,
+            prompts: layout.prompts,
+            notes: layout.notes,
+            chat: (chat: string, names: ChatNames) => layout.chatFolder(db, paths.files, sources.userId, chat, names),
+            played: (chat: string) => s.chat(chat) !== null && s.isPlayed(chat),
+            recordVersion: (chat: string, turn: string, path: string, before: string | null, after: string | null, definition: string, at: number, stands: boolean) => layout.recordVersion(db, paths.files, sources.userId, chat, turn, path, before, after, { id: "carried", definition }, at, stands),
+            forgetVersions: (chat: string) => layout.forgetVersions(db, paths.files, sources.userId, chat),
+          }
+        : null;
       const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree });
       report.landed = carried.landed;
       report.carried = carried.carried;
       // What it carried of each chat it imported, over the chat's whole path, for the chat's first briefing on RPE and the Migration page.
       step = "keeping what was carried of each chat";
-      const notes = layout ? `${layout.notes}/${IMPORTED}` : null;
+      const notes = layout ? layout.notes : null;
       for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried({ report, db, s, chat: c.chatId, notes }));
       // The store keeps the world revisions the run carried (its `world_file` table, left as it is), so a migrated chat's world can be read and written to.
       step = "keeping the worlds the chats play";

@@ -92,7 +92,6 @@ export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "chat-switch": "the swap (`rpe up`): each chat on in RPE as it was on today, the engine it used on its record",
   "build-jobs": "the jobs lane",
   "panel-requests": "the pages lane: each request onto the turn that answered it",
-  "agents-workspace": "the pages lane: as notes, per chat and global",
   "assistant-threads": "the pages lane",
   "chips-staged": "the pages lane",
   "approvals-jobs": "the jobs lane",

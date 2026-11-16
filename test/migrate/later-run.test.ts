@@ -19,7 +19,7 @@ import { migrate } from "../../src/migrate/migrate";
 import { reportText, type MigrationReport } from "../../src/migrate/report";
 import type { Rec } from "../../src/shared/ledger";
 import { AREAS, buildFixture, CHAT, PEOPLE, RUNTIME, SECRETS, STRAY, USER, type Fixture } from "./fixture";
-import { look, notesOf } from "./look";
+import { look, notesOf, versionsOf } from "./look";
 import { deleteMessage, editRecord, putArea, showSwipe } from "./today-edits";
 import { TREE as tree } from "./tree";
 
@@ -68,15 +68,15 @@ describe("a later run over today's data changed since", () => {
       const notes = await notesOf(data, CHAT.harness);
       expect(notes?.has("author/prepare.md")).toBe(false);
       // The first reply's version still holds it: its turn wrote it.
-      expect(notes?.get("turns/message-1-swipe-0/author/prepare.md")).toBe(AREAS["gen-1"]["author/prepare.md"]);
+      expect(versionsOf(data, CHAT.harness).find((v) => v.path === "author/prepare.md")).toMatchObject({ before: null, after: AREAS["gen-1"]["author/prepare.md"] });
       expect(second.carried?.ownFiles).toMatchObject({ removed: 4, changed: 1 });
 
       // Then the player deleted the message before the last reply: every later version folder is numbered anew, and the old numbers go.
       deleteMessage(fixture, "m-h5");
       await migrated(fixture, data, 11);
-      const after = await notesOf(data, CHAT.harness);
-      expect(after?.get("turns/message-4-swipe-0/notebook.md")).toBe(AREAS["gen-2"]["notebook.md"]);
-      expect([...(after?.keys() ?? [])].filter((p) => p.startsWith("turns/message-5-"))).toEqual([]);
+      expect(versionsOf(data, CHAT.harness).filter((v) => v.path === "notebook.md").map((v) => v.after)).toContain(AREAS["gen-2"]["notebook.md"]);
+      // None is left on a turn of the earlier import.
+      expect(look(data, (db) => db.query<{ n: number }, []>("SELECT count(*) AS n FROM note_version v WHERE json_extract(v.agent, '$.id') = 'carried' AND NOT EXISTS (SELECT 1 FROM turn t WHERE t.id = v.turn)").get()?.n)).toBe(0);
     });
   });
 

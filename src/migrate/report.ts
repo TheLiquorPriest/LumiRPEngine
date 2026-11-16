@@ -169,6 +169,11 @@ export interface ChatImportReport {
    * turn. Absent from a report kept before runs counted them.
    */
   edited?: number;
+  /**
+   * What a replaced chat held of his own changes and his jobs' (R-79), written again just before the turns now tied to the replies they
+   * stood before: how many were, and how many had lost their place (their reply is gone) and stay in the backup only. Absent where none.
+   */
+  own?: { placed: number; lost: number };
 }
 
 export interface MigrationReport {
@@ -346,6 +351,7 @@ export function reportText(report: MigrationReport): string {
       lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
       for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "going back differs (not kept)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
       if ((c.edited ?? 0) > 0) lines.push(`    ${c.edited} swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
+      if (c.own !== undefined) lines.push(`    ${c.own.placed} change(s) of his own and his jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
     }
   }
   if (report.unreadable.length > 0) {

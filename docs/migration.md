@@ -73,7 +73,7 @@ The rehearsal and the real run print the same report. It holds counts and checks
 - **What the old engines recorded on each reply** is kept word for word beside the turn it became, read-only: each session, summary, transcript, segment and job report its record names, and why a reply stood with no turn played and where it said something against its turn. `GET /api/v1/chats/<chat>/carried` lists a migrated chat's carried turns, a page at a time (`migration.page`, at most `migration.pageMost`), and `GET /api/v1/chats/<chat>/turns/<turn>/carried` gives one whole, with the engine that played the chat.
 - **What could not be read**, by path: a damaged file the previous build had already set aside, say.
 - **Settings:** those carried into RPE's settings, from what to what, a time in milliseconds carried as seconds; those RPE has a like setting for that counts otherwise or takes no such value, not carried, each with why; those with no setting of the same meaning in RPE yet, kept in the backup; and those that name a connection in Lumiverse, which RPE cannot use. Pick one of RPE's connections for each of those; until you do, that work uses RPE's default connection.
-- **Your own files:** your agents, skills, texts and notes are carried into RPE's file tree. A `GUIDANCE.md` of yours is carried under `imported/`, switched off, because it was written for agents that have changed. The report says so under "Waiting on you".
+- **Your own files:** your agents, skills and texts are carried into RPE's file tree under `imported/`, switched off, because they were written for agents that have changed. A `GUIDANCE.md` of yours is carried there too, and the report says so under "Waiting on you". Notes are carried as notes: each chat's notebook, scene, learned files and the agents engine's workspace into that chat's own `persistent-workspace/`, with every change a turn made recorded on that turn in RPE's own history of notes, so showing an earlier reply again puts its notes back; your `~/` files and the agents engine's global workspace into the global `persistent-workspace/`, which every chat's agents read and none writes. A file you made or changed in RPE since an earlier run is never written over. Each file pinned in the previous build is a pin in `pins:` of the chat's `RPE.yml` (or of `RPE-global.yml`), for the agent that is handed it at the start of each run: its lead agent's pins are the Author's, a pin for a role RPE has no agent for is pinned for the Author and listed, and a pin for one of your own agents stays under that agent's name, which is carried switched off.
 - **What was left in Lumiverse as it is**, and the disk the run takes.
 - **The backup's path and checksum.**
 
@@ -86,13 +86,12 @@ Some kinds of thing have no place in RPE yet. The run counts them, keeps them in
 - approvals and jobs;
 - the previous runtime's own settings (its tuning and memory limit; its update choice is carried, as `update.restart`);
 - what you asked for through a panel;
-- the agents engine's workspace;
 - GM assistant threads;
 - review cards, stored chips and staged changes;
 
 ## Running it again
 
-You can run the migration again at any time, the rehearsal or the real run. For a chat you have not played on RPE yet, a new run replaces what an earlier run carried with what the previous build holds now. Once you play a chat on RPE, that chat is RPE's: a later run leaves it alone, and says so ("played on RPE: left alone"). The same goes for what you changed in RPE since a run carried it: a connection, the default connection, a carried setting or a world you edited in Build is kept as RPE has it, and the report says so.
+You can run the migration again at any time, the rehearsal or the real run. For a chat you have not played on RPE yet, a new run replaces what an earlier run carried with what the previous build holds now; what you did there in RPE since (an edit of your own, a job you started) is kept and tied to the same replies, and one whose reply is gone is named. Once you play a chat on RPE, that chat is RPE's: a later run leaves it alone, and says so ("played on RPE: left alone"). The same goes for what you changed in RPE since a run carried it: a connection, the default connection, a carried setting or a world you edited in Build is kept as RPE has it, and the report says so.
 
 ## 3. The switch
 

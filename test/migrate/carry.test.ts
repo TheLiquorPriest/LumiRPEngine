@@ -159,10 +159,10 @@ describe("what the real run carries besides the chats", () => {
     // The prompt set today's turns recorded, word for word, by the hash its turns name it by; and its row has nothing in the backup only.
     expect(await at(`prompt-sets/${blobHash("set")}.json`)).toBe(await readFile(join(fixture.userFolder, `prompts/sets/${blobHash("set")}.json`), "utf8"));
     expect(report.rows.find((r) => r.row === "texts")?.count).toMatchObject({ found: 1, attached: 1, backup: 0 });
-    expect([await at("GUIDANCE.md"), await at("home/style.md")]).toEqual(["Keep the fog grey.", "Short lines."]);
+    expect([await at("GUIDANCE.md"), await readFile(join(files, NOTES_FOLDER, "style.md"), "utf8")]).toEqual(["Keep the fog grey.", "Short lines."]);
     // Nothing of any chat is at the user's level, which every chat's agents read.
     expect(existsSync(join(files, "imported", "chats"))).toBe(false);
-    expect((await readdir(files)).sort()).toEqual(["RPE-global.yml", "chats", "imported"]);
+    expect((await readdir(files)).sort()).toEqual(["RPE-global.yml", "chats", "imported", NOTES_FOLDER]);
     expect(reportText(report)).toContain("Waiting on you: your GUIDANCE.md");
   });
 
@@ -183,7 +183,7 @@ describe("what the real run carries besides the chats", () => {
       expect(holding(await readable({ files, ...sibling }))).toEqual([]);
       // The chat's own agents read them in its notes folder: the area at its latest turn, the characters' mind files left to their own row; and its learned/.
       const mine = await readable({ files, ...own });
-      const notes = `${NOTES_FOLDER}/imported`;
+      const notes = NOTES_FOLDER;
       expect([`${notes}/notebook.md`, `${notes}/author/prepare.md`, `${notes}/learned/notes.md`].map((p) => mine.get(p))).toEqual(texts);
       expect([...mine.keys()].filter((p) => p.includes("minds/"))).toEqual([]);
       // A chat LumiAH was told to forget is left in the backup, and no folder is made for it.
@@ -220,7 +220,7 @@ describe("what the real run carries besides the chats", () => {
     let notebook = "";
     try {
       const own = new TreeChats(db, { run: async (write) => write(db) }, files).folders(USER, CHAT.harness);
-      notebook = join(files, "chats", own?.character ?? "", own?.chat ?? "", NOTES_FOLDER, "imported", "notebook.md");
+      notebook = join(files, "chats", own?.character ?? "", own?.chat ?? "", NOTES_FOLDER, "notebook.md");
       // A turn played on RPE, and its agents' word in the notes.
       openStore({ db, registry, worlds: () => undefined }).user(USER).beginTurn({ chat: CHAT.harness, kind: "normal" });
     } finally {

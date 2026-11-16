@@ -25,20 +25,20 @@ import { YAML } from "bun";
 import { writeWhole } from "../app/disk";
 import type { Migration, MigrationArea } from "../app/migrations";
 import { chatLine } from "../cast";
+import { WS_DELETE, WS_WRITE, workspaceOf, workspacePins } from "../engine/workspace";
 import { isRecord } from "../shared/json";
-import type { UserStore } from "../store";
+import type { TurnRow, UserStore } from "../store";
 import { readBytes, sha256 } from "./files";
 import { AREA_DOC, type AreaFile, areaDoc, areaOf, chatOfKey, docKey, pathTurns, type TurnAreas } from "./history";
 import { MIND_FILE } from "./inside";
 import type { Item } from "./report";
 import { keepWritten, type WrittenFile, writtenFiles } from "./tables";
 import type { Today } from "./today";
+import { agentMetaOf } from "./today/chat-agent-meta";
+import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
 
-/** The folder everything here is written under, at the user's level and in a chat's notes, as the plan names it. */
+/** The folder, at the user's level, that his agents, skills, texts, GUIDANCE.md and prompt sets are written under, switched off: nothing is in force until he says. */
 export const IMPORTED = "imported";
-
-/** The folder of a chat's notes, under `imported/`, that keeps each earlier version by the turn that wrote it. */
-export const VERSIONS = "turns";
 
 /** The folder, under `imported/` at the user's level, of the prompt sets today's turns recorded: each named by the hash a turn's record gives it (`Rec.prompts`). */
 export const PROMPT_SETS = "prompt-sets";
@@ -63,6 +63,10 @@ export interface TreeLayout {
    * the first time RPE meets the chat, as the tree chooses it, and made.
    */
   chatFolder(db: Database, files: string, user: string, chat: string, names: ChatNames): Promise<string>;
+  /** Records a note's text as the version an imported turn wrote (the old engine its writer): what the file held before and what it left; it stands where that turn stands on the chat's path (`TreeNotes.recordVersion`). */
+  recordVersion(db: Database, files: string, user: string, chat: string, turn: string, path: string, before: string | null, after: string | null, by: { id: string; definition: string }, at: number, stands: boolean): Promise<void>;
+  /** Forgets the versions an earlier run recorded for a chat, those whose writer is `{ id: "carried" }` (`TreeNotes.forgetCarried`). */
+  forgetVersions(db: Database, files: string, user: string, chat: string): Promise<void>;
 }
 
 /** Where the user's own files go in this run: the tree's folder, its folder names, and each chat's own folder. */
@@ -77,6 +81,10 @@ export interface TreePlaces {
   chat(chat: string, names: ChatNames): Promise<string>;
   /** Whether a chat was played on RPE: its notes are RPE's then, and a run leaves them as they are. */
   played(chat: string): boolean;
+  /** Records a note's text as the version an imported turn wrote, for the old engine `definition` (`TreeLayout.recordVersion`, with the run's database, the tree's folder and the user given). */
+  recordVersion(chat: string, turn: string, path: string, before: string | null, after: string | null, definition: string, at: number, stands: boolean): Promise<void>;
+  /** Forgets the versions an earlier run recorded for a chat. */
+  forgetVersions(chat: string): Promise<void>;
 }
 
 export interface OwnFilesCarried {
@@ -87,22 +95,36 @@ export interface OwnFilesCarried {
   promptSets: number;
   guidance: number;
   home: number;
+  /** The agents engine's global workspace files, in the global notes folder with the `~/` files. */
+  global: number;
   notes: number;
-  /** Earlier versions of each chat's notes, by the turn that wrote them, under `turns/`. */
+  /** Versions of each chat's notes recorded on the turns that wrote them, in RPE's own history of notes. */
   versions: number;
-  /** The notes a turn removed or moved away, listed beside its version (`removedList`). */
+  /** Of those, the notes a turn removed or moved away. */
   removals: number;
   learned: number;
+  /** The agents engine's chat workspace files (counted among the notes). */
+  workspace: number;
+  /** Area documents of LumiAH's chat areas that no imported turn ended with (before any turn, or a generation that left no reply): in the backup only. */
+  untied: number;
   /** Files whose names would leave the folder they go in: not written, in the backup only. */
   leftOut: number;
+  /** Files this run would write that RPE already holds as something else (made or changed in RPE since): left as they are. */
+  heldAsHis: number;
   /** Chats played on RPE, whose notes this run left as they are. */
   leftAlone: number;
   /** Chats this run did not import whose earlier import stands, whose notes an earlier run wrote: left as they are. */
   kept: number;
   /** Files an earlier run wrote that this run does not write again, as today's side no longer has them: removed, each as that run wrote it. */
   removed: number;
+  /** Files of the layout an earlier build's run used (`imported/chats/` at the user's level) that were removed, where they were still as that run wrote them. */
+  oldLayout: number;
   /** Files an earlier run wrote that today's side no longer has, changed in RPE since: left as they are, and no longer the migration's. */
   changed: number;
+  /** Files pinned in today's build, to be written as pins (`pins.ts`). */
+  pins: PinWanted[];
+  /** The ids of his own agent definitions, which are carried switched off. */
+  agentIds: string[];
   /** Each chat's notes, versions and learned files, by chat. */
   byChat: { chat: string; notes: number; versions: number; learned: number }[];
 }
@@ -125,31 +147,56 @@ export interface NoteHistory {
   carried: ReadonlySet<string>;
 }
 
-/** The file beside a turn's version folder under `turns/` that lists, a path a line, the notes that turn removed or moved away: beside it, as a note of any name may be among the files in it, and no folder there is named with a dot. */
-export const removedList = (folder: string): string => `${folder}.removed.txt`;
+/** A file pinned in today's build for a definition (`FileEntry.pins`, or the agents engine's pin on a workspace file): the config it is written in (null: the global one), the file as that level's view names it, and the definition's id as today's build had it. */
+export interface PinWanted {
+  config: string | null;
+  file: string;
+  role: string;
+}
+
+/** A note a turn wrote or removed, by its path: its text before and after. */
+interface NoteChange {
+  path: string;
+  before: string | null;
+  after: string | null;
+}
 
 /**
- * Each earlier version of a chat's notes, by the folder it is kept in under `turns/`: for each turn of
- * a reply on the chat's path, its own or one it shares with the chat it was branched from, the files
- * that turn changed and the paths it removed or moved away; for each area document of the chat no
- * imported turn ended with, all its files. Mind files are left to their own row.
+ * The agents engine's workspace over a chat's imported turns: its files as the chat's head holds them, each with whether it is
+ * pinned, and, by turn, what the turn wrote or removed (the turn's `engine.ws.write` and `engine.ws.delete` changes, against the
+ * workspace the turn started from), with the texts of the blobs they name. A text today's clean-up had removed leaves its file out.
  */
-async function noteVersions(chat: string, docs: readonly string[], history: NoteHistory): Promise<Map<string, { files: AreaFile[]; removed: string[] }>> {
-  const out = new Map<string, { files: AreaFile[]; removed: string[] }>();
-  const notes = (path: string): boolean => !MIND_FILE.test(path);
-  for (const { turn, swipe, at } of pathTurns(history.db, history.s, chat)) {
-    const changes = (await history.areas.changesAt(turn, notes)) ?? [];
-    const files = changes.flatMap((c) => (c.now === null ? [] : [c.now]));
-    const removed = changes.flatMap((c) => (c.now === null ? [c.path] : []));
-    if (files.length + removed.length > 0) out.set(`message-${at}-swipe-${swipe}`, { files, removed });
+async function agentsWorkspace(today: Today, history: NoteHistory, chat: string): Promise<{ files: { path: string; text: string; pinned: boolean }[]; changes: Map<string, NoteChange[]> }> {
+  const text = async (hash: string | undefined): Promise<string | null> => (hash === undefined ? null : today.userView.read(`agents/blobs/${hash}`));
+  const changes = new Map<string, NoteChange[]>();
+  for (const { turn } of pathTurns(history.db, history.s, chat)) {
+    const wrote = history.s.changes(turn.id).filter((c) => c.applied && (c.op === WS_WRITE || c.op === WS_DELETE));
+    if (wrote.length === 0) continue;
+    const start = workspaceOf(history.s.startOf(turn.id).state.world);
+    const end: Record<string, string> = { ...start };
+    for (const c of wrote) {
+      const data = isRecord(c.value) && isRecord(c.value.data) ? c.value.data : {};
+      if (typeof data.path !== "string") continue;
+      if (c.op === WS_WRITE && typeof data.hash === "string") end[data.path] = data.hash;
+      else delete end[data.path];
+    }
+    const list: NoteChange[] = [];
+    for (const path of [...new Set([...Object.keys(start), ...Object.keys(end)])].sort()) {
+      if (start[path] === end[path]) continue;
+      const [before, after] = [await text(start[path]), await text(end[path])];
+      if ((start[path] !== undefined && before === null) || (end[path] !== undefined && after === null)) continue;
+      list.push({ path, before, after });
+    }
+    if (list.length > 0) changes.set(turn.id, list);
   }
-  for (const doc of docs) {
-    if (history.areas.tied.has(doc)) continue;
-    const generation = AREA_DOC.exec(doc)?.[2] ?? "";
-    const files = ((await history.areas.doc(doc))?.files ?? []).filter((f) => notes(f.path));
-    if (files.length > 0) out.set(generation === "root" ? "before-any-turn" : `generation-${generation}`, { files, removed: [] });
+  const head = history.s.headState(chat).state.world;
+  const pinned = workspacePins(head);
+  const files: { path: string; text: string; pinned: boolean }[] = [];
+  for (const [path, hash] of Object.entries(workspaceOf(head)).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const body = await text(hash);
+    if (body !== null) files.push({ path, text: body, pinned: pinned[path] === true });
   }
-  return out;
+  return { files, changes };
 }
 
 /** A definition's header in the new format (`name`, `description`, `tools`), and its body. */
@@ -185,19 +232,36 @@ async function pruneEmpty(file: string, base: string): Promise<void> {
  * still as that run wrote it (`migration_file`).
  */
 export async function carryOwnFiles(today: Today, items: readonly Item[], places: TreePlaces, history: NoteHistory): Promise<OwnFilesCarried> {
-  const out: OwnFilesCarried = { agents: 0, skills: 0, texts: 0, promptSets: 0, guidance: 0, home: 0, notes: 0, versions: 0, removals: 0, learned: 0, leftOut: 0, leftAlone: 0, kept: 0, removed: 0, changed: 0, byChat: [] };
+  const out: OwnFilesCarried = { agents: 0, skills: 0, texts: 0, promptSets: 0, guidance: 0, home: 0, global: 0, notes: 0, versions: 0, removals: 0, learned: 0, workspace: 0, untied: 0, leftOut: 0, heldAsHis: 0, leftAlone: 0, kept: 0, removed: 0, oldLayout: 0, changed: 0, pins: [], agentIds: [], byChat: [] };
   const wrote: WrittenFile[] = [];
-  /** Writes one file, by its path below the folder `base` of the tree's: the user's level's, or a chat's notes' (`chat`, "" for none); a name that would leave the folder it goes in is counted as left out, and stays in the backup. */
+  const earlier = new Map(writtenFiles(history.db, history.s.id).map((f) => [`${f.base}\u0000${f.path}`, f.sha256]));
+  /**
+   * Writes one file, by its path below the folder `base` of the tree's: the user's level's, or a chat's notes' (`chat`, "" for none).
+   * A name that would leave the folder it goes in is counted as left out, and stays in the backup. A file RPE holds there that is not
+   * what an earlier run wrote (one he made or changed, or a job of his) is never written over: it is left, and counted.
+   */
   const put = async (chat: string, base: string, path: string, body: string): Promise<boolean> => {
     if (!staysInside(path)) {
       out.leftOut++;
       return false;
     }
     const disk = join(places.root, base, path);
-    await mkdir(dirname(disk), { recursive: true });
-    await writeWhole(disk, body);
+    const held = await readBytes(disk);
+    const heldAs = held === null ? null : sha256(held);
+    if (heldAs !== null && heldAs !== sha256(body) && heldAs !== earlier.get(`${base}\u0000${path}`)) {
+      out.heldAsHis++;
+      return false;
+    }
+    if (heldAs === null) {
+      await mkdir(dirname(disk), { recursive: true });
+      await writeWhole(disk, body);
+    }
     wrote.push({ chat, base, path, sha256: sha256(body) });
     return true;
+  };
+  /** Pinned files to write as pins, once the notes they name are there. */
+  const pin = (config: string | null, file: string, roles: readonly string[]): void => {
+    for (const role of roles) out.pins.push({ config, file, role });
   };
 
   // The user's own agents and skills, in the new header format with the original beside each; and their edited texts.
@@ -205,6 +269,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
   const definitions = isRecord(harness) && isRecord(harness.definitions) ? harness.definitions : {};
   for (const [id, def] of Object.entries(isRecord(definitions.agents) ? definitions.agents : {})) {
     if (!isRecord(def)) continue;
+    out.agentIds.push(id);
     const tools = Array.isArray(def.tools) ? def.tools.filter((t): t is string => typeof t === "string") : undefined;
     if (await put("", IMPORTED, `${places.agents}/${id}.md`, headed({ name: id, description: text(def.description), tools }, text(def.instructions) ?? ""))) out.agents++;
     await put("", IMPORTED, `${places.agents}/${id}.original.json`, `${JSON.stringify(def, null, 2)}\n`);
@@ -226,7 +291,10 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       for (const f of (await areaOf(today, item.path))?.files ?? []) {
         if (f.path === "GUIDANCE.md") {
           if (await put("", IMPORTED, "GUIDANCE.md", f.text)) out.guidance++;
-        } else if (await put("", IMPORTED, `home/${f.path}`, f.text)) out.home++;
+        } else if (await put("", places.notes, f.path, f.text)) {
+          out.home++;
+          pin(null, `@global/${places.notes}/${f.path}`, f.pins);
+        }
       }
       continue;
     }
@@ -241,9 +309,14 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     if (id !== null) learned.set(id, item.path);
   }
   const latest = await latestAreas(today, items);
-  const areas = [...history.areas.carried];
   // A chat RPE's store holds that this run did not import keeps what an earlier run wrote for it: it was played on RPE, or its earlier import stands.
   const keeps = (chat: string): boolean => chat !== "" && !history.carried.has(chat) && history.s.chat(chat) !== null;
+  // The agents engine's global workspace, into the global notes folder with his own `~/` files, which every chat's agents read and none writes.
+  const global = json(await today.userView.read("agents/global.json"));
+  for (const [path, f] of Object.entries(isRecord(global) && isRecord(global.files) ? global.files : {})) {
+    const body = isRecord(f) && typeof f.hash === "string" ? await today.userView.read(`agents/blobs/${f.hash}`) : null;
+    if (body !== null && (await put("", places.notes, path, body))) out.global++;
+  }
   // Each chat's into its own notes folder, placed as RPE places the chat: by its name and its character's, as Lumiverse has them.
   for (const id of [...new Set([...history.carried, ...latest.keys(), ...learned.keys()])].sort()) {
     if (keeps(id)) {
@@ -253,20 +326,47 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     }
     // A branch reads as LumiAH gave it its files: its turns' areas, the ones it shares included; and the learned/ of the chat it was made from, until it has its own.
     const now = (await notesNow(id, latest.get(id) ?? null, history)).filter((f) => !MIND_FILE.test(f.path));
-    const versions = await noteVersions(id, areas.filter((doc) => AREA_DOC.exec(doc)?.[1] === docKey(id)), history);
     const doc = chatLine(history.s, id).map((c) => learned.get(c)).find((d) => d !== undefined);
     const knows = doc === undefined ? [] : ((await history.areas.doc(doc))?.files ?? []);
-    if (now.length === 0 && versions.size === 0 && knows.length === 0) continue;
     const row = today.chats.find((c) => c.id === id);
+    const imported = history.s.chat(id) !== null && history.carried.has(id);
+    const heads = imported ? await agentsWorkspace(today, history, id) : null;
+    const keptLearned = Object.entries(agentMetaOf(row?.metadata ?? {}).learned);
+    if (now.length === 0 && knows.length === 0 && (heads === null || heads.files.length === 0) && keptLearned.length === 0) continue;
     const character = row === undefined || row.character === null ? null : today.db.character(row.character);
-    const notes = `${await places.chat(id, { character, chat: { name: row?.name ?? "" } })}/${places.notes}/${IMPORTED}`;
+    const folder = `${await places.chat(id, { character, chat: { name: row?.name ?? "" } })}/${places.notes}`;
+    const config = join(places.root, dirname(folder), "RPE.yml");
     const mine = { chat: id, notes: 0, versions: 0, learned: 0 };
-    for (const f of now) if (await put(id, notes, f.path, f.text)) mine.notes++;
-    for (const [folder, { files, removed }] of versions) {
-      for (const f of files) if (await put(id, notes, `${VERSIONS}/${folder}/${f.path}`, f.text)) mine.versions++;
-      if (removed.length > 0 && (await put(id, notes, `${VERSIONS}/${removedList(folder)}`, `${removed.join("\n")}\n`))) out.removals += removed.length;
+    for (const f of now) if (await put(id, folder, f.path, f.text)) {
+      mine.notes++;
+      pin(config, `${places.notes}/${f.path}`, f.pins);
     }
-    for (const f of knows) if (await put(id, notes, `learned/${f.path}`, f.text)) mine.learned++;
+    for (const f of knows) if (await put(id, folder, `learned/${f.path}`, f.text)) mine.learned++;
+    for (const f of heads?.files ?? []) if (await put(id, folder, f.path, f.text)) {
+      out.workspace++;
+      mine.notes++;
+      if (f.pinned) pin(config, `${places.notes}/${f.path}`, ["main"]);
+    }
+    for (const [path, file] of keptLearned) {
+      const body = await today.userView.read(`agents/blobs/${file.hash}`);
+      if (body !== null && (await put(id, folder, path, body))) mine.learned++;
+    }
+    // Each version of a note, on the turn that wrote it, in RPE's own history of notes: showing an earlier carried reply puts its notes back.
+    if (imported) {
+      await places.forgetVersions(id);
+      const definition = chatKnowledgePrefsOf(row?.metadata ?? {}).engine ?? "classic";
+      const standing = history.s.path(id);
+      const record = async (turn: TurnRow, at: number, change: { path: string; before: string | null; after: string | null }): Promise<void> => {
+        await places.recordVersion(id, turn.id, change.path, change.before, change.after, definition, turn.created, standing[at]?.turn === turn.id);
+        mine.versions++;
+        if (change.after === null) out.removals++;
+      };
+      for (const { turn, at } of pathTurns(history.db, history.s, id)) {
+        for (const c of (await history.areas.changesAt(turn, (path) => !MIND_FILE.test(path))) ?? []) await record(turn, at, { path: c.path, before: c.was?.text ?? null, after: c.now?.text ?? null });
+        for (const c of heads?.changes.get(turn.id) ?? []) await record(turn, at, c);
+      }
+      out.untied += [...history.areas.carried].filter((doc) => AREA_DOC.exec(doc)?.[1] === docKey(id) && !history.areas.tied.has(doc)).length;
+    }
     out.byChat.push(mine);
     out.notes += mine.notes;
     out.versions += mine.versions;
@@ -291,6 +391,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     await rm(disk);
     await pruneEmpty(disk, join(places.root, f.base));
     out.removed++;
+    if (f.base === IMPORTED && f.path.startsWith("chats/")) out.oldLayout++;
   }
   keepWritten(history.db, history.s.id, [...stays, ...wrote]);
   return out;

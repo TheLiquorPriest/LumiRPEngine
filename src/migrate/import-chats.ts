@@ -37,7 +37,7 @@ import { hashJson } from "../shared/hash";
 import type { ChatId, RevisionId, UserId, WorldId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { ChatRun, Tombstone } from "../shared/ledger";
-import { matchTurn, StoreInputError, type ShownMessage, type Store, type UserStore } from "../store";
+import { type KeptOwn, matchTurn, StoreInputError, type ShownMessage, type Store, type UserStore } from "../store";
 import { CapturingFold, foldToday } from "./capture";
 import { textHash, type SwipeFacts } from "./lumiverse-db";
 import { chainOf, placements, type Pick, type Placement } from "./own-path";
@@ -308,26 +308,35 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
   const blank = { turns: 0, placed: { own: 0, shown: 0, lost: 0, head: 0 }, shares: null, placedAsShown: false, matched: { head: true, swipes: 0, of: 0 }, differences: [], dropped: 0, violations: 0 };
   /** Why a chat was not imported, saying so where what an earlier run imported of it stands. */
   const stands = (chat: string, why: string): string => (s.chat(chat) !== null ? `${why}; what an earlier run imported of it stands` : why);
+  /** His own changes and his jobs' that a replaced chat and its branches held, each waiting for its chat to be imported again (R-79). */
+  const keptOwn = new Map<string, KeptOwn[]>();
   for (const chat of sourcesFirst(input.chats)) {
     const id = chat.chatId;
     const earlier = s.chat(id) !== null;
-    let outcome: { left: ChatImportReport["outcome"] } | { done: Imported; asShown: boolean; link: Link | null; replaced: boolean };
+    const freed: KeptOwn[] = [];
+    /** Writes his changes of this chat again, tied to the same replies, once its turns are tied afresh. */
+    const restored = (): { placed: number; lost: number } => {
+      const r = s.restoreOwn([...(keptOwn.get(id) ?? []), ...freed.filter((k) => k.chat === id)]);
+      return { placed: r.placed, lost: r.lost.length };
+    };
+    let outcome: { left: ChatImportReport["outcome"] } | { done: Imported; asShown: boolean; link: Link | null; replaced: boolean; own: { placed: number; lost: number } };
     try {
       outcome = db.transaction(() => {
+        freed.length = 0;
         if (earlier) {
-          if (s.isPlayed(id)) return { left: "played on RPE: left alone" as const };
           const forgot = s.forgetImport(id);
-          if (forgot.played.length > 0) return { left: "a chat made from it was played on RPE: left alone" as const };
+          if (forgot.played.length > 0) return { left: forgot.played.includes(id) ? ("played on RPE: left alone" as const) : ("a chat made from it was played on RPE: left alone" as const) };
           forgetChats(db, s.id, forgot.removed);
+          freed.push(...forgot.kept);
         }
         const source = chat.branch ? byId.get(chat.branch.from) : undefined;
         const link = source && s.chat(source.chatId) ? linkOf(chat, source) : null;
         try {
-          return { done: db.transaction(() => importOne(s, db, registry, chat, link, false, turnOfShared))(), asShown: false, link, replaced: earlier || wasImported.has(id) };
+          return { done: db.transaction(() => importOne(s, db, registry, chat, link, false, turnOfShared))(), asShown: false, link, replaced: earlier || wasImported.has(id), own: restored() };
         } catch (error) {
           if (!(error instanceof HeadRebased)) throw error;
           store.dropCaches();
-          return { done: db.transaction(() => importOne(s, db, registry, chat, null, true, turnOfShared))(), asShown: true, link: null, replaced: earlier || wasImported.has(id) };
+          return { done: db.transaction(() => importOne(s, db, registry, chat, null, true, turnOfShared))(), asShown: true, link: null, replaced: earlier || wasImported.has(id), own: restored() };
         }
       })();
     } catch (error) {
@@ -339,9 +348,12 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
       reports.push({ chatId: id, outcome: outcome.left, ...blank });
       continue;
     }
-    const { done, asShown, link, replaced } = outcome;
+    // What a branch of it held waits for the branch, which is imported after it.
+    keptOwn.delete(id);
+    for (const k of freed) if (k.chat !== id) keptOwn.set(k.chat, [...(keptOwn.get(k.chat) ?? []), k]);
+    const { done, asShown, link, replaced, own } = outcome;
     const shares = link ? { chat: link.from, messages: Object.keys(link.map).length } : null;
-    reports.push({ chatId: id, outcome: replaced ? "replaced" : "imported", turns: done.turns, placed: done.placed, shares, placedAsShown: asShown, matched: done.matched, differences: done.differences, dropped: done.dropped, violations: done.violations, edited: done.edited });
+    reports.push({ chatId: id, outcome: replaced ? "replaced" : "imported", turns: done.turns, placed: done.placed, shares, placedAsShown: asShown, matched: done.matched, differences: done.differences, dropped: done.dropped, violations: done.violations, edited: done.edited, ...(own.placed + own.lost > 0 ? { own } : {}) });
     keepChat(db, s.id, id, run, shares?.chat ?? null, replaced ? "replaced" : "imported", done.differences.length > 0);
   }
   for (const n of input.notOpened) reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank });

@@ -17,7 +17,7 @@ import { storyBrief, storyRecordParts } from "../../src/story/index";
 import { storyAt } from "../../src/story/path";
 import { StoryRecord } from "../../src/story/record";
 import { AREAS, buildFixture, CHAT, PEOPLE, STRAY, USER, type Fixture } from "./fixture";
-import { accounted, look, mindAt, notesOf, turnOf } from "./look";
+import { accounted, look, mindAt, notesOf, turnOf, versionsOf } from "./look";
 import { type ShippedParts, shippedParts } from "./parts";
 import { TREE as tree } from "./tree";
 
@@ -129,24 +129,23 @@ describe("what today's build recorded beside each turn", () => {
     expect(reportText(report)).toContain("RPE's story record and cast, each on the turn whose record held it; each swipe's record also kept word for word beside its turn in the migration's imported_record, read-only: 3 beat(s), 1 struck, 2 draft(s) as proposed futures, 2 casting(s) in the cast, 1 pinned as the player pinned them, 8 of the 8 entr(ies) found in today's records\n");
   });
 
-  test("the Author's notes are in the chat's own notes folder at every turn: as they stand at the reply the chat shows, not the area written last, and each version before it by the turn that wrote it", async () => {
+  test("the Author's notes are in the chat's own notes folder as they stand at the reply the chat shows, and each change a turn made to them is a version on that turn in RPE's own history of notes", async () => {
     const files = await notes();
     // The shown swipe's area, though the swipe the chat doesn't show was written after it.
     expect(files.get("notebook.md")).toBe(AREAS["gen-3"]["notebook.md"]);
-    expect(files.get("turns/before-any-turn/notebook.md")).toBe(AREAS.root["notebook.md"]);
-    expect(files.get("turns/message-1-swipe-0/notebook.md")).toBe(AREAS["gen-1"]["notebook.md"]);
-    expect(files.get("turns/message-1-swipe-0/author/prepare.md")).toBe(AREAS["gen-1"]["author/prepare.md"]);
-    // The last reply's swipes: the one that changed the notebook keeps its version there; the one that changed nothing of the notes has no folder.
-    expect(files.get("turns/message-5-swipe-0/notebook.md")).toBe(AREAS["gen-2"]["notebook.md"]);
-    expect([...files.keys()].filter((p) => p.startsWith("turns/message-5-swipe-1"))).toEqual([]);
+    const versions = versionsOf(data, CHAT.harness);
+    const notebook = versions.filter((v) => v.path === "notebook.md");
+    expect(notebook.map((v) => v.after)).toEqual(expect.arrayContaining([AREAS["gen-1"]["notebook.md"], AREAS["gen-2"]["notebook.md"], AREAS["gen-3"]["notebook.md"]]));
+    // Only the versions of turns that stand on the chat's path stand, and the newest of them is what the folder holds.
+    expect(notebook.filter((v) => v.stands).at(-1)?.after).toBe(AREAS["gen-3"]["notebook.md"]);
+    expect(versions.find((v) => v.path === "author/prepare.md")).toMatchObject({ before: null, after: AREAS["gen-1"]["author/prepare.md"] });
     // No mind file among the notes: they are the characters'.
     expect([...files.keys()].filter((p) => p.includes("minds/"))).toEqual([]);
-    // Every version found is there, once a turn holds it, and the report counts them where they are.
-    const versions = new Set(Object.values(AREAS).flatMap((a) => Object.entries(a).flatMap(([p, t]) => (p.startsWith("minds/") ? [] : [`${p}\u0000${t}`]))));
-    const kept = new Set([...files].flatMap(([p, t]) => (p.startsWith("turns/") ? [`${p.replace(/^turns\/[^/]+\//, "")}\u0000${t}`] : [])));
-    expect(kept).toEqual(versions);
-    expect(report.carried?.ownFiles?.versions).toBe(versions.size);
-    expect(report.rows.find((r) => r.row === "author-notes")?.inside?.count).toBe(versions.size);
+    // Every version found is counted where it is: those a turn wrote are recorded; the chat's area before any turn, which no turn ended with, is in the backup only.
+    const all = new Set(Object.values(AREAS).flatMap((a) => Object.entries(a).flatMap(([p, t]) => (p.startsWith("minds/") ? [] : [`${p}\u0000${t}`]))));
+    expect(report.carried?.ownFiles?.versions).toBe(versions.length);
+    expect(report.carried?.ownFiles?.untied).toBe(1);
+    expect(report.rows.find((r) => r.row === "author-notes")?.inside?.count).toBe(all.size);
     expect(report.rows.find((r) => r.row === "author-notes")?.count).toMatchObject({ found: 12, carried: 12, backup: 0 });
   });
 
@@ -182,7 +181,7 @@ describe("what today's build recorded beside each turn", () => {
         `- ${PEOPLE.ada.name}: core.md, memory.md`,
         `- ${PEOPLE.bo.name}: profile.md`,
         "From the earlier build's story record: 3 beat(s) and 1 strike(s) on the timeline, 2 draft(s) as proposed futures, 2 casting(s) in the cast.",
-        "The Author's notes from the earlier build are in `persistent-workspace/imported`, as they stood at its last turn; each earlier version is in `persistent-workspace/imported/turns`, by the turn that wrote it; what it had learned is in `persistent-workspace/imported/learned`.",
+        "The Author's notes from the earlier build are in `persistent-workspace`, as they stood at its last turn; each earlier version is in `persistent-workspace`, by the turn that wrote it; what it had learned is in `persistent-workspace/learned`.",
       ]);
       expect(look(data, (db, _s, store) => migratedChat({ db, store, user: USER, chat: CHAT.plain }))).toBeNull();
     } finally {

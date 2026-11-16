@@ -116,7 +116,7 @@ describe("migrate", () => {
     const db = new Database(join(data, "rpe.db"));
     try {
       const own = new TreeChats(db, { run: async (write) => write(db) }, files).folders(USER, CHAT.harness);
-      expect((await readable({ files, character: own?.character ?? null, chat: own?.chat ?? null })).get(`${NOTES_FOLDER}/imported/notebook.md`)).toBe("Ada distrusts the guard. The fog came.");
+      expect((await readable({ files, character: own?.character ?? null, chat: own?.chat ?? null })).get(`${NOTES_FOLDER}/notebook.md`)).toBe("Ada distrusts the guard. The fog came.");
     } finally {
       db.close();
     }

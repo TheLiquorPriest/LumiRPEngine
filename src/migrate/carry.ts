@@ -10,14 +10,16 @@
 
 import type { Database } from "bun:sqlite";
 import { attachTexts } from "./old-records";
+import { join } from "node:path";
 import { modelsPort } from "../app/connections";
-import type { DataPaths } from "../app/config";
+import { type DataPaths, SHIPPED_FOLDER } from "../app/config";
 import { SecretsFile } from "../app/secrets";
 import type { Store, UserStore } from "../store";
 import { bookTrouble, carryConnections, type ConnectionsCarried } from "./connections";
 import { TurnAreas } from "./history";
 import { carryMinds, type MindsCarried } from "./minds";
-import { carryOwnFiles, IMPORTED as IMPORTED_FOLDER, type OwnFilesCarried, PROMPT_SETS, type TreePlaces, VERSIONS } from "./own-files";
+import { carryOwnFiles, IMPORTED as IMPORTED_FOLDER, type OwnFilesCarried, PROMPT_SETS, type TreePlaces } from "./own-files";
+import { carryPins, type PinsCarried } from "./pins";
 import { People } from "./people";
 import { apartText, type ChatFate, type Item, type MigrationReport } from "./report";
 import { NO_PLACE_YET, type RowId } from "./rows";
@@ -52,6 +54,8 @@ export interface CarriedReport {
   connections: ConnectionsCarried | { why: string } | null;
   /** Null: the run was not given the file tree's places, and the user's own files are in the backup only. */
   ownFiles: OwnFilesCarried | null;
+  /** The pins written for the files pinned in today's build; null where no file tree was given. */
+  pins: PinsCarried | null;
   /** The characters' mind files attached to their records in the cast, of the chats this run imported. */
   minds: MindsCarried;
   /** The story record carried into RPE's story record and cast, of the chats this run imported. */
@@ -114,6 +118,9 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const chats = (report.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId);
   const turnAreas = new TurnAreas(today, db, s, report.items);
   const ownFiles = tree === null ? null : await carryOwnFiles(today, report.items, tree, { db, s, areas: turnAreas, carried: new Set(chats) });
+  // The files pinned in today's build as pins, each for the agent that is handed it (R-174).
+  const pinned = tree === null || ownFiles === null ? null : await carryPins({ wanted: ownFiles.pins, globalConfig: paths.globalConfig, shipped: join(paths.files, SHIPPED_FOLDER, tree.agents), own: new Set(ownFiles.agentIds), earlier });
+  if (pinned !== null) keepPutPrints(db, user, pinned.put);
 
   // The earlier import's changes on the turns it replaced or removed (the cast's and the story's among them) went with those turns; what today's build recorded beside each turn is carried next.
   const people = new People(db, store, s, now);
@@ -160,13 +167,15 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   if (connections !== null && !("why" in connections)) landed.connections = `RPH's two documents, through the models port: ${connections.connections.length} connection(s) in RPE-global.yml's models; ${connections.keys} key(s), ${connections.signins} sign-in(s) and ${connections.headerValues} header value(s) in the secrets file and nowhere else`;
   if (tree !== null && ownFiles !== null) {
     const at = `The user's level of the file tree, under ${IMPORTED_FOLDER}/, switched off`;
-    const inChat = `that chat's own notes folder, under ${tree.notes}/${IMPORTED_FOLDER}/, which no other chat's agents read`;
-    const alone = `${ownFiles.leftAlone > 0 ? `; ${ownFiles.leftAlone} chat(s) played on RPE keep the notes they have` : ""}${ownFiles.kept > 0 ? `; ${ownFiles.kept} chat(s) this run did not import keep the notes an earlier run wrote` : ""}`;
+    const inChat = `that chat's own notes folder, ${tree.notes}/`;
+    const alone = `${ownFiles.leftAlone > 0 ? `; ${ownFiles.leftAlone} chat(s) played on RPE keep the notes they have` : ""}${ownFiles.kept > 0 ? `; ${ownFiles.kept} chat(s) this run did not import keep the notes an earlier run wrote` : ""}${ownFiles.heldAsHis > 0 ? `; ${ownFiles.heldAsHis} file(s) RPE already holds as something else (made or changed there since) were left as they are` : ""}`;
     landed["own-agents"] = `${at}: ${ownFiles.agents} agent(s) in ${tree.agents}/ and ${ownFiles.skills} skill(s) in ${tree.skills}/, each in the new header format with the original beside it`;
     landed.texts = `${at}: ${ownFiles.texts} edited text(s) in ${tree.prompts}/, each named for what it was; ${ownFiles.promptSets} prompt set(s) today's turns recorded, word for word, in ${PROMPT_SETS}/, each named by the hash the turns' records give it`;
     landed.guidance = `${at}: GUIDANCE.md (${ownFiles.guidance})`;
-    landed["author-notes"] = `Each chat's area as the reply it shows left it, in ${inChat} (${ownFiles.notes} file(s)); every version before it, by the turn that wrote it, under ${VERSIONS}/ there (${ownFiles.versions} file(s)), with beside each the notes that turn removed or moved away (${ownFiles.removals})${alone}`;
-    landed["learned-and-home"] = `${at}: your ~/ files in home/ (${ownFiles.home} file(s)); each chat's learned/ in ${inChat}, as learned/ (${ownFiles.learned} file(s))${alone}`;
+    landed["author-notes"] = `Each chat's notes as the reply it shows left them, in ${inChat} (${ownFiles.notes} file(s)); every change a turn made to them is recorded on that turn in RPE's own history of notes (${ownFiles.versions} version(s), ${ownFiles.removals} of them a note removed), so showing an earlier reply puts its notes back${ownFiles.untied > 0 ? `; ${ownFiles.untied} area(s) no imported turn ended with are in the backup only` : ""}${alone}`;
+    landed["learned-and-home"] = `Your ~/ files in the global notes folder, ${tree.notes}/ at the user's level, which every chat's agents read and none writes (${ownFiles.home} file(s)); each chat's learned/ in ${inChat}, as learned/ (${ownFiles.learned} file(s))${ownFiles.oldLayout > 0 ? `; ${ownFiles.oldLayout} file(s) an earlier build's run left under ${IMPORTED_FOLDER}/chats/ at the user's level were taken out` : ""}${alone}`;
+    landed["agents-workspace"] = `As notes: the agents engine's chat workspace in ${inChat} (${ownFiles.workspace} file(s)), each turn's writes and removals among its versions, and its global workspace in the global notes folder (${ownFiles.global} file(s))${alone}`;
+    if (pinned !== null) landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in today's build as pins in \`pins:\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that today's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for his own definitions, which are carried switched off` : ""}`;
   }
-  return { landed, carried: { worlds, settings, connections, ownFiles, minds, story } };
+  return { landed, carried: { worlds, settings, connections, ownFiles, pins: pinned?.carried ?? null, minds, story } };
 }

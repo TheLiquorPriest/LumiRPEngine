@@ -145,8 +145,8 @@ export function countWorldDoc(doc: unknown, current: boolean, tally: Tally): voi
   tally.add("second-copies", entries.filter((e) => isRecord(e) && isRecord(e.source) && e.source.kind === "book").length);
 }
 
-/** An area's index as LumiAH keeps it in a blob (`AreaIndex`, `H/core/workspace.ts:41-45`): each file's path and the hash of its body. */
-export function areaFiles(text: string | null): { path: string; hash: string }[] | null {
+/** An area's index as LumiAH keeps it in a blob (`AreaIndex`, `H/core/workspace.ts:41-45`): each file's path, the hash of its body and the definitions it is pinned for. */
+export function areaFiles(text: string | null): { path: string; hash: string; pins: string[] }[] | null {
   if (text === null) return null;
   let raw: unknown;
   try {
@@ -155,7 +155,7 @@ export function areaFiles(text: string | null): { path: string; hash: string }[]
     return null;
   }
   if (!isRecord(raw) || raw.v !== 1 || raw.kind !== "index" || !isRecord(raw.files)) return null;
-  return Object.entries(raw.files).flatMap(([path, entry]) => (isRecord(entry) && typeof entry.hash === "string" ? [{ path, hash: entry.hash }] : []));
+  return Object.entries(raw.files).flatMap(([path, entry]) => (isRecord(entry) && typeof entry.hash === "string" ? [{ path, hash: entry.hash, pins: Array.isArray(entry.pins) ? entry.pins.filter((p): p is string => typeof p === "string") : [] }] : []));
 }
 
 /** The head of an area as its document holds it (`AreaDoc`, `H/core/workspace.ts:48-53`): the hash of its index, or null while it holds no file. */
