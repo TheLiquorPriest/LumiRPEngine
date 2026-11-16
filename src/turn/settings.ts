@@ -369,12 +369,15 @@ const DEFS = {
   },
 } as const satisfies Record<string, Setting>;
 
-/** Every setting the turn lane reads, as a config file writes it: its own, the map's and the taps'. */
-export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS), ...MAP_SETTINGS, ...TAP_SETTINGS];
+/**
+ * Every setting the turn lane lists, as a config file writes it: its own, the map's and the taps'. `lead` is RPH's (its jobs list it,
+ * which `harnessSettings` carries), so it is read here and listed once, by RPH.
+ */
+export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS).filter((def) => def !== DEFS.lead), ...MAP_SETTINGS, ...TAP_SETTINGS];
 
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
-  const read = readConfig(await portTexts(files, scope), log, TURN_SETTINGS);
+  const read = readConfig(await portTexts(files, scope), log, [...TURN_SETTINGS, DEFS.lead]);
   // Each value is one its setting takes, so it is of the type the setting's `takes` says.
   return {
     lead: read.value(DEFS.lead) as string | null,
