@@ -1,20 +1,23 @@
 // The user's own files of the tree, written as him (plan §5.2, §5.4, §14): a file written as the user at a
 // level, which for a file of another level is his own file of that name there, taken in place of the
 // farther one, and kept as written by him (`recordWritten`) so the Files page can say which updates came
-// after; a file of his removed, which for one in place of a default is resetting to the default; and a
-// name switched off or on again in a level's config (`off:`), which is what "Delete" on a shipped file
-// does. The Files routes call these, and so does the migration's switch-on, which writes his files too.
-// Every path is a path of the chat's view, found by the view (`locate`): none leaves the tree, and a link
-// is refused.
+// after; a file of his removed, which for one in place of a default is resetting to the default; a name
+// switched off or on again in a level's config (`off:`), which is what "Delete" on a shipped file does;
+// and a folder made, a file or folder of his renamed, moved or copied, never a shipped one or one RPE
+// makes again. The Files routes call these, and so does the migration's switch-on, which writes his
+// files too. Every path is a path of the chat's view, found by the view (`locate`): none leaves the tree,
+// and a link is refused. A chat RPE has not played yet is placed, as its first turn places it, at his
+// first write to it.
 
-import { mkdir, rm } from "node:fs/promises";
-import { dirname } from "node:path";
-import type { LayerLevel } from "rp-harness/contract";
+import { cp, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
+import type { GuidanceKind, LayerLevel } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";
 import { LayoutRefused, withTopLevelKey, yamlMapping } from "../app/yaml";
-import { nameList, OFF_KEY, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
-import type { TreeChats, TreeWrites } from "./chats";
+import { kindAt, nameList, OFF_KEY, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
+import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { recordWritten } from "./defaults";
 import { type ChatLocation, type Located, locate, treeLayers, viewPath } from "./view";
 
@@ -24,6 +27,8 @@ export interface OwnFilesDeps {
   chats: TreeChats;
   writes: TreeWrites;
   now(): number;
+  /** Places a chat RPE has not played yet, by Lumiverse's own names for it and its character, as its first turn places it; absent where RPE cannot (a test's own tree). */
+  place?(user: string, chat: string): Promise<ChatFolders>;
 }
 
 /** A path of the view, found: where it is, and where on disk. */
@@ -43,6 +48,12 @@ export class OwnFiles {
   locationOf(user: string, chat: string | null): ChatLocation {
     const folders = chat === null ? null : this.#d.chats.folders(user, chat);
     return { files: this.#d.files, character: folders?.character ?? null, chat: folders?.chat ?? null };
+  }
+
+  /** The chat's view for a write: a chat RPE has not played yet is placed first, so its levels have folders. */
+  async locationFor(user: string, chat: string | null): Promise<ChatLocation> {
+    if (chat !== null && this.#d.chats.folders(user, chat) === null && this.#d.place !== undefined) await this.#d.place(user, chat);
+    return this.locationOf(user, chat);
   }
 
   /** A path of the view, found; a 400 for one that is not a path, a 404 for one the view does not hold. */
@@ -114,4 +125,53 @@ export class OwnFiles {
       await writeWhole(config.disk, spliced);
     });
   }
+
+  /** Refuses what is not the user's: a shipped file or folder, or one RPE makes again. A 403 that says which. */
+  #yours(at: FoundFile): void {
+    if (!userMayWrite(at.level, at.rest, at.kind)) throw new RouteError(403, at.level === "shipped" ? `${at.path} is shipped: the shipped files are read-only, and your own go at the global, character or chat level.` : `${at.path} is not yours to change: RPE makes it again.`);
+  }
+
+  /** Makes a folder of the user's, and the folders above it; one already there is left as it is. */
+  async makeFolder(loc: ChatLocation, path: string): Promise<FoundFile> {
+    const at = await this.found(loc, path);
+    this.#yours(at);
+    if (at.is === "file") throw new RouteError(409, `${at.path} is a file.`);
+    if (at.is === "none") await mkdir(at.disk, { recursive: true }).catch(conflict);
+    return at;
+  }
+
+  /**
+   * Renames or moves a file or folder of the user's to a path that is not taken, or with `copy` copies it there (a copy of a folder
+   * leaves its links out). Both are the user's: neither a shipped file nor one RPE makes again. A file written there is kept as the
+   * user's now. Answers where it went, and the kind of guidance the place is a folder of, if it is one (a file moved into `rules/`
+   * is a rule).
+   */
+  async relocate(user: string, loc: ChatLocation, from: string, to: string, copy: boolean): Promise<{ at: FoundFile; guidance: GuidanceKind | null }> {
+    const source = await this.found(loc, from);
+    if (source.is === "none") throw new RouteError(404, `The tree has no file or folder ${source.path}.`);
+    this.#yours(source);
+    const target = await this.found(loc, to);
+    if (target.is !== "none") throw new RouteError(409, `${target.path} is there already.`);
+    this.#yours(target);
+    if (source.is === "folder" && target.disk.startsWith(`${source.disk}${sep}`)) throw new RouteError(409, `${source.path} cannot go inside itself.`);
+    const [first, second] = [source.disk, target.disk].sort();
+    await oneFileAtATime(first ?? source.disk, () =>
+      oneFileAtATime(second ?? target.disk, async () => {
+        await mkdir(dirname(target.disk), { recursive: true }).catch(conflict);
+        if (copy) await cp(source.disk, target.disk, { recursive: true, errorOnExist: true, force: false, filter: (path) => !lstatSync(path).isSymbolicLink() });
+        else await rename(source.disk, target.disk);
+      }),
+    );
+    const written = source.is === "file" ? [target.disk] : (await readdir(target.disk, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));
+    for (const disk of written) await recordWritten(this.#d.writes, user, writtenKey(this.#d.files, disk), this.#d.now());
+    const layer = treeLayers().find((l) => l.level === target.level);
+    return { at: target, guidance: layer === undefined || target.rest.length < 2 ? null : (kindAt(layer, target.rest[0]) ?? null) };
+  }
+}
+
+/** A refusal for a path that has a file where a folder is needed, or a folder where a file is. */
+function conflict(error: unknown): never {
+  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  if (code === "ENOTDIR" || code === "EEXIST") throw new RouteError(409, "A file stands where a folder is needed.");
+  throw error;
 }

@@ -2,7 +2,7 @@
 // held to the tree's own types, so that the pages' types and the API reference say what a page sends and
 // is sent, and a change to one stops this compiling until the declaration says the same.
 
-import type { FileKind, StackPart } from "rp-harness/contract";
+import type { FileKind, GuidanceKind, StackPart } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, layerLevel, shape } from "../app";
 import type { TreeFileEntry } from "./catalog";
 import type { DiffLine } from "./defaults";
@@ -88,6 +88,27 @@ export const fileRemovedReply = shape.object({
   removed: field(T, "The path of the file removed; for a shipped file, the path of the one switched off."),
   switchedOff: opt(layerLevel, "For a shipped file: the level whose `off:` list now names it. The file itself stays."),
 });
+
+const guidanceKind = shape.named("GuidanceKind", "A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools.", shape.oneOf("agents", "skills", "rules", "hooks", "prompts", "tools"));
+type GuidanceMirrored = Holds<Exactly<Infer<typeof guidanceKind>, GuidanceKind>>;
+export const folderBody = shape.named("FolderAsk", "A folder of the user's to make, by its path in the chat's view; a chat's level names the chat.", shape.object({ chat: opt(nullable(T)), path: T }));
+export const folderMadeReply = shape.object({ path: field(T, "The path of the folder, as the view names it.") });
+export const fileMoveBody = shape.named(
+  "FileMoveAsk",
+  "A file or folder of the user's to rename, move or copy: its path in the chat's view, and the path it goes to, which nothing stands at; a chat's level names the chat.",
+  shape.object({ chat: opt(nullable(T)), from: T, to: T }),
+);
+export const fileMovedReply = shape.named(
+  "FileMovedReply",
+  "Where a file or folder went: its path, the file as the listing now shows it (none for a folder), and the kind of guidance it now is when it went into a folder of one.",
+  shape.object({ path: T, file: nullable(treeFileRow), guidance: field(nullable(guidanceKind), "The kind of guidance the place is a folder of: a file moved into `rules/` is a rule; null for any other.") }),
+);
+export const applyBody = shape.named("ApplyNowAsk", "The chat whose open session starts its opening block afresh.", shape.object({ chat: shape.text({ blank: false }) }));
+export const applyReply = shape.named(
+  "ApplyNowReply",
+  "What \"Apply now\" did: the session whose opening block starts afresh with the next run of each agent, or none when no session is open, and what that means in words.",
+  shape.object({ session: nullable(T), note: T }),
+);
 
 // ---------------------------------------------------------------- suggestions
 
@@ -185,4 +206,4 @@ export const stackReply = shape.named("StackReply", "The exact stack an agent ge
 type StackMirrored = Holds<Exactly<Infer<typeof stackPartRow>, StackPart>>;
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [KindMirrored, EntryMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];
+export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];

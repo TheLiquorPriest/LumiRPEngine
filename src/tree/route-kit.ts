@@ -6,9 +6,9 @@ import type { Database } from "bun:sqlite";
 import type { LayerLevel, StackPart } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { type TreeFileEntry, treeListing } from "./catalog";
-import type { TreeChats, TreeWrites } from "./chats";
+import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { defaultStanding } from "./defaults";
-import { type FoundFile, OwnFiles } from "./own-files";
+import { OwnFiles } from "./own-files";
 import type { TreeSuggestions } from "./suggestions";
 import type { ChatLocation } from "./view";
 
@@ -24,8 +24,12 @@ export interface TreeRoutesDeps {
   suggestions: TreeSuggestions;
   /** Whether a turn of the chat is going on now: its turn folders are not pruned while one is. */
   turning(user: string, chat: string): boolean;
-  /** The exact stack an agent gets in the chat and where each part comes from, as the harness's definitions give it (§5.2). */
-  stack(user: string, chat: string, agent: string): Promise<StackPart[]>;
+  /** The exact stack an agent gets in the chat and where each part comes from, as the harness's definitions give it (§5.2); with no chat, the one the shipped and global levels give. */
+  stack(user: string, chat: string | null, agent: string): Promise<StackPart[]>;
+  /** "Apply now" (R-119): starts the open session's opening block afresh from the files as they stand; says which session that was, none when the chat has no session open. */
+  apply(user: string, chat: string): Promise<{ session: string | null }>;
+  /** Places a chat RPE has not played yet, by Lumiverse's own names for it and its character, as its first turn places it; absent where RPE cannot. */
+  place?(user: string, chat: string): Promise<ChatFolders>;
 }
 
 /** The levels a file may be written at (plan §5): every level but the shipped one's is the user's. */
@@ -62,7 +66,7 @@ export interface RouteKit {
 }
 
 export function routeKit(deps: TreeRoutesDeps): RouteKit {
-  const own = new OwnFiles({ files: deps.files, chats: deps.chats, writes: deps.writes, now: deps.now });
+  const own = new OwnFiles({ files: deps.files, chats: deps.chats, writes: deps.writes, now: deps.now, ...(deps.place === undefined ? {} : { place: deps.place }) });
   const listingOf = (user: string, loc: ChatLocation): Promise<TreeFileEntry[]> => treeListing(loc, defaultStanding(deps.db, user));
   return { deps, own, listingOf, entryOf: async (user, loc, path) => (await listingOf(user, loc)).find((f) => f.path === path) ?? null };
 }

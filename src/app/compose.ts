@@ -31,7 +31,7 @@ import { playArea } from "../play/area";
 import { storeArea } from "../store/area";
 import { storyArea } from "../story/area";
 import { treeArea } from "../tree/area";
-import { levelFiles, RPE_GUIDANCE, treeReader } from "../tree";
+import { levelFiles, NO_CHAT, RPE_GUIDANCE, treeReader } from "../tree";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { bootstrapArea } from "../turn/bootstrap/area";
@@ -92,6 +92,24 @@ export function compose(options: ComposeOptions = {}): Composition {
   const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
   const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat), made().env.log);
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
+  // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
+  const place = async (owner: string, chat: string) => {
+    const known = made().chats.folders(owner, chat);
+    if (known !== null) return known;
+    const reads = door.lumiverse()?.reads;
+    if (reads === undefined) throw new RouteError(503, "RPE is not connected to Lumiverse, so it cannot make that chat's folder yet: try again once it is.");
+    const lv = await reads.chat(chat);
+    if (lv === null) throw new RouteError(404, `Lumiverse has no chat ${chat} of yours.`);
+    const character = lv.character === null ? null : await reads.character(lv.character);
+    return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
+  };
+  // "Apply now" (R-119): the chat's open session starts its opening block afresh; none open, nothing to renew.
+  const apply = async (user: string, chat: string): Promise<{ session: string | null }> => {
+    const open = (await made().harness.sessions.list(user, chat)).find((s) => s.state === "open");
+    if (open === undefined) return { session: null };
+    await made().harness.definitions.apply({ user, chat, session: open.id });
+    return { session: open.id };
+  };
 
   const areas: Area[] = [
     appArea({
@@ -101,16 +119,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       settings: (at) => {
         const owner = at.config.lumiverse.user ?? "";
         // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
-        const placed = async (chat: string) => {
-          const known = made().chats.folders(owner, chat);
-          if (known !== null) return known;
-          const reads = door.lumiverse()?.reads;
-          if (reads === undefined) throw new RouteError(503, "RPE is not connected to Lumiverse, so it cannot make that chat's folder yet: try again once it is.");
-          const lv = await reads.chat(chat);
-          if (lv === null) throw new RouteError(404, `Lumiverse has no chat ${chat} of yours.`);
-          const character = lv.character === null ? null : await reads.character(lv.character);
-          return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
-        };
+        const placed = (chat: string) => place(owner, chat);
         return {
           // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder, or made for a write.
           levels: async (chat, make = false) => {
@@ -128,7 +137,15 @@ export function compose(options: ComposeOptions = {}): Composition {
     ifaceArea(),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
     // The tree lays the shipped files before the areas after it read them.
-    treeArea(() => ({ chats: made().chats, suggestions: made().suggestions, turning, stack: (user, chat, agent) => made().harness.definitions.stack(scope(user, chat), agent) })),
+    treeArea(() => ({
+      chats: made().chats,
+      suggestions: made().suggestions,
+      turning,
+      // With no chat named, the stack the shipped and global levels give: a chat that is never placed has no levels of its own.
+      stack: (user, chat, agent) => made().harness.definitions.stack(scope(user, chat ?? NO_CHAT), agent),
+      apply,
+      place,
+    })),
     turn.area,
     bootstrapArea({
       turns: made,
@@ -137,7 +154,7 @@ export function compose(options: ComposeOptions = {}): Composition {
     castArea(() => ({ store: made().store, turning, files, settings: async (user, chat) => (await settings(user, chat)).cast })),
     storyArea(() => ({ store: made().store, turning, files, settings: async (user, chat) => (await settings(user, chat)).story })),
     buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE })),
-    playArea(() => ({ store: made().store, turning, guidance: RPE_GUIDANCE })),
+    playArea(() => ({ store: made().store, turning, guidance: RPE_GUIDANCE, dueItems: async (user: string, chat: string) => (await settings(user, chat)).engine.dueItems })),
     door.area,
   ];
 

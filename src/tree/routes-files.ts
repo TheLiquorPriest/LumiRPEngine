@@ -20,7 +20,7 @@ import { defaultStanding, defaultUpdateTexts, lineDiff, updatesSince } from "./d
 import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit";
 import { OFF_LEVELS } from "./own-files";
 import { treeSettingsOf } from "./settings";
-import { chatQuery, fileRemovedReply, fileSwitchBody, fileWriteBody, fileWrittenReply, stackReply, treeDiffReply, treeFileReply, treeListingReply, type TreeFileDiff, type TreeFileText } from "./shapes";
+import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, stackReply, treeDiffReply, treeFileReply, treeListingReply, type TreeFileDiff, type TreeFileText } from "./shapes";
 
 /** The routes that name a file: its path in the chat's view follows the route's own segments. */
 const FILE_PATH = "/api/v1/files/*";
@@ -35,10 +35,10 @@ export function fileRoutes(kit: RouteKit) {
       path: "/api/v1/files-stack",
       access: "page",
       group: "files",
-      does: "The exact stack an agent gets in a chat, part by part, with the file each comes from.",
-      query: { chat: shape.field(shape.text({ blank: false }), "The chat the agent runs in."), agent: shape.field(shape.text({ blank: false }), "The agent's definition.") },
+      does: "The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; with no chat, the stack the shipped and global levels give.",
+      query: { chat: shape.optional(shape.text({ blank: false }), "The chat the agent runs in; left out, the shipped and global levels alone."), agent: shape.field(shape.text({ blank: false }), "The agent's definition.") },
       reply: stackReply,
-      handle: async ({ user, query }) => ({ agent: query.agent, parts: await deps.stack(user, query.chat, query.agent) }),
+      handle: async ({ user, query }) => ({ agent: query.agent, parts: await deps.stack(user, query.chat ?? null, query.agent) }),
     }),
     route({
       method: "GET",
@@ -48,7 +48,12 @@ export function fileRoutes(kit: RouteKit) {
       does: "Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own.",
       query: { chat: chatQuery },
       reply: treeListingReply,
-      handle: async ({ user, query }) => ({ files: await kit.listingOf(user, own.locationOf(user, chatOf(query.chat))) }),
+      handle: async ({ user, query }) => {
+        const chat = chatOf(query.chat);
+        // A chat RPE has not played yet is placed as its first turn places it, so its levels have folders; where RPE cannot (Lumiverse is out of reach), its view is the shipped and global levels' alone.
+        const loc = await own.locationFor(user, chat).catch(() => own.locationOf(user, chat));
+        return { files: await kit.listingOf(user, loc) };
+      },
     }),
     route({
       method: "GET",
@@ -109,7 +114,7 @@ export function fileRoutes(kit: RouteKit) {
       reply: fileWrittenReply,
       handle: async ({ user, params, body }) => {
         const chat = chatOf(body.chat);
-        const loc = own.locationOf(user, chat);
+        const loc = await own.locationFor(user, chat);
         const written = await own.writeAsUser(user, loc, viewPathOf(params["*"]), levelOf(body.level, LEVELS, chat), body.text);
         return { file: await kit.entryOf(user, loc, written) };
       },
@@ -124,7 +129,7 @@ export function fileRoutes(kit: RouteKit) {
       reply: fileRemovedReply,
       handle: async ({ user, params, query }) => {
         const chat = chatOf(query.chat);
-        const loc = own.locationOf(user, chat);
+        const loc = await own.locationFor(user, chat);
         const at = await own.found(loc, viewPathOf(params["*"]));
         if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
         if (at.level !== "shipped") {
@@ -149,13 +154,67 @@ export function fileRoutes(kit: RouteKit) {
       handle: async ({ user, params, body }) => {
         const chat = chatOf(body.chat);
         const level = levelOf(body.level, OFF_LEVELS, chat);
-        const loc = own.locationOf(user, chat);
+        const loc = await own.locationFor(user, chat);
         const path = viewPathOf(params["*"]);
         const listed = await kit.entryOf(user, loc, (await own.found(loc, path)).path);
         if (listed === null) throw new RouteError(404, `The tree has no file ${path}.`);
         if (listed.item === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
         await own.switchOff(loc, level, listed.item, body.off);
         return { file: await kit.entryOf(user, loc, listed.path) };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/files-apply",
+      access: "page",
+      group: "files",
+      does: "\"Apply now\": starts the opening block of the chat's open session afresh from the files as they stand, there and then (the next run of each agent makes it); says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it.",
+      body: applyBody,
+      reply: applyReply,
+      handle: async ({ user, body }) => {
+        const { session } = await deps.apply(user, body.chat);
+        return { session, note: session === null ? "No session of this chat is open, so the next one opens with the files as they stand." : `The opening block of session ${session} starts afresh with the next run of each agent, from the files as they stand.` };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/files-folder",
+      access: "page",
+      group: "files",
+      does: "Makes a folder of the user's, and the folders above it, at a path of a chat's view (a never-played chat is placed first); never a shipped one, or one RPE makes again.",
+      body: folderBody,
+      reply: folderMadeReply,
+      handle: async ({ user, body }) => {
+        const loc = await own.locationFor(user, chatOf(body.chat));
+        return { path: (await own.makeFolder(loc, viewPathOf(body.path))).path };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/files-move",
+      access: "page",
+      group: "files",
+      does: "Renames or moves a file or folder of the user's to a path nothing stands at; a file moved into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again.",
+      body: fileMoveBody,
+      reply: fileMovedReply,
+      handle: async ({ user, body }) => {
+        const loc = await own.locationFor(user, chatOf(body.chat));
+        const { at, guidance } = await own.relocate(user, loc, viewPathOf(body.from), viewPathOf(body.to), false);
+        return { path: at.path, file: await kit.entryOf(user, loc, at.path), guidance };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/files-copy",
+      access: "page",
+      group: "files",
+      does: "Copies a file or folder of the user's to a path nothing stands at (the copy of a folder leaves its links out); a file copied into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again.",
+      body: fileMoveBody,
+      reply: fileMovedReply,
+      handle: async ({ user, body }) => {
+        const loc = await own.locationFor(user, chatOf(body.chat));
+        const { at, guidance } = await own.relocate(user, loc, viewPathOf(body.from), viewPathOf(body.to), true);
+        return { path: at.path, file: await kit.entryOf(user, loc, at.path), guidance };
       },
     }),
   ] as const;

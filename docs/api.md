@@ -355,6 +355,32 @@ Every file of the chat's view of the tree; with no chat, of the shipped level an
 | Body | none |
 | Reply | [`TreeListingReply`](#treelistingreply) |
 
+### `POST /api/v1/files-apply`
+
+"Apply now": starts the opening block of the chat's open session afresh from the files as they stand, there and then (the next run of each agent makes it); says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`ApplyNowAsk`](#applynowask) |
+| Reply | [`ApplyNowReply`](#applynowreply) |
+
+### `POST /api/v1/files-copy`
+
+Copies a file or folder of the user's to a path nothing stands at (the copy of a folder leaves its links out); a file copied into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`FileMoveAsk`](#filemoveask) |
+| Reply | [`FileMovedReply`](#filemovedreply) |
+
 ### `GET /api/v1/files-diff/*`
 
 A file's difference from the shipped file of its name, and what the updates that changed the shipped file since it was written changed of it, together and one by one.
@@ -367,6 +393,32 @@ A file's difference from the shipped file of its name, and what the updates that
 | Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own |
 | Body | none |
 | Reply | [`TreeDiffReply`](#treediffreply) |
+
+### `POST /api/v1/files-folder`
+
+Makes a folder of the user's, and the folders above it, at a path of a chat's view (a never-played chat is placed first); never a shipped one, or one RPE makes again.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`FolderAsk`](#folderask) |
+| Reply | `{ path: string }` |
+
+### `POST /api/v1/files-move`
+
+Renames or moves a file or folder of the user's to a path nothing stands at; a file moved into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`FileMoveAsk`](#filemoveask) |
+| Reply | [`FileMovedReply`](#filemovedreply) |
 
 ### `PUT /api/v1/files-off/*`
 
@@ -396,14 +448,14 @@ Prunes a chat's old turn folders as the chat's retention setting says, never whi
 
 ### `GET /api/v1/files-stack`
 
-The exact stack an agent gets in a chat, part by part, with the file each comes from.
+The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; with no chat, the stack the shipped and global levels give.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
-| Query | `chat`: `string`, The chat the agent runs in<br>`agent`: `string`, The agent's definition |
+| Query | `chat` (may be left out): `string`, The chat the agent runs in; left out, the shipped and global levels alone<br>`agent`: `string`, The agent's definition |
 | Body | none |
 | Reply | [`StackReply`](#stackreply) |
 
@@ -1166,6 +1218,27 @@ export interface AgentRef {
 }
 ```
 
+### `ApplyNowAsk`
+
+The chat whose open session starts its opening block afresh.
+
+```ts
+export interface ApplyNowAsk {
+  chat: string;
+}
+```
+
+### `ApplyNowReply`
+
+What "Apply now" did: the session whose opening block starts afresh with the next run of each agent, or none when no session is open, and what that means in words.
+
+```ts
+export interface ApplyNowReply {
+  session: string | null;
+  note: string;
+}
+```
+
 ### `Arrived`
 
 Whether RPE took the build, and where it stands, in words.
@@ -1860,6 +1933,31 @@ How sure a value or a fact is.
 export type FactStanding = "established" | "proposed" | "assumed";
 ```
 
+### `FileMoveAsk`
+
+A file or folder of the user's to rename, move or copy: its path in the chat's view, and the path it goes to, which nothing stands at; a chat's level names the chat.
+
+```ts
+export interface FileMoveAsk {
+  chat?: string | null;
+  from: string;
+  to: string;
+}
+```
+
+### `FileMovedReply`
+
+Where a file or folder went: its path, the file as the listing now shows it (none for a folder), and the kind of guidance it now is when it went into a folder of one.
+
+```ts
+export interface FileMovedReply {
+  path: string;
+  file: TreeFileRow | null;
+  /** The kind of guidance the place is a folder of: a file moved into `rules/` is a rule; null for any other. */
+  guidance: GuidanceKind | null;
+}
+```
+
 ### `FileReply`
 
 One file of a turn's folder, by its path below the folder, as text.
@@ -1935,6 +2033,17 @@ export interface FoldDifference {
 }
 ```
 
+### `FolderAsk`
+
+A folder of the user's to make, by its path in the chat's view; a chat's level names the chat.
+
+```ts
+export interface FolderAsk {
+  chat?: string | null;
+  path: string;
+}
+```
+
 ### `FolderEntry`
 
 One entry of a turn's folder: its path below the folder, its size (a folder's is what its files hold), and whether it is a folder.
@@ -1957,6 +2066,14 @@ export interface FolderReply {
   /** How the file host stopped short of the whole folder; absent when it listed it all. */
   stopped?: FindStopped;
 }
+```
+
+### `GuidanceKind`
+
+A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools.
+
+```ts
+export type GuidanceKind = "agents" | "skills" | "rules" | "hooks" | "prompts" | "tools";
 ```
 
 ### `HorizonEntryRow`

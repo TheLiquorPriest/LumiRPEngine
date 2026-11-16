@@ -7,17 +7,18 @@
 // name and text is invented.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { YAML } from "bun";
 import { loadGuidance } from "rp-harness";
 import type { App, RunningServer } from "../../src/app";
-import { CHATS_FOLDER, type DefaultsDeps, layDefaults, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
+import { CHATS_FOLDER, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
 import { answeredProblems } from "../app/call";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "../app/helpers";
 
 const CHAT = "chat-bell";
 const NAMES = { character: { id: "char-wren", name: "Wren Alder" }, chat: { name: "The Drowned Bell" } };
+const GHOST = { character: { id: "char-heron", name: "Ghost Heron" }, chat: { name: "The Quiet Lamp" } };
 
 const SHIPPED_RPH: Record<string, string> = {
   "RPE-global.yml": "layered: [AGENTS]\noff: []\n",
@@ -55,6 +56,9 @@ describe("the Files page's routes", () => {
   let suggestions: TreeSuggestions;
   /** Whether the test's chat has a turn going on. */
   let turning = false;
+  /** The chat's open session, if one is, and the chats whose opening block "Apply now" started afresh. */
+  let open: string | null = null;
+  const applied: string[] = [];
   /** The file port agents write through. */
   let port: TreeFiles;
 
@@ -85,8 +89,15 @@ describe("the Files page's routes", () => {
             const chats = new TreeChats(a.db, a.writes, a.paths.files);
             port = treeFiles({ files: a.paths.files, user: OWNER, chats, turnFolder: async () => null, writes: a.writes, now: a.now });
             // The definition, instruction and rule files of the agent's stack, as the harness's own `definitions.stack` lists them among its parts.
-            const stack = async (user: string, chat: string, agent: string) => (await loadGuidance(port, { user, chat, session: "none" }).stack(agent)).entries.map(({ replaces: _replaces, layered: _layered, ...part }) => part);
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, suggestions, turning: () => turning, stack }));
+            const stack = async (user: string, chat: string | null, agent: string) => (await loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }).stack(agent)).entries.map(({ replaces: _replaces, layered: _layered, ...part }) => part);
+            const apply = async (_user: string, chat: string) => {
+              if (open === null) return { session: null };
+              applied.push(chat);
+              return { session: open };
+            };
+            // A chat RPE has not played yet is placed by the names Lumiverse would give.
+            const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, suggestions, turning: () => turning, stack, apply, place }));
           },
         },
       ],
@@ -293,6 +304,70 @@ describe("the Files page's routes", () => {
 
     await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "global", off: false });
     expect(await gm()).toMatchObject({ off: false, offIn: [], applies: true });
+  });
+
+  test("an agent's stack is read with or without a chat, Apply now renews the open session's block and says so, and with none open says the next one opens as the files stand", async () => {
+    const withChat = await call<{ agent: string; parts: { kind: string; path: string; text?: string }[] }>("GET", `/api/v1/files-stack?agent=gm&chat=${CHAT}`);
+    expect(withChat.body.parts.find((p) => p.kind === "definition")).toMatchObject({ path: "@shipped/.agents/gm.md" });
+    await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, text: "---\nname: gm\ndescription: This chat's GM.\n---\nMine.\n" });
+    expect((await call<{ parts: { kind: string; path: string }[] }>("GET", `/api/v1/files-stack?agent=gm&chat=${CHAT}`)).body.parts.find((p) => p.kind === "definition")).toMatchObject({ path: "agents/gm.md" });
+    // With no chat, the stack the shipped and global levels give: no chat's own file is in it.
+    const without = await call<{ parts: { kind: string; path: string }[] }>("GET", "/api/v1/files-stack?agent=gm");
+    expect(without.status).toBe(200);
+    expect(without.body.parts.find((p) => p.kind === "definition")).toMatchObject({ path: "@shipped/.agents/gm.md" });
+    expect(without.body.parts.map((p) => p.path)).not.toContain("agents/gm.md");
+
+    expect((await call<{ session: string | null; note: string }>("POST", "/api/v1/files-apply", { chat: CHAT })).body).toMatchObject({ session: null, note: expect.stringContaining("No session") });
+    expect(applied).toEqual([]);
+    open = "s-1";
+    expect((await call<{ session: string | null }>("POST", "/api/v1/files-apply", { chat: CHAT })).body.session).toBe("s-1");
+    expect(applied).toEqual([CHAT]);
+  });
+
+  test("he makes a folder, renames, moves and copies his own files; a shipped or generated path is refused with why; a file moved into rules/ is a rule, which the answer says", async () => {
+    const moved = (from: string, to: string, kind: "move" | "copy" = "move") => call<{ path: string; file: TreeFileEntry | null; guidance: string | null }>("POST", `/api/v1/files-${kind}`, { chat: CHAT, from, to });
+    expect((await call<{ path: string }>("POST", "/api/v1/files-folder", { chat: CHAT, path: "skills/harbor" })).body).toEqual({ path: "skills/harbor" });
+    expect((await readdir(join(chatFolder, "skills", "harbor"))).length).toBe(0);
+    expect((await call("POST", "/api/v1/files-folder", { chat: CHAT, path: "@shipped/.rules/mine" })).status).toBe(403);
+
+    await call("PUT", "/api/v1/files/draft.md", { level: "chat", chat: CHAT, text: "---\ndescription: Be kind.\nagents: all\n---\nBe kind.\n" });
+    const rule = await moved("draft.md", "rules/kind.md");
+    expect(rule.body).toMatchObject({ path: "rules/kind.md", guidance: "rules", file: { item: "rules/kind", applies: true } });
+    expect((await listing()).has("draft.md")).toBe(false);
+    const copy = await moved("rules/kind.md", "@global/.rules/kind.md", "copy");
+    expect(copy.body).toMatchObject({ path: "@global/.rules/kind.md", guidance: "rules", file: { level: "global" } });
+    expect(await readFile(join(app.paths.files, ".rules", "kind.md"), "utf8")).toContain("Be kind.");
+    expect((await moved("rules/kind.md", "@global/.rules/kind.md", "copy")).status).toBe(409);
+
+    // A folder is renamed whole, and goes nowhere inside itself.
+    const folder = await moved("skills/harbor", "skills/dock");
+    expect(folder.body).toMatchObject({ path: "skills/dock", file: null, guidance: "skills" });
+    expect((await moved("skills/dock", "skills/dock/in")).status).toBe(409);
+
+    // Nothing shipped or generated is touched, or taken as a place.
+    await mkdir(join(chatFolder, "sessions", "s1"), { recursive: true });
+    await writeFile(join(chatFolder, "sessions", "s1", "s1.jsonl"), "{}\n");
+    for (const [from, to] of [["@shipped/.agents/gm.md", "agents/gm.md"], ["sessions/s1/s1.jsonl", "notes.md"], ["rules/kind.md", "@shipped/.rules/kind.md"], ["rules/kind.md", "sessions/s1/kind.md"]] as const) {
+      expect({ from, to, status: (await moved(from, to)).status }).toEqual({ from, to, status: 403 });
+    }
+    expect((await moved("rules/none.md", "rules/other.md")).status).toBe(404);
+  });
+
+  test("a chat RPE has not played yet has its levels on the Files page: listing it places its folders, and writing its WORLD.md leaves the chat's file for its first turn", async () => {
+    const ghost = "chat-lamp";
+    expect(await app.db.query("SELECT 1 FROM tree_chat WHERE chat = ?").get(ghost)).toBeNull();
+    const listed = await call<{ files: TreeFileEntry[] }>("GET", `/api/v1/files?chat=${ghost}`);
+    expect(listed.status).toBe(200);
+    const folders = new TreeChats(app.db, app.writes, app.paths.files).folders(OWNER, ghost);
+    expect(folders).not.toBeNull();
+    const lamp = join(app.paths.files, CHATS_FOLDER, folders?.character ?? "", folders?.chat ?? "");
+    expect((await readdir(lamp)).sort()).toContain("rules");
+    const written = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files/WORLD.md", { level: "chat", chat: ghost, text: "# A quiet lamp\n" });
+    expect(written.body.file).toMatchObject({ path: "WORLD.md", level: "chat" });
+    expect(await readFile(join(lamp, "WORLD.md"), "utf8")).toBe("# A quiet lamp\n");
+    // Its window setting, written before it is played, is its own RPE.yml.
+    await call("PUT", "/api/v1/files/RPE.yml", { level: "chat", chat: ghost, text: "retention:\n  turnFolders: 7\n" });
+    expect(await readFile(join(lamp, "RPE.yml"), "utf8")).toContain("turnFolders: 7");
   });
 
   test("a page reaches nothing outside the tree, writes no shipped or generated file, and without a page's token gets nothing", async () => {

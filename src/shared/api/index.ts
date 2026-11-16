@@ -19,6 +19,17 @@ export interface AgentRef {
   plays?: string;
 }
 
+/** The chat whose open session starts its opening block afresh. */
+export interface ApplyNowAsk {
+  chat: string;
+}
+
+/** What "Apply now" did: the session whose opening block starts afresh with the next run of each agent, or none when no session is open, and what that means in words. */
+export interface ApplyNowReply {
+  session: string | null;
+  note: string;
+}
+
 /** Whether RPE took the build, and where it stands, in words. */
 export interface Arrived {
   /** Whether RPE took the build: every file matched, and it started. */
@@ -463,6 +474,21 @@ export type FactSource = "prose" | "lore" | "author" | "gm" | "character" | "pla
 /** How sure a value or a fact is. */
 export type FactStanding = "established" | "proposed" | "assumed";
 
+/** A file or folder of the user's to rename, move or copy: its path in the chat's view, and the path it goes to, which nothing stands at; a chat's level names the chat. */
+export interface FileMoveAsk {
+  chat?: string | null;
+  from: string;
+  to: string;
+}
+
+/** Where a file or folder went: its path, the file as the listing now shows it (none for a folder), and the kind of guidance it now is when it went into a folder of one. */
+export interface FileMovedReply {
+  path: string;
+  file: TreeFileRow | null;
+  /** The kind of guidance the place is a folder of: a file moved into `rules/` is a rule; null for any other. */
+  guidance: GuidanceKind | null;
+}
+
 /** One file of a turn's folder, by its path below the folder, as text. */
 export interface FileReply {
   name: string;
@@ -508,6 +534,12 @@ export interface FoldDifference {
   kept: boolean;
 }
 
+/** A folder of the user's to make, by its path in the chat's view; a chat's level names the chat. */
+export interface FolderAsk {
+  chat?: string | null;
+  path: string;
+}
+
 /** One entry of a turn's folder: its path below the folder, its size (a folder's is what its files hold), and whether it is a folder. */
 export interface FolderEntry {
   name: string;
@@ -521,6 +553,9 @@ export interface FolderReply {
   /** How the file host stopped short of the whole folder; absent when it listed it all. */
   stopped?: FindStopped;
 }
+
+/** A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools. */
+export type GuidanceKind = "agents" | "skills" | "rules" | "hooks" | "prompts" | "tools";
 
 /** An entry of the Author's horizon, as the store keeps it: as the Author wrote it, with the level of the world it names now (none: words that name nothing). */
 export interface HorizonEntryRow {
@@ -2098,12 +2133,52 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** "Apply now": starts the opening block of the chat's open session afresh from the files as they stand, there and then (the next run of each agent makes it); says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it. */
+  "POST /api/v1/files-apply": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: ApplyNowAsk;
+    reply: ApplyNowReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Copies a file or folder of the user's to a path nothing stands at (the copy of a folder leaves its links out); a file copied into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again. */
+  "POST /api/v1/files-copy": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: FileMoveAsk;
+    reply: FileMovedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** A file's difference from the shipped file of its name, and what the updates that changed the shipped file since it was written changed of it, together and one by one. */
   "GET /api/v1/files-diff/*": {
     params: { "*": string };
     query: { chat?: string };
     body: undefined;
     reply: TreeDiffReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Makes a folder of the user's, and the folders above it, at a path of a chat's view (a never-played chat is placed first); never a shipped one, or one RPE makes again. */
+  "POST /api/v1/files-folder": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: FolderAsk;
+    reply: { path: string };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Renames or moves a file or folder of the user's to a path nothing stands at; a file moved into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again. */
+  "POST /api/v1/files-move": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: FileMoveAsk;
+    reply: FileMovedReply;
     paged: false;
     long: false;
     joined: false;
@@ -2128,10 +2203,10 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The exact stack an agent gets in a chat, part by part, with the file each comes from. */
+  /** The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; with no chat, the stack the shipped and global levels give. */
   "GET /api/v1/files-stack": {
     params: Record<string, never>;
-    query: { chat: string; agent: string };
+    query: { chat?: string; agent: string };
     body: undefined;
     reply: StackReply;
     paged: false;
