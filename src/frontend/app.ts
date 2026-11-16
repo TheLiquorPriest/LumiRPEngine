@@ -346,6 +346,8 @@ export interface MapHand {
   paint(chat: ChatId, place: string, strokes: readonly MapStroke[]): Promise<MapWrote>;
   lay(chat: ChatId, place: string, laying: MapLaying): Promise<MapWrote>;
   undo(chat: ChatId, edit: string): Promise<void>;
+  /** How the chat's map shows what its character knows: Known, or Fog; the chat's own setting (`map.display`), in force at once. */
+  display(chat: ChatId, display: "knowledge" | "fog"): Promise<void>;
 }
 
 export interface App {

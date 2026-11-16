@@ -29,5 +29,9 @@ export function keptMapHand(client: Pick<RpeClient, "call">, changed: () => void
       await client.call("POST /api/v1/chats/:chat/edits/:edit/undo", { chat, edit });
       changed();
     },
+    async display(chat, display) {
+      await client.call("PUT /api/v1/settings", {}, { body: { level: "chat", chat, key: "map.display", value: display } });
+      changed();
+    },
   };
 }

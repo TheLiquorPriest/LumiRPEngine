@@ -16,6 +16,7 @@ import type { MapDisplay } from "../../../shared/world";
 import type { MapPlaceView, MapScopeView } from "../core/map-scope";
 import type { CanvasPalette } from "./canvas-theme";
 import { canvasPalette } from "./canvas-theme";
+import { paintScene } from "./map-pieces";
 import { controlBoxes, LABEL_PAD, LINE, placeLabels, type PlacedLabel } from "./labels";
 import { paintWalls, thinWalls, wallKindOf, wallPlan, type WallCell, type WallGrid, type WallPlan } from "./map-walls";
 
@@ -90,6 +91,8 @@ export interface DrawOptions {
   display: MapDisplay;
   /** A cell picked on the grid, outlined. */
   cell: { x: number; y: number } | null;
+  /** A piece of the grid picked (its id): drawn outlined. */
+  piece: string | null;
 }
 
 /** Whether a place is known of but never visited, and not where the POV is: heard of, or under fog. */
@@ -206,8 +209,9 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
     g.setLineDash([]);
     g.globalAlpha = 1;
   }
-  // Things lying in cells: a small diamond each.
-  for (const item of grid.items ?? []) {
+  // Everyone and everything on the grid where the view puts them; a grid with no scene keeps a diamond for each thing lying in a cell.
+  if (grid.pieces !== undefined || grid.doors !== undefined || grid.dark !== undefined) paintScene(g, grid, unit, t, palette, opts.piece);
+  for (const item of grid.pieces === undefined ? (grid.items ?? []) : []) {
     const c = toScreen(t, { x: (item.x + 0.5) * unit, y: (item.y + 0.5) * unit });
     const r = Math.max(4, size * 0.24);
     g.beginPath();

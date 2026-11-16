@@ -15,16 +15,20 @@ import { PLACE_MARK_LABEL, PLACE_MARKS } from "../../../shared/maps";
 import { pushSheet, useApp } from "../../../frontend/app";
 import { Empty, IconButton, JsonView, List, ListRow, Section, Seg, useBusy } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
+import { isRecord } from "../../../shared/json";
+import type { MapWrote } from "../../../shared/api";
 import { Icon } from "../../../ui/icons";
 import { fit, GestureTracker, hitTest, IDENTITY, toWorld, zoomAt } from "../../../frontend/map-math";
 import type { Point, Transform } from "../../../frontend/map-math";
 import type { PanelProps } from "../../../frontend/registry";
 import { travelRequest } from "../../../frontend/requests";
 import { useSelect } from "../../../ui/store";
-import type { MapPlaceView, MapScopeView, MapView } from "../core/view";
+import type { MapPieceView, MapPlaceView, MapScopeView, MapView } from "../core/view";
 import { useThemeVersion } from "./canvas-theme";
 import { labelAt, labelPadding, type PlacedLabel } from "./labels";
 import { drawScope, MARK_ICON, placePoint, scopeBounds, unitOf } from "./map-draw";
+import { isBeing, pieceAt, piecesAt } from "./map-pieces";
+import { LayGrid, legendOf, MapTools, tapped, UndoBar, type LegendSymbol, type MapTool } from "./map-tools";
 import { mapFocus, MODE_ICON, PlaceDetail, placeStatus } from "./place";
 import { decodeMapView } from "./view";
 
@@ -52,6 +56,14 @@ export interface MapStageProps {
   onCell?(cell: Cell): void;
   /** A picked cell, outlined. */
   cell?: Cell | null;
+  /** A tap on a square tries the grid before the places on it (the edit tools). */
+  cellsFirst?: boolean;
+  /** The piece picked (its id): drawn outlined, and, held, carried to a square. */
+  piece?: string | null;
+  /** A tap on a piece of the grid, with the square it stands on; without it a tap on a piece is a tap on its square. */
+  onPiece?(piece: MapPieceView, cell: Cell): void;
+  /** The picked piece carried to another square. */
+  onMove?(piece: MapPieceView, cell: Cell): void;
   display: MapDisplay;
   /** Screen px along the top covered by bars over the map. */
   top: number;
@@ -76,7 +88,10 @@ export function MapStage(props: MapStageProps) {
   const [transform, setTransform] = useState<Transform>(IDENTITY);
   const labels = useRef<PlacedLabel[]>([]);
   const theme = useThemeVersion();
-  const options = { selected: props.selected, here: props.here, inside: props.inside, top: props.top, display: props.display, cell: props.cell ?? null };
+  // A picked piece carried to a square: where it would land is outlined while it is held.
+  const dragging = useRef<{ id: number; piece: MapPieceView } | null>(null);
+  const [target, setTarget] = useState<Cell | null>(null);
+  const options = { selected: props.selected, here: props.here, inside: props.inside, top: props.top, display: props.display, cell: target ?? props.cell ?? null, piece: props.piece ?? null };
 
   const refit = () => {
     const el = canvas.current;
@@ -113,7 +128,7 @@ export function MapStage(props: MapStageProps) {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => paint(transform), [scope, transform, props.selected, props.here, props.inside, props.top, props.display, props.cell, theme]);
+  useEffect(() => paint(transform), [scope, transform, props.selected, props.here, props.inside, props.top, props.display, props.cell, props.piece, target, theme]);
 
   // A dot first (48 px across), then a name (at least 40 px tall).
   const placeAt = (p: Point): MapPlaceView | null => {
@@ -137,6 +152,9 @@ export function MapStage(props: MapStageProps) {
     return cell.x >= 0 && cell.y >= 0 && cell.x < grid.width && cell.y < grid.height ? cell : null;
   };
 
+  // The piece under a screen point (a piece's square or a badge on it), on a grid that draws pieces.
+  const pieceTapped = (p: Point): MapPieceView | null => (scope.grid ? pieceAt(scope.grid, unitOf(scope), tracker.current.transform, p) : null);
+
   const zoom = (factor: number) => {
     const el = canvas.current;
     if (!el) return;
@@ -158,11 +176,22 @@ export function MapStage(props: MapStageProps) {
           const el = canvas.current;
           if (!el) return;
           el.setPointerCapture(event.pointerId);
+          // The picked piece, pressed on, is carried to a square and not the map with it.
+          const held = props.piece && props.onMove ? pieceTapped(localPoint(el, event)) : null;
+          if (held && held.id === props.piece) {
+            dragging.current = { id: event.pointerId, piece: held };
+            return;
+          }
           tracker.current.down(event.pointerId, localPoint(el, event), event.timeStamp);
         }}
         onPointerMove={(event) => {
           const el = canvas.current;
           if (!el) return;
+          if (dragging.current?.id === event.pointerId) {
+            const over = cellAt(localPoint(el, event));
+            setTarget((was) => (was?.x === over?.x && was?.y === over?.y ? was : over));
+            return;
+          }
           const before = tracker.current.transform;
           const after = tracker.current.move(event.pointerId, localPoint(el, event)).transform;
           if (after === before) return;
@@ -172,11 +201,21 @@ export function MapStage(props: MapStageProps) {
         onPointerUp={(event) => {
           const el = canvas.current;
           if (!el) return;
+          const drag = dragging.current;
+          if (drag?.id === event.pointerId) {
+            dragging.current = null;
+            setTarget(null);
+            const cell = cellAt(localPoint(el, event));
+            if (cell && (cell.x !== drag.piece.x || cell.y !== drag.piece.y)) props.onMove?.(drag.piece, cell);
+            return;
+          }
           const result = tracker.current.up(event.pointerId, localPoint(el, event), event.timeStamp);
           if (!result.tap) return;
-          const place = placeAt(result.tap);
+          const place = props.cellsFirst && props.onCell && cellAt(result.tap) ? null : placeAt(result.tap);
+          const piece = place || !props.onPiece ? null : pieceTapped(result.tap);
           const cell = place || !props.onCell ? null : cellAt(result.tap);
-          if (cell && props.onCell) props.onCell(cell);
+          if (piece && cell && props.onPiece) props.onPiece(piece, cell);
+          else if (cell && props.onCell) props.onCell(cell);
           else props.onTap(place);
         }}
         onPointerCancel={(event) => tracker.current.cancel(event.pointerId)}
@@ -206,6 +245,16 @@ export function MapPanel(props: PanelProps) {
 
 /** The newest place-sheet request any map has taken: a map opened later doesn't take an old one again. */
 let takenFocus = 0;
+
+/** What a piece of the grid is, in a line: its kind, where it lies, its footprint, what it blocks and its state. */
+function pieceWords(piece: MapPieceView, all: readonly MapPieceView[]): string {
+  const parts = [piece.kind];
+  if (piece.on !== undefined) parts.push(`${piece.within ? "in" : "on"} ${all.find((o) => o.id === piece.on)?.name ?? "something"}`);
+  if (piece.size !== undefined) parts.push(`${piece.size[0]} by ${piece.size[1]} squares`);
+  if (piece.blocks?.way === true) parts.push("blocks the way");
+  if (piece.state !== undefined) parts.push(piece.state);
+  return parts.filter((p) => p !== "").join(" · ");
+}
 
 /** The scope's known places as a list: where the POV is first, then by name, each with its quickest way there. */
 function PlaceList(props: { view: MapView; scope: MapScopeView; top: number; onPick(place: MapPlaceView): void }) {
@@ -245,6 +294,15 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
   const crumbs = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(52);
+  // What stands on the grid and what the owner's hand is doing on it.
+  const [piece, setPiece] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [laying, setLaying] = useState(false);
+  const [tool, setTool] = useState<MapTool>("square");
+  const [symbol, setSymbol] = useState<string | null>(null);
+  const [symbols, setSymbols] = useState<LegendSymbol[]>([]);
+  const [anchor, setAnchor] = useState<Cell | null>(null);
+  const [undo, setUndo] = useState<{ edit: string; words: string } | null>(null);
   // In the map overlay there's no sheet stack: a place's details dock over the map, and the overlay
   // frame has its own full screen and close. Known before the first effects run.
   const overlayRef = useRef(false);
@@ -312,14 +370,97 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
   useEffect(() => {
     if (dockKey !== null) dock.current?.focus({ preventScroll: true });
   }, [dockKey]);
+  // The map's own symbols, read when the tools are taken up: what a square can be changed to.
+  useEffect(() => {
+    if (!editing || !app.maps || scope?.id == null) return;
+    let live = true;
+    app.maps.grid(props.chatId, scope.id).then(
+      (g) => {
+        if (live) setSymbols(legendOf(g.legend));
+      },
+      (error: unknown) => app.toast(error instanceof Error ? error.message : String(error), "error"),
+    );
+    return () => {
+      live = false;
+    };
+  }, [editing, scope?.id, props.chatId]);
   if (!scope) return <Empty icon="map">No places on the map yet.</Empty>;
   const display = view.display;
-  const lying = (c: Cell | null) => (c && grid?.items ? grid.items.filter((i) => i.x === c.x && i.y === c.y) : []);
+  const lying = (c: Cell | null) => (c && grid?.items && grid.pieces === undefined ? grid.items.filter((i) => i.x === c.x && i.y === c.y) : []);
   const things = lying(cell);
   const open = (id: string | null) => {
     setOpened(id);
     setSelected(null);
     setCell(null);
+  };
+  // What stands on the tapped square, and the sheet each opens.
+  const hand = app.maps;
+  const placeId = scope.id;
+  const cellPieces = cell && grid ? piecesAt(grid, cell) : [];
+  // A being has a person's sheet and a thing an item's, where the page has them.
+  const sheetKindOf = (p: MapPieceView): "person" | "item" | null => {
+    const kind = isBeing(p.kind) ? "person" : "item";
+    return app.catalog.sheets.has(kind) ? kind : null;
+  };
+  const openPiece = (p: MapPieceView) => {
+    const kind = sheetKindOf(p);
+    if (kind === null) return;
+    if (overlay) app.overlays.closeMap();
+    app.ui.update((ui) => pushSheet(ui, { kind, id: p.id }));
+  };
+  const told = (error: unknown) => app.toast(error instanceof Error ? error.message : String(error), "error");
+  // A change of his on the grid, once made: what RPE found that does not add up is said, and the change can be taken back.
+  const done = (wrote: MapWrote, words: string) => {
+    setUndo(wrote.undo === null ? null : { edit: wrote.undo, words });
+    const found = wrote.advised.flatMap((a) => (isRecord(a) && typeof a.reason === "string" ? [a.reason] : []));
+    if (found.length > 0) app.toast(found.join(" "), "info");
+  };
+  const move = (p: MapPieceView, to: Cell) => {
+    if (!hand || placeId === null) return;
+    void run(async () => {
+      try {
+        done(await hand.move(props.chatId, placeId, p.id, [to.x + 1, to.y + 1]), `Moved ${p.name}.`);
+      } catch (error) {
+        told(error);
+      }
+    });
+  };
+  const paint = (c: Cell) => {
+    if (!hand || placeId === null || symbol === null) return;
+    const next = tapped(tool, symbol, anchor, c);
+    setAnchor(next.anchor);
+    const stroke = next.stroke;
+    if (stroke === null) return;
+    void run(async () => {
+      try {
+        done(await hand.paint(props.chatId, placeId, [stroke]), "Squares changed.");
+      } catch (error) {
+        told(error);
+      }
+    });
+  };
+  const lay = (laying: { width: number; height: number; feet: number }) => {
+    if (!hand || placeId === null) return;
+    void run(async () => {
+      try {
+        done(await hand.lay(props.chatId, placeId, { ...laying, title: scope.name }), `A grid laid for ${scope.name}.`);
+        setLaying(false);
+      } catch (error) {
+        told(error);
+      }
+    });
+  };
+  const undoLast = () => {
+    if (!hand || undo === null) return;
+    const edit = undo.edit;
+    void run(async () => {
+      try {
+        await hand.undo(props.chatId, edit);
+        setUndo(null);
+      } catch (error) {
+        told(error);
+      }
+    });
   };
   const place = selected ? (scope.places.find((p) => p.id === selected) ?? null) : null;
   // A place's details: its sheet in the drawer, a dock over the map in the overlay.
@@ -337,7 +478,7 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
     // Back to the overlay, so the next Escape closes it.
     root.current?.closest<HTMLElement>("[data-lre-overlay]")?.focus({ preventScroll: true });
   };
-  const cellTitle = things.length > 0 ? things.map((t) => t.name).join(", ") : "This spot";
+  const cellTitle = [...cellPieces.map((p) => p.name), ...things.map((t) => t.name)].join(", ") || "This spot";
   // The marks this scope's places carry, in the legend's order: one row each.
   const marks = PLACE_MARKS.filter((m) => scope.places.some((p) => p.mark === m));
   return (
@@ -352,14 +493,32 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
           grid
             ? (c) => {
                 setSelected(null);
-                setCell(walkable || lying(c).length > 0 ? c : null);
+                if (editing) {
+                  paint(c);
+                  return;
+                }
+                const here = piecesAt(grid, c);
+                setPiece(here.some((p) => p.id === piece) ? piece : (here[0]?.id ?? null));
+                setCell(walkable || lying(c).length > 0 || here.length > 0 ? c : null);
               }
             : undefined
         }
-        cell={cell}
+        cellsFirst={editing}
+        piece={editing ? null : piece}
+        onPiece={
+          editing
+            ? undefined
+            : (p, c) => {
+                setSelected(null);
+                setPiece(p.id);
+                setCell(c);
+              }
+        }
+        onMove={hand && placeId !== null && !editing ? move : undefined}
+        cell={cell ?? anchor}
         display={display}
         top={top}
-        hideZoom={listing || dockedPlace !== null || cell !== null}
+        hideZoom={listing || dockedPlace !== null || cell !== null || editing}
       />
       <div class="lre-world-mapbar" ref={bar}>
         <nav class="lre-world-crumbs" ref={crumbs} aria-label="Map levels">
@@ -377,6 +536,20 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
           </span>
         </nav>
         <IconButton icon="list" label="List of places" variant="secondary" pressed={listing} onClick={() => setListing(!listing)} />
+        {hand && placeId !== null && grid ? (
+          <IconButton
+            icon="edit"
+            label="Change squares"
+            variant="secondary"
+            pressed={editing}
+            onClick={() => {
+              setEditing(!editing);
+              setAnchor(null);
+              setCell(null);
+            }}
+          />
+        ) : null}
+        {hand && placeId !== null && !grid ? <IconButton icon="plus" label="Lay a grid" variant="secondary" pressed={laying} onClick={() => setLaying(!laying)} /> : null}
         {!overlay ? <IconButton icon="expand" label="Full screen" variant="secondary" onClick={() => void app.overlays.openMap()} /> : null}
       </div>
       {listing ? (
@@ -392,7 +565,7 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
       ) : null}
       {!listing && dockedPlace === null && cell === null ? (
         <div class="lre-world-mode">
-          <Seg<MapDisplay> label="The map shows" value={display} options={DISPLAYS} disabled={busy} onChange={(next) => run(() => app.request({ type: "lre.map", chatId: props.chatId, display: next }))} />
+          <Seg<MapDisplay> label="The map shows" value={display} options={DISPLAYS} disabled={busy} onChange={(next) => run(async () => (hand ? hand.display(props.chatId, next).catch(told) : app.request({ type: "lre.map", chatId: props.chatId, display: next })))} />
           {marks.length > 0 ? (
             <ul class="lre-world-legend" aria-label="Marks" data-lre-map-legend>
               {marks.map((mark) => (
@@ -412,6 +585,25 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
             <IconButton icon="close" label="Close" onClick={() => setCell(null)} />
           </div>
           {things.length > 0 ? <span class="lre-muted">{things.length === 1 ? "It lies here." : "They lie here."}</span> : null}
+          {cellPieces.length > 0 ? (
+            <div data-lre-map-pieces>
+              <List>
+                {cellPieces.map((p) => (
+                  <ListRow
+                    key={p.id}
+                    id={p.id}
+                    icon={isBeing(p.kind) ? "user" : "box"}
+                    title={p.name}
+                    subtitle={pieceWords(p, grid?.pieces ?? [])}
+                    current={p.id === piece}
+                    chevron={sheetKindOf(p) !== null}
+                    onClick={() => (sheetKindOf(p) !== null ? openPiece(p) : setPiece(p.id))}
+                  />
+                ))}
+              </List>
+              {hand && piece !== null && cellPieces.some((p) => p.id === piece) && !editing ? <span class="lre-muted">Drag it to another square to move it.</span> : null}
+            </div>
+          ) : null}
           {walkable ? (
             <div data-lre-map-walk>
               <List>
@@ -435,6 +627,9 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
           ) : null}
         </div>
       ) : null}
+      {undo ? <UndoBar undo={undo} busy={busy} onUndo={undoLast} /> : null}
+      {editing && placeId !== null && grid ? <MapTools tool={tool} symbol={symbol} symbols={symbols} anchor={anchor} busy={busy} undo={null} onTool={(next) => { setTool(next); setAnchor(null); }} onSymbol={setSymbol} onUndo={undoLast} onClose={() => { setEditing(false); setAnchor(null); }} /> : null}
+      {laying && placeId !== null && !grid ? <LayGrid place={placeId} name={scope.name} busy={busy} onLay={lay} /> : null}
       {dockedPlace ? (
         <div ref={dock} tabIndex={-1} class="lre-world-dock" data-lre-map-dock={dockedPlace.id} role="group" aria-label={dockedPlace.name} onKeyDown={dockKeys(() => setSelected(null))}>
           <div class="lre-world-dock-head">
