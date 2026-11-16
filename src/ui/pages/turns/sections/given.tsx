@@ -3,7 +3,8 @@ import { Button } from "../../../atoms";
 import type { RunNode } from "../../../live-model";
 import { EachRun } from "../parts";
 import { Folder } from "../folder";
-import type { TurnSection } from "../types";
+import { LoreMapRows, NAMED_PARTS, PromptBySlice } from "../prompt-parts";
+import type { TurnParts, TurnSection } from "../types";
 
 /** What a run's lead was given, by the names it began work with. */
 function Given(props: { run: RunNode }) {
@@ -53,13 +54,34 @@ function TurnLore(props: { lore: TurnReply["lore"] }) {
 }
 
 
+/** The turn's folder's files the Author's prompt and briefing are made of, each opened on demand by the name it is given. */
+function NamedParts(props: { folder: TurnParts["folder"]; onOpenFile(name: string): void }) {
+  const files = (props.folder.files ?? []).filter((f) => !f.folder && NAMED_PARTS[f.name] !== undefined);
+  if (files.length === 0) return null;
+  return (
+    <div class="lre-stack" data-named-parts>
+      <span class="rpe-caption">Named parts</span>
+      <div class="rpe-files">
+        {files.map((f) => (
+          <Button key={f.name} small kind="ghost" current={props.folder.open?.name === f.name} onClick={() => props.onOpenFile(f.name)}>
+            {NAMED_PARTS[f.name]}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export const section: TurnSection = {
   id: "given",
   order: 50,
   title: "What the Author was given",
   spoiler: true,
-  body: ({ turn, runs, folder, onOpenFile, onOpenRequest, onCloseFile }) => (
+  body: ({ turn, runs, folder, lead, loreRows, onOpenFile, onOpenRequest, onCloseFile }) => (
     <div class="lre-stack">
+      <PromptBySlice prompt={turn.prompt} lead={lead} />
+      <LoreMapRows rows={loreRows} />
+      <NamedParts folder={folder} onOpenFile={onOpenFile} />
       <EachRun
         runs={runs}
         views={turn.runs}

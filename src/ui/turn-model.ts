@@ -1,7 +1,8 @@
 // A turn's timings as the Turn page says them: each moment with the time since the one before it, and
-// the spans between them that tell where the time went. The span before the first words is what writing
-// the intent record costs before the reply begins (plan §10.3), shown beside the gate. And the turn as
-// its page shows it while it runs: its last read, with what the live road has said since.
+// the spans between them that tell where the time went, each under its own name: the wait for the turn
+// before, the intent record's own time (plan §10.3) and, apart from it, the rest of the time before the
+// first words. And the turn as its page shows it while it runs: its last read, with what the live road
+// has said since.
 
 import type { TurnReply, RunShown, TurnMoments } from "../shared/api";
 import { addUsage, type RunNode, runTotals } from "./live-model";
@@ -68,14 +69,24 @@ export interface Span {
   ms: number;
 }
 
-/** Where the time went, for each span whose two ends both happened. */
+/**
+ * Where the time went, each span under its own name, for each whose two ends happened: the wait for the turn before and intake's own
+ * steps (the run's `received` to `started`, which the wait is no part of), the intent record's own time, and apart from it the rest of
+ * the time before the first words (the calls made before the reply: a gap check, a read, a sub-agent). No span is called what the
+ * record cost.
+ */
 export function spansOf(timings: TurnMoments): Span[] {
   const span = (label: string, from: number | null, to: number | null): Span[] => (from === null || to === null ? [] : [{ label, ms: to - from }]);
+  const waited = timings.wait ?? [];
+  const record = timings.intent === null || timings.intent.to === null ? null : timings.intent.to - timings.intent.from;
+  const beforeWords = timings.started === null || timings.firstWord === null ? null : timings.firstWord - timings.started;
   return [
-    ...span("Before the lead began", timings.received, timings.started),
-    ...span("Before the first words", timings.started, timings.firstWord),
+    ...(waited.length === 0 ? [] : [{ label: "Waiting for the turn before", ms: waited.reduce((sum, w) => sum + (w.to - w.from), 0) }]),
+    ...(timings.intake === null ? span("Before the lead began", timings.received, timings.started) : timings.intake.map((step) => ({ label: `Intake: ${step.step}`, ms: step.to - step.from }))),
+    ...(record === null ? [] : [{ label: "The intent record's own time", ms: record }]),
+    ...(beforeWords === null ? [] : [{ label: record === null ? "Before the first words" : "Before the first words, apart from the intent record (the calls made before the reply)", ms: Math.max(0, beforeWords - (record ?? 0)) }]),
     ...span("Writing the reply", timings.firstWord, timings.released),
-    ...span("After the reply", timings.released, timings.ended),
+    ...span("After the reply", timings.finished ?? timings.released, timings.ended),
     ...span("In all", timings.received, timings.ended ?? timings.released),
   ];
 }

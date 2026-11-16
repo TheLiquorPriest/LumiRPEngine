@@ -1,7 +1,7 @@
 // The Turn page's shared shapes: what a section is drawn from, what a section is, and the turn's folder as the page holds it.
 
 import type { ComponentChildren } from "preact";
-import type { FolderEntry, RequestReply, TurnReply } from "../../../shared/api";
+import type { FolderEntry, RequestReply, TurnLoreRow, TurnReply } from "../../../shared/api";
 import type { RunNode } from "../../live-model";
 import type { NoticeLines } from "../../notice-words";
 
@@ -36,6 +36,10 @@ export interface TurnParts {
   folder: FolderShown;
   /** The notices file's words, for the records of a run's trace that are notices. */
   notices?: NoticeLines;
+  /** The lead's first request rebuilt as it was sent, whose prompt messages hold the text of each slice; null until read, and where it cannot be shown. */
+  lead?: RequestShown | null;
+  /** The lore Lumiverse activated for the turn's prompt, entry by entry; null until read. */
+  loreRows?: readonly TurnLoreRow[] | null;
   onOpenFile(name: string): void;
   onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;

@@ -7,14 +7,14 @@ import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { TurnReply } from "../../src/shared/api";
 import { applyRead, EMPTY_LIVE, runsOf } from "../../src/ui/live-model";
+import { RpeError } from "../../src/ui/client";
 import { NO_FOLDER, NO_SETTLE, newestOnPath, type SettleShown, settleNow, TurnsView, type TurnsViewProps, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
 import { askingClient, settle } from "./asking";
 import { CHAT, EARLIER, turnAt } from "./recorded";
 import { banners, elements, expand, press, textOf } from "./vnodes";
 
 const REFUSED = "A run of this chat is going on: settle it once that ends.";
-/** The turns the list reads at a time. */
-const TURNS_PAGE = 30;
+
 
 function turns(over: Partial<TurnsViewProps>) {
   const pressed: unknown[] = [];
@@ -120,25 +120,20 @@ describe("Settle now", () => {
     expect(button(none.tree, "Settle now")).toBeUndefined();
   });
 
-  test("the Turn page's Settle now goes with the newest turn on the chat's path, as the route settles it: after a swipe back to an earlier swipe the newest run's turn is off the path, and the list is read further back past it", async () => {
-    const [swipe, earlier, before] = EARLIER as [TurnsViewProps["turns"][number], TurnsViewProps["turns"][number], TurnsViewProps["turns"][number]];
-    // The player swiped back from turn-30 to turn-29's reply: turn-30 is the newest run's turn, and off the path now.
-    const back = [{ ...swipe, onPath: false }, { ...earlier, onPath: true }, before];
+  test("the Turn page's Settle now goes with the newest turn on the chat's path, read at once, however far back it was swiped; a chat with none has none", async () => {
     const { client, asked } = askingClient();
-    const one = newestOnPath(client, CHAT, TURNS_PAGE);
-    expect(asked[0]).toMatchObject({ key: "GET /api/v1/chats/:chat/turns", params: { chat: CHAT }, query: { limit: TURNS_PAGE } });
-    asked[0]?.answer({ turns: back, more: false });
-    expect((await one)?.id).toBe("turn-29");
+    const one = newestOnPath(client, CHAT);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ key: "GET /api/v1/chats/:chat/newest", params: { chat: CHAT } });
+    asked[0]?.answer({ ...turnAt(), id: "turn-29", status: "released" });
+    expect(await one).toEqual({ id: "turn-29", status: "released" });
 
-    const paged = newestOnPath(client, CHAT, TURNS_PAGE);
-    asked[1]?.answer({ turns: back.slice(0, 1), more: true });
-    await settle();
-    expect(asked[2]).toMatchObject({ query: { limit: TURNS_PAGE, before: "turn-30" } });
-    asked[2]?.answer({ turns: back.slice(1), more: false });
-    expect((await paged)?.id).toBe("turn-29");
-
-    const none = newestOnPath(client, CHAT, TURNS_PAGE);
-    asked[3]?.answer({ turns: back.slice(0, 1), more: false });
+    const none = newestOnPath(client, CHAT);
+    asked[1]?.fail(new RpeError(404, "Chat chat-calder has no turn of its own on its path."));
     expect(await none).toBeNull();
+    // Any other refusal is not a chat with none.
+    const refused = newestOnPath(client, CHAT);
+    asked[2]?.fail(new RpeError(500, "RPE could not read it."));
+    await expect(refused).rejects.toThrow("RPE could not read it.");
   });
 });

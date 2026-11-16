@@ -8,10 +8,10 @@
 // the Author settles an edit then, and nothing is written to the chat.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { SettleReply, TurnReply, TurnRow } from "../../../shared/api";
+import type { SettleReply, TurnLoreRow, TurnReply, TurnRow } from "../../../shared/api";
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
-import { replyOf, type RpeClient } from "../../client";
+import { replyOf, type RpeClient, RpeError } from "../../client";
 import { Badge, Banner, Button, Empty, Gated, PageHeader, Section } from "../../atoms";
 import { type RunNode, runsOf } from "../../live-model";
 import { NOTHING_WATCHED, onChatChange, watchTurn, type WatchLimits, type Watched } from "../../live-watch";
@@ -22,9 +22,10 @@ import { useUiSetting } from "../../ui-settings";
 import { counted, duration, errorWords, tokenWords, when } from "../../words";
 import type { PageEntry } from "../../page-entry";
 import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "../jobs";
+import { useRead } from "../../reading";
 import { readFolder } from "./folder";
 import { TURN_SECTIONS } from "./sections/list";
-import { type FolderShown, NO_FOLDER, type TurnParts, type TurnSection } from "./types";
+import { type FolderShown, NO_FOLDER, type RequestShown, type TurnParts, type TurnSection } from "./types";
 
 export { NO_FOLDER, readFolder, TURN_SECTIONS };
 export type { FolderShown, OpenShown, RequestShown, TurnParts, TurnSection } from "./types";
@@ -74,18 +75,14 @@ export function settleNow(client: Pick<RpeClient, "call">, chat: string, onChang
   );
 }
 
-/**
- * The newest turn on the chat's path, the one Settle now settles; null where the list holds none. The list is newest run first, and
- * after a swipe back to an earlier swipe its first turns are off the path: it is read a page at a time past them.
- */
-export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string, limit: number): Promise<TurnRow | null> {
-  let before: string | undefined;
-  for (;;) {
-    const list = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit, ...(before === undefined ? {} : { before }) } }));
-    const found = list.turns.find((t) => t.onPath);
-    if (found !== undefined) return found;
-    before = list.turns.at(-1)?.id;
-    if (!list.more || before === undefined) return null;
+/** The newest turn on the chat's path, the one Settle now settles, read at once; null where the chat has no turn of its own on its path. */
+export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string): Promise<Pick<TurnRow, "id" | "status"> | null> {
+  try {
+    const turn = replyOf(await client.call("GET /api/v1/chats/:chat/newest", { chat }));
+    return { id: turn.id, status: turn.status };
+  } catch (error) {
+    if (error instanceof RpeError && error.status === 404) return null;
+    throw error;
   }
 }
 
@@ -334,6 +331,10 @@ export interface TurnViewProps {
   onOpenFile(name: string): void;
   /** The notices file's words, for the records of a run's trace that are notices. */
   notices?: NoticeLines;
+  /** The lead's first request, rebuilt as it was sent, read once the spoiler gate is open; null until read. */
+  lead?: RequestShown | null;
+  /** The lore Lumiverse activated for the turn's prompt, entry by entry; null until read. */
+  loreRows?: readonly TurnLoreRow[] | null;
   onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
@@ -348,7 +349,7 @@ export function TurnView(props: TurnViewProps) {
   const kind = turn.runs.at(-1)?.kind ?? turn.kind;
   const status = statusWords(kind, turn.status);
   const failure = turn.error === null || (kind === "settle" && turn.status === "no-reply") ? null : replyErrorWords(turn.error, turn.status);
-  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
+  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
@@ -404,10 +405,9 @@ export function TurnPage(props: { chat: string; turn: string }) {
   const [folder, setFolder] = useState<FolderShown>(NO_FOLDER);
   const reader = useRef<{ open(name: string): void; openRequest(name: string, held: string | null): void; close(): void } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
-  const [newest, setNewest] = useState<TurnRow | null>(null);
+  const [newest, setNewest] = useState<Pick<TurnRow, "id" | "status"> | null>(null);
   const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
   const notices = useNoticeLines(chat);
-  const turnsAtATime = useUiSetting("turnsAtATime");
   // What the watch is held to is read when it is used, so a setting changed meanwhile holds at once.
   const limits = useRef<WatchLimits>({ renderMs: 0, keepRuns: 0, keepFailures: 0 });
   limits.current = { renderMs: useUiSetting("redrawMs"), keepRuns: useUiSetting("keepRuns"), keepFailures: useUiSetting("keepFailures") };
@@ -421,7 +421,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
     // Which turn is the newest on the chat's path, and whether a run of it goes on: Settle now is offered on that turn alone. Read again when a run begins or ends.
     let alive = true;
     const read = (): void => {
-      newestOnPath(app.client, chat, turnsAtATime).then(
+      newestOnPath(app.client, chat).then(
         (found) => {
           if (alive) setNewest(found);
         },
@@ -434,7 +434,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
       alive = false;
       off();
     };
-  }, [chat, turn, turnsAtATime]);
+  }, [chat, turn]);
   useEffect(() => {
     setFolder(NO_FOLDER);
     if (!gateOpen) return;
@@ -445,6 +445,20 @@ export function TurnPage(props: { chat: string; turn: string }) {
       reader.current = null;
     };
   }, [chat, turn, reads, gateOpen]);
+  // What the prompt's slices are made of: the lead's first request as it was sent, and the entries Lumiverse activated; read once the gate is open.
+  const firstRun = watched.detail?.runs[0];
+  const leadFile = firstRun?.requests[0]?.file ?? null;
+  const leadHeld = firstRun?.held ?? turn;
+  const lead = useRead(
+    gateOpen && leadFile !== null
+      ? async () => {
+          const { same, messages, tools } = replyOf(await app.client.call("GET /api/v1/chats/:chat/turns/:turn/requests/*", { chat, turn: leadHeld, "*": leadFile as string }));
+          return { same, messages, tools };
+        }
+      : null,
+    [chat, turn, leadHeld, leadFile, gateOpen],
+  );
+  const loreRead = useRead(gateOpen ? async () => replyOf(await app.client.call("GET /api/v1/chats/:chat/turns/:turn/lore", { chat, turn })).entries : null, [chat, turn, gateOpen, reads]);
   const runs = runsOf(watched.model, turn);
   const latest = watched.detail === null ? runs.at(-1) : latestOf(watched.detail, runs);
   const detail = watched.detail === null ? null : liveTurn(watched.detail, latest);
@@ -473,6 +487,8 @@ export function TurnPage(props: { chat: string; turn: string }) {
       gateOpen={gateOpen}
       folder={folder}
       notices={notices}
+      lead={lead.value}
+      loreRows={loreRead.value}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onBack={back}
