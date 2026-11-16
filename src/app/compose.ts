@@ -139,7 +139,21 @@ export function compose(options: ComposeOptions = {}): Composition {
   // His worlds, kept by the worlds area: Build edits them through its service, and a proposal for a world's entry is approved through its store, once mounted.
   // The chats that play his worlds are listed with Lumiverse's name for each, where RPE is set up for a Lumiverse.
   const worlds = worldsArea(() => ({ store: made().store, turning, chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null }));
-  const build = buildArea(() => ({ store: made().store, worlds: worlds.service(), guidance: RPE_GUIDANCE }));
+  const build = buildArea(() => ({
+    store: made().store,
+    worlds: worlds.service(),
+    guidance: RPE_GUIDANCE,
+    // His books for Build's lore: read as the lore reads them, an entry's fields written through the lore's one recorded writer, and a chat's messages as Lumiverse holds them.
+    lore: {
+      books,
+      writes: { edit: (user, entry, fields, revision) => proposals().edit(user, entry, fields, revision) },
+      messages: async (_user, chat) => {
+        const reads = lumiverse().reads;
+        const path = await reads.path(chat);
+        return path === null ? [] : (await reads.messages(chat, { from: 0, to: path.length })).map((m) => ({ id: m.id, role: m.role, text: m.text }));
+      },
+    },
+  }));
   const worldWrites = (): LoreWorldWrites => worldEntryWrites(worlds.service().worlds);
   // The agents' suggestions about lore, kept as proposals and written to his books only on his approval: one queue, made when first asked for.
   let proposed: LoreProposals | null = null;
@@ -297,8 +311,10 @@ export function compose(options: ComposeOptions = {}): Composition {
           rules: () => rules.list(at),
           definitions: () => definitions.list(at),
           stack: (agent) => definitions.stack(at, agent),
-          // What the files name that runs or calls out, the hooks in force among them, as RPH lists it: RPH lists no other file's problems for a host.
+          // What the files name that runs or calls out, the hooks in force among them, as RPH lists it.
           external: () => external.list(at),
+          // Every problem RPH finds in the files it reads for the view, a hooks file that will not parse among them.
+          problems: () => made().harness.problems(at),
         };
       },
       written: (saved) => listing.written(saved),
