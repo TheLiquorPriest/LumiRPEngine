@@ -202,6 +202,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       files: app.paths.files,
       user,
       chats,
+      // A grep's pattern runs on the worker pool, ended at `files.grepMs` even inside one line.
+      workers: app.workers,
       async turnFolder(scope) {
         const turn = scope.turn === undefined ? null : store.user(scope.user).turn(scope.turn);
         return turn === null || turn.chat !== scope.chat ? null : turnFolderName(turn.depth + 1, turn.id);

@@ -706,6 +706,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     else if (change.kind === "message-swiped" && change.updated === true) work = this.#edited(user, change.chat, change.message, null, change.shown);
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
     else if (change.kind === "lore-activated") work = this.#loreHeard(user, change.chat, change.lore);
+    // A chat deleted in Lumiverse: its folders are kept as a deleted chat's, and its turns stay in the store.
+    else if (change.kind === "chat-deleted") work = this.#d.chats.deleted(user, change.chat, this.#d.clock.now());
     if (work === null) return;
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
@@ -1067,7 +1069,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /**
    * The chat's generations whose end was not recorded (plan §10.8, §10.10): one that ended unheard, and one RPE stopped during, whose
    * run is given its end now, as failed. Each is then tied to what Lumiverse saved, as its end would have tied it, or dropped. One that
-   * cannot be recorded now is logged, and the next intake finds it again.
+   * cannot be recorded now is logged, and the next intake finds it again. What else the comparison with the messages the store holds
+   * finds (a message gone, edited, inserted, or the chat deleted) is taken as Lumiverse's own telling of it would be, before the path
+   * is compared.
    */
   async #catchUp(reads: LumiverseReads, user: string, chat: string): Promise<void> {
     await this.settled();
@@ -1078,11 +1082,16 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const stopped: ReplyError = { code: "failed", detail: await turnErrorWords(this.#d.files, { user, chat }, "stopped_mid_run") };
       await this.#d.writes.run((db) => left.forEach((r) => this.#d.runs.put(db, { ...r, status: "failed", ended: r.ended ?? this.#d.clock.now(), error: stopped })), "ending the runs RPE stopped during");
     }
-    const found = await reconcile(reads, { chat, messages: [], awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target })) });
+    const messages = this.#d.store.user(user).path(chat).map((e) => ({ id: e.message, hash: e.hash, hidden: e.hidden }));
+    const found = await reconcile(reads, { chat, messages, awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target })) });
     for (const change of found) {
-      if (change.kind !== "generation-ended") continue;
+      if (change.kind !== "generation-ended") {
+        this.changed(change);
+        continue;
+      }
       await this.#ended(user, change).catch((error: unknown) => this.#d.log.error("A generation's end could not be recorded; the chat's next turn looks again.", { chat, generation: change.generation, error: words(error) }));
     }
+    await this.settled();
   }
 
   /**
