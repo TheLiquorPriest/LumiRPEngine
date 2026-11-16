@@ -165,6 +165,7 @@ export interface StageEvent extends EventBase {
 /** The clock advance applied by a turn: its elapsed time, a timelapse or an applied `time.advance`. */
 export interface ClockEvent extends EventBase {
   type: "clock";
+  /** How far the clock goes, in minutes; a part of a minute counts to the second (6 seconds is 0.1), and the clock sums in whole seconds (`clockPlus`). */
   minutes: number;
   cause: "tick" | "action" | "timelapse" | "advance";
 }

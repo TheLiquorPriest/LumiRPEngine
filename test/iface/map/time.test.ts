@@ -1,13 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { initialState } from "../../../src/engine/world-state";
-import { moveTime, NOTHING_MOVES, place, roundsTime, scaleOf } from "../../../src/packs/space/core/grid-model";
+import type { HostTool, JsonObject, ToolResult } from "rp-harness/contract";
+import { moveTime, roundsTime, scaleOf } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
-import { move } from "../../../src/packs/space/core/grid-path";
-import { positionChanges } from "../../../src/iface/map/record";
-import { clockChange } from "../../../src/iface/map/time";
-import type { ChangeInput } from "../../../src/store/types";
-import { testStore } from "../../store/fixtures";
-import { drawn, INN, registry, TOWN, worldWith } from "./fixtures";
+import { asHarnessPasses } from "../../story/rig";
+import { rig, wordsFromFiles } from "../rig";
+import { drawn, INN, TOWN, worldWith } from "./fixtures";
+
+const SRC = { from: "prose", message: "m-4" };
 
 describe("each grid's time step", () => {
   test("a grid laid in play counts rounds of 6 seconds, six squares a round; the town counts minutes", () => {
@@ -32,27 +31,22 @@ describe("each grid's time step", () => {
 });
 
 describe("a fight on the room grid", () => {
-  test("moves the clock by seconds, not minutes", () => {
-    const world = worldWith(INN);
-    const d = drawn(INN);
-    const { s, revision } = testStore({ world });
-    s.createChat({ id: "c", revision });
-    const turn = s.beginTurn({ chat: "c", kind: "normal" });
-    const record = (changes: ChangeInput[]) => s.addChanges(turn.id, changes.map((c) => ({ ...c, by: "gm", source: "gm" as const })));
-    const start = initialState(world, revision, registry()).clock;
-
-    const opening = place(d, place(d, NOTHING_MOVES, "wren", [2, 5]).moving, "bram", [11, 2]).moving;
-    record(positionChanges(d, NOTHING_MOVES, opening));
-    // Round one: Wren closes five squares; Bram holds. The round is six seconds.
-    const first = move(d, opening, "wren", [7, 5]);
-    expect([first.walk?.distance, first.took]).toEqual([5, { seconds: 6, rounds: 1 }]);
-    record([...positionChanges(d, opening, first.moving), clockChange(roundsTime(d.scale, 1)?.seconds ?? 0)]);
-    // Bram runs nine squares round the table to the hearth side: two rounds.
-    const second = move(d, first.moving, "bram", [4, 7]);
-    expect(second.took).toEqual({ seconds: 12, rounds: 2 });
-    const { changes, state } = record([...positionChanges(d, first.moving, second.moving), clockChange(second.took?.seconds ?? 0)]);
-    expect(changes.every((c) => c.applied)).toBe(true);
-    expect((state.world.clock - start) * 60).toBeCloseTo(18, 9);
-    expect(state.world.entities.bram?.fields).toMatchObject({ x: 3, y: 6 });
+  test("moves the clock by seconds, not minutes, through pass_time", async () => {
+    const t = await rig({}, worldWith(INN));
+    const clock = (): number => t.s.stateAt(t.turn.id).state.world.clock;
+    const play = async (operation: JsonObject): Promise<ToolResult> => {
+      const r = await t.call("world_apply", asHarnessPasses(t.tools.get("world_apply") as HostTool, { operations: [operation] }));
+      wordsFromFiles(r);
+      return r;
+    };
+    const start = clock();
+    // Five rounds of the common room's grid, six seconds each.
+    const rounds = await play({ op: "pass_time", rounds: 5, at: "The Common Room", source: SRC });
+    expect(rounds.error).toBeUndefined();
+    expect((clock() - start) * 60).toBe(30);
+    // The map of a town counts walking minutes, not rounds: rounds cannot be read there, and the clock stays where it was.
+    const none = await play({ op: "pass_time", rounds: 5, at: "The Far Road", source: SRC });
+    expect(none.error).toBe(true);
+    expect((clock() - start) * 60).toBe(30);
   });
 });

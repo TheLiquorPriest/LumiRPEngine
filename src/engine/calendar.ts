@@ -1,9 +1,10 @@
 // Calendar arithmetic over game minutes (DESIGN §9.1 Calendar & time, §9.2 Time).
 //
 // The clock counts minutes since the world epoch, a local date-time in the calendar's home time
-// zone. Local wall time is uniform: a DST change shifts other places' offsets from home, never the
-// home clock itself, so the clock never skips or repeats an hour. Gregorian and custom calendars
-// share one interface. Everything is integer arithmetic: no Date, no Intl.
+// zone, to the second (`clockSeconds`: a sum of seconds is made in whole seconds, so ten rounds of
+// six read the minute they make). Local wall time is uniform: a DST change shifts other places'
+// offsets from home, never the home clock itself, so the clock never skips or repeats an hour.
+// Gregorian and custom calendars share one interface. Everything is integer arithmetic: no Date, no Intl.
 
 import type { CalendarDef, DateRule, DayPart, HolidayDef, Recurrence, WorldDoc } from "../shared/world";
 import { own } from "./pack-kit";
@@ -20,6 +21,8 @@ export interface CalDate {
   /** Days since the epoch's date (negative before it). */
   dayIndex: number;
   minuteOfDay: number;
+  /** The seconds past the minute, 0 to 59; 0 where the clock reads a whole minute. */
+  second: number;
 }
 
 const DEFAULT_DAY_PARTS: readonly DayPart[] = [
@@ -38,6 +41,21 @@ const GREGORIAN_WEEKDAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Th
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 const ISO_DATE = /^(-?\d{1,6})-(\d{2})-(\d{2})/;
 const ISO_LOCAL = /^(-?\d{1,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+/** A clock reading in whole seconds since the epoch. The clock counts seconds exactly: this is the one place a reading's seconds are taken. */
+export function clockSeconds(clock: number): number {
+  return Math.round(clock * 60);
+}
+
+/** The clock reading a count of whole seconds since the epoch gives (a whole minute where they make one: `600 / 60` is exactly `10`). */
+export function clockOfSeconds(seconds: number): number {
+  return seconds / 60;
+}
+
+/** `clock` moved on by `minutes`, a part of one included, summed in whole seconds so no second is lost to the sum. */
+export function clockPlus(clock: number, minutes: number): number {
+  return clockOfSeconds(clockSeconds(clock) + clockSeconds(minutes));
+}
 
 export function floorDiv(a: number, b: number): number {
   return Math.floor(a / b);
@@ -66,10 +84,10 @@ export function formatHHMM(minuteOfDay: number): string {
  * A time of day as the player reads it, on a 12-hour clock: "7:00 AM", midnight "12:00 AM", noon
  * "12:00 PM". Only for showing: `formatHHMM` stays the value format editors and helpers read back.
  */
-export function formatTimeOfDay(minuteOfDay: number): string {
+export function formatTimeOfDay(minuteOfDay: number, second = 0): string {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   const h = Math.floor(m / 60);
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")}${second > 0 ? `:${String(second).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
 }
 
 // ---------------------------------------------------------------- gregorian day numbers
@@ -198,11 +216,13 @@ export function calendarOf(world: Pick<WorldDoc, "calendar">): Calendar {
 
 /** The local date of a clock reading in the home time zone. */
 export function dateAt(cal: Calendar, clock: number): CalDate {
-  const local = cal.epochMinute + Math.floor(clock);
+  const total = clockSeconds(clock);
+  const whole = floorDiv(total, 60);
+  const local = cal.epochMinute + whole;
   const dayIndex = floorDiv(local, MINUTES_PER_DAY);
   const abs = cal.epochAbs + dayIndex;
   const d = cal.system.date(abs);
-  return { ...d, weekday: cal.system.weekday(abs), dayIndex, minuteOfDay: local - dayIndex * MINUTES_PER_DAY };
+  return { ...d, weekday: cal.system.weekday(abs), dayIndex, minuteOfDay: local - dayIndex * MINUTES_PER_DAY, second: total - whole * 60 };
 }
 
 /** Clock reading of a local time on a day (day index relative to the epoch's date). */
@@ -233,23 +253,25 @@ export function dayIndexOfText(cal: Calendar, text: string): number {
 /** A local `YYYY-MM-DD HH:MM` with the time zone's offset applied: how a helper reads a day and time, and writes one back. */
 export function formatStamp(cal: Calendar, clock: number, offsetMinutes = 0): string {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${d.year < 0 ? "-" : ""}${String(Math.abs(d.year)).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
+  return `${d.year < 0 ? "-" : ""}${String(Math.abs(d.year)).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}${d.second > 0 ? `:${String(d.second).padStart(2, "0")}` : ""}`;
 }
 
 /**
- * The clock of a local `YYYY-MM-DD HH:MM` (a `T` between them reads too), or null unless it is exactly
- * that: a day the calendar has (no 30 February, no thirteenth month of twelve) at a time of day from
- * 00:00 to 23:59. Unlike `clockOfLocal`, it never guesses a time the text leaves out.
+ * The clock of a local `YYYY-MM-DD HH:MM` (a `T` between them reads too), with `:SS` after it where the
+ * time holds seconds, or null unless it is exactly that: a day the calendar has (no 30 February, no
+ * thirteenth month of twelve) at a time of day from 00:00 to 23:59. Unlike `clockOfLocal`, it never
+ * guesses a time the text leaves out.
  */
 export function clockOfStamp(cal: Calendar, text: string): number | null {
-  const m = /^\s*(-?\d{1,6})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})\s*$/.exec(text);
+  const m = /^\s*(-?\d{1,6})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*$/.exec(text);
   if (!m) return null;
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
   const minute = Number(m[4]) * 60 + Number(m[5]);
-  if (month < 1 || month > cal.system.months || day < 1 || day > cal.system.monthLength(year, month) || Number(m[4]) > 23 || Number(m[5]) > 59) return null;
-  return clockAt(cal, dayIndexOf(cal, year, month, day), minute);
+  const second = Number(m[6] ?? 0);
+  if (month < 1 || month > cal.system.months || day < 1 || day > cal.system.monthLength(year, month) || Number(m[4]) > 23 || Number(m[5]) > 59 || second > 59) return null;
+  return clockPlus(clockAt(cal, dayIndexOf(cal, year, month, day), minute), second / 60);
 }
 
 /** The next clock reading after `clock` (strictly) at local time `minuteOfDay`. */
@@ -349,10 +371,10 @@ export function weekdayName(cal: Calendar, weekday: number): string {
   return cal.system.weekdayNames[weekday] ?? `D${weekday}`;
 }
 
-/** `Fri 16 Oct 2026, 7:00 AM`. */
+/** `Fri 16 Oct 2026, 7:00 AM`, `Fri 16 Oct 2026, 7:00:06 AM` where the clock holds seconds. */
 export function formatClock(cal: Calendar, clock: number, offsetMinutes = 0): string {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay, d.second)}`;
 }
 
 // ---------------------------------------------------------------- day parts and the slot grid

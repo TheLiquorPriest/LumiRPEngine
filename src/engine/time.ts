@@ -10,7 +10,7 @@ import { heldBy } from "../shared/finance";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/ledger";
 import { activitySpanEnd, type WorldDoc } from "../shared/world";
-import { calendarOf, clockAt, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, placeOffset, shortestSlot, slotIndexAt, slotStart, type Calendar } from "./calendar";
+import { calendarOf, clockAt, clockOfSeconds, clockOfStamp, clockPlus, clockSeconds, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, placeOffset, shortestSlot, slotIndexAt, slotStart, type Calendar } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -410,14 +410,16 @@ export function typedSpan(cal: Calendar, now: number, words: string, anchorAt?: 
 
 /** The counts a written span gives before its unit: a number or a number word, never a vague one ("a couple of", "a few", "next"). */
 const WRITTEN_COUNTS: Readonly<Record<string, number>> = Object.fromEntries(Object.entries(SPAN_COUNTS).filter(([word]) => word !== "next" && !word.includes("couple")));
+/** The units a written span (`pass_time`'s `for`) counts in: a typed span's, and seconds. */
+const WRITTEN_UNITS: Readonly<Record<string, number>> = { ...SPAN_UNITS, second: 1 / 60, sec: 1 / 60 };
 /** One length of a written span: a count, a unit, and "and a half" before or after the unit. */
-const WRITTEN_TERM = new RegExp(`^(${longestFirst(Object.keys(WRITTEN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?`);
+const WRITTEN_TERM = new RegExp(`^(${longestFirst(Object.keys(WRITTEN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(WRITTEN_UNITS))})s?( and a half)?`);
 /** Words that lead a written time without changing it: "until 22:00", "in two hours", "at noon", "the next hour". */
 const WRITTEN_LEAD = /^(?:(?:in|for|over|after|until|till|til|by|at|to|on|the next|another|the|this) )+/;
 /** A clock time as it is written: 22:00, 9:30pm, 10pm. */
 const WRITTEN_CLOCK = /^(?:(\d{1,2}):(\d{2}) ?(am|pm)?|(\d{1,2}) ?(am|pm))$/;
 
-/** The minutes a written span is, summed over its lengths ("an hour and twenty minutes"); null when the words are anything but lengths. */
+/** The minutes a written span is, summed over its lengths ("an hour and twenty minutes", "thirty seconds"), to the second; null when the words are anything but lengths. */
 function writtenSpan(words: string): number | null {
   let rest = words;
   let total = 0;
@@ -425,14 +427,14 @@ function writtenSpan(words: string): number | null {
     const m = WRITTEN_TERM.exec(rest);
     if (!m) return null;
     const count = WRITTEN_COUNTS[m[1] ?? ""] ?? Number(m[1]);
-    total += (count + (m[2] || m[4] ? 0.5 : 0)) * (SPAN_UNITS[m[3] ?? ""] ?? 0);
+    total += (count + (m[2] || m[4] ? 0.5 : 0)) * (WRITTEN_UNITS[m[3] ?? ""] ?? 0);
     rest = rest.slice(m[0].length);
     if (rest === "") break;
     const between = /^(?: and)? /.exec(rest);
     if (!between) return null;
     rest = rest.slice(between[0].length);
   }
-  return total > 0 ? Math.round(total) : null;
+  return total > 0 && clockSeconds(total) > 0 ? clockOfSeconds(clockSeconds(total)) : null;
 }
 
 /** The minute of a day a written clock time names: noon, midnight, 22:00, 10pm, or the start of a part of the world's day by its id or label, exactly; null otherwise. */
@@ -473,7 +475,7 @@ export function writtenTime(cal: Calendar, now: number, said: string, offsetAt: 
     .replace(/\b(?:a |an )?quarter (?:of )?(?:an? )?hour\b/g, "15 minutes");
   const led = words.replace(WRITTEN_LEAD, "");
   const span = writtenSpan(led);
-  if (span !== null) return now + span;
+  if (span !== null) return clockPlus(now, span);
   const tomorrow = /^tomorrow(?: |$)/.test(led);
   const minute = writtenMinute(cal, tomorrow ? led.replace(/^tomorrow ?/, "").replace(WRITTEN_LEAD, "") : led);
   if (minute === null) return null;
@@ -807,7 +809,7 @@ export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<Wo
   let clock = before.clock;
   for (const e of events) {
     if (e.type === "clock") {
-      clock += e.minutes;
+      clock = clockPlus(clock, e.minutes);
       continue;
     }
     if (e.type === "post") {

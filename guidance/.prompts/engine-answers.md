@@ -41,8 +41,10 @@ want_bestiary: a row of the world's bestiary
 want_type: a type of the catalogs
 want_check: a check of the world's
 want_schedule: a schedule of the world's
-wants_time: a date and time, YYYY-MM-DD HH:MM; a clock time, such as 22:00, 10pm, noon or midnight, or a part of this world's day by its id or label, as the next time the clock shows it, or tomorrow's after tomorrow; or a count and a unit for a span, such as two hours or an hour and twenty minutes
-wants_minutes: a number of minutes
+wants_time: a date and time, YYYY-MM-DD HH:MM; a clock time, such as 22:00, 10pm, noon or midnight, or a part of this world's day by its id or label, as the next time the clock shows it, or tomorrow's after tomorrow; or a count and a unit for a span, such as two hours, thirty seconds or an hour and twenty minutes
+wants_minutes: a number of minutes, a part of one counted in seconds (0.5 is thirty seconds)
+wants_seconds: a number of seconds
+wants_rounds: a whole number of rounds above 0, counted by the grid of the scene, which must be a room-scale map that counts rounds; otherwise give seconds or minutes
 wants_dice: dice such as 1d20+3 or 2d6
 wants_square: [column, row], two whole numbers counted from 1 at the top left, as the map prints them
 wants_fields: an object of field: value
@@ -61,7 +63,7 @@ wants_sum: numbers with + - * / and brackets, and a percent sign after a number 
 wants_specs: a list of { label, value }
 wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
-time_from_now: {{#ahead}}{{ahead}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} from now{{/ahead}}{{#ago}}{{ago}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} before now{{/ago}}{{#now}}the time now{{/now}}
+time_from_now: {{#ahead}}{{ahead}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} from now{{/ahead}}{{#ago}}{{ago}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} before now{{/ago}}{{#aheadSeconds}}{{aheadSeconds}} {{#one}}second{{/one}}{{^one}}seconds{{/one}} from now{{/aheadSeconds}}{{#agoSeconds}}{{agoSeconds}} {{#one}}second{{/one}}{{^one}}seconds{{/one}} before now{{/agoSeconds}}{{#now}}the time now{{/now}}
 not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply this ({{code}}){{#reason}}: {{reason}}{{/reason}}.{{#choices}} It is one of: {{choices}}.{{#records}} Whatever the story meant by it, the {{records}} operation records it as given.{{/records}}{{/choices}}
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
 outside_list: Operation {{n}} ({{op}}): {{field}} {{value}} is not one of what a {{field}} can hold: {{choices}}. Whatever you meant by it, the {{records}} operation records it as given.

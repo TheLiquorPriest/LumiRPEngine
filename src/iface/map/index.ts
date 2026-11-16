@@ -6,7 +6,7 @@
 export { printMap, type LegendEntry, type Listed, type Printed } from "./print";
 export { layForPlace, layOverSquare, plainRows, type Laid, type Laying } from "./lay";
 export { editMap, type Stroke } from "./edit";
-export { clockChange } from "./time";
+export { roundsClock, type RoundsClock } from "./time";
 export { doorEvent, draftChange, positionChange, positionChanges, positionEvent, shapeEvent, squaresEvent } from "./record";
 export { beside, gridMoves, inZone } from "./moves";
 export { amountOf, distanceData, farText, layersAt, MAP_ANSWERS, mapLines, mapView, mapWording, mapWords, NO_WORDING, type Layers, type MapWording } from "./words";

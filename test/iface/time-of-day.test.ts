@@ -5,7 +5,9 @@
 import { describe, expect, test } from "bun:test";
 import type { HostTool, JsonObject, ToolResult } from "rp-harness/contract";
 import { asHarnessPasses } from "../story/rig";
-import { type Rig, rig, texts, wordsFromFiles } from "./rig";
+import { calendarOf, clockOfStamp, formatClock, formatStamp } from "../../src/engine/calendar";
+import { blankWorld } from "../../src/store/blank";
+import { type Rig, registry, rig, texts, wordsFromFiles } from "./rig";
 
 const SRC = { from: "prose", message: "m-4" };
 /** Minutes in a day, and the blank world's first day starting at its epoch. */
@@ -92,5 +94,24 @@ describe("pass_time reads a time of day", () => {
       expect({ words, error: r.error, clock: clock(t) }).toEqual({ words, error: true, clock: at(0, 8) });
       expect(texts(r)[0]).toContain("It takes a date and time");
     }
+  });
+});
+
+describe("the clock counts seconds", () => {
+  test("ten changes of 6 s move the clock one minute exactly, and one round reads 10:00:06", async () => {
+    const t = await blankAt(at(0, 10));
+    const cal = calendarOf(blankWorld(registry()));
+    const r = await play(t, { op: "pass_time", seconds: 6, source: SRC });
+    expect(r.error).toBeUndefined();
+    expect(formatStamp(cal, clock(t))).toEndWith("10:00:06");
+    expect(formatClock(cal, clock(t))).toEndWith("10:00:06 AM");
+    expect(clockOfStamp(cal, formatStamp(cal, clock(t)))).toBe(clock(t));
+    for (let i = 1; i < 10; i++) expect((await play(t, { op: "pass_time", seconds: 6, source: SRC })).error).toBeUndefined();
+    expect(clock(t)).toBe(at(0, 10, 1));
+    expect(formatClock(cal, clock(t))).toEndWith("10:01 AM");
+    // A span in words reads seconds too, and a part of a minute is kept to the second.
+    await play(t, { op: "pass_time", for: "thirty seconds", source: SRC });
+    await play(t, { op: "pass_time", minutes: 0.5, source: SRC });
+    expect(clock(t)).toBe(at(0, 10, 2));
   });
 });

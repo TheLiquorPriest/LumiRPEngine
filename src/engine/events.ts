@@ -34,6 +34,7 @@ import type {
   UpgradePicks,
 } from "../shared/ledger";
 import { APART_GROUP, UPGRADE_ASPECTS } from "../shared/ledger";
+import { clockPlus, clockSeconds } from "./calendar";
 import { unpinPause } from "./engine-pack";
 import type { Advice, EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { WorldState } from "./state";
@@ -203,13 +204,17 @@ const stageDef: EventTypeDef<StageEvent> = {
   },
 };
 
+// The clock is summed in whole seconds (`clockPlus`): a part of a minute is kept exactly, and a sum of any number of them never reads the minute before.
 const clockDef: EventTypeDef<ClockEvent> = {
   type: "clock",
   validate: (e) => (Number.isFinite(e.minutes) && e.minutes >= 0 ? null : reject("bad_minutes", "minutes must be ≥ 0")),
   apply: (e, state) => {
-    state.clock += e.minutes;
+    state.clock = clockPlus(state.clock, e.minutes);
   },
-  describe: (e) => `+${e.minutes} min`,
+  describe: (e) => {
+    const seconds = clockSeconds(e.minutes);
+    return seconds % 60 === 0 ? `+${seconds / 60} min` : seconds < 60 ? `+${seconds} s` : `+${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  },
 };
 
 const timelapseDef: EventTypeDef<TimelapseEvent> = {

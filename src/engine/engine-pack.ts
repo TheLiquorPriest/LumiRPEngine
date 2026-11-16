@@ -21,7 +21,7 @@ import type { PackEvent } from "../shared/ledger";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
 import { acts, applyLife, lifeChannel, lifeEffect, lifeKnownTo, lifeOf, tellLife } from "./life";
-import { calendarOf, formatClock, placeOffset, slotIndexAt } from "./calendar";
+import { calendarOf, clockPlus, clockSeconds, formatClock, placeOffset, slotIndexAt } from "./calendar";
 import { knowsChannel, spawnChannel } from "./narration-channels";
 import { kindIs, placeOfEntity } from "./scope";
 import { restoreObservations } from "./seen";
@@ -356,9 +356,9 @@ const events: EventTypeDef<PackEvent>[] = [
     // Never before the story starts: nothing in the world was there to be set back to.
     validate: (e, ctx) => {
       const minutes = e.data.minutes;
-      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0) return { code: "bad_event", reason: "a clock set back needs whole minutes above zero" };
+      if (typeof minutes !== "number" || !Number.isFinite(minutes) || clockSeconds(minutes) <= 0) return { code: "bad_event", reason: "a clock set back needs a time above zero, in minutes or a part of one counted in seconds" };
       const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
-      if (ctx.state.clock - minutes >= start) return null;
+      if (clockPlus(ctx.state.clock, -minutes) >= start) return null;
       return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
     },
     // A second set-back inside the window keeps the furthest the clock had run, not where it stood.
@@ -367,7 +367,7 @@ const events: EventTypeDef<PackEvent>[] = [
       if (typeof minutes !== "number") return;
       const s = slice(state);
       s.reached = Math.max(typeof s.reached === "number" ? s.reached : state.clock, state.clock);
-      state.clock -= minutes;
+      state.clock = clockPlus(state.clock, -minutes);
     },
     describe: (e) => `clock set back ${String(e.data.minutes)} min`,
   },
