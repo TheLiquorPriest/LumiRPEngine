@@ -26,6 +26,7 @@ import { passConnection, TURN_SETTINGS, turnSettings } from "./settings";
 import { namedStretches } from "./stage";
 import { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
 import { leadConnection, NO_SESSION, type MigratedSource } from "./turns";
+import { WEB_SETTING_DEFS, webRoutes } from "./web";
 
 /** What the turn lane takes from the composition. */
 export interface TurnTakes {
@@ -89,7 +90,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
       { area: "prompt", migrations: PROMPT_MIGRATIONS },
       { area: "harness", migrations: HARNESS_MIGRATIONS },
     ],
-    settings: [...harnessSettings(), ...TURN_SETTINGS],
+    settings: [...harnessSettings(), ...TURN_SETTINGS, ...Object.values(WEB_SETTING_DEFS)],
     liveKinds: [REQUESTS_KIND],
     fills: {
       door: {
@@ -176,6 +177,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
       at.builds.counts(async () => runs.chatsGoing().length + lane.intakesGoing() + (await harness.jobs.list({ user: owner(), states: ["running", "queued"] })).jobs.length);
       at.routes.add("turn", turnRoutes({ turns, chatName: async (chat) => (await takes.lumiverse()?.reads.chat(chat))?.name ?? null }));
       at.routes.add("sessions", sessionRoutes({ turns, writes: at.writes, files: at.paths.files, log: at.log }));
+      at.routes.add("web", webRoutes(at.secrets));
       await lane.preload();
     },
     stopping: () => turns?.harness.close(),

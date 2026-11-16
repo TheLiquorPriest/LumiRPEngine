@@ -20,7 +20,7 @@
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { type LinesPart, loadGuidance } from "../app/guidance";
-import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
@@ -47,6 +47,7 @@ import { TurnMarks } from "./marks";
 import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
 import { stateSearcher, storySearcher } from "./searchers";
+import { webSearcher } from "./web";
 import { STORE_AREAS } from "./store-areas";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
@@ -163,7 +164,7 @@ export interface TurnsOptions {
    * user's (false when it was not going on); null before it is mounted, or when RPE is not set up for a
    * Lumiverse.
    */
-  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stopGeneration(generation: string): Promise<boolean> } | null;
+  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: StoresPort; stopGeneration(generation: string): Promise<boolean> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */
@@ -345,6 +346,12 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     if (parts === null) throw new Error(await turnErrorWords(files, scope, "no_lumiverse_chat"));
     return parts.chat;
   };
+  // Lumiverse's memory (its entities and arcs), the chat's summaries and its databanks, as stores `archive_search` finds and reads (§6.8).
+  const storesNow = async (scope: Scope): Promise<StoresPort> => {
+    const parts = options.lumiverse();
+    if (parts === null) throw new Error(await turnErrorWords(files, scope, "no_lumiverse_chat"));
+    return parts.stores;
+  };
   const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore, files);
   // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
   facts.add(castFacts({ store, sources, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])) }));
@@ -396,6 +403,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     },
     lore: { ...lorePorts, read: (scope, ids, reader) => lorePorts.read(joined(scope), ids, reader), search: (scope, query, reader) => lorePorts.search(joined(scope), query, reader) },
     prompt: prompts,
+    stores: {
+      list: async (scope) => (await storesNow(scope)).list(scope),
+      search: async (scope, query) => (await storesNow(scope)).search(scope, query),
+      read: async (scope, ref) => (await storesNow(scope)).read(scope, ref),
+    },
+    // `web_search` over the provider he sets on the Connections page; off until he sets one.
+    web: webSearcher({ secrets: app.secrets, config: () => globalConfig(app.paths.files, app.log) }),
     // RPE's tools are a chat's: a job of no chat is given none of them.
     tools: { all: async (scope) => (scope.chat === undefined ? [] : (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) }))) },
     // `gap_check`'s places beside the chat and the lore: the folded state and the story record, at the check's turn as it is joined.
