@@ -21,13 +21,13 @@ import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { aboutOf, applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, inventedUnchecked, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
+import { aboutOf, applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, inventedUnchecked, laterWrite, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
 import { draft } from "./working";
 import { Areas, type StoreArea } from "./areas";
 import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
 import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
-import { chainOf, comparePaths, matchTurn, nodeKey, turnByHash, turnsShown, type ShowingTurn } from "./path";
+import { chainOf, comparePaths, keptOf, matchTurn, mergeKept, nodeKey, toldWith, turnByHash, turnsShown, type ShowingTurn } from "./path";
 import { BLANK_REVISION, blankWorld } from "./blank";
 import { UserWorlds, type WorldChange, type WorldRevisionRow } from "./worlds";
 import { migrateStore, missingStoreTables } from "./schema";
@@ -41,8 +41,10 @@ import {
   type ChangeInput,
   type ChangeRow,
   type ChatRow,
+  type EarlierLanded,
   type Folded,
   type KeptOwn,
+  type KeptReport,
   type Lane,
   type NotApplied,
   type PathEntry,
@@ -236,6 +238,8 @@ interface ChatDb {
   started: number | null;
   was_on: number | null;
   engine: string | null;
+  /** What a comparison between turns found and kept for the next turn's start to tell (`KeptReport`), as JSON; null: nothing. */
+  kept: string | null;
 }
 
 interface Cached {
@@ -1365,8 +1369,12 @@ export class UserStore {
    * kept whole. Absent, the path was read now, after everything heard. `swipesOf` gives a message's swipes, each with its saved-text
    * hash and date, asked only for a reply whose date ties a turn's while its text differs: when that turn's saved text is still among
    * them, the reply is another swipe, not an edit (§6.3 l.617). Messages inserted before a played turn are reported with it.
+   *
+   * A comparison asked to `keep` (made between turns, when no turn of the chat is going on) keeps what it finds, a flip, a delete, an edit, an
+   * inserted message, with the chat as well as returning it: the next comparison, at a turn's start, gives what was kept with what it finds
+   * itself, once (R-130).
    */
-  sync(chat: string, shown: readonly ShownMessage[], heardUpTo?: number, swipesOf?: (message: string) => readonly { hash: string; date?: number | null }[] | null): PathReport {
+  sync(chat: string, shown: readonly ShownMessage[], heardUpTo?: number, swipesOf?: (message: string) => readonly { hash: string; date?: number | null }[] | null, options: { keep?: boolean } = {}): PathReport {
     const row = this.chatOrThrow(chat);
     const before = pathOf(row.path);
     const was = new Map(before.map((e) => [e.message, e]));
@@ -1449,7 +1457,7 @@ export class UserStore {
       } else if (e.turn !== null && hadTurn.has(e.turn)) next = e.turn;
     }
     // What no longer applies is folded inside the write, so the snapshots that fold finds are stored with it.
-    const notApplied = this.write(false, () => {
+    const report = this.write(false, () => {
       const flag = this.db.query("UPDATE turn SET edited = ? WHERE user = ? AND id = ?");
       for (const [turn, hash] of flags) flag.run(hash, this.id, turn);
       const put = this.db.query("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)");
@@ -1462,9 +1470,66 @@ export class UserStore {
         this.id,
         chat,
       ]);
-      return found.rebased ? this.headState(chat).notApplied : [];
+      const notApplied = found.rebased ? this.headState(chat).notApplied : [];
+      const now: PathReport = { ...found, unplayed: this.withReasons(chat, found.unplayed, after), edited, branched, notApplied, ...(branchStopped.length > 0 ? { branchStopped } : {}), ...(inserted.length > 0 ? { inserted } : {}) };
+      // What was kept between turns is told with this one's report, once; this one's own is kept where it was asked to be.
+      const kept: KeptReport = row.kept === null ? {} : (JSON.parse(row.kept) as KeptReport);
+      if (options.keep === true) {
+        this.db.run("UPDATE chat SET kept = ? WHERE user = ? AND id = ?", [JSON.stringify(mergeKept(kept, keptOf(now))), this.id, chat]);
+        return now;
+      }
+      if (row.kept === null) return now;
+      this.db.run("UPDATE chat SET kept = NULL WHERE user = ? AND id = ?", [this.id, chat]);
+      return toldWith(now, kept);
     });
-    return { ...found, unplayed: this.withReasons(chat, found.unplayed, after), edited, branched, notApplied, ...(branchStopped.length > 0 ? { branchStopped } : {}), ...(inserted.length > 0 ? { inserted } : {}) };
+    return report;
+  }
+
+  /**
+   * Keeps why a reply stands with no turn played (`stopped`, `failed`, `restarted`), by its message, as a carrier gives it from what the
+   * old engine recorded on the reply; null takes it off. A comparison lists it with the reply's unplayed stretch.
+   */
+  setReason(chat: string, message: string, why: StretchWhy | null): void {
+    this.chatOrThrow(chat);
+    this.write(false, () => {
+      if (why === null) this.db.run("DELETE FROM reply_reason WHERE user = ? AND chat = ? AND message = ?", [this.id, chat, message]);
+      else this.db.run("INSERT INTO reply_reason (user, chat, message, why) VALUES (?, ?, ?, ?) ON CONFLICT (user, chat, message) DO UPDATE SET why = excluded.why", [this.id, chat, message, why]);
+    });
+  }
+
+  /** Each unplayed stretch with the reasons kept for the replies in it (`setReason`); none kept: the stretches as compared. */
+  private withReasons(chat: string, stretches: PathReport["unplayed"], after: readonly PathEntry[]): PathReport["unplayed"] {
+    if (stretches.length === 0) return stretches;
+    const kept = new Map(this.db.query<{ message: string; why: string }, [string, string]>("SELECT message, why FROM reply_reason WHERE user = ? AND chat = ?").all(this.id, chat).map((r) => [r.message, r.why as StretchWhy]));
+    if (kept.size === 0) return stretches;
+    const replies = after.filter((e) => !e.user).map((e) => e.message);
+    return stretches.map((s) => {
+      const why = replies.slice(replies.indexOf(s.from), replies.indexOf(s.to) + 1).flatMap((message) => (kept.has(message) ? [{ message, why: kept.get(message) as StretchWhy }] : []));
+      return why.length === 0 ? s : { ...s, why };
+    });
+  }
+
+  /**
+   * Lets the next comparison tell the edits this chat's turns carry as it tells any: the mark that a reply was edited (`TurnRow.edited`) is the
+   * comparison's record that it told it, and the path keeps the hash each reply showed then; both go back to the text the turn was saved on,
+   * so the next comparison finds the reply showing other text and tells it. An import's own comparisons are not the Author's. The turns
+   * keep the text they were played on. How many replies it was done for.
+   */
+  forgetEdits(chat: string): number {
+    const row = this.chatOrThrow(chat);
+    const marked = new Map(
+      this.db
+        .query<{ id: string; hash: string | null }, [string, string]>("SELECT id, hash FROM turn WHERE user = ? AND chat = ? AND edited IS NOT NULL")
+        .all(this.id, chat)
+        .map((t) => [t.id, t.hash ?? ""]),
+    );
+    if (marked.size === 0) return 0;
+    const path = pathOf(row.path).map((e) => (e.turn !== null && marked.has(e.turn) ? { ...e, hash: marked.get(e.turn) as string } : e));
+    this.write(false, () => {
+      this.db.run("UPDATE turn SET edited = NULL WHERE user = ? AND chat = ? AND edited IS NOT NULL", [this.id, chat]);
+      this.db.run("UPDATE chat SET path = ? WHERE user = ? AND id = ?", [JSON.stringify(path), this.id, chat]);
+    });
+    return marked.size;
   }
 
   /**
@@ -1654,9 +1719,10 @@ export class UserStore {
    * store's own, held for the next call: read it, never change it. A job's changes are recorded with
    * the turn that started it and take effect once the job has ended (`endJob`), before the next turn
    * to begin; until then only the job sees them: each is checked on the job's own state (`stateFor`),
-   * and the state returned for them is that one.
+   * and the state returned for them is that one. `refused` names inputs (by place in `inputs`) that are known not to stand, each with the
+   * report that says why: they are recorded unapplied, with it, and the rest are applied as if they were not there.
    */
-  addChanges(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; state: StoreState } {
+  addChanges(turnId: string, inputs: readonly ChangeInput[], refused?: ReadonlyMap<number, Report>): { changes: ChangeRow[]; state: StoreState } {
     const turn = this.turnToWrite(turnId);
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
     inputs.forEach((c, i) => checkChange(c, i, this.store.env.areas));
@@ -1672,8 +1738,14 @@ export class UserStore {
     const fell = new Set(existing.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
     // The engine's handlers put a change's own objects into the state, which is then held frozen: they apply the store's copy, so the
     // caller's values stay the caller's.
-    const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: turnId, n: turn.depth + 1, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
-    const outcomes = applyChecked(this.store.envOf(this.id), state, items, fell);
+    const stand = inputs.flatMap((_, i) => (refused?.has(i) === true ? [] : [i]));
+    const items: Item[] = stand.map((i) => {
+      const c = inputs[i] as ChangeInput;
+      return { op: c.op, value: structuredClone(c.value), turn: turnId, n: turn.depth + 1, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null };
+    });
+    const done = applyChecked(this.store.envOf(this.id), state, items, fell);
+    const landed = new Map(stand.map((i, k) => [i, done[k]] as const));
+    const outcomes: Outcome[] = inputs.map((_, i) => (refused?.has(i) === true ? { applied: false, reports: [refused.get(i) as Report] } : (landed.get(i) ?? { applied: false, reports: [] })));
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
     const through = this.throughTurn(turn);
@@ -1691,6 +1763,54 @@ export class UserStore {
     if (jobs.length === 0) this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, Math.max(inside.upto, ...ids), this.id, turn.chat, this.store.markOf(this.id, turn.chat));
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
+  }
+
+  /**
+   * Adds changes to a turn that later turns have followed (R-54): on his word, as his answer to a carried keep-or-discard question lands the
+   * held turns' changes, each on its own turn, never after the newest reply, where an old value would overwrite what a later turn set. They are
+   * rows of that turn like any other; the snapshots from it on are dropped and the later turns' changes are applied again on top of them, in
+   * order. What a later turn wrote stands over an added change that writes it: that change is recorded unapplied with `later_value`, naming that
+   * turn's number. What of the later turns no longer applies is listed by thing and value (`NotApplied`), and the stretch from the turn to the
+   * head is reported as a swipe flipped on an earlier message is; both are kept with each chat whose path runs through the turn, for that chat's
+   * next turn's start to tell once (`sync`), and returned here, per chat, for the caller's own answer.
+   */
+  addEarlier(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; landed: EarlierLanded[] } {
+    const turn = this.turnToWrite(turnId);
+    const stretches = new Map<string, PathEntry[]>();
+    for (const chat of this.throughTurn(turn)) {
+      const path = pathOf(this.chatOrThrow(chat).path);
+      const at = path.findIndex((e) => e.turn === turnId);
+      const after = at < 0 ? [] : path.slice(at + 1).filter((e) => e.turn !== null);
+      if (after.length > 0) stretches.set(chat, after);
+    }
+    const heads = new Map([...stretches.keys()].map((chat) => [chat, this.headState(chat)] as const));
+    const had = new Map([...heads].map(([chat, head]) => [chat, new Set(head.notApplied.map((n) => n.change))] as const));
+    // A part a later turn wrote stands over a change that writes it, and so does the rest of the change's unit.
+    const env = this.store.envOf(this.id);
+    const unit = (c: ChangeInput, i: number): string => (isRecord(c.value) && typeof c.value.group === "string" ? `g:${c.value.group}` : `c:${i}`);
+    const later = new Map<string, number | Report>();
+    inputs.forEach((c, i) => {
+      for (const head of heads.values()) {
+        const at = laterWrite(env, head.state, { id: i, op: c.op, lane: c.lane, value: c.value, by: c.by ?? null, applied: true, turn: turnId, from: turn.depth + 1 });
+        const prior = later.get(unit(c, i));
+        if (at !== null && (typeof prior !== "number" || (typeof at === "number" && at > prior))) later.set(unit(c, i), at);
+      }
+    });
+    const refused = new Map<number, Report>();
+    inputs.forEach((c, i) => {
+      const at = later.get(unit(c, i));
+      if (at !== undefined) refused.set(i, typeof at === "number" ? { code: "later_value", values: { turn: at } } : at);
+    });
+    const added = this.addChanges(turnId, inputs, refused);
+    const landed: EarlierLanded[] = [];
+    for (const [chat, after] of stretches) {
+      const notApplied = this.headState(chat).notApplied.filter((n) => !(had.get(chat)?.has(n.change) ?? false));
+      const rebased = { from: (after[0] as PathEntry).message, to: (after.at(-1) as PathEntry).message, turns: after.map((e) => e.turn as string) };
+      const kept = this.chatDb(chat)?.kept;
+      this.write(false, () => this.db.run("UPDATE chat SET kept = ? WHERE user = ? AND id = ?", [JSON.stringify(mergeKept(kept === null || kept === undefined ? {} : (JSON.parse(kept) as KeptReport), { rebased, notApplied })), this.id, chat]));
+      landed.push({ chat, rebased, notApplied });
+    }
+    return { changes: added.changes, landed };
   }
 
   /**

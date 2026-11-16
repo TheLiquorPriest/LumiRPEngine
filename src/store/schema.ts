@@ -334,6 +334,10 @@ CREATE TABLE reply_reason (
       db.run("INSERT INTO job (user, id, ended) SELECT user, job, ended FROM job_end WHERE true ON CONFLICT (user, id) DO UPDATE SET ended = excluded.ended");
       db.run("DROP TABLE job_end");
     },
+    version: 15,
+    // What a comparison between turns found, kept with the chat (`chat.kept`, JSON) until the next turn's start tells it, once (plan §6.3, R-130);
+    // and what an answer that lands held changes on an earlier turn left to look over (R-54).
+    sql: `ALTER TABLE chat ADD COLUMN kept TEXT;`,
   },
 ];
 

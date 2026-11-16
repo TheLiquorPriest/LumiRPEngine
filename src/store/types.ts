@@ -291,6 +291,24 @@ export interface PathReport {
   inserted?: { message: string; before: string }[];
 }
 
+/**
+ * What a comparison between turns found and kept with the chat (R-130), for the next turn's start to tell once beside what it finds itself: a
+ * flip, a delete, an edit, an inserted message, a stretch to look over and what no longer applies there. What is derived from the path each
+ * time (an unplayed stretch) is not kept: the next comparison finds it again.
+ */
+export type KeptReport = Partial<Pick<PathReport, "gone" | "swiped" | "flipped" | "rebased" | "edited" | "branched" | "notApplied" | "inserted">>;
+
+/**
+ * What landing held changes on an earlier turn left to look over, for one chat whose path runs through that turn (`UserStore.addEarlier`):
+ * the stretch from that turn to the head, as a flipped swipe's is reported, and what of it no longer applies, by thing and value.
+ */
+export interface EarlierLanded {
+  chat: string;
+  /** The turns after it on the chat's path, as the first and last message they stand at; null where none follows. */
+  rebased: PathReport["rebased"];
+  notApplied: NotApplied[];
+}
+
 /** Why a reply stands with no turn played, as the old engine recorded it: the reply was stopped, failed, or restarted. */
 export type StretchWhy = "stopped" | "failed" | "restarted";
 

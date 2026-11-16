@@ -9,7 +9,7 @@
 // the one it was made on.
 
 import { hashParts } from "../shared/hash";
-import { StoreInputError, type PathEntry, type PathReport, type SeenMessage, type ShownMessage, type TurnPoint, type TurnRow } from "./types";
+import { StoreInputError, type KeptReport, type PathEntry, type PathReport, type SeenMessage, type ShownMessage, type TurnPoint, type TurnRow } from "./types";
 
 /** The key of `turn` standing after the path node `prev` (null: at the chat's start). */
 export function nodeKey(prev: string | null, turn: string): string {
@@ -154,4 +154,53 @@ export function comparePaths(before: readonly PathEntry[], after: readonly PathE
   }
   if (run) unplayed.push(run);
   return { gone, swiped, flipped, rebased, unplayed };
+}
+
+/** Each item once, by its key: the first seen where it stands, later ones folded into it by `join`. */
+function oneEach<T>(items: readonly T[], key: (item: T) => string, join: (first: T, later: T) => T = (first) => first): T[] {
+  const seen = new Map<string, T>();
+  for (const item of items) {
+    const k = key(item);
+    const had = seen.get(k);
+    seen.set(k, had === undefined ? item : join(had, item));
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Two reports of one chat's, the earlier first, as one: what a comparison between turns kept and what the next finds, told once together (R-130).
+ * A message flipped or swiped twice is told from where it stood first to where it stands now; a stretch from its first message to its last, its
+ * turns once each; a thing that no longer applies once, by its change. Only what either holds is in it.
+ */
+export function mergeKept(earlier: KeptReport, later: KeptReport): KeptReport {
+  const out: KeptReport = {};
+  const gone = oneEach([...(earlier.gone ?? []), ...(later.gone ?? [])], (g) => g.message);
+  if (gone.length > 0) out.gone = gone;
+  const swiped = earlier.swiped !== undefined && earlier.swiped !== null && later.swiped !== undefined && later.swiped !== null && earlier.swiped.message === later.swiped.message ? { ...later.swiped, from: earlier.swiped.from } : (later.swiped ?? earlier.swiped);
+  if (swiped !== undefined && swiped !== null) out.swiped = swiped;
+  const flipped = oneEach([...(earlier.flipped ?? []), ...(later.flipped ?? [])], (f) => f.message, (first, next) => ({ ...next, from: first.from }));
+  if (flipped.length > 0) out.flipped = flipped;
+  const [a, b] = [earlier.rebased ?? null, later.rebased ?? null];
+  if (a !== null || b !== null) out.rebased = { from: (a ?? (b as NonNullable<typeof b>)).from, to: (b ?? (a as NonNullable<typeof a>)).to, turns: [...new Set([...(a?.turns ?? []), ...(b?.turns ?? [])])] };
+  const edited = oneEach([...(earlier.edited ?? []), ...(later.edited ?? [])], (e) => e.turn, (first, next) => ({ ...next, saved: first.saved }));
+  if (edited.length > 0) out.edited = edited;
+  const branched = later.branched ?? earlier.branched;
+  if (branched !== undefined && branched !== null) out.branched = branched;
+  const notApplied = oneEach([...(earlier.notApplied ?? []), ...(later.notApplied ?? [])], (n) => String(n.change));
+  if (notApplied.length > 0) out.notApplied = notApplied;
+  const inserted = oneEach([...(earlier.inserted ?? []), ...(later.inserted ?? [])], (i) => i.message);
+  if (inserted.length > 0) out.inserted = inserted;
+  return out;
+}
+
+/** What a comparison finds besides what is derived from the path each time: the part of its report that is kept between turns. */
+export function keptOf(found: PathReport): KeptReport {
+  const { gone, swiped, flipped, rebased, edited, branched, notApplied, inserted } = found;
+  return mergeKept({}, { gone, swiped, flipped, rebased, edited, branched, notApplied, ...(inserted === undefined ? {} : { inserted }) });
+}
+
+/** A comparison's report with what was kept told beside it. */
+export function toldWith(found: PathReport, kept: KeptReport): PathReport {
+  const m = mergeKept(kept, keptOf(found));
+  return { ...found, gone: m.gone ?? [], swiped: m.swiped ?? null, flipped: m.flipped ?? [], rebased: m.rebased ?? null, edited: m.edited ?? [], branched: m.branched ?? null, notApplied: m.notApplied ?? [], ...(m.inserted === undefined ? {} : { inserted: m.inserted }) };
 }
