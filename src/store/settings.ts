@@ -8,6 +8,7 @@
 
 import { STORE_DEFAULTS } from "./store";
 import { WORLD_STATE_DEFAULTS } from "./world-state";
+import { STATE_SEARCH_DEFAULTS } from "./search";
 import { WORLD_DOCS_DEFAULTS } from "./worlds";
 
 /** The levels a setting is read from where the host makes its part once for every chat. */
@@ -39,5 +40,11 @@ export const WORLD_DOCS_SETTING_DEFS = {
   kept: { key: "store.worldsKept", default: WORLD_DOCS_DEFAULTS.kept, takes: { type: "whole", least: 1 }, levels: GLOBAL, perConnection: false, name: "World revisions held in memory", about: "Revisions of world documents held in memory once read, the least recently used going first.", effect: "start" },
 } as const satisfies Record<keyof typeof WORLD_DOCS_DEFAULTS, object>;
 
+/** The state search's (`StateIndex`), made once for every chat: what the index gives back, and how long a chat is quiet before the index follows it. */
+export const STATE_SEARCH_SETTING_DEFS = {
+  candidates: { key: "store.searchCandidates", default: STATE_SEARCH_DEFAULTS.candidates, takes: { type: "whole", least: 1 }, levels: GLOBAL, perConnection: false, name: "Candidates a world search takes from its index", about: "Things the state index gives back for each word asked, before the search puts them in order by what the world says of them; a world with a very common word in many names may need more.", effect: "start" },
+  settle: { key: "store.searchSettle", default: STATE_SEARCH_DEFAULTS.settle, takes: { type: "whole", least: 0 }, levels: GLOBAL, perConnection: false, name: "Quiet time before the state index follows a chat", about: "Milliseconds a chat's writes stay quiet before its search index follows its head: the many writes of one turn are followed once.", effect: "start" },
+} as const satisfies Record<keyof typeof STATE_SEARCH_DEFAULTS, object>;
+
 /** Every setting the store reads, as a config file writes it. */
-export const STORE_SETTINGS = [...Object.values(STORE_SETTING_DEFS), ...Object.values(WORLD_STATE_SETTING_DEFS), ...Object.values(WORLD_DOCS_SETTING_DEFS)];
+export const STORE_SETTINGS = [...Object.values(STORE_SETTING_DEFS), ...Object.values(WORLD_STATE_SETTING_DEFS), ...Object.values(WORLD_DOCS_SETTING_DEFS), ...Object.values(STATE_SEARCH_SETTING_DEFS)];

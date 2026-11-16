@@ -486,6 +486,28 @@ export class Store {
     return new UserStore(this, id);
   }
 
+  private readonly writeListeners = new Set<(user: string, chats: readonly string[] | null) => void>();
+
+  /**
+   * Tells `listener` of each write a user's store makes, as it is done: the chats whose folds it changes, or null for a write that names none
+   * (a comparison moves a chat's head without changing a fold). The state search follows a chat's head by it. Returns what stops it.
+   */
+  onWrite(listener: (user: string, chats: readonly string[] | null) => void): () => void {
+    this.writeListeners.add(listener);
+    return () => void this.writeListeners.delete(listener);
+  }
+
+  /** @internal */
+  wrote(user: string, chats: readonly string[] | null): void {
+    for (const listener of this.writeListeners) {
+      try {
+        listener(user, chats);
+      } catch (error) {
+        this.log?.("A listener of the store's writes failed.", { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+
   /** Lets go of everything held in memory: folded states, snapshots waiting for a write, and the paths read last. */
   dropCaches(): void {
     this.folds.clear();
@@ -764,6 +786,7 @@ export class UserStore {
       const out = fn();
       if (chats !== false) this.store.newMarks(this.id, chats);
       else this.store.flush(this.id);
+      this.store.wrote(this.id, chats === false ? null : chats);
       return out;
     })();
   }

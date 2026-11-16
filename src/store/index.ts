@@ -2,12 +2,13 @@
 
 export { joinable, openStore, refuseJoined, Store, UserStore, STORE_DEFAULTS, type StoreFailure, type StoreOptions, type SessionRow } from "./store";
 export { Areas, type AreaChange, type AreaOp, type AreaOutcome, type AreaPart, type StoreArea } from "./areas";
-export { STORE_SETTING_DEFS, STORE_SETTINGS, WORLD_DOCS_SETTING_DEFS, WORLD_STATE_SETTING_DEFS } from "./settings";
+export { STATE_SEARCH_SETTING_DEFS, STORE_SETTING_DEFS, STORE_SETTINGS, WORLD_DOCS_SETTING_DEFS, WORLD_STATE_SETTING_DEFS } from "./settings";
 export { HORIZON, horizonOf, TreeView, type From, type HorizonEntry, type NodeKind, type NodeView, type Reflection, type ValueLine, type ValuesShown, type ViewOptions, type ViewReading } from "./view";
 export { readPart, renderView, wordLine, Template, type Part, type Piece, type View, type ViewLine } from "./words";
 export { factStore, standing, type FactInput } from "./facts";
 export { BLANK_REVISION, blankWorld, clockRecorded } from "./blank";
 export { moveWorldFiles, sha256Of, storedWorlds, readWorldDoc, UserWorlds, WORLD_DOCS_DEFAULTS, type DraftRead, type DraftWrite, type KeptPart, type WorldChange, type WorldFilesMoved, type WorldRevisionRow } from "./worlds";
+export { StateIndex, STATE_SEARCH_DEFAULTS, type Found, type FoundKind, type StateIndexOptions, type StateIndexPort, type StateIndexStore } from "./search";
 export { timeDue } from "./due";
 export {
   worldState,
