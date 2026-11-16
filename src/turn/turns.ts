@@ -1112,8 +1112,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#d.writes.run((db) => left.forEach((r) => this.#interrupt(db, { ...r, status: "failed", ended: r.ended ?? this.#d.clock.now(), error: stopped })), "ending the runs RPE stopped during");
       this.#stateChanged(chat);
     }
-    const messages = this.#d.store.user(user).path(chat).map((e) => ({ id: e.message, hash: e.hash, hidden: e.hidden }));
-    const found = await reconcile(reads, { chat, messages, awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target })) });
+    const path = this.#d.store.user(user).path(chat);
+    const messages = path.map((e) => ({ id: e.message, hash: e.hash, hidden: e.hidden }));
+    // A continue whose tag named no message went on the newest reply on the path as RPE held it: its end is looked for there, so it is
+    // tied to the joined text as its end would have tied it.
+    const newestReply = path.findLast((e) => !e.user)?.message ?? null;
+    const found = await reconcile(reads, { chat, messages, awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target ?? (r.kind === "continue" ? newestReply : null) })) });
     for (const change of found) {
       if (change.kind !== "generation-ended") {
         this.changed(change);
