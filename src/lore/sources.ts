@@ -8,6 +8,7 @@ import type { WorldState } from "../engine/state";
 import type { JsonObject } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import type { Store } from "../store/store";
+import { horizonOf } from "../store/view";
 import { StoreInputError } from "../store/types";
 import { type OverlayRow, overlayRows } from "./overlays";
 
@@ -139,7 +140,7 @@ export function storeWorlds(store: Store, castName?: LoreWorlds["castName"]): Lo
       const state = folded.world;
       const world = store.env.worlds(state.revision);
       if (world === undefined) throw new Error(`The world revision ${state.revision} that chat ${chat} stands on is not available, so its lore cannot be read.`);
-      return { registry, world, state, horizon: folded.horizon };
+      return { registry, world, state, horizon: horizonOf(store.env, folded).map((h) => h.at) };
     },
     ...(castName !== undefined ? { castName } : {}),
   };
