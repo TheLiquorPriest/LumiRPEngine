@@ -32,7 +32,7 @@ import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
 import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, joinCast, type SourceReader, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
-import { mapLines, mapView } from "../iface";
+import { mapView, mapWording } from "../iface";
 import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
@@ -1237,7 +1237,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const statePart = await guidance.part(PARTS.worldState);
     const layout = statePart === undefined ? null : await this.#d.files.read(scope, statePart.source.path);
     if (layout?.status === "read") {
-      const maps = mapView(await mapLines(guidanceTexts(this.#d.files, scope, this.#d.log)), settings.map);
+      const maps = mapView(await mapWording(guidanceTexts(this.#d.files, scope, this.#d.log)), settings.map);
       try {
         const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });

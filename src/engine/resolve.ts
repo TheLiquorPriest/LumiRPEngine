@@ -82,6 +82,8 @@ export interface Resolution {
   observable: string | null;
   /** How the adjudication policy decided the check; null without a check or under a plain-rolling policy. */
   adjudged: Adjudged | null;
+  /** With `advise` (`ResolveOptions`): each requirement the action did not meet, which it went on past; none otherwise. */
+  advised?: Failure[];
   /**
    * The thing the player said they had, made real for this action as one of a turn's (DESIGN §9.4
    * player claims; set by the plan): its entity and name, and what its Undo takes back: its making,
@@ -225,6 +227,11 @@ function firstUnmet(action: ActionDef, env: ExprEnv): Failure | null {
   return plain === null ? null : unmet(plain, env, false);
 }
 
+/** Every requirement of the action that does not hold, in its order. */
+function allUnmet(action: ActionDef, env: ExprEnv): Failure[] {
+  return action.requires.flatMap((req) => (truthy(evalExpr(requirementExpr(req), env, false)) ? [] : [unmet(req, env, isHardLock(req))]));
+}
+
 /**
  * What keeps the action the player's words named (`needs`) from holding one that plays in its place
  * (DESIGN §9.4): the first of its requirements on the picks it was given that doesn't hold, a hard
@@ -315,6 +322,11 @@ export interface ResolveOptions {
   heard?: string;
   /** The action the player's words named, when this one plays in its place: its needs hold this one too (`unmetNeeds`). */
   needs?: Needs;
+  /**
+   * The world's rules advise rather than refuse (plan §6.1; his own tap, PlanTurnKinds-21): each requirement the action does not meet
+   * is given back in `advised`, and the action is applied all the same.
+   */
+  advise?: true;
 }
 
 /**
@@ -350,8 +362,9 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   const itself = firstUnmet(p.action, env);
   const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs, req.params ?? {}) : null;
   // A hard lock vetoes first, whichever action's it is.
-  const unmet = itself?.hard ? itself : named?.hard ? named : (itself ?? named);
-  if (unmet !== null) return { ...base, actor: p.actor, failed: unmet, events: w.events.slice(start) };
+  const unmetHere = itself?.hard ? itself : named?.hard ? named : (itself ?? named);
+  const advised = opts.advise === true && unmetHere !== null ? allUnmet(p.action, env) : [];
+  if (unmetHere !== null && opts.advise !== true) return { ...base, actor: p.actor, failed: unmetHere, events: w.events.slice(start) };
 
   // The plan is read from the state before the action: its duration and activity span.
   const duration = Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0));
@@ -443,6 +456,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
     outcome,
     events: w.events.slice(start),
     rejected: result.rejected,
+    ...(advised.length > 0 ? { advised } : {}),
     duration,
     activity,
     observable: p.action.observable ?? null,

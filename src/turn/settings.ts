@@ -38,6 +38,7 @@ import { CAST_DEFAULTS, CAST_SETTING_DEFS, type CastSettings } from "../cast";
 import { IFACE_DEFAULTS, IFACE_SETTING_DEFS, type IfaceSettings } from "../iface";
 import { MAP_DEFAULTS, MAP_SETTINGS, type MapConfig, mapConfigRead } from "../iface/map";
 import { WORLD_STATE_DEFAULTS, WORLD_STATE_SETTING_DEFS, type WorldStateSettings } from "../store";
+import { TAP_DEFAULTS, TAP_SETTING_DEFS, TAP_SETTINGS, type TapSettings } from "../play/settings";
 import { STORY_DEFAULTS, STORY_SETTING_DEFS, STORY_SO_FAR_SETTING_DEFS, type StorySettings } from "../story";
 import { STORY_SO_FAR_DEFAULTS, type StorySoFarSettings } from "../story/sofar";
 import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
@@ -82,6 +83,8 @@ export interface TurnSettings {
   turnsPage: { size: number; most: number };
   /** The most characters a request's words may hold (`requests.textMost`); one past it is not kept. */
   requestsTextMost: number;
+  /** The taps' bounds, for the chat (`src/play/settings.ts`). */
+  taps: TapSettings;
 }
 
 /** The defaults, where no level sets a value. */
@@ -113,6 +116,7 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   // The first build's fixed page sizes, made settings.
   turnsPage: { size: 50, most: 500 },
   requestsTextMost: 2000,
+  taps: TAP_DEFAULTS,
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -271,8 +275,8 @@ const DEFS = {
   },
 } as const satisfies Record<string, Setting>;
 
-/** Every setting the turn lane reads, as a config file writes it: its own, and the map's. */
-export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS), ...MAP_SETTINGS];
+/** Every setting the turn lane reads, as a config file writes it: its own, the map's and the taps'. */
+export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS), ...MAP_SETTINGS, ...TAP_SETTINGS];
 
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
@@ -299,6 +303,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     reserve: read.value(RESERVE) as number,
     turnsPage: { size: read.value(DEFS.turnsPage) as number, most: read.value(DEFS.turnsPageMost) as number },
     requestsTextMost: read.value(DEFS.requestsTextMost) as number,
+    taps: read.numbers(TAP_SETTING_DEFS),
   };
 }
 

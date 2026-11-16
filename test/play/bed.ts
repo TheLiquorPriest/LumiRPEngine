@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 import type { HostTool, JsonObject, JsonValue, ToolCtx, ToolResult } from "rp-harness/contract";
 import { type LiveEvent, LiveHub, WriteQueue } from "../../src/app";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
-import { engineTools, gridMoves, Lines, mapView, shippedTexts, stateScan } from "../../src/iface/index";
+import { engineTools, gridMoves, mapView, mapWording, shippedTexts, stateScan } from "../../src/iface/index";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { playRoutes, PlayService } from "../../src/play";
 import { hashJson } from "../../src/shared/hash";
@@ -122,7 +122,7 @@ export function makeBed(): Bed {
       const s = store.user(user);
       const begun = await writes.run(() => s.beginTurn({ chat, kind: "normal" }), "a turn");
       if (during !== undefined) {
-        const tools = new Map((await engineTools({ store: s, env: store.env, writes, files: shippedTexts(), search: stateScan, due: timeDue(store), grid: gridMoves(), map: mapView(Lines.none()) })).map((t) => [t.name, t]));
+        const tools = new Map((await engineTools({ store: s, env: store.env, writes, files: shippedTexts(), search: stateScan, due: timeDue(store), grid: gridMoves(), map: mapView(await mapWording(shippedTexts())) })).map((t) => [t.name, t]));
         const tool = tools.get("world_apply") as HostTool;
         const ctx: ToolCtx = { scope: { user, chat, session: "session-1", turn: begun.id }, agent: { id: "author-1", definition: "author" }, run: begun.id, callId: `call-${++asked}`, signal: new AbortController().signal, onUpdate: () => undefined };
         await during(async (operations) => {

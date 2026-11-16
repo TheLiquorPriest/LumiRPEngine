@@ -19,18 +19,19 @@
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
-import type { AgentRef, Clock, Environment, Harness, HostTool, Scope } from "rp-harness/contract";
+import type { AgentRef, Clock, Environment, Harness, HostTool, JsonValue, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
-import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
+import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_SETTINGS, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
+import type { StoreFailure } from "../store/store";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
@@ -139,16 +140,16 @@ export const MACHINE_CLOCK: Clock = {
  * limits are the global level's settings, read once: the store is made once for every chat.
  */
 export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths">): Store {
-  const handlerFailed = (failure: { op: string; error: unknown; user?: string; chat?: string; turn?: string; change?: number | null }): void => {
-    const { op, chat, turn } = failure;
+  const handlerFailed = (failure: StoreFailure): void => {
+    const { op, chat, turn, change, user } = failure;
     const error = failure.error instanceof Error ? failure.error.message : String(failure.error);
-    const change = failure.change ?? null;
-    app.log.error("An engine handler failed on a change, which is recorded as not applied.", { op, error, user: failure.user ?? null, chat: chat ?? null, turn: turn ?? null, change });
-    if (chat !== undefined && turn !== undefined) app.live.publish(chat, { kind: "handler_failed", data: { op, error, turn, change } });
+    app.log.error("An engine handler failed on a change, which is recorded as not applied.", { op, error, user, chat: chat ?? null, turn, change });
+    if (chat !== undefined) app.live.publish(chat, { kind: "handler_failed", data: { op, error, turn, change } });
   };
   const global = globalConfig(app.paths.files, app.log);
   const worlds = storedWorlds(app.db, global.numbers(WORLD_DOCS_SETTING_DEFS));
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, ...global.numbers(STORE_SETTING_DEFS) });
+  // A walk the store's settings cut short (`engine.kindChain`, `holderDepth`, `space.visitDepth`) is logged, once for each chain.
+  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), ...global.numbers(STORE_SETTING_DEFS) });
 }
 
 export interface TurnsOptions {
@@ -286,9 +287,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const hostTools = async (scope: Scope): Promise<HostTool[]> => {
     const texts = guidanceTexts(files, scope, app.log);
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
-    const [lines, settings] = await Promise.all([mapLines(texts), turnSettings(files, scope, app.log)]);
+    const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines, settings.map), map: mapView(lines, settings.map), mapSettings: settings.map, due, settings: settings.engine, ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, settings: settings.engine, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now(), settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
@@ -308,7 +309,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const into = turns.turn(scope.turn) === null ? null : turns.joinedTo(scope.turn);
     return into === null ? scope : { ...scope, turn: into };
   };
-  const lorePorts = lorePort(lore);
+  const lorePorts = lorePort(lore, loreIndex);
   // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
   const events = turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log });
   const env: Environment = {

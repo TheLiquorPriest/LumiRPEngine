@@ -30,7 +30,7 @@ import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "rp-harness";
 import type { AgentRef, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, dropCastStaged, type SourceReader } from "../cast";
-import { mapLines, mapView, rulesetData } from "../iface";
+import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
 import { dropStoryStaged, storyBrief } from "../story";
@@ -113,7 +113,7 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   if (layout.status !== "read") return null;
   const part = readPart(layout.text, "world-state");
   const settings = await turnSettings(deps.files, scope, deps.log);
-  const map = maps ? mapView(await mapLines(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
+  const map = maps ? mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
   return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState }) };
 }
 
