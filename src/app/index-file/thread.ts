@@ -90,10 +90,10 @@ function inBatches<T>(db: Database, items: readonly T[], batch: number, each: (i
   for (let at = 0; at < items.length; at += batch) write(items.slice(at, at + batch));
 }
 
-/** A query a person typed as one the full-text index takes: each word quoted, all of them asked for. */
-function matchOf(query: string): string | null {
+/** A query a person typed as one the full-text index takes: each word quoted, all of them asked for; with `prefix`, each word as the start of a word. */
+function matchOf(query: string, prefix: boolean): string | null {
   const words = query.match(/[\p{L}\p{N}]+/gu);
-  return words === null ? null : words.map((word) => `"${word}"`).join(" ");
+  return words === null ? null : words.map((word) => (prefix ? `"${word}"*` : `"${word}"`)).join(" ");
 }
 
 function tableName(name: string): string {
@@ -179,9 +179,9 @@ export const INDEX_TASKS = {
   },
 
   /** On any thread: the ids of the texts that hold every word of `query`, the user's alone, within `scope` when one is named, best first. */
-  indexSearch(input: { path: string; index: IndexName; user: string; query: string; scope: string | null; limit: number }): IndexHit[] {
+  indexSearch(input: { path: string; index: IndexName; user: string; query: string; scope: string | null; limit: number; prefix?: boolean }): IndexHit[] {
     const name = indexOf(input.index);
-    const match = matchOf(input.query);
+    const match = matchOf(input.query, input.prefix === true);
     if (match === null) return [];
     const scoped = input.scope === null ? "" : " AND k.scope = $scope";
     const sql = `SELECT k.id AS id, k.revision AS revision, k.scope AS scope, f.rank AS rank FROM "${name}" f JOIN "${name}_key" k ON k.row = f.rowid WHERE f."${name}" MATCH $match AND k.user = $user${scoped} ORDER BY f.rank LIMIT $limit`;

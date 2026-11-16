@@ -66,9 +66,9 @@ export class IndexFile {
     return await this.#writer.run("indexDrop", { path: this.#path, index, user, ids, batch: this.#batch });
   }
 
-  /** The user's texts in `index` that hold every word of `query`, within `scope` (a chat, a book) when one is named, best first, `limit` at most. */
-  async search(index: IndexName, user: string, query: string, options: { scope?: string | null; limit: number }): Promise<IndexHit[]> {
-    return await this.#workers.run("indexSearch", { path: this.#path, index, user, query, scope: options.scope ?? null, limit: options.limit });
+  /** The user's texts in `index` that hold every word of `query` (with `prefix`, every word as the start of a word), within `scope` (a chat, a book) when one is named, best first, `limit` at most. */
+  async search(index: IndexName, user: string, query: string, options: { scope?: string | null; limit: number; prefix?: boolean }): Promise<IndexHit[]> {
+    return await this.#workers.run("indexSearch", { path: this.#path, index, user, query, scope: options.scope ?? null, limit: options.limit, prefix: options.prefix === true });
   }
 
   /** Makes an area's own table, by its own step; one standing with other columns is made again, empty (`made`), and the area feeds it again. */
