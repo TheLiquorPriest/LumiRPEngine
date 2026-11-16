@@ -10,19 +10,34 @@ import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { writtenTime } from "../engine/time";
 import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
-import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
+import { nearestOf } from "../iface/reading";
+import { type Fields, type GuidanceFiles, Lines, textOf, toolText } from "../iface/texts";
 import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type TreeView } from "../store";
 import { pairMarks, questsOfThread, threadTouched } from "../quests/thread";
 import { storyAt } from "./path";
-import { nameKey, type Span, type StoryItem, StoryRecord } from "./record";
+import { nameKey, type Span, type StoryItem, type StoryPart, StoryRecord } from "./record";
 
 /** Every fixed value of the story tools, each a setting with this default. */
 export const STORY_DEFAULTS = Object.freeze({
   /** The most items one `story_query` answers with; the answer says how many more match. */
   queryItems: 50,
+  /** How many near ids an answer about an id the record does not hold lists. */
+  nearMatches: 5,
+  /** How far off in spelling an id may be, as a part of its length, and still be listed as a near one. */
+  nearDistance: 0.25,
 });
 
 export type StorySettings = { -readonly [K in keyof typeof STORY_DEFAULTS]: number };
+
+/**
+ * What an answer about an id the record does not hold says besides it: the ids of that part nearest it (those of any part when `part`
+ * is null), by the engine's own measure and never an empty list while the record holds any (R-74), or that the record holds none.
+ */
+export function nearIds(lines: Lines, settings: Pick<StorySettings, "nearMatches" | "nearDistance">, record: StoryRecord, said: string, part: StoryPart | null): Fields {
+  const ids = [...record.items.values()].filter((i) => part === null || i.part === part).map((i) => i.id);
+  const near = nearestOf(said.trim(), ids, settings).slice(0, settings.nearMatches);
+  return { near: textOf(near), nothing: ids.length === 0 ? (lines.line("nothing_stored", { part: part ?? "" }) ?? "") : "" };
+}
 
 /** The prompt part every answer's sentences come from. */
 export const STORY_ANSWERS = "story-answers";

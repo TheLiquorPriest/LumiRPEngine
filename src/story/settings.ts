@@ -10,6 +10,8 @@ import { STORY_SO_FAR_DEFAULTS, type StorySoFarSettings } from "./sofar";
 /** The story tools' (`storyTools`): read at every level, since the tools are made for the chat a call is in, at each turn. */
 export const STORY_SETTING_DEFS = {
   queryItems: { key: "story.queryItems", default: STORY_DEFAULTS.queryItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Items a story query gives", about: "The most items one story_query answers with; the answer says how many more match.", effect: "turn" },
+  nearMatches: { key: "story.nearMatches", default: STORY_DEFAULTS.nearMatches, takes: { type: "whole", least: 0 }, perConnection: false, name: "Near ids listed", about: "How many near ids an answer about an id the story record does not hold lists.", effect: "turn" },
+  nearDistance: { key: "story.nearDistance", default: STORY_DEFAULTS.nearDistance, takes: { type: "number", least: 0 }, perConnection: false, name: "Spelling distance of a near id", about: "How far off in spelling an id may be and still be listed as a near one, as a part of its length: 0.25 lets a quarter of its letters differ.", effect: "turn" },
 } as const satisfies NumberSettings<keyof StorySettings>;
 
 /** The story's facts' (`storyFacts`): the host makes them once for every chat, when RPE starts, so they are read from the global level alone. */

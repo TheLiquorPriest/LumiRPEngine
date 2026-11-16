@@ -17,7 +17,7 @@ import { type Fields, type Lines, textOf } from "../iface/texts";
 import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
 import { type Lane, STANDINGS, type TreeView } from "../store";
-import { allSpans, itemView, placeRefOf, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, treeOf, valueView } from "./kit";
+import { allSpans, itemView, nearIds, placeRefOf, recordOr, STORY_DEFAULTS, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, treeOf, valueView } from "./kit";
 import { keyedItemId, recordStory, type StoryItem, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
 
 /** The lane every operation of the tool writes to. */
@@ -134,6 +134,8 @@ interface Reading {
   lines: Lines;
   /** The ref of the place a name or id names in the world the turn stands in; null when it names none there, undefined when that world has no place to name. */
   placeRef(words: string): string | null | undefined;
+  /** What an answer about an id the record does not hold adds: the near ids of that part (of any part with none), or that the record holds none. */
+  near(said: string, part: StoryPart | null): Fields;
 }
 
 function isUnread(v: unknown): v is Unread {
@@ -190,7 +192,7 @@ function readArg(r: Reading, n: number, op: string, field: string, kind: Kind, s
       return words === "" ? undefined : words;
     }
     case "item":
-      return typeof said === "string" && r.record.items.has(said.trim()) ? said.trim() : { line: "unknown_id", fields: { n, op, field, id: JSON.stringify(said) } };
+      return typeof said === "string" && r.record.items.has(said.trim()) ? said.trim() : { line: "unknown_id", fields: { n, op, field, id: JSON.stringify(said), ...r.near(typeof said === "string" ? said : "", null) } };
   }
 }
 
@@ -199,7 +201,7 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
   const named = raw.id;
   const byId = (): { item: string; fresh: boolean } | Unread => {
     const id = typeof named === "string" ? named.trim() : "";
-    return r.record.items.get(id)?.part === def.part ? { item: id, fresh: false } : { line: "unknown_id", fields: { n, op: def.name, part: def.part, id: JSON.stringify(named) } };
+    return r.record.items.get(id)?.part === def.part ? { item: id, fresh: false } : { line: "unknown_id", fields: { n, op: def.name, part: def.part, id: JSON.stringify(named), ...r.near(id, def.part) } };
   };
   switch (def.finds) {
     case "new-or-id": {
@@ -288,7 +290,7 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
 }
 
 /** What a page's correction of an item is read against: the record as it stands, story time, the answers' lines and the world's places. */
-export type CorrectionReading = Omit<Reading, "turn">;
+export type CorrectionReading = Omit<Reading, "turn" | "near">;
 
 /** A correction of an item as read: what it writes, and the lines that say what was not read or did not add up. */
 export interface CorrectionRead {
@@ -302,7 +304,7 @@ export interface CorrectionRead {
  * is refused in the line that says so. The item's record of a turn is read as that turn's.
  */
 export function readCorrection(r: CorrectionReading, item: StoryItem, fields: JsonObject): CorrectionRead | { refused: Unread } {
-  const reading: Reading = { ...r, turn: item.part === "record" ? item.opened : null };
+  const reading: Reading = { ...r, turn: item.part === "record" ? item.opened : null, near: (said, part) => nearIds(r.lines, STORY_DEFAULTS, r.record, said, part) };
   // What names the item is the item's own, whatever the page sent: an arc is found by who it is about.
   const given: JsonObject = { ...fields, op: item.part, id: item.id, ...(item.part === "arc" ? { who: item.fields.who ?? "" } : {}) };
   const out = readOp(reading, 1, given);
@@ -344,6 +346,7 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     turn,
     lines: call.lines,
     placeRef: (words) => placeRefOf((view ??= treeOf(call)), words),
+    near: (said, part) => nearIds(call.lines, call.settings, record, said, part),
   };
   const ops = list.map((raw, i) => readOp(reading, i + 1, raw));
   if (ops.some((o) => o.fatal.length > 0)) {

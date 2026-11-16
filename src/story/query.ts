@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
-import { allSpans, itemView, namesOf, placeRefOf, recordOr, type StoryCall, storyClock, type StoryToolSpec, treeOf } from "./kit";
+import { allSpans, itemView, namesOf, nearIds, placeRefOf, recordOr, type StoryCall, storyClock, type StoryToolSpec, treeOf } from "./kit";
 import { nameKey, STORY_PARTS, type Span, type StoryItem, type StoryPart, type StoryRecord } from "./record";
 
 const QUERY_PROPERTIES: Record<string, JsonObject> = {
@@ -60,7 +60,7 @@ async function query(args: JsonObject, call: StoryCall): Promise<Reply> {
 
   if (typeof args.id === "string") {
     const item = record.items.get(args.id.trim());
-    if (item === undefined) return reply.line("unknown_id", { id: JSON.stringify(args.id) }).fail();
+    if (item === undefined) return reply.line("unknown_id", { id: JSON.stringify(args.id), ...(typeof part === "string" ? { part } : {}), ...nearIds(call.lines, call.settings, record, args.id, typeof part === "string" ? (part as StoryPart) : null) }).fail();
     return reply.data({ [item.part]: [itemView(record, item, clock, spans, history)] });
   }
   if (args.due === true && clock === null) reply.line("no_clock_due", {});

@@ -19,7 +19,8 @@ one_name: Operation {{n}} ({{op}}): who names one person, or plot.
 no_message: Operation {{n}} ({{op}}): {{field}} names no message: you sent {{value}}, and the chat's messages are numbered 0 to {{last}}.
 no_clock: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but this chat keeps no story time, so it will not come up as due.
 unreadable_time: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM), a clock time (18:30) or a span from now (two days) can be counted.
-unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.
+unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.{{#near}} The nearest {{#part}}{{part}} {{/part}}ids it holds: {{near}}.{{/near}}{{#nothing}} {{nothing}}{{/nothing}}
+nothing_stored: The story record holds no {{#part}}{{part}}{{/part}}{{^part}}item{{/part}} yet; story_query lists what it holds.
 no_current: Operation {{n}} ({{op}}): there is no {{part}} yet. Open one with new.
 current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is closed. Open a new one with new, or name {{id}} to write to it.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.

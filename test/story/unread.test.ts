@@ -110,7 +110,7 @@ describe("story_record, as the Author met it live", () => {
     expect(r.error).toBe(true);
     wordsFromFiles(r);
     expect(texts(r)).toEqual([
-      'Operation 2 (thread): the story record on this path holds no thread "th-999".',
+      'Operation 2 (thread): the story record on this path holds no thread "th-999". The story record holds no thread yet; story_query lists what it holds.',
       "thread reads id, text, kind, state, stakes, who, payoff, hot, close, drop, why, and a new one needs text. It does not read mood.",
       'Operation 3: op cannot be read, you sent "sing". It is one of: premise, chapter, scene, beat, thread, arc, player, future, canon, retcon, record, overlay.',
       "premise reads text, tone, rules, role.",
