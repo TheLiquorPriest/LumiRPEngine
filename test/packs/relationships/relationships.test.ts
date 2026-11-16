@@ -46,12 +46,10 @@ describe("relationships", () => {
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
   });
 
-  test("level 4 decays closed-form at read time (half-life 30 days); lower levels don't", () => {
+  test("level 4 never fades regard by code: thirty days on, it reads as recorded", () => {
     const w = setup(4);
     applyEffects(reg, w, [{ type: "relationships.adjust", args: { from: "maya", to: "you", axis: "warmth", delta: 40 } }], { bindings: {}, rng: createRng("x") });
     w.apply({ type: "clock", minutes: 30 * 1440, cause: "advance" });
-    expect(regardValue(w.ctx, "maya", "you", "warmth")).toBe(20);
-    w.state.realism.levels.relationships = 3;
     expect(regardValue(w.ctx, "maya", "you", "warmth")).toBe(40);
   });
 

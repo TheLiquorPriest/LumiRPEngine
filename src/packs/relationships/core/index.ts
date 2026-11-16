@@ -1,4 +1,4 @@
-// Relationships pack (DESIGN §9.3): per-pair multi-axis regard, appraisal rules, closed-form decay,
+// Relationships pack (DESIGN §9.3): per-pair multi-axis regard, appraisal rules,
 // bands that feed the planner and the narrator's voice, history and group regard; groups
 // (factions, families, households, companies) with membership; and kinship.
 //
@@ -17,7 +17,7 @@
 //   1  one band per pair (axes move together: an appraisal's mean delta)
 //   2  one number per pair (the axes' mean)
 //   3  multiple axes plus appraisal rules
-//   4  closed-form decay toward 0 at read time, history, group regard
+//   4  history, group regard
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
@@ -68,8 +68,6 @@ export const APPRAISALS: Readonly<Record<string, Readonly<Record<string, number>
   threat: { warmth: -8, trust: -10, fear: 10 },
 };
 
-/** Half-life of regard decay at level 4, in days (world config `halfLifeDays`). */
-export const DEFAULT_HALF_LIFE_DAYS = 30;
 const HISTORY = 8;
 /** A chat's time: the stated length, else a quarter of an hour. */
 const CHAT_FOR = "minutes > 0 ? minutes : 15";
@@ -82,7 +80,7 @@ declare module "../../../engine/registry" {
     "relationship.appraise": AppraiseService;
   }
   interface QueryMap {
-    /** Current regard (decayed at level 4): one axis, or the axes' mean. */
+    /** Current regard as last recorded: one axis, or the axes' mean. */
     regard: (ctx: ReadContext, from: EntityId, to: EntityId, axis?: string) => number;
     regard_band: (ctx: ReadContext, from: EntityId, to: EntityId) => string;
     /** A group's regard toward someone (any group, factions included): its own regard relation, else its members' mean. */
@@ -93,6 +91,8 @@ declare module "../../../engine/registry" {
     "relationships.words": (ctx: ReadContext, from: EntityId, to: EntityId) => string | null;
     /** The voice line for someone in the POV's scene, as the narrator's People section tells it (`voiceLine`); null without regard. */
     "relationships.voice": (ctx: ReadContext, who: EntityId) => string | null;
+    /** What a world's half-life halves of regard within a span, as a read: it changes nothing. A world with no half-life has none. */
+    "relationships.fading": (ctx: ReadContext, span: { from: number; to: number }) => Fading[];
   }
 }
 
@@ -112,8 +112,10 @@ export function bandsOf(ctx: Pick<ReadContext, "world">): BandDef[] {
   return raw.map((b) => objOf(b)).map((b) => ({ label: strOf(b.label), ...(typeof b.min === "number" ? { min: b.min } : {}), ...(typeof b.max === "number" ? { max: b.max } : {}) }));
 }
 
-function halfLife(ctx: Pick<ReadContext, "world">): number {
-  return numOf(config(ctx).halfLifeDays, DEFAULT_HALF_LIFE_DAYS) * 1440;
+/** The half-life, in minutes, a world's relationships config gives its regard (`halfLifeDays`), or null where it sets none: code holds none of its own. */
+function halfLife(ctx: Pick<ReadContext, "world">): number | null {
+  const days = config(ctx).halfLifeDays;
+  return typeof days === "number" && Number.isFinite(days) && days > 0 ? Math.max(1, days * 1440) : null;
 }
 
 function relationOf(state: Readonly<WorldState>, from: EntityId, to: EntityId): JsonObject | null {
@@ -121,18 +123,11 @@ function relationOf(state: Readonly<WorldState>, from: EntityId, to: EntityId): 
   return r ? (r.fields ?? {}) : null;
 }
 
-/** Closed-form decay toward 0 since `t`, at Relationships level 4 (every pair, NPC↔NPC included). */
-function decayed(ctx: ReadContext, from: EntityId, value: number, since: number, at: number): number {
-  if (ctx.levelOf(from, "relationships") < 4 || at <= since) return value;
-  return value * Math.pow(0.5, (at - since) / halfLife(ctx));
-}
-
-/** Every axis's current value from A toward B, inside the axis range. */
-export function regardAxes(ctx: ReadContext, from: EntityId, to: EntityId, at = ctx.state.clock): Record<string, number> {
+/** Every axis's value from A toward B as it was last recorded: nothing fades by itself as time passes. */
+export function regardAxes(ctx: ReadContext, from: EntityId, to: EntityId): Record<string, number> {
   const f = relationOf(ctx.state, from, to) ?? {};
-  const t = numOf(f.t, at);
   const out: Record<string, number> = {};
-  for (const a of axesOf(ctx)) out[a.id] = Math.max(a.min, Math.min(a.max, Math.round(decayed(ctx, from, numOf(f[a.id]), t, at) * 10) / 10));
+  for (const a of axesOf(ctx)) out[a.id] = Math.round(numOf(f[a.id]) * 10) / 10;
   return out;
 }
 
@@ -154,35 +149,44 @@ function deltasFor(ctx: ReadContext, appraisal: string | Record<string, number>)
   return { ...(own(APPRAISALS, appraisal) ?? {}) };
 }
 
-const appraise: AppraiseService = (ctx, from, to, appraisal, why, mutual) => {
-  if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to) || from === to) return [];
+const appraise: AppraiseService = (ctx, from, to, appraisal, why, mutual) => appraiseWith(ctx, from, to, appraisal, why, mutual, false);
+
+/**
+ * A regard change as an event. As given (`given`), it is recorded at any realism level and between someone and themself, on the axes
+ * it names and never spread as a mean over every axis, and it is kept past an axis's range; the event carries the mark, so a record
+ * made without it folds as it always did, spread and clamped.
+ */
+function appraiseWith(ctx: ReadContext, from: EntityId, to: EntityId, appraisal: string | Record<string, number>, why: string | undefined, mutual: boolean | undefined, given: boolean): LedgerEvent[] {
+  if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to) || (from === to && !given)) return [];
   const level = ctx.levelOf(from, "relationships");
-  if (level === 0) return [];
+  if (level === 0 && !given) return [];
   const axes = axesOf(ctx).map((a) => a.id);
   const raw = deltasFor(ctx, appraisal);
   const known = Object.entries(raw).filter(([k, v]) => axes.includes(k) && v !== 0);
   if (known.length === 0) return [];
   let deltas: JsonObject;
-  if (level >= 3) deltas = Object.fromEntries(known);
+  if (level >= 3 || given) deltas = Object.fromEntries(known);
   else {
     // Below level 3 the pair has one value: every axis moves by the appraisal's mean.
     const mean = Math.round((known.reduce((a, [, v]) => a + v, 0) / axes.length) * 10) / 10;
     deltas = Object.fromEntries(axes.map((a) => [a, mean]));
   }
-  // Each change also carries its result, the pair's anchor `{axis values, t}`: a record keeps only the
-  // last anchor per NPC↔NPC pair (period close) and decay runs from it at read time.
+  // Each change also carries its result, the pair's anchor `{axis values, t}`: a record keeps only the last anchor per NPC↔NPC pair (period close).
   const npc = from !== ctx.world.pov && to !== ctx.world.pov;
-  const anchor = anchorAfter(ctx, from, to, deltas, ctx.state.clock);
-  const back = mutual ? anchorAfter(ctx, to, from, deltas, ctx.state.clock) : null;
+  const anchor = anchorAfter(ctx, from, to, deltas, ctx.state.clock, given);
+  const back = mutual ? anchorAfter(ctx, to, from, deltas, ctx.state.clock, given) : null;
   const sameBack = back !== null && JSON.stringify(back) === JSON.stringify(anchor);
-  return [{ type: "relationships.regard", data: { from, to, deltas, why: why ?? (typeof appraisal === "string" ? appraisal : "change"), ...(mutual ? { mutual: true } : {}), ...(npc ? { npc: true } : {}), anchor, ...(back && !sameBack ? { back } : {}) } }];
-};
+  return [{ type: "relationships.regard", data: { from, to, deltas, why: why ?? (typeof appraisal === "string" ? appraisal : "change"), ...(mutual ? { mutual: true } : {}), ...(npc ? { npc: true } : {}), ...(given ? { asGiven: true } : {}), anchor, ...(back && !sameBack ? { back } : {}) } }];
+}
 
-/** A pair's axis values and `t` after `deltas` at `at`: decayed to `at`, plus the deltas, clamped to each axis. */
-function anchorAfter(ctx: ReadContext, from: EntityId, to: EntityId, deltas: JsonObject, at: number): JsonObject {
-  const current = regardAxes(ctx, from, to, at);
+/** A pair's axis values and `t` after `deltas` at `at`: what is recorded, plus the deltas, each kept inside its axis unless the change is as given. */
+function anchorAfter(ctx: ReadContext, from: EntityId, to: EntityId, deltas: JsonObject, at: number, given: boolean): JsonObject {
+  const current = regardAxes(ctx, from, to);
   const out: JsonObject = {};
-  for (const a of axesOf(ctx)) out[a.id] = Math.max(a.min, Math.min(a.max, Math.round(((current[a.id] ?? 0) + numOf(deltas[a.id])) * 10) / 10));
+  for (const a of axesOf(ctx)) {
+    const value = Math.round(((current[a.id] ?? 0) + numOf(deltas[a.id])) * 10) / 10;
+    out[a.id] = given ? value : Math.max(a.min, Math.min(a.max, value));
+  }
   out.t = at;
   return out;
 }
@@ -208,6 +212,15 @@ const regardEvent: EventTypeDef<PackEvent> = {
     if (e.data.deltas === undefined && e.data.anchor === undefined) return { code: "bad_delta", reason: "regard needs deltas or an anchor" };
     return numbers.every((v) => typeof v === "number" && Number.isFinite(v)) ? null : { code: "bad_delta", reason: "regard values must be numbers" };
   },
+  // What was kept as the story gave it and lies past its axis's range: kept all the same, and said.
+  advise: (e, ctx) => {
+    if (e.data.asGiven !== true || e.data.deltas === undefined) return null;
+    const from = strOf(e.data.from);
+    const to = strOf(e.data.to);
+    const after = anchorAfter(ctx, from, to, objOf(e.data.deltas), ctx.state.clock, true);
+    const past = axesOf(ctx).find((a) => numOf(after[a.id]) < a.min || numOf(after[a.id]) > a.max);
+    return past ? { code: "off_the_scale", values: { who: own(ctx.state.entities, from)?.name ?? from, toward: own(ctx.state.entities, to)?.name ?? to, axis: past.label, value: numOf(after[past.id]), least: past.min, most: past.max } } : null;
+  },
   apply: (e, state, ctx) => {
     const from = strOf(e.data.from);
     const to = strOf(e.data.to);
@@ -217,8 +230,8 @@ const regardEvent: EventTypeDef<PackEvent> = {
       const rctx: ReadContext = { ...ctx, state };
       const deltas = objOf(e.data.deltas);
       const entry = e.data.npc === true ? null : { at: state.clock, why: strOf(e.data.why), deltas };
-      const fwd = anchorAfter(rctx, from, to, deltas, state.clock);
-      const rev = mutual ? anchorAfter(rctx, to, from, deltas, state.clock) : null;
+      const fwd = anchorAfter(rctx, from, to, deltas, state.clock, e.data.asGiven === true);
+      const rev = mutual ? anchorAfter(rctx, to, from, deltas, state.clock, e.data.asGiven === true) : null;
       writeRegard(state, from, to, fwd, entry);
       if (rev) writeRegard(state, to, from, rev, entry);
       return;
@@ -233,7 +246,7 @@ const regardEvent: EventTypeDef<PackEvent> = {
     const to = strOf(e.data.to);
     return e.data.mutual === true ? [{ entity: from, rel: "regard", to }, { entity: to, rel: "regard", to: from }] : [{ entity: from, rel: "regard", to }];
   },
-  // NPC↔NPC regard in a record: the last anchor per pair stands for the period (decay runs from it).
+  // NPC↔NPC regard in a record: the last anchor per pair stands for the period.
   coarsen: {
     key: (e) => (e.data.npc === true ? (e.data.mutual === true ? `m:${[strOf(e.data.from), strOf(e.data.to)].sort().join("|")}` : `d:${strOf(e.data.from)}>${strOf(e.data.to)}`) : null),
     merge: (_a, b) => ({ ...b, data: { from: b.data.from ?? null, to: b.data.to ?? null, ...(b.data.mutual === true ? { mutual: true } : {}), npc: true, anchor: b.data.anchor ?? {}, ...(b.data.back !== undefined ? { back: b.data.back } : {}) } }),
@@ -340,6 +353,7 @@ export const relationshipsPack: PackDef = {
     r.query("relationships.words", regardWords);
     // People tells each person's regard after their own line, once it has named the POV first: Cast life reads it there.
     r.query("relationships.voice", voiceLine);
+    r.query("relationships.fading", fadingIn);
     r.formula("regard", (ctx, from, to, axis) => regardValue(ctx, String(from ?? ""), String(to ?? ""), typeof axis === "string" && axis !== "" ? axis : undefined));
     r.formula("regard_band", (ctx, from, to) => regardBand(ctx, String(from ?? ""), String(to ?? "")));
     // Group regard, under the name worlds already use.
@@ -348,14 +362,17 @@ export const relationshipsPack: PackDef = {
     r.effect({ type: "relationships.appraise", args: ["from", "to", "appraisal", "why?", "mutual?"], resolve: (a, ctx) => [...appraise(ctx, strOf(a.from), strOf(a.to), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined), ...(a.mutual === true ? appraise(ctx, strOf(a.to), strOf(a.from), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined) : [])] });
     r.effect({
       type: "relationships.adjust",
-      args: ["from", "to", "delta", "axis?", "why?"],
+      args: ["from", "to", "delta", "axis?", "why?", "asGiven?"],
       resolve(a, ctx) {
         const from = strOf(a.from);
         const to = strOf(a.to);
         if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to)) return reject("missing_entity", "regard needs two entities");
         const delta = numOf(a.delta);
         const axis = strOf(a.axis);
-        return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
+        // As given: the change is kept on the axis named (else every axis by it), whatever the level, between anyone and themself, never spread and never clamped; past the range it is advised.
+        const given = a.asGiven === true;
+        if (given && axis !== "" && !axesOf(ctx).some((x) => x.id === axis)) return { ...reject("bad_axis", `no regard axis ${axis}`), said: axis, choices: axesOf(ctx).map((x) => x.id) };
+        return appraiseWith(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"), undefined, given);
       },
     });
 
@@ -407,4 +424,42 @@ export function regardView(ctx: ReadContext, from: EntityId, to: EntityId): { ax
   const axes = regardAxes(ctx, from, to);
   const bands = bandsOf(ctx);
   return axesOf(ctx).map((a) => ({ axis: a.label, band: bandOf(bands, axes[a.id] ?? 0)?.label ?? "neutral", value: axes[a.id] ?? 0 }));
+}
+
+/** One half-life of a pair's regard that ends within a span: the value last recorded, when it was, the moment the half-life ends and the value that is then half as many times over. */
+export interface Fading {
+  from: EntityId;
+  to: EntityId;
+  axis: string;
+  value: number;
+  since: number;
+  at: number;
+  halved: number;
+}
+
+/**
+ * The fading a world's half-life (`halfLifeDays` in its relationships config) brings, as a read: each pair and axis whose regard that
+ * half-life halves within the span (after `span.from`, up to `span.to`), with the moment each whole half-life since it was recorded ends.
+ * It changes nothing: what the fading does is for an agent to decide. A world that sets no half-life has none.
+ */
+export function fadingIn(ctx: ReadContext, span: { from: number; to: number }): Fading[] {
+  const life = halfLife(ctx);
+  if (life === null) return [];
+  const out: Fading[] = [];
+  for (const [from, e] of Object.entries(ctx.state.entities)) {
+    for (const r of e.relations) {
+      if (r.type !== "regard") continue;
+      const f = r.fields ?? {};
+      const since = numOf(f.t, ctx.state.clock);
+      for (const a of axesOf(ctx)) {
+        const value = numOf(f[a.id]);
+        if (value === 0) continue;
+        for (let n = Math.max(1, Math.ceil((span.from - since) / life)); since + n * life <= span.to; n++) {
+          const at = since + n * life;
+          if (at > span.from) out.push({ from, to: r.to, axis: a.id, value, since, at, halved: Math.round(value * Math.pow(0.5, n) * 10) / 10 });
+        }
+      }
+    }
+  }
+  return out.sort((x, y) => x.at - y.at || x.from.localeCompare(y.from) || x.to.localeCompare(y.to) || x.axis.localeCompare(y.axis));
 }
