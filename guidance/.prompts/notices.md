@@ -19,12 +19,15 @@ keys:
   no_change: it changed nothing
   same_name: that name was already taken
   already: it was already so
+  unplayed_stopped: the earlier build's turn for it was stopped before it was played
+  unplayed_failed: the earlier build's turn for it failed
+  unplayed_restarted: a restart cut off the earlier build's turn for it
 ---
 file_changed: {{path}} was changed since this session opened. The copy in the opening block no longer stands. Its whole current text follows.
 file_off: {{path}} has been switched off since this session opened. The copy in the opening block no longer stands.
 skills_changed: The list of skills in the opening block no longer stands.{{#listed}} The list as it stands now follows.{{/listed}}
 migrated_chat: This chat was carried over from the earlier build. Its state, cast and story record are as that build left them. {{carried}}
-unplayed: Since your last turn, replies were written in this chat without a turn of yours (messages {{range}}, counting the chat's first message as 0). The newest of them is this conversation's last assistant turn, and those the conversation holds are already in front of you: they need no reading again.
+unplayed: Since your last turn, replies were written in this chat without a turn of yours (messages {{range}}, counting the chat's first message as 0). The newest of them is this conversation's last assistant turn, and those the conversation holds are already in front of you: they need no reading again.{{#why}} Message {{message}}: {{why}}.{{/why}}
 edited: Message {{message}} was edited after its turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
 edited_more: {{count}} replies were edited after their turns and are not given in full here: messages {{messages}}, counting the chat's first message as 0. chat_read reads any of them.
 player_edited: The player's message {{message}} was edited since your last turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
@@ -32,7 +35,7 @@ player_inserted: The player inserted a message before a turn already played. It 
 approval_waiting: A write of yours waits for the player's word: {{tool}}, to the {{lane}} lane{{#turn}}, on turn {{turn}}{{/turn}}. It is on the turn's card as a question until the player answers it.
 player_edit: {{#undo}}The player undid an earlier edit{{#of}}: {{of}}{{/of}}.{{/undo}}{{^undo}}The player made an edit to the record before this turn: {{what}}.{{/undo}}{{#changes}} Recorded: {{.}}.{{/changes}}{{#not_applied}} Not applied: {{.}}.{{/not_applied}} What was pressed: {{request}}
 deleted: {{count}} turn(s) were deleted since the last one. Messages are numbered as the chat stood before, counting its first message as 0.{{#turns}} Message {{message}}, "{{words}}…".{{/turns}}{{#more}} Also messages {{more}}.{{/more}}
-swipe_flipped: An earlier reply ({{message}}) was changed to another of its swipes. The turns after it were applied again on it{{#range}} (messages {{range}}){{/range}}.{{#stopped}} Not applied, {{op}} {{value}} from message {{message}}, because {{why}}.{{/stopped}}{{#more}} {{more}} more are not listed.{{/more}}
+swipe_flipped: An earlier reply ({{message}}) was changed to another of its swipes. The turns after it were applied again on it{{#range}} (messages {{range}}){{/range}}.{{#stopped}} Not applied{{#about}}, about {{about}}{{/about}}: {{op}} {{value}} from message {{message}}, because {{why}}.{{/stopped}}{{#more}} {{more}} more are not listed.{{/more}}
 swipe_shown: The newest reply ({{message}}) now shows another of its swipes.
 job_finished: A job finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} Its report: {{report}}{{/report}}{{#applied}} Took effect now: {{op}}{{#about}} on {{about}}{{/about}}, {{value}}.{{/applied}}{{#not_applied}} Did not take effect: {{op}}{{#about}} on {{about}}{{/about}}, {{value}}{{#why}}, because {{why}}{{/why}}{{#later}} (the value from message {{later}} stands){{/later}}.{{/not_applied}}{{#more}} {{more}} more of its changes are not listed; the Jobs page lists them all.{{/more}}
 job_failed: A job failed before it finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}{{#applied}} Took effect now: {{op}}{{#about}} on {{about}}{{/about}}, {{value}}.{{/applied}}{{#not_applied}} Did not take effect: {{op}}{{#about}} on {{about}}{{/about}}, {{value}}{{#why}}, because {{why}}{{/why}}{{#later}} (the value from message {{later}} stands){{/later}}.{{/not_applied}}{{#more}} {{more}} more of its changes are not listed; the Jobs page lists them all.{{/more}}
