@@ -38,7 +38,7 @@ import { playArea } from "../play/area";
 import { storeArea } from "../store/area";
 import { storyArea } from "../story/area";
 import { treeArea } from "../tree/area";
-import { levelFiles, NO_CHAT, RPE_GUIDANCE, treeReader } from "../tree";
+import { levelFiles, MOUNTS, NO_CHAT, OwnFiles, RPE_GUIDANCE, treeReader } from "../tree";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { globalConfig } from "../turn/settings";
@@ -231,7 +231,14 @@ export function compose(options: ComposeOptions = {}): Composition {
       projection: made().projection,
     })),
     ifaceArea(() => ({ store: made().store })),
-    migrateArea({ identifier: EXTENSION_IDENTIFIER }),
+    migrateArea({
+      identifier: EXTENSION_IDENTIFIER,
+      // His own file at the global level of the tree, written as he writes one on the Files page: `path` below the level's folder (`.agents/x.md`).
+      writeAsUser: (user, path, text) => {
+        const own = new OwnFiles({ files: app().paths.files, chats: made().chats, writes: app().writes, now: app().now });
+        return own.writeAsUser(user, own.locationOf(user, null), `${MOUNTS.global}${path}`, "global", text);
+      },
+    }),
     // The tree lays the shipped files before the areas after it read them.
     treeArea(() => ({
       chats: made().chats,
