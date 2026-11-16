@@ -708,6 +708,27 @@ export type Effect = "use" | "turn" | "start";
 /** How hard a model reasons on a call. */
 export type Effort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+/** What the press removed: the book, the chats it was taken out of, whether the book itself was deleted, and what could not be done. */
+export interface EngineBookRemoved {
+  book: string;
+  /** The chats the book was taken out of. */
+  detached: string[];
+  /** The book was deleted; false where Lumiverse had it no longer, or the removal stopped. */
+  removed: boolean;
+  /** Why the removal stopped part way, in Lumiverse's words; null where it went through. */
+  failed: string | null;
+}
+
+/** A book today's build made for its worlds, as the press beside it would remove it: its entries, and every chat it is attached to, by name. */
+export interface EngineBookShown {
+  book: string;
+  name: string;
+  /** How many entries the book holds, all removed with it. */
+  entries: number;
+  /** The chats it is attached to: the press takes it out of each, and changes nothing else of them. */
+  chats: { chat: string; name: string }[];
+}
+
 /** How many entries of a kind a character holds on the path read: standing, and struck. */
 export interface EntryCount {
   held: number;
@@ -955,6 +976,24 @@ export interface GivenReply {
   chat: string;
   turn: string | null;
   definitions: { name: string; off: boolean; given: GivenName[]; missing: string[] }[];
+}
+
+/** Going back as it stands, and his word: the steps with the configured branch and what the swap recorded, the permissions by name, what today's build put in Lumiverse, and, only once he has said he will not go back, each engine book with a press. */
+export interface GoingBackShown {
+  /** The branch the previous build is kept on (`migration.previousBranch`). */
+  branch: string;
+  /** The steps of going back, as rpe down prints them. */
+  steps: string[];
+  /** The permissions the previous build asks for, by name. */
+  permissions: string[];
+  /** When he said he will not go back; null where he has not. */
+  said: string | null;
+  /** What today's build put in Lumiverse, counted, as the last real run found it; null before any run. */
+  lumiverse: JsonValue | null;
+  /** The engine books in Lumiverse now, each with a press: null until he has said he will not go back. */
+  books: EngineBookShown[] | null;
+  /** Why no engine book is listed where he has said it: RPE is not set up for a Lumiverse, or Lumiverse could not be read. */
+  booksWhy: string | null;
 }
 
 /** A change a reflection proposed and the Author accepted, laid over the base: its words, what caused it, and its date in story time. */
@@ -1815,6 +1854,17 @@ export interface ModelPictures {
   from: "user" | "pi" | "connection";
 }
 
+/** His word that he will not go back, confirmed. */
+export interface NoGoingBackAsk {
+  /** true: he confirmed he will not go back; kept once, and the first time stands. */
+  sure: boolean;
+}
+
+/** When he said he will not go back. */
+export interface NoGoingBackSaid {
+  said: string;
+}
+
 /** What no longer applies at the chat's head: the earlier reply that shows another swipe than its later turns were made on (null where none does), and each change that stopped applying. */
 export interface NotAppliedReply {
   reply: { turn: string; n: number } | null;
@@ -2044,7 +2094,7 @@ export interface PlaceRecord {
   features: { facts: { items: PlaceFactRow[]; more: number }; fixtures: { name: string; at: number[]; size: number[] }[]; zones: { name: string; squares: number }[] };
   here: PlaceHereRow[];
   ways: { ways: PlaceWayRow[]; adjoining: ({ id: string; name: string; how: "beside" | "way" })[] };
-  access: { entry: PlaceEntry | null; facts: { items: PlaceFactRow[]; more: number }; doors: ({ at: number[]; state: "open" | "closed" | "locked" })[] };
+  access: { entry: PlaceEntry | null; light: "lit" | "dark" | null; facts: { items: PlaceFactRow[]; more: number }; doors: ({ at: number[]; state: "open" | "closed" | "locked" })[] };
   history: { items: ({ beat: string; text: string | null; message: number | null; turn: TurnId })[]; more: number };
   known: PlaceKnownRow[];
 }
@@ -5455,6 +5505,36 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: MigrationTextReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Removes one engine book of today's build and takes it out of every chat it is attached to, through Lumiverse's own routes as him, changing nothing else of any chat; only after he has said he will not go back. What it removed, and what it could not. */
+  "POST /api/v1/migration/engine-books/:book/removal": {
+    params: { book: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: EngineBookRemoved;
+    paged: false;
+    long: true;
+    joined: false;
+  };
+  /** Going back as it stands: its steps with the configured branch, the chats moved onto RPE's connections since the swap, RPE's own earlier connection and a key to put back; the permissions by name; what today's build put in Lumiverse; his word that he will not go back; and, only once he has said it, each engine book with the chats it is attached to. */
+  "GET /api/v1/migration/going-back": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: GoingBackShown;
+    paged: false;
+    long: true;
+    joined: false;
+  };
+  /** Keeps his word that he will not go back, once confirmed, with its time; said again, the first time stands. Only after it does the page offer to remove what today's build put in Lumiverse. */
+  "POST /api/v1/migration/going-back": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: NoGoingBackAsk;
+    reply: NoGoingBackSaid;
     paged: false;
     long: false;
     joined: false;

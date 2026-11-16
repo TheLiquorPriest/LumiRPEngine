@@ -202,6 +202,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `migration.rows` | `[]` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Rows you give to what the migration finds: A file the migration finds that no row of its table names fails the report by name. A row given here (its path, what becomes of it, and your line saying what it is) is counted, kept in the backup and listed in the report as yours; nothing is carried that has no reader. |
 | `migration.page` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Carried turns per page: How many of a migrated chat's turns a page of its list of carried turns holds, each with what the old engine recorded of it. |
 | `migration.pageMost` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most carried turns a page may ask for: The most carried turns one request for a chat's list may ask for with `limit`; a larger ask is given this many. |
+| `migration.previousBranch` | `before-standalone` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | The previous build's branch: The branch of the extension's repository the previous build is kept on: going back switches the installed extension to it, and rpe down, the Migration page and the migration's report name it. |
 
 ## Files and notes
 
@@ -493,6 +494,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `taps.nameMost` | `80` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest name a refusal quotes: The most characters of a name a tap's refusal quotes back; a longer one reads as naming no one. |
 | `taps.thingsMost` | `64` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Things one fix changes: The most things one ✎ things fix changes; past it the tap is answered in words and changes nothing. |
+| `taps.journalMost` | `100` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns the Journal reads at a time: The most turns, newest first, whose notes the Journal shows; a longer chat reads the rest a page at a time. |
 | `taps.tell.payments` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Payments to others: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.credit` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Credit: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.property` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Property: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
@@ -506,6 +508,14 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `taps.tell.governance` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Governance: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.things` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Things: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.paymentsFrom` | `0` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Payments told from: A payment to someone else is told to the next turn's Author from this amount, in whole units of the world's money (0: every one). |
+
+## `things`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `things.tidy` | none (as the world's tidy.auto says) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Tidy-up findings in the world state: Whether each turn's world state lists the holds that cannot be (a thing too big to carry on a person, a thing worn but lying elsewhere) with the fix the tidy-up would make; unset, the world's own tidy.auto decides. Nothing is ever fixed by itself. |
+| `things.tidyLeft` | `[]` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Tidy-up findings left as they are: The keys of the tidy-up's findings he told it to leave alone (Leave it): they are not listed again. |
+| `things.tidyLeftMost` | `1000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Findings left alone, kept: The most keys the list of findings left alone keeps; past it the oldest go. |
 
 ## `web`
 

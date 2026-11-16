@@ -2821,6 +2821,47 @@ A report's printed text, as the rehearsal or the run printed it.
 | Body | none |
 | Reply | [`MigrationTextReply`](#migrationtextreply) |
 
+### `POST /api/v1/migration/engine-books/:book/removal`
+
+Removes one engine book of today's build and takes it out of every chat it is attached to, through Lumiverse's own routes as him, changing nothing else of any chat; only after he has said he will not go back. What it removed, and what it could not.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `book` |
+| Query | none |
+| Body | none |
+| Reply | [`EngineBookRemoved`](#enginebookremoved) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
+### `GET /api/v1/migration/going-back`
+
+Going back as it stands: its steps with the configured branch, the chats moved onto RPE's connections since the swap, RPE's own earlier connection and a key to put back; the permissions by name; what today's build put in Lumiverse; his word that he will not go back; and, only once he has said it, each engine book with the chats it is attached to.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`GoingBackShown`](#goingbackshown) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
+### `POST /api/v1/migration/going-back`
+
+Keeps his word that he will not go back, once confirmed, with its time; said again, the first time stands. Only after it does the page offer to remove what today's build put in Lumiverse.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`NoGoingBackAsk`](#nogoingbackask) |
+| Reply | [`NoGoingBackSaid`](#nogoingbacksaid) |
+
 ### `POST /api/v1/migration/rehearsals`
 
 Starts a rehearsal over today's data, read-only as `rpe migrate --rehearse` reads it, and answers its report in brief once read; the running RPE holds the report in memory beside the last real run's, and nothing of it is written, RPE's database included. One under way is refused.
@@ -4311,6 +4352,37 @@ How hard a model reasons on a call.
 export type Effort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 ```
 
+### `EngineBookRemoved`
+
+What the press removed: the book, the chats it was taken out of, whether the book itself was deleted, and what could not be done.
+
+```ts
+export interface EngineBookRemoved {
+  book: string;
+  /** The chats the book was taken out of. */
+  detached: string[];
+  /** The book was deleted; false where Lumiverse had it no longer, or the removal stopped. */
+  removed: boolean;
+  /** Why the removal stopped part way, in Lumiverse's words; null where it went through. */
+  failed: string | null;
+}
+```
+
+### `EngineBookShown`
+
+A book today's build made for its worlds, as the press beside it would remove it: its entries, and every chat it is attached to, by name.
+
+```ts
+export interface EngineBookShown {
+  book: string;
+  name: string;
+  /** How many entries the book holds, all removed with it. */
+  entries: number;
+  /** The chats it is attached to: the press takes it out of each, and changes nothing else of them. */
+  chats: { chat: string; name: string }[];
+}
+```
+
 ### `EntryCount`
 
 How many entries of a kind a character holds on the path read: standing, and struck.
@@ -4712,6 +4784,29 @@ export interface GivenReply {
   chat: string;
   turn: string | null;
   definitions: { name: string; off: boolean; given: GivenName[]; missing: string[] }[];
+}
+```
+
+### `GoingBackShown`
+
+Going back as it stands, and his word: the steps with the configured branch and what the swap recorded, the permissions by name, what today's build put in Lumiverse, and, only once he has said he will not go back, each engine book with a press.
+
+```ts
+export interface GoingBackShown {
+  /** The branch the previous build is kept on (`migration.previousBranch`). */
+  branch: string;
+  /** The steps of going back, as rpe down prints them. */
+  steps: string[];
+  /** The permissions the previous build asks for, by name. */
+  permissions: string[];
+  /** When he said he will not go back; null where he has not. */
+  said: string | null;
+  /** What today's build put in Lumiverse, counted, as the last real run found it; null before any run. */
+  lumiverse: JsonValue | null;
+  /** The engine books in Lumiverse now, each with a press: null until he has said he will not go back. */
+  books: EngineBookShown[] | null;
+  /** Why no engine book is listed where he has said it: RPE is not set up for a Lumiverse, or Lumiverse could not be read. */
+  booksWhy: string | null;
 }
 ```
 
@@ -6008,6 +6103,27 @@ export interface ModelPictures {
 }
 ```
 
+### `NoGoingBackAsk`
+
+His word that he will not go back, confirmed.
+
+```ts
+export interface NoGoingBackAsk {
+  /** true: he confirmed he will not go back; kept once, and the first time stands. */
+  sure: boolean;
+}
+```
+
+### `NoGoingBackSaid`
+
+When he said he will not go back.
+
+```ts
+export interface NoGoingBackSaid {
+  said: string;
+}
+```
+
 ### `NotAppliedReply`
 
 What no longer applies at the chat's head: the earlier reply that shows another swipe than its later turns were made on (null where none does), and each change that stopped applying.
@@ -6351,7 +6467,7 @@ export interface PlaceRecord {
   features: { facts: { items: PlaceFactRow[]; more: number }; fixtures: { name: string; at: number[]; size: number[] }[]; zones: { name: string; squares: number }[] };
   here: PlaceHereRow[];
   ways: { ways: PlaceWayRow[]; adjoining: ({ id: string; name: string; how: "beside" | "way" })[] };
-  access: { entry: PlaceEntry | null; facts: { items: PlaceFactRow[]; more: number }; doors: ({ at: number[]; state: "open" | "closed" | "locked" })[] };
+  access: { entry: PlaceEntry | null; light: "lit" | "dark" | null; facts: { items: PlaceFactRow[]; more: number }; doors: ({ at: number[]; state: "open" | "closed" | "locked" })[] };
   history: { items: ({ beat: string; text: string | null; message: number | null; turn: TurnId })[]; more: number };
   known: PlaceKnownRow[];
 }
