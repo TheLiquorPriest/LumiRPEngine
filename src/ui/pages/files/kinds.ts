@@ -46,12 +46,21 @@ export function shippedPathFor(below: string): string {
   return `@shipped/${below}`;
 }
 
+/** The folders of his under `imported/` that are read from a dot folder at their level: his attached agents and skills. */
+const IMPORTED_FOLDERS: Readonly<Record<string, string>> = { agents: ".agents", skills: ".skills" };
+
 /**
- * Where a file of his under `imported/` is read from at its own level: the same path without the `imported/` step. The page
- * offers to move or copy it there; null for a file that is not under `imported/`.
+ * Where a file of his under `imported/` is read from at its own level: his agents and skills go to the dot folders they are read from,
+ * `imported/GUIDANCE.md` to `AGENTS.md`, and the rest keeps its path without the `imported/` step (his texts under `.prompts/` stay as they are).
+ * The page offers to move or copy it there; null for a file that is not under `imported/`.
  */
 export function importedTarget(path: string): string | null {
   const at = path.indexOf("/imported/");
   const top = path.startsWith("imported/") ? 0 : at < 0 ? -1 : at + 1;
-  return top < 0 ? null : `${path.slice(0, top)}${path.slice(top + "imported/".length)}`;
+  if (top < 0) return null;
+  const rest = path.slice(top + "imported/".length);
+  const [first = "", ...below] = rest.split("/");
+  const folder = IMPORTED_FOLDERS[first];
+  const target = rest === "GUIDANCE.md" ? "AGENTS.md" : folder === undefined || below.length === 0 ? rest : [folder, ...below].join("/");
+  return `${path.slice(0, top)}${target}`;
 }

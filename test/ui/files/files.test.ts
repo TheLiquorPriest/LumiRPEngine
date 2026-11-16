@@ -102,14 +102,16 @@ describe("the Files page", () => {
   });
 
   test("a file of his under imported/ offers to be moved to where its kind is read from, and a new file is made at a level that holds its kind", () => {
-    expect(importedTarget("@global/imported/agents/x.md")).toBe("@global/agents/x.md");
-    expect(importedTarget("imported/agents/x.md")).toBe("agents/x.md");
+    expect(importedTarget("@global/imported/agents/x.md")).toBe("@global/.agents/x.md");
+    expect(importedTarget("imported/skills/s1/SKILL.md")).toBe(".skills/s1/SKILL.md");
+    expect(importedTarget("imported/GUIDANCE.md")).toBe("AGENTS.md");
+    expect(importedTarget("@global/imported/.prompts/p.md")).toBe("@global/.prompts/p.md");
     expect(importedTarget("@global/rules/x.md")).toBeNull();
     const opened = { path: "@global/imported/agents/x.md", file: { path: "@global/imported/agents/x.md", level: "global" as const, kind: "yours" as const, bytes: 3, editable: true, text: "abc" }, piece: false, problem: null, mode: "read" as const, draft: { text: "abc", level: "global" as const }, diff: null };
     const entry = row("@global/imported/agents/x.md");
     const page = view({ open: opened, browse: { ...NO_FILES.browse, loading: false, items: [listed(entry)] } });
     press(page.tree, "Move it to where its kind is read from");
-    expect(page.calls).toContain("move:@global/imported/agents/x.md>@global/agents/x.md");
+    expect(page.calls).toContain("move:@global/imported/agents/x.md>@global/.agents/x.md");
     // A rule is made at the chat's own level at its top, at yours under its own folder; AGENTS.md has a place only in a chat's levels.
     const rule = KINDS.find((k) => k.id === "rule");
     expect(viewPathAt("chat", rule?.at("engine-silent") ?? "")).toBe("rules/engine-silent.md");
