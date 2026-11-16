@@ -87,7 +87,7 @@ describe("the Cast page", () => {
       { id: "mind-1", struck: true },
       { id: "mind-2", struck: false },
     ]);
-    const answer: CastStrikeReply = { changed: true, entry: ODILE_RECORD.perceptions[0] as CastStrikeReply["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: ["No one else holds it."] };
+    const answer: CastStrikeReply = { changed: true, entry: ODILE_RECORD.perceptions.items[0] as CastStrikeReply["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: ["No one else holds it."] };
     expect(banners(view({ open: ODILE.id, character: ODILE_RECORD, struck: { ask: { id: "perc-1", struck: true }, answer } }, true).tree)).toEqual([
       { title: "Struck", text: "StruckStruck with it, the knowledge it gave: know-1.Secrets it no longer holds: fact-toll.No one else holds it." },
     ]);
@@ -111,7 +111,7 @@ describe("the Cast page", () => {
     press(list.tree, "Show them for this chat");
     expect(list.pressed).toEqual(["open gate"]);
 
-    const answer: CastStrikeReply = { changed: true, entry: ODILE_RECORD.perceptions[0] as CastStrikeReply["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: [] };
+    const answer: CastStrikeReply = { changed: true, entry: ODILE_RECORD.perceptions.items[0] as CastStrikeReply["entry"], alsoStruck: ["know-1"], letGo: ["fact-toll"], alsoStood: [], heldAgain: [], notes: [] };
     const opened = view({ list: CAST, open: ODILE.id, character: ODILE_RECORD, struck: { ask: { id: "perc-1", struck: true }, answer } });
     expect(opened.text).toContain("Odile Holt");
     for (const id of ["base", "castings", "memories", "mind", "knowledge", "relationships", "perceptions", "files", "sources"]) expect(section(opened.tree, id)).toBe("");
@@ -143,7 +143,7 @@ describe("the Cast page", () => {
     reader.strike({ id: "perc-1", struck: true });
     expect(shown.at(-1)?.striking).toBe("perc-1");
     expect(asked[2]).toMatchObject({ key: "POST /api/v1/chats/:chat/cast/:character/strike", params: { chat: CHAT, character: ODILE.id }, body: { id: "perc-1", struck: true } });
-    const answer: CastStrikeReply = { changed: true, entry: { ...(ODILE_RECORD.perceptions[0] as CastStrikeReply["entry"]), struck: true }, alsoStruck: ["know-1"], letGo: [], alsoStood: [], heldAgain: [], notes: [] };
+    const answer: CastStrikeReply = { changed: true, entry: { ...(ODILE_RECORD.perceptions.items[0] as CastStrikeReply["entry"]), struck: true }, alsoStruck: ["know-1"], letGo: [], alsoStood: [], heldAgain: [], notes: [] };
     asked[2]?.answer(answer);
     await settle();
     expect(shown.at(-1)).toMatchObject({ striking: null, struck: { ask: { id: "perc-1", struck: true }, answer } });

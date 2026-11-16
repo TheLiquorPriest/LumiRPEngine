@@ -10,6 +10,7 @@ const counts = (over: Partial<EntryCounts>): EntryCounts => ({ growth: none, min
 
 export const ODILE: CastMemberRow = {
   id: "char-odile",
+  person: null,
   name: "Odile Holt",
   chat: CHAT,
   casting: { as: "principal", pinned: true, line: "Runs the ferry, owes nobody." },
@@ -17,7 +18,7 @@ export const ODILE: CastMemberRow = {
   counts: counts({ mind: { held: 1, struck: 1 }, memories: { held: 2, struck: 0 }, knowledge: { held: 1, struck: 0 }, perceptions: { held: 1, struck: 0 }, files: { held: 2, struck: 0, filed: 1 } }),
 };
 
-export const TOBIN: CastMemberRow = { id: "char-tobin", name: "Tobin Reede", chat: CHAT, casting: null, from: { carried: false, played: false }, counts: counts({}) };
+export const TOBIN: CastMemberRow = { id: "char-tobin", name: "Tobin Reede", chat: CHAT, person: null, casting: null, from: { carried: false, played: false }, counts: counts({}) };
 
 export const CAST: CastReply = { chat: CHAT, turn: null, characters: [ODILE, TOBIN] };
 
@@ -39,30 +40,33 @@ const entry = (id: string, part: EntryRow["part"], fields: EntryRow["fields"], o
 export const MARKUP = "<b>Wants</b> the toll lifted";
 export const CARRIED_FILE = "# Odile\n\nKeeps the ferry's ledger in a tin under the bench.\n";
 
+/** A list as the cast route gives it: bounded, with how many the record holds and how many it leaves out on each side. */
+const bound = <T>(items: T[]): { items: T[]; total: number; before: number; after: number } => ({ items, total: items.length, before: 0, after: 0 });
+
 export const ODILE_RECORD: CharacterReply = {
   chat: CHAT,
   turn: null,
   character: ODILE,
-  sources: [{ kind: "card", ref: "card-odile", defines: "her looks and her trade", created: 1_700_000_000_000 }],
+  sources: [{ kind: "card", ref: "card-odile", defines: "her looks and her trade", created: 1_700_000_000_000, title: "Odile Holt", state: "current" }],
   base: [
     { part: "seed", version: 1, text: "A ferrywoman who kept the crossing open.", standing: false, turn: null, by: "migration", created: 1 },
     { part: "seed", version: 2, text: "A ferrywoman who keeps the crossing open, toll or no toll.", standing: true, turn: "turn-7", by: "author", created: 2 },
   ],
   castings: [{ turn: "turn-2", message: 3, imported: true, by: "migration", wrote: { as: "principal" } }],
-  growth: [],
-  mind: [entry("mind-1", "mind", { kind: "want", text: MARKUP }), entry("mind-2", "mind", { kind: "feeling", text: "Tired of the reeve." }, { struck: true })],
-  memories: [
+  growth: bound([]),
+  mind: bound([entry("mind-1", "mind", { kind: "want", text: MARKUP }), entry("mind-2", "mind", { kind: "feeling", text: "Tired of the reeve." }, { struck: true })]),
+  memories: bound([
     { ...entry("mem-1", "memory", { text: "The night the rope broke." }, { date: "3 Thawmonth" }), tier: "long", strength: 0.21, faint: true },
     { ...entry("mem-2", "memory", { text: "Tobin paid in copper." }), tier: "top", strength: 0.9, faint: false },
-  ],
-  relationships: [],
-  knowledge: [entry("know-1", "knowledge", { text: "The reeve skims the toll." })],
-  history: [],
-  perceptions: [{ ...entry("perc-1", "perception", { text: "Tobin looked away at the reeve's name." }), of: { turn: "turn-6", message: 10 } }],
-  files: [
+  ]),
+  relationships: bound([]),
+  knowledge: bound([entry("know-1", "knowledge", { text: "The reeve skims the toll." })]),
+  history: bound([]),
+  perceptions: bound([{ ...entry("perc-1", "perception", { text: "Tobin looked away at the reeve's name." }), of: { turn: "turn-6", message: 10 } }]),
+  files: bound([
     { ...entry("file-1", "mind", { kind: "imported", file: "core.md", text: CARRIED_FILE }, { imported: true, by: "migration" }), file: "core.md", text: CARRIED_FILE, filed: true },
     { ...entry("file-2", "mind", { kind: "imported", file: "plans.md", text: "Sell the spare oars." }, { imported: true, by: "migration" }), file: "plans.md", text: "Sell the spare oars.", filed: false },
-  ],
+  ]),
 };
 
 const item = (id: string, part: StoryItemRow["part"], from: number | null, to: number | null, fields: StoryItemRow["fields"], over: Partial<StoryItemRow> = {}): StoryItemRow => ({

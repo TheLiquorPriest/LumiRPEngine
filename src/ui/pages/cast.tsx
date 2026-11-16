@@ -11,7 +11,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSelect } from "../store";
-import type { CharacterReply, EntryRow, EntryCounts, CastReply, CastMemberRow, CastStrikeReply, CastRole, MemoryBand } from "../../shared/api";
+import type { CharacterReply, EntryRow, EntryCounts, EntryItems, CastReply, CastMemberRow, CastStrikeReply, CastRole, MemoryBand } from "../../shared/api";
 import { useApp } from "../app";
 import { Badge, Banner, Empty, Fold, Gated, PageHeader, Pre, Row, Section } from "../atoms";
 import { replyOf, type RpeClient } from "../client";
@@ -183,7 +183,18 @@ function StruckBanner(props: { struck: { ask: StrikeAsk; answer: CastStrikeReply
 interface EntryList {
   id: string;
   title: string;
-  entries: readonly EntryRow[];
+  entries: EntryItems;
+}
+
+/** What a bounded list leaves out: the record holds `total` of them, and the route gives as many as its bound allows. */
+function LeftOut(props: { items: { total: number; before: number; after: number } }) {
+  const left = props.items.before + props.items.after;
+  if (left === 0) return null;
+  return (
+    <p class="lre-muted rpe-meta" data-left-out>
+      {counted(left, "entry", "entries")} of the {props.items.total} the record holds {left === 1 ? "is" : "are"} not shown here.
+    </p>
+  );
 }
 
 export interface CastViewProps {
@@ -273,12 +284,12 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
           </ol>
         )}
       </Section>
-      <Section id="memories" title={`Memories (${c.memories.length})`}>
-        {c.memories.length === 0 ? (
+      <Section id="memories" title={`Memories (${c.memories.total})`}>
+        {c.memories.items.length === 0 ? (
           <p class="lre-muted rpe-line">None.</p>
         ) : (
           <ul class="lre-stack rpe-plain">
-            {c.memories.map((m) =>
+            {c.memories.items.map((m) =>
               card(m, m.date === null ? "memory" : `memory, ${m.date}`, {
                 marks: (
                   <>
@@ -291,29 +302,32 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
             )}
           </ul>
         )}
+        <LeftOut items={c.memories} />
       </Section>
       {lists.map((list) => (
-        <Section key={list.id} id={list.id} title={`${list.title} (${list.entries.length})`}>
-          {list.entries.length === 0 ? (
+        <Section key={list.id} id={list.id} title={`${list.title} (${list.entries.total})`}>
+          {list.entries.items.length === 0 ? (
             <p class="lre-muted rpe-line">None.</p>
           ) : (
-            <ul class="lre-stack rpe-plain">{list.entries.map(plain)}</ul>
+            <ul class="lre-stack rpe-plain">{list.entries.items.map(plain)}</ul>
           )}
+          <LeftOut items={list.entries} />
         </Section>
       ))}
-      <Section id="perceptions" title={`Perceptions (${c.perceptions.length})`}>
-        {c.perceptions.length === 0 ? (
+      <Section id="perceptions" title={`Perceptions (${c.perceptions.total})`}>
+        {c.perceptions.items.length === 0 ? (
           <p class="lre-muted rpe-line">None.</p>
         ) : (
-          <ul class="lre-stack rpe-plain">{c.perceptions.map((p) => card(p, "perception", { more: <p class="rpe-meta">Of {writeWords({ turn: p.of.turn, message: p.of.message, by: null, imported: false })}</p> }))}</ul>
+          <ul class="lre-stack rpe-plain">{c.perceptions.items.map((p) => card(p, "perception", { more: <p class="rpe-meta">Of {writeWords({ turn: p.of.turn, message: p.of.message, by: null, imported: false })}</p> }))}</ul>
         )}
+        <LeftOut items={c.perceptions} />
       </Section>
-      <Section id="files" title={`Mind files the migration carried (${c.files.length})`}>
-        {c.files.length === 0 ? (
+      <Section id="files" title={`Mind files the migration carried (${c.files.total})`}>
+        {c.files.items.length === 0 ? (
           <p class="lre-muted rpe-line">None.</p>
         ) : (
           <ul class="lre-stack rpe-plain">
-            {c.files.map((f) =>
+            {c.files.items.map((f) =>
               card(f, f.file, {
                 // Its text is shown whole below, word for word.
                 fields: Object.fromEntries(Object.entries(f.fields).filter(([name]) => name !== "text")),
@@ -323,6 +337,7 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
             )}
           </ul>
         )}
+        <LeftOut items={c.files} />
       </Section>
       <Section id="sources" title={`Sources (${c.sources.length})`}>
         {c.sources.length === 0 ? (
