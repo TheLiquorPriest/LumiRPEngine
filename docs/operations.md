@@ -584,6 +584,7 @@ Reads; changes nothing.
 | `depth` | whole number, or one of full |  | How many levels below the point to show, or full for everything beneath it. |
 | `due` | text |  | A span ahead (two hours, until dawn, or a date and time YYYY-MM-DD HH:MM): what falls due in it at that part of the tree. |
 | `map` | true or false |  | true to add the place's map as text. |
+| `part` | one of since, feature, access |  | For a place: since, feature or access, to read that part of its record whole (what the story changed there, its features, who may enter and how it stands) in place of the newest few the place's lines show. |
 
 Worked example:
 

@@ -11,6 +11,7 @@
 import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
 import type { Rejection } from "../engine/registry";
 import { isRecord } from "../shared/json";
+import { prepareBases } from "../places/prepare";
 import { type Lane, PRECISIONS, STANDINGS, type StoreState } from "../store/types";
 import { type Call, NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { type OpContext, type OpDef, tellUnread, type Unread } from "./ops";
@@ -330,6 +331,8 @@ export async function runOperations(call: Call, asked: readonly Asked[], askArgs
   const base = readingOr(call, first);
   if (base === null) return first;
   if (base.turn === null) return first.line("turn_needed", {}).fail();
+  // (S17Story, places) The entries bound to a place a call writes a base of, as Lumiverse holds them now: what the base is drawn against.
+  await prepareBases(call, asked);
   // Read first on the state as it stands, so the player is asked nothing about a call that cannot be read.
   const tried = attempt(call, base, asked, new Set());
   if (tried.unread) return refusal(call, tried, explain);
