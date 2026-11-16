@@ -1,11 +1,11 @@
 // What the tests of the kept Build page share: a client whose roads are RPE's own Build routes (the old one, and the worlds'), run in
 // this process over a fresh database (test/build-mode/bed.ts), and timers the test moves by hand.
 
-import { buildRoutes, chatsRoutes, worldsRoutes } from "../../../src/build";
+import { buildRoutes, chatsRoutes, jobsRoutes, worldsRoutes } from "../../../src/build";
 import type { KeptTransport } from "../../../src/ui/kept/client";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
 import type { Timers } from "../../../src/ui/roads";
-import { buildServiceOn, makeBed, USER, words } from "../../build-mode/bed";
+import { buildServiceOn, jobHomeOn, makeBed, USER, words } from "../../build-mode/bed";
 import { callRoute } from "../../app/call";
 
 export { USER, words };
@@ -23,7 +23,7 @@ export function routeClient(): RouteClient {
   const bed = makeBed();
   const service = buildServiceOn(bed);
   const [post] = buildRoutes(service);
-  const routes = [post, ...worldsRoutes(service.worlds, 4 * 1024 * 1024), ...chatsRoutes(service.worlds)];
+  const routes = [post, ...worldsRoutes(service.worlds, 4 * 1024 * 1024), ...chatsRoutes(service.worlds), ...jobsRoutes(jobHomeOn(bed, service.worlds))];
   const route = `${post.method} ${post.path}`;
   const asked: RouteClient["asked"] = [];
   const call = async (key: string, params: Record<string, string> | undefined, options?: { body?: unknown; query?: Record<string, string | number> }): Promise<unknown> => {
@@ -31,7 +31,7 @@ export function routeClient(): RouteClient {
     const found = routes.find((r) => `${r.method} ${r.path}` === key);
     if (found === undefined) throw new RpeError(404, `No route ${key}.`);
     const reply = await callRoute(found, { params: params ?? {}, ...(options?.query === undefined ? {} : { query: options.query }), body: options?.body, user: USER });
-    return JSON.parse(JSON.stringify(reply));
+    return reply === undefined ? undefined : JSON.parse(JSON.stringify(reply));
   };
   return { client: { call: call as RpeClient["call"] }, asked, route };
 }

@@ -8,8 +8,10 @@
 //   build_seed  each world a migration run put into `build_file`, with one fingerprint of its files
 //               as that run put them, so a later run tells a copy changed in RPE from one it may
 //               replace (`seed.ts`)
+//   build_job   each job Build ran or runs, with its status, progress, input and result (`jobs/schema.ts`)
 
 import type { Migration } from "../app/migrations";
+import { JOB_MIGRATION } from "./jobs/schema";
 
 export const BUILD_MIGRATIONS: readonly Migration[] = [
   {
@@ -29,4 +31,5 @@ CREATE TABLE build_seed (
   PRIMARY KEY (user, world)
 ) WITHOUT ROWID`,
   },
+  JOB_MIGRATION,
 ];

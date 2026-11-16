@@ -179,6 +179,9 @@ describe("the standalone application's boundaries", () => {
             if (composes && !RULES[top].sandboxed) continue;
             if (!rule.zones.includes(top)) violations.push(`${rel} (${zone}) → ${target}: ${zone} may not import ${top}`);
             else if (sandboxed && !RULES[top].sandboxed && !shared.has(resolveLocal(file, spec))) violations.push(`${rel} → ${target}: not among what the extension shares`);
+          } else if (composes && top === "worker") {
+            // The kept worker's steps (Build's Playtest and Check world) are put on the list of worker tasks as the lanes' heavy functions are.
+            continue;
           } else if (!(rule.carried as readonly string[]).includes(top)) {
             violations.push(`${rel} (${zone}) → ${target}: ${zone} may not import ${top}`);
           }

@@ -11,10 +11,14 @@ import { LiveHub, WriteQueue } from "../../src/app";
 import type { Migration } from "../../src/app/migrations";
 import { BUILD_MIGRATIONS } from "../../src/build/schema";
 import { type BuildAnswer, buildRoutes, BuildService } from "../../src/build/index";
+import { JobHome } from "../../src/build/jobs/home";
+import { labRunners } from "../../src/build/jobs/lab";
+import { JOB_LIMIT_DEFAULTS } from "../../src/build/jobs/limits";
+import * as lane from "../../src/worker/background-lane";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { MIGRATE_TABLES } from "../../src/migrate/tables";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
-import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
+import type { ErrorMessage, JobSummary, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { migrateStore, openStore, readPart, type Store, storedWorlds } from "../../src/store";
 import { WorldService } from "../../src/worlds/service";
@@ -114,4 +118,10 @@ export function makePage(bed: Bed, service = buildServiceOn(bed)): Page {
       return await callRoute(post, { body: { lre: 1, reqId: `req-${++asked}`, ...message }, user });
     },
   };
+}
+
+/** Build's job home over a bed, with the kept worker's steps run in this process (a test of the page needs no thread): `told` hears each change of a job. */
+export function jobHomeOn(bed: Bed, worlds: WorldService, told: (job: JobSummary) => void = () => undefined): JobHome {
+  const workers = { run: async (task: "labStep" | "labLint", input: never) => (task === "labStep" ? lane.labStep(input) : lane.labLint(input)) } as never;
+  return new JobHome({ db: bed.db, writes: bed.writes, log: bed.log, limits: async () => JOB_LIMIT_DEFAULTS, runners: labRunners({ worlds, store: bed.store, workers }), told: (_user, job) => told(job) });
 }

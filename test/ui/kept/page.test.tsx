@@ -1,8 +1,7 @@
 // The Build page, as the shells' page switch shows it, drawn by Preact in a page of its own (dom.ts)
 // against RPE's own Build route run in this process (bed.ts): it lists the worlds RPE keeps, opens one,
 // sends an edit as today's `lre.editor` message and commits it, all through today's Build mode. On the
-// world's home, RPE's word on Build's background tools, which this build of RPE does not serve, is said
-// there, once, and not asked again. Leaving the page leaves nothing behind: no handler on the window or
+// world's home, Build's background tools list their jobs from RPE's job routes and no banner shows. Leaving the page leaves nothing behind: no handler on the window or
 // the document, no timer, no stylesheet, and nobody hearing the transport.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -16,7 +15,7 @@ import { createGate } from "../../../src/ui/gate";
 import { webHost } from "../../../src/ui/kept/host";
 import { mountBuild } from "../../../src/ui/kept/page";
 import { createStore as storeOf } from "../../../src/ui/store";
-import { counted, handTimers, type HandTimers, type RouteClient, routeClient, words as rpeWords } from "./bed";
+import { counted, handTimers, type HandTimers, type RouteClient, routeClient } from "./bed";
 import { openPage, type Page, PageElement, PageEvent } from "./dom";
 
 let page: Page;
@@ -49,11 +48,6 @@ function button(root: PageElement, text: string): PageElement {
   const [only] = found;
   if (found.length !== 1 || only === undefined) throw new Error(`${found.length} buttons say “${text}”`);
   return only;
-}
-
-/** The messages the page sent RPE of one type and op, in order. */
-function sent(rpe: RouteClient, type: string, op: string): Record<string, unknown>[] {
-  return rpe.asked.flatMap(({ body }) => (body !== null && typeof body === "object" && "type" in body && "op" in body && body.type === type && body.op === op ? [body as Record<string, unknown>] : []));
 }
 
 /** Two worlds RPE keeps already, made from its starter templates; each one's id and head revision, by name. */
@@ -99,9 +93,8 @@ describe("the Build page", () => {
       .find((b) => b.textContent.includes("Fernwick"))
       ?.click();
     await until("Fernwick's world bar", () => root.querySelector(".lre-build-bar-name")?.textContent === "Fernwick");
-    const toolsWord = rpeWords("job");
-    await until("RPE's word on the background tools", () => root.querySelector("[data-rpe-said]") !== null);
-    expect(root.querySelectorAll("[data-rpe-said] .lre-banner").map(words)).toEqual([toolsWord]);
+    await until("the Tools list's jobs asked of RPE", () => rpe.asked.some((a) => a.key === "GET /api/v1/build/jobs"));
+    expect(root.querySelector("[data-rpe-said]")).toBeNull();
     expect(root.querySelectorAll(".lre-toast").map(words)).toEqual([]);
 
     const world = root.querySelectorAll("button.lre-listrow-hit").find((b) => b.querySelector(".lre-listrow-title")?.textContent === "World");
@@ -128,8 +121,8 @@ describe("the Build page", () => {
       .querySelectorAll("button")
       .find((b) => b.getAttribute("aria-label") === "Back to Fernwick Vale")
       ?.click();
-    await until("the world's home again, with RPE's word on its tools", () => root.querySelector("[data-lre-world-home]") !== null && root.querySelector("[data-rpe-said]") !== null);
-    expect({ said: root.querySelectorAll("[data-rpe-said] .lre-banner").map(words), asked: sent(rpe, "lre.job", "list").length >= 1 }).toEqual({ said: [toolsWord], asked: true });
+    await until("the world's home again", () => root.querySelector("[data-lre-world-home]") !== null);
+    expect({ said: root.querySelectorAll("[data-rpe-said]").length, asked: rpe.asked.filter((a) => a.key === "GET /api/v1/build/jobs").length >= 2 }).toEqual({ said: 0, asked: true });
 
     await act(() => render(null, root as unknown as HTMLElement));
     const calls = rpe.asked.length;

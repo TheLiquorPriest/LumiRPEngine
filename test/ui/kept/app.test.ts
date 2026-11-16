@@ -72,8 +72,7 @@ describe("the App kept for Build and Play", () => {
     // RPE's `unavailable` for a request it does not serve is said on the page; another error with the very same words is toasted.
     const rpe = routeClient();
     const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
-    const worldId = "w-fernwick";
-    expect(await kept.app.request({ type: "lre.job", op: "list", worldId })).toBeNull();
+    expect(await kept.app.request({ type: "lre.lore", op: "books" })).toBeNull();
     const said = kept.said.get();
     expect(said).toHaveLength(1);
     expect(kept.app.toasts.get()).toEqual([]);
