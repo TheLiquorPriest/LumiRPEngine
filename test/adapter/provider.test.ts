@@ -56,7 +56,7 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     passConnection: () => "conn-author",
     passWords: async (key, fields) => `${key}${fields.detail ? `: ${fields.detail}` : ""}`,
     holdMs: () => 540_000,
-    heard: { tagged: () => [], untagged: () => false },
+    heard: { tagged: async () => [], untagged: () => false },
     untaggedWhileAwaited: () => "pass",
     modelNames: () => ["rpe"],
     turns: { play },

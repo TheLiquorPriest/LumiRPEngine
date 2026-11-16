@@ -34,6 +34,7 @@ export const READ_COLUMNS: Readonly<Record<string, Readonly<Record<string, strin
   world_book_entries: {
     id: "TEXT",
     world_book_id: "TEXT",
+    uid: "TEXT",
     key: "TEXT",
     keysecondary: "TEXT",
     content: "TEXT",
@@ -46,6 +47,7 @@ export const READ_COLUMNS: Readonly<Record<string, Readonly<Record<string, strin
     disabled: "INTEGER",
     selective: "INTEGER",
     vectorized: "INTEGER",
+    sticky: "INTEGER",
     extensions: "TEXT",
     revision: "INTEGER",
     updated_at: "INTEGER",
@@ -118,16 +120,15 @@ const STEP = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.swipe_id, m.revisio
   CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipe_dates) THEN NULL
     WHEN json_type(m.swipe_dates, '$[' || m.swipe_id || ']') IN ('integer', 'real') THEN json_extract(m.swipe_dates, '$[' || m.swipe_id || ']')
     END AS shown_date`;
+const ENTRY = "e.id, e.world_book_id, e.uid, e.key, e.keysecondary, e.content, e.comment, e.position, e.depth, e.role, e.order_value, e.constant, e.disabled, e.selective, e.vectorized, e.sticky, e.extensions, e.revision, e.updated_at";
 const Q = {
   chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
   path: `SELECT ${STEP} ${OF_CHAT} ${ORDER}`,
   messages: `SELECT ${MESSAGE} ${OF_CHAT} ${ORDER} LIMIT ? OFFSET ?`,
   messagesById: `SELECT ${MESSAGE} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
   book: "SELECT id, name, description, metadata, updated_at FROM world_books WHERE id = ? AND user_id = ?",
-  entries: `SELECT e.id, e.world_book_id, e.key, e.keysecondary, e.content, e.comment, e.position, e.depth, e.role, e.order_value, e.constant, e.disabled, e.selective, e.vectorized, e.extensions, e.revision, e.updated_at
-    FROM world_book_entries e JOIN world_books w ON w.id = e.world_book_id WHERE e.world_book_id = ? AND w.user_id = ? ORDER BY e.order_value, e.rowid`,
-  entry: `SELECT e.id, e.world_book_id, e.key, e.keysecondary, e.content, e.comment, e.position, e.depth, e.role, e.order_value, e.constant, e.disabled, e.selective, e.vectorized, e.extensions, e.revision, e.updated_at
-    FROM world_book_entries e JOIN world_books w ON w.id = e.world_book_id WHERE e.id = ? AND w.user_id = ?`,
+  entries: `SELECT ${ENTRY} FROM world_book_entries e JOIN world_books w ON w.id = e.world_book_id WHERE e.world_book_id = ? AND w.user_id = ? ORDER BY e.order_value, e.rowid`,
+  entry: `SELECT ${ENTRY} FROM world_book_entries e JOIN world_books w ON w.id = e.world_book_id WHERE e.id = ? AND w.user_id = ?`,
   character: "SELECT id, name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, tags, alternate_greetings, extensions, updated_at FROM characters WHERE id = ? AND user_id = ?",
   persona: "SELECT id, name, title, description, metadata, attached_world_book_id, is_default, is_narrator, updated_at FROM personas WHERE id = ? AND user_id = ?",
   // Lumiverse's own query for it (`services/personas.service.ts:184`).

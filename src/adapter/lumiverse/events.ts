@@ -107,7 +107,9 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
       const lore: TagLore[] = [];
       for (const e of Array.isArray(payload.entries) ? payload.entries : []) {
         if (!isRecord(e) || typeof e.id !== "string") continue;
-        lore.push({ id: e.id, book: str(e.bookId), title: typeof e.comment === "string" ? e.comment : "", how: str(e.source) });
+        // Lumiverse's own word for how an entry came in, where it says one (`ActivatedWorldInfoEntry.activationType`, `llm/types.ts:425`); else its source.
+        const said = e.activationType === "constant" || e.activationType === "sticky" || e.activationType === "keyword" || e.activationType === "vector" ? e.activationType : null;
+        lore.push({ id: e.id, book: str(e.bookId), bookName: str(e.bookName), title: typeof e.comment === "string" ? e.comment : "", how: said ?? (e.source === "vector" ? "vector" : e.source === "keyword" ? "keyword" : null), told: said !== null });
       }
       return { kind: "lore-activated", chat, lore };
     }

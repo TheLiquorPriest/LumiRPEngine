@@ -24,7 +24,8 @@ import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type
 import { promptReads, type ModelRooms } from "./receipt";
 import { createChatReads, type ChatReads } from "./chat";
 import { createDbReader, type DbReader } from "./db";
-import { followChanges, type ChatChanges } from "./events";
+import { Activations } from "./activation";
+import { followChanges, type ChatChange, type ChatChanges } from "./events";
 import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
@@ -158,8 +159,11 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   const log = (message: string): void => app?.log.warn(`[lumiverse] ${message}`);
   /** Every model name RPE's connections in Lumiverse name (`lumiverse.models`, which the swap fills with each connection it takes, R-109), read at each use. */
   const rpeModels = (): string[] => app?.config.lumiverse.models ?? [];
-  /** The generations the event socket hears: their activated lore, and the ones on RPE's connections whose tagged request never came. */
+  /** Tells how each activated entry came in, over the door's reads; set when the door is built. */
+  let activations: Activations | null = null;
+  /** The generations the event socket hears: their activated lore, told, and the ones on RPE's connections whose tagged request never came. */
   const heard = new HeardGenerations({
+    tell: async (chat, lore) => (activations === null ? [...lore] : activations.tell(chat, lore)),
     rpeModel: (model) => rpeModels().includes(model),
     asked: (chat, generation) => answers.answered(chat, generation),
     untaggedEnd: ({ chat, generation, untagged, stopped }) =>
@@ -200,6 +204,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     const http = createHttpReads(session, () => settings().reads);
     const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log, settings: () => settings().database });
     const reads = database === null ? http : preferDatabase(database, http);
+    activations = new Activations(reads, log);
     const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search });
     const sockets = (): LumiverseSettings["socket"] => settings().socket;
     const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), settings: sockets });
@@ -399,11 +404,24 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       if (parts === null) return;
       // A new key at each start, handed to the extension in the registration: the one before it is retired.
       key = (await at.auth.makeKey("extension")).key;
-      offChanges = followChanges(parts.events, {
-        changed: (change) => {
-          heard.heard(change);
+      // What is heard reaches the turn lane in its order, a lore change once its entries are told: while one is being told, what is heard after it waits behind it.
+      let behind: Promise<void> | null = null;
+      const deliver = (change: ChatChange): void => {
+        const told = heard.heard(change);
+        if (told === null && behind === null) {
           lanes.changes.changed(change);
-        },
+          return;
+        }
+        const mine: Promise<void> = (behind ?? Promise.resolve())
+          .then(async () => lanes.changes.changed(change.kind === "lore-activated" && told !== null ? { ...change, lore: await told } : change))
+          .catch((error: unknown) => log(`a change Lumiverse made was not handed on: ${error instanceof Error ? error.message : String(error)}`));
+        behind = mine;
+        void mine.then(() => {
+          if (behind === mine) behind = null;
+        });
+      };
+      offChanges = followChanges(parts.events, {
+        changed: deliver,
         reopened: () => lanes.changes.reopened(),
       });
       offLifecycle = parts.events.onEvent((event, payload) => {

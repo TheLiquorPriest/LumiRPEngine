@@ -211,7 +211,7 @@ export class Rig {
       holdMs: () => 540_000,
       // Lumiverse's own list of the lore that activated for the chat's running generation, as RPE's event socket hears it.
       heard: {
-        tagged: (chat) => {
+        tagged: async (chat) => {
           const since = this.lv.events.findLastIndex((e) => e.event === "GENERATION_STARTED" && isRecord(e.payload) && e.payload.chatId === chat);
           const said = this.lv.events.slice(Math.max(0, since)).findLast((e) => e.event === "WORLD_INFO_ACTIVATED" && isRecord(e.payload) && e.payload.chatId === chat);
           const change = said === undefined ? null : changeOf(said.event, said.payload);

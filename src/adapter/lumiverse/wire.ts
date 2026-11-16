@@ -129,14 +129,20 @@ export interface TagMessage {
 
 /**
  * A lore entry Lumiverse activated for the prompt, as its `WORLD_INFO_ACTIVATED` event lists it (`activatedWorldInfo`,
- * `world-info-capture.ts:17-29`; `generate.service.ts:2868-2879`). RPE hears it on its event socket; the tag carries none.
+ * `generate.service.ts:2868-2879`). RPE hears it on its event socket; the tag carries none. As the event gives it, `how` is
+ * Lumiverse's own word ("keyword" or "vector"; nothing more is said) and `told` is false; the door (`activation.ts`) then tells
+ * how the entry came in, by Lumiverse's counts, and names its book.
  */
 export interface TagLore {
   id: string;
   book: string | null;
+  /** Its book's name, where Lumiverse's event or the book's row gave it. */
+  bookName: string | null;
   title: string;
-  /** "keyword" or "vector", as Lumiverse said. */
-  how: string | null;
+  /** How it came into the prompt: always on, by one of its keys, by meaning, or still in force from earlier; null where it cannot be told. */
+  how: "constant" | "keyword" | "vector" | "sticky" | null;
+  /** `how` is known. False where the door could not tell the ways apart (the entry's sticky setting changed while its window was open, or its row could not be read): `how` is then null. */
+  told: boolean;
 }
 
 /** The history cut the extension made: on RPE's answer, or none when it had no answer in time (RPE then cuts on receipt). */

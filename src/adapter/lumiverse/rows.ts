@@ -70,7 +70,10 @@ export interface LvBook {
 
 export interface LvEntry {
   id: string;
+  /** Its book's id. */
   book: string;
+  /** The key of its counts in the chat's `metadata.wi_state` (`world-info-activation.service.ts:16-23`), which is not its id. */
+  uid: string;
   keys: string[];
   secondaryKeys: string[];
   content: string;
@@ -84,6 +87,8 @@ export interface LvEntry {
   disabled: boolean;
   selective: boolean;
   vectorized: boolean;
+  /** How many generations it stays on after its keys stop matching; 0 where it has no sticky window (`world-info-activation.service.ts:454-470`). */
+  sticky: number;
   /** Its extensions without the keys Lumiverse sends as fields of their own (`world-books.service.ts:219-236`). */
   extensions: JsonObject;
   revision: number;
@@ -252,6 +257,7 @@ export function entryFrom(row: Record<string, unknown>): LvEntry {
   const secondary = parsed(row.keysecondary, "secondary keys");
   return {
     id: id(row.id),
+    uid: str(row.uid),
     book: id(row.world_book_id),
     keys: Array.isArray(keys) ? keys.filter((k): k is string => typeof k === "string") : [],
     secondaryKeys: Array.isArray(secondary) ? secondary.filter((k): k is string => typeof k === "string") : [],
@@ -265,6 +271,7 @@ export function entryFrom(row: Record<string, unknown>): LvEntry {
     disabled: flag(row.disabled),
     selective: flag(row.selective),
     vectorized: flag(row.vectorized),
+    sticky: num(row.sticky),
     extensions,
     revision: num(row.revision),
     updatedAt: num(row.updated_at),
