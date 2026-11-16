@@ -524,7 +524,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `cast.queryItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Items a cast query gives: The most items of one part one cast_query answers with; the answer says how many more there are. |
-| `cast.secretConfidence` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sureness of a secret learned: How sure, from 0 to 1, a character is of a secret a perception says they now know. |
+| `cast.secretConfidence` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sureness of a secret learned: How sure, from 0 to 1, a character is of a secret a perception or cast_update says they now hold, used only when the one who writes it says nothing of how sure they are. |
 | `cast.topOfMind` | `9` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Top of mind | Top of mind: The most memories a character holds at top of mind. |
 | `cast.shortTermDays` | `3` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Short-term memory | Short-term memory: Days of story time a memory stays short term, unless a dream settles it sooner. |
 | `cast.fadeDays` | `3` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Days a memory takes to fade: Story days in which a memory of weight 1, never recalled, falls to half its strength; each point of weight doubles it, each recall adds as much again. |
@@ -548,6 +548,13 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `places.access` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places: access entries shown: The most access entries of a place one answer shows; the answer counts the rest and says the query that reads them. |
 | `places.page` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places in one page of the list: The most places one page of the Places list holds. |
 | `places.history` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Beats in a place's history: The most beats one answer of a place's history gives, newest first; the answer counts the rest. |
+
+## `quests`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `quests.history` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Beats in a quest's history: The most beats one answer of a quest's history gives, newest first; the answer counts the rest. |
+| `quests.page` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Quests in one page of the records: The most quests one page of the Quests page's records holds. |
 
 ## `worlds`
 

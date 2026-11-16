@@ -495,6 +495,26 @@ export interface ChatStorageRow {
   measured?: number | null;
 }
 
+/** What the move came to: the revision the chat plays from its next turn, the id its Undo takes (null where it already plays that revision), whether it took effect, and whether a turn runs now. */
+export interface ChatUpgraded {
+  /** The revision from the next turn. */
+  revision: string;
+  /** The id its Undo takes. */
+  edit: string | null;
+  /** It took effect where it was recorded. */
+  applied: boolean;
+  /** A turn runs now. */
+  waiting: boolean;
+}
+
+/** Whether the Upgrade was taken back, and why not where it was not. */
+export interface ChatUpgradeUndone {
+  /** Something was recorded. */
+  undone: boolean;
+  /** Why not, in words; empty where it was. */
+  words: string;
+}
+
 /** What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path, the message just above that, how many messages lie above it, and how many of those the story does not cover yet. */
 export interface ChatWindowReply {
   /** The window is on for this chat. */
@@ -3593,6 +3613,18 @@ export interface WindowGauge {
   reserve: number;
 }
 
+/** What attaching came to: whether the chat plays the world's head from its next turn, the revision it plays, where it stood if it played a world already, and whether a turn runs now. */
+export interface WorldAttached {
+  /** The chat takes the world's head revision from its next turn. */
+  attached: boolean;
+  /** The revision it plays, or will. */
+  revision: string;
+  /** For a chat that plays a world already. */
+  plays?: { world: string; name: string; revision: string; behind: boolean };
+  /** A turn runs now, so the next turn is the first to play it. */
+  waiting: boolean;
+}
+
 /** A change to one of his worlds, once it is kept: the world, what was written (a revision, the index, the draft, a history note, or the whole world removed), and for the draft its version and whether one is stored now. */
 export interface WorldChanged {
   /** The world's id. */
@@ -3605,6 +3637,26 @@ export interface WorldChanged {
   version?: number;
   /** For the draft: whether one is stored now (false once it is discarded or committed). */
   stored?: boolean;
+}
+
+/** A chat that plays one of his worlds: its name, the world and the revision it plays now (a move that waits for its next turn counted), the world's head, and whether it is behind. */
+export interface WorldChat {
+  /** The chat's id. */
+  chat: string;
+  /** Its name in Lumiverse; its id where Lumiverse gives none. */
+  name: string;
+  /** The world it plays. */
+  world: string;
+  /** The world's name. */
+  worldName: string;
+  /** The revision it plays now. */
+  revision: string;
+  /** The world's head revision; null where the world is gone from his worlds. */
+  head: string | null;
+  /** The world has a newer revision than the chat plays. */
+  behind: boolean;
+  /** Why the chat cannot be moved on. */
+  reason?: string;
 }
 
 /** The draft as the world's next revision. Where the world's errors block it, `revision` is null and `message` and `lint` say what blocks. */
@@ -4727,6 +4779,36 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** What moving the chat to a revision of its world would bring in, entity by entity and part by part, each with the pick it defaults to and why; a secret row is marked behind the spoiler gate. */
+  "GET /api/v1/chats/:chat/upgrade": {
+    params: { chat: string };
+    query: { to: string };
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Moves the chat to a revision of its world from its next turn, with his picks (a change not named takes its default): his own change, placed after the newest reply while a run goes on. The turn that runs now keeps the revision it started with; the next plays the new one and tells the Author. */
+  "POST /api/v1/chats/:chat/upgrade": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { to: string; merge?: JsonValue };
+    reply: ChatUpgraded;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Takes an Upgrade of the chat back, whole: the chat goes to the revision it came from, from its next turn; what play changed since stays as played. */
+  "POST /api/v1/chats/:chat/upgrade/undo": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { edit: string };
+    reply: ChatUpgradeUndone;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there. */
   "GET /api/v1/chats/:chat/walk": {
     params: { chat: string };
@@ -5687,6 +5769,16 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** Attaches the world to a chat. A chat that plays no world takes the world's head revision from its next turn (a turn that runs now keeps the state it started with); one that plays an older revision of it is answered with where it stands, so the Upgrade is offered, and one that plays another world, with which. RPE writes nothing to Lumiverse for it. */
+  "POST /api/v1/worlds/:world/attach": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { chat: string };
+    reply: WorldAttached;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** A character as its own model, from the world's draft. */
   "GET /api/v1/worlds/:world/characters/:entity": {
     params: { world: string; entity: string };
@@ -5883,6 +5975,16 @@ export interface ApiRoutes {
     query: { revision?: string };
     body: undefined;
     reply: { updates: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The chats that play one of his worlds (one world's, or one chat), each with its name, the revision it plays and whether that is behind the world's head. */
+  "GET /api/v1/worlds/chats": {
+    params: Record<string, never>;
+    query: { world?: string; chat?: string };
+    body: undefined;
+    reply: { chats: WorldChat[] };
     paged: false;
     long: false;
     joined: false;
