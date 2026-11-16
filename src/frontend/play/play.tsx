@@ -18,7 +18,6 @@ import type { IconName } from "../../ui/icons";
 import type { PanelDef } from "../registry";
 import { useSelect } from "../../ui/store";
 import type { UiCatalog } from "../ui-registry";
-import { attachedText } from "../gm/engine";
 import { publishBarHeight } from "../bar-height";
 
 /** Core panels always show; a pack's panel shows once its view model is in the state (a null one is none, as the Encounter's between fights). */
@@ -77,13 +76,6 @@ export function Play() {
   const panel = dest ? (hub ? (dest.panels.find((p) => p.id === "core.scene") ?? dest.panels[0]) : (dest.panels.find((p) => p.id === play.tab[dest.id]) ?? dest.panels[0])) : undefined;
   const current = panel?.id ?? null;
   const chatId = world?.chatId ?? null;
-  // Showing a pack's panel is a player-facing observation of the POV (DESIGN §9.2): it may
-  // materialize the POV's detail in that pack's domain. Until it lands (or while a reply holds the
-  // write), the panel shows the representation, so nothing waits on the answer and a refusal says
-  // nothing. Context sends its own on opening; Now's hub sends for the panels it shows.
-  useEffect(() => {
-    if (chatId !== null && current !== null && !current.startsWith("core.")) void app.send({ type: "lre.view.open", chatId, panel: current, entity: null });
-  }, [chatId, current]);
   // Back returns focus to the control that opened the sheet: the one last focused in
   // Play, kept as it was focused, since an opener may lose focus while its request runs (disabled
   // while busy) or as the sheet hides the destination under it.
@@ -204,9 +196,6 @@ function NotWorld(props: { chatId: string }) {
       const result = await app.request({ type: "lre.world", op: "attach", worldId: world.id, chatId: props.chatId });
       if (!result) return;
       void app.client.open(props.chatId);
-      // Which engine the chat plays from its first turn: the harness where it can, else its classic steps, and why.
-      const engine = await app.request<"lre.chat.knowledge">({ type: "lre.chat.knowledge", chatId: props.chatId, engines: true });
-      if (engine) app.toast(attachedText(world.name, engine.engine ?? "classic", engine.harnessBlocked ?? null), "info");
     });
   return (
     <div class="lre-play-notworld" data-lre-section="play-not-world">

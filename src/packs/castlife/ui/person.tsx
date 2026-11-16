@@ -203,11 +203,6 @@ export function personOrgs(pages: unknown, who: EntityId): PersonOrg[] {
 export function PersonSheet(props: SheetProps) {
   const app = useApp();
   const [fixingWhere, setFixingWhere] = useState(false);
-  useEffect(() => {
-    void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "castlife.cast", entity: props.id }).then((result) => {
-      toastQueued(app, result);
-    });
-  }, [props.chatId, props.id]);
   const view = decodeCastView(props.state.panels["castlife.cast"]);
   const person = view?.people.find((p) => p.id === props.id);
   if (!view || !person) {

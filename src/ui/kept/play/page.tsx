@@ -35,6 +35,8 @@ export interface PlayMount {
   settings(): ToastSettings;
   /** Shows the shell's Build page. */
   openBuild(): void;
+  /** Shows one of RPE's pages (the Live page, a turn's page). */
+  open(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
 }
 
 /** The floating pill reports its size to the float widget it lives in; here the page lays the strip out, so the size goes nowhere. */
@@ -101,7 +103,7 @@ export function PlayPage(props: { chat: string }) {
   useEffect(() => {
     const at = root.current;
     if (at === null) return undefined;
-    return mountPlay(at, { client: app.client, chat: props.chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build" }) });
+    return mountPlay(at, { client: app.client, chat: props.chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build" }), open: app.go });
   }, [props.chat]);
   return <div ref={root} class="rpe-play" />;
 }

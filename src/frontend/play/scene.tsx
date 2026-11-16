@@ -20,12 +20,7 @@ import type { IconName } from "../../ui/icons";
 import { Icon } from "../../ui/icons";
 import type { PanelDef, PanelProps } from "../registry";
 import { NeedsYou, QuickActions, StatusBanners } from "./now";
-import { EngineBlocked, NoConnectionNotice, useHarnessBlocked } from "../gm/engine";
-import { gmAt } from "../gm/gate";
-import { useAgentConnections, useOpenConnections } from "../story/connections";
-import { toastQueued } from "../queued";
 import { visiblePanels } from "./play";
-import { PrepareCard } from "../story/prepare";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
 
@@ -41,34 +36,6 @@ function weatherIcon(weather: string): IconName {
   return "cloud";
 }
 
-/** Where the harness can't play the user's chats, which engine plays this one and why, with the way to put it right (`EngineNotice`). */
-function EngineWord(props: { state: StateView }) {
-  const app = useApp();
-  const engine = props.state.engine ?? "classic";
-  const blocked = useHarnessBlocked(props.state.chatId, engine);
-  if (engine !== "harness") return null;
-  return <HarnessWord chatId={props.state.chatId} blocked={blocked} onEngine={() => app.ui.update((ui) => gmAt({ ...ui, mode: "gm" }, "chat"))} />;
-}
-
-/** On a chat the harness plays: whether its runtime keeps a connection, as the drawer reads it, with the way to Harness → System → Runtime → Connections. */
-function HarnessWord(props: { chatId: string; blocked: string | null; onEngine(): void }) {
-  const connections = useAgentConnections(props.chatId);
-  const open = useOpenConnections();
-  return <EngineNotice blocked={props.blocked} none={connections.none} onEngine={props.onEngine} onConnections={open} />;
-}
-
-/**
- * Play's word on the engine for a chat the harness plays, without hooks. While its runtime keeps no
- * connection (`none`), that keeps the chat from playing, whatever else does too, and only
- * Connections puts it right: the notice says what to do there, with the way where the drawer can
- * open it (`onConnections`). Otherwise, where the harness can't play the chat (`blocked`), why, with
- * the way to the Engine switch (`onEngine`); nothing while it can.
- */
-export function EngineNotice(props: { blocked: string | null; none: boolean; onEngine(): void; onConnections: (() => void) | null }) {
-  if (props.none) return <NoConnectionNotice engine="harness" none onOpen={props.onConnections} />;
-  return <EngineBlocked engine="harness" blocked={props.blocked} onOpen={props.onEngine} />;
-}
-
 export function ScenePanel(props: PanelProps) {
   const app = useApp();
   const { state } = props;
@@ -79,8 +46,6 @@ export function ScenePanel(props: PanelProps) {
   return (
     <div class="lre-play-now" data-lre-panel="core.scene">
       <StatusBanners state={state} />
-      <EngineWord state={state} />
-      {state.engine === "harness" ? <PrepareCard chatId={state.chatId} /> : null}
       <SceneCard state={state} />
       <NeedsYou state={state} />
       {inline.map((panel) => (
@@ -95,13 +60,10 @@ export function ScenePanel(props: PanelProps) {
   );
 }
 
-/** A pack panel shown inside Now. Showing it observes the POV there (DESIGN §9.2), as its own tab did. */
+/** A pack panel shown inside Now; it shows what the state holds, and asks RPE nothing on opening. */
 function InlinePanel(props: { panel: PanelDef; state: StateView }) {
   const app = useApp();
   const { panel, state } = props;
-  useEffect(() => {
-    void app.send({ type: "lre.view.open", chatId: state.chatId, panel: panel.id, entity: null });
-  }, [state.chatId, panel.id]);
   return (
     <div class="lre-play-inline" data-lre-panel-host={panel.id}>
       <panel.component chatId={state.chatId} view={state.panels[panel.id] ?? null} state={state} send={app.send} />
@@ -215,17 +177,13 @@ function Here(props: { state: StateView }) {
   const [busy, run] = useBusy();
   const present = state.scene?.present ?? [];
   const open = (entity: EntityId) => {
-    // The sheet observes them on opening: the row only opens it.
+    // The sheet shows what the state holds of them: the row only opens it, and asks RPE nothing.
     if (app.catalog.sheets.has("person")) {
       app.ui.update((ui) => pushSheet(ui, { kind: "person", id: entity }));
       return;
     }
-    run(async () => {
-      const cast = app.catalog.panels.find((panel) => panel.id === "castlife.cast");
-      const result = await app.request({ type: "lre.view.open", chatId: state.chatId, panel: cast ? cast.id : "core.scene", entity });
-      if (result && cast) app.ui.update((ui) => playAt(ui, "people", cast.id));
-      toastQueued(app, result);
-    });
+    const cast = app.catalog.panels.find((panel) => panel.id === "castlife.cast");
+    if (cast) app.ui.update((ui) => playAt(ui, "people", cast.id));
   };
   return (
     <div class="lre-play-here">

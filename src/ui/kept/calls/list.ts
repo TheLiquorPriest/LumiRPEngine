@@ -2,5 +2,6 @@
 // Every call file of the kept views, in name order.
 
 import type { CallFile } from "../client";
+import { calls as playCalls } from "./play";
 
-export const CALLS: readonly CallFile[] = [];
+export const CALLS: readonly CallFile[] = [playCalls];

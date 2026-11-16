@@ -391,13 +391,6 @@ function ItemSheets(props: { chatId: ChatId; sheet: ItemSheetKind | null; item: 
 
 export function ItemSheet(props: SheetProps) {
   const app = useApp();
-  const [nothingMore, setNothingMore] = useState(false);
-  useEffect(() => {
-    setNothingMore(false);
-    void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "gear.gear", entity: props.id }).then((result) => {
-      if (!toastQueued(app, result) && result && !result.materialized) setNothingMore(true);
-    });
-  }, [props.chatId, props.id]);
   const view = decodeGearView(props.state.panels["gear.gear"]);
   const found = view ? findItem(view, props.id) : null;
   if (!found || !view) {
@@ -470,7 +463,7 @@ export function ItemSheet(props: SheetProps) {
               ))}
             </List>
           ) : (
-            <Empty icon="box">{nothingMore ? `Nothing more inside ${item.name}.` : "Nothing seen inside yet."}</Empty>
+            <Empty icon="box">{`Nothing inside ${item.name} yet.`}</Empty>
           )}
         </Section>
       ) : null}

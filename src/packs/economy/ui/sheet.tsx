@@ -19,7 +19,7 @@ import { decodeFinanceView } from "./decode";
 import type { HubControls, PlayerControls, Reader } from "./hub";
 import type { HubPage } from "./nav";
 import { HubPageView } from "./pages";
-import { observeMoney, playElsewhere, usePlayerControls } from "./panel";
+import { playElsewhere, usePlayerControls } from "./panel";
 import { pageOf, routeFrom } from "./routes";
 
 /** An organization's own money as its page in Orgs carries it (`orgs.org`'s money section): there only for a reader who may see it. */
@@ -55,12 +55,6 @@ function HubSheet(props: SheetProps & { kind: SheetKind }) {
   const app = useApp();
   const controls = usePlayerControls(props.chatId, props.state);
   const route = pageOf(props.kind, props.id);
-  // The first money page in the stack observes the POV's money on mount, as the Money tab does,
-  // which matters when it opens over Now from the glance or over Orgs; pages over it don't ask again.
-  useEffect(() => {
-    const first = app.ui.get().play.stack.find((r) => r.kind === "money" || r.kind === "account");
-    if (first?.kind === props.kind && first.id === props.id) observeMoney(app, props.chatId);
-  }, [props.chatId]);
   const raw = props.state.panels["economy.money"];
   const pov = raw === undefined || raw === null ? null : decodeFinanceView(raw);
   const shown = route === null ? null : sheetMoney(route, pov, controls, (org) => orgMoney(props.state, org));

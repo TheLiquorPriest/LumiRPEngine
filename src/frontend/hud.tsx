@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { FixTarget, HudView, StateView } from "../shared/state-view";
 import { useApp, useView } from "./app";
 import { Badge, Button, Empty, IconButton, List, ListRow, useBusy } from "./components";
-import { ActivityLine } from "./diagnostics";
+import { ActivityLine } from "./play/activity";
 import { FixEditor } from "./fix-editor";
 import { formatCents, formatMinutes, humanize } from "./format";
 import { Icon } from "../ui/icons";

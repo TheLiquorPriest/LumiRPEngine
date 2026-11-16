@@ -333,6 +333,8 @@ export interface App {
   toast(text: string, tone?: Toast["tone"]): void;
   /** Sends a request; on an error, shows it and resolves null. */
   request<K extends keyof ResultBodies>(body: Extract<RequestBody, { type: K }>): Promise<ResultBodies[K] | null>;
+  /** Shows one of RPE's own pages (the Live page, a turn's page) where the shell shows its pages; absent where the App has no shell to ask. */
+  open?(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
 }
 
 export const AppContext = createContext<App | null>(null);

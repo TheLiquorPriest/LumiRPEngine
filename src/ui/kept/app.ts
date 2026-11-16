@@ -75,6 +75,8 @@ export interface KeptDeps {
   settings(): ToastSettings;
   /** Shows the shell's Build page, where today's Play would switch to Build mode. */
   openBuild?(): void;
+  /** Shows one of RPE's pages where the shell shows its pages (the Live page, a turn's page). */
+  open?(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
   /** The call files; the folder's list unless a test gives its own. */
   calls?: readonly CallFile[];
 }
@@ -213,10 +215,6 @@ export function keptApp(deps: KeptDeps): Kept {
   // RPE's words for each refusal `send` blanked, by the answer it blanked.
   const refusals = new WeakMap<object, string>();
   const send: Send = async (body) => {
-    if (deps.mode === "play" && body.type === "lre.chat.knowledge" && body.engines === true) {
-      // Which engine plays the chat, which today's picker asks after its Attach to word its toast: RPE plays every chat one way, and today's words name another. Nothing comes back, so the picker shows no toast; the attach is said in the page's words instead.
-      return new Promise(() => undefined);
-    }
     const answer = await client.send(body);
     if (answer.type === "lre.error") {
       // RPE's refusal of a request it does not serve yet: its words are the page's, said once by `request`; what a component gets back from `send` has none, so nothing toasts them.
@@ -259,6 +257,7 @@ export function keptApp(deps: KeptDeps): Kept {
     agents: createStore<AgentsView | null>(null),
     toast,
     request,
+    ...(deps.open === undefined ? {} : { open: deps.open }),
   };
   // A push that the draft moved past the one Build holds has it read again (DESIGN §23).
   if (deps.mode === "build") stops.push(trackDraft(app, clock));

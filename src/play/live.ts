@@ -8,16 +8,16 @@
 import type { LiveHub } from "../app";
 import { isRecord } from "../shared/json";
 
-/** The kind the turn lane publishes RPH's trace records under, and the event that ends a run. */
+/** The kind the turn lane publishes RPH's trace records under, and the events that begin and end a run: each moves what the panels say (a turn is running, or is not). */
 const TRACE_KIND = "trace";
-const RUN_ENDED = "run_ended";
+const RUN_CHANGES: ReadonlySet<string> = new Set(["run_started", "run_ended"]);
 
 /** Tells everyone following `chat` that its state changed. */
 export function stateChanged(live: Pick<LiveHub, "publish">, chat: string): void {
   live.publish(chat, { kind: "state", data: {} });
 }
 
-/** Follows chats on the live hub, each once, and tells their followers when a run of theirs ends. */
+/** Follows chats on the live hub, each once, and tells their followers when a run of theirs begins or ends. */
 export class RunEnds {
   private readonly followed = new Set<string>();
 
@@ -28,9 +28,9 @@ export class RunEnds {
     this.followed.add(chat);
     this.live.follow(chat, {
       take: (batch) => {
-        const ended = batch.events.some((e) => e.kind === TRACE_KIND && isRecord(e.data) && isRecord(e.data.event) && e.data.event.kind === RUN_ENDED);
-        // After the hub has handed the run's end to every follower, so each page gets the events in order.
-        if (ended) queueMicrotask(() => stateChanged(this.live, chat));
+        const changes = batch.events.some((e) => e.kind === TRACE_KIND && isRecord(e.data) && isRecord(e.data.event) && RUN_CHANGES.has(String(e.data.event.kind)));
+        // After the hub has handed the run's start or end to every follower, so each page gets the events in order.
+        if (changes) queueMicrotask(() => stateChanged(this.live, chat));
         return true;
       },
     });

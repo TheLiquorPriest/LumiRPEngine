@@ -142,7 +142,7 @@ describe("the Build page", () => {
     const root = page.document.createElement("div");
     let leave = (): void => undefined;
     await act(() => {
-      leave = mountBuild(root as unknown as HTMLElement, { client: { ...routeClient().client, follow: () => () => undefined }, chat: storeOf<string | null>(null), host: webHost({ revokeMs: () => 1000 }), timers: handTimers(), settings: () => ({ toastsShown: 3, errorToastMs: 6000, toastMs: 3500 }) });
+      leave = mountBuild(root as unknown as HTMLElement, { client: { ...routeClient().client, follow: () => () => undefined }, chat: storeOf<string | null>(null), host: webHost({ revokeMs: () => 1000 }), timers: handTimers(), settings: () => ({ toastsShown: 3, errorToastMs: 6000, toastMs: 3500 }), open: () => undefined });
     });
     await until("the worlds", () => root.querySelector("[data-lre-section=build]") !== null);
     await act(() => leave());

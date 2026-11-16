@@ -29,6 +29,8 @@ export interface BuildMount {
   host: KeptHost;
   timers: Timers;
   settings(): ToastSettings;
+  /** Shows one of RPE's pages (the Live page, a turn's page). */
+  open(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
 }
 
 /** Puts today's Build mode in `root`; the returned function takes it away with all it started. */
@@ -66,7 +68,7 @@ export function BuildPage(props: { chat?: string | null }) {
   useEffect(() => {
     const at = root.current;
     if (at === null) return undefined;
-    return mountBuild(at, { client: app.client, chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get() });
+    return mountBuild(at, { client: app.client, chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), open: app.go });
   }, []);
   return <div ref={root} class="rpe-kept" />;
 }

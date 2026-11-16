@@ -43,17 +43,6 @@ export function usePlayerControls(chatId: ChatId, state: StateView): PlayerContr
   };
 }
 
-/**
- * Opens the POV's money, whose detail is the POV's to materialize (DESIGN §9.2; an account has
- * none of its own), as picking the Money tab does: for a money page that opens elsewhere (over Now
- * from the glance, over Orgs from an organization's page) and an organization's tabs that read it.
- */
-export function observeMoney(app: App, chatId: ChatId): void {
-  void app.request({ type: "lre.view.open", chatId, panel: "economy.money", entity: null }).then((result) => {
-    toastQueued(app, result);
-  });
-}
-
 /** In Play, where money's links outside money lead: an organization's page in Orgs, on the tab named (none: the Orgs home), or a panel on its tab. */
 export function playElsewhere(app: App, to: Elsewhere): void {
   app.ui.update((ui) => ("panel" in to ? showPanel(ui, app.catalog, to.panel) : to.org === null ? playAt(ui, "orgs") : openAt(ui, "orgs", orgRoute(to.org, to.tab))));

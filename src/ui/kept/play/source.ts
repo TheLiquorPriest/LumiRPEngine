@@ -10,9 +10,11 @@
 
 import type { SyncState } from "../../../frontend/protocol-client";
 import type { LiveEvent } from "../../../shared/api";
+import type { StateView } from "../../../shared/state-view";
 import { createStore, type Readable } from "../../store";
 import { replyOf, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
+import { foldRun, NO_RUN, type RunLine } from "./activity";
 
 /** The live kind RPE publishes on a chat once its state changed (`src/play/live.ts`), with no data of its own. */
 export const STATE_CHANGED = "state";
@@ -30,6 +32,10 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
   let alive = true;
   let reading = false;
   let again = false;
+  /** The chat's run as the trace told it, and the state as RPE last gave it: the view shows Paused while the run's call is held by his pause. */
+  let run: RunLine = NO_RUN;
+  let base: StateView | null = null;
+  const shown = (view: StateView | null): StateView | null => (view !== null && run.held && view.status === "in_flight" ? { ...view, status: "paused" } : view);
 
   const read = (): void => {
     if (!alive) return;
@@ -43,7 +49,8 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
       (view) => {
         reading = false;
         if (!alive) return;
-        state.set({ ...state.get(), view, status: "live", failed: null });
+        base = view;
+        state.set({ ...state.get(), view: shown(base), status: "live", failed: null });
         if (again) {
           again = false;
           read();
@@ -65,6 +72,11 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
   const unfollow = client.follow(chat, {
     events(events, missed) {
       heard?.(events);
+      const next = foldRun(chat, run, events);
+      if (next !== run) {
+        run = next;
+        state.update((held) => ({ ...held, activity: run.activity, view: shown(base) }));
+      }
       if (missed !== null || events.some((event) => event.kind === STATE_CHANGED)) read();
     },
     reset: read,

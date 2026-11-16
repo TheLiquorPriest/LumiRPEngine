@@ -31,20 +31,16 @@ import { GmHub } from "./gm";
 import { MoneyHub, type PlayerControls, type Reader, type SegmentProps } from "./hub";
 import { ALL_ACTIVITY, businessControls, type ActivityFilter, type MoneySegment } from "./layout";
 import { actionPage, Controls, detailPage, type Elsewhere, type HubNav } from "./nav";
-import { observeMoney, playElsewhere, usePlayerControls } from "./panel";
+import { playElsewhere, usePlayerControls } from "./panel";
 import { amountOf } from "./requests";
 import { gmStreamDrafts, RevenueEditor, RevenueStreams, revenueEditOps, revenueSpawnOps } from "./revenue";
 import { routeFrom } from "./routes";
 import { rate } from "./taxes";
 import { JobListRow } from "./work";
 
-/** The POV's own money and controls beside an organization's page in Play, its detail observed as the Money tab does. */
+/** The POV's own money and controls beside an organization's page in Play: what the state holds, and nothing asked on opening. */
 export function useReader(props: OrgTabProps): Reader | null {
-  const app = useApp();
   const controls = usePlayerControls(props.chatId, props.state);
-  useEffect(() => {
-    observeMoney(app, props.chatId);
-  }, [props.chatId]);
   const raw = props.state.panels["economy.money"];
   const view = raw === undefined || raw === null ? null : decodeFinanceView(raw);
   return view ? { view, controls } : null;

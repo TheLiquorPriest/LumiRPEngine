@@ -4,10 +4,8 @@
 
 import type { Chip, ChipKind, StateView } from "../../shared/state-view";
 import { playAt, useApp } from "../app";
-import { KeepReportChip } from "../chips";
 import { chipRole, chipTone } from "../chip-roles";
 import { Badge, Banner, Button, List, ListRow, Section, useBusy } from "../components";
-import { HARNESS_MODE } from "../harness/mode";
 import type { IconName } from "../../ui/icons";
 import { Icon } from "../../ui/icons";
 import { isMobile } from "../layout";
@@ -31,45 +29,35 @@ const DECISION_ICON: Partial<Record<ChipKind, IconName>> = {
   overdue: "clock",
 };
 
-/** Paused with the Keep report, or a turn running (on the harness, its author at work); nothing otherwise. */
+/** The way to the Live page, where a running turn is watched, paused and let go on; none where the App has no shell to ask. */
+function useWatch(chatId: string): (() => void) | null {
+  const { open } = useApp();
+  return open === undefined ? null : () => open({ page: "live", chat: chatId });
+}
+
+/** A turn paused on the Live page, or running; nothing otherwise. */
 export function StatusBanners(props: { state: StateView }) {
-  const app = useApp();
   const { state } = props;
+  const watch = useWatch(state.chatId);
   if (state.status === "paused") {
-    const keep = state.chips.find((chip) => chip.kind === "keep_report");
-    // The Keep report says what was edited and holds Keep and Discard; without it, the banner says it.
     return (
       <div class="lre-play-status" data-lre-status="paused">
-        <Banner tone="warn" icon="pause" title="Paused" actions={keep ? <KeepReportChip chip={keep} chatId={state.chatId} send={app.send} /> : undefined}>
-          {keep ? undefined : "A user message was edited. Later turns don't change the world until you keep or discard them."}
+        <Banner tone="warn" icon="pause" title="Paused" actions={watch === null ? undefined : <Button size="sm" onClick={watch}>Open Live</Button>}>
+          The turn is held on the Live page and goes on when you resume it there. A change you make now still applies at once.
         </Banner>
       </div>
     );
   }
-  if (state.status === "in_flight") return <TurnRunning engine={state.engine} onWatch={() => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id }))} />;
+  if (state.status === "in_flight") return <TurnRunning onWatch={watch} />;
   return null;
 }
 
-/**
- * A turn under way, without hooks. On the harness the author works in LumiRPEngine's runtime and
- * sends the reply itself, once and whole when it is told, while the activity line says only that the reply
- * is awaited: the banner says who is at work and gives the way to watch it (the Harness tab, which
- * opens on Live).
- */
-export function TurnRunning(props: { engine: StateView["engine"]; onWatch(): void }) {
-  if (props.engine === "harness") {
-    return (
-      <div class="lre-play-status" data-lre-status="in_flight">
-        <Banner tone="info" icon="sparkle" title="The author is working on this turn" actions={<Button icon={HARNESS_MODE.icon} size="sm" onClick={props.onWatch}>Watch it work</Button>}>
-          It reads the world, lets the characters think, records what changed and writes the reply as it goes. This can take a while. Changes you make now apply when it finishes.
-        </Banner>
-      </div>
-    );
-  }
+/** A turn under way, without hooks: a change made now applies at once and the running turn goes on from where it began; the way to watch it on Live, where there is one. */
+export function TurnRunning(props: { onWatch: (() => void) | null }) {
   return (
     <div class="lre-play-status" data-lre-status="in_flight">
-      <Banner tone="info" icon="hourglass" title="A turn is running">
-        Changes you make now apply when it finishes.
+      <Banner tone="info" icon="hourglass" title="A turn is running" actions={props.onWatch === null ? undefined : <Button icon="eye" size="sm" onClick={props.onWatch}>Watch it work</Button>}>
+        A change you make now applies at once, and the running turn goes on from where it began.
       </Banner>
     </div>
   );

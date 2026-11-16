@@ -137,11 +137,6 @@ function CallMeter(props: { meter: CallMeterView }) {
 export function ContextPanel(props: PanelProps) {
   const view = decodeContextView(props.view);
   const [index, setIndex] = useState(0);
-  const app = useApp();
-  // Opening the inspector runs the backend's deliverability check (a dry-run assembly).
-  useEffect(() => {
-    void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "core.context", entity: null });
-  }, [props.chatId]);
   const meter = props.state.meter ? <CallMeter meter={props.state.meter} /> : null;
   if (props.view === undefined || props.view === null) {
     return (
