@@ -4,20 +4,20 @@
 import type { Area } from "../app";
 import { createRegistry } from "../engine/registry-impl";
 import { ALL_PACKS } from "../packs/index";
-import type { Store } from "../store";
 import { rehearsal } from "./migrate";
 import { Rehearsals } from "./rehearse-job";
-import { migrateRoutes, type MigrateRoutesDeps } from "./routes";
+import { migrateRoutes, type MigratePresses, type MigrateRoutesDeps } from "./routes";
 import { MIGRATE_SETTINGS } from "./setting-list";
 import { MIGRATE_TABLES } from "./tables";
 
 /**
  * What the migration takes from the composition: the extension's identifier, which the Migration page names; the file tree's
  * writer as him at the global level (`OwnFiles.writeAsUser`, which the migration may not import), which one press uses to switch
- * an attached file on: `text` written at `path` below the global level, the path written answered; and RPE's store, where his
- * answer to a paused chat lands the held turns' changes.
+ * an attached file on: `text` written at `path` below the global level, the path written answered; the folders agents, skills and
+ * prompts are read from at a level of the tree (`GLOBAL_FOLDERS`); and RPE's store, where his answer to a paused chat lands the
+ * held turns' changes.
  */
-export type MigrateTakes = Pick<MigrateRoutesDeps, "identifier"> & { writeAsUser?(user: string, path: string, text: string): Promise<string>; store?(): Store };
+export type MigrateTakes = Pick<MigrateRoutesDeps, "identifier"> & Pick<MigratePresses, "writeAsUser" | "store" | "folders">;
 
 export function migrateArea(takes: MigrateTakes): Area {
   return {
@@ -42,6 +42,7 @@ export function migrateArea(takes: MigrateTakes): Area {
             registry,
             ...(takes.store === undefined ? {} : { store: takes.store }),
             ...(takes.writeAsUser === undefined ? {} : { writeAsUser: takes.writeAsUser }),
+            ...(takes.folders === undefined ? {} : { folders: takes.folders }),
           },
         }),
       );
