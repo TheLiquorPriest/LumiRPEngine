@@ -8,8 +8,12 @@ import { migrateRoutes, type MigrateRoutesDeps } from "./routes";
 import { MIGRATE_SETTINGS } from "./setting-list";
 import { MIGRATE_TABLES } from "./tables";
 
-/** What the migration takes from the composition: the extension's identifier, which the Migration page names. */
-export type MigrateTakes = Pick<MigrateRoutesDeps, "identifier">;
+/**
+ * What the migration takes from the composition: the extension's identifier, which the Migration page names; and the file tree's
+ * writer as him at the global level (`OwnFiles.writeAsUser`, which the migration may not import), which one press uses to switch
+ * an attached file on: `text` written at `path` below the global level, the path written answered.
+ */
+export type MigrateTakes = Pick<MigrateRoutesDeps, "identifier"> & { writeAsUser?(user: string, path: string, text: string): Promise<string> };
 
 export function migrateArea(takes: MigrateTakes): Area {
   return {
