@@ -1877,6 +1877,140 @@ export interface PersonAsk {
   person: string | null;
 }
 
+/** What the place is and looks like, in the words that stand: the Author's or the player's own, or, until one is written, the world's. `world` says whose; `older`: an entry bound to the place changed, went or was bound since the base was drawn. */
+export interface PlaceBase {
+  text: string | null;
+  /** These are the world's own words for the place, at its revision; no base was written. */
+  world: boolean;
+  /** The revision of the world the words are the world's at; null for a written base. */
+  revision: string | null;
+  by: string | null;
+  turn: TurnId | null;
+  older: boolean;
+}
+
+/** A base the owner wrote: the change that holds it (a player's own change, which he can undo from the review card), the base as it now reads and the entries it was drawn against. */
+export interface PlaceBaseWritten {
+  change: string;
+  base: PlaceBase;
+  sources: PlaceSourceRow[];
+}
+
+/** The beat of the story that caused something: its id, its words and the number of the message it lies at (null while that is not on the chat's path). */
+export interface PlaceBeatRef {
+  id: string;
+  text: string | null;
+  message: number | null;
+}
+
+/** Who may enter: the audience the world or play set, and the place that sets it (the place itself, or one above it). */
+export interface PlaceEntry {
+  audience: string;
+  at: string;
+  name: string;
+  inherited: boolean;
+}
+
+/** A fact of the place as the record keeps it: its key and words, the turn that wrote it and that turn's number, the story time then (null where the chat shows no date), the beat that caused it, and how exact, how sure and from where. */
+export interface PlaceFactRow {
+  id: string;
+  key: string;
+  value: string;
+  turn: TurnId;
+  n: number;
+  /** Story time after that turn; null while the chat's clock shows no date. */
+  time: string | null;
+  beat: PlaceBeatRef | null;
+  precision: "exact" | "approximate" | "vague" | "unknown" | null;
+  standing: "established" | "proposed" | "assumed" | null;
+  source: "prose" | "lore" | "author" | "gm" | "character" | "player" | "import" | "default" | "invented" | null;
+  by: string | null;
+}
+
+/** Someone or something at the place as the tree places it: its id and name, whether it is a person or a thing, what it is on or in, and where it stands (a square, a zone or words). */
+export interface PlaceHereRow {
+  ref: string;
+  name: string;
+  kind: "person" | "thing";
+  /** What it is in or on, where it is carried or lies on something. */
+  holder: { ref: string; name: string; how: "in" | "on" } | null;
+  square: number[] | null;
+  zone: string | null;
+  words: string | null;
+}
+
+/** Someone who knows of the place: who, whether the world's own record says so or a character's knowledge names it, how it was learned and how well it is known. */
+export interface PlaceKnownRow {
+  who: string;
+  name: string;
+  by: "world" | "knowledge";
+  how: string | null;
+  reach: string | null;
+  precision: "exact" | "approximate" | "vague" | "unknown" | null;
+  standing: "established" | "proposed" | "assumed" | null;
+}
+
+/** A place's record, at the chat's newest turn or as it stood at one of its turns, in its nine parts: its sources, its base, what the story changed there since, its features, who and what is here, its ways, its access and state, its history and who knows of it. */
+export interface PlaceRecord {
+  place: string;
+  ref: string;
+  name: string;
+  parent: { id: string; name: string } | null;
+  kind: "place" | "room" | "spot" | "venue";
+  /** The place draws a grid of its own. */
+  grid: boolean;
+  /** Play made it; the world does not have it. */
+  made: boolean;
+  /** The turn read at; null: the chat's newest. */
+  turn: TurnId | null;
+  sources: PlaceSourceRow[];
+  base: PlaceBase;
+  since: { items: PlaceFactRow[]; more: number };
+  features: { facts: { items: PlaceFactRow[]; more: number }; fixtures: { name: string; at: number[]; size: number[] }[]; zones: { name: string; squares: number }[] };
+  here: PlaceHereRow[];
+  ways: { ways: PlaceWayRow[]; adjoining: ({ id: string; name: string; how: "beside" | "way" })[] };
+  access: { entry: PlaceEntry | null; facts: { items: PlaceFactRow[]; more: number }; doors: ({ at: number[]; state: "open" | "closed" | "locked" })[] };
+  history: { items: ({ beat: string; text: string | null; message: number | null; turn: TurnId })[]; more: number };
+  known: PlaceKnownRow[];
+}
+
+/** A place of the chat as it is played: its id and name, the place it is in, what kind it is, and whether it draws a grid. */
+export interface PlaceRow {
+  place: string;
+  name: string;
+  parent: { id: string; name: string } | null;
+  kind: "place" | "room" | "spot" | "venue";
+  grid: boolean;
+  made: boolean;
+}
+
+/** A page of the chat's places as it plays them, the world's own and those made in play, the places inside a place after it, in the order the world lists them. */
+export interface Places {
+  items: PlaceRow[];
+  next: string | null;
+}
+
+/** A lore entry bound to the place, read live: its id, the aspect it defines, who bound it, its title and revision now (null where Lumiverse no longer holds it), the revision the base was drawn against, and whether the base is older than it. */
+export interface PlaceSourceRow {
+  entry: string;
+  aspect: string;
+  by: string;
+  title: string | null;
+  revision: string | null;
+  drawn: string | null;
+  newer: boolean;
+}
+
+/** A way that joins the place to another: the place it leads to, each way of travel with its minutes and distance, whether it goes both ways, and for a way the chat laid or changed the turn that did it. */
+export interface PlaceWayRow {
+  route: string;
+  to: { id: string; name: string };
+  modes: ({ mode: string; minutes: number; km: number | null })[];
+  /** Both ways, only out of this place, or only into it. */
+  dir: "both" | "out" | "in";
+  turn: TurnId | null;
+}
+
 /** A tap that plays now: one of the world's actions with its values, where it was made, and any words typed with it (its line in the chat; with none, what was pressed); or the id of a request that waits (Send now). */
 export type PlayAsk = { action: string; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now" | "command"; words?: string } | { request: string };
 
@@ -3858,6 +3992,36 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** The chat's places as it plays them, the world's own and those made in play, a page at a time, at the chat's newest turn or as it stood at one of its turns: each with the place it is in, what kind of place it is and whether it draws a grid of its own. */
+  "GET /api/v1/chats/:chat/places": {
+    params: { chat: string };
+    query: { turn?: TurnId; limit?: number; cursor?: string };
+    body: undefined;
+    reply: Places;
+    paged: true;
+    long: false;
+    joined: true;
+  };
+  /** One place of the chat in full, by its id or its name, at the chat's newest turn or as it stood at one of its turns, in its nine parts: its sources read live and its base, what the story changed there, its features, who and what is here, its ways, its access and state, its history and who knows of it. */
+  "GET /api/v1/chats/:chat/places/:place": {
+    params: { chat: string; place: string };
+    query: { turn?: TurnId };
+    body: undefined;
+    reply: PlaceRecord;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** Writes the owner's own words as a place's base, a change of his own with source player, placed after the chat's newest reply on its own line: swiping that reply keeps it and a turn that is running goes on from the state it started with. It is drawn against the entries bound to the place as they stand, so the base is no longer marked older than its sources; he undoes it from the review card. */
+  "PUT /api/v1/chats/:chat/places/:place/base": {
+    params: { chat: string; place: string };
+    query: Record<string, never>;
+    body: { text: string };
+    reply: PlaceBaseWritten;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line put in the chat as his message and a reply started, through Lumiverse's own routes as him, with nothing written into message or chat metadata; the turn that answers it is told what was pressed. */
   "POST /api/v1/chats/:chat/plays": {
     params: { chat: string };
@@ -3918,72 +4082,22 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** What waits in a chat for the next message, asked for beside his words: each request with its kind, what was asked and when. */
-  "GET /api/v1/chats/:chat/requests": {
-    params: { chat: string };
-    query: Record<string, never>;
-    body: undefined;
-    reply: RequestsReply;
-    paged: false;
-    long: false;
-    joined: false;
-  };
-  /** A person's things: what they carry, wear and keep, and where each is; none for an id that is no person. */
-  "GET /api/v1/chats/:chat/people/:entity/things": {
-    params: { chat: string; entity: string };
-    query: Record<string, never>;
-    body: undefined;
-    reply: JsonValue;
-    paged: false;
-    long: false;
-    joined: false;
-  };
-  /** The chat's places as it plays them, the world's own and those made in play, a page at a time, at the chat's newest turn or as it stood at one of its turns: each with the place it is in, what kind of place it is and whether it draws a grid of its own. */
-  "GET /api/v1/chats/:chat/places": {
-    params: { chat: string };
-    query: { turn?: TurnId; limit?: number; cursor?: string };
-    body: undefined;
-    reply: Places;
-    paged: true;
-    long: false;
-    joined: true;
-  };
-  /** One place of the chat in full, by its id or its name, at the chat's newest turn or as it stood at one of its turns, in its nine parts: its sources read live and its base, what the story changed there, its features, who and what is here, its ways, its access and state, its history and who knows of it. */
-  "GET /api/v1/chats/:chat/places/:place": {
-    params: { chat: string; place: string };
-    query: { turn?: TurnId };
-    body: undefined;
-    reply: PlaceRecord;
-    paged: false;
-    long: false;
-    joined: true;
-  };
-  /** Writes the owner's own words as a place's base, a change of his own with source player, placed after the chat's newest reply on its own line: swiping that reply keeps it and a turn that is running goes on from the state it started with. It is drawn against the entries bound to the place as they stand, so the base is no longer marked older than its sources; he undoes it from the review card. */
-  "PUT /api/v1/chats/:chat/places/:place/base": {
-    params: { chat: string; place: string };
-    query: Record<string, never>;
-    body: { text: string };
-    reply: PlaceBaseWritten;
-    paged: false;
-    long: false;
-    joined: false;
-  };
-  /** A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line put in the chat as his message and a reply started, through Lumiverse's own routes as him, with nothing written into message or chat metadata; the turn that answers it is told what was pressed. */
-  "POST /api/v1/chats/:chat/plays": {
-    params: { chat: string };
-    query: Record<string, never>;
-    body: PlayAsk;
-    reply: PlayedReply;
-    paged: false;
-    long: false;
-    joined: false;
-  };
   /** The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads) and the turn's marks; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined. */
   "GET /api/v1/chats/:chat/replies": {
     params: { chat: string };
     query: { ids: string };
     body: undefined;
     reply: RepliesReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** What waits in a chat for the next message, asked for beside his words: each request with its kind, what was asked and when. */
+  "GET /api/v1/chats/:chat/requests": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: RequestsReply;
     paged: false;
     long: false;
     joined: false;
@@ -4437,16 +4551,6 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
-  };
-  /** What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there. */
-  "GET /api/v1/chats/:chat/walk": {
-    params: { chat: string };
-    query: { x: number; y: number };
-    body: undefined;
-    reply: { minutes: number; disabled?: string };
-    paged: false;
-    long: false;
-    joined: false;
   };
   /** What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path (with the step and the hold as the chat's settings set them), the message just above it, how many messages lie above, and how many of those the story does not cover yet; only the signed-in user's own chats. */
   "GET /api/v1/chats/:chat/window": {

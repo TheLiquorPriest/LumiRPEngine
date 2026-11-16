@@ -114,6 +114,9 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `pages.toastMs` | `3500` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Any other toast shows for: Milliseconds any other toast shows in the kept views. |
 | `pages.downloadRevokeMs` | `1000` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | A download link is kept for: Milliseconds the kept views keep a download's link before the browser lets it go. |
 | `pages.previewWaitMs` | `300` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Wait after typing before a prompt part is rendered again: Milliseconds the Files page waits after he stops typing in a prompt part before it asks RPH to render the draft again for its preview. |
+| `pages.briefChars` | `90` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Characters of a job's brief shown in the Jobs list: Characters of a job's brief the Jobs list shows on its line before it cuts the rest with an ellipsis; the job open shows its brief whole. |
+| `pages.titleChars` | `60` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Characters of a scene's name shown on Sessions: Characters of a scene's name (its name, title or summary in the story record) the Sessions list shows before it cuts the rest with an ellipsis. |
+| `pages.messagesAtOnce` | `100` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Messages read at once for the Story timeline: Messages whose text the Story timeline asks Lumiverse's door for in one read, for the beats it has listed; the rest are read straight after. |
 
 ## The store
 
