@@ -148,6 +148,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `engine.creditScoreAssumed` | `700` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Score assumed for someone with none: The credit score the finance tables are read at for someone with no score recorded. |
 | `engine.editOps` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Operations one GM edit carries: The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it. |
 | `engine.placeCap` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places a chat makes before each further one is reported: The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same. |
+| `engine.carriedChars` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Characters of an old record read at once: The most characters of what an earlier build recorded for a migrated turn that one turn_carried answers with; the rest is read on from where it stops. |
 
 ## `space`
 
