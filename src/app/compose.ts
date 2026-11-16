@@ -102,6 +102,9 @@ export function compose(options: ComposeOptions = {}): Composition {
       draft: (...a: Parameters<WorldService["draft"]>) => worlds.service().draft(...a),
       commit: (...a: Parameters<WorldService["commit"]>) => worlds.service().commit(...a),
       lint: (...a: Parameters<WorldService["lint"]>) => worlds.service().lint(...a),
+      get chats() {
+        return worlds.service().chats;
+      },
     }),
     proposals: () => proposals(),
     // The projection book is written to his books through the door's writes, once it is set up for a Lumiverse.

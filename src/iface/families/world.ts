@@ -1,7 +1,8 @@
 // The world's document as the agents that may write it work on it (the skill `world`, searchable tools; plan §6.8, §14 "Build, as
-// today"): read it (`world_read`, `world_shape`, `world_status`, `world_history`) and change the world's draft (`world_put`,
-// `world_set`, `world_patch`, `world_remove`, `world_discard`, `world_restore`) and commit it as the world's next revision
-// (`world_commit`), through the world service Build's routes call. The same checks refuse the same writes; what the world's own
+// today"): read it (`world_read`, `world_shape`, `world_status`, `world_history`, and what this chat made in play beside its draft,
+// `world_made`), change the world's draft (`world_put`, `world_set`, `world_patch`, `world_remove`, `world_discard`, `world_restore`),
+// commit it as the world's next revision (`world_commit`), and move this chat on to a newer revision from its next turn
+// (`world_upgrade`), through the world service Build's routes call. The same checks refuse the same writes; what the world's own
 // rules refuse is told as the refusal with its lint issues, never changed. None of these decides anything: each reads or writes
 // what its call names. A world is named by its id, and left out it is the one this chat plays. The writes are the engine lane's, so
 // the user's setting for that lane asks first.
@@ -13,6 +14,7 @@ import type { JsonPatchOp } from "../../shared/json-patch";
 import type { LintIssue } from "../../shared/lint";
 import type { WorldCollection, WorldPart } from "../../shared/world";
 import { nameOf } from "../../shared/world-diff";
+import { madePlaceViews, madeThings } from "../../engine/thing-gm";
 import { DraftMoved, WORLD_COLLECTIONS, WorldError } from "../../worlds/worlds";
 import type { EditorResult } from "../../worlds/worlds";
 import { OBJECT, type Call, type Reply, TEXT, type ToolSpec, WHOLE } from "../kit";
@@ -243,6 +245,34 @@ const history: ToolSpec = {
     }),
 };
 
+const made: ToolSpec = {
+  name: "world_made",
+  family: FAMILY,
+  tier: "read",
+  properties: { world: TEXT },
+  required: [],
+  example: {},
+  run: (args, call) =>
+    guarded(call, async (reply) => {
+      const target = targetOf(call, reply, args);
+      if (target === null) return reply;
+      const playing = Reading.of(call);
+      if (!(playing instanceof Reading)) return saysUnreadable(reply, playing);
+      // What play made that the world it plays does not hold (things, places), each with whether the draft holds it already.
+      const { draft } = await target.service.draft(target.user, target.world, { op: "get" });
+      const things = madeThings(playing.ctx, draft);
+      const places = madePlaceViews(playing.ctx, draft);
+      const most = call.settings.worldListed;
+      return reply.data({
+        world: target.world,
+        things: things.slice(0, most) as unknown as JsonValue,
+        places: places.slice(0, most) as unknown as JsonValue,
+        ...(things.length > most ? { thingsMore: things.length - most } : {}),
+        ...(places.length > most ? { placesMore: places.length - most } : {}),
+      });
+    }),
+};
+
 // ---------------------------------------------------------------- the writes
 
 /** A write tool: it names its lane, the engine's, and records nothing of the store's: it changes the world's draft. */
@@ -381,4 +411,20 @@ const commit = writing({
     }),
 });
 
-export const WORLD_TOOLS: readonly ToolSpec[] = [read, shape, status, history, put, set, patch, remove, discard, restore, commit];
+const upgrade = writing({
+  name: "world_upgrade",
+  properties: { revision: TEXT },
+  required: [],
+  example: { revision: "r-4" },
+  run: (args, call) =>
+    guarded(call, async (reply) => {
+      // Only the world this chat plays: the chat moves on to another revision of it.
+      const target = targetOf(call, reply, {});
+      if (target === null) return reply;
+      const to = textArg(args, "revision") ?? (await target.service.read(target.user, target.world)).revision;
+      const done = await target.service.chats.upgrade(target.user, call.scope.chat, to);
+      return reply.data({ world: target.world, revision: done.revision, applied: done.applied, waiting: done.waiting, ...(done.edit !== null ? { edit: done.edit } : {}) });
+    }),
+});
+
+export const WORLD_TOOLS: readonly ToolSpec[] = [read, shape, status, history, made, put, set, patch, remove, discard, restore, commit, upgrade];

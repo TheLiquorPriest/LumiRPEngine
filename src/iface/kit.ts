@@ -204,8 +204,8 @@ export interface EngineDeps {
   placeSources?: PlaceSourcesReader;
   /** What an earlier build recorded on a migrated turn, read-only, for `turn_carried`: given by the application, which holds the migration's records. Absent: none is held. */
   carried?: CarriedPort;
-  /** The world service Build's routes call (`src/worlds/service.ts`), for the tools that read and change a world's document. Absent: the user's worlds are not reachable from this run. */
-  worlds?: Pick<WorldService, "list" | "read" | "draft" | "commit" | "lint">;
+  /** The world service Build's routes call (`src/worlds/service.ts`), for the tools that read and change a world's document and move a chat on to another revision of it. Absent: the user's worlds are not reachable from this run. */
+  worlds?: Pick<WorldService, "list" | "read" | "draft" | "commit" | "lint" | "chats">;
   /** Keeps the values each line the call said was filled with, as the answers part's last use in the call's chat (the Prompts preview reads them). Absent: none is kept. */
   lastUse?: LastUseKeeper;
   /** Milliseconds since 1970, for an approval's question; `Date.now` when absent. */
