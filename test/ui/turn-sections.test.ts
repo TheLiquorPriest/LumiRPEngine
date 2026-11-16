@@ -42,10 +42,12 @@ describe("the Turn page's sections", () => {
   });
 
   test("an activated entry whose tag gives no way shows 'not said'", () => {
-    const text = view(turnAt(), { loreRows: [{ id: "e-12", entry: "ent", book: "", title: "The lamp", how: null }, { id: "e-13", entry: "ent2", book: "bk", title: "The tide", how: "keyword" }] });
+    const text = view(turnAt(), { loreRows: [{ id: "e-12", entry: "ent", book: "", title: "The lamp", how: null, receipt: "kept-out" }, { id: "e-13", entry: "ent2", book: "bk", title: "The tide", how: "keyword", receipt: null }] });
     expect(text).toContain("e-12");
     expect(text).toContain("book not said; not said how it activated");
     expect(text).toContain("book bk; by a key");
+    expect(text).toContain("kept out: RPE's check on the prompt's arrival took it out");
+    expect(text.match(/kept out:/g)).toHaveLength(1);
   });
 
   test("a turn shows what he asked for, the Author's record with its decision line, and the tools it found", () => {
@@ -58,7 +60,17 @@ describe("the Turn page's sections", () => {
   });
 
   test("the changes stand lane by lane, an ignored engine says so, and a report, an unsourced write and an unapplied one are listed unsettled", () => {
-    const turn: TurnReply = { ...turnAt(), changes: [{ lane: "story", changes: [change(1, "beat", { source: null })] }, { lane: "engine", changes: [change(2, "pay", { applied: false, reports: [{ code: "unbalanced" }] })] }], todos: [{ agent: "gm", open: ["settle the purse"] }] };
+    const unsourced = change(1, "beat", { source: null });
+    const unapplied = change(2, "pay", { applied: false, reports: [{ code: "unbalanced" }] });
+    const turn: TurnReply = {
+      ...turnAt(),
+      changes: [{ lane: "story", changes: [unsourced] }, { lane: "engine", changes: [unapplied] }],
+      unsettled: [
+        { change: unsourced, lane: "story", turn: turnAt().id, about: [], why: ["unsourced"] },
+        { change: unapplied, lane: "engine", turn: turnAt().id, about: ["entity:wren"], why: ["reported", "not_applied"] },
+      ],
+      todos: [{ agent: "gm", open: ["settle the purse"] }],
+    };
     const text = view(turn);
     expect(text).toContain("The story lane");
     expect(text).toContain("The engine lane");

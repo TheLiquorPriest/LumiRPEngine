@@ -42,12 +42,5 @@ export function ChangeLine(props: { change: TurnChange; lane?: string; why?: rea
   );
 }
 
-/** Why a change is listed as unsettled: it carries a report, did not apply, has no source, or is an invention with no gap check or consent in the turn's told list; none where it is settled. */
-export function unsettledWhy(change: TurnChange, told: TurnReply["told"]): string[] {
-  const why: string[] = [];
-  if (change.reports.length > 0) why.push("carries a report");
-  if (!change.applied) why.push("was not applied");
-  if (change.source === null) why.push("has no source");
-  if (change.source === "invented" && told.gapChecks.length === 0 && told.consents.length === 0) why.push("is an invention with no gap check or consent");
-  return why;
-}
+/** Why the Unsettled list holds a change, in the words of its line, by the route's code for each. */
+export const UNSETTLED_WORDS = { reported: "carries a report", not_applied: "was not applied", unsourced: "has no source", unchecked: "is an invention with no gap check or consent" } as const;
