@@ -28,8 +28,9 @@ describe("the bootstrap on a chat's page", () => {
     expect(fact(tree, "story")).toContain("1 premise, 1 chapter, 2 scenes, 5 beats");
     expect(fact(tree, "story")).toContain("2 threads (1 open), 0 arcs, 1 reading of the player");
     expect(fact(tree, "story")).toContain("0 of 1 principal with an arc");
-    expect(fact(tree, "horizon")).toBe("The horizon2 entries, 1 naming a place or thing of the world; story time kept");
-    expect(fact(tree, "principals")).toBe("Each principal's base and memoriesOdile Holt: base seed; 0 memories");
+    expect(fact(tree, "horizon")).toContain("The horizon2 entries, 1 naming a place or thing of the world; story time kept");
+    expect(fact(tree, "horizon")).toContain("The place: recorded; 0 established, 1 assumed, 0 proposed, 2 with no standing");
+    expect(fact(tree, "principals")).toBe("Each principal's base and memoriesOdile Holt: base seed; 0 memories, 0 written by its own agent (0 from perceptions), 0 otherwise");
     expect(textOf(elements(tree).find((e) => e.props["data-facts"] === "true")?.props.children)).not.toMatch(/\bhold/);
   });
 });

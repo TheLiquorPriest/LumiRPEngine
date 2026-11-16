@@ -154,12 +154,38 @@ function factLines(facts: DoneEnoughShown): { id: keyof DoneEnoughShown; title: 
             ]
           : [],
     },
-    { id: "horizon", title: "The horizon", fact: horizon, lines: () => (horizon.known ? [`${counted(horizon.entries, "entry", "entries")}, ${num(horizon.named)} naming a place or thing of the world; story time ${horizon.clock ? "kept" : "not kept"}`] : []) },
+    {
+      id: "horizon",
+      title: "The horizon",
+      fact: horizon,
+      lines: () =>
+        horizon.known
+          ? [
+              `${counted(horizon.entries, "entry", "entries")}, ${num(horizon.named)} naming a place or thing of the world; story time ${horizon.clock ? "kept" : "not kept"}`,
+              ...(
+                [
+                  ["The time", horizon.time],
+                  ["The place", horizon.place],
+                  ["Who is on stage", horizon.onStage],
+                  ["What they have", horizon.holdings],
+                ] as const
+              ).map(([label, p]) => `${label}: ${p.recorded ? "recorded" : "not recorded"}; ${num(p.established)} established, ${num(p.assumed)} assumed, ${num(p.proposed)} proposed, ${num(p.none)} with no standing`),
+            ]
+          : [],
+    },
     {
       id: "principals",
       title: "Each principal's base and memories",
       fact: principals,
-      lines: () => (principals.known ? (principals.principals.length === 0 ? ["No principal yet"] : principals.principals.map((p) => `${p.name}: base ${p.base.length === 0 ? "none written" : p.base.join(", ")}; ${counted(p.memories, "memory", "memories")}`)) : []),
+      lines: () =>
+        principals.known
+          ? principals.principals.length === 0
+            ? ["No principal yet"]
+            : principals.principals.map(
+                (p) =>
+                  `${p.name}: base ${p.base.length === 0 ? "none written" : p.base.join(", ")}; ${counted(p.memories, "memory", "memories")}, ${num(p.own)} written by its own agent (${num(p.ownFromPerceptions)} from perceptions), ${num(p.memories - p.own)} otherwise`,
+              )
+          : [],
     },
   ];
 }

@@ -32,6 +32,11 @@ const notKnown = shape.named("FactNotKnown", "A fact of \"done enough\" that cou
 /** A fact read from its records, with what it counts and names; whether it holds is the bootstrap skill's to say, never the route's. */
 const fact = <const F extends Fields>(fields: F) => shape.union(shape.object({ known: shape.literal(true), ...fields }), notKnown);
 const stretch = shape.named("MessageStretch", "Messages from `from` to `to`, both kept, as the chat numbers them from 0.", shape.object({ from: N, to: N }));
+const horizonPart = shape.named(
+  "HorizonPartShown",
+  "One part of the horizon's seed: whether it is recorded, and how many of its values stand established, assumed or proposed by the change that set each, and how many carry no standing.",
+  shape.object({ recorded: shape.yesNo(), established: N, assumed: N, proposed: N, none: N }),
+);
 
 const doneEnough = shape.named(
   "DoneEnoughShown",
@@ -41,8 +46,8 @@ const doneEnough = shape.named(
     history: fact({ messages: N, leftOut: N, covered: N, stretches: N, summarized: N, nearestUncovered: shape.nullable(stretch), nearestUnsummarized: shape.nullable(stretch) }),
     cast: fact({ listed: N, cast: N, uncast: shape.list(T) }),
     story: fact({ premise: N, chapters: N, scenes: N, beats: N, threads: N, openThreads: N, arcs: N, principals: N, principalsWithArc: N, player: N }),
-    horizon: fact({ entries: N, named: N, clock: shape.yesNo() }),
-    principals: fact({ principals: shape.list(shape.object({ id: T, name: T, base: shape.list(T), memories: N })) }),
+    horizon: fact({ entries: N, named: N, clock: shape.yesNo(), time: horizonPart, place: horizonPart, onStage: horizonPart, holdings: horizonPart }),
+    principals: fact({ principals: shape.list(shape.object({ id: T, name: T, base: shape.list(T), memories: N, own: N, ownFromPerceptions: N })) }),
   }),
 );
 

@@ -7,19 +7,13 @@
 // the skill words, never as the words of what failed, which go to the log alone.
 
 import type { ChatPort, FilesPort, Log, Scope } from "rp-harness/contract";
-import { type Casting, type Character, chatLine } from "../../cast";
+import { type Character, castNow, type CastNow } from "../../cast";
 import type { LoreIndex } from "../../lore";
-import { clockRecorded, type Store } from "../../store";
-import { storyCoverage } from "../../story";
+import { clockRecorded, scenePlaceOf, type Store, type TreeView } from "../../store";
+import { nameKey, namesOf, storyCoverage, storyHead, type StoryRecord } from "../../story";
 import { windowStart } from "../../story/window";
 import { turnSettings } from "../settings";
 import { NO_SESSION } from "../turns";
-// The cast's and the story's own readers of their records at a reading: neither area's public face offers them yet.
-import { castAt } from "../../cast/path";
-import { baseOf, CastRecord, castingInForce, charactersOf } from "../../cast/record";
-import { namesOf } from "../../story/kit";
-import { storyAt } from "../../story/path";
-import { nameKey, StoryRecord } from "../../story/record";
 
 /** Why a fact is not known, as a code: `unreadable`, its records could not be read (the log has what failed). */
 export type NotKnownWhy = "unreadable";
@@ -82,19 +76,40 @@ export interface StoryModelFact {
   player: number;
 }
 
-/** 5. The horizon: its entries, those that name a level of the world's tree now, and whether the chat keeps story time. */
+/** One part of the horizon's seed: whether it is recorded, and how many of its values stand established, assumed or proposed, and how many carry no standing. */
+export interface HorizonPart {
+  recorded: boolean;
+  established: number;
+  assumed: number;
+  proposed: number;
+  none: number;
+}
+
+/**
+ * 5. The horizon: its entries, those that name a level of the world's tree now, and whether the chat keeps story time; and each part of
+ * its seed (plan §12 l.1402: the time, the place, who is on stage, what they have) with the standing of the changes that set its values.
+ */
 export interface HorizonFact {
   entries: number;
   named: number;
   clock: boolean;
+  time: HorizonPart;
+  place: HorizonPart;
+  onStage: HorizonPart;
+  holdings: HorizonPart;
 }
 
-/** One principal: the parts of its base that are written, and its memories. */
+/**
+ * One principal: the parts of its base that are written; its memories, those its own agent wrote, and of those the ones it wrote from
+ * perceptions, apart from every other memory (the player's own, or carried by a migration).
+ */
 export interface PrincipalFact {
   id: string;
   name: string;
   base: string[];
   memories: number;
+  own: number;
+  ownFromPerceptions: number;
 }
 
 /** 6. Each principal's base and memories. */
@@ -120,22 +135,6 @@ export interface DoneEnoughDeps {
   /** The chat as Lumiverse holds it: the length of a chat the store has not met. */
   chat: Pick<ChatPort, "info">;
   log: Log;
-}
-
-/** The cast at the chat's head: every character the chat knows, each with the casting in force there (null: none), and the principals among them. */
-interface CastNow {
-  record: CastRecord | null;
-  cast: { character: Character; as: Casting | null }[];
-  principals: Character[];
-}
-
-function castNow(deps: DoneEnoughDeps, user: string, chat: string): CastNow {
-  const { db } = deps.store;
-  const store = deps.store.user(user);
-  // A chat the store has not met has no turns, so no rows of the cast: a casting in force there is the player's pin alone.
-  const record = store.chat(chat) === null ? null : CastRecord.read(deps.store, user, castAt(store, chat, null));
-  const cast = charactersOf(db, user, chatLine(store, chat)).map((character) => ({ character, as: record === null ? character.pinned : (castingInForce(record, character)?.as ?? null) }));
-  return { record, cast, principals: cast.filter((c) => c.as === "principal").map((c) => c.character) };
 }
 
 async function loreFact(deps: DoneEnoughDeps, user: string, chat: string): Promise<LoreIndexFact> {
@@ -193,7 +192,7 @@ function castFact(now: CastNow): CastFact {
 
 function storyFact(deps: DoneEnoughDeps, user: string, chat: string, principals: readonly Character[]): StoryModelFact {
   const store = deps.store.user(user);
-  const record = store.chat(chat) === null ? null : StoryRecord.read(deps.store, user, storyAt(store, chat, null));
+  const record = store.chat(chat) === null ? null : storyHead(deps.store, user, chat);
   const of = (part: Parameters<StoryRecord["of"]>[0]) => record?.of(part) ?? [];
   const threads = of("thread");
   const arcs = of("arc");
@@ -212,15 +211,53 @@ function storyFact(deps: DoneEnoughDeps, user: string, chat: string, principals:
   };
 }
 
-function horizonFact(deps: DoneEnoughDeps, user: string, chat: string): HorizonFact {
-  const store = deps.store.user(user);
-  if (store.chat(chat) === null) return { entries: 0, named: 0, clock: false };
-  const entries = store.view(chat).horizon();
-  return { entries: entries.length, named: entries.filter((e) => e.ref !== null).length, clock: clockRecorded(store.headState(chat).state) };
+const NO_PART: HorizonPart = { recorded: false, established: 0, assumed: 0, proposed: 0, none: 0 };
+
+/** A part of the seed from the marks of the refs that hold its values: each mark a value, counted by the standing of the change that set it. */
+function partOf(view: TreeView, refs: readonly string[], recorded: boolean, only?: string): HorizonPart {
+  const out = { ...NO_PART, recorded };
+  for (const ref of refs) {
+    const marks = view.state.marks[ref] ?? {};
+    for (const [part, mark] of Object.entries(marks)) {
+      if (only !== undefined && part !== only) continue;
+      const standing = mark?.standing ?? null;
+      if (standing === "established") out.established++;
+      else if (standing === "assumed") out.assumed++;
+      else if (standing === "proposed") out.proposed++;
+      else out.none++;
+    }
+  }
+  return out;
 }
 
-function principalsFact(deps: DoneEnoughDeps, user: string, chat: string, now: CastNow): PrincipalsFact {
-  return { principals: now.principals.map((c) => ({ id: c.id, name: c.name, base: [...baseOf(deps.store.db, user, c.id, chat).keys()], memories: now.record?.of(c.id, "memory").length ?? 0 })) };
+function horizonFact(deps: DoneEnoughDeps, user: string, chat: string): HorizonFact {
+  const store = deps.store.user(user);
+  if (store.chat(chat) === null) return { entries: 0, named: 0, clock: false, time: NO_PART, place: NO_PART, onStage: NO_PART, holdings: NO_PART };
+  const view = store.view(chat);
+  const entries = view.horizon();
+  const clock = clockRecorded(view.state);
+  // The place of the scene, the people in it, and the things each of them has, as the tree holds them now.
+  const place = scenePlaceOf(view);
+  const people = place === null ? [] : view.childrenOf(place).filter((ref) => ref.startsWith("entity:"));
+  const things = people.flatMap((person) => view.childrenOf(person));
+  return {
+    entries: entries.length,
+    named: entries.filter((e) => e.ref !== null).length,
+    clock,
+    time: partOf(view, ["world"], clock, "time"),
+    place: partOf(view, place === null ? [] : [place], place !== null),
+    onStage: partOf(view, people, people.length > 0),
+    holdings: partOf(view, things, things.length > 0),
+  };
+}
+
+function principalsFact(now: CastNow): PrincipalsFact {
+  return {
+    principals: now.principals.map((p) => {
+      const own = p.memories.filter((m) => m.by === "own");
+      return { id: p.character.id, name: p.character.name, base: [...p.base], memories: p.memories.length, own: own.length, ownFromPerceptions: own.filter((m) => m.fromPerceptions).length };
+    }),
+  };
 }
 
 /** The six facts for one chat, at its head. */
@@ -238,7 +275,7 @@ export async function doneEnough(deps: DoneEnoughDeps, user: string, chat: strin
   // The cast is read once: the cast, the story model's arcs and the principals all count from it.
   const now = ((): CastNow | Error => {
     try {
-      return castNow(deps, user, chat);
+      return castNow(deps.store, user, chat);
     } catch (error) {
       return error instanceof Error ? error : new Error(String(error));
     }
@@ -251,8 +288,8 @@ export async function doneEnough(deps: DoneEnoughDeps, user: string, chat: strin
     lore,
     history,
     cast: await known("cast", fromCast(castFact)),
-    story: await known("story", fromCast((c) => storyFact(deps, user, chat, c.principals))),
+    story: await known("story", fromCast((c) => storyFact(deps, user, chat, c.principals.map((p) => p.character)))),
     horizon: await known("horizon", () => horizonFact(deps, user, chat)),
-    principals: await known("principals", fromCast((c) => principalsFact(deps, user, chat, c))),
+    principals: await known("principals", fromCast(principalsFact)),
   };
 }

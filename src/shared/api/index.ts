@@ -649,8 +649,8 @@ export interface DoneEnoughShown {
   history: { known: true; messages: number; leftOut: number; covered: number; stretches: number; summarized: number; nearestUncovered: MessageStretch | null; nearestUnsummarized: MessageStretch | null } | FactNotKnown;
   cast: { known: true; listed: number; cast: number; uncast: string[] } | FactNotKnown;
   story: { known: true; premise: number; chapters: number; scenes: number; beats: number; threads: number; openThreads: number; arcs: number; principals: number; principalsWithArc: number; player: number } | FactNotKnown;
-  horizon: { known: true; entries: number; named: number; clock: boolean } | FactNotKnown;
-  principals: { known: true; principals: { id: string; name: string; base: string[]; memories: number }[] } | FactNotKnown;
+  horizon: { known: true; entries: number; named: number; clock: boolean; time: HorizonPartShown; place: HorizonPartShown; onStage: HorizonPartShown; holdings: HorizonPartShown } | FactNotKnown;
+  principals: { known: true; principals: { id: string; name: string; base: string[]; memories: number; own: number; ownFromPerceptions: number }[] } | FactNotKnown;
 }
 
 /** What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted). */
@@ -958,6 +958,15 @@ export interface HorizonEntryRow {
   name: string | null;
   /** How deep the world state shows it: a whole number of levels, or `full`. */
   depth: number | "full";
+}
+
+/** One part of the horizon's seed: whether it is recorded, and how many of its values stand established, assumed or proposed by the change that set each, and how many carry no standing. */
+export interface HorizonPartShown {
+  recorded: boolean;
+  established: number;
+  assumed: number;
+  proposed: number;
+  none: number;
 }
 
 /** One of the install's facts, which the command line sets and no page writes: its key in config.json, what it is, its value, and where it was given (config.json, the environment, or where the install put the data folder). */
