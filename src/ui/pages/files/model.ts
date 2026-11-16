@@ -4,7 +4,7 @@
 // default), with the agents' suggestions and an agent's stack. The page shows what RPE answers, in its
 // words: what RPH does with a file is RPH's own list, never worked out here from names.
 
-import type { LayerLevel, ApplyNowReply, DiffRow, FileSwitchAsk, FileWrittenReply, StackReply, SuggestionAcceptedReply, SuggestionDismissedReply, SuggestionsReply, SuggestionShown, TreeDiffReply, TreeFileReply, TreeFileRow, TreeListed, TreeListedReply } from "../../../shared/api";
+import type { LayerLevel, ApplyNowReply, DiffRow, FilePinAsk, FileSwitchAsk, FileWrittenReply, StackReply, SuggestionAcceptedReply, SuggestionDismissedReply, SuggestionsReply, SuggestionShown, TreeDiffReply, TreeFileReply, TreeFileRow, TreeListed, TreeListedReply } from "../../../shared/api";
 import type { RpeClient } from "../../client";
 import { errorWords } from "../../words";
 
@@ -46,6 +46,7 @@ export interface FilesCalls {
   save(path: string, level: WriteLevel, text: string): Promise<FileWrittenReply>;
   remove(path: string): Promise<{ removed: string }>;
   switchName(path: string, level: FileSwitchAsk["level"], off: boolean): Promise<FileWrittenReply>;
+  pin(path: string, level: FilePinAsk["level"], agent: string, pinned: boolean): Promise<FileWrittenReply>;
   suggestions(): Promise<SuggestionsReply>;
   accept(id: number, level: WriteLevel, text: string | null): Promise<SuggestionAcceptedReply>;
   dismiss(id: number): Promise<SuggestionDismissedReply>;
@@ -67,6 +68,7 @@ export function filesCalls(client: Pick<RpeClient, "call">, chat: string | null)
     save: (path, level, text) => client.call("PUT /api/v1/files/*", { "*": path }, { body: { level, text, ...query } }),
     remove: (path) => client.call("DELETE /api/v1/files/*", { "*": path }, { query }),
     switchName: (path, level, off) => client.call("PUT /api/v1/files-off/*", { "*": path }, { body: { level, off, ...query } }),
+    pin: (path, level, agent, pinned) => client.call("PUT /api/v1/files-pin/*", { "*": path }, { body: { level, agent, pinned, ...query } }),
     suggestions: () => client.call("GET /api/v1/suggestions", {}, { query: { ...query, state: "open" } }),
     accept: (id, level, text) => client.call("POST /api/v1/suggestions/:id/accept", { id: String(id) }, { body: text === null ? { level } : { level, text } }),
     dismiss: (id) => client.call("POST /api/v1/suggestions/:id/dismiss", { id: String(id) }),
@@ -142,11 +144,13 @@ export interface FilesShown {
   apply: ApplyShown;
   busy: boolean;
   refusal: { at: "file" | "make" | number; words: string } | null;
+  /** The pin form: the agent chosen or typed, and the level of the config that holds the pin (null: the default for the chat). */
+  pinning: { agent: string; level: "global" | "chat" | null };
 }
 
 export const NO_BROWSE: BrowseShown = { folder: "", search: "", items: [], next: null, loading: true, problem: null, levels: [], stopped: null };
 export const NO_APPLY: ApplyShown = { busy: false, note: null, problem: null };
-export const NO_FILES: FilesShown = { browse: NO_BROWSE, open: null, suggestions: { list: null, problem: null, editing: null, levels: {} }, agents: null, stack: null, apply: NO_APPLY, busy: false, refusal: null };
+export const NO_FILES: FilesShown = { browse: NO_BROWSE, open: null, suggestions: { list: null, problem: null, editing: null, levels: {} }, agents: null, stack: null, apply: NO_APPLY, busy: false, refusal: null, pinning: { agent: "", level: null } };
 
 /** The entry the listing holds for a path, among those read. */
 export function entryOf(browse: BrowseShown, path: string): TreeFileRow | undefined {
@@ -170,6 +174,10 @@ export interface FilesControl {
   save(): void;
   remove(): void;
   switchName(path: string, level: FileSwitchAsk["level"], off: boolean): void;
+  /** Pins the file for an agent at a level, or takes the pin away. */
+  pin(path: string, level: FilePinAsk["level"], agent: string, pinned: boolean): void;
+  /** What the pin form holds: the agent chosen or typed, and the level (null: this chat's, or his own with none open). */
+  pinning(next: FilesShown["pinning"]): void;
   diff(): void;
   edit(id: number | null): void;
   editText(text: string): void;
@@ -339,6 +347,18 @@ export function filesControl(calls: FilesCalls, limits: () => FilesLimits, onCha
         () => calls.switchName(path, level, off),
         () => undefined,
       );
+    },
+    pin(path, level, agent, pinned) {
+      ask(
+        "file",
+        () => calls.pin(path, level, agent, pinned),
+        () => {
+          if (pinned) show({ ...shown, pinning: { ...shown.pinning, agent: "" } });
+        },
+      );
+    },
+    pinning(next) {
+      show({ ...shown, pinning: next });
     },
     diff() {
       const now = shown.open;

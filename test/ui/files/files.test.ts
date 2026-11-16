@@ -31,6 +31,8 @@ function view(shown: Partial<FilesShown>, chat: string | null = "chat-calder") {
     onClose: noop("close"),
     onPiece: noop("piece"),
     onMode: (m) => void calls.push(`mode:${m}`),
+    onPin: (path, level, agent, pinned) => void calls.push(`pin:${path}:${level}:${agent}:${pinned}`),
+    onPinning: noop("pinning"),
     onDraft: noop("draft"),
     onSave: noop("save"),
     onRemove: noop("remove"),
@@ -114,5 +116,15 @@ describe("the Files page", () => {
     expect(viewPathAt("global", rule?.at("engine-silent") ?? "")).toBe("@global/rules/engine-silent.md");
     expect(KINDS.find((k) => k.id === "agents-md")?.levels(null)).toEqual([]);
     expect(elements(page.tree).some((e) => e.props["data-open"] === "@global/imported/agents/x.md")).toBe(true);
+  });
+
+  test("a file says which agents it is pinned for, unpinning takes one away, and a pin is made for the agent chosen at the level chosen", () => {
+    const opened = { path: "persistent-workspace/tide-table.md", file: { path: "persistent-workspace/tide-table.md", level: "chat" as const, kind: "notes" as const, bytes: 3, editable: true, text: "abc" }, piece: false, problem: null, mode: "read" as const, draft: { text: "abc", level: "chat" as const }, diff: null };
+    const entry = row("persistent-workspace/tide-table.md", { pinnedFor: [{ agent: "gm", level: "chat" }] });
+    const page = view({ open: opened, agents: ["gm", "keeper"], pinning: { agent: "keeper", level: "global" }, browse: { ...NO_FILES.browse, loading: false, items: [listed(entry)] } });
+    expect(page.text).toContain("Pinned for gm, in the config of this chat's");
+    press(page.tree, "Unpin");
+    press(page.tree, "Pin");
+    expect(page.calls).toEqual(["pin:persistent-workspace/tide-table.md:chat:gm:false", "pin:persistent-workspace/tide-table.md:global:keeper:true"]);
   });
 });

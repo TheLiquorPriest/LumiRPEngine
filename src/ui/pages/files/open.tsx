@@ -8,6 +8,7 @@ import { Badge, Banner, Button, Pre } from "../../atoms";
 import { bytesWords, counted, LEVEL_WORDS, when } from "../../words";
 import type { FilesShown, OpenFile, WriteLevel } from "./model";
 import { writeLevels } from "./model";
+import { PinPanel } from "./pins";
 import { standingOf } from "./standing";
 
 export const WRITE_WORDS: Readonly<Record<WriteLevel, string>> = { global: "Yours, for every chat", character: "This character's", chat: "This chat's" };
@@ -109,6 +110,8 @@ export interface OpenActions {
   onSave(): void;
   onRemove(): void;
   onSwitch(path: string, level: "global" | "chat", off: boolean): void;
+  onPin(path: string, level: "global" | "chat", agent: string, pinned: boolean): void;
+  onPinning(next: FilesShown["pinning"]): void;
   onDiff(): void;
   onPiece(): void;
 }
@@ -154,6 +157,7 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
           An update took away the default this file stands in place of, on {when(entry.defaultRemoved)}.
         </p>
       )}
+      {entry === undefined ? null : <PinPanel entry={entry} chat={props.chat} agents={shown.agents} busy={shown.busy} pinning={shown.pinning} onPin={props.onPin} onPinning={props.onPinning} />}
       {props.unread ? (
         <p class="rpe-line" data-unread="true">
           To put it in force, move it to where its kind is read from at the same level, or copy from it.

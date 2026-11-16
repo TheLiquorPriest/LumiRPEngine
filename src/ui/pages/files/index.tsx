@@ -12,7 +12,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Banner, Fold, PageHeader } from "../../atoms";
+import { Fold, PageHeader } from "../../atoms";
 import type { PageEntry } from "../../page-entry";
 import { useUiSetting } from "../../ui-settings";
 import { Browser } from "./browse";
@@ -137,6 +137,8 @@ export function FilesPage(props: { chat: string | null; at?: readonly string[] }
       onSave={() => control?.save()}
       onRemove={() => control?.remove()}
       onSwitch={(path, level, off) => control?.switchName(path, level, off)}
+      onPin={(path, level, agent, pinned) => control?.pin(path, level, agent, pinned)}
+      onPinning={(next) => control?.pinning(next)}
       onDiff={() => control?.diff()}
       onEdit={(id) => control?.edit(id)}
       onEditText={(text) => control?.editText(text)}
