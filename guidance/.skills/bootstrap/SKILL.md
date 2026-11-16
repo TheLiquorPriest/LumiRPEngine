@@ -53,4 +53,4 @@ The player set a token limit for this job (`tokenLimit`): tokens sent and writte
 
 ## What you end with
 
-A report in a few lines: which of the six hold, what you could not settle, and what you would read next if given more.
+A report in a few lines: which of the six hold, what you could not make out, and what you would read next if given more.

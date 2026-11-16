@@ -7,6 +7,7 @@ lines:
   chat_choices: "This chat's own choices (knowledge tracking, what the narrator knows, the engine, tidying) are not kept by this build of RPE: RPE plays every chat itself."
   not_world: "This chat does not play a world in RPE."
   no_revision: "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."
+  bad_marker: "That time control cannot be read: it names a control of the clock (tick, scale, pause, interrupt, speed_through, montage or unit_cap), what it covers and its value."
   unknown_action: "unknown action {{action}}"
   needs_someone: "{{action}}: it needs someone"
   needs_place: "{{action}}: it needs a place"

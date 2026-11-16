@@ -24,7 +24,7 @@ Keep to what the message contains. Do not add moments the player did not write. 
 
 Play the moments in order. What one moment changes is true for the next.
 
-A moment that hinges on nothing can be settled in a line. A moment where others act, or where something is contested, is run like any other; the skill `sandbox` says how.
+A moment that hinges on nothing can be told and recorded in a line. A moment where others act, or where something is contested, is run like any other; the skill `sandbox` says how.
 
 ## What you end with
 
