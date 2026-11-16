@@ -12,9 +12,10 @@ import { mapSettingsOf } from "../../shared/maps";
 import type { ReadContext } from "../../engine/registry";
 import { nextTurn } from "../../packs/combat/core/flow";
 import { fightById, fighterOf, fightsOf, rulesOf, type Encounter } from "../../packs/combat/core/model";
-import { groundAt, roundsTime, spotOf } from "../../packs/space/core/grid-model";
+import { spotOf } from "../../packs/space/core/grid-model";
 import { reach } from "../../packs/space/core/positions";
 import { TEXT } from "../kit";
+import { roundsClock } from "../map/time";
 import { find, isUnread, named, notAs, notOneOf, type OpContext } from "../ops";
 import { fightAfter, noSuchFight } from "./fights";
 import { notApplicable, type WriteDef, writeTool } from "./run";
@@ -112,12 +113,11 @@ const round: WriteDef = {
     // Where the fight is on a grid that counts rounds, the rounds that went by are seconds on the clock; on any other, a fight takes no clock time.
     const after = fightById(w.state, fight.id);
     const rounds = after === null ? 0 : after.round - rounds0;
-    const ground = rounds > 0 && fight.place !== null ? groundAt(w.ctx, fight.place) : null;
-    const took = ground === null ? null : roundsTime(ground.drawn.scale, rounds);
-    if (took !== null) {
-      const moved = o.draft.applyAll([{ type: "clock", minutes: took.seconds / 60, cause: "action" }]);
+    const clock = rounds > 0 && fight.place !== null ? roundsClock(w.ctx, fight.place, rounds, "action", o.call.deps.mapSettings) : null;
+    if (clock !== null) {
+      const moved = o.draft.applyAll([clock.event]);
       if (moved) return notApplicable(o, moved.code);
-      o.reply.line("rounds_clock", { n: o.n, op: o.op, rounds, one: rounds === 1, seconds: took.seconds });
+      o.reply.line("rounds_clock", { n: o.n, op: o.op, rounds, one: rounds === 1, seconds: clock.took.seconds });
     }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
