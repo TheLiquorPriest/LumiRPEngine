@@ -149,6 +149,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `engine.editOps` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Operations one GM edit carries: The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it. |
 | `engine.placeCap` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places a chat makes before each further one is reported: The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same. |
 | `engine.carriedChars` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Characters of an old record read at once: The most characters of what an earlier build recorded for a migrated turn that one turn_carried answers with; the rest is read on from where it stops. |
+| `engine.worldChars` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Characters of a world's document read at once: The most characters of a world's document one world_read answers with; a longer value is answered as an outline to read further into. |
+| `engine.worldListed` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Items of a list about a world listed: The most items of a list about a world's document, such as the issues of its lint or its revisions, that one answer gives; how many more there are is said. |
 
 ## `space`
 
@@ -483,6 +485,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `map.coverTotal` | `4` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lines blocked for total cover: How many of the four lines, blocked, give total cover (D&D: four). A world's ruleset that says otherwise wins. |
 | `map.coverCreatures` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Creatures give cover: Whether other people and things standing between an attacker and a target obstruct the lines, as D&D has it. A world's ruleset that says otherwise wins. |
 | `map.lightUnset` | `lit` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A place with no light recorded reads: lit or dark: how a place reads, on the grid and to sight, when neither it nor any place above it has had its light set (world_apply, set, key light). |
+| `map.display` | `world` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | How the map panel shows the map: world: as the world says; knowledge: only what the character knows, places heard of drawn dashed; fog: fog over what it has not seen. The panel's Known and Fog switch writes this for the chat. |
 
 ## `taps`
 
