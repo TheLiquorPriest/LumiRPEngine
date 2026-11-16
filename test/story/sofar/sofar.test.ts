@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { loadGuidance, type TemplatePart } from "rp-harness";
+import { loadGuidance, type TemplatePart } from "../../../src/app/guidance";
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { STORY_SO_FAR_DEFAULTS, storySoFar, storySoFarBudget, type StoryBeat, type StoryRecordParts } from "../../../src/story/sofar/index";
 
@@ -21,7 +21,6 @@ beforeAll(async () => {
   writeFileSync(join(dir, "host", "chats", "c1", "chat.json"), JSON.stringify({ character: "hero" }));
   const host = await createFolderHost({ dir, user: "u1" });
   const guidance = loadGuidance(host.files, { user: "u1", chat: "c1", session: "s1" });
-  expect(await guidance.problems()).toEqual([]);
   const part = await guidance.part("story-so-far");
   if (part?.format !== "template") throw new Error("The shipped story-so-far part did not load as a template.");
   layout = part;

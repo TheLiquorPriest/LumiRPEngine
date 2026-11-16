@@ -3,6 +3,7 @@ description: The sentences the story tools answer with (story_query, story_recor
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
+no_chat_run: {{tool}} works on a chat's story, and this run belongs to no chat: nothing was done.
 no_turn: There is no turn {{id}} in this chat.
 turn_needed: Operation {{n}} ({{op}}) is your record of a turn, and this call belongs to no turn, so it was not made.
 no_operations: operations cannot be read: send a list of operations.

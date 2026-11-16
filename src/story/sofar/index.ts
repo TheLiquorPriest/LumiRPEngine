@@ -7,7 +7,7 @@
 // nothing by meaning and writes no words: the layout and every word around the record's own text
 // are the shipped prompt part `.prompts/story-so-far.md`, filled in here.
 
-import type { TemplatePart } from "rp-harness";
+import type { TemplatePart } from "../../app/guidance";
 import type { JsonObject } from "../../shared/json";
 
 /** A summary from the record, with the messages it stands for (places in the chat, both ends kept). `gone`: its messages are not in the chat any more, so it stands where the turn that wrote it does. */
