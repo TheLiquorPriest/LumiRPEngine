@@ -501,4 +501,45 @@ INSERT INTO job (user, id, started, chat, turn, state, value)
 DROP TABLE turn_job;
 `,
   },
+  {
+    version: 21,
+    name: "the questions he is asked before a write goes ahead, and the cards of the turns carried in",
+    // `approval`: a call held for his word under a lane set to Confirm (plan §6.8): who asked, which call of which tool, the lane and its
+    // arguments, when it was asked, and where it stands (`waiting`, `answered`, or `taken_down` when the turn stopped or RPE restarted);
+    // his answer is kept as he gave it. Of a turn or of a job (one of the two is set).
+    // `chip`: a card, a chip or an approval of the turns carried in from the earlier engine (marked `import`), as it was, for the card
+    // route to show beside the changes the store holds.
+    sql: `
+CREATE TABLE approval (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  job TEXT,
+  agent TEXT NOT NULL,
+  call TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  lane TEXT NOT NULL,
+  args TEXT NOT NULL,
+  asked INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  answer TEXT,
+  answered INTEGER,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX approval_turn ON approval (user, chat, turn);
+CREATE TABLE chip (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX chip_turn ON chip (user, chat, turn);
+`,
+  },
 ];

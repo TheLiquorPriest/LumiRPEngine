@@ -127,6 +127,19 @@ Withdraws a request that waits; one kept with a turn already stays, and the answ
 
 ## Turns
 
+### `POST /api/v1/chats/:chat/approvals/:approval/answer`
+
+His word on a question a lane set to Confirm is waiting on: go ahead, or not with a reason the agent is given. Says whether it reached a question that was waiting.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `approval` |
+| Query | none |
+| Body | [`ApprovalAnswerBody`](#approvalanswerbody) |
+| Reply | [`ApprovalAnswerReply`](#approvalanswerreply) |
+
 ### `GET /api/v1/chats/:chat/newest`
 
 The newest turn on the chat's path in one read, as the turn's own route gives it: a turn going on now, else the newest of the chat's own on its path, however far back it was swiped.
@@ -221,6 +234,34 @@ One turn, read on from where a page has read to: its intent record, what went to
 | Query | `run` (may be left out): `string`, One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole<br>`from` (may be left out): `number`, The named run's records are given from the one with this number; 1 when left out |
 | Body | none |
 | Reply | [`TurnReply`](#turnreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/chats/:chat/turns/:turn/card`
+
+A turn's one review card: its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`ReviewCardReply`](#reviewcardreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `POST /api/v1/chats/:chat/turns/:turn/changes/:change/undo`
+
+Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn`, `change` |
+| Query | none |
+| Body | none |
+| Reply | [`UndoReply`](#undoreply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/files`
@@ -2396,6 +2437,28 @@ export interface ApplyNowReply {
 }
 ```
 
+### `ApprovalAnswerBody`
+
+His word on a question: go ahead, or not, with a reason the agent is given.
+
+```ts
+export interface ApprovalAnswerBody {
+  go: boolean;
+  reason?: string;
+}
+```
+
+### `ApprovalAnswerReply`
+
+Whether his word reached a question that was waiting.
+
+```ts
+export interface ApprovalAnswerReply {
+  answered: boolean;
+  state: "answered" | "settled" | "unknown";
+}
+```
+
 ### `Arrived`
 
 Whether RPE took the build, and where it stands, in words.
@@ -2439,6 +2502,17 @@ The base's four documents.
 
 ```ts
 export type BaseDocument = "seed" | "soul" | "inner_voice" | "background";
+```
+
+### `BaseNow`
+
+The base as it stands, each document in its newest version, with the accepted growth laid over it (growth is layered over the base wherever the base is shown).
+
+```ts
+export interface BaseNow {
+  parts: { part: BaseDocument; version: number; text: string }[];
+  growth: GrowthOverBase[];
+}
 ```
 
 ### `BaseVersionRow`
@@ -2595,6 +2669,42 @@ Why a tool call never ran: a limit spent before it started, past the most tool c
 export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: number } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string } | { by: "hook"; hook: string; reason: string };
 ```
 
+### `CardChange`
+
+One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes) and the changes that already undid it.
+
+```ts
+export interface CardChange {
+  id: string;
+  op: string;
+  applied: boolean;
+  by: string | null;
+  source: string | null;
+  standing: string | null;
+  value: JsonValue;
+  reports: ReportShown[];
+  undo: { ops: string[]; left: ReportShown[] };
+  undoneBy: string[];
+}
+```
+
+### `CardQuestion`
+
+A call held for his word under a lane set to Confirm: its id, the agent, the tool, the lane and the arguments, when it was asked, where it stands (waiting, answered, or taken down when the turn stopped), and his answer once given.
+
+```ts
+export interface CardQuestion {
+  id: string;
+  agent: string;
+  tool: string;
+  lane: string;
+  args: JsonValue;
+  asked: number;
+  state: "waiting" | "answered" | "taken_down";
+  answer: { go: boolean; reason?: string } | null;
+}
+```
+
 ### `CarriedText`
 
 One text an old engine's record of a reply names, kept word for word beside its turn: the part of the record that names it, where it was in today's user storage, and its words (null where today's clean-up had removed it).
@@ -2676,6 +2786,8 @@ export interface CastMemberRow {
   casting: CastingRow | null;
   /** Where its record on the path came from: writes on turns a migration's import wrote (carried), and writes on turns RPE played. */
   from: { carried: boolean; played: boolean };
+  /** The world's person it is, by the entity's id; null where none is known. */
+  person: string | null;
   counts: EntryCounts;
 }
 ```
@@ -2739,27 +2851,35 @@ export interface CastStrikeReply {
 
 ### `CharacterReply`
 
-Everything on one character's record, by kind; `turn` null: at the chat's newest.
+Everything on one character's record, by kind; `turn` null: at the chat's newest. Each list is bounded by cast.queryItems and read further back with `part` and `skip`.
 
 ```ts
 export interface CharacterReply {
   chat: string;
   turn: TurnId | null;
+  /** The most items of one list this answer gives (the setting cast.queryItems). */
+  listed: number;
   character: CastMemberRow;
+  /** Each source bound to it, read live: its title now and how it stands against the base. */
   sources: SourceBindingRow[];
   /** Every version of every part of the base, oldest first. */
   base: BaseVersionRow[];
+  now: BaseNow;
   /** The Author's castings of it on the path, oldest first. */
   castings: EntryWriteRow[];
-  growth: EntryRow[];
+  /** While a principal is away: its whereabouts and intention as the Author recorded them (the entry's fields); null otherwise. */
+  away: EntryRow | null;
+  /** Its game side by reference to the world's person it is: where it is, what it holds, what it owns elsewhere, its values; null where the store holds no such person. */
+  game: { [key: string]: JsonValue } | null;
+  growth: EntryItems;
   /** What is on its mind; the carried mind files are under `files`. */
-  mind: EntryRow[];
-  memories: MemoryRow[];
-  relationships: EntryRow[];
-  knowledge: EntryRow[];
-  history: EntryRow[];
-  perceptions: PerceptionRow[];
-  files: MindFileRow[];
+  mind: EntryItems;
+  memories: MemoryItems;
+  relationships: EntryItems;
+  knowledge: EntryItems;
+  history: EntryItems;
+  perceptions: PerceptionItems;
+  files: MindFileItems;
 }
 ```
 
@@ -3171,12 +3291,28 @@ export interface EntryCounts {
 }
 ```
 
+### `EntryItems`
+
+A list of entries, bounded: the newest the setting cast.queryItems allows after passing over `skip`, with what was left out on either side.
+
+```ts
+export interface EntryItems {
+  items: EntryRow[];
+  /** How many the record holds in all. */
+  total: number;
+  /** How many older ones are left out before what is given. */
+  before: number;
+  /** How many newer ones are left out after it. */
+  after: number;
+}
+```
+
 ### `EntryPart`
 
 The parts of a character's record kept as rows tied to turns, the casting aside.
 
 ```ts
-export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away";
+export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away" | "edit";
 ```
 
 ### `EntryRow`
@@ -3528,6 +3664,19 @@ export interface GivenReply {
   chat: string;
   turn: string | null;
   definitions: { name: string; off: boolean; given: GivenName[]; missing: string[] }[];
+}
+```
+
+### `GrowthOverBase`
+
+A change a reflection proposed and the Author accepted, laid over the base: its words, what caused it, and its date in story time.
+
+```ts
+export interface GrowthOverBase {
+  id: string;
+  text: string;
+  cause: string | null;
+  date: string | null;
 }
 ```
 
@@ -4320,6 +4469,22 @@ A memory's tier: top of mind, short term, long term.
 export type MemoryBand = "top" | "short" | "long";
 ```
 
+### `MemoryItems`
+
+A list of memories, bounded as the entries are.
+
+```ts
+export interface MemoryItems {
+  items: MemoryRow[];
+  /** How many the record holds in all. */
+  total: number;
+  /** How many older ones are left out before what is given. */
+  before: number;
+  /** How many newer ones are left out after it. */
+  after: number;
+}
+```
+
 ### `MemoryRow`
 
 A memory, with its tier, strength (0 to 1) and whether it has faded to its gist, at story time at the reading (none while struck).
@@ -4428,6 +4593,22 @@ export interface MigrationReportShown {
   worldsInBuild?: WorldsInBuildShown;
   changes: JsonValue;
   refusals: JsonValue;
+}
+```
+
+### `MindFileItems`
+
+A list of carried mind files, bounded as the entries are.
+
+```ts
+export interface MindFileItems {
+  items: MindFileRow[];
+  /** How many the record holds in all. */
+  total: number;
+  /** How many older ones are left out before what is given. */
+  before: number;
+  /** How many newer ones are left out after it. */
+  after: number;
 }
 ```
 
@@ -4629,6 +4810,22 @@ export interface PerceptionAsk {
   reliability?: string;
   drop?: boolean;
   why?: string;
+}
+```
+
+### `PerceptionItems`
+
+A list of perceptions, bounded as the entries are.
+
+```ts
+export interface PerceptionItems {
+  items: PerceptionRow[];
+  /** How many the record holds in all. */
+  total: number;
+  /** How many older ones are left out before what is given. */
+  before: number;
+  /** How many newer ones are left out after it. */
+  after: number;
 }
 ```
 
@@ -4975,6 +5172,17 @@ export interface ReplySoFar {
 }
 ```
 
+### `ReportShown`
+
+What a change did not add up to, or why it did not apply: a code and its values, never words.
+
+```ts
+export interface ReportShown {
+  code: string;
+  values?: { [key: string]: JsonValue };
+}
+```
+
 ### `RequestAsk`
 
 A composer control's ask, for the next message: its kind, the choice made, and any words typed with it.
@@ -5060,6 +5268,19 @@ Where a restart onto RPE's app file on disk stands: nothing to restart onto, wai
 
 ```ts
 export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand";
+```
+
+### `ReviewCardReply`
+
+A turn's one card: its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it.
+
+```ts
+export interface ReviewCardReply {
+  turn: string;
+  lanes: ({ lane: "story" | "engine"; changes: CardChange[] })[];
+  questions: CardQuestion[];
+  imported: { id: string; kind: string; at: number; data: JsonValue }[];
+}
 ```
 
 ### `RuleFiring`
@@ -5589,7 +5810,7 @@ export type SourceBindingKind = "card" | "persona" | "entry" | "memory";
 
 ### `SourceBindingRow`
 
-A source bound to the character, as recorded (the text stays in Lumiverse).
+A source bound to the character, as recorded (the text stays in Lumiverse), with its title as Lumiverse holds it now and how it stands against the base.
 
 ```ts
 export interface SourceBindingRow {
@@ -5598,7 +5819,18 @@ export interface SourceBindingRow {
   /** Which side of the character it defines, in the binder's words. */
   defines: string | null;
   created: number;
+  /** Its name or title in Lumiverse now; null when gone or unread. */
+  title: string | null;
+  state: SourceFreshness;
 }
+```
+
+### `SourceFreshness`
+
+A bound source read now in Lumiverse against the base: current; changed since the base was last drawn from it; unseen (bound after, or never drawn from); gone from Lumiverse; or unread (Lumiverse could not be asked).
+
+```ts
+export type SourceFreshness = "current" | "changed" | "unseen" | "gone" | "unread";
 ```
 
 ### `Span`
@@ -6777,6 +7009,17 @@ export interface UndoAsk {
   chip: string;
   choice: "undo";
   payload?: { [key: string]: JsonValue };
+}
+```
+
+### `UndoReply`
+
+What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes: a part a later change has written since, or one with no reversal.
+
+```ts
+export interface UndoReply {
+  recorded: string[];
+  left: ReportShown[];
 }
 ```
 

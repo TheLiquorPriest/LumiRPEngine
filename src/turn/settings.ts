@@ -36,7 +36,7 @@
 // theirs from the levels every chat shares (`globalConfig`), when RPE starts. Every value is read
 // through the one reader of the config levels (`src/app/config-read.ts`), which logs what it passes over.
 
-import type { Carry, FilesPort, Log, Scope } from "rp-harness/contract";
+import type { Carry, FilesPort, LanePermission, Log, Scope } from "rp-harness/contract";
 import { type ConfigRead, diskTextsNow, portTexts, readConfig } from "../app/config-read";
 import type { Setting } from "../app/setting-list";
 import { CAST_DEFAULTS, CAST_SETTING_DEFS, type CastSettings } from "../cast";
@@ -112,6 +112,8 @@ export interface TurnSettings {
   storyNewest: StoryNewest;
   /** The most characters of a gap check's hit in the state or the story record (`gap.snippet`). */
   gapSnippet: number;
+  /** What a write to each lane does (`permissions.<lane>`), and a call of a tool outside RPE (`external`): the user's, per chat, read at every level. */
+  permissions: Readonly<Record<"story" | "engine" | "external", LanePermission>>;
 }
 
 /** Whose messages are the story: as Lumiverse has it, everyone's, or the replies alone (R-176). */
@@ -120,6 +122,8 @@ export type StoryFrom = "lumiverse" | "everyone" | "replies";
 export type StoryNewest = "directive" | "leave_out";
 export const STORY_FROM: readonly StoryFrom[] = ["lumiverse", "everyone", "replies"];
 export const STORY_NEWEST: readonly StoryNewest[] = ["directive", "leave_out"];
+/** What a lane's writes may be set to, as the contract names them. */
+export const LANE_PERMISSIONS: readonly LanePermission[] = ["auto", "confirm", "never"];
 
 /** The defaults, where no level sets a value. */
 export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
@@ -162,6 +166,8 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   storyFrom: "lumiverse",
   storyNewest: "directive",
   gapSnippet: 240,
+  // Appendix D.1: "Write permission, each lane: Auto"; the external tier has its own, with the same three values.
+  permissions: { story: "auto", engine: "auto", external: "auto" },
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -381,6 +387,33 @@ const DEFS = {
     about: "The most characters of a gap check's hit in the world state or the story record that the agent reads and the evidence keeps.",
     effect: "turn",
   },
+  permissionStory: {
+    key: "permissions.story",
+    default: TURN_DEFAULTS.permissions.story,
+    takes: { type: "oneOf", values: LANE_PERMISSIONS },
+    perConnection: false,
+    name: "Write permission, the story lane",
+    about: "What the agents' writes to the story record do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never).",
+    effect: "turn",
+  },
+  permissionEngine: {
+    key: "permissions.engine",
+    default: TURN_DEFAULTS.permissions.engine,
+    takes: { type: "oneOf", values: LANE_PERMISSIONS },
+    perConnection: false,
+    name: "Write permission, the engine lane",
+    about: "What the agents' writes to the world's state do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never).",
+    effect: "turn",
+  },
+  permissionExternal: {
+    key: "permissions.external",
+    default: TURN_DEFAULTS.permissions.external,
+    takes: { type: "oneOf", values: LANE_PERMISSIONS },
+    perConnection: false,
+    name: "Permission for tools that reach outside RPE",
+    about: "What a call of a tool outside RPE (the web, a command, an MCP server) does: go ahead (auto), wait for his word (confirm), or is refused (never).",
+    effect: "turn",
+  },
 } as const satisfies Record<string, Setting>;
 
 /**
@@ -423,6 +456,11 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     storyFrom: read.value(DEFS.storyFrom) as StoryFrom,
     storyNewest: read.value(DEFS.storyNewest) as StoryNewest,
     gapSnippet: read.value(DEFS.gapSnippet) as number,
+    permissions: {
+      story: read.value(DEFS.permissionStory) as LanePermission,
+      engine: read.value(DEFS.permissionEngine) as LanePermission,
+      external: read.value(DEFS.permissionExternal) as LanePermission,
+    },
   };
 }
 

@@ -30,6 +30,7 @@ import { liveRoutes } from "./live-routes";
 import { rulesRoutes } from "./rules-routes";
 import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
+import { reviewRoutes } from "./review";
 import { stateRoutes } from "./state-routes";
 import { type ChangeView, chatsReply, fileReply, folderReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
@@ -493,5 +494,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     ...givenRoutes(turns),
     ...liveRoutes(turns),
     ...rulesRoutes(turns),
+    ...reviewRoutes(turns),
   ] as const;
 }

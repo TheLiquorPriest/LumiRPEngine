@@ -54,6 +54,7 @@ import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
 import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
+import type { Approvals } from "./approvals";
 import { type TurnSettings, turnSettings } from "./settings";
 import { type FoundItem, foundItems, type GoneTurn, type KeptItem, type SinceKept } from "./since";
 import { stageAt, stageCues } from "./stage";
@@ -191,6 +192,8 @@ export interface TurnLaneDeps {
   secretSettings: SecretSettingsFor;
   /** What comparisons of a chat's path found, kept with the chat. */
   since: SinceKept;
+  /** The questions a lane set to Confirm waits on, kept with the turn's card: what is waiting is told at a turn's start. */
+  approvals: Approvals;
   /** The notes agents write, put as they stand at each turn's start (plan §5.4). */
   notes: TreeNotes;
   /** The projection book (`lore.projection`), brought up to date after a run's reply and at each change of the path, never on the reply's path. */
@@ -1678,6 +1681,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const world = revision === null ? undefined : this.#d.store.env.worlds(revision);
       for (const e of ownerEditsBefore(store, chat, turn.id, found.tell, world)) add("player-edit", notices?.line("player_edit", e.fields));
     }
+    // A question that waits for his word (a lane set to Confirm) is told at each turn's start while it waits, in the notices part's words.
+    for (const q of this.#d.approvals.waitingIn(user, chat)) add("awaiting", notices?.line("approval_waiting", { tool: q.tool, lane: q.lane, ...(q.turn !== null ? { turn: q.turn } : {}) }), q.turn === null ? {} : { turn: q.turn });
     // What this turn was told that decides what later turns are: a continue's found things, so the turns after the turn it continues
     // are not told them again.
     return { items, told: again ? kept.map((k) => k.id) : [] };

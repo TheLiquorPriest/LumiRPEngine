@@ -13,9 +13,10 @@
 //                                                            a host's and the cast's given by name
 //   clock    the machine's                          log      the app's
 //
-// Left out, as the contract allows: `approvals` (every lane is Auto) and `stores` (RPE reaches no store but its
-// own). `switches` is the app's registry (`src/app/switches.ts`): RPH asks it, for the run's user, before
-// anything that runs a command or calls out, and before a provider key goes to a connection whose place changed.
+// Left out, as the contract allows: `stores` (RPE reaches no store but its own). `approvals` is this lane's (`approvals.ts`: each lane Auto,
+// Confirm or Never as he set it for the chat, and the questions a Confirm waits on, kept with the turn's card). `switches` is the app's
+// registry (`src/app/switches.ts`): RPH asks it, for the run's user, before anything that runs a command or calls out, and before a
+// provider key goes to a connection whose place changed.
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
@@ -40,6 +41,7 @@ import type { StoreFailure } from "../store/store";
 import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
+import { Approvals } from "./approvals";
 import { type EventsDeps, givenViews, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { JOB_KIND } from "./jobs";
@@ -213,6 +215,10 @@ export interface Turns {
   runs: Runs;
   /** What he asks for beside his words, waiting or kept with the turn that answered it. */
   requests: Requests;
+  /** The one home of the decision whether a write goes ahead, and the questions a lane set to Confirm waits on: what the card's routes read and answer. */
+  approvals: Approvals;
+  /** The application's write queue: what the routes that record something (an undo from the card) write through. */
+  writes: App["writes"];
   /** The marks each turn carries apart from its run's status. */
   marks: TurnMarks;
   trace: TurnTrace;
@@ -282,6 +288,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));
   const marks = new TurnMarks(app.db, app.writes);
   const since = new SinceKept(app.db);
+  const approvals = new Approvals({ db: app.db, writes: app.writes, files, log: app.log, now: () => clock.now() });
   // Search by meaning (plan §9.4, §10.5): one vector per lore entry, chat message, state thing and story item in the index file, made on
   // his embedding connection through the model layer; with none set, nothing is embedded and every search is by words alone.
   const meaning = new MeaningIndex({ index: app.index, embed: (user, texts) => harness.models.embed(user, texts) });
@@ -455,6 +462,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     // Every fact RPE counts is a chat's: a job of no chat has none of them.
     facts: { defs: () => facts.defs(), read: async (scope, names) => (scope.chat === undefined ? {} : await facts.read(joined(scope), names)) },
     models: app.models,
+    // The one home of the decision whether a write goes ahead: each lane Auto, Confirm or Never as he set it for the chat. A continue's held turn is the turn it was joined to.
+    approvals: { permission: (scope, lane) => approvals.permission(joined(scope), lane), ask: (scope, ask, signal) => approvals.ask(joined(scope), ask, signal) },
     switches: app.switches,
     store: kvStore(app.db, app.writes),
     trace,
@@ -487,6 +496,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     requests,
     marks,
     since,
+    approvals,
     notes,
     projection,
     // A chat deleted in Lumiverse: what is derived of it in the index file goes (rebuilt from its sources were it ever played again).
@@ -524,5 +534,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given };
 }
