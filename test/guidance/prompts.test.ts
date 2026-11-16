@@ -331,6 +331,18 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     for (const name of turns) expect({ name, said: (part.line(name, {}) ?? "").trim().length > 0 }).toEqual({ name, said: true });
   });
 
+  test("turn-result.md lays out the beats and the changes of both lanes, marks one not applied, and says so when there are none", async () => {
+    const part = await template("turn-result");
+    const full = part.render({ beats: [{ text: "She finds the key" }], engine: [{ op: "move", value: '{"who":"Mira"}' }, { op: "pay", value: "{}", refused: true }], story: [{ op: "beat", value: "{}" }] }).text;
+    expect(full).toContain("- Beat opened: She finds the key");
+    expect(full).toContain('- Engine change, move: {"who":"Mira"}');
+    expect(full).toContain("- Engine change, pay, not applied: {}");
+    expect(full).toContain("- Story change, beat: {}");
+    expect(full).not.toContain("opened no beat");
+    expect(part.render({ none: true }).text).toContain("opened no beat");
+    expect({ asks: ASKS.test(written(part)), unfilled: full.includes("{{") }).toEqual({ asks: false, unfilled: false });
+  });
+
   test("request-answers.md words why a request from a panel cannot be kept or withdrawn, and a panel's request is told with what was pressed, on what, from where and with which values", async () => {
     const part = await lines("request-answers");
     expect([...part.names].sort()).toEqual(["kept", "no_chat", "not_found", "too_long"]);

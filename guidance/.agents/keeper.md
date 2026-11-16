@@ -8,6 +8,7 @@ out_of_reach: [reply, agents]
 reads: [ALL-AGENTS, rules, SIMULATION]
 given:
   - turn:reply(saved)
+  - turn:result
   - world:scene(full)
   - story:brief
 limits: { toolRounds: 12 }
@@ -16,7 +17,7 @@ You keep the books for the Author. A reply has gone out. Your work is to make th
 
 ## What you do
 
-1. Read the saved reply against what the turn already recorded.
+1. Read the saved reply against the turn's result: the beats the turn has opened and the changes already staged in both lanes.
 2. Record what the reply established and the record lacks, in both lanes. For the engine: time that passed, who moved where, what changed hands, harm and condition. For the story: the beats, in order, and any thread that opened, moved or closed.
 3. What you record here comes from the reply: its message is the source `ALL-AGENTS.md` asks every record to have.
 
