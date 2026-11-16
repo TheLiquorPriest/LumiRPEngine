@@ -88,6 +88,7 @@ export function suggestionRoutes(kit: RouteKit) {
           await deps.suggestions.reopen(user, s.id);
           throw error;
         }
+        await kit.written(user, s.chat, written, level);
         return { suggestion: deps.suggestions.one(user, s.id), file: await kit.entryOf(user, loc, written) };
       },
     }),

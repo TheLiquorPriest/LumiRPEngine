@@ -59,6 +59,8 @@ describe("the Files page's routes", () => {
   /** The chat's open session, if one is, and the chats whose opening block "Apply now" started afresh. */
   let open: string | null = null;
   const applied: string[] = [];
+  /** What the routes told as written, in order. */
+  const told: { user: string; chat: string | null; path: string; level: string }[] = [];
   /** Measures the chats' folders as the Storage page asks. */
   let measurer: ChatMeasurer;
   /** The file port agents write through. */
@@ -100,7 +102,7 @@ describe("the Files page's routes", () => {
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
             measurer = new ChatMeasurer({ files: a.paths.files, chats, now: a.now });
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }) }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }), written: (saved) => void told.push(saved) }));
           },
         },
       ],
@@ -339,6 +341,27 @@ describe("the Files page's routes", () => {
     await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: false });
     await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "global", chat: CHAT, agent: "ghost", pinned: false });
     expect((await call<{ pins: unknown[] }>("GET", `/api/v1/files-pins?chat=${CHAT}`)).body.pins).toEqual([]);
+  });
+
+  test("a save, a delete, a move, a switch-off and a pin each call the written hook once with the chat, the path and the level, and a refused write calls nothing", async () => {
+    told.length = 0;
+    await call("PUT", "/api/v1/files/WORLD.md", { level: "chat", chat: CHAT, text: "# World\n" });
+    expect(told).toEqual([{ user: OWNER, chat: CHAT, path: "WORLD.md", level: "chat" }]);
+    await call("POST", "/api/v1/files-move", { chat: CHAT, from: "WORLD.md", to: "SIMULATION.md" });
+    await call("PUT", "/api/v1/files-off/@shipped/.rules/consent.md", { level: "chat", chat: CHAT, off: true });
+    await call("PUT", "/api/v1/files-pin/SIMULATION.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true });
+    await call("DELETE", `/api/v1/files/SIMULATION.md?chat=${CHAT}`);
+    expect(told.map((t) => [t.path, t.level])).toEqual([
+      ["WORLD.md", "chat"],
+      ["SIMULATION.md", "chat"],
+      ["@shipped/.rules/consent.md", "chat"],
+      ["SIMULATION.md", "chat"],
+      ["SIMULATION.md", "chat"],
+    ]);
+    told.length = 0;
+    expect((await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "shipped", text: "x" })).status).toBeGreaterThanOrEqual(400);
+    expect((await call("PUT", "/api/v1/files-pin/NOPE.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true })).status).toBeGreaterThanOrEqual(400);
+    expect(told).toEqual([]);
   });
 
   test("an agent's stack is read with or without a chat, Apply now renews the open session's block and says so, and with none open says the next one opens as the files stand", async () => {

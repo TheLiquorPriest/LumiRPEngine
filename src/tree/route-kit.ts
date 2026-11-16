@@ -54,6 +54,8 @@ export interface TreeRoutesDeps {
   derived?: readonly DerivedMeans[];
   /** The store's own removal of a deleted chat's turns, changes and snapshots (which keeps them while a branch reads them: `kept`), before the rest of its rows go. */
   dropStored?(user: string, chat: string): Promise<{ kept: boolean }>;
+  /** Told once after each file of the user's lands through a Files route (a save, a reset, a delete, a rename, a move, a copy, a switch-off, a pin, a suggestion accepted): the chat (none for the shared levels), its path and the level; never for a refused write. */
+  written?(saved: { user: string; chat: string | null; path: string; level: LayerLevel }): Promise<void> | void;
   /** Measures chats' folders in the background and keeps what it finds: asked again for a chat after a prune. */
   measurer: ChatMeasurer;
 }
@@ -89,6 +91,8 @@ export interface RouteKit {
   listingOf(user: string, loc: ChatLocation): Promise<TreeFileEntry[]>;
   /** The listing's entry of one path, as it stands. */
   entryOf(user: string, loc: ChatLocation, path: string): Promise<TreeFileEntry | null>;
+  /** Tells `deps.written` that a file of the user's landed: called once by each route that writes, after the write, never for a refused one. */
+  written(user: string, chat: string | null, path: string, level: LayerLevel): Promise<void>;
 }
 
 export function routeKit(deps: TreeRoutesDeps): RouteKit {
@@ -99,5 +103,6 @@ export function routeKit(deps: TreeRoutesDeps): RouteKit {
     if (!lookup.ok || lookup.at.is !== "file" || lookup.at.disk === null) return null;
     return await entryAt(await listingContext(loc, defaultStanding(deps.db, user)), lookup.at.level, lookup.at.rest, lookup.at.disk);
   };
-  return { deps, own, listingOf, entryOf };
+  const written = async (user: string, chat: string | null, path: string, level: LayerLevel): Promise<void> => void (await deps.written?.({ user, chat, path, level }));
+  return { deps, own, listingOf, entryOf, written };
 }

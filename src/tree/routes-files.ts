@@ -159,7 +159,9 @@ export function fileRoutes(kit: RouteKit) {
       handle: async ({ user, params, body }) => {
         const chat = chatOf(body.chat);
         const loc = await own.locationFor(user, chat);
-        const written = await own.writeAsUser(user, loc, viewPathOf(params["*"]), levelOf(body.level, LEVELS, chat), body.text);
+        const level = levelOf(body.level, LEVELS, chat);
+        const written = await own.writeAsUser(user, loc, viewPathOf(params["*"]), level, body.text);
+        await kit.written(user, chat, written, level);
         return { file: await kit.entryOf(user, loc, written) };
       },
     }),
@@ -178,12 +180,14 @@ export function fileRoutes(kit: RouteKit) {
         if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
         if (at.level !== "shipped") {
           await own.remove(at);
+          await kit.written(user, chat, at.path, at.level);
           return { removed: at.path };
         }
         const level = levelOf(query.level ?? (chat === null ? "global" : "chat"), OFF_LEVELS, chat);
         const listed = await kit.entryOf(user, loc, at.path);
         if (listed?.item === null || listed === null) throw new RouteError(400, `${at.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
         await own.switchOff(loc, level, listed.item, true);
+        await kit.written(user, chat, at.path, level);
         return { removed: at.path, switchedOff: level };
       },
     }),
@@ -204,6 +208,7 @@ export function fileRoutes(kit: RouteKit) {
         if (listed === null) throw new RouteError(404, `The tree has no file ${path}.`);
         if (listed.item === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
         await own.switchOff(loc, level, listed.item, body.off);
+        await kit.written(user, chat, listed.path, level);
         return { file: await kit.entryOf(user, loc, listed.path) };
       },
     }),
@@ -220,6 +225,7 @@ export function fileRoutes(kit: RouteKit) {
         const level = levelOf(body.level, OFF_LEVELS, chat);
         const loc = await own.locationFor(user, chat);
         const path = await own.pin(loc, level, viewPathOf(params["*"]), body.agent, body.pinned);
+        await kit.written(user, chat, path, level);
         return { file: await kit.entryOf(user, loc, path) };
       },
     }),
@@ -281,8 +287,10 @@ export function fileRoutes(kit: RouteKit) {
       body: fileMoveBody,
       reply: fileMovedReply,
       handle: async ({ user, body }) => {
-        const loc = await own.locationFor(user, chatOf(body.chat));
+        const chat = chatOf(body.chat);
+        const loc = await own.locationFor(user, chat);
         const { at, guidance } = await own.relocate(user, loc, viewPathOf(body.from), viewPathOf(body.to), false);
+        await kit.written(user, chat, at.path, at.level);
         return { path: at.path, file: await kit.entryOf(user, loc, at.path), guidance };
       },
     }),
@@ -295,8 +303,10 @@ export function fileRoutes(kit: RouteKit) {
       body: fileMoveBody,
       reply: fileMovedReply,
       handle: async ({ user, body }) => {
-        const loc = await own.locationFor(user, chatOf(body.chat));
+        const chat = chatOf(body.chat);
+        const loc = await own.locationFor(user, chat);
         const { at, guidance } = await own.relocate(user, loc, viewPathOf(body.from), viewPathOf(body.to), true);
+        await kit.written(user, chat, at.path, at.level);
         return { path: at.path, file: await kit.entryOf(user, loc, at.path), guidance };
       },
     }),

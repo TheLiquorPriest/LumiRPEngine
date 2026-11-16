@@ -149,6 +149,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       place,
       openSessions,
       // A deleted chat's turns, changes and snapshots go the store's own way: kept where a branch reads them.
+      // The snapshots of a living chat's folds are derived: the fold makes them again when next due, every answer the same.
+      derived: [{ name: "snapshots", tables: ["snapshot"], drop: async (user, chat) => void (await app().writes.run(() => made().store.user(user).dropSnapshots(chat), "dropping a chat's snapshots")) }],
       dropStored: (user, chat) => app().writes.run(() => made().store.user(user).deleteChat(chat), "removing a deleted chat's turns"),
       // What RPH itself makes of the files of a chat's view, for the Files page.
       guidance: (user, chat) => loadGuidance(made().files, scope(user, chat ?? NO_CHAT)),
