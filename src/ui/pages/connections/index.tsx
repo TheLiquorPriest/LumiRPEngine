@@ -4,13 +4,14 @@
 // model shows its limits as RPH uses them and where each comes from, and the form sets the user's own in
 // their place. What the layer or the provider refuses is shown in its own words.
 
-import { useEffect, useState } from "preact/hooks";
-import type { ConnectionAuth, ConnectionShown, ConnectionsShown, ConnectionTested, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer, SaveConnection } from "../../shared/api";
-import { useApp } from "../app";
-import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
-import type { RpeClient } from "../client";
-import type { PageEntry } from "../page-entry";
-import { duration, errorWords, num } from "../words";
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { ConnectionAuth, ConnectionShown, ConnectionsShown, ConnectionTested, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer, SaveConnection } from "../../../shared/api";
+import { useApp } from "../../app";
+import { Badge, Banner, Button, Empty, PageHeader } from "../../atoms";
+import type { RpeClient } from "../../client";
+import type { PageEntry } from "../../page-entry";
+import { duration, errorWords, num } from "../../words";
+import { NO_SIGNIN, SignInPanel, type SignInShown, signInCalls, signInSteps } from "./signin";
 
 const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
 
@@ -263,6 +264,8 @@ export interface ConnectionsViewProps {
   /** Each connection's last test, by its id. */
   tests: Readonly<Record<string, ConnectionTestShown>>;
   onTest(id: string): void;
+  /** Each connection's sign-in, by its id, and the steps of it. */
+  signIn(id: string): SignInHandle;
 }
 
 /**
@@ -307,8 +310,32 @@ function TestShown(props: { test: ConnectionTestShown; view: ConnectionShown; on
   );
 }
 
-function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; test: ConnectionTestShown | undefined; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void; onTest(id: string): void }) {
-  const { view, action } = props;
+/** A key whose provider or address changed since it was given: held, sent nowhere, until he allows the address on the server; no page releases it. */
+function KeyHeld(props: { view: ConnectionShown }) {
+  const { view } = props;
+  const named = /\s/.test(view.name) ? `"${view.name}"` : view.name;
+  return (
+    <div class="lre-stack" data-key-held>
+      <p class="rpe-line">{`Its key is held and sent nowhere: its provider or address changed since the key was given. It would go to ${view.baseUrl ?? `${view.provider}'s own address`}.`}</p>
+      <p class="rpe-meta">
+        To let it go there, run on the server: <code>rpe allow {named}</code>
+      </p>
+    </div>
+  );
+}
+
+/** What the page does for a connection that signs in: where its sign-in stands, and the steps of it. */
+export interface SignInHandle {
+  shown: SignInShown | undefined;
+  start(id: string): void;
+  code(id: string, code: string): void;
+  finish(id: string, code: string): void;
+  cancel(id: string): void;
+  out(id: string): void;
+}
+
+function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; test: ConnectionTestShown | undefined; signIn: SignInHandle; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void; onTest(id: string): void }) {
+  const { view, action, signIn } = props;
   const said = [view.provider, view.model, view.effort === undefined ? null : `thinks at ${view.effort}`].filter((part) => part !== null && part !== undefined).join(" · ");
   return (
     <li class="lre-section" data-connection={view.id}>
@@ -319,6 +346,8 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
       <div class="lre-section-body lre-stack">
         <p class="rpe-line">{said}</p>
         <p class="rpe-meta">{keyWords(view)}</p>
+        {view.key?.waiting === true ? <KeyHeld view={view} /> : null}
+        {view.auth === "signin" ? <SignInPanel name={view.name} provider={signIn.shown?.state?.provider ?? (view.provider.startsWith("openai") ? "openai" : "anthropic")} shown={signIn.shown ?? NO_SIGNIN} onStart={() => signIn.start(view.id)} onCode={(code) => signIn.code(view.id, code)} onFinish={(code) => signIn.finish(view.id, code)} onCancel={() => signIn.cancel(view.id)} onOut={() => signIn.out(view.id)} /> : null}
         <p class="rpe-meta" data-limits={view.id}>{`${limitsWords(view.limitsInForce, view.limitsProblem ?? null)}.`}</p>
         {action.kind === "remove" && action.id === view.id ? (
           <div class="lre-inline rpe-wrap">
@@ -393,7 +422,7 @@ export function ConnectionsView(props: ConnectionsViewProps) {
       ) : (
         <ul class="lre-stack rpe-plain">
           {list.connections.map((view) => (
-            <ConnectionRow key={view.id} view={view} action={action} test={props.tests[view.id]} onAction={props.onAction} onRemove={props.onRemove} onDefault={props.onDefault} onTest={props.onTest} />
+            <ConnectionRow key={view.id} view={view} action={action} test={props.tests[view.id]} signIn={props.signIn(view.id)} onAction={props.onAction} onRemove={props.onRemove} onDefault={props.onDefault} onTest={props.onTest} />
           ))}
         </ul>
       )}
@@ -419,6 +448,7 @@ export function ConnectionsPage() {
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [tests, setTests] = useState<Readonly<Record<string, ConnectionTestShown>>>({});
+  const [signins, setSignins] = useState<Readonly<Record<string, SignInShown>>>({});
   useEffect(() => {
     let alive = true;
     app.client.call("GET /api/v1/connections", {}).then(
@@ -435,6 +465,16 @@ export function ConnectionsPage() {
       alive = false;
     };
   }, []);
+  const readFor = useRef(new Set<string>());
+  useEffect(() => {
+    for (const c of list?.connections ?? []) {
+      if (c.auth !== "signin" || readFor.current.has(c.id)) continue;
+      readFor.current.add(c.id);
+      signInSteps(signInCalls(app.client))
+        .read(c.id)
+        .then((shown) => setSignins((now) => ({ ...now, [c.id]: shown })));
+    }
+  }, [list]);
   const ask = (change: () => Promise<unknown>, after: ConnectionsAction): void => {
     setSaving(true);
     setRefusal(null);
@@ -453,6 +493,16 @@ export function ConnectionsPage() {
       },
     );
   };
+  const steps = signInSteps(signInCalls(app.client));
+  /** One step of a sign-in: the connection's panel shows it busy, then what came of it; where it may have changed the connection, the list is read again. */
+  const signAct = (id: string, run: (was: SignInShown) => Promise<SignInShown>, reread = false): void => {
+    const was = signins[id] ?? NO_SIGNIN;
+    setSignins((now) => ({ ...now, [id]: { ...was, busy: true } }));
+    run(was).then(async (next) => {
+      setSignins((now) => ({ ...now, [id]: next }));
+      if (reread) await app.client.call("GET /api/v1/connections", {}).then(setList, () => undefined);
+    });
+  };
   return (
     <ConnectionsView
       list={list}
@@ -469,6 +519,14 @@ export function ConnectionsPage() {
       onRemove={(id) => ask(() => app.client.call("DELETE /api/v1/connections/:id", { id }), { kind: "none" })}
       onDefault={(id) => ask(() => app.client.call("PUT /api/v1/connections/:id/default", { id }), action)}
       tests={tests}
+      signIn={(id) => ({
+        shown: signins[id],
+        start: (key) => signAct(key, (was) => steps.start(key, was)),
+        code: (key, code) => setSignins((now) => ({ ...now, [key]: { ...(now[key] ?? NO_SIGNIN), code } })),
+        finish: (key, code) => signAct(key, (was) => steps.finish(key, was, code), true),
+        cancel: (key) => signAct(key, (was) => steps.cancel(key, was)),
+        out: (key) => signAct(key, (was) => steps.out(key, was), true),
+      })}
       onTest={(id) => {
         setTests((now) => ({ ...now, [id]: { busy: true } }));
         testConnection(app.client, id).then((test) => setTests((now) => ({ ...now, [id]: test })));

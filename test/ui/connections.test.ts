@@ -6,7 +6,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, draftOf, limitsWords, testConnection } from "../../src/ui/pages/connections";
+import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, draftOf, limitsWords, testConnection } from "../../src/ui/pages/connections/index";
+import { NO_SIGNIN, SignInPanel, signInCalls, signInSteps, signInWords } from "../../src/ui/pages/connections/signin";
 import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../../src/shared/api";
 import { duration } from "../../src/ui/words";
 import { askingClient, settle } from "./asking";
@@ -38,6 +39,7 @@ function view(over: Partial<ConnectionsViewProps> = {}) {
     onDefault: (id) => asked.push({ default: id }),
     tests: {},
     onTest: (id) => asked.push({ test: id }),
+    signIn: () => ({ shown: undefined, start: (id) => asked.push({ signInStart: id }), code: () => undefined, finish: (id, code) => asked.push({ signInFinish: id, code }), cancel: (id) => asked.push({ signInCancel: id }), out: (id) => asked.push({ signInOut: id }) }),
     ...over,
   };
   const tree = expand(h(ConnectionsView, props));
@@ -170,5 +172,34 @@ describe("the Connections page", () => {
     const saved = draftOf(entries({ name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", retries: "3", serialTools: "on", contextWindow: "48000", maxTokens: "6000", key: "" }), own);
     expect(saved.connection).toMatchObject({ retries: 3, serialTools: true, messageThreads: null, limits: { "deepseek-v4-flash": { contextWindow: 48_000, maxTokens: 6000 } } });
     expect(draftOf(entries({ name: "Flash", provider: "deepseek", auth: "key", retries: "", key: "" }), own).connection).toMatchObject({ retries: null, serialTools: null, messageThreads: null });
+  });
+});
+
+describe("a connection that signs in", () => {
+  test("its flow is started, finished with what he pastes, and shown signed in until when; sign-out reads it again", async () => {
+    const { client, asked } = askingClient();
+    const steps = signInSteps(signInCalls(client));
+    const started = steps.start("c-studio", NO_SIGNIN);
+    asked.find((a) => a.key === "POST /api/v1/connections/:id/signin")?.answer({ flow: "f1", url: "https://provider.example/sign-in", note: "Paste the code it shows." });
+    const open = await started;
+    expect(open.flow).toMatchObject({ flow: "f1" });
+    const page = expand(h(SignInPanel, { name: "Studio", provider: "anthropic", shown: { ...open, state: { provider: "anthropic", signedIn: false, until: null, flow: "f1", ended: null } }, onStart: () => undefined, onCode: () => undefined, onFinish: () => undefined, onCancel: () => undefined, onOut: () => undefined }));
+    expect(textOf(page)).toContain("https://provider.example/sign-in");
+    expect(textOf(page)).toContain("Paste the code it shows.");
+    const finished = steps.finish("c-studio", open, "the-code");
+    const finish = asked.find((a) => a.key === "POST /api/v1/connections/:id/signin/finish");
+    expect(finish?.body).toEqual({ flow: "f1", code: "the-code" });
+    finish?.answer({ provider: "anthropic", signedIn: true, until: Date.UTC(2026, 11, 1), flow: null, ended: null });
+    const done = await finished;
+    expect(done.flow).toBeNull();
+    expect(signInWords(done.state)).toContain("Signed in to its provider until");
+  });
+
+  test("a key held says where it would go and the line to run on the server", () => {
+    const held: ConnectionShown = { ...KEYED, id: "c-held", name: "Held", baseUrl: "https://other.example/v1", key: { set: true, waiting: true } };
+    const { text } = view({ list: { ...LIST, connections: [held] } });
+    expect(text).toContain("Its key is held and sent nowhere");
+    expect(text).toContain("https://other.example/v1");
+    expect(text).toContain("rpe allow Held");
   });
 });

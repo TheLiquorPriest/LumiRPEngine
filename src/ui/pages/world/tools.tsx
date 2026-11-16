@@ -210,9 +210,11 @@ export function RowTools(props: { chat: string; level: string; part: string; as:
             <Button small kind="ghost" current={panel === "change"} onClick={() => toggle("change")}>
               Change
             </Button>
-            <Button small kind="ghost" current={panel === "remove"} onClick={() => toggle("remove")}>
-              Remove
-            </Button>
+            {props.as === "fact" ? null : (
+              <Button small kind="ghost" current={panel === "remove"} onClick={() => toggle("remove")}>
+                Remove
+              </Button>
+            )}
           </>
         )}
       </div>
