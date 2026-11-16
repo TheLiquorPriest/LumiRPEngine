@@ -4,7 +4,7 @@
 // them, and is applied and marked so where it does not. Code checks none of it against the story.
 
 import type { AgentRef, JsonObject, JsonValue } from "rp-harness/contract";
-import { PRECISIONS, SOURCES, STANDINGS, type Precision, type Source, type Standing } from "../store/types";
+import { type ChangeInput, PRECISIONS, SOURCES, STANDINGS, type Precision, type Source, type Standing } from "../store/types";
 import { TEXT } from "./kit";
 
 /** What an agent may name as a source: every kind the store keeps but an import, which only a migration writes. */
@@ -130,4 +130,28 @@ export function citeOf(p: Provenance): JsonObject | null {
   const out: JsonObject = { ...cites };
   if (p.consent !== undefined) out.consent_by = p.consent;
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/** What a change keeps of a write's provenance (`stampOf`): the story's and the cast's writes carry it per write. */
+export type Stamp = Pick<ChangeInput, "source" | "precision" | "standing" | "cite">;
+
+/** The provenance as the store keeps it on a change: its source's kind (null: unsourced), how exact, how sure, and what it cites. */
+export function stampOf(p: Provenance): Stamp {
+  return { source: p.source?.from ?? null, precision: p.precision, standing: p.standing, cite: citeOf(p) };
+}
+
+/**
+ * The provenance an item of a tool that records what it can read carries (`story_record`, `cast_update`, a character's own tools): an
+ * argument of it that cannot be read is left out and returned with the choices it was one of, so the item is recorded without it and
+ * the answer says so (a source left out is an unsourced write), never refused for it.
+ */
+export function provenanceLeniently(given: JsonObject, agent: AgentRef): { prov: Provenance; left: Unreadable[] } {
+  const rest: JsonObject = { ...given };
+  const left: Unreadable[] = [];
+  for (;;) {
+    const read = provenanceOf(rest, agent);
+    if (!("field" in read)) return { prov: read, left };
+    left.push(read);
+    delete rest[read.field.split(".")[0] as string];
+  }
 }

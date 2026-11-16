@@ -18,7 +18,7 @@ describe("a name that is not in the cast yet", () => {
     const r = await b.play("perceive", MARTA, turn.id);
     expect(r.error).toBeUndefined();
     expect(wordsFromFiles(r)).toBe(true);
-    expect(texts(r).filter((t) => !t.startsWith("{"))).toEqual(["Marta Venn was not in the cast, so they were added to it, not yet cast."]);
+    expect(texts(r).filter((t) => !t.startsWith("{"))).toEqual(["Marta Venn was not in the cast, so they were added to it, not yet cast.", "Operation 1 (perception) names no source, so it is marked unsourced."]);
     const [marta] = charactersOf(b.t.db, USER, [CHAT]);
     expect(marta?.name).toBe("Marta Venn");
     const [p] = dataOf(r).perceptions as JsonObject[];
@@ -31,7 +31,7 @@ describe("a name that is not in the cast yet", () => {
     // Cast later, she is the same character: nothing is made twice, and nothing more is said of her.
     const cast = await b.play("cast_update", { operations: [{ op: "cast", who: "Marta Venn", as: "principal" }] }, turn.id);
     expect(cast.error).toBeUndefined();
-    expect(texts(cast).filter((t) => !t.startsWith("{"))).toEqual([]);
+    expect(texts(cast).filter((t) => !t.startsWith("{"))).toEqual(["Operation 1 (cast) names no source, so it is marked unsourced."]);
     expect(charactersOf(b.t.db, USER, [CHAT]).map((c) => c.id)).toEqual([marta?.id]);
   });
 
@@ -51,7 +51,7 @@ describe("a name that is not in the cast yet", () => {
     );
     expect(r.error).toBeUndefined();
     expect(wordsFromFiles(r)).toBe(true);
-    expect(texts(r).filter((t) => !t.startsWith("{"))).toEqual(["Ida Pell was not in the cast, so they were added to it, not yet cast."]);
+    expect(texts(r).filter((t) => !t.startsWith("{"))).toEqual(["Ida Pell was not in the cast, so they were added to it, not yet cast.", "Operation 1 (knowledge) names no source, so it is marked unsourced.", "Operation 2 (relationship) names no source, so it is marked unsourced.", "Operation 3 (cast) names no source, so it is marked unsourced."]);
     const made = new Map(charactersOf(b.t.db, USER, [CHAT]).map((c) => [c.name, c.id]));
     expect([...made.keys()].sort()).toEqual(["Ida Pell", "Tobin Lorne"]);
     const record = b.t.record(turn);

@@ -9,5 +9,8 @@ arguments:
   entries.from: "The ids of the perceptions or memories it comes from, a realization among them."
   entries.drop: "true when it is no longer on your mind; false to bring it back."
   entries.why: "Why it changed or went."
+  entries.source: "Where it comes from: its kind alone (prose, lore, author, gm, character, player, default or invented), or an object with the kind in from. lore, message and roll cite an entry, message or roll by id."
+  entries.precision: "How exact it is: exact, approximate, vague or unknown."
+  entries.standing: "How sure it is: established, proposed or assumed."
 ---
 Sets what is on your mind now: what holds your attention, what you feel, what you believe, what you want, what you plan, and what you hide. As many entries as you need in one call. An entry belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives each entry's id and how it now stands.

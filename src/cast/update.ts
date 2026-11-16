@@ -27,7 +27,9 @@ import type { FactId } from "../shared/minds";
 import type { Lane } from "../store";
 import { IFACE_DEFAULTS } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
+import { type Provenance, provenanceData } from "../iface/source";
 import { baseView, type CastCall, type CastReading, type CastToolSpec, itemView, readingOr, sourceView, whoView } from "./kit";
+import { LORE_STAMP, PROVENANCE_READS, readSource, shownReads, sourceLines, stampOn } from "./source";
 import {
   addCharacter,
   BASE_PARTS,
@@ -89,7 +91,7 @@ const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
 };
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "person", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "whereabouts", "place", "names", "intention", "until", "how", "secret", "files", "accept", "drop", "why"];
+const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "person", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "whereabouts", "place", "names", "intention", "until", "how", "secret", "files", "accept", "drop", "why", ...PROVENANCE_READS];
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -122,6 +124,8 @@ export interface ItemRead {
   fatal: Unread[];
   unread: Unread[];
   ignored: string[];
+  /** Where it comes from, how exact and how sure, when it is written as a change of its own: read by `readSource`. */
+  prov?: Provenance;
 }
 
 /** What a kind of item reads; what every one of it needs; and what a new one needs. */
@@ -142,7 +146,7 @@ export function refused(reply: Reply, items: readonly ItemRead[], readsOf: (op: 
     for (const u of [...it.fatal, ...it.unread]) reply.line(u.line, u.fields);
     if (it.op === undefined || it.fatal.length + it.unread.length + it.ignored.length === 0) continue;
     const { reads, needs, newNeeds } = readsOf(it.op);
-    reply.line("op_takes", { op: it.op, reads: textOf(reads), needs: textOf(needs), new_needs: textOf(newNeeds), ignored: textOf(it.ignored) });
+    reply.line("op_takes", { op: it.op, reads: textOf(shownReads(reads)), needs: textOf(needs), new_needs: textOf(newNeeds), ignored: textOf(it.ignored) });
   }
   return reply.line("nothing_recorded", {}).fail();
 }
@@ -151,7 +155,7 @@ export function refused(reply: Reply, items: readonly ItemRead[], readsOf: (op: 
 export function leftOut(reply: Reply, it: ItemRead, reads: readonly string[]): void {
   for (const u of it.unread) reply.report(u.line, u.fields);
   const left = [...new Set([...it.ignored, ...it.unread.flatMap((u) => (u.kept === true ? [] : [String(u.fields.field)]))])];
-  if (it.op !== undefined && left.length > 0) reply.report("not_read", { n: it.n, op: it.op, left: textOf(left), reads: textOf(reads) });
+  if (it.op !== undefined && left.length > 0) reply.report("not_read", { n: it.n, op: it.op, left: textOf(left), reads: textOf(shownReads(reads)) });
 }
 
 /** Values an item needs: one sent but unreadable makes the item unreadable, said as what could not be read; those not sent are said to be needed, in one line. */
@@ -213,6 +217,8 @@ interface Planned {
   person?: string;
   /** For a relationship: who it is toward, by reference (a character's id, the world's person, or the name). */
   toward?: string;
+  /** Where it comes from, as the call gave it; none for an operation that writes no change (a binding, a base). */
+  prov?: Provenance;
 }
 
 /** One operation as read, and what it writes when it can be read. */
@@ -269,7 +275,8 @@ export function readArg(lines: Lines, n: number, op: string, field: string, kind
 function readsOf(op: string): Reads {
   const name = op as Op;
   return {
-    reads: ["who", ...Object.keys(ARGS[name])],
+    // The source, precision and standing belong to the operations written as changes: a binding and a base are written beside them.
+    reads: ["who", ...Object.keys(ARGS[name]), ...(name === "bind" || name === "base" ? [] : PROVENANCE_READS)],
     needs: name === "cast" ? ["who", "as"] : name === "relationship" ? ["who", "with"] : name === "filed" ? ["who", "files"] : ["who"],
     // Knowledge is words, a secret, or both: a new one needs one of them, which `readOp` says when it has neither.
     newNeeds: name === "growth" || name === "history" ? ["text"] : [],
@@ -528,6 +535,12 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const ops: OpRead[] = [];
   for (const [i, raw] of list.entries()) ops.push(await readOp(reading, i + 1, raw));
   if (ops.some((o) => o.fatal.length > 0)) return refused(reply, ops, readsOf);
+  // Where each operation that is written as a change comes from: a binding and a base are written beside the changes, and carry none.
+  for (const [i, o] of ops.entries()) {
+    if (o.planned === undefined || o.planned.op === "bind" || o.planned.op === "base") continue;
+    readSource(call, o, list[i] as JsonObject);
+    o.planned.prov = o.prov;
+  }
   const planned = ops.flatMap((o) => (o.planned === undefined ? [] : [o.planned]));
 
   const now = (call.deps.now ?? Date.now)();
@@ -538,7 +551,7 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
     // Each character this call names that the cast does not hold is made first, so every operation can name it.
     const ids = makeFresh(db, call, fresh, now);
     // A secret's fact is recorded before anyone holds it.
-    if (turn !== null && world !== null && world.facts.length > 0) store.user(user).addChanges(turn, holdingChanges(world.facts, CAST_LANE, call.agent.id, call.agent.job ?? null));
+    if (turn !== null && world !== null && world.facts.length > 0) store.user(user).addChanges(turn, holdingChanges(world.facts, CAST_LANE, call.agent.id, call.agent.job ?? null).map((c) => ({ ...c, ...LORE_STAMP })));
     const items = new Map<number, string>();
     for (const p of planned) {
       const id = ids.get(p.character) ?? p.character;
@@ -551,16 +564,16 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         writeCast(
           store,
           { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now },
-          p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true } })),
+          p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true }, ...stampOn(p.prov) })),
         );
       } else if (p.part !== undefined && turn !== null) {
         const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.toward ?? (p.value.with as string)) : p.part === "away" ? awayItemId(id) : (p.item ?? null);
-        const [row] = writeCast(store, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value }]);
+        const [row] = writeCast(store, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value, ...stampOn(p.prov) }]);
         if (row !== undefined) items.set(p.n, row.item);
         // The world's person a character is: kept on the character, outside the turn, as a binding of a source is.
         if (p.person !== undefined) setPerson(db, user, id, p.person);
         const events = [...(p.holds?.events ?? []), ...(p.forgets?.flatMap((f) => f.events) ?? [])];
-        if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));
+        if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null).map((c) => ({ ...c, ...(stampOn(p.prov).stamp ?? {}) })));
       }
     }
     return { ids, items };
@@ -576,11 +589,12 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const operations: JsonObject[] = [];
   for (const o of ops) {
     leftOut(reply, o, readsOf(o.op as Op).reads);
+    sourceLines(reply, [o]);
     const p = o.planned;
     if (p === undefined) continue;
     const id = written.ids.get(p.character) ?? p.character;
     const who = whoView({ id, name: p.name });
-    const done: JsonObject = { n: p.n, op: p.op, who, wrote: p.op === "bind" && p.source !== undefined ? { [p.source.kind]: p.source.ref, ...p.value } : p.value };
+    const done: JsonObject = { n: p.n, op: p.op, who, wrote: p.op === "bind" && p.source !== undefined ? { [p.source.kind]: p.source.ref, ...p.value } : p.value, ...(p.prov !== undefined ? provenanceData(p.prov) : {}) };
     if (p.op === "cast") {
       const character = findCharacter(store.db, user, after.chats, id) as Character;
       const casting = castingInForce(after.record, character);

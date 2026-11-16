@@ -13,10 +13,12 @@
 
 import type { JsonObject } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
+import type { Provenance } from "../iface/source";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, datedAt, readingOr } from "./kit";
 import { dimmedOf, memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
 import { type CastWrite, writeCast } from "./record";
+import { CHARACTER_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
 import { listOf, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
 import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
 
@@ -40,10 +42,10 @@ function memoryKinds(s: CastSettings): Readonly<Record<string, Kind>> {
 const MEMORY_FIELDS = ["text", "gist", "weight", "tone", "who", "about"];
 
 const RECALL_READS: Reads = { reads: ["cue", "skip", "top"], needs: ["cue"], newNeeds: [] };
-const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top", "taken"], needs: [], newNeeds: ["text", "gist"] };
-const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth", "top"], needs: ["from", "text", "gist"], newNeeds: [] };
-const DREAM_READS: Reads = { reads: ["keep", "fade", "connect"], needs: [], newNeeds: [] };
-const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS], needs: ["memories", "text", "gist"], newNeeds: [] };
+const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top", "taken", ...PROVENANCE_READS], needs: [], newNeeds: ["text", "gist"] };
+const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth", "top", ...PROVENANCE_READS], needs: ["from", "text", "gist"], newNeeds: [] };
+const DREAM_READS: Reads = { reads: ["keep", "fade", "connect", ...PROVENANCE_READS], needs: [], newNeeds: [] };
+const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS, ...PROVENANCE_READS], needs: ["memories", "text", "gist"], newNeeds: [] };
 
 /** Each memory named, as it stands after the call. */
 function after(call: CastCall, reply: Reply, self: Self, ids: readonly string[]): JsonObject[] | null {
@@ -77,8 +79,8 @@ function leavingTop(self: Self, s: CastSettings, putting: ReadonlySet<string>, f
 }
 
 /** The writes that take those who leave top of mind off it. */
-function offTop(self: Self, leaving: readonly MemoryNow[]): CastWrite[] {
-  return leaving.map((m) => ({ character: self.character.id, part: "memory", item: m.item.id, value: { top: false } }));
+function offTop(self: Self, leaving: readonly MemoryNow[], prov?: Provenance): CastWrite[] {
+  return leaving.map((m) => ({ character: self.character.id, part: "memory", item: m.item.id, value: { top: false }, ...stampOn(prov) }));
 }
 
 /** Says who left top of mind to make room, weakest first. */
@@ -116,8 +118,9 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
           part: "memory" as const,
           item: m.item.id,
           value: { recalls: (typeof m.item.fields.recalls === "number" ? m.item.fields.recalls : 0) + 1, ...(self.now !== null ? { recalled: self.now } : {}), ...(dimmedOf(m.item) < 1 ? { dimmed: 1 } : {}), ...(putting.has(m.item.id) ? { top: true } : {}) },
+          stamp: CHARACTER_STAMP,
         })),
-        ...offTop(self, leaving),
+        ...offTop(self, leaving).map((w) => ({ ...w, stamp: CHARACTER_STAMP })),
       ]),
     call.tool,
   );
@@ -162,6 +165,7 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
     items.push(it);
     const value: JsonObject = {};
     readFields(call, it, given, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag", taken: "texts" }, value);
+    readSource(call, it, given);
     const { id, taken, ...fields } = value;
     if (id !== undefined && strangers(self, "memory", [id]).length > 0) {
       it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id) } });
@@ -180,17 +184,18 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
     if (only) {
       // Nothing to remember of them: the perceptions are only marked taken in, and are not given again.
     } else if (id === undefined) needed(it, ["text", "gist"].filter((f) => fields[f] === undefined));
-    else if (Object.keys(fields).length === 0) it.fatal.push({ line: "needs_one", fields: { n, op: "memory", fields: MEMORY_READS.reads.filter((f) => f !== "id") } });
+    else if (Object.keys(fields).length === 0) it.fatal.push({ line: "needs_one", fields: { n, op: "memory", fields: MEMORY_READS.reads.filter((f) => f !== "id" && !(PROVENANCE_READS as readonly string[]).includes(f)) } });
     if (it.fatal.length === 0) {
-      if (!only) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields, ...(id === undefined && moment !== undefined ? { at: moment } : {}) });
-      for (const p of taken === undefined ? [] : ownIds(self, it, "perception", "taken", taken, false)) writes.push({ character: self.character.id, part: "perception", item: p, value: { taken: true } });
+      if (!only) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields, ...(id === undefined && moment !== undefined ? { at: moment } : {}), ...stampOn(it.prov) });
+      for (const p of taken === undefined ? [] : ownIds(self, it, "perception", "taken", taken, false)) writes.push({ character: self.character.id, part: "perception", item: p, value: { taken: true }, ...stampOn(it.prov) });
     }
   }
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => MEMORY_READS);
   const putting = writes.filter((w) => w.value.top === true);
   const leaving = leavingTop(self, call.settings, new Set(putting.flatMap((w) => (w.item === null ? [] : [w.item]))), putting.filter((w) => w.item === null).length);
-  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, [...writes, ...offTop(self, leaving)]), call.tool);
+  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, [...writes, ...offTop(self, leaving, items.find((it) => it.prov !== undefined)?.prov)]), call.tool);
   for (const it of items) leftOut(reply, it, MEMORY_READS.reads);
+  sourceLines(reply, items);
   saidLeft(reply, call.settings, leaving);
   const shown = after(call, reply, self, rows.slice(0, writes.length).map((r) => r.item));
   return shown === null ? reply : reply.data({ memories: shown });
@@ -214,6 +219,7 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   const it: ItemRead = { n: 1, op: "reflect", fatal: [], unread: [], ignored: ignoredOf(args, REFLECT_READS.reads) };
   const value: JsonObject = {};
   readFields(call, it, args, { from: "texts", ...memoryKinds(call.settings), growth: "text", top: "flag" }, value);
+  readSource(call, it, args);
   needed(it, REFLECT_READS.needs.filter((f) => value[f] === undefined));
   if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
   const self = selfOr(call, reply);
@@ -224,16 +230,17 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   const leaving = leavingTop(self, call.settings, new Set(), top === true ? 1 : 0);
   const written = await call.deps.writes.run(() => {
     const [realization] = writeCast(call.deps.store, self.writer, [
-      { character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization", ...(top === true ? { top: true } : {}) } },
-      ...offTop(self, leaving),
+      { character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization", ...(top === true ? { top: true } : {}) }, ...stampOn(it.prov) },
+      ...offTop(self, leaving, it.prov),
     ]);
     const id = realization?.item ?? "";
     // A change the realization proposes is growth the Author has yet to accept (`cast_update`'s growth `accept`).
-    const proposed = typeof growth === "string" ? writeCast(call.deps.store, self.writer, [{ character: self.character.id, part: "growth", item: null, value: { text: growth, cause: id, proposed: true } }]) : [];
+    const proposed = typeof growth === "string" ? writeCast(call.deps.store, self.writer, [{ character: self.character.id, part: "growth", item: null, value: { text: growth, cause: id, proposed: true }, ...stampOn(it.prov) }]) : [];
     return { id, growth: proposed[0]?.item ?? null };
   }, call.tool);
   saidLeft(reply, call.settings, leaving);
   leftOut(reply, it, REFLECT_READS.reads);
+  sourceLines(reply, [it]);
   const shown = after(call, reply, self, [written.id]);
   return shown === null ? reply : reply.data({ realization: shown[0] ?? null, ...(written.growth !== null ? { proposed_growth: written.growth } : {}) });
 }
@@ -256,6 +263,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   const it: ItemRead = { n: 1, op: "dream", fatal: [], unread: [], ignored: ignoredOf(args, DREAM_READS.reads) };
   const value: JsonObject = {};
   readFields(call, it, args, { keep: "texts", fade: "texts" }, value);
+  readSource(call, it, args);
   const items: ItemRead[] = [it];
   const connections: { it: ItemRead; fields: JsonObject }[] = [];
   const connect = listOf(args.connect);
@@ -268,6 +276,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
     const c: ItemRead = { n: i + 1, op: "connection", fatal: [], unread: [], ignored: ignoredOf(given, CONNECTION_READS.reads) };
     const fields: JsonObject = {};
     readFields(call, c, given, { memories: "texts", ...memoryKinds(call.settings) }, fields);
+    readSource(call, c, given);
     needed(c, CONNECTION_READS.needs.filter((f) => fields[f] === undefined));
     items.push(c);
     connections.push({ it: c, fields });
@@ -301,11 +310,14 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
       change.weight = weight;
       kept.push(m.item.id);
     }
-    if (Object.keys(change).length > 0) writes.push({ character: self.character.id, part: "memory", item: m.item.id, value: change });
+    if (Object.keys(change).length > 0) writes.push({ character: self.character.id, part: "memory", item: m.item.id, value: change, ...stampOn(it.prov) });
   }
-  for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c.fields, kind: "connection" } });
+  const dreamWrites = writes.length;
+  for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c.fields, kind: "connection" }, ...stampOn(c.it.prov) });
   const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, writes), call.tool);
   for (const x of items) leftOut(reply, x, readsOf(x.op ?? "").reads);
+  // The dream names where it comes from only when it wrote something of its own: what it settled, dimmed or raised.
+  sourceLines(reply, dreamWrites > 0 ? items : items.filter((x) => x !== it));
   const made = rows.filter((r) => !byId.has(r.item)).map((r) => r.item);
   const shown = after(call, reply, self, [...rows.filter((r) => byId.has(r.item)).map((r) => r.item), ...made]);
   if (shown === null) return reply;
@@ -323,7 +335,7 @@ export const DREAM: CastToolSpec = {
   family: "cast",
   tier: "write",
   lane: CAST_LANE,
-  properties: { ...unchecked(["keep", "fade"]), connect: { type: "array", items: { type: "object", properties: unchecked(CONNECTION_READS.reads) } } },
+  properties: { ...unchecked(["keep", "fade", ...PROVENANCE_READS]), connect: { type: "array", items: { type: "object", properties: unchecked(CONNECTION_READS.reads) } } },
   required: [],
   example: { keep: ["mem-12"], fade: ["mem-14"], connect: [{ memories: ["mem-3", "mem-12"], text: "The cellar again. It was the cellar when I was a boy, too.", gist: "The cellar keeps coming back." }] },
   run: dream,

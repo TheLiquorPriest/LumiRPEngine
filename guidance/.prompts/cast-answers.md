@@ -28,6 +28,9 @@ not_bound: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound.
 unknown_id: Operation {{n}} ({{op}}): {{who}} has no {{part}} {{id}} on this path.{{#near}} The nearest {{who}} has: {{near}}.{{/near}}
 no_file: Operation {{n}} ({{op}}): {{who}} has no old mind file {{file}} on this path.{{#files}} Theirs are: {{files}}.{{/files}}
 nothing_recorded: Nothing was written. Send the call again with that put right.
+unsourced: Operation {{n}} ({{op}}) names no source, so it is marked unsourced.
+invented_unchecked: Operation {{n}} ({{op}}) is recorded as invented and names no gap check, so it is marked so.
+invented_unconsented: Operation {{n}} ({{op}}) is recorded as invented and names no consent, so it is marked so.
 pinned: Operation {{n}} (cast): the player pinned {{who}} as {{as}}, and that stands. Your casting is kept for when the pin is taken away.
 no_cast: No one is cast on this path yet.
 no_character: There is no {{who}} in the cast.

@@ -17,6 +17,7 @@ import type { Reply } from "../iface/kit";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastToolSpec, itemView, readingOr } from "./kit";
 import { type CastRow, type CastWrite, type CastWriter, MIND_KINDS, RELATIONSHIP_DIMENSIONS, relationshipItemId, writeCast } from "./record";
+import { PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
 import { towardOf } from "./refs";
 import { worldAt } from "./secrets";
 import { listOf, notAnItem, ownIds, readFields, selfOr, unchecked } from "./self";
@@ -24,20 +25,21 @@ import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type R
 
 /** What one entry of the mind reads, each as its kind. */
 const ENTRY: Readonly<Record<string, Kind>> = { id: "name", kind: MIND_KINDS, text: "text", about: "texts", from: "texts", drop: "flag", why: "text" };
-const ENTRY_READS: Reads = { reads: Object.keys(ENTRY), needs: [], newNeeds: ["kind", "text"] };
+const ENTRY_READS: Reads = { reads: [...Object.keys(ENTRY), ...PROVENANCE_READS], needs: [], newNeeds: ["kind", "text"] };
 
 /** Where a feeling, a plan or a stand toward someone can come from: the character's own perceptions and memories, a realization among them. */
 const FROM_PARTS = ["perception", "memory"] as const;
 
 /** What one relationship reads, each as its kind. */
 const RELATIONSHIP: Readonly<Record<string, Kind>> = { with: "name", text: "text", ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, "dimension"])), from: "texts", drop: "flag", why: "text" };
-const RELATIONSHIP_READS: Reads = { reads: Object.keys(RELATIONSHIP), needs: ["with"], newNeeds: [] };
+const RELATIONSHIP_READS: Reads = { reads: [...Object.keys(RELATIONSHIP), ...PROVENANCE_READS], needs: ["with"], newNeeds: [] };
 
 /** Writes what a call read, and answers with each item it wrote as it now stands, and with what was left out. */
 async function writeOwn(call: CastCall, reply: Reply, writer: CastWriter, items: readonly ItemRead[], writes: readonly CastWrite[], reads: Reads, key: string): Promise<Reply> {
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => reads);
   const rows: CastRow[] = await call.deps.writes.run(() => writeCast(call.deps.store, writer, writes), call.tool);
   for (const it of items) leftOut(reply, it, reads.reads);
+  sourceLines(reply, items);
   const after = readingOr(call, reply);
   if (after === null) return reply;
   const shown = [...new Set(rows.map((r) => r.item))].flatMap((id) => {
@@ -68,6 +70,7 @@ async function mindSet(args: JsonObject, call: CastCall): Promise<Reply> {
     items.push(it);
     const value: JsonObject = {};
     readFields(call, it, given, ENTRY, value);
+    readSource(call, it, given);
     const { id, ...fields } = value;
     // An entry to change is one of the character's own on this path, of a kind the mind holds; a file carried from the earlier build is none of them.
     const item = id === undefined ? undefined : self.reading.record.items.get(id as string);
@@ -81,8 +84,8 @@ async function mindSet(args: JsonObject, call: CastCall): Promise<Reply> {
       else delete fields.from;
     }
     if (id === undefined) needed(it, ENTRY_READS.newNeeds.filter((f) => fields[f] === undefined));
-    else if (!Object.keys(fields).some((k) => k !== "why")) it.fatal.push({ line: "needs_one", fields: { n, op: "mind", fields: ENTRY_READS.reads.filter((f) => f !== "id" && f !== "why") } });
-    if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "mind", item: (id as string | undefined) ?? null, value: fields });
+    else if (!Object.keys(fields).some((k) => k !== "why")) it.fatal.push({ line: "needs_one", fields: { n, op: "mind", fields: Object.keys(ENTRY).filter((f) => f !== "id" && f !== "why") } });
+    if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "mind", item: (id as string | undefined) ?? null, value: fields, ...stampOn(it.prov) });
   }
   return writeOwn(call, reply, self.writer, items, writes, ENTRY_READS, "entries");
 }
@@ -125,6 +128,7 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
     items.push(it);
     const value: JsonObject = {};
     readFields(call, it, given, RELATIONSHIP, value);
+    readSource(call, it, given);
     if (typeof value.with !== "string") {
       needed(it, ["with"]);
       continue;
@@ -135,12 +139,12 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
       else delete value.from;
     }
     if (!Object.keys(value).some((k) => k !== "with" && k !== "why")) {
-      it.fatal.push({ line: "needs_one", fields: { n, op: "relationship", fields: RELATIONSHIP_READS.reads.filter((f) => f !== "with" && f !== "why") } });
+      it.fatal.push({ line: "needs_one", fields: { n, op: "relationship", fields: Object.keys(RELATIONSHIP).filter((f) => f !== "with" && f !== "why") } });
       continue;
     }
     // Toward a person by reference (a character of the chat, or the world's person), the name as written beside it: a rename follows, and the id joins the same relationship.
     const toward = towardOf(call.deps.store.db, call.scope.user, self.reading.chats, ctx ??= worldAt(call.deps.store, call.scope.user, call.scope.turn ?? null, call.agent.job ?? null, call.scope.chat), value.with);
-    writes.push({ character: self.character.id, part: "relationship", item: relationshipItemId(self.character.id, toward.ref), value: { ...value, with: toward.name, toward: toward.ref } });
+    writes.push({ character: self.character.id, part: "relationship", item: relationshipItemId(self.character.id, toward.ref), value: { ...value, with: toward.name, toward: toward.ref }, ...stampOn(it.prov) });
   }
   return writeOwn(call, reply, self.writer, items, writes, RELATIONSHIP_READS, "relationships");
 }

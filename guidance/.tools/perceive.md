@@ -15,5 +15,8 @@ arguments:
   perceptions.reliability: "How reliable the telling is."
   perceptions.drop: "true to strike the perception named by id; say why. What it added to their knowledge is struck with it, and the secrets it made theirs are theirs no longer, unless other knowledge of theirs still gives them."
   perceptions.why: "With drop: why it goes."
+  perceptions.source: "Where the perception comes from, which is not who told it (told_by): its kind alone (prose, lore, author, gm, character, player, default or invented), or an object with the kind in from. lore, message and roll cite an entry, message or roll by id; an invention cites its gap_check and consent."
+  perceptions.precision: "How exact what you write is: exact, approximate, vague or unknown."
+  perceptions.standing: "How sure what you write is: established, proposed or assumed."
 ---
 Records what reached each character of a moment of this turn, one perception per character and moment, many in one call. A perception belongs to this turn: if the turn is swiped or deleted, it goes, with what it added to their knowledge and the secrets it made theirs. The answer gives each perception's id, how it now stands, the ids of the knowledge it added, and, for one struck or corrected, the knowledge struck with it and the secrets let go.

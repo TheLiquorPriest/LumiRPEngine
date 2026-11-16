@@ -36,5 +36,8 @@ arguments:
   operations.accept: "growth: true to accept a change a character's reflection proposed, by its id; false to set it back to proposed."
   operations.drop: "bind: true to take the source away. away: true when the principal is back in view. growth, history, relationship, knowledge: true to strike it; say why. Struck knowledge of a secret takes the secret back from them, unless other knowledge of theirs still gives it."
   operations.why: "cast: why this casting. With drop: why it goes."
+  operations.source: "Where it comes from (not for bind or base): its kind alone (prose, lore, author, gm, character, player, default or invented), or an object with the kind in from. lore, message and roll cite an entry, message or roll by id; an invention cites its gap_check and consent."
+  operations.precision: "How exact what you write is: exact, approximate, vague or unknown."
+  operations.standing: "How sure what you write is: established, proposed or assumed."
 ---
 Writes a character's record, as many operations as you need in one call: their casting, the sources bound to them, their base, their growth, history, relationships and knowledge, and which of their old mind files have been filed. Casting, growth, history, relationships, knowledge and filing belong to this turn: if the turn is swiped or deleted, they go with it, and so do the secrets their knowledge made theirs. The sources and the base stand outside turns, and every version of the base is kept. The answer gives what each operation wrote and how that part of the record now stands, with the secrets knowledge made theirs and those it let go.

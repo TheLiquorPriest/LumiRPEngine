@@ -11,12 +11,13 @@
 // once. What goes ahead is recorded in one queued write, the lore lane's overlays included, and the
 // answer says what each operation wrote, how its item now stands, and what did not add up.
 
-import type { JsonObject, JsonValue } from "rp-harness/contract";
+import type { AgentRef, JsonObject, JsonValue } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
+import { MARKS, type Provenance, provenanceData, provenanceLeniently, type Stamp, stampOf } from "../iface/source";
 import { type Fields, type Lines, textOf } from "../iface/texts";
 import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
-import { type Lane, STANDINGS, type TreeView } from "../store";
+import { type Lane, STANDINGS, type Standing, type TreeView } from "../store";
 import { allSpans, itemView, nearIds, placeRefOf, recordOr, STORY_DEFAULTS, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, treeOf, valueView } from "./kit";
 import { keyedItemId, recordStory, type StoryItem, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
 
@@ -75,7 +76,7 @@ export const STORY_OPERATIONS: readonly string[] = [...OPS.map((o) => o.name), O
 const BY_NAME: ReadonlyMap<string, OpDef> = new Map(OPS.map((o) => [o.name, o]));
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "entry", "close", "drop", "why"] as const;
+const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "source", "precision", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "entry", "close", "drop", "why"] as const;
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -99,6 +100,8 @@ interface Planned {
   fresh: boolean;
   value: JsonObject;
   reports: Unread[];
+  /** Where it comes from, how exact and how sure; none for a page's correction, which is the player's. */
+  prov?: Provenance;
 }
 
 interface PlannedOverlay {
@@ -106,6 +109,7 @@ interface PlannedOverlay {
   op: typeof OVERLAY;
   entry: string;
   note: string;
+  prov?: Provenance;
 }
 
 type Read = Planned | PlannedOverlay;
@@ -132,6 +136,8 @@ interface Reading {
   /** The turn the call belongs to; none for a call of his own job or the assistant's, whose writes belong to no turn. */
   turn: string | null;
   lines: Lines;
+  /** Who writes: its operations carry a source, a precision and a standing of their own; none for a page's correction. */
+  agent?: AgentRef;
   /** The ref of the place a name or id names in the world the turn stands in; null when it names none there, undefined when that world has no place to name. */
   placeRef(words: string): string | null | undefined;
   /** What an answer about an id the record does not hold adds: the near ids of that part (of any part with none), or that the record holds none. */
@@ -142,7 +148,10 @@ function isUnread(v: unknown): v is Unread {
   return typeof v === "object" && v !== null && "line" in v;
 }
 
-/** What an operation reads besides `op`; what every one of it needs; and what a new item of it needs. */
+/** The arguments every operation reads for where it comes from: read by each, so never said to be left out, and said in each argument's file rather than in each operation's list. */
+const PROVENANCE_KEYS = ["source", "precision", "standing"] as const;
+
+/** What an operation reads besides `op` (its provenance aside); what every one of it needs; and what a new item of it needs. */
 function takesOf(op: string): { reads: string[]; needs: string[]; newNeeds: string[] } {
   if (op === OVERLAY) return { reads: ["entry", "text"], needs: ["entry", "text"], newNeeds: [] };
   const def = BY_NAME.get(op) as OpDef;
@@ -238,6 +247,31 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
   }
 }
 
+/** What a write carries to the store: its provenance as a change keeps it; none where the writer's own stands. */
+const stampOn = (prov: Provenance | undefined): { stamp?: Stamp } => (prov === undefined ? {} : { stamp: stampOf(prov) });
+
+/** The marks and lines an operation's provenance carries into the answer: the write was made all the same. */
+function provenanceLines(reply: Reply, n: number, op: string, prov: Provenance | undefined): void {
+  if (prov === undefined) return;
+  for (const mark of prov.marks) reply.mark(mark);
+  const fields = { n, op };
+  if (prov.marks.includes(MARKS.unsourced)) reply.line("unsourced", fields);
+  if (prov.marks.includes(MARKS.noGapCheck)) reply.line("invented_unchecked", fields);
+  if (prov.marks.includes(MARKS.noConsent)) reply.line("invented_unconsented", fields);
+}
+
+/**
+ * What an operation's own provenance reads as (its source, precision and standing): an argument that cannot be read is left out and
+ * said, and the operation is recorded without it, so a source left out is an unsourced write. A future's own `standing` is its standing.
+ */
+function provenanceFor(r: Reading, n: number, op: string, given: JsonObject, out: OpRead, futureStanding?: Standing): Provenance | undefined {
+  if (r.agent === undefined) return undefined;
+  const { standing: _kept, ...rest } = given;
+  const { prov, left } = provenanceLeniently(futureStanding !== undefined || op === "future" ? rest : given, r.agent);
+  for (const u of left) out.unread.push({ line: "unreadable_op", fields: { n, op, field: u.field, value: JSON.stringify(u.value), choices: textOf(u.choices) } });
+  return futureStanding !== undefined ? { ...prov, standing: futureStanding } : prov;
+}
+
 /** One operation read, and applied to the record the next one is read against. */
 function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   const given = isRecord(raw) ? (raw as JsonObject) : null;
@@ -245,7 +279,7 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   if (given === null || op === undefined || (op !== OVERLAY && !BY_NAME.has(op))) {
     return { n, fatal: [{ line: "unknown_op", fields: { n, value: JSON.stringify(given?.op ?? null), choices: textOf(STORY_OPERATIONS) } }], unread: [], ignored: [] };
   }
-  const reads = new Set(["op", ...takesOf(op).reads]);
+  const reads = new Set(["op", ...takesOf(op).reads, ...PROVENANCE_KEYS]);
   const out: OpRead = { n, op, fatal: [], unread: [], ignored: Object.keys(given).filter((k) => !reads.has(k) && given[k] !== undefined && given[k] !== null) };
   if (op === OVERLAY) {
     // Words are always read, so an overlay is unreadable only for what it lacks.
@@ -253,7 +287,10 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
     const note = readArg(r, n, op, "text", "text", given.text) as string | undefined;
     const missing = [entry === undefined ? "entry" : null, note === undefined ? "text" : null].filter((f): f is string => f !== null);
     if (entry === undefined || note === undefined) out.fatal.push({ line: "needs", fields: { n, op, fields: missing } });
-    else out.read = { n, op, entry, note };
+    else {
+      const prov = provenanceFor(r, n, op, given, out);
+      out.read = { n, op, entry, note, ...(prov !== undefined ? { prov } : {}) };
+    }
     return out;
   }
   const def = BY_NAME.get(op) as OpDef;
@@ -285,7 +322,8 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   }
   if (typeof value.due === "string") reports.push({ line: r.clock === null ? "no_clock" : "unreadable_time", fields: { n, op, field: "due", value: JSON.stringify(value.due) } });
   r.record.apply({ part: def.part, item: found.item, value, turn: r.turn ?? "" });
-  out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
+  const prov = provenanceFor(r, n, op, given, out, def.part === "future" && typeof value.standing === "string" ? (value.standing as Standing) : undefined);
+  out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports, ...(prov !== undefined ? { prov } : {}) };
   return out;
 }
 
@@ -345,6 +383,7 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     clock: storyClock(store, call.scope.user, call.scope.chat, turn),
     turn,
     lines: call.lines,
+    agent: call.agent,
     placeRef: (words) => placeRefOf((view ??= treeOf(call)), words),
     near: (said, part) => nearIds(call.lines, call.settings, record, said, part),
   };
@@ -383,11 +422,11 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
       // A new item's stand-in id, as later operations of the call named it, becomes the id its first write is given.
       const made = new Set<string>();
       const list = read.map((r): StoryWrite | StoryOverlayWrite => {
-        if (r.op === OVERLAY) return { entry: (r as PlannedOverlay).entry, note: (r as PlannedOverlay).note };
+        if (r.op === OVERLAY) return { entry: (r as PlannedOverlay).entry, note: (r as PlannedOverlay).note, ...stampOn((r as PlannedOverlay).prov) };
         const p = r as Planned;
-        if (!p.fresh || made.has(p.item)) return { part: p.part, item: p.item, value: p.value };
+        if (!p.fresh || made.has(p.item)) return { part: p.part, item: p.item, value: p.value, ...stampOn(p.prov) };
         made.add(p.item);
-        return { part: p.part, item: null, stand: p.item, value: p.value };
+        return { part: p.part, item: null, stand: p.item, value: p.value, ...stampOn(p.prov) };
       });
       // One write of the store: the call's changes stand or fall together.
       return recordStory(store, writer, list);
@@ -411,17 +450,18 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     if (o.op !== undefined && left.length > 0) reply.report("not_read", { n: o.n, op: o.op, left: textOf(left), reads: textOf(takesOf(o.op).reads) });
     const r = o.read;
     if (r === undefined) continue;
+    provenanceLines(reply, r.n, r.op, r.prov);
     if (r.op === OVERLAY) {
       const ov = r as PlannedOverlay;
       const done = written.get(ov.n);
-      operations.push({ n: ov.n, op: ov.op, entry: ov.entry, wrote: { text: ov.note }, ...(done !== undefined ? { written: { overlay: done.change, entry: ov.entry, note: ov.note } } : { recorded: false }) });
+      operations.push({ n: ov.n, op: ov.op, entry: ov.entry, wrote: { text: ov.note }, ...(ov.prov !== undefined ? provenanceData(ov.prov) : {}), ...(done !== undefined ? { written: { overlay: done.change, entry: ov.entry, note: ov.note } } : { recorded: false }) });
       continue;
     }
     const p = r as Planned;
     const row = written.get(p.n);
     const item = row?.item == null ? undefined : after.items.get(row.item);
     for (const report of p.reports) reply.report(report.line, report.fields);
-    operations.push({ n: p.n, op: p.op, id: row?.item ?? null, wrote: valueView(after, p.value, reading.clock), now: item === undefined ? null : itemView(after, item, reading.clock, spans) });
+    operations.push({ n: p.n, op: p.op, id: row?.item ?? null, wrote: valueView(after, p.value, reading.clock), ...(p.prov !== undefined ? provenanceData(p.prov) : {}), now: item === undefined ? null : itemView(after, item, reading.clock, spans) });
   }
   return reply.data({ operations });
 }

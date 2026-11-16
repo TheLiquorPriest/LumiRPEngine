@@ -20,12 +20,14 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
+import { type Provenance, provenanceData } from "../iface/source";
 import { textOf } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
 import type { FactId } from "../shared/minds";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastReading, type CastToolSpec, nearIds, readingOr, whoView } from "./kit";
 import { type CastItem, type CastWrite, type CastWriter, writeCast } from "./record";
+import { LORE_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
 import { forgetsOf, holdingChanges, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { CAST_LANE, characterNamed, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, makeFresh, needed, readArg, type Reads, refused, type Unread } from "./update";
 
@@ -50,13 +52,13 @@ const ARGS: Readonly<Record<string, Kind>> = {
 };
 
 /** None holds back a value: the file says what each is, and this code reads each in whatever shape it comes. */
-const PROPERTIES: Record<string, JsonObject> = Object.fromEntries(Object.keys(ARGS).map((name) => [name, {}]));
+const PROPERTIES: Record<string, JsonObject> = Object.fromEntries([...Object.keys(ARGS), ...PROVENANCE_READS].map((name) => [name, {}]));
 
 /** What an answer's lines call one item of the call. */
 const OP = "perception";
 
 /** What a perception reads, what every one needs, and what a new one needs. */
-const READS: Reads = { reads: Object.keys(ARGS), needs: ["who"], newNeeds: ["reach"] };
+const READS: Reads = { reads: [...Object.keys(ARGS), ...PROVENANCE_READS], needs: ["who"], newNeeds: ["reach"] };
 
 /** A perception read, ready to write. */
 interface Planned {
@@ -76,6 +78,8 @@ interface Planned {
   /** The knowledge it gave that goes (all of it, for a perception it strikes), and each secret's holding taken back. */
   struck: string[];
   forgets: { fact: FactId; events: LedgerEvent[] }[];
+  /** Where it comes from, as the call gave it; none for the player's own, whose source is his. */
+  prov?: Provenance;
 }
 
 /** One perception as read, and what it writes when it can be read. */
@@ -204,6 +208,14 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
   const reads: PerceptionRead[] = [];
   for (const [i, raw] of list.entries()) reads.push(await readPerception(call, cast, world, fresh, i + 1, raw));
   if (reads.some((x) => x.fatal.length > 0)) return refused(reply, reads, () => READS);
+  // Where each perception comes from, beside its own told_by and reliability: the write's source; the player's own is the player's.
+  if (!player) {
+    for (const [i, x] of reads.entries()) {
+      if (x.planned === undefined) continue;
+      readSource(call, x, list[i] as JsonObject);
+      x.planned.prov = x.prov;
+    }
+  }
   const planned = reads.flatMap((x) => (x.planned === undefined ? [] : [x.planned]));
 
   const user = call.scope.user;
@@ -215,21 +227,25 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
     const out: { character: string; perception: string; knowledge: string[] }[] = [];
     for (const p of planned) {
       const character = ids.get(p.character) ?? p.character;
-      const [row] = writeCast(call.deps.store, writer, [{ character, part: "perception", item: p.item, value: p.value }]);
+      const [row] = writeCast(call.deps.store, writer, [{ character, part: "perception", item: p.item, value: p.value, ...stampOn(p.prov) }]);
       const perception = row?.item ?? "";
       const source: JsonObject = { from: perception, ...(typeof p.value.told_by === "string" ? { told_by: p.value.told_by } : {}) };
       const knowledge: CastWrite[] = [
-        ...p.knows.map((text): CastWrite => ({ character, part: "knowledge", item: null, value: { text, ...source } })),
-        ...p.newSecrets.map((fact): CastWrite => ({ character, part: "knowledge", item: null, value: { secret: fact, ...source } })),
+        ...p.knows.map((text): CastWrite => ({ character, part: "knowledge", item: null, value: { text, ...source }, ...stampOn(p.prov) })),
+        ...p.newSecrets.map((fact): CastWrite => ({ character, part: "knowledge", item: null, value: { secret: fact, ...source }, ...stampOn(p.prov) })),
       ];
       out.push({ character, perception, knowledge: writeCast(call.deps.store, writer, knowledge).map((k) => k.item) });
-      writeCast(call.deps.store, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) } })));
+      writeCast(call.deps.store, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) }, ...stampOn(p.prov) })));
     }
-    // A secret's fact is recorded before anyone holds it; each perception's holdings, then what its strike lets go.
-    const events = [...world.facts, ...planned.flatMap((p) => [...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events)])];
-    if (events.length > 0) {
+    // A secret's fact is recorded before anyone holds it (the lore's own); each perception's holdings, then what its strike lets go (the perception's).
+    const by = player ? "player" : call.agent.id;
+    const changes = [
+      ...holdingChanges(world.facts, CAST_LANE, by, job).map((c) => ({ ...c, ...LORE_STAMP })),
+      ...planned.flatMap((p) => holdingChanges([...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events)], CAST_LANE, by, job).map((c) => ({ ...c, ...(stampOn(p.prov).stamp ?? {}) }))),
+    ].map((c) => (player ? { ...c, source: "player" as const } : c));
+    if (changes.length > 0) {
       const u = call.deps.store.user(user);
-      u.record(u.writeTarget({ chat: call.scope.chat, turn, job }), holdingChanges(events, CAST_LANE, player ? "player" : call.agent.id, job).map((c) => (player ? { ...c, source: "player" as const } : c)));
+      u.record(u.writeTarget({ chat: call.scope.chat, turn, job }), changes);
     }
     return out;
   }, call.tool);
@@ -238,12 +254,14 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
   const after = readingOr(call, reply);
   if (after === null) return reply;
   for (const x of reads) leftOut(reply, x, READS.reads);
+  if (!player) sourceLines(reply, reads);
   return reply.data({
     perceptions: planned.map((p, i) => {
       const done = written[i];
       const item = done === undefined ? undefined : after.record.items.get(done.perception);
       return {
         n: p.n,
+        ...(p.prov !== undefined ? provenanceData(p.prov) : {}),
         who: whoView({ id: done?.character ?? p.character, name: p.name }),
         id: done?.perception ?? null,
         now: item === undefined ? null : perceptionView(after, item),
