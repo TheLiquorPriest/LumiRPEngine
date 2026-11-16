@@ -16,6 +16,7 @@ import { counted, LEVEL_WORDS } from "../../words";
 import { WaitingSection } from "../settings/waiting";
 import { FiringLine } from "./firings";
 import { namesOf } from "./header";
+import { hookAddress, hookAt, HookOpen, HOOKS, HooksList, useHooks } from "./hooks";
 import { RuleOpen, whyWords } from "./open";
 
 export { whyWords } from "./open";
@@ -48,6 +49,7 @@ function RuleLine(props: { rule: RuleView; open: boolean; onOpen(): void }) {
           <span class="lre-inline">
             <Badge>{LEVEL_WORDS[rule.level]}</Badge>
             <Badge tone={rule.inForce ? "pos" : "warn"}>{rule.inForce ? "in force" : rule.why === "example" ? "example" : "not in force"}</Badge>
+            {rule.command?.state === "waiting" ? <Badge tone="warn" title="Its command waits for rpe allow on the server">command waiting</Badge> : null}
           </span>
         </span>
       </button>
@@ -148,7 +150,9 @@ export function RulesPage(props: { chat: string | null; at: readonly string[] | 
   const go = (at: string[]): void => app.go({ page: "rules", chat, at });
   const [switched, setSwitched] = useState<ReadonlyMap<string, RuleView>>(new Map());
   const list = sortedRules((rules.value?.rules ?? []).map((r) => switched.get(r.name) ?? r));
-  const open = view === null || view === FACTS || view === LOG ? null : (list.find((r) => r.name === view) ?? null);
+  const open = view === null || view === FACTS || view === LOG || view === HOOKS ? null : (list.find((r) => r.name === view) ?? null);
+  const hooks = useHooks(chat, changed);
+  const openHook = view === HOOKS ? hookAt(hooks.value?.rows ?? [], props.at ?? []) : null;
   const waiting = (switches.value ?? []).filter((s: SwitchEntry) => s.kind === "hook" || s.kind === "rule-command");
   const reload = (rule: RuleView | null): void => {
     if (rule !== null) setSwitched((held) => new Map(held).set(rule.name, rule));
@@ -179,7 +183,7 @@ export function RulesPage(props: { chat: string | null; at: readonly string[] | 
       ) : view === LOG && chat !== null ? (
         <LogPart chat={chat} rule={props.at?.[1] ?? null} onRule={(rule) => go([LOG, rule])} onTurn={(turn) => app.go({ page: "turns", chat, at: [turn] })} />
       ) : (
-        <div class="rpe-files-split" data-open={open === null ? "no" : "yes"}>
+        <div class="rpe-files-split" data-open={open === null && view !== HOOKS ? "no" : "yes"}>
           <div class="rpe-files-browser lre-stack">
             {rules.problem === null ? null : (
               <Banner tone="neg" icon="alert" title="The rules could not be read">
@@ -199,9 +203,18 @@ export function RulesPage(props: { chat: string | null; at: readonly string[] | 
             )}
             {rules.loading && rules.value === null ? <p class="lre-muted rpe-line">Reading the rules…</p> : null}
             <p class="rpe-meta">{counted(list.filter((r) => r.inForce).length, "rule")} in force of {list.length}.</p>
+            <HooksList rows={hooks.value?.rows ?? []} loading={hooks.loading} problem={hooks.problem} stopped={hooks.value?.stopped ?? false} open={openHook} onOpen={(row) => go(hookAddress(row))} />
             <WaitingSection switches={waiting} problem={switches.problem} />
           </div>
-          {view === null ? null : (
+          {view === null ? null : view === HOOKS ? (
+            <div class="lre-stack rpe-open-session">
+              {openHook === null ? (
+                <p class="lre-muted rpe-line">{hooks.loading ? "Reading the hooks…" : "No hook of that name is in this stack."}</p>
+              ) : (
+                <HookOpen key={`${openHook.file.path}:${openHook.hook.name}`} chat={chat} row={openHook} onChanged={() => setChanged((n) => n + 1)} onFile={(path) => app.go({ page: "files", chat, at: [path] })} />
+              )}
+            </div>
+          ) : (
             <div class="lre-stack rpe-open-session">
               {open === null ? (
                 <p class="lre-muted rpe-line">{rules.loading ? "Reading the rules…" : "No rule of that name is in this stack."}</p>

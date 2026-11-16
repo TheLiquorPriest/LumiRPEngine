@@ -15,7 +15,7 @@ export function unreadIn(items: readonly TreeListed[]): Set<string> {
   const skills = files.flatMap((f) => (f.item?.startsWith("skills/") === true ? [f.path.slice(0, f.path.lastIndexOf("/") + 1)] : []));
   return new Set(
     files
-      .filter((f) => f.kind === "yours" && f.item === null && f.isConfig !== true && f.held === undefined)
+      .filter((f) => f.kind === "yours" && f.item === null && f.isConfig !== true && f.held === undefined && f.hooks === undefined)
       .filter((f) => (f.level === "chat" ? f.path : f.path.slice(f.path.indexOf("/") + 1)).includes("/"))
       .filter((f) => !skills.some((folder) => f.path.startsWith(folder)))
       .map((f) => f.path),
@@ -26,6 +26,10 @@ export function unreadIn(items: readonly TreeListed[]): Set<string> {
 export function standingOf(entry: TreeFileRow, unread: boolean): { words: string; tone: Tone | undefined } {
   if (entry.isConfig === true) return { words: "a level's config file", tone: undefined };
   if (entry.editedOn !== undefined && entry.editedOn !== null) return { words: `generated; edited on the ${entry.editedOn} page`, tone: undefined };
+  if (entry.hooks !== undefined) {
+    const running = entry.hooks.filter((h) => h.applies && h.state === "on").length;
+    return { words: entry.hooks.length === 0 ? "read: it names no hook RPH can read" : `read: ${running} of its ${entry.hooks.length} ${entry.hooks.length === 1 ? "hook runs" : "hooks run"}; see the Rules page`, tone: running > 0 ? "pos" : undefined };
+  }
   if (unread) return { words: "kept, read by no agent", tone: undefined };
   if (entry.off) return { words: "switched off", tone: "warn" };
   if (entry.replacedBy !== null) return { words: `replaced by ${entry.replacedBy}`, tone: undefined };
