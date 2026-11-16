@@ -7,6 +7,9 @@ description: The layout of the lore map the Author is given at the start of ever
 {{#in_prompt.lines}}
 - {{.}}
 {{/in_prompt.lines}}
+{{#in_prompt.entries}}
+- [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}}{{#defines}} Defines {{defines}}.{{/defines}}{{#extras}} {{extras}}.{{/extras}}{{#how_constant}} (on every turn){{/how_constant}}{{#how_keyword}} (by a key){{/how_keyword}}{{#how_vector}} (by meaning){{/how_vector}}{{#how_sticky}} (still sticky from an earlier turn){{/how_sticky}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
+{{/in_prompt.entries}}
 {{/in_prompt}}
 {{#changed}}
 
@@ -15,6 +18,9 @@ description: The layout of the lore map the Author is given at the start of ever
 {{#changed.lines}}
 - {{.}}
 {{/changed.lines}}
+{{#changed.entries}}
+- [{{id}}] {{title}}:{{#notes}} {{.}}{{/notes}}
+{{/changed.entries}}
 {{/changed}}
 {{#world}}
 
@@ -23,6 +29,9 @@ description: The layout of the lore map the Author is given at the start of ever
 {{#world.lines}}
 - {{.}}
 {{/world.lines}}
+{{#world.entries}}
+- [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}}{{#extras}} {{extras}}.{{/extras}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
+{{/world.entries}}
 {{/world}}
 {{#bound}}
 
@@ -31,6 +40,9 @@ description: The layout of the lore map the Author is given at the start of ever
 {{#bound.lines}}
 - {{.}}
 {{/bound.lines}}
+{{#bound.entries}}
+- [{{id}}] {{title}}{{#kind}} ({{kind}}){{/kind}}{{#line}}: {{line}}{{/line}} Bound to {{bound}}.{{#extras}} {{extras}}.{{/extras}}{{#stale}} (changed since it was indexed){{/stale}}{{#keys}} (not indexed yet; keys: {{keys}}){{/keys}}
+{{/bound.entries}}
 {{#bound.left_out}}
 - and {{bound.left_out}} more
 {{/bound.left_out}}

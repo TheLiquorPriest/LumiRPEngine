@@ -173,6 +173,21 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     for (const part of [lore, world]) expect(written(part)).not.toMatch(ASKS);
   });
 
+  test("lore-answers.md says how an entry came into the prompt and that it changed since it was indexed, and lore-map.md lays an entry out itself where those lines are off", async () => {
+    const answers = await lines("lore-answers");
+    expect(answers.line("fault", { tool: "lore_index_write" })).toBe("lore_index_write failed by a fault of RPE's own, not by anything in your call. It is logged.");
+    const entry = { id: "e-1", title: "Harbour", kind: "place", line: "The quay.", how_keyword: true, stale: true, extras: ["tide: high"] };
+    const said = answers.line("map_in_prompt", entry as never) ?? "";
+    expect(said).toBe("[e-1] Harbour (place): The quay. tide: high. (by a key) (changed since it was indexed)");
+    expect(answers.line("map_in_prompt", { id: "e-2", title: "Wharf", keys: "wharf, quay" } as never)).toBe("[e-2] Wharf (not indexed yet; keys: wharf, quay)");
+    expect(answers.line("index_file_entry", { id: "e-1", title: "Harbour", source: "Book", size: 90, indexed: true, extras: ["tide: high"] } as never)).toContain("tide: high.");
+    const lore = await template("lore-map");
+    const text = lore.render({ in_prompt: { entries: [entry] }, changed: { entries: [{ id: "e-3", title: "Quay", notes: ["Burnt down."] }] }, bound: { entries: [{ id: "e-4", title: "Tide table", bound: "Wren" }] } }).text;
+    expect(text).toContain("- [e-1] Harbour (place): The quay. tide: high. (by a key) (changed since it was indexed)");
+    expect(text).toContain("- [e-3] Quay: Burnt down.");
+    expect(text).toContain("- [e-4] Tide table Bound to Wren.");
+  });
+
   test("delegate-brief.md frames the task, what the sub-agent was given and what to send back; question.md shows an agent's question", async () => {
     const brief = await template("delegate-brief");
     const given = brief.render({ task: "Map the harbour.", attachments: [{ name: "file:plan.md", text: "PLAN" }], returns: "A list of quays." }).text;
