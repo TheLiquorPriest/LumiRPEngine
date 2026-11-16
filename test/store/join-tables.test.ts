@@ -19,7 +19,7 @@ const nodeIs = (does: "moved" | "kept" | "dropped" | "never"): Fate => ({ names:
 
 const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
   // A chat's path and head hold the turns its comparison or a tie placed there: never a held open turn.
-  chat: { user: "none", id: "none", world: "none", revision: "none", source_chat: "none", source_message: "none", head: nodeIs("never"), path: turnIs("never"), created: "none", deleted: "none", heard: "none", heard_count: "none", compared: "none", seed: "none", started: "none", was_on: "none", engine: "none" },
+  chat: { user: "none", id: "none", world: "none", revision: "none", source_chat: "none", source_message: "none", head: nodeIs("never"), path: turnIs("never"), created: "none", deleted: "none", heard: "none", heard_count: "none", compared: "none", seed: "none", started: "none", was_on: "none", engine: "none", kept: turnIs("never") },
   message_link: { user: "none", chat: "none", message: "none", source_chat: "none", source_message: "none" },
   session: { user: "none", id: "none", chat: "none", scene: "none", opened_by: turnIs("moved"), closed_by: turnIs("moved") },
   // The held turn's row stays as the record of a joined turn; no turn stands after it, and it joins none of its own.
