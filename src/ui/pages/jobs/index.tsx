@@ -5,28 +5,15 @@
 // when the page opens, when the live view says a run of the chat began or ended, and after a Cancel;
 // nothing polls.
 
-import type { JobsReply, JobState, JobView } from "../../shared/api";
-import { Badge, Banner, Button, Pre, Section, type Tone } from "../atoms";
-import type { RpeClient } from "../client";
-import { errorWords, num, tokenWords, when } from "../words";
+import type { JobsReply, JobView } from "../../../shared/api";
+import { Badge, Banner, Button, Pre, Section } from "../../atoms";
+import type { RpeClient } from "../../client";
+import type { PageEntry } from "../../page-entry";
+import { errorWords, num, tokenWords, when } from "../../words";
+import { JobsPage } from "./page";
+import { cancellable, JOB_STATE_WORDS } from "./words";
 
-/** How a job stands, as a badge says it. */
-export const JOB_STATE_WORDS: Readonly<Record<JobState, { words: string; tone?: Tone }>> = {
-  queued: { words: "queued", tone: "accent" },
-  held: { words: "held", tone: "warn" },
-  running: { words: "running", tone: "accent" },
-  asking: { words: "asking whether to go on", tone: "accent" },
-  done: { words: "done", tone: "pos" },
-  failed: { words: "failed", tone: "neg" },
-  cancelled: { words: "cancelled", tone: "warn" },
-  "off-path": { words: "off the path", tone: "warn" },
-  interrupted: { words: "interrupted", tone: "warn" },
-};
-
-/** Whether a Cancel can do anything: the job has not ended (waiting, held, running, or asking). */
-export function cancellable(job: JobView): boolean {
-  return job.state === "queued" || job.state === "held" || job.state === "running" || job.state === "asking";
-}
+export { cancellable, JOB_STATE_WORDS } from "./words";
 
 /** The jobs as a page holds them: the list read last, what could not be read, the Cancel out, and what RPE answered to the last one. */
 export interface JobsShown {
@@ -143,3 +130,5 @@ export function JobsView(props: { shown: JobsShown; everyChat: boolean; onCancel
     </Section>
   );
 }
+
+export const entry: PageEntry = { id: "jobs", title: "Jobs", icon: "briefcase", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 40, render: (route) => <JobsPage chat={route.chat ?? null} at={route.at} /> };
