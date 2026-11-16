@@ -1013,6 +1013,26 @@ export interface LoreOverlays {
   overlays: ({ id: number; entry: string; title: string | null; note: string; turn: number; turnId: string; by: string | null; agent: string | null })[];
 }
 
+/** What applying the setting did: the book as it now stands and whether it was rewritten, or, with the setting off, the book that was taken away. */
+export interface LoreProjectionRefreshed {
+  /** Whether the chat's setting has it on. */
+  on: boolean;
+  /** Lumiverse's id of the chat's book after the press; null where there is none. */
+  book: string | null;
+  /** Whether the book was rewritten (false where it already held what the path says). */
+  written: boolean;
+  /** The book taken away because the setting is off; null where none was. */
+  removed: string | null;
+}
+
+/** Whether a chat has the projection book on, and the book RPE made for it where it has. */
+export interface LoreProjectionState {
+  /** Whether the chat's setting `lore.projection` has it on. */
+  on: boolean;
+  /** Lumiverse's id of the chat's book; null where none is made. */
+  book: string | null;
+}
+
 /** What an agent drafted for his lore: a new entry (the book, title and keys it drafted) or an edit to an entry of his books or his world (the passage as it stands and what would replace it), the turn it came from, and where it stands. */
 export interface LoreProposal {
   /** Its number. */
@@ -1273,6 +1293,28 @@ export interface PageProof {
   proof: string;
 }
 
+/** A perception the player writes, corrects or strikes for a character: with `id` it corrects (or, with `drop`, strikes) that one; without, it writes a new one of the turn named (`turn`), else of the chat's newest. `knows` as an empty list says the character now knows nothing from it. His own change, placed after the newest reply. */
+export interface PerceptionAsk {
+  id?: string;
+  /** The turn the perception is of; left out, the chat's newest. */
+  turn?: TurnId;
+  reach?: "whole" | "part" | "told" | "none";
+  moment?: string;
+  content?: string;
+  missed?: string;
+  knows?: string[];
+  told_by?: string;
+  reliability?: string;
+  drop?: boolean;
+  why?: string;
+}
+
+/** The perception record of a turn or a stretch of turns ending at it, oldest first: for each, who was on stage with how that was read, and which of them have a perception of it. */
+export interface PerceptionRecordReply {
+  chat: string;
+  turns: StageTurn[];
+}
+
 /** A perception, with the turn it is of and that turn's reply. */
 export interface PerceptionRow {
   id: string;
@@ -1293,6 +1335,22 @@ export interface PerceptionRow {
   /** Every write of it on the path, oldest first. */
   writes: EntryWriteRow[];
   of: { turn: TurnId; message: number | null };
+}
+
+/** What writing, correcting or striking a perception did: its id, the knowledge it gave, written now, the knowledge struck with it, the secrets let go, and what could not be done, in the cast's words. */
+export interface PerceptionWrittenReply {
+  /** The perception's id; null where nothing was written. */
+  id: string | null;
+  /** The perception as it stands now at the chat's newest. */
+  entry: PerceptionRow | null;
+  /** The knowledge written with it, by id. */
+  knowledge: string[];
+  /** The knowledge struck with it, by id. */
+  struck: string[];
+  /** The secrets whose holding it let go. */
+  letGo: string[];
+  /** What it left out or could not do, in the cast's words. */
+  notes: string[];
 }
 
 /** Lumiverse's own clipping inside RPE's window: how many of the window's messages the prompt does not hold, and why (its memory's summary stands for them, its message limit, or the preset's context size; null where it could not be told). */
@@ -1781,6 +1839,28 @@ export interface StackPartRow {
 export interface StackReply {
   agent: string;
   parts: StackPartRow[];
+}
+
+/** Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; and the perceptions of that turn it has, by id, struck ones left out: none listed is a gap. */
+export interface StagePerson {
+  name: string;
+  /** The cast's character of that name; null where the cast holds none. */
+  character: string | null;
+  /** Its casting in force at the turn; null: none. */
+  casting: CastRole | null;
+  perceptions: string[];
+}
+
+/** How a turn's stage was read: from the open scene and who the state places in its place (scene), from where the owner's character stands when no scene was recorded (owner), or not recorded at all (none). */
+export type StageReading = "scene" | "owner" | "none";
+
+/** One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none. */
+export interface StageTurn {
+  turn: TurnId;
+  /** That turn's reply on the chat's path, from 0; null where it is on none. */
+  message: number | null;
+  read: StageReading;
+  people: StagePerson[];
 }
 
 /** That RPE answers here, its build, and the address of the Lumiverse it belongs to (null where it is set to none): nothing more, so a client sends a saved sign-in only to its own RPE. */
@@ -2541,6 +2621,16 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** Writes a perception for a character, corrects one or strikes one, as the player's own change placed after the newest reply: it lands while a run goes on and in a branch with no turn of its own, and the Author is told of it at the next turn. `knows` as an empty list says the character now knows nothing from it. */
+  "POST /api/v1/chats/:chat/cast/:character/perceptions": {
+    params: { chat: string; character: string };
+    query: Record<string, never>;
+    body: PerceptionAsk;
+    reply: PerceptionWrittenReply;
+    paged: false;
+    long: false;
+    joined: true;
+  };
   /** Strikes an entry of a character's record, or takes its strike back, as the player's own change on the chat's newest turn; says what it did, in the cast's words. */
   "POST /api/v1/chats/:chat/cast/:character/strike": {
     params: { chat: string; character: string };
@@ -2631,6 +2721,26 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** Whether the chat has the projection book on (the setting `lore.projection`, off unless he turns it on) and the book RPE made for it, which only that chat has attached. */
+  "GET /api/v1/chats/:chat/lore/projection": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: LoreProjectionState;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Applies the chat's `lore.projection` setting now: on, the chat's own book of what the story changed and made is made or rewritten from the path as it stands; off, a book made while it was on is taken away. His own books are never touched. */
+  "POST /api/v1/chats/:chat/lore/projection/refresh": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: LoreProjectionRefreshed;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** A chat's messages as Lumiverse holds them, by a list of ids or by a stretch of its places (`index_in_chat`, a gap where a message was deleted); only the signed-in user's own chats. */
   "GET /api/v1/chats/:chat/messages": {
     params: { chat: string };
@@ -2647,6 +2757,16 @@ export interface ApiRoutes {
     query: { run?: string; from?: number };
     body: undefined;
     reply: TurnReply;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none. */
+  "GET /api/v1/chats/:chat/perceptions": {
+    params: { chat: string };
+    query: { turn?: TurnId; count?: number };
+    body: undefined;
+    reply: PerceptionRecordReply;
     paged: false;
     long: false;
     joined: true;

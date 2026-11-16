@@ -271,6 +271,7 @@ describe("the standalone docs", () => {
       "bootstrap.tokenLimit": ["Bootstrap asks before", 200_000],
       "chat.hiddenReadable": ["Hidden messages readable by agents", false],
       "server.address": ["RPE listens on", "127.0.0.1"],
+      "lumiverse.extension.questionWait": ["How long the extension waits for RPE's answer before a generation", 3],
     };
     const marked = SETTINGS.filter((def) => def.row !== undefined).map((def) => [def.key, def.row, def.default]);
     expect(marked.sort()).toEqual(Object.entries(D1).map(([key, [row, value]]) => [key, row, value]).sort());

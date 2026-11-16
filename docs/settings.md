@@ -119,6 +119,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `store.branchHops` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Branches followed back: How many branches back a chat's messages are followed to the turns they share; past it, the comparison and the log say where it stopped. |
 | `store.placeDepth` | `64` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Places a place inherits from: How many places up the tree a place takes values from; past it, the tree says the chain stops there. |
 | `store.notable` | `3` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Names of note in a reflection: Names of note each reflection of the world lists. |
+| `store.workerFoldAt` | `500` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Changes a fold runs over before it goes to a worker: A fold over more changes than this runs on a worker thread, so a long chat's fold, fresh or after a swipe flipped on an early message, never stalls another chat's turn, the extension's question or a page. |
 | `store.worldsKept` | `8` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World revisions held in memory: Revisions of world documents held in memory once read, the least recently used going first. |
 
 ## The engine's tools
@@ -147,7 +148,6 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `worldState.budget` | `4000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: everything else | World state: everything else: Tokens of the briefing's world state that everything but the horizon shares. |
-| `worldState.charsPerToken` | `4` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Characters per token, for the world state: Characters counted as one token when the world state's budget is measured. |
 | `worldState.dueAhead` | `360` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time ahead listed as due: Minutes of story time ahead that the world state's due section lists. |
 
 ## Lore
@@ -159,6 +159,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lore.titleWords` | `8` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Words that title an entry: Words of its text that title a lore entry with no title of its own. |
 | `lore.search.minTerm` | `3` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Shortest word a lore search matches: A name or word shorter than this matches nothing in a search of the lore; lower it to find a two-letter name. |
 | `lore.search.wordCap` | `3` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most a repeated word counts: A word repeated in an entry counts at most this often in how a search ranks it, so one long entry cannot outrank the rest on one word. |
+| `lore.held.budget` | `1600` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tokens of held secrets a character is given: The most tokens the secrets a character holds may take in the lore it is given as its own, with how it came by each; one that does not fit is left out and the next tried. |
+| `lore.workerCatalogueAt` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Entries a catalogue is made on a worker from: A library of more lore entries than this has its catalogue (each entry's id, title, keys, size, how it activates and revision) made on a worker thread, so a large library never stalls another chat's turn or a page. |
 | `lore.search.stopWords` | `["the","and","for","with","that","this","from","into","onto","have","has","had","was","were","are","you","your","yours","my","mine","our","ours","his","her","hers","their","theirs","them","they","she","him","its","not","but","all","any","can","will","would","could","should","about","then","than","there","here","what","when","where","which","who","whom","how","why","just","very","some","more","most","other","out","over","under","again","also","like","get","got","one","two","too","off","own","same","such","only","each","both","few","nor","yet"]` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Words a lore search ignores: Words that count for nothing in a search of the lore (articles and the like); change the list for a book in another language. |
 | `lore.books` | `["auto"]` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Books the lore reads: `auto` reads every book the chat reads. Otherwise a list of book ids: only those of the chat's books are read as lore, by the index, the lore map's fourth part, the search and every read. |
 | `lore.index.batch` | `20` | RPE-global.yml or a chat's RPE.yml | at its next use | Appendix D.1: Lore indexing, entries per call | Lore indexing, entries per call: Entries handed to one call of a lore indexing run. |
@@ -166,6 +168,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lore.index.batchChars` | `48000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore indexing, characters per call: The most characters of entry text handed to one call of a lore indexing run, so long entries never overrun a small model's window; one entry is handed at least, however long. |
 | `lore.index.page` | `50` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Lore index, entries per page: Entries one page of the lore index on the Lore page holds. |
 | `lore.index.entry` | none (no index entry of his own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Your own lore index entry: A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse. |
+| `lore.proposals.page` | `50` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Lore proposals, rows per page: Rows one page of the proposals' queue and of the record of writes to your lore holds on the Lore page. |
+| `lore.projection` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Projection book: Whether this chat gets a book of its own that carries what the story changed and made (notes on your entries, the people and canon it made) into Lumiverse's own activation, rewritten after scenes and when the path changes; a branch gets its own. Off, no book is made and one made while it was on is taken away. Your own books are never touched. |
 
 ## `secrets`
 
@@ -181,6 +185,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `migration.rows` | `[]` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Rows you give to what the migration finds: A file the migration finds that no row of its table names fails the report by name. A row given here (its path, what becomes of it, and your line saying what it is) is counted, kept in the backup and listed in the report as yours; nothing is carried that has no reader. |
+| `migration.page` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Carried turns per page: How many of a migrated chat's turns a page of its list of carried turns holds, each with what the old engine recorded of it. |
+| `migration.pageMost` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most carried turns a page may ask for: The most carried turns one request for a chat's list may ask for with `limit`; a larger ask is given this many. |
 
 ## Files and notes
 
@@ -327,11 +333,22 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `tools.perCall` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | The most one tool call takes: Messages chat_read gives, entries lore_read reads, hits a search asks each place for, and messages a stretch of the chat an agent is given holds. |
 | `tools.schemaShown` | `600` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Schema shown with a call that does not fit: Characters of a tool's schema shown whole in the answer to a call that does not fit it; a longer schema is left out of that answer. |
 | `tools.fixedTokens` | `8000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Size of an agent's tool list: Tokens an agent's fixed list of tools, as its requests carry it, should stay under; a list over it is marked in the live view and on the Turn page, and still runs. |
+| `tools.commandTimeout` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a command tool may take: Seconds one of your command tools may run when its manifest names no timeout; past them it is stopped and the agent is told. |
+| `tools.httpTimeout` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time an HTTP tool may take: Seconds one of your HTTP tools may wait for its address's answer when its manifest names no timeout; past them the call is given up and the agent is told. |
+| `tools.answerMax` | `1048576` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | The most read of a tool's answer: Bytes read of what a command tool, an HTTP tool or an MCP server answers; past them the answer is cut and the agent is told. |
 | `rules.window` | none (the whole text) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a pattern looks at: Characters a rule's pattern looks at at a time, the newest of what is written and stretches of a tool's arguments or result; none: the whole text. |
 | `rules.patternTime` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a rule's pattern may run: Milliseconds one rule's pattern may run on one text; past it the run is stopped, counts as no match, and is shown on the Turn page. |
 | `rules.interrupt` | `stop` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A stream rule that interrupts: What a stream rule that interrupts does: stop the call where it matched, or remind the agent after it instead. |
 | `rules.interrupts.<connection>` | none (as rules.interrupt says) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A stream rule that interrupts, on a connection: Stop or remind, for one connection whose stopped reply cannot go on cleanly. |
 | `rules.judge` | none (the asking agent's own connection) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The model that answers a `question:` rule | Connection that judges questions: The connection that answers a rule's question, by its name or id, where the rule names none. |
+| `rules.commandTimeout` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time a rule's command may take: Seconds a rule's command may take to answer yes or no; past them it is stopped and the rule is shown as unable to work, never as a no. |
+
+## `mcp`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `mcp.startTimeout` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time an MCP server may take to start: Seconds one of your MCP servers may take to start, or to answer at its address, and list its tools; past them it is stopped and its tools are not offered this time. |
+| `mcp.callTimeout` | `60` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Time an MCP tool may take: Seconds one call of an MCP server's tool may take; past them the call is given up and the agent is told. |
 
 ## What is kept of a turn
 
@@ -364,6 +381,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `sessions.carried` | `["scratch/scene.md"]` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Scratch files a scene keeps: Files of a turn's scratch/ the session's cache keeps as they stand: each turn starts with the newest on its path, and its own version becomes the standing one at its end. Empty: nothing is carried. |
 | `sessions.held` | `8` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sessions kept read: Sessions whose file stays read in memory between their turns, so a turn starts without reading it again; past this many, the one used least recently is let go and read whole when next asked for. |
+| `sessions.page` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sessions a page: Sessions listed in one page of the Sessions page when it asks for no number. |
 
 ## The turn
 
@@ -394,6 +412,17 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `requests.textMost` | `2000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest request: The most characters a request beside his words may hold (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so. |
 
+## The story record
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `story.from` | `lumiverse` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Whose messages are the story: Whose messages the chat's story is made of: as Lumiverse has it (lumiverse), everyone's, or the replies alone (replies). A briefing fact the guidance reads. |
+| `story.newest` | `directive` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | His newest message: With the story made of the replies: whether his newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads. |
+| `story.queryItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Items a story query gives: The most items one story_query answers with; the answer says how many more match. |
+| `story.ahead` | `2` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Messages ahead of a turn: Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and the player's next message), where the story record is measured. |
+| `story.soFar.share` | `0.05` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: share of the window: The share of the Author's window the briefing's story so far may fill. |
+| `story.soFar.floor` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: fewest tokens: The fewest tokens the briefing's story so far may fill, however small the window. |
+
 ## `map`
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
@@ -413,6 +442,19 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `taps.nameMost` | `80` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest name a refusal quotes: The most characters of a name a tap's refusal quotes back; a longer one reads as naming no one. |
 | `taps.thingsMost` | `64` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Things one fix changes: The most things one ✎ things fix changes; past it the tap is answered in words and changes nothing. |
+| `taps.tell.payments` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Payments to others: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.credit` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Credit: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.property` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Property: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.business` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Business: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.staff` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Staff: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.members` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Members: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.structure` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Structure: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.handovers` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Hand-overs and outfits: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.accounts` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Your own accounts: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.investing` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Investing: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.governance` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Governance: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.things` | `false` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Things: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
+| `taps.tell.paymentsFrom` | `0` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Payments told from: A payment to someone else is told to the next turn's Author from this amount, in whole units of the world's money (0: every one). |
 
 ## Bootstrap
 
@@ -435,15 +477,6 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `cast.comesToMindTokens` | `2000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: What comes to mind | What comes to mind: Tokens of a character's memories that come to mind for a scene. |
 | `cast.charsPerToken` | `3.2` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Characters per token, for the cast: Characters counted as one token in the cast's budgets, where the model gives no count of its own. |
 | `cast.recallItems` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Memories one recall brings back: The most memories one recall brings back; the answer says how many more touch the cue. |
-
-## The story record
-
-| Setting | Default | Where | In force | Appendix D.1 | What it does |
-|---|---|---|---|---|---|
-| `story.queryItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Items a story query gives: The most items one story_query answers with; the answer says how many more match. |
-| `story.ahead` | `2` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Messages ahead of a turn: Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and the player's next message), where the story record is measured. |
-| `story.soFar.share` | `0.05` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: share of the window: The share of the Author's window the briefing's story so far may fill. |
-| `story.soFar.floor` | `6000` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The story so far, in the briefing | The story so far: fewest tokens: The fewest tokens the briefing's story so far may fill, however small the window. |
 
 ## Lumiverse
 
