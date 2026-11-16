@@ -20,12 +20,10 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import type { EntityId } from "../../shared/ids";
 import type { EditOp, GmThingsRead, ResultBodies } from "../../shared/protocol";
-import { EDIT_OPS_MAX } from "../../shared/protocol";
-import { TIDY_BOUNDS } from "../../shared/settings";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { GmThingExtras, HistorySource, KeepResult, LoanChoice, MadeInPlay, RestView, TidyFinding, TidyFix, TidyKind, TidyRun } from "../../shared/thing-gm";
 import type { HandoverBasis, ItemOp, Rest, SetKind, Size, SizeClass, Spot } from "../../shared/things";
-import { isSize, makeFieldsOf, SET_KIND_LABEL, SET_KINDS, SET_NAME_MAX, setsOf, SIZE_LABELS, SIZES } from "../../shared/things";
+import { isSize, makeFieldsOf, SET_KIND_LABEL, SET_KINDS, setsOf, SIZE_LABELS, SIZES } from "../../shared/things";
 import type { PartyRef, ThingPage, ThingPicks, ThingRow, ThingType, WhereChoice, WhereStep } from "../../shared/thing-view";
 import { GRANT_WORDS, partyPossessive, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
 import { vehicleSpecsOf, type VehicleClassChoice, type VehicleSpec } from "../../shared/vehicles";
@@ -51,7 +49,7 @@ import { SpecsEditor } from "../things/specs";
 import type { BulkEditor, Editor } from "./editor";
 import { FieldRow, Relations } from "./entity";
 import { thinEntity } from "./parts";
-import { gmAt, gmOpen } from "./gate";
+import { gmOpen } from "./gate";
 import { ActionRow, ActionRows, GmCard, GmPage, usePages } from "./ui";
 
 type ThingsBody = ResultBodies["lre.things"];
@@ -262,10 +260,11 @@ export function TidyCard(props: { finding: TidyFinding; names?: ReadonlyMap<stri
   );
 }
 
-/** Tidy up's run: how many it found, its cards, Show N left (each left one with Bring it back), and how many findings a run shows. */
-export function TidyList(props: { run: TidyRun; names: ReadonlyMap<string, string>; busy: boolean; showLeft: boolean; onFix(fix: TidyFix): void; onLeave(finding: TidyFinding, left: boolean): void; onAsk(finding: TidyFinding): void; onShowLeft(show: boolean): void; onLimit(limit: number): void; onOpen(id: EntityId): void }) {
+/** Tidy up's run: how many it found, its cards, Show N left (each left one with Bring it back), and how many findings a run shows (within `bounds`, the setting's). */
+export function TidyList(props: { run: TidyRun; names: ReadonlyMap<string, string>; busy: boolean; showLeft: boolean; bounds: readonly [number, number]; onFix(fix: TidyFix): void; onLeave(finding: TidyFinding, left: boolean): void; onAsk?(finding: TidyFinding): void; onShowLeft(show: boolean): void; onLimit(limit: number): void; onOpen(id: EntityId): void }) {
   const { run } = props;
-  const [min, max] = TIDY_BOUNDS.findings;
+  const [min, max] = props.bounds;
+  const ask = props.onAsk;
   const title = run.total === 0 ? "Nothing to tidy" : run.findings.length < run.total ? `${run.findings.length} of ${run.total} findings` : run.total === 1 ? "1 finding" : `${run.total} findings`;
   return (
     <div class="lre-stack" data-lre-tidy-run="">
@@ -278,7 +277,7 @@ export function TidyList(props: { run: TidyRun; names: ReadonlyMap<string, strin
           {run.left > 0 ? "Only the findings you left are standing." : "Every thing is where it can be, its owner and size make sense, and nothing looks made twice."}
         </Empty>
       ) : (
-        run.findings.map((f) => <TidyCard key={f.key} finding={f} names={props.names} busy={props.busy} onFix={props.onFix} onLeave={(left) => props.onLeave(f, left)} onAsk={() => props.onAsk(f)} onOpen={props.onOpen} />)
+        run.findings.map((f) => <TidyCard key={f.key} finding={f} names={props.names} busy={props.busy} onFix={props.onFix} onLeave={(left) => props.onLeave(f, left)} {...(ask ? { onAsk: () => ask(f) } : {})} onOpen={props.onOpen} />)
       )}
       {run.left > 0 ? (
         <Button variant="ghost" icon={props.showLeft ? "chevron-up" : "chevron-down"} onClick={() => props.onShowLeft(!props.showLeft)}>
@@ -388,10 +387,7 @@ function TidyPanel(props: { chatId: string; editor: BulkEditor; names: ReadonlyM
       const body = await app.request(gmThingsRequest(chatId, { op: "tidy" }));
       if (body) tidy.set(body);
     });
-  const ask = (f: TidyFinding) =>
-    act(async () => {
-      if (await app.request({ type: "lre.assistant", chatId, op: "send", text: `Tidy up found this: ${f.text}` })) app.ui.update((ui) => gmAt(ui, "core.assistant"));
-    });
+  // Ask the Curator opened Talk, the GM assistant's chat, which this build does not have: a finding is not offered to it.
   const keep = () =>
     act(async () => {
       const things = [...picked].flatMap((k) => (k.startsWith("thing:") ? [k.slice(6)] : []));
@@ -416,7 +412,7 @@ function TidyPanel(props: { chatId: string; editor: BulkEditor; names: ReadonlyM
       ) : !shown ? (
         <Empty icon="hourglass">Looking through the things…</Empty>
       ) : (
-        <TidyList run={shown} names={props.names} busy={busy || editor.busy} showLeft={showLeft} onFix={(fix) => void editor.edit(fix.ops, fix.done)} onLeave={leave} onAsk={ask} onShowLeft={setShowLeft} onLimit={limit} onOpen={props.onOpen} />
+        <TidyList run={shown} names={props.names} busy={busy || editor.busy} showLeft={showLeft} bounds={editor.limits.tidyRun} onFix={(fix) => void editor.edit(fix.ops, fix.done)} onLeave={leave} onShowLeft={setShowLeft} onLimit={limit} onOpen={props.onOpen} />
       )}
       {made.body?.made ? (
         <KeepList
@@ -567,29 +563,28 @@ function biggest(rows: readonly ThingRow[]): SizeClass | null {
  * The bar under GM → Things while it chooses: how many are picked, Select all and Clear, and what to
  * do to every thing picked: Move to…, Put in…, Put away (each to where it rests), Wear or Take off
  * (on whoever has it), Hand to…, Make it theirs…, Let use…, Rename… (one thing), Size… and
- * Remove…, each one GM edit of one op a thing with one Undo, so at most `EDIT_OPS_MAX` at a time.
- * Put away and Wear send at once; the rest open their sheets.
+ * Remove…, one op a thing, sent as edits of at most the setting `engine.editOps` operations each
+ * (`BulkEditor.editAll`), with one Undo for all of it. Put away and Wear send at once; the rest open
+ * their sheets.
  */
-export function ThingsBulkBar(props: { selection: Selection; all: readonly string[]; shown: readonly string[]; rows: readonly ThingRow[]; editor: Editor; onSheet(sheet: BulkSheet): void }) {
+export function ThingsBulkBar(props: { selection: Selection; all: readonly string[]; shown: readonly string[]; rows: readonly ThingRow[]; editor: BulkEditor; onSheet(sheet: BulkSheet): void }) {
   const { rows, editor } = props;
-  const over = rows.length > EDIT_OPS_MAX;
-  const off = editor.busy || rows.length === 0 || over;
+  const off = editor.busy || rows.length === 0;
   const away = bulkEdit({ do: "away" }, rows);
   const wear = bulkEdit({ do: "wear" }, rows);
   const takeOff = allWorn(rows);
   return (
     <SelectBar label="Things picked" selection={props.selection} all={props.all} shown={props.shown}>
-      {over ? <span class="lre-small lre-muted" data-lre-bulk-over="">{`One edit holds at most ${EDIT_OPS_MAX} changes: pick fewer.`}</span> : null}
       <Button size="sm" icon="pin" disabled={off} onClick={() => props.onSheet("move")}>
         Move to…
       </Button>
       <Button size="sm" icon="box" disabled={off} onClick={() => props.onSheet("put")}>
         Put in…
       </Button>
-      <Button size="sm" icon="home" disabled={off || away === null} title={away === null && rows.length > 0 ? "Each is where it is kept already, or kept nowhere" : undefined} onClick={() => away && void editor.edit(away.ops, away.done)}>
+      <Button size="sm" icon="home" disabled={off || away === null} title={away === null && rows.length > 0 ? "Each is where it is kept already, or kept nowhere" : undefined} onClick={() => away && void editor.editAll(away.ops, () => away.done)}>
         Put away
       </Button>
-      <Button size="sm" icon={takeOff ? "close" : "shield"} disabled={off || wear === null} title={wear === null && rows.length > 0 ? "None of them takes a slot and is with someone to wear it" : undefined} onClick={() => wear && void editor.edit(wear.ops, wear.done)}>
+      <Button size="sm" icon={takeOff ? "close" : "shield"} disabled={off || wear === null} title={wear === null && rows.length > 0 ? "None of them takes a slot and is with someone to wear it" : undefined} onClick={() => wear && void editor.editAll(wear.ops, () => wear.done)}>
         {takeOff ? "Take off" : "Wear"}
       </Button>
       <Button size="sm" icon="user-plus" disabled={off} onClick={() => props.onSheet("hand")}>
@@ -828,15 +823,15 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const chosenIds = new Set(chosen.map((r) => r.id));
   const loans = bulkLoans(clock);
   const closeBulk = () => setBulk(null);
-  /** One bulk change as one GM edit; its sheet closes once it applied. */
+  /** One bulk change as edits of at most `engine.editOps` operations each, with one Undo; its sheet closes once any applied. */
   const change = (next: BulkChange): void => {
     const edit = bulkEdit(next, chosen);
     if (!edit) {
       app.toast("Nothing to change: each one is so already.", "info");
       return closeBulk();
     }
-    void editor.edit(edit.ops, edit.done).then((ok) => {
-      if (!ok) return;
+    void editor.editAll(edit.ops, () => edit.done).then(({ applied }) => {
+      if (applied === 0) return;
       closeBulk();
       if (next.do === "remove") selection.set([]);
     });
@@ -1543,7 +1538,7 @@ function SaveSetForm(props: { person: GmEntity; editor: Editor }) {
         <label class="label" for={nameId}>
           Name
         </label>
-        <input id={nameId} class="lre-input" value={name} maxLength={SET_NAME_MAX} placeholder={kind === "outfit" ? "Work clothes" : "Range day"} onInput={(event) => setName(event.currentTarget.value)} />
+        <input id={nameId} class="lre-input" value={name} placeholder={kind === "outfit" ? "Work clothes" : "Range day"} onInput={(event) => setName(event.currentTarget.value)} />
         <span class="lre-field-help">{kind === "outfit" ? `Keeps what ${person.name} wears now.` : `Keeps what ${person.name} has ready: in hand, holstered, sheathed, and their armor.`}</span>
       </div>
       <Button variant="primary" icon="check" disabled={editor.busy || trimmed === ""} onClick={() => void editor.edit([item({ do: "set_save", who: person.id, name: trimmed, kind })], done).then((ok) => ok && setName(""))}>

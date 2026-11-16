@@ -7,7 +7,7 @@
 
 import { useId, useState } from "preact/hooks";
 import type { ChatId } from "../../../shared/ids";
-import { SET_KIND_LABEL, SET_KINDS, SET_NAME_MAX, type SetKind } from "../../../shared/things";
+import { SET_KIND_LABEL, SET_KINDS, type SetKind } from "../../../shared/things";
 import { FormSheet } from "../../../frontend/build/form-kit";
 import { Badge, Button, Empty, Section, Seg } from "../../../frontend/components";
 import type { Req } from "../../../frontend/requests";
@@ -106,7 +106,7 @@ export function SetsSheet(props: { chatId: ChatId; view: GearView; atOnce: AtOnc
               <label class="label" for={nameId}>
                 Name
               </label>
-              <input id={nameId} class="lre-input" value={name} maxLength={SET_NAME_MAX} placeholder={kind === "outfit" ? "Work clothes" : "Range day"} onInput={(event) => setName(event.currentTarget.value)} />
+              <input id={nameId} class="lre-input" value={name} placeholder={kind === "outfit" ? "Work clothes" : "Range day"} onInput={(event) => setName(event.currentTarget.value)} />
               <span class="lre-field-help">{kind === "outfit" ? "Keeps what you wear now." : "Keeps what you have ready: in hand, holstered, sheathed, and your armor."}</span>
             </div>
             <Button variant="primary" icon="check" disabled={atOnce.busy || trimmed === ""} onClick={() => atOnce.send(setSaveRequest(props.chatId, trimmed, kind), `Saved ${trimmed}.`, () => setName(""))}>

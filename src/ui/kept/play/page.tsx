@@ -26,6 +26,8 @@ import { keptApp, type ToastSettings } from "../app";
 import type { KeptHost } from "../host";
 import { Said } from "../said";
 import { PLAY_CSS } from "./styles";
+// GM mode's things browser sets itself in World's slot when its module loads: the pages that show Play are the ones that load it.
+import "../things";
 
 export interface PlayMount {
   client: Pick<RpeClient, "call" | "follow">;

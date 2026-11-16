@@ -8,7 +8,6 @@
 
 import { useMemo } from "preact/hooks";
 import type { ChatId, EntityId, PlaceId } from "../../shared/ids";
-import { FIX_THINGS_MAX } from "../../shared/protocol";
 import type { ItemFix, SizeClass } from "../../shared/things";
 import { SIZES } from "../../shared/things";
 import type { WhereChoice } from "../../shared/thing-view";
@@ -78,14 +77,15 @@ export function moveChoices(choices: readonly WhereChoice[], things: readonly Mo
 /**
  * Move to…'s sheet. `kept` offers Where it's kept (in words, for one thing); `blocked` holds back a
  * holder already full; `atOnce` sends the request, its notice and Undo the caller's; `store` keeps
- * the chat's recent targets (the page's storage, by default).
+ * the chat's recent targets (the page's storage, by default). `most`, where given, is how many things
+ * one move takes (`taps.thingsMost`); without it RPE answers a move past its setting in words.
  */
-export function MoveSheet(props: { chatId: ChatId; things: readonly MoveThing[]; choices: readonly WhereChoice[]; at: MoveAt; kept?: string | null; blocked?(choice: WhereChoice): string | null; atOnce: AtOnce; title?: string; store?: RecentStore; onClose(): void; onMoved?(): void }) {
+export function MoveSheet(props: { chatId: ChatId; things: readonly MoveThing[]; choices: readonly WhereChoice[]; at: MoveAt; kept?: string | null; blocked?(choice: WhereChoice): string | null; atOnce: AtOnce; title?: string; store?: RecentStore; most?: number; onClose(): void; onMoved?(): void }) {
   const store = props.store ?? pageStore;
   const choices = useMemo(() => moveChoices(props.choices, props.things), [props.choices, props.things]);
   const suggestions = useMemo(() => moveSuggestions(choices, { recent: recentMoves(store, props.chatId), ...props.at }), [choices, props.chatId, props.at]);
   const { names } = thingNames(props.things);
-  const over = props.things.length > FIX_THINGS_MAX;
+  const over = props.most !== undefined && props.things.length > props.most;
   const extras: WhereExtra[] = props.kept === undefined ? [] : [{ value: KEPT_CHOICE, label: "Where it's kept", help: props.kept ?? (props.things.length === 1 ? "Back where it belongs" : "Each back where it belongs") }];
   const pick = (next: WherePick | null): void => {
     if (next === null || over || props.atOnce.busy) return;
@@ -95,5 +95,5 @@ export function MoveSheet(props: { chatId: ChatId; things: readonly MoveThing[];
       props.onClose();
     });
   };
-  return <WhereSheet title={props.title ?? (over ? `Pick at most ${FIX_THINGS_MAX}` : `Move ${names} to`)} choices={choices} value={null} size={biggestSize(props.things)} blocked={props.blocked} extras={extras} suggestions={suggestions} empty="Pick where" onClose={props.onClose} onPick={pick} />;
+  return <WhereSheet title={props.title ?? (over ? `Pick at most ${props.most}` : `Move ${names} to`)} choices={choices} value={null} size={biggestSize(props.things)} blocked={props.blocked} extras={extras} suggestions={suggestions} empty="Pick where" onClose={props.onClose} onPick={pick} />;
 }

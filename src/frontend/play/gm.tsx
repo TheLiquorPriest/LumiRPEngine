@@ -17,6 +17,8 @@ import type { StateView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY } from "../../shared/world";
 import { useApp, useUi } from "../app";
 import { sendInChunks } from "../batch";
+import { EDIT_OPS_MAX, FIX_THINGS_MAX } from "../../shared/protocol";
+import { TIDY_BOUNDS } from "../../shared/settings";
 import { Banner, Button, Empty, useBusy } from "../components";
 import { Gate, TruthBar } from "../gm/curtain";
 import type { BulkEditor, EditNotice } from "../gm/editor";
@@ -31,6 +33,9 @@ import { WorldSection } from "../gm/world";
 import type { PanelProps } from "../registry";
 import { editRequest } from "../requests";
 import { QUEUED_TOAST, toastQueued } from "../queued";
+
+/** GM mode's own bounds, today's fixed ones: the World page's browser reads RPE's settings instead (`ui/kept/things.tsx`). */
+const GM_LIMITS = { editOps: EDIT_OPS_MAX, thingsMost: FIX_THINGS_MAX, tidyRun: TIDY_BOUNDS.findings } as const;
 
 /**
  * What the GM view is loaded again on when the chat has no GM key (`StateView.gmKey`): the chat
@@ -103,7 +108,8 @@ export function GmPanel(props: PanelProps) {
         reloadKey: page.reloadKey,
         need: page.need,
         edit: (ops, done) => commit(async (send) => ({ applied: (await send(ops)) ? 1 : 0, of: 1 }), done === undefined ? undefined : () => done).then((outcome) => outcome.applied === 1),
-        editAll: (ops, done) => commit((send) => sendInChunks(ops, send), done),
+        editAll: (ops, done) => commit((send) => sendInChunks(ops, send, GM_LIMITS.editOps), done),
+        limits: GM_LIMITS,
       }
     : null;
   // A notice shows only while its Undo still reaches what it made: the next reply, or an Undo in the chat, retires it.

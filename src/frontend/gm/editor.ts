@@ -28,11 +28,13 @@ export interface Editor {
  */
 export interface BulkEditor extends Editor {
   /**
-   * Sends a batch as edits of at most `EDIT_OPS_MAX` operations, in order, stopping at the first one
+   * Sends a batch as edits of at most `limits.editOps` operations, in order, stopping at the first one
    * refused; then the GM view says what applied, `done` with how many operations did, with one Undo
    * for all of it.
    */
   editAll(ops: readonly EditOp[], done: (count: number) => string): Promise<{ applied: number; of: number }>;
+  /** The bounds the page's controls hold to, as RPE's settings give them: the operations in one edit (`engine.editOps`), the things one move takes (`taps.thingsMost`), and how many findings a Tidy up run may show (`things.tidyRunMost`'s least and most). */
+  limits: { editOps: number; thingsMost: number; tidyRun: readonly [number, number] };
   /** The chat's GM key as the view was last loaded at (`GmSectionProps.reloadKey`): what a page reads besides `gm` (a thing, a character) it reads again on this, not on `gm`. */
   reloadKey: string;
   /**

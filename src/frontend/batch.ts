@@ -45,11 +45,12 @@ export function chunks<T>(items: readonly T[], size = EDIT_OPS_MAX): T[][] {
 }
 
 /**
- * Sends a batch in chunks, in order, each through `send` (one `lre.edit`, or one draft write); stops
- * at the first one refused, so what applied is the chunks before it. Resolves how many applied.
+ * Sends a batch in chunks of at most `size`, in order, each through `send` (one `lre.edit`, or one
+ * draft write); stops at the first one refused, so what applied is the chunks before it. Resolves how
+ * many applied.
  */
-export async function sendInChunks<T>(items: readonly T[], send: (chunk: T[]) => Promise<boolean>): Promise<{ applied: number; of: number }> {
-  const all = chunks(items);
+export async function sendInChunks<T>(items: readonly T[], send: (chunk: T[]) => Promise<boolean>, size?: number): Promise<{ applied: number; of: number }> {
+  const all = chunks(items, size);
   let applied = 0;
   for (const chunk of all) {
     if (!(await send(chunk))) break;

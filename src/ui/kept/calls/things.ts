@@ -18,6 +18,15 @@ function isChats(request: RequestBody): request is Things & { scope: "gm" | "pla
   return request.type === "lre.things" && (request.scope === "gm" || request.scope === "play");
 }
 
+/** Tidy up's own control of how many findings a run shows: today's user setting `tidy.findings`, now RPE's global `things.tidyRunMost`. */
+function runMostOf(request: RequestBody): number | null {
+  if (request.type !== "lre.settings.set") return null;
+  const { patch } = request;
+  const tidy = patch.tidy;
+  if (Object.keys(patch).length !== 1 || typeof tidy !== "object" || tidy === null || Array.isArray(tidy) || Object.keys(tidy).length !== 1) return null;
+  return typeof tidy.findings === "number" ? tidy.findings : null;
+}
+
 /** The world's draft as Build holds it now: its parts the readers take, and what a write names of it. */
 async function draftOf(ctx: CallContext): Promise<{ world: string; draft: { entities: unknown; places: unknown }; base: string | null; version: number }> {
   const world = ctx.world();
@@ -28,8 +37,13 @@ async function draftOf(ctx: CallContext): Promise<{ world: string; draft: { enti
 
 export const calls: CallFile = {
   name: "things",
-  takes: isChats,
+  takes: (request) => isChats(request) || runMostOf(request) !== null,
   async serve(request, ctx): Promise<ServedBody> {
+    const runMost = runMostOf(request);
+    if (runMost !== null) {
+      await ctx.client.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "things.tidyRunMost", value: runMost } });
+      return {} as ServedBody;
+    }
     if (!isChats(request)) throw new Refusal("internal", "The things calls do not take that request.");
     const chat = request.chatId;
     const { client } = ctx;
