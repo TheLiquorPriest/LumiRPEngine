@@ -1274,6 +1274,22 @@ export interface ModelPictures {
   from: "user" | "pi" | "connection";
 }
 
+/** What no longer applies at the chat's head: the earlier reply that shows another swipe than its later turns were made on (null where none does), and each change that stopped applying. */
+export interface NotAppliedReply {
+  reply: { turn: string; n: number } | null;
+  items: NotAppliedShown[];
+}
+
+/** A change that no longer applies on the swipes now showing: its id, its turn and that turn's number, its operation, and the codes of why. */
+export interface NotAppliedShown {
+  change: string;
+  turn: string;
+  n: number;
+  op: string;
+  words: string;
+  reason: string;
+}
+
 /** A note file of a chat: its path in the chat's view, its size now (0 for one no longer there), and how many times agents wrote it in turns. */
 export interface NoteRow {
   path: string;
@@ -2564,6 +2580,43 @@ export interface Usage {
   reasoning?: number;
 }
 
+/** Where a job the owner started for no chat runs: the user and the job's own session, at the user's level; no chat and no turn. */
+export interface UserSessionScope {
+  user: string;
+  session: string;
+  chat?: void;
+  turn?: void;
+}
+
+/** One change that wrote a value, as the World page lists a value's history: its id, the turn it is of or stands just before and that turn's number, when it was recorded, its lane and the area holding what it wrote, its operation and values, who made it, how exact, how sure and from where, its report codes, what it left there, whether it wrote the typed value or a fact beside it, and for a fact the turn of the later exact record that settled it. */
+export interface ValueChangeShown {
+  id: string;
+  turn: string;
+  n: number;
+  at: number;
+  lane: "story" | "engine";
+  area: string;
+  op: string;
+  words: string;
+  values: { [key: string]: JsonValue };
+  by: string | null;
+  precision: "exact" | "approximate" | "vague" | "unknown" | null;
+  standing: "established" | "proposed" | "assumed" | null;
+  source: "prose" | "lore" | "author" | "gm" | "character" | "player" | "import" | "default" | "invented" | null;
+  reports: string[];
+  value: string | null;
+  kind: "value" | "fact";
+  settledBy: string | null;
+}
+
+/** The history of one value: the level and part asked for, a page of the changes that wrote it, newest first, and where the next page starts (null at the end). */
+export interface ValueHistoryReply {
+  at: string;
+  part: string;
+  items: ValueChangeShown[];
+  next: string | null;
+}
+
 /** One thing the last run left waiting on the user, by what it is. */
 export type WaitingOnUser = { kind: "guidance"; path: string } | { kind: "connection"; setting: string; connection: string } | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean } | { kind: "own"; agents: number; skills: number; texts: number } | { kind: "filing"; chat: string; characters: number; notes: boolean } | { kind: "world"; world: string; name: string | null };
 
@@ -3004,6 +3057,26 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
+  };
+  /** The history of one value by turn: every change along the chat's path, at its head or up to a turn, that wrote the part asked for of the level asked for (a field, a relation, a balance as `posted`, a quest's stage as `stage` of `track:<id>`, a fact's key, a world value, an area item's part), newest first, a page at a time; each with its turn, lane, who made it, its marks and reports, and for a fact the later exact record that settled it. */
+  "GET /api/v1/chats/:chat/state/history": {
+    params: { chat: string };
+    query: { at: string; part: string; turn?: TurnId; limit?: number; cursor?: string };
+    body: undefined;
+    reply: ValueHistoryReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** What no longer applies at the chat's head on the swipes now showing: each change that stopped applying, with its turn and the codes of why, and the earlier reply whose swipe the later turns were not made on. */
+  "GET /api/v1/chats/:chat/state/not-applied": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: NotAppliedReply;
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** A level's typed systems, at the chat's head or as it stood at a turn: each game system that keeps something there as that system keeps it (accounts with their postings and balance, a thing's four facts, a group's positions and ranks, the day, the sky, a vehicle's driver, a sheet), named as the source; what the player could not see is marked secret. */
   "GET /api/v1/chats/:chat/state/systems": {

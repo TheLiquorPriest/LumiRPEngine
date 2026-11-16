@@ -360,6 +360,32 @@ What a turn's time brought due, each thing with what the turn recorded for it.
 | Reply | [`DueReply`](#duereply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `GET /api/v1/chats/:chat/state/history`
+
+The history of one value by turn: every change along the chat's path, at its head or up to a turn, that wrote the part asked for of the level asked for (a field, a relation, a balance as `posted`, a quest's stage as `stage` of `track:<id>`, a fact's key, a world value, an area item's part), newest first, a page at a time; each with its turn, lane, who made it, its marks and reports, and for a fact the later exact record that settled it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `at`: `string`, The level, by its tree ref (`entity:<id>`, `place:<id>`, `world`, `track:<id>`, an area's own ref)<br>`part`: `string`, The part of it: a field's or relation's name, `posted`, `stage`, a fact's key, a world value's key, an area item's part<br>`turn` (may be left out): [`TurnId`](#turnid), Read the path up to this turn; the chat's head when left out<br>`limit` (may be left out): `number`, The most changes on the page; all of them when left out<br>`cursor` (may be left out): `string`, Where the page starts: the `next` of the page before |
+| Body | none |
+| Reply | [`ValueHistoryReply`](#valuehistoryreply) |
+
+### `GET /api/v1/chats/:chat/state/not-applied`
+
+What no longer applies at the chat's head on the swipes now showing: each change that stopped applying, with its turn and the codes of why, and the earlier reply whose swipe the later turns were not made on.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`NotAppliedReply`](#notappliedreply) |
+
 ### `GET /api/v1/chats/:chat/state/systems`
 
 A level's typed systems, at the chat's head or as it stood at a turn: each game system that keeps something there as that system keeps it (accounts with their postings and balance, a thing's four facts, a group's positions and ranks, the day, the sky, a vehicle's driver, a sheet), named as the source; what the player could not see is marked secret.
@@ -3782,6 +3808,32 @@ export interface ModelPictures {
 }
 ```
 
+### `NotAppliedReply`
+
+What no longer applies at the chat's head: the earlier reply that shows another swipe than its later turns were made on (null where none does), and each change that stopped applying.
+
+```ts
+export interface NotAppliedReply {
+  reply: { turn: string; n: number } | null;
+  items: NotAppliedShown[];
+}
+```
+
+### `NotAppliedShown`
+
+A change that no longer applies on the swipes now showing: its id, its turn and that turn's number, its operation, and the codes of why.
+
+```ts
+export interface NotAppliedShown {
+  change: string;
+  turn: string;
+  n: number;
+  op: string;
+  words: string;
+  reason: string;
+}
+```
+
 ### `NoteRow`
 
 A note file of a chat: its path in the chat's view, its size now (0 for one no longer there), and how many times agents wrote it in turns.
@@ -5724,6 +5776,58 @@ export interface Usage {
   cacheWrite: number;
   output: number;
   reasoning?: number;
+}
+```
+
+### `UserSessionScope`
+
+Where a job the owner started for no chat runs: the user and the job's own session, at the user's level; no chat and no turn.
+
+```ts
+export interface UserSessionScope {
+  user: string;
+  session: string;
+  chat?: void;
+  turn?: void;
+}
+```
+
+### `ValueChangeShown`
+
+One change that wrote a value, as the World page lists a value's history: its id, the turn it is of or stands just before and that turn's number, when it was recorded, its lane and the area holding what it wrote, its operation and values, who made it, how exact, how sure and from where, its report codes, what it left there, whether it wrote the typed value or a fact beside it, and for a fact the turn of the later exact record that settled it.
+
+```ts
+export interface ValueChangeShown {
+  id: string;
+  turn: string;
+  n: number;
+  at: number;
+  lane: "story" | "engine";
+  area: string;
+  op: string;
+  words: string;
+  values: { [key: string]: JsonValue };
+  by: string | null;
+  precision: "exact" | "approximate" | "vague" | "unknown" | null;
+  standing: "established" | "proposed" | "assumed" | null;
+  source: "prose" | "lore" | "author" | "gm" | "character" | "player" | "import" | "default" | "invented" | null;
+  reports: string[];
+  value: string | null;
+  kind: "value" | "fact";
+  settledBy: string | null;
+}
+```
+
+### `ValueHistoryReply`
+
+The history of one value: the level and part asked for, a page of the changes that wrote it, newest first, and where the next page starts (null at the end).
+
+```ts
+export interface ValueHistoryReply {
+  at: string;
+  part: string;
+  items: ValueChangeShown[];
+  next: string | null;
 }
 ```
 
