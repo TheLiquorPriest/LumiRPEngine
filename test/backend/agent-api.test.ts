@@ -15,10 +15,11 @@ import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world"
 import { mapTemplate } from "../../src/shared/maps";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { createSpindleHost } from "../../src/backend/spindle-host";
-import { DOC_DEPTH_CAP } from "../../src/worlds/worlds";
+import { WORLD_LIMIT_DEFAULTS } from "../../src/worlds/limits";
 import { Rig } from "../support/rig";
 import { testWorld } from "../support/test-pack";
 
+const DOC_DEPTH_CAP = WORLD_LIMIT_DEFAULTS.depth;
 const place = (id: string, name = id): JsonObject => ({ id, name, fields: {} });
 
 /** The rig's editor on one world, from `session` when named. */

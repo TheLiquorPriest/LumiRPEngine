@@ -1,15 +1,18 @@
-// World storage and revisions (DESIGN §4.1, ARCHITECTURE §3.1).
+// World storage and revisions (DESIGN §4.1, ARCHITECTURE §3.1; PlanChatUI-B1).
 //
-//   userStorage/worlds/<worldId>/index.json      WorldIndex
-//   userStorage/worlds/<worldId>/rev/<rev>.json  one immutable document per revision (rev = hashJson)
-//   userStorage/worlds/<worldId>/draft.json      the editors' working copy: { base, doc, version }
-//   userStorage/worlds/<worldId>/history.json    how each revision became head: { v: 1, notes }
+// A world is four kinds of file, as today's world store has always named them:
 //
-// Writes go temp-then-move. Revisions read are cached in a bounded LRU; an open chat also pins the
-// revisions its ledger references, so the ledger's synchronous `worlds(revision)` lookup never misses.
-// Requests are handled concurrently, so every write of one world (its draft, a commit, an install,
-// its index, its deletion) waits for the one before it (DESIGN §23): two writers that read the same
-// draft would otherwise each write it back without the other's change.
+//   index.json      WorldIndex
+//   rev/<rev>.json  one immutable document per revision (rev = hashJson)
+//   draft.json      the editors' working copy: { base, doc, version }
+//   history.json    how each revision became head: { v: 1, notes }
+//
+// Where they are kept is the backing's (`backing.ts`): his worlds are kept once, in the store's own table, each draft write made on
+// the version it was read at; a folder of files by path is how today's side kept them, and the migration still reads that way.
+// Revisions read are cached in a bounded LRU; an open chat also pins the revisions its ledger references, so the ledger's
+// synchronous `worlds(revision)` lookup never misses. Requests are handled concurrently, so every write of one world (its draft,
+// a commit, an install, its index, its deletion) waits for the one before it (DESIGN §23): two writers that read the same draft
+// would otherwise each write it back without the other's change.
 
 import { hashJson } from "../shared/hash";
 import type { RevisionId, UserId, WorldId } from "../shared/ids";
@@ -33,7 +36,8 @@ import type { Registry } from "../engine/registry-impl";
 import { shippedVersion } from "../engine/table-updates";
 import type { StarterTable } from "../shared/tables";
 import type { HostPort } from "../shared/host";
-import { readStoredJson } from "./stored-json";
+import { hostBacking, type WorldBacking } from "./backing";
+import { WORLD_LIMIT_DEFAULTS, type WorldLimits } from "./limits";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
 
 interface Draft {
@@ -61,25 +65,6 @@ export type HeadSource = RevisionNote["source"];
 
 const HEAD_SOURCES: Record<HeadSource, true> = { create: true, build: true, agent: true, import: true };
 
-/** The most operations one patch may carry. */
-export const PATCH_OPS_CAP = 500;
-
-/**
- * The most one patch may bring in, in characters of JSON: the values it adds or replaces and what
- * it copies. It is the host's 4 MiB frame, the most one request can carry, so a patch whose copies
- * double the draft over and over can't grow a world faster than a write that sends it whole.
- */
-export const PATCH_SIZE_CAP = 4 * 1024 * 1024;
-
-/**
- * How deep a world document may nest: well inside the 128 levels `hashJson` hashes through at
- * commit, with room for the export file that wraps it.
- */
-export const DOC_DEPTH_CAP = 64;
-
-/** The longest commit note the history keeps, in characters. */
-export const NOTE_CAP = 200;
-
 /**
  * What a patch may not change: the world's identity and format, the engine version that wrote it,
  * the pins (the store keeps the table pins itself) and the suppressed sources.
@@ -101,6 +86,20 @@ export class WorldError extends Error {
 }
 
 /**
+ * A write made on a draft version that is not the draft's now (DESIGN §23): nothing was written, and the draft as it now stands
+ * is the answer, so the writer can read what moved and write again.
+ */
+export class DraftMoved extends WorldError {
+  constructor(
+    message: string,
+    readonly current: EditorResult,
+  ) {
+    super("conflict", message);
+    this.name = "DraftMoved";
+  }
+}
+
+/**
  * Each lore entry of `doc` that is a copy of a World Info entry (`source.kind: "book"`, which only an
  * earlier build wrote), by id: the entry it copies, as `bookId/entryId`. LRE reads World Info live, so
  * an edit may keep or remove such a copy but never make one (`apply`).
@@ -112,17 +111,6 @@ function bookCopies(doc: WorldDoc): Map<string, string> {
       return source.kind === "book" ? [[id, `${source.bookId}/${source.entryId}`] as const] : [];
     }),
   );
-}
-
-/** A world's storage directory; ids that could escape it are refused. */
-function worldDir(worldId: WorldId): string {
-  if (!pathSafe(worldId)) throw new WorldError("bad_request", "invalid world id");
-  return `worlds/${worldId}/`;
-}
-
-function revisionFile(worldId: WorldId, revision: RevisionId): string {
-  if (!pathSafe(revision)) throw new WorldError("bad_request", "invalid revision");
-  return `${worldDir(worldId)}rev/${revision}.json`;
 }
 
 /** Every world collection the editors write (a stored or requested name is checked against it). */
@@ -148,16 +136,24 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   routines: true,
 };
 
-/**
- * Loaded revisions kept across chats, least recently used first. A revision is several MB once parsed
- * (a 1.7 MB world is ~7 MB), so few are kept; an open chat pins the ones its ledger references, so
- * eviction never breaks a fold, and a revision evicted while a chat still pins it is found again
- * (`alive`) rather than read a second time. Each revision read holds the parts it has alike with the
- * world's revision read before it as that one's own (`shareAlike`), so a chat Upgraded through many
- * revisions pins about one world's worth, not one for each.
- */
-export const REVISION_CACHE_CAP = 8;
+/** A world id that names a world and could reach no other (a folder, a row): else the request is refused. */
+function checkWorld(world: WorldId): WorldId {
+  if (!pathSafe(world)) throw new WorldError("bad_request", "invalid world id");
+  return world;
+}
 
+function checkRevision(revision: RevisionId): RevisionId {
+  if (!pathSafe(revision)) throw new WorldError("bad_request", "invalid revision");
+  return revision;
+}
+
+/**
+ * Loaded revisions are kept across chats, least recently used first (`worlds.revisionsHeld` of them, 8 by default). A revision is
+ * several MB once parsed (a 1.7 MB world is ~7 MB), so few are kept; an open chat pins the ones its ledger references, so
+ * eviction never breaks a fold, and a revision evicted while a chat still pins it is found again (`alive`) rather than read a
+ * second time. Each revision read holds the parts it has alike with the world's revision read before it as that one's own
+ * (`shareAlike`), so a chat Upgraded through many revisions pins about one world's worth, not one for each.
+ */
 export class WorldStore {
   /**
    * Loaded revisions by `user \0 world \0 revision` (a bare revision key would let one
@@ -169,21 +165,29 @@ export class WorldStore {
   /** The revision of each world read last, by `user \0 world`, whose parts the next one read shares. */
   private readonly lastRead = new Map<string, WeakRef<WorldDoc>>();
 
+  private readonly backing: WorldBacking;
+  /** How many revisions are held loaded, as the limits last read said. */
+  private cap = WORLD_LIMIT_DEFAULTS.revisionsHeld;
+
+  /**
+   * `host` is where the worlds are kept: a backing (the store's table, `storeBacking`), or the host's storage as today's side keeps
+   * them, which the migration reads. `limits` is read at each write: the settings `worlds.*`, today's values by default.
+   */
   constructor(
-    private readonly host: HostPort,
+    host: HostPort | WorldBacking,
     private readonly registry: Registry,
     /** The starter worlds' own tables, whose newer versions Data updates offers a world made from one. */
     private readonly starters: readonly StarterTable[] = [],
-  ) {}
-
-  private async readJson(path: string, userId: UserId): Promise<unknown> {
-    const text = await this.host.storage.read(path, userId);
-    return text === null ? null : (JSON.parse(text) as unknown);
+    private readonly limits: () => WorldLimits | Promise<WorldLimits> = () => WORLD_LIMIT_DEFAULTS,
+  ) {
+    this.backing = "storage" in host ? hostBacking(host) : host;
   }
 
-  private async writeJson(path: string, value: unknown, userId: UserId): Promise<void> {
-    await this.host.storage.write(`${path}.tmp`, JSON.stringify(value), userId);
-    await this.host.storage.move(`${path}.tmp`, path, userId);
+  /** The limits in force now; the revisions held follow them. */
+  private async lim(): Promise<WorldLimits> {
+    const now = await this.limits();
+    this.cap = now.revisionsHeld;
+    return now;
   }
 
   /** Runs `work` once the world's earlier writes have settled, whatever became of them. */
@@ -215,7 +219,7 @@ export class WorldStore {
   private remember(key: string, doc: WorldDoc): void {
     if (this.revisions.has(key)) return;
     this.revisions.set(key, doc);
-    while (this.revisions.size > REVISION_CACHE_CAP) {
+    while (this.revisions.size > this.cap) {
       const oldest = this.revisions.entries().next();
       if (oldest.done) break;
       const [evicted, held] = oldest.value;
@@ -243,7 +247,8 @@ export class WorldStore {
   }
 
   async index(worldId: WorldId, userId: UserId): Promise<WorldIndex | null> {
-    const raw = await this.readJson(`${worldDir(worldId)}index.json`, userId);
+    const text = await this.backing.read(userId, checkWorld(worldId), "index.json");
+    const raw = text === null ? null : (JSON.parse(text) as unknown);
     if (!isRecord(raw) || typeof raw.head !== "string") return null;
     const draftVersion = typeof raw.draftVersion === "number" && Number.isSafeInteger(raw.draftVersion) && raw.draftVersion > 0 ? raw.draftVersion : 0;
     return {
@@ -257,11 +262,7 @@ export class WorldStore {
   }
 
   async list(userId: UserId): Promise<WorldIndex[]> {
-    const ids = new Set<string>();
-    for (const path of await this.host.storage.list("worlds/", userId)) {
-      const match = /^worlds\/([^/]+)\/index\.json$/.exec(path);
-      if (match?.[1]) ids.add(match[1]);
-    }
+    const ids = await this.backing.worlds(userId);
     const out: WorldIndex[] = [];
     for (const id of ids) {
       const index = await this.index(id, userId);
@@ -272,14 +273,28 @@ export class WorldStore {
 
   /** How each of the world's revisions became head, oldest first (DESIGN §23); kept beside the index, so reading the index never reads it. */
   async history(worldId: WorldId, userId: UserId): Promise<RevisionNote[]> {
-    const raw = await readStoredJson(this.host, `${worldDir(worldId)}history.json`, userId, `world ${worldId} history`, (v) => isRecord(v) && Array.isArray(v.notes));
-    return isRecord(raw) && Array.isArray(raw.notes) ? raw.notes.filter(isRevisionNote) : [];
+    const text = await this.backing.read(userId, checkWorld(worldId), "history.json");
+    if (text === null) return [];
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      await this.backing.setAside(userId, worldId, "history.json", `world ${worldId} history`, "unreadable");
+      return [];
+    }
+    if (!isRecord(raw) || !Array.isArray(raw.notes)) {
+      await this.backing.setAside(userId, worldId, "history.json", `world ${worldId} history`, "malformed");
+      return [];
+    }
+    return raw.notes.filter(isRevisionNote);
   }
 
   private async revision(worldId: WorldId, revision: RevisionId, userId: UserId): Promise<WorldDoc> {
     const known = this.cached(userId, worldId, revision);
     if (known) return known;
-    const raw = await this.readJson(revisionFile(worldId, revision), userId);
+    await this.lim();
+    const text = await this.backing.read(userId, checkWorld(worldId), `rev/${checkRevision(revision)}.json`);
+    const raw = text === null ? null : (JSON.parse(text) as unknown);
     if (!isWorldDoc(raw)) throw new WorldError("not_found", `revision ${revision} of ${worldId} not found`);
     const at = `${userId}\u0000${worldId}`;
     const before = this.lastRead.get(at)?.deref();
@@ -325,7 +340,8 @@ export class WorldStore {
    * The working copy takes the next version when a draft is `dropped` (at that draft's version) or
    * the head moves under no draft, so no version names two states of it.
    */
-  private async commitDoc(doc: WorldDoc, userId: UserId, loreBookId: string | null, made: { source: HeadSource; note?: string; dropped?: number }): Promise<{ revision: RevisionId; lint: LintIssue[]; count: number; moved: boolean }> {
+  private async commitDoc(doc: WorldDoc, userId: UserId, loreBookId: string | null, made: { source: HeadSource; note?: string; dropped?: number; madeOn?: number }): Promise<{ revision: RevisionId; lint: LintIssue[]; count: number; moved: boolean }> {
+    await this.lim();
     const issues = lintWorld(doc, this.registry);
     if (issues.some((i) => i.severity === "error")) throw new WorldError("validation", "the world has errors", issues);
     const written = stamped(doc);
@@ -333,21 +349,20 @@ export class WorldStore {
     try {
       rev = hashJson(written);
     } catch (error) {
-      // A document stored before writes were held to DOC_DEPTH_CAP can nest past what hashing allows.
+      // A document stored before writes were held to the depth limit can nest past what hashing allows.
       throw new WorldError("validation", `the world can't be committed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    await this.writeJson(revisionFile(doc.id, rev), written, userId);
     this.remember(WorldStore.key(userId, doc.id, rev), written);
     const index = await this.index(doc.id, userId);
     const revisions = index ? [...index.revisions.filter((r) => r !== rev), rev] : [rev];
     const moved = index?.head !== rev;
     const prior = index?.draftVersion ?? 0;
     const count = made.dropped !== undefined ? Math.max(prior, made.dropped) + 1 : index && moved ? prior + 1 : prior;
-    await this.writeJson(`${worldDir(doc.id)}index.json`, { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions, ...(count > 0 ? { draftVersion: count } : {}) }, userId);
-    if (moved) {
-      const note: RevisionNote = { revision: rev, at: Date.now(), source: made.source, ...(made.note !== undefined ? { note: made.note } : {}) };
-      await this.writeJson(`${worldDir(doc.id)}history.json`, { v: 1, notes: [...(await this.history(doc.id, userId)), note] }, userId);
-    }
+    const note: RevisionNote | null = moved ? { revision: rev, at: Date.now(), source: made.source, ...(made.note !== undefined ? { note: made.note } : {}) } : null;
+    const history = note === null ? null : JSON.stringify({ v: 1, notes: [...(await this.history(doc.id, userId)), note] });
+    const body = { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions, ...(count > 0 ? { draftVersion: count } : {}) };
+    const landed = await this.backing.commit(userId, doc.id, { revision: rev, document: JSON.stringify(written), index: JSON.stringify(body), note, history, dropDraft: made.dropped !== undefined, ...(made.madeOn !== undefined ? { madeOn: made.madeOn } : {}) });
+    if (!landed) throw await this.moved(doc.id, userId, "review it and commit again");
     return { revision: rev, lint: issues, count, moved };
   }
 
@@ -363,14 +378,12 @@ export class WorldStore {
     await this.serial(userId, worldId, async () => {
       const index = await this.index(worldId, userId);
       if (!index) throw new WorldError("not_found", `world ${worldId} not found`);
-      await this.writeJson(`${worldDir(worldId)}index.json`, { ...index, loreBookId: bookId }, userId);
+      await this.backing.write(userId, worldId, "index.json", JSON.stringify({ ...index, loreBookId: bookId }));
     });
   }
 
   async remove(worldId: WorldId, userId: UserId): Promise<void> {
-    await this.serial(userId, worldId, async () => {
-      for (const path of await this.host.storage.list(worldDir(worldId), userId)) await this.host.storage.remove(path, userId);
-    });
+    await this.serial(userId, worldId, () => this.backing.remove(userId, checkWorld(worldId)));
   }
 
   /**
@@ -379,7 +392,8 @@ export class WorldStore {
    * before drafts had versions is a new draft, one write in.
    */
   private async storedDraft(index: WorldIndex, userId: UserId): Promise<Draft | null> {
-    const raw = await this.readJson(`${worldDir(index.id)}draft.json`, userId);
+    const text = await this.backing.read(userId, index.id, "draft.json");
+    const raw = text === null ? null : (JSON.parse(text) as unknown);
     if (!isRecord(raw) || !isWorldDoc(raw.doc)) return null;
     const count = index.draftVersion ?? 0;
     const version = typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : count + 1;
@@ -431,15 +445,18 @@ export class WorldStore {
 
   private async apply(request: EditorRequest, draft: Draft & { stored: boolean; head: RevisionId }, userId: UserId, changed?: DraftNotice): Promise<EditorResult> {
     const worldId = request.worldId;
-    if (request.op === "get") return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored, version: draft.version };
-    // An outside client names the version it read (DESIGN §23); a request without one isn't checked.
-    if (request.version !== undefined && request.version !== draft.version) throw new WorldError("conflict", `the draft changed since you read it (it is at version ${draft.version} now); reload and retry`);
+    const limits = await this.lim();
+    const current = (): EditorResult => ({ draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored, version: draft.version });
+    if (request.op === "get") return current();
+    // A writer names the version it read (DESIGN §23); a request without one isn't checked here, though the write itself is made on the version this read found.
+    if (request.version !== undefined && request.version !== draft.version) throw new DraftMoved(`the draft changed since you read it (it is at version ${draft.version} now); reload and retry`, current());
     if (request.op === "discard") {
-      if (!draft.stored) return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: false, version: draft.version };
-      const count = await this.dropDraft(worldId, userId, draft.version);
+      if (!draft.stored) return current();
+      const dropped = await this.backing.dropDraft(userId, worldId, draft.version);
+      if (!dropped.done) throw await this.moved(worldId, userId, "reload and retry");
+      const count = dropped.version;
       const head = structuredClone(await this.revision(worldId, draft.head, userId));
       changed?.(worldId, { version: count, stored: false, base: draft.head });
-      await this.removeDraft(worldId, userId, "the draft is discarded");
       return { draft: head, lint: lintWorld(head, this.registry), base: draft.head, stored: false, version: count };
     }
     if (request.base !== null && request.base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
@@ -449,7 +466,7 @@ export class WorldStore {
     let base = draft.base;
     let lint: LintIssue[];
     if (request.op === "patch") {
-      const patched = this.patched(draft.doc, request.ops);
+      const patched = this.patched(draft.doc, request.ops, limits);
       // A patch that changes nothing (only tests, say) writes nothing.
       if (jsonEqual(patched.doc, draft.doc)) return { draft: draft.doc, lint: patched.lint, base: draft.base, stored: draft.stored, version: draft.version };
       doc = patched.doc;
@@ -458,7 +475,7 @@ export class WorldStore {
       let what: string;
       if (request.op === "set") {
         if (!hasOwn(WORLD_PARTS, request.part)) throw new WorldError("bad_request", `unknown part ${String(request.part)}`);
-        if (typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: DOC_DEPTH_CAP - 1 }) === "string") throw new WorldError("bad_request", `the ${request.part} part nests deeper than ${DOC_DEPTH_CAP - 1} levels`);
+        if (typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: limits.depth - 1 }) === "string") throw new WorldError("bad_request", `the ${request.part} part nests deeper than ${limits.depth - 1} levels (worlds.depth)`);
         what = `the ${request.part} part`;
         setPart(doc, request.part, request.value);
       } else if (request.op === "profile") {
@@ -499,7 +516,7 @@ export class WorldStore {
         const owner = isRecord(current) && typeof current.map === "string" ? current.map : null;
         if (owner !== null) throw new WorldError("bad_request", `${request.collection} ${request.id} is drawn by the map ${owner}; edit it there`);
         if (request.op === "put" && request.collection !== "maps" && isRecord(request.value) && request.value.map !== undefined) throw new WorldError("bad_request", "only a map marks what it draws (map)");
-        if (request.op === "put" && typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: DOC_DEPTH_CAP - 2 }) === "string") throw new WorldError("bad_request", `${request.collection} ${request.id} nests deeper than ${DOC_DEPTH_CAP - 2} levels`);
+        if (request.op === "put" && typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: limits.depth - 2 }) === "string") throw new WorldError("bad_request", `${request.collection} ${request.id} nests deeper than ${limits.depth - 2} levels (worlds.depth)`);
         if (request.op === "put" && request.collection === "routines") {
           const problem = routineProblem(request.id, request.value);
           if (problem !== null) throw new WorldError("bad_request", problem);
@@ -527,41 +544,30 @@ export class WorldStore {
       if (copy) throw new WorldError("bad_request", `lore ${copy[0]} would copy the World Info entry ${copy[1]}: LumiRPEngine reads World Info live, so a copy is never read. Pin the book entry instead (lorePins), or write the lore as the world's own, with no book source.`);
     }
     const version = draft.version + 1;
-    await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
+    const written = await this.backing.writeDraft(userId, worldId, JSON.stringify({ base, doc, version }), draft.version);
+    if (!written.done) throw await this.moved(worldId, userId, "reload and retry");
     changed?.(worldId, { version, stored: true, base });
     return { draft: doc, lint, base, stored: true, version };
   }
 
-  /** Counts a draft as dropped before its file goes (DESIGN §23): the index records the next version, and a read takes a file at or below it for no draft. */
-  private async dropDraft(worldId: WorldId, userId: UserId, version: number): Promise<number> {
-    const index = await this.index(worldId, userId);
-    if (!index) throw new WorldError("not_found", `world ${worldId} not found`);
-    const count = Math.max(index.draftVersion ?? 0, version) + 1;
-    await this.writeJson(`${worldDir(worldId)}index.json`, { ...index, draftVersion: count }, userId);
-    return count;
-  }
-
-  /** Removes a dropped draft's file. The drop is already counted, so a failure leaves a file no read takes for a draft; it is still reported. */
-  private async removeDraft(worldId: WorldId, userId: UserId, done: string): Promise<void> {
-    try {
-      await this.host.storage.remove(`${worldDir(worldId)}draft.json`, userId);
-    } catch (error) {
-      throw new Error(`${done}, but its file couldn't be removed (${error instanceof Error ? error.message : String(error)}); it no longer reads as the draft`);
-    }
+  /** A write found the draft at another version than the one it read: what is there now, as the answer, with nothing of the write kept. */
+  private async moved(worldId: WorldId, userId: UserId, then: string): Promise<DraftMoved> {
+    const now = await this.draft(worldId, userId);
+    return new DraftMoved(`the draft changed since you read it (it is at version ${now.version} now); ${then}`, { draft: now.doc, lint: lintWorld(now.doc, this.registry), base: now.base, stored: now.stored, version: now.version });
   }
 
   /**
    * The draft with an RFC 6902 patch applied to a copy of it (DESIGN §23), all of it or none. It may
-   * carry at most PATCH_OPS_CAP operations, bring in at most PATCH_SIZE_CAP characters of JSON, nest
-   * the document no deeper than DOC_DEPTH_CAP, name no prototype key, give no collection item an id
+   * carry at most `worlds.patchOps` operations, bring in at most `worlds.patchBytes` characters of JSON, nest
+   * the document no deeper than `worlds.depth`, name no prototype key, give no collection item an id
    * `safeKey` refuses, change nothing PATCH_PROTECTED names and edit nothing a map draws (as a
    * collection write may not), and it must leave a world the engine can read. Then, as after a
    * collection write, the maps compile and the tables it changed are pinned. A refusal names the
    * operation; a failed `test` is a `conflict`.
    */
-  private patched(before: WorldDoc, raw: unknown): { doc: WorldDoc; lint: LintIssue[] } {
+  private patched(before: WorldDoc, raw: unknown, limits: WorldLimits): { doc: WorldDoc; lint: LintIssue[] } {
     if (!Array.isArray(raw)) throw new WorldError("bad_request", "a patch is a list of operations");
-    if (raw.length > PATCH_OPS_CAP) throw new WorldError("bad_request", `a patch has at most ${PATCH_OPS_CAP} operations; this one has ${raw.length}`);
+    if (raw.length > limits.patchOps) throw new WorldError("bad_request", `a patch has at most ${limits.patchOps} operations (worlds.patchOps); this one has ${raw.length}`);
     const ops: JsonPatchOp[] = [];
     let after: JsonValue;
     try {
@@ -578,7 +584,7 @@ export class WorldStore {
         ops.push(op);
       });
       // A world document is plain JSON.
-      after = applyPatch(before as unknown as JsonValue, ops, { size: PATCH_SIZE_CAP, depth: DOC_DEPTH_CAP });
+      after = applyPatch(before as unknown as JsonValue, ops, { size: limits.patchBytes, depth: limits.depth });
     } catch (error) {
       if (!(error instanceof PatchError)) throw error;
       // Every pointer was read above, so a test that fails found the draft other than the client read it.
@@ -643,20 +649,20 @@ export class WorldStore {
    * The draft as the world's next revision. `base` and `version`, when sent, must be the draft's,
    * and a draft begun on an earlier head is refused: committing it would put back what was made
    * head since. The history says who committed (`build`, or `agent` for an outside client) and
-   * keeps the note, trimmed and cut to NOTE_CAP characters (DESIGN §23).
+   * keeps the note, trimmed and cut to `worlds.noteChars` characters (DESIGN §23).
    */
   async commit(worldId: WorldId, base: RevisionId | null, userId: UserId, by: { source: "build" | "agent"; note?: string; version?: number }, changed?: DraftNotice): Promise<{ revision: RevisionId; lint: LintIssue[] }> {
     if (by.note !== undefined && typeof by.note !== "string") throw new WorldError("bad_request", "a commit note is text");
+    const limits = await this.lim();
     // Cut by code point, so the cut never splits a character in two.
-    const note = by.note === undefined ? "" : Array.from(by.note.trim()).slice(0, NOTE_CAP).join("");
+    const note = by.note === undefined ? "" : Array.from(by.note.trim()).slice(0, limits.noteChars).join("");
     return this.serial(userId, worldId, async () => {
       const draft = await this.draft(worldId, userId);
-      if (by.version !== undefined && by.version !== draft.version) throw new WorldError("conflict", `the draft changed since you read it (it is at version ${draft.version} now); review it and commit again`);
+      if (by.version !== undefined && by.version !== draft.version) throw new DraftMoved(`the draft changed since you read it (it is at version ${draft.version} now); review it and commit again`, { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored, version: draft.version });
       if (base !== null && base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
       if (draft.stored && draft.base !== draft.head) throw new WorldError("conflict", "the world changed since this draft began; reload it");
-      const made = await this.commitDoc(draft.doc, userId, null, { source: by.source, ...(note !== "" ? { note } : {}), ...(draft.stored ? { dropped: draft.version } : {}) });
+      const made = await this.commitDoc(draft.doc, userId, null, { source: by.source, madeOn: draft.version, ...(note !== "" ? { note } : {}), ...(draft.stored ? { dropped: draft.version } : {}) });
       if (draft.stored || made.moved) changed?.(worldId, { version: made.count, stored: false, base: made.revision });
-      if (draft.stored) await this.removeDraft(worldId, userId, `revision ${made.revision} is the head now`);
       return { revision: made.revision, lint: made.lint };
     });
   }

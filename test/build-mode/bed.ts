@@ -17,6 +17,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { migrateStore, openStore, readPart, type Store, storedWorlds } from "../../src/store";
+import { WorldService } from "../../src/worlds/service";
 import { callRoute } from "../app/call";
 
 export const USER = "user-ash";
@@ -100,7 +101,7 @@ export interface Page {
 
 let asked = 0;
 
-export function makePage(bed: Bed, service = new BuildService({ db: bed.db, writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE })): Page {
+export function makePage(bed: Bed, service = new BuildService({ worlds: new WorldService({ store: bed.store, writes: bed.writes, log: bed.log }), writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE })): Page {
   const [post] = buildRoutes(service);
   return {
     service,

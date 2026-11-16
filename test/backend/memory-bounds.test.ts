@@ -6,10 +6,11 @@ import { describe, expect, test } from "bun:test";
 import { OPEN_CHATS_CAP } from "../../src/migrate/today/ledger-io";
 import { VIEWS_KEPT } from "../../src/backend/push";
 import { LIVE_LORES_KEPT } from "../../src/backend/runtime";
-import { REVISION_CACHE_CAP } from "../../src/worlds/worlds";
+import { WORLD_LIMIT_DEFAULTS } from "../../src/worlds/limits";
 import type { BackendToFrontend } from "../../src/shared/protocol";
 import { Rig } from "../support/rig";
 import { POV } from "../support/test-pack";
+const REVISION_CACHE_CAP = WORLD_LIMIT_DEFAULTS.revisionsHeld;
 
 /** The engine's in-memory maps a test reads (private to their classes). */
 function held(rig: Rig): { slots: number; liveLores: number } {
