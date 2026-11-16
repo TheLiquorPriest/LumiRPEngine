@@ -24,6 +24,9 @@ nothing_stored: The story record holds no {{#part}}{{part}}{{/part}}{{^part}}ite
 no_current: Operation {{n}} ({{op}}): there is no {{part}} yet. Open one with new.
 current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is closed. Open a new one with new, or name {{id}} to write to it.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
+unsourced: Operation {{n}} ({{op}}) names no source, so it is marked unsourced.
+invented_unchecked: Operation {{n}} ({{op}}) is recorded as invented and names no gap check, so it is marked so.
+invented_unconsented: Operation {{n}} ({{op}}) is recorded as invented and names no consent, so it is marked so.
 already_closed: Operation {{n}} ({{op}}): {{id}} was already closed.
 due_now: Operation {{n}} ({{op}}): it falls due at {{due}}, which is not after now ({{now}}), so it is due at once.
 due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it is due at once.
@@ -40,3 +43,5 @@ timeline_gone: The timeline has no {{id}} any more, so the page after it cannot 
 so_far_unavailable: The story so far is not worked out here.
 quest_gone: The quests have no {{id}} any more, so the page after it cannot be told. Read the quests again from their start.
 no_quest: The chat has no quest {{id}}.
+no_place: The chat has no place {{id}}.
+place_gone: The places have no {{id}} any more, so the page after it cannot be told. Read the places again from their start.

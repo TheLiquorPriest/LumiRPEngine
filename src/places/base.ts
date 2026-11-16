@@ -14,7 +14,7 @@ export type PlaceBaseShown = Infer<typeof baseShown>;
 /** The base that stands for a place at a point of the path: the one written in play, else the world's own description, else none. */
 export function baseAt(at: PlaceAt, place: string, sources: Pick<PlaceSources, "older"> | null): PlaceBaseShown {
   const written = baseOf(placeSliceOf(at.state), place);
-  if (written !== null) return { text: written.text, world: false, revision: null, by: written.by, turn: written.turn, older: sources?.older ?? false };
+  if (written !== null) return { text: written.text, world: false, revision: null, by: written.by, turn: written.turn === "" ? null : written.turn, older: sources?.older ?? false };
   const described = placeDef(at, place)?.fields.description;
   if (typeof described === "string" && described.trim() !== "") return { text: described, world: true, revision: at.world.revision, by: null, turn: null, older: false };
   return { text: null, world: false, revision: null, by: null, turn: null, older: false };

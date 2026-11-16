@@ -133,7 +133,7 @@ export function fixturesOf(grid: Drawn): { name: string; at: number[]; size: num
     if (seen.has(i)) continue;
     const found = fixtureAt(grid, squareAt(grid, i));
     if (found === null) continue;
-    for (const [x, y] of found.squares) seen.add(y * grid.width + x);
+    for (const [x, y] of found.squares) seen.add((y - 1) * grid.width + (x - 1));
     out.push({ name: found.name, at: [...found.at], size: [...found.size] });
   }
   return out;

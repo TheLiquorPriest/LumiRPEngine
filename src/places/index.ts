@@ -9,3 +9,10 @@ export { isPlaceFactPart, PLACE_FACT_PARTS, PLACE_PARTS, type PlaceFactPart, typ
 export { accessOf, doorsOf, entryOf, type FactReader, factReader, factsOfPart, featuresOf, fixturesOf, gridOf, newest, type PlaceAt, placeAt, placeAtState, placeDef, placeKindOf, rowFields, sinceOf, zonesOf } from "./record";
 export { PLACES_DEFAULTS, PLACES_SETTING_DEFS, PLACES_SETTINGS, type PlacesSettings } from "./settings";
 export { drawnFrom, type EntryNow, type PlaceBinding, type PlaceSources, type PlaceSourceShown, type PlaceSourcesReader, sourcesNow } from "./sources";
+export { type PlaceReadDeps, placeRow, placeRows, readPlace, sourceRows } from "./read";
+export { PLACE_BASE_PATH, PLACE_PATH, PLACES_PATH, placesRoutes, type PlacesRoutesDeps } from "./routes";
+export { makePlace, PLACE_MAKE_KINDS, sourcesArg } from "./make";
+export { adjoiningOf, routesLaidIn, type PlaceAdjoining, type PlaceWay, waysOf, waysPart } from "./ways";
+export { hereOf, historyOf, knownOf, type PlaceHere, type PlaceHistoryRow, type PlaceKnown } from "./whole";
+export { type PlaceWriter, writeBase } from "./write";
+export { type PlaceBaseBody, type PlaceBaseWritten, type PlaceRecordAnswer, type PlaceRowShown, type PlacesPage } from "./shapes";

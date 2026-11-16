@@ -78,7 +78,7 @@ export const entryRow = shape.named(
 export const hereRow = shape.named(
   "PlaceHereRow",
   "Someone or something at the place as the tree places it: its id and name, whether it is a person or a thing, what it is on or in, and where it stands (a square, a zone or words).",
-  shape.object({ ref: T, name: T, kind: shape.oneOf("person", "thing"), in: nullable(T), square: nullable(square), zone: nullable(T), words: nullable(T) }),
+  shape.object({ ref: T, name: T, kind: shape.oneOf("person", "thing"), holder: field(nullable(shape.object({ ref: T, name: T, how: shape.oneOf("in", "on") })), "What it is in or on, where it is carried or lies on something."), square: nullable(square), zone: nullable(T), words: nullable(T) }),
 );
 
 export const wayRow = shape.named(
