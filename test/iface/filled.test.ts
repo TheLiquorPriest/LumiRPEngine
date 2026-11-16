@@ -32,6 +32,11 @@ function filledIn(row: ChangeRow): boolean {
   return row.source === "default" && row.standing === "assumed" && row.precision === null && row.cite === null;
 }
 
+/** Recorded as the owner's own, what the world authored: established, from the player. */
+function authored(row: ChangeRow): boolean {
+  return row.source === "player" && row.standing === "established" && row.precision === null && row.cite === null;
+}
+
 /** Recorded with the call's own provenance. */
 function asSaid(row: ChangeRow): boolean {
   return row.source === "prose" && row.standing === "established" && (row.cite as JsonObject | null)?.message === "m-12";
@@ -56,14 +61,14 @@ describe("money nobody gave", () => {
     wordsFromFiles(r);
   });
 
-  test("an account the world gave is opened as a change of its own, from the world's defaults and as assumed", async () => {
+  test("an account the world gave is opened as a change of its own, as the owner's authored opening: established, from the player", async () => {
     const t = await rig();
     const r = await t.call("world_apply", { operations: [{ op: "pay", who: "wren", to: "bram", amount: 3, for: "a mug of cider", ...PROSE }] });
     expect(r.error).toBeUndefined();
     const rows = t.s.changes(t.turn.id);
     const opened = rows.filter((row) => row.op === "materialize");
     expect(opened.length).toBe(1);
-    expect(opened.every(filledIn)).toBe(true);
+    expect(opened.every(authored)).toBe(true);
     const paid = rows.filter((row) => row.op !== "materialize" && !bookkeeping(row));
     expect(paid.length).toBeGreaterThan(0);
     expect(paid.every(asSaid)).toBe(true);

@@ -38,7 +38,7 @@ describe("cash", () => {
     const r = await apply(t, [{ op: "set", at: "wren", key: "cash", add: -50, ...SRC }]);
     expect(r.error).toBeUndefined();
     expect(t.s.stateAt(t.turn.id).state.world.accounts.acct_wren).toBe(-3800);
-    expect(r.reports).toEqual([expect.stringContaining("could pay at most $12.00")]);
+    expect(r.reports).toEqual([expect.stringContaining("held $12.00")]);
     wordsFromFiles(r);
   });
 

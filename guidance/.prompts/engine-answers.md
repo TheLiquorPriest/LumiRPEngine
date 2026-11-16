@@ -102,6 +102,13 @@ nothing_filled: Operation {{n}} ({{op}}): nothing was filled in for {{what}}: it
 paid_past_held: Operation {{n}} ({{op}}): {{payer}} paid {{amount}} and could pay at most {{held}} from any one way; the payment is recorded all the same.
 paid_from_outside: Operation {{n}} ({{op}}): the world keeps no accounts for {{payer}}, so it was paid from their money outside the world's accounts.
 money_untracked: Operation {{n}} ({{op}}): this world keeps no money for {{payer}}, so no money moved.
+account_not_open: Operation {{n}} ({{op}}): {{account}} is {{status}}, and {{amount}} was taken out of it all the same; it could have covered {{held}}.
+corrected_past_held: Operation {{n}} ({{op}}): {{payer}}'s cash was corrected down by {{amount}} and held {{held}}; it stands below nothing, as given.
+paid_past_owed: Operation {{n}} ({{op}}): {{amount}} went into {{account}}, which owed {{owed}}; the whole amount moved, {{past}} past what was owed.
+goods_words: Operation {{n}} ({{op}}): {{goods}} names no one recorded thing{{#several}}; it fits {{several}}{{/several}}, so nothing was made or moved and the words are kept on the payment. A thing the story buys is made with spawn first, then named.
+terms_added: Operation {{n}} ({{op}}): the world's own terms came with this payment, {{count}} more sums ({{sums}}), each recorded as its own change that stands as assumed.
+way_not_held: Operation {{n}} ({{op}}): {{payer}} holds nothing that pays as {{way}}, so the payment went their usual way.
+use_give: Operation {{n}} ({{op}}): {{name}} is {{other}}, which holds no money of the economy's, and a payer or payee is someone or a group.{{#near}} Nearest: {{near}}.{{/near}} A thing that holds coin is given with the give operation.
 closed_with_money: Operation {{n}} ({{op}}): {{what}} was closed with {{amount}} still on it.
 derived: Operation {{n}} ({{op}}): {{name}}'s {{key}} is worked out by the rules, which give {{figure}}; {{value}} was kept as given and stands over it.
 world_unlisted: Operation {{n}} ({{op}}): {{key}} is not a value the world's setup lists; {{value}} is recorded as the world's own, and every level below takes it unless it sets its own.

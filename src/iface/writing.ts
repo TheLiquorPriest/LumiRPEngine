@@ -173,7 +173,7 @@ export class Draft {
 
   /** Marks events an item op hands back as filled in from the world (`ItemOpApplied.filled`) to be recorded apart from the call's own, with `prov` (`FILLED_IN`: assumed, from the default, when none is given). */
   markFilled(events: readonly LedgerEvent[], prov: Provenance = FILLED_IN): void {
-    for (const ev of events) this.filled.set(ev, prov);
+    for (const ev of events) if (!this.filled.has(ev)) this.filled.set(ev, prov);
   }
 
   /**

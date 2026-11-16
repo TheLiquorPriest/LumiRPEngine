@@ -232,7 +232,7 @@ describe("a payment the story made that an earlier build recorded", () => {
 });
 
 describe("a rebased view", () => {
-  test("where the link can't spare its overdraft transfer any more, only the transfer drops: checking carries the whole overdraft, the compass stays, savings never goes below zero", () => {
+  test("where the link can't spare its overdraft transfer any more, it stands all the same, advised: checking carries the whole overdraft, the compass stays, savings goes below nothing", () => {
     const w = setup((world) => {
       frozen("card")(world);
       overdraft({ overdraft: "linked", overdraft_link: "savings" })(world);
@@ -254,12 +254,12 @@ describe("a rebased view", () => {
     const branch = new Working(reg, w.world, before);
     expect(branch.apply({ type: "post", lines: [{ account: "savings", amount: -4000 }, { account: SHOP, amount: 4000 }], memo: "Spent elsewhere" })).toBeNull();
     const applied = applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s));
-    expect(applied).toEqual(bought.applied.filter((e) => !apart.includes(e)));
-    expect([branch.state.accounts.checking, branch.state.accounts.savings]).toEqual([2000 - total, 1000]);
+    expect(applied).toEqual(bought.applied);
+    expect([branch.state.accounts.checking, branch.state.accounts.savings]).toEqual([7000 - total, 1000 - 5000]);
     expect(owned(branch)).toBe(true);
   });
 
-  test("where the payment itself can't land, the overdraft transfer it brought drops with it: savings and checking stay as they were, and no compass", () => {
+  test("where the payment's account was frozen, the payment and the overdraft transfer it brought stand, advised: the compass is owned", () => {
     const w = setup((world) => {
       frozen("card")(world);
       overdraft({ overdraft: "linked", overdraft_link: "savings" })(world);
@@ -274,12 +274,12 @@ describe("a rebased view", () => {
     // The other branch: checking was frozen before the reply.
     const branch = new Working(reg, w.world, before);
     expect(branch.apply({ type: "economy.status", data: { account: "checking", status: "frozen" } })).toBeNull();
-    expect(applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual([]);
-    expect([branch.state.accounts.checking, branch.state.accounts.savings]).toEqual([2000, 50000]);
-    expect(owned(branch)).toBe(false);
+    expect(applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual(bought.applied);
+    expect([branch.state.accounts.checking, branch.state.accounts.savings]).toEqual([0, 50000 - (total - 2000)]);
+    expect(owned(branch)).toBe(true);
   });
 
-  test("a cash purchase the story made, on a branch whose wallet can't cover it, drops whole: no negative wallet, no history line, no compass", () => {
+  test("a cash purchase the story made, on a branch whose wallet can't cover it, stands whole: the wallet goes below nothing, with its history line and the compass", () => {
     const w = setup();
     holding(w, { cash: 20000 });
     const before = structuredClone(w.state);
@@ -291,13 +291,13 @@ describe("a rebased view", () => {
     const branch = new Working(reg, w.world, before);
     holding(branch, { cash: 5000 });
     const lines = journalOf(branch.state, "cash").length;
-    expect(applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual([]);
-    expect(branch.state.accounts.cash).toBe(5000);
-    expect(journalOf(branch.state, "cash")).toHaveLength(lines);
-    expect(owned(branch)).toBe(false);
+    expect(applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual(bought.applied);
+    expect(branch.state.accounts.cash).toBe(5000 - total);
+    expect(journalOf(branch.state, "cash")).toHaveLength(lines + 1);
+    expect(owned(branch)).toBe(true);
   });
 
-  test("a payment the story took from savings, nothing else covering it or able to run a debt, drops whole on a branch whose savings can't cover it", () => {
+  test("a payment the story took from savings, nothing else covering it or able to run a debt, stands on a branch whose savings can't cover it", () => {
     const w = setup(frozen("checking", "card"));
     holding(w, { cash: 1000, savings: 60000 });
     const before = structuredClone(w.state);
@@ -307,13 +307,13 @@ describe("a rebased view", () => {
     // The other branch: savings holds $200.00.
     const branch = new Working(reg, w.world, before);
     holding(branch, { savings: 20000 });
-    expect(applyValidUnits(reg, paid.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual([]);
-    expect(branch.state.accounts.savings).toBe(20000);
+    expect(applyValidUnits(reg, paid.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual(paid.applied);
+    expect(branch.state.accounts.savings).toBe(20000 - 50000);
   });
 });
 
 describe("Edit amount on a purchase the story made", () => {
-  test("from cash, a price the wallet can't cover is refused and the wallet never goes below zero", () => {
+  test("from cash, a price the wallet can't cover stands, and the wallet goes below zero", () => {
     const w = setup();
     holding(w, { cash: 20000 });
     const bought = narrated(w, { ...COMPASS, method: "cash" });
@@ -322,8 +322,8 @@ describe("Edit amount on a purchase the story made", () => {
     expect(w.state.accounts.cash).toBe(left);
     const repriced = w.ctx.service("economy.reprice")(w.ctx, bought.applied, total + left + 10000);
     if (!Array.isArray(repriced)) throw new Error(repriced.reason);
-    expect(applyValidUnits(reg, repriced, w.state, (s) => reg.context(w.world, s))).toEqual([]);
-    expect(w.state.accounts.cash).toBe(left);
+    expect(applyValidUnits(reg, repriced, w.state, (s) => reg.context(w.world, s))).toHaveLength(repriced.length);
+    expect(w.state.accounts.cash).toBe(left - (left + 10000));
   });
 
   test("past the card's limit, the player's price stands as the story's payment did", () => {

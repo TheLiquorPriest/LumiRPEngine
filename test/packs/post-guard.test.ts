@@ -31,7 +31,7 @@ function setup(): Working {
   return w;
 }
 
-/** The `post` event's validation, own check plus guards, as every fold runs it. */
+/** The `post` event's validation, own check plus guards, as every fold runs it: never a refusal now. */
 function check(w: Working, account: string, cents: number, to = shop): string | null {
   const lines: PostingLine[] = [
     { account, amount: -cents },
@@ -40,28 +40,40 @@ function check(w: Working, account: string, cents: number, to = shop): string | 
   return reg.get("post")?.validate({ type: "post", lines, memo: "Payment" }, w.ctx)?.code ?? null;
 }
 
+/** What the funds guard advises on a payment of `cents` from `account`: its code, or null. */
+function advice(w: Working, account: string, cents: number, to = shop): string | null {
+  const lines: PostingLine[] = [
+    { account, amount: -cents },
+    { account: to, amount: cents },
+  ];
+  return reg.get("post")?.advise?.({ type: "post", lines, memo: "Payment" }, w.ctx)?.code ?? null;
+}
+
 describe("posting guard and payment units (ledger 1.10)", () => {
-  test("a payment the account can't cover is refused at fold time, at Money 2 and up", () => {
+  test("a payment the account can't cover stands and is advised, at Money 2 and up", () => {
     const w = setup();
     const cash = w.state.accounts.cash ?? 0;
     expect(cash).toBeGreaterThan(0);
-    expect(check(w, "cash", cash)).toBeNull();
-    expect(check(w, "cash", cash + 8400)).toBe("declined");
-    expect(check(w, "checking", (w.state.accounts.checking ?? 0) + 1)).toBe("declined");
-    w.state.realism.levels.money = 1;
+    expect(advice(w, "cash", cash)).toBeNull();
     expect(check(w, "cash", cash + 8400)).toBeNull();
+    expect(advice(w, "cash", cash + 8400)).toBe("paid_past_held");
+    expect(check(w, "checking", (w.state.accounts.checking ?? 0) + 1)).toBeNull();
+    expect(advice(w, "checking", (w.state.accounts.checking ?? 0) + 1)).toBe("paid_past_held");
+    w.state.realism.levels.money = 1;
+    expect(advice(w, "cash", cash + 8400)).toBeNull();
   });
 
-  test("a card charge past the limit is refused; the bank's own interest is not", () => {
+  test("a card charge past the limit stands and is advised; the bank's own interest is not", () => {
     const w = setup();
     const room = Number(w.state.entities.card?.fields.limit ?? 0) + (w.state.accounts.card ?? 0);
     expect(room).toBeGreaterThan(0);
-    expect(check(w, "card", room)).toBeNull();
-    expect(check(w, "card", room + 1)).toBe("declined");
-    expect(check(w, "card", room + 5000, `${EXTERNAL_ACCOUNT_PREFIX}bank:card`)).toBeNull();
+    expect(advice(w, "card", room)).toBeNull();
+    expect(check(w, "card", room + 1)).toBeNull();
+    expect(advice(w, "card", room + 1)).toBe("paid_past_held");
+    expect(advice(w, "card", room + 5000, `${EXTERNAL_ACCOUNT_PREFIX}bank:card`)).toBeNull();
   });
 
-  test("on a branch that can't afford it, a cash purchase folds out whole: no negative wallet, no history line, no item", () => {
+  test("on a branch that can't afford it, a cash purchase stands whole, as one unit: the wallet goes below nothing, with its history line and its item", () => {
     const w = setup();
     const before: WorldState = structuredClone(w.state);
     const bought = resolveAction(reg, w, { action: "buy", params: { item: "milk_whole", method: "cash" } }, createRng("b"));
@@ -73,22 +85,21 @@ describe("posting guard and payment units (ledger 1.10)", () => {
     const cash = branch.state.accounts.cash ?? 0;
     branch.apply({ type: "post", lines: [{ account: "cash", amount: -(cash - 100) }, { account: shop, amount: cash - 100 }], memo: "Spent elsewhere" });
     const history = moneyView(branch.ctx).recent.length;
-    const items = Object.keys(branch.state.entities).length;
     const applied = applyValidUnits(reg, events, branch.state, (s) => reg.context(branch.world, s));
-    expect(applied.filter((e) => e.type !== "clock")).toEqual([]);
-    expect(branch.state.accounts.cash).toBe(100);
-    expect(moneyView(branch.ctx).recent.length).toBe(history);
-    expect(Object.keys(branch.state.entities).length).toBe(items);
+    expect(applied.filter((e) => e.type !== "clock")).toEqual(events.filter((e) => e.type !== "clock"));
+    expect(branch.state.accounts.cash).toBeLessThan(100);
+    expect(moneyView(branch.ctx).recent.length).toBe(history + 1);
   });
 
-  test("a payment the story made (`overdraw`) folds past what its account covers; the same posting without it doesn't", () => {
+  test("a payment the story made (`overdraw`) stands past what its account covers, and so does the same posting without it; both are advised", () => {
     const w = setup();
     const lines: PostingLine[] = [
       { account: "checking", amount: -((w.state.accounts.checking ?? 0) + 5000) },
       { account: shop, amount: (w.state.accounts.checking ?? 0) + 5000 },
     ];
-    expect(reg.get("post")?.validate({ type: "post", lines, memo: "Payment" }, w.ctx)?.code).toBe("declined");
+    expect(reg.get("post")?.validate({ type: "post", lines, memo: "Payment" }, w.ctx)).toBeNull();
     expect(reg.get("post")?.validate({ type: "post", lines, memo: "Payment", overdraw: true }, w.ctx)).toBeNull();
+    expect(reg.get("post")?.advise?.({ type: "post", lines, memo: "Payment" }, w.ctx)?.code).toBe("paid_past_held");
   });
 
   test("a narrated purchase nothing covers goes on the payer's last way that can run a debt, and Pay another way moves it to savings", () => {

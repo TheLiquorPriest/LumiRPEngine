@@ -15,7 +15,7 @@ import { calendarOf, dateAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
-import type { ReadContext, Rejection } from "../../../engine/registry";
+import type { Advice, ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import type { FinanceHooks, SaleTerms } from "./module";
@@ -110,6 +110,22 @@ export interface ChargeOptions {
    * money is a band alone moves down their band, as level 1 does.
    */
   story?: boolean;
+  /**
+   * A payment as an agent gave it (`pay`, `src/iface/ops-values.ts`): the way it names (`source`) pays
+   * whatever that way holds and whatever its status is, and the payment never moves off it; any other
+   * goes the payer's own order (`sourceGiven`). No level holds it back, and nothing is added to the
+   * amount (no tax, takings, commission, overdraft transfer or fee, cash advance fee, cash back, held
+   * funds) unless `terms` asks. Its journal line says it was the story's. The funds guard advises on
+   * its posting (`fundsAdvice`); it never declines it. Money into an account (`deposit`) lands there
+   * as named, whole, past what it owes or into one that owes nothing.
+   */
+  given?: boolean;
+  /**
+   * With `given`: the economy's own sums for the payment, kept out of its events and handed back here for the caller to record
+   * each as its own change: `before` (a linked overdraft's transfer, a cash advance's fee) and `after` (the sale's tax, the
+   * business's takings and commissions through the sale hooks (`sale`), an overdraft fee).
+   */
+  terms?: { before: LedgerEvent[]; after: LedgerEvent[] };
 }
 
 export type ChargeService = (ctx: ReadContext, payer: EntityId, cents: number, memo: string, opts?: ChargeOptions) => LedgerEvent[] | Rejection;
@@ -721,6 +737,7 @@ function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cen
  * cash or savings drops whole on a rebased view that can't cover it.
  */
 export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions = {}): LedgerEvent[] | Rejection {
+  if (opts.given === true) return chargeGiven(hooks, ctx, payer, rawCents, memo, opts);
   if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
   const cents = Math.round(rawCents);
   // A financed purchase put nothing down still pays the sales tax on its whole price now.
@@ -777,6 +794,101 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   // (DESIGN §25.10): a rebased view whose link can't spare it drops the transfer alone, and the
   // payment takes the account the further into overdraft, never the link below zero.
   return opts.story === true ? [...apartFrom(od.before, paid), ...paid] : asUnit([...od.before, ...paid]);
+}
+
+// ---------------------------------------------------------------- a payment as an agent gives it
+
+/** One way a payer pays from, as a payment names it: an account they spend from, or a card they hold on one. */
+export interface Way {
+  id: EntityId;
+  name: string;
+  account: EntityId;
+  card?: EntityId;
+}
+
+/** Every way `payer` may name to pay from, whatever its status: each account they spend from, and each card of theirs on it. */
+export function waysOf(ctx: ReadContext, payer: EntityId): Way[] {
+  const out: Way[] = [];
+  for (const account of accountsOf(ctx, payer, "spend")) {
+    out.push({ id: account, name: labelOf(ctx, account), account });
+    for (const card of cardsOn(ctx.state, account)) if (strOf(own(ctx.state.entities, card)?.fields.holder) === payer) out.push({ id: card, name: labelOf(ctx, card), account, card });
+  }
+  return out;
+}
+
+/** The account or card of the payer's that `id` is, as it pays, whatever it holds and whatever its status; null when it is not theirs to spend from. */
+export function namedWay(ctx: ReadContext, payer: EntityId, id: EntityId): Picked | null {
+  const e = own(ctx.state.entities, id);
+  if (e?.kind === "card") {
+    const account = strOf(e.fields.account);
+    return strOf(e.fields.holder) === payer && canSpend(ctx.state, account, payer) ? { account, card: id, via: e.fields.network === "debit" ? "debit" : e.fields.network === "charge" ? "charge" : "credit" } : null;
+  }
+  return e?.kind === "account" && canSpend(ctx.state, id, payer) ? { account: id, via: classOf(ctx, id) === "cash" ? "cash" : "account" } : null;
+}
+
+/**
+ * The way of the payer's one of the fixed ways of paying names (cash, card, credit, debit, charge, checking, savings, account): the
+ * first of that kind that covers the payment, else the first of that kind; null when they hold none.
+ */
+export function wayFor(ctx: ReadContext, payer: EntityId, way: PayMethod, cents: number): Picked | null {
+  if (way === "cash") {
+    const wallet = cashAccount(ctx, payer);
+    return wallet === null ? null : { account: wallet, via: "cash" };
+  }
+  const tried = sourcesToTry(ctx, payer, cents, { method: way, till: false }, []);
+  return tried.find((s) => covers(ctx, s, cents, true)) ?? tried[0] ?? null;
+}
+
+/**
+ * What pays a payment as the story gave it: the way it names (`source`, an account or a card of the payer's), whatever it holds and
+ * whatever its status; else the payer's own order, with the way the story pays by when that order finds none to cover it (`chooseSource`),
+ * else the first of their accounts that is open. Null when nothing of theirs can: it is then paid from their money outside the world's accounts.
+ */
+export function sourceGiven(ctx: ReadContext, payer: EntityId, cents: number, opts: { source?: EntityId; except?: EntityId; category?: string }): Picked | null {
+  const named = opts.source !== undefined ? namedWay(ctx, payer, opts.source) : null;
+  if (named !== null) return named;
+  const chosen = chooseSource(ctx, payer, cents, { method: "auto", ...(opts.category ? { category: opts.category } : {}), ...(opts.except ? { except: opts.except } : {}), till: false, overdraft: false, story: true });
+  if (!("code" in chosen)) return chosen;
+  const open = [cashAccount(ctx, payer), ...accountsOf(ctx, payer, "spend")].find((a): a is string => a !== null && a !== opts.except && statusOf(ctx.state, a) === "open");
+  return open === undefined ? null : { account: open, via: classOf(ctx, open) === "cash" ? "cash" : "account" };
+}
+
+/**
+ * `charge` for a payment as an agent gave it (`ChargeOptions.given`): the amount from the way it names to where it names, whole,
+ * and nothing besides it unless `terms` asks; the funds guard advises on it where the way is not open or holds less.
+ */
+function chargeGiven(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions): LedgerEvent[] | Rejection {
+  if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+  const cents = Math.round(rawCents);
+  if (!(cents > 0)) return reject("bad_amount", "the amount must be positive");
+  const at = opts.at ?? ctx.state.clock;
+  const sold = opts.terms !== undefined && opts.sale !== undefined ? saleTermsOf(hooks, ctx, payer, cents, opts.category ?? "", opts.sale) : null;
+  const tax = Math.max(0, Math.round(sold?.tax ?? 0));
+  // The call's own payee, or the account it names, as it is: whoever sells there is never put in their place.
+  const dest = opts.deposit !== undefined && own(ctx.state.entities, opts.deposit)?.kind === "account" ? { account: opts.deposit, extra: [] as LedgerEvent[] } : payeeSide(ctx, opts, cents);
+  const ledger = hasLedger(ctx, payer);
+  const picked = ledger ? sourceGiven(ctx, payer, cents, { ...(opts.source !== undefined ? { source: opts.source } : {}), except: dest.account, ...(opts.category ? { category: opts.category } : {}) }) : null;
+  const source = picked?.account ?? external(payer);
+  if (source === dest.account) return reject("bad_party", `${labelOf(ctx, payer)} can't pay ${labelOf(ctx, dest.account)} from itself`);
+  const band = !ledger && ctx.levelOf(payer, "money") >= 1 ? l1Move(ctx.state, payer, -cents) : [];
+  const lines = merged([
+    { account: source, amount: -cents },
+    { account: dest.account, amount: cents },
+  ]);
+  const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
+  const counterparty = opts.payee ?? outside;
+  const meta: TxnMeta = { memo, kind: opts.kind ?? "payment", ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), payer, ...(picked?.card ? { card: picked.card } : {}), story: true, ...(opts.at !== undefined ? { at: opts.at } : {}) };
+  const owed = traitsOf(ctx, dest.account)?.liability === true ? [{ type: FINANCE_EVENTS.cardPaid, data: { account: dest.account, cents } }] : [];
+  const paid = asUnit([{ type: "post", lines, memo }, ...band, ...dest.extra, txn(lines, meta), ...owed]);
+  if (opts.terms !== undefined) {
+    const od = picked !== null ? overdraftEvents(ctx, source, cents + tax, at) : { before: [], after: [] };
+    const advance = picked !== null && traitsOf(ctx, source)?.revolving === true && traitsOf(ctx, dest.account)?.liability !== true ? cashAdvanceFee(ctx, source, cents) : 0;
+    const fee = advance > 0 ? posting([{ account: source, amount: -advance }, { account: bankSide(productOf(ctx, source)?.institution ?? ""), amount: advance }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", at }) : [];
+    const taxed = tax > 0 ? posting([{ account: source, amount: -tax }, { account: sold?.taxAccount ?? dest.account, amount: tax }], { memo: "Sales tax", kind: "fee", category: "tax", payer, at }) : [];
+    opts.terms.before.push(...asUnit(od.before), ...asUnit(fee));
+    opts.terms.after.push(...asUnit(taxed), ...(sold?.extra ?? []), ...asUnit(od.after));
+  }
+  return paid;
 }
 
 // ---------------------------------------------------------------- moving money
@@ -930,31 +1042,29 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
 // ---------------------------------------------------------------- the funds guard
 
 /**
- * Ledger 1.10: a posting folds only if the accounts it draws on can pay it (the fold-time twin of the
- * choices above): an open account, within its balance less holds, its credit, or the overdraft its
- * policy allows. What a bank posts itself (interest, fees) and what posts against a holder's own
- * outside account (openings, level-1 moves) isn't checked. A payment the story made on an account
- * that can run a debt (`overdraw`, DESIGN §9.5) needs only open accounts: it stands past what they
- * cover, on any path. One it made from cash or savings carries none and is checked as any payment;
- * one an earlier build recorded from them with `overdraw` stands as that build wrote it, since some
- * of those went past cover on their own path (an Edit amount on a cash purchase), which a stricter
- * check would break.
+ * Ledger 1.10 as an adviser (plan §6.7): a posting stands whatever the accounts it draws on can pay, and says so where an account is
+ * not open, or holds less than it takes (its balance less holds, its credit, or the overdraft its policy allows): the guard's code
+ * with the values it saw. A posting of a correction says `corrected_past_held`, any other `paid_past_held`. What a bank posts itself
+ * (interest, fees) and what posts against a holder's own outside account (openings, level-1 moves) is not looked at.
  */
-export function postGuard(ctx: ReadContext, lines: readonly PostingLine[], overdraw = false): Rejection | null {
+export function fundsAdvice(ctx: ReadContext, lines: readonly PostingLine[]): Advice | null {
   const s = ctx.state;
   if (lines.some((l) => l.amount > 0 && l.account.startsWith(BANK_PREFIX))) return null;
+  const money = (cents: number): string => formatMoney(cents, ctx.world.currency);
   for (const l of lines) {
     if (l.amount >= 0) continue;
     const t = traitsOf(ctx, l.account);
     if (!t || t.installment) continue;
     const holders = holdersOf(s, l.account).filter((h) => own(s.entities, h));
-    if (holders.length === 0 || accountLevel(ctx, l.account) < 2) continue;
+    const holder = holders[0];
+    if (holder === undefined || accountLevel(ctx, l.account) < 2) continue;
     if (lines.some((x) => holders.some((h) => x.account === external(h)))) continue;
-    const name = labelOf(ctx, l.account);
+    const account = `${labelOf(ctx, l.account)} [${l.account}]`;
     const status = statusOf(s, l.account);
-    if (status !== "open") return reject("declined", `${name} is ${status.replace(/_/g, " ")}`);
-    if (!overdraw && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
-      return reject("declined", t.liability ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+    const held = Math.max(0, availableOf(ctx, l.account) + overdraftRoom(ctx, l.account));
+    if (status !== "open") return { code: "account_not_open", values: { account, status: status.replace(/_/g, " "), amount: money(-l.amount), held: money(held) } };
+    if (availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
+      return { code: lines.some((x) => x.account === CORRECTION_ACCOUNT) ? "corrected_past_held" : "paid_past_held", values: { payer: `${labelOf(ctx, holder)} [${holder}]`, account, amount: money(-l.amount), held: money(held) } };
     }
   }
   return null;

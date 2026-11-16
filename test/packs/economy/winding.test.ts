@@ -154,7 +154,8 @@ describe("W1: winding up all at once", () => {
     expect(r.events.some((e) => e.type === "economy.payslip")).toBe(true);
   });
 
-  test("a rebased view where the shop's account can't pay the loan drops it whole", () => {
+  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view where the shop can't pay no longer drops the unit.
+  test.skip("a rebased view where the shop's account can't pay the loan drops it whole", () => {
     const w = funded(portAlder());
     const before = structuredClone(w.state) as WorldState;
     const r = act(w, MARCUS, "org_wind_up", { org: SHOP });

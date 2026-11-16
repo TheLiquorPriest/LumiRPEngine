@@ -5,7 +5,7 @@
 // quest's paths) is applied and reported.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { isRecord, safeKey } from "../shared/json";
+import { safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { formatMoney } from "../shared/world";
 import { fieldBounds, type LevelOffer, levelsFollowXp, applyEffects } from "../engine/effects";
@@ -16,15 +16,18 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { optionalService, own } from "../engine/pack-kit";
 import { baseWorld } from "../engine/places-in-play";
 import { createRng } from "../engine/rng";
-import { fieldDef, formulaFigure, GONE_FIELD } from "../engine/scope";
+import { fieldDef, formulaFigure, GONE_FIELD, isGone, placeOfEntity } from "../engine/scope";
+import { applyItemOp } from "../engine/thing-ops";
+import { isThing, possessorOf } from "../engine/things";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
-import { accountsOf, availableOf, balance, classOf, external, hasLedger, statusOf } from "../packs/economy/core/model";
-import { asUnit, cashAccount, NO_WAY_TO_PAY, overdraftRoom, payeeSide, posting } from "../packs/economy/core/pay";
+import { accountsOf, balance, classOf, external, hasLedger, holdersOf, statusOf, traitsOf } from "../packs/economy/core/model";
+import { asUnit, cashAccount, isParty, type PayMethod, payeeSide, posting, waysOf, wayFor } from "../packs/economy/core/pay";
 import { axesOf } from "../packs/relationships/core/index";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import type { FactStore } from "./kit";
-import { find, findOptional, isUnread, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, outsideList, refusedAs, textArg, type Unread } from "./ops";
+import { find, findOptional, isUnread, itemOptions, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, outsideList, refusedAs, textArg, type Unread } from "./ops";
+import type { Provenance } from "./source";
 import { textOf } from "./texts";
 import { moveTo } from "./ops-things";
 import { setClock, timeArg } from "./ops-time";
@@ -32,18 +35,22 @@ import { setClock, timeArg } from "./ops-time";
 /** The fact store every `fact` is recorded through: the store's own. */
 const FACTS: FactStore = factStore;
 
+/** What a world's own authored openings are recorded as: the owner set them in his world, so they stand established, from the player (plan §6.6). */
+const AUTHORED: Provenance = { source: { from: "player" }, precision: null, standing: "established", marks: [] };
+
 /**
  * Opens the accounts the world gave each of `ids` that nobody has opened yet, so a sum starts from
  * what the world gave: for a party that holds accounts, the world's money opens them by posting
  * their authored openings (`openingBalances`) and nothing else. Someone the world gave no accounts
  * is given none here; the world's tables fill those in only when an agent asks (`fill_in_detail`).
- * What is opened is no part of what the call said, so it is a change of its own (`Draft.fill`).
+ * What is opened is no part of what the call said, so it is a change of its own (`Draft.fill`), and
+ * it stands established from the player: the owner set it in his world.
  * What could not be applied, when something could not.
  */
 export function openAuthored(o: OpContext, ids: readonly string[]): Unread | undefined {
   for (const id of ids) {
     if (!hasLedger(o.draft.w.ctx, id)) continue;
-    const bad = o.draft.fill(o.n, id, "money");
+    const bad = o.draft.fill(o.n, id, "money", AUTHORED);
     if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
   }
   return undefined;
@@ -62,11 +69,11 @@ export interface PastCover {
 }
 
 /**
- * A payment made from the payer's own money whatever it holds, where today's economy found nothing
+ * A payment made from the payer's own money whatever it holds, for a caller whose way found nothing
  * that covers it (`NO_WAY_TO_PAY`) or declined it: out of their cash, else the first account they
- * spend from, of those still open (today's guard declines a posting from one that is not, past
- * cover or not), else their outside account; into the payee's side; as one unit with its journal
- * lines and what is made with it.
+ * spend from that is open, else their outside account; into the payee's side; as one unit with its
+ * journal lines and what is made with it. The funds guard advises on it where it runs past cover; it
+ * does not decline it. `pay` does not come here: the way it names is the way it pays.
  */
 export function payPastCover(o: OpContext, p: PastCover): Unread | undefined {
   const ctx = o.draft.w.ctx;
@@ -76,8 +83,7 @@ export function payPastCover(o: OpContext, p: PastCover): Unread | undefined {
     { account: open ?? external(p.payer), amount: -p.cents },
     { account: dest.account, amount: p.cents },
   ];
-  // Marked as today's story payments past cover are (`overdraw`): it stands past what the accounts cover, on any path.
-  const paid = posting(lines, { memo: p.memo, kind: p.kind, payer: p.payer, ...(p.payee !== undefined ? { counterparty: p.payee } : {}), ...(p.category !== undefined ? { category: p.category } : {}), story: true }).map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e));
+  const paid = posting(lines, { memo: p.memo, kind: p.kind, payer: p.payer, ...(p.payee !== undefined ? { counterparty: p.payee } : {}), ...(p.category !== undefined ? { category: p.category } : {}), story: true });
   const bad = o.draft.applyAll(asUnit([...paid, ...dest.extra, ...(p.with ?? [])]));
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
 }
@@ -85,70 +91,146 @@ export function payPastCover(o: OpContext, p: PastCover): Unread | undefined {
 /**
  * What a payment of `cents` by `payer` came to, from the state after it (its events from `from`
  * on): from the payer's money outside the world's accounts, when the world keeps none for them,
- * is said; past what an account it took from allows (below nothing, past a card's limit or an
- * overdraft), or from outside money though the payer holds accounts none of which could pay, is
- * reported, with what that way could have paid. A payment covered in full says nothing.
+ * is said; from outside money though the payer holds accounts none of which could pay, is reported,
+ * with what that way could have paid (nothing). What an account it took from held, past cover or
+ * not open, is the funds guard's advice on the posting, reported as the operation is recorded.
  */
 export function paidLines(o: OpContext, payer: string, cents: number, from: number): void {
   const ctx = o.draft.w.ctx;
   const lines = o.draft.w.events.slice(from).flatMap((e) => (e.type === "post" ? e.lines : []));
-  const outside = external(payer);
-  const fromOutside = lines.some((l) => l.account === outside && l.amount < 0);
+  if (!lines.some((l) => l.account === external(payer) && l.amount < 0)) return;
   const fields = { n: o.n, op: o.op, payer: named(o.reading, payer) };
-  if (fromOutside && !hasLedger(ctx, payer)) {
-    o.reply.line("paid_from_outside", fields);
-    return;
-  }
-  const taken = new Map<string, number>();
-  for (const l of lines) if (l.amount < 0 && !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX)) taken.set(l.account, (taken.get(l.account) ?? 0) - l.amount);
-  const room = (account: string): number => availableOf(ctx, account) + overdraftRoom(ctx, account);
-  const past = [...taken].find(([account]) => room(account) < 0);
-  if (past === undefined && !fromOutside) return;
-  const held = past === undefined ? 0 : Math.max(0, room(past[0]) + past[1]);
-  o.reply.report("paid_past_held", { ...fields, amount: formatMoney(cents, o.reading.doc.currency), held: formatMoney(held, o.reading.doc.currency) });
+  if (!hasLedger(ctx, payer)) o.reply.line("paid_from_outside", fields);
+  else o.reply.report("paid_past_held", { ...fields, amount: formatMoney(cents, o.reading.doc.currency), held: formatMoney(0, o.reading.doc.currency) });
+}
+
+/** The fixed ways of paying a call's `method` may name; any other it names is one of the payer's own accounts or cards, by id or exact name. */
+const FIXED_WAYS: readonly PayMethod[] = ["cash", "card", "credit", "debit", "charge", "checking", "savings", "account"];
+
+/**
+ * The way a call's `method` names: one of the fixed ways, or an account or card of the payer's by its id or its exact name. Nothing
+ * is read out of the words. Anything else is refused with the fixed ways and the payer's own listed as the choices.
+ */
+function wayNamed(o: OpContext, payer: string, said: string): { way: PayMethod } | { source: string } | Unread {
+  const text = said.trim();
+  const lower = text.toLowerCase();
+  const fixed = FIXED_WAYS.find((m) => m === lower);
+  if (fixed !== undefined) return { way: fixed };
+  const ways = waysOf(o.draft.w.ctx, payer);
+  const byId = ways.filter((w) => w.id === text);
+  const hits = byId.length > 0 ? byId : ways.filter((w) => w.name.trim().toLowerCase() === lower);
+  const [hit, other] = hits;
+  if (hit !== undefined && other === undefined) return { source: hit.id };
+  if (hit !== undefined) return { line: "several", fields: { n: o.n, op: o.op, field: "method", name: text, several: textOf(hits.map((w) => `${w.name} [${w.id}]`)) } };
+  const choices = [...FIXED_WAYS, ...ways.map((w) => `${w.name} [${w.id}]`)];
+  return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "method", value: JSON.stringify(said), choices: textOf(choices) }, data: { field: "method", choices } };
+}
+
+/** A payer or payee that names a thing, not someone or a group the economy keeps money for: the answer names `give` for a thing that holds coin. */
+function notParty(u: Unread): Unread {
+  return u.line === "unknown" && u.fields.other !== "" ? { ...u, line: "use_give" } : u;
+}
+
+/** The recorded things the words of a payment's goods name exactly: by id, or by the whole name. */
+function goodsNamed(o: OpContext, said: string): string[] {
+  const w = o.draft.w;
+  const key = said.trim().replace(/\s+/g, " ").toLowerCase();
+  if (key === "") return [];
+  return Object.entries(w.state.entities)
+    .filter(([id, e]) => isThing(w.ctx, id) && !isGone(w.state, id) && (id === said.trim() || e.name.trim().replace(/\s+/g, " ").toLowerCase() === key))
+    .map(([id]) => id);
+}
+
+/**
+ * A thing a payment bought, changing hands through the things model with advice: to a person as sold (a seller who did not hold it is
+ * reported; a built-in thing moves and is advised), to anyone else (a group, a business) made theirs where it stands.
+ */
+function handOver(o: OpContext, thing: string, to: string, seller: string | undefined): Unread | undefined {
+  const w = o.draft.w;
+  const holder = possessorOf(w.ctx, thing);
+  if (seller !== undefined && holder !== seller) o.reply.report("not_holding", { n: o.n, op: o.op, from: named(o.reading, seller), what: named(o.reading, thing), holder: holder === null ? "" : named(o.reading, holder) });
+  const op = o.reading.isPerson(to) ? { do: "hand" as const, item: thing, to, basis: "sale" as const, why: "" } : { do: "own" as const, item: thing, owner: to, why: "" };
+  const out = applyItemOp(w, op, { ...itemOptions(o), advise: true });
+  if ("code" in out) return out.code === "no_change" ? undefined : refusedAs(o, out, "goods", "thing");
+  if (out.filled !== undefined) o.draft.markFilled(out.filled);
+  for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
+  return undefined;
 }
 
 const pay: OpDef = {
   name: "pay",
   lane: "engine",
   needs: ["who", "amount"],
-  takes: ["who", "to", "amount", "for", "goods", "qty", "reason", "method"],
+  takes: ["who", "to", "amount", "for", "goods", "qty", "reason", "method", "world_terms"],
   example: { op: "pay", who: "wren", to: "bram", amount: 3, for: "a room for the night", goods: "Cask of cider", reason: "purchase", source: { from: "prose", message: "m-0018" } },
   run(o) {
-    const payer = find(o, "who", "entity");
-    if (isUnread(payer)) return payer;
-    const payee = findOptional(o, "to", "entity");
-    if (isUnread(payee)) return payee;
+    const w = o.draft.w;
+    const payer = find(o, "who", "party");
+    if (isUnread(payer)) return notParty(payer);
+    const toFound = findOptional(o, "to", "entity");
+    if (isUnread(toFound)) return toFound;
+    // A payee is someone, a group, or one of their accounts (the money lands in that account as it is).
+    const account = toFound !== undefined && own(w.state.entities, toFound.id)?.kind === "account" ? toFound.id : undefined;
+    if (toFound !== undefined && account === undefined && !isParty(w.ctx, toFound.id)) {
+      const asParty = find(o, "to", "party");
+      if (isUnread(asParty)) return notParty(asParty);
+    }
+    const payee = account !== undefined ? holdersOf(w.state, account).find((h) => own(w.state.entities, h) !== undefined && isParty(w.ctx, h)) : toFound?.id;
     const amount = numberArg(o.args, "amount");
     if (amount === undefined || !(amount > 0)) return notAs(o, "amount", o.args.amount ?? null, "amount");
+    if (o.args.qty !== undefined && !(typeof o.args.qty === "number" && Number.isInteger(o.args.qty) && o.args.qty >= 1)) return notAs(o, "qty", o.args.qty, "qty");
     const cents = minorUnits(o.reading, amount);
     const goods = textArg(o.args, "goods");
-    const memo = textArg(o.args, "for") ?? textArg(o.args, "reason") ?? textArg(o.args, "goods") ?? "Payment";
-    const method = textArg(o.args, "method");
-    const reason = textArg(o.args, "reason");
-    const w = o.draft.w;
+    // The journal line is the call's own words, else none.
+    const memo = textArg(o.args, "for") ?? textArg(o.args, "reason") ?? goods ?? "";
+    const said = textArg(o.args, "method");
+    const way = said === undefined ? undefined : wayNamed(o, payer.id, said);
+    if (way !== undefined && isUnread(way)) return way;
     const from = w.events.length;
-    const unopened = openAuthored(o, [payer.id, ...(payee ? [payee.id] : [])]);
+    const unopened = openAuthored(o, [payer.id, ...(payee !== undefined ? [payee] : [])]);
     if (unopened) return unopened;
-    const qty = typeof o.args.qty === "number" && Number.isInteger(o.args.qty) && o.args.qty > 0 ? o.args.qty : 1;
-    // Money and goods as one change: today's purchase, the seller's own thing changing hands, or a new one made; the money goes to the one named in `to` either way.
-    const spec = goods !== undefined
-      ? { type: "economy.buy", args: { payer: payer.id, item: goods, qty, price: cents, exact: true, story: true, ...(payee ? { seller: payee.id, payee: payee.id } : {}), ...(method !== undefined ? { method } : {}), ...(reason !== undefined ? { category: reason } : {}) } as Record<string, JsonValue> }
-      : { type: "economy.transfer", args: { from: payer.id, to: payee?.id ?? `${EXTERNAL_ACCOUNT_PREFIX}world`, cents, memo, story: true, ...(method !== undefined ? { method } : {}) } as Record<string, JsonValue> };
+    const ctx = w.ctx;
+    const fixed = way !== undefined && "way" in way ? way.way : undefined;
+    const picked = fixed !== undefined ? wayFor(ctx, payer.id, fixed, cents) : null;
+    const source = way !== undefined && "source" in way ? way.source : picked !== null ? (picked.card ?? picked.account) : undefined;
+    // What a card or loan owed before this payment, for a payment into it.
+    const owing = account !== undefined && traitsOf(ctx, account)?.liability === true ? Math.max(0, -balance(w.state, account)) : undefined;
+    const terms = o.args.world_terms === true ? { before: [] as LedgerEvent[], after: [] as LedgerEvent[] } : undefined;
+    const charge = optionalService(ctx, "economy.charge");
     const before = w.events.length;
-    const out = applyEffects(o.reading.registry, w, [spec], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
-    const refused = out.rejected[0]?.rejection;
-    const unpaid = w.events.slice(before).find((e) => e.type === "economy.txn" && "data" in e && isRecord(e.data) && typeof e.data.unpaid === "number");
-    if (refused !== undefined) {
-      if (refused.code !== NO_WAY_TO_PAY && refused.code !== "declined") return { line: "not_applicable", fields: { n: o.n, op: o.op, code: refused.code } };
-      const failed = payPastCover(o, { payer: payer.id, ...(payee ? { payee: payee.id } : {}), cents, memo, kind: "payment" });
-      if (failed) return failed;
-    } else if (unpaid !== undefined) {
-      const failed = payPastCover(o, { payer: payer.id, ...(payee ? { payee: payee.id } : {}), cents, memo, kind: "purchase" });
-      if (failed) return failed;
+    if (charge !== null) {
+      const ownAccount = account !== undefined && payee === payer.id;
+      const events = charge(ctx, payer.id, cents, memo, {
+        given: true,
+        kind: goods !== undefined ? "purchase" : ownAccount && owing === undefined ? "transfer" : "payment",
+        ...(payee !== undefined ? { payee } : account === undefined ? { counterparty: `${EXTERNAL_ACCOUNT_PREFIX}world` } : {}),
+        ...(account !== undefined ? { deposit: account } : {}),
+        ...(source !== undefined ? { source } : {}),
+        ...(terms !== undefined ? { terms, sale: { place: placeOfEntity(w.state, payer.id), item: goods ?? memo } } : {}),
+      });
+      if (!Array.isArray(events)) return refusedAs(o, events, "to", "party");
+      const early = terms === undefined ? null : o.draft.fillWith(terms.before);
+      const bad = early ?? o.draft.applyAll(events) ?? (terms === undefined ? null : o.draft.fillWith(terms.after));
+      if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
     }
     if (w.events.length === before) o.reply.report("money_untracked", { n: o.n, op: o.op, payer: named(o.reading, payer.id) });
     else paidLines(o, payer.id, cents, before);
+    const money = (c: number): string => formatMoney(c, o.reading.doc.currency);
+    if (account !== undefined && owing !== undefined && cents > owing) o.reply.report("paid_past_owed", { n: o.n, op: o.op, account: named(o.reading, account), amount: money(cents), owed: money(owing), past: money(cents - owing) });
+    if (fixed !== undefined && picked === null) o.reply.report("way_not_held", { n: o.n, op: o.op, payer: named(o.reading, payer.id), way: fixed });
+    const added = terms === undefined ? [] : [...terms.before, ...terms.after].filter((e) => e.type === "post");
+    if (added.length > 0) o.reply.report("terms_added", { n: o.n, op: o.op, count: added.length, sums: textOf(added.map((e) => money(e.type === "post" ? e.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0) : 0))) });
+    // Goods that are a recorded thing change hands; any other words stay words on the payment's journal line, and nothing is made.
+    if (goods !== undefined) {
+      const found = goodsNamed(o, goods);
+      const held = payee === undefined ? [] : found.filter((id) => possessorOf(w.ctx, id) === payee);
+      const sold = found.length === 1 ? found[0] : held.length === 1 ? held[0] : undefined;
+      if (sold === undefined) o.reply.report("goods_words", { n: o.n, op: o.op, goods, ...(found.length > 1 ? { several: textOf(found.map((id) => named(o.reading, id))) } : {}) });
+      else {
+        const failed = handOver(o, sold, payer.id, payee);
+        if (failed) return failed;
+      }
+    }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
@@ -173,7 +255,8 @@ function amountOf(v: JsonValue | undefined): number | undefined {
 /**
  * Corrects someone's cash as the GM's edit corrects it: a balanced posting against the outside
  * correction account that brings what their cash accounts hold `to` a sum, or moves it `by` one.
- * Past nothing, the rest comes off their carried cash all the same, below nothing, and is reported.
+ * Past nothing, one correction takes all of it and the rest off their carried cash, below nothing, and
+ * the funds guard advises that it held less (`corrected_past_held`).
  * Null when they keep no cash account: their cash is then a field like any other.
  */
 function correctCash(o: OpContext, entity: string, change: { to: number } | { by: number }): Unread | undefined | null {
@@ -184,17 +267,10 @@ function correctCash(o: OpContext, entity: string, change: { to: number } | { by
   if (wallet === null) return null;
   const held = accountsOf(ctx, entity, "spend").filter((id) => classOf(ctx, id) === "cash").reduce((sum, id) => sum + balance(ctx.state, id), 0);
   const target = "by" in change ? held + minorUnits(o.reading, change.by) : minorUnits(o.reading, change.to);
-  const corrected = optionalService(ctx, "economy.set_cash")?.(ctx, entity, Math.max(0, target)) ?? null;
+  const corrected = target >= 0 ? (optionalService(ctx, "economy.set_cash")?.(ctx, entity, target) ?? null) : (optionalService(ctx, "economy.adjust")?.(ctx, wallet, target - held) ?? null);
   if (corrected === null) return null;
   const bad = Array.isArray(corrected) ? o.draft.applyAll(corrected) : corrected;
   if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-  if (target >= 0) return undefined;
-  // Marked as a correction past cover is (`overdraw`), as `gm_adjust_money` takes an account below nothing.
-  const rest = optionalService(ctx, "economy.adjust")?.(ctx, wallet, target);
-  if (!Array.isArray(rest)) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: rest?.code ?? "no_handler" } };
-  const worse = o.draft.applyAll(rest.map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e)));
-  if (worse) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: worse.code } };
-  o.reply.report("paid_past_held", { n: o.n, op: o.op, payer: named(o.reading, entity), amount: formatMoney(held - target, o.reading.doc.currency), held: formatMoney(Math.max(0, held), o.reading.doc.currency) });
   return undefined;
 }
 

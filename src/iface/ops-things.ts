@@ -638,7 +638,7 @@ const spawn: OpDef = {
       made = id;
       const holder = spot !== null && "in" in spot ? spot.in : null;
       const at = spot === null ? null : "place" in spot ? spot.place : placeOfEntity(w.state, spot.in);
-      const args: Record<string, JsonValue> = { id, kind, name, fields: { ...(row?.fields ?? {}), ...((fields as JsonObject | undefined) ?? {}) }, ...(holder !== null ? { relations: [{ type: "in", to: holder }] } : {}) };
+      const args: Record<string, JsonValue> = { id, kind, name, fields: { ...((fields as JsonObject | undefined) ?? {}) }, ...(holder !== null ? { relations: [{ type: "in", to: holder }] } : {}) };
       const tier = textArg(o.args, "tier") ?? row?.tier;
       if (tier !== undefined) args.tier = tier;
       if (at !== null && holder === null) args.place = at;
@@ -648,6 +648,12 @@ const spawn: OpDef = {
       const failed = out.rejected[0];
       if (failed) return refusedAs(o, failed.rejection, "kind", "entity");
       if (out.filled !== undefined) o.draft.markFilled(out.filled);
+      // A bestiary row's sheet values are the world's own table's, not the call's: each is a change of its own, filled in from the table.
+      const drawn = Object.entries(row?.fields ?? {}).filter(([k]) => !Object.hasOwn((fields as JsonObject | undefined) ?? {}, k)).map(([field, value]): LedgerEvent => ({ type: "set", entity: id, field, value }));
+      if (drawn.length > 0) {
+        const bad = o.draft.fillWith(drawn);
+        if (bad) return refusedAs(o, bad, "bestiary", "entity");
+      }
       for (const advice of out.advice ?? []) o.draft.adviseOp(o.n, advice);
     }
     // Words that name nothing are kept as its position's words, never as a field; and said as what they are.
