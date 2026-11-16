@@ -216,6 +216,18 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
       </Button>
     );
   else if (w.kind === "row" && !w.done) press = <GiveRow path={w.path} given={props.given} onDone={props.onDone} />;
+  else if (w.kind === "filing" && !w.done)
+    press = (
+      <Press
+        label="Start filing it"
+        kind="primary"
+        run={async () => {
+          const job = await app.client.call("POST /api/v1/chats/:chat/bootstrap", { chat: w.chat }, { body: {} });
+          props.onDone();
+          return `Started job ${job.id}: the offer below follows it, and starts the rest at once.`;
+        }}
+      />
+    );
   else if (w.kind === "pin" || w.kind === "text") {
     const file = w.kind === "pin" ? w.file : w.path;
     press = (
