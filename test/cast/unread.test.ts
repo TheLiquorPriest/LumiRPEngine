@@ -28,7 +28,7 @@ describe("the cast's tools, never refused for what they do not read", () => {
     );
     expect(r.error).toBeUndefined();
     expect(wordsFromFiles(r)).toBe(true);
-    expect(r.reports).toEqual(["Operation 1 (perception) was written without feeling, where. It reads id, who, message, moment, reach, content, missed, knows, secrets, told_by, reliability, drop, why."]);
+    expect(r.reports).toEqual(["Operation 1 (perception) was written without feeling, where. It reads id, who, message, moment, reach, content, missed, knows, secrets, told_by, reliability, learned, belief, sure, drop, why."]);
     const [p] = dataOf(r).perceptions as JsonObject[];
     expect((p?.now as JsonObject).content).toBe("The door bangs; Wren drips on the boards.");
     expect(p?.knowledge).toHaveLength(1);
@@ -51,7 +51,7 @@ describe("the cast's tools, never refused for what they do not read", () => {
     expect(wordsFromFiles(r)).toBe(true);
     expect(r.reports).toEqual([
       "Operation 1 (relationship) was written without mood. It reads who, with, text, trust, warmth, respect, fear, drop, why.",
-      "Operation 2 (knowledge) was written without from. It reads who, id, text, secret, how, drop, why.",
+      "Operation 2 (knowledge) was written without from. It reads who, id, text, secret, told_by, learned, belief, sure, about, how, drop, why.",
     ]);
     const [rel, known] = dataOf(r).operations as JsonObject[];
     expect(rel?.wrote).toEqual({ with: "Wren", text: "She owes him for the lamp oil.", trust: 35, toward: "entity:wren" });

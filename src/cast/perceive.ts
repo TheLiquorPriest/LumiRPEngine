@@ -23,12 +23,12 @@ import type { Reply } from "../iface/kit";
 import { type Provenance, provenanceData } from "../iface/source";
 import { textOf } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
-import type { FactId } from "../shared/minds";
+import { type FactId, HOLDING_BELIEFS, HOLDING_HOWS, type HoldingBelief, type HoldingHow } from "../shared/minds";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastReading, type CastToolSpec, nearIds, readingOr, whoView } from "./kit";
 import { type CastItem, type CastWrite, type CastWriter, writeCast } from "./record";
 import { LORE_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
-import { forgetsOf, holdingChanges, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
+import { forgetsOf, type HoldingGiven, holdingChanges, secretResolver, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { CAST_LANE, characterNamed, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, makeFresh, needed, readArg, type Reads, refused, type Unread } from "./update";
 
 /** How much of a moment reached a character (§7.3): all of it, part of it, told of it by someone, or nothing. */
@@ -47,6 +47,9 @@ const ARGS: Readonly<Record<string, Kind>> = {
   secrets: "texts",
   told_by: "name",
   reliability: "text",
+  learned: HOLDING_HOWS,
+  belief: HOLDING_BELIEFS,
+  sure: { min: 0, max: 1 },
   drop: "flag",
   why: "text",
 };
@@ -140,7 +143,9 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
   const said = (secrets as string[] | undefined) ?? [];
   const trouble: Unread[] = [];
   const turnRow = said.length === 0 || of === null ? null : call.deps.store.user(call.scope.user).turn(of);
-  const held = said.length > 0 ? await secretsHeld(world, { n, op: OP, field: "secrets" }, character.name, fields.told_by, turnRow, said, call.settings.secretConfidence, trouble) : [];
+  // How the secrets were learned, whether they believe them and how sure, as the writer says; what is left out is the default (the setting's sureness).
+  const holding: HoldingGiven = { ...(typeof fields.learned === "string" ? { how: fields.learned as HoldingHow } : {}), ...(typeof fields.belief === "string" ? { belief: fields.belief as HoldingBelief } : {}), ...(typeof fields.sure === "number" ? { sure: fields.sure } : {}) };
+  const held = said.length > 0 ? await secretsHeld(world, { n, op: OP, field: "secrets" }, character, fields.told_by, turnRow, said, call.settings.secretConfidence, trouble, holding) : [];
   // A secret that cannot be held is left out; while another is held, the perception still holds secrets.
   out.unread.push(...trouble.map((u) => (held.length > 0 ? { ...u, kept: true } : u)));
   // The knowledge it gave that stands. Struck, the perception takes all of it along; corrected with what they now know or with the
@@ -155,7 +160,7 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
         ? gave
         : []
       : gave.filter((k) => (knows !== undefined && typeof k.fields.text === "string" && !(knows as string[]).includes(k.fields.text)) || (holds.size > 0 && typeof k.fields.secret === "string" && !holds.has(k.fields.secret)) || (cleared && !(typeof k.fields.secret === "string" && holds.has(k.fields.secret))));
-  const forgets = forgetsOf(world.ctx, n, OP, character.name, secretsLetGo(cast.record, character.id, struck), out.unread);
+  const forgets = forgetsOf(world.ctx, n, OP, character, secretsLetGo(cast.record, character.id, struck), out.unread);
   // What the knowledge it keeps already gives is not written again.
   const kept = gave.filter((k) => !struck.includes(k));
   const keptTexts = new Set(kept.flatMap((k) => (typeof k.fields.text === "string" ? [k.fields.text] : [])));
@@ -203,6 +208,7 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
   const world = new SecretWorld(
     () => worldAt(call.deps.store, call.scope.user, turn, call.agent.job ?? null, call.scope.chat),
     (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books({ user: call.scope.user, chat: call.scope.chat }, book, entry)),
+    secretResolver(call.deps.secretFact, call.scope.user),
   );
   const fresh = new Map<string, string>();
   const reads: PerceptionRead[] = [];

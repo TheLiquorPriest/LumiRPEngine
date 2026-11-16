@@ -33,7 +33,8 @@ invented_unchecked: Operation {{n}} ({{op}}) is recorded as invented and names n
 invented_unconsented: Operation {{n}} ({{op}}) is recorded as invented and names no consent, so it is marked so.
 pinned: Operation {{n}} (cast): the player pinned {{who}} as {{as}}, and that stands. Your casting is kept for when the pin is taken away.
 no_cast: No one is cast on this path yet.
-no_character: There is no {{who}} in the cast.
+no_character: There is no {{who}} in the cast{{#near}}; the nearest names are {{near}}{{/near}}.
+no_knowers: No one the cast holds knows that.
 not_cast: {{who}} has no casting on this path.
 more: {{count}} more in {{part}}. Ask again with skip {{skip}} to see them.
 no_perceptions: perceptions cannot be read: send a list of perceptions.
@@ -44,8 +45,9 @@ no_world_secret: Operation {{n}} ({{op}}): this chat plays no world the engine c
 no_holder: Operation {{n}} ({{op}}): no one in the world is named {{who}}, so a secret cannot be held by them.
 no_teller: Operation {{n}} ({{op}}): a secret someone was told is held with its teller, and no one in the world is named {{who}}.
 many_named: Operation {{n}} ({{op}}): {{count}} people in the world are named {{who}}: {{ids}}.
-unknown_secret: Operation {{n}} ({{op}}): this chat holds no secret {{secret}}.
+unknown_secret: Operation {{n}} ({{op}}): this chat holds no secret {{secret}}{{#near}}; the nearest it holds are {{near}}{{/near}}.
 secret_refused: Operation {{n}} ({{op}}): the secret {{secret}} cannot be held by {{who}} ({{code}}).
+self_teller: Operation {{n}} ({{op}}): {{who}} was named as the one who told {{who}}; it is kept as first hand.
 own_turn: What {{tool}} writes is kept with a turn, and this call belongs to none.
 plays_none: {{tool}} is a character's own, and this agent plays no one.
 no_memories_sent: memories cannot be read: send a list of memories.

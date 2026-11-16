@@ -116,6 +116,7 @@ describe("cast_update", () => {
       soul: { text: "Wants a quiet life; will not lie to a guest.", version: 1 },
       inner_voice: { text: "Counts things when nervous.", version: 1 },
       background: { text: "Born in the inn's cellar.", version: 1 },
+      growth: [{ text: "No longer trusts a sealed letter.", cause: "The forged seal.", date: "Sat 1 Mar 2031, 8:00 AM" }],
     });
     expect(cast?.now).toEqual({ as: "supporting", line: "The innkeeper of the Gilded Hart." });
     expect(growth?.id).toMatch(/^g-[0-9a-f]+$/);
@@ -285,6 +286,6 @@ describe("cast_query", () => {
 
     const unknown = await b.call("cast_query", { who: "Odile" }, turn.id);
     expect(unknown.error).toBe(true);
-    expect(texts(unknown)).toEqual(["There is no Odile in the cast."]);
+    expect(texts(unknown)).toEqual(["There is no Odile in the cast; the nearest names are Hale, Bram."]);
   });
 });

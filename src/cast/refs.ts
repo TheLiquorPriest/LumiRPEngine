@@ -1,9 +1,10 @@
 // What the Author's words name in the world (plan §6.4 l.680, §7.1): a principal out of view is recorded
-// with the places and people its whereabouts and intention name, by their refs in the world state
-// (`place:<id>`, `entity:<id>`), and with the story time the intention is meant for, where that reads
-// as a time. A word the world holds none of is left unreferenced and answered with the names nearest
-// to it, never guessed at: code finds what the words name by id, by name and by the engine's own
-// reading of a place named in play, and judges nothing else.
+// with the places and people its whereabouts and intention name, and a statement of what a character knows
+// with what it is about, by their refs in the world state (`place:<id>`, `entity:<id>`), and with the story
+// time the intention is meant for, where that reads as a time. The names are found by the engine's one
+// reading of names (`Reading`), whatever kinds it finds, and a place named as the engine finds one in play.
+// A word the world holds none of is left unreferenced and answered with the names nearest to it, never
+// guessed at; code judges nothing else.
 
 import { calendarOf, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
@@ -11,28 +12,38 @@ import { findPlaces } from "../engine/places-in-play";
 import type { ReadContext } from "../engine/registry";
 import { writtenTime } from "../engine/time";
 import { IFACE_DEFAULTS } from "../iface/kit";
-import { nearestOf } from "../iface/reading";
+import { isFound, Reading } from "../iface/reading";
 import type { Database } from "bun:sqlite";
+import type { CastCall } from "./kit";
 import { type CastItem, charactersOf, findCharacter, nameKey } from "./record";
 import { personNamed } from "./secrets";
 
-/** What words name: a ref in the world's tree, or the names nearest to them where they name nothing. */
+/** What words name: a ref in the world's tree, or the names nearest to them where they name nothing (several: each of those they fit). */
 export type Named = { ref: string } | { near: string[] };
 
-/** The place or the person, thing or other entity `said` names: an id, a ref, a whole name, or a place named as the engine finds one in play. */
-export function refOf(ctx: ReadContext, said: string): Named {
-  const text = said.trim();
-  const bare = text.replace(/^(?:entity|place):/, "");
-  if (Object.hasOwn(ctx.state.entities, bare)) return { ref: `entity:${bare}` };
-  const named = Object.entries(ctx.state.entities).filter(([, e]) => nameKey(e.name) === nameKey(bare));
-  const [one] = named;
-  if (named.length === 1 && one !== undefined) return { ref: `entity:${one[0]}` };
-  const stands = placeOfEntity(ctx.state, ctx.world.pov);
-  const places = findPlaces(ctx, bare, stands === null ? {} : { near: stands });
-  const [place] = places;
-  if (place !== undefined && (places.length === 1 || place.matched !== "head")) return { ref: `place:${place.id}` };
-  const names = [...Object.values(ctx.world.places).map((p) => p.name), ...Object.values(ctx.state.entities).map((e) => e.name)];
-  return { near: nearestOf(text, [...new Set(names)], IFACE_DEFAULTS).slice(0, IFACE_DEFAULTS.nearMatches) };
+/**
+ * What the call's words name, by the engine's one reading of names at the call's own point of the story: a person, thing, place or any
+ * other point of the tree, by id, ref, name or the words of one name; else a place named in play. Where the call reads no world, nothing is named.
+ */
+export function namesIn(call: CastCall): (said: string) => Named {
+  let reading: Reading | null | undefined;
+  return (said) => {
+    if (reading === undefined) {
+      const made = Reading.of({ scope: call.scope, agent: call.agent, lines: call.lines, deps: { store: call.deps.store.user(call.scope.user), env: call.deps.store.env }, settings: { nearMatches: IFACE_DEFAULTS.nearMatches, nearDistance: IFACE_DEFAULTS.nearDistance } });
+      reading = made instanceof Reading ? made : null;
+    }
+    if (reading === null) return { near: [] };
+    const found = reading.find(said, "point");
+    if (isFound(found)) return { ref: found.ref };
+    // A place named in play, as the engine finds one by the words of its name.
+    const text = said.trim();
+    const stands = placeOfEntity(reading.ctx.state, reading.ctx.world.pov);
+    const places = findPlaces(reading.ctx, text.replace(/^place:/, ""), stands === null ? {} : { near: stands });
+    const [place] = places;
+    if (found.several.length === 0 && place !== undefined && (places.length === 1 || place.matched !== "head")) return { ref: `place:${place.id}` };
+    const several = found.several.map((s) => s.name);
+    return { near: several.length > 0 ? several : found.near.map((n) => n.name) };
+  };
 }
 
 /** The story time (minutes of the world's clock) words give, where they are a date and time, a clock time, a part of the day or a counted span; none where they read as none of these. */

@@ -16,7 +16,7 @@ import { clockRecorded, type Store, type UserStore } from "../store";
 import { castAt } from "./path";
 import { IMPORTED_KIND, importedText } from "./imported";
 import { type BaseVersion, type CastItem, CastRecord, type Character, chatLine } from "./record";
-import type { BookReader } from "./secrets";
+import type { BookReader, SecretFactOf } from "./secrets";
 import type { SourceReader, SourceState } from "./sources";
 
 /** Every fixed value of the cast's tools, each a setting with this default. */
@@ -63,7 +63,7 @@ export type CastSettings = { -readonly [K in keyof typeof CAST_DEFAULTS]: number
  */
 export const CAST_SETTING_DEFS = {
   queryItems: { key: "cast.queryItems", default: CAST_DEFAULTS.queryItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Items a cast query gives", about: "The most items of one part one cast_query answers with; the answer says how many more there are.", effect: "turn" },
-  secretConfidence: { key: "cast.secretConfidence", default: CAST_DEFAULTS.secretConfidence, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Sureness of a secret learned", about: "How sure, from 0 to 1, a character is of a secret a perception says they now know.", effect: "turn" },
+  secretConfidence: { key: "cast.secretConfidence", default: CAST_DEFAULTS.secretConfidence, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Sureness of a secret learned", about: "How sure, from 0 to 1, a character is of a secret a perception or cast_update says they now hold, used only when the one who writes it says nothing of how sure they are.", effect: "turn" },
   topOfMind: { key: "cast.topOfMind", default: CAST_DEFAULTS.topOfMind, takes: { type: "whole", least: 0 }, perConnection: false, name: "Top of mind", about: "The most memories a character holds at top of mind.", effect: "turn", row: "Top of mind" },
   shortTermDays: { key: "cast.shortTermDays", default: CAST_DEFAULTS.shortTermDays, takes: { type: "number", least: 0 }, perConnection: false, name: "Short-term memory", about: "Days of story time a memory stays short term, unless a dream settles it sooner.", effect: "turn", row: "Short-term memory" },
   // A memory that fades in no time at all would have no strength to measure.
@@ -117,6 +117,8 @@ export interface CastDeps {
   sources: SourceReader;
   /** Reads a Lumiverse book entry's text live, for a secret its marks hold that the chat holds no fact of yet; without it, such a secret cannot be held. */
   books?: BookReader;
+  /** Turns the id the lore shows a secret by (`e-112#2`, `w-31`) into the fact it is; without it only today's own forms of a fact id are read. */
+  secretFact?: SecretFactOf;
   /** Settings over `CAST_DEFAULTS`. */
   settings?: Partial<CastSettings>;
   /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */
@@ -290,6 +292,14 @@ export function baseView(current: ReadonlyMap<string, BaseVersion>, all: readonl
     out[part] = all === null ? { text: v.text, version: v.version } : all.filter((x) => x.part === part).map((x) => ({ version: x.version, text: x.text, by: x.by }));
   }
   return out;
+}
+
+/** The growth the Author accepted for a character, each change with its date in story time: what is laid over the base wherever the base is shown (one a reflection only proposed counts once the Author accepts it). */
+export function growthOver(reading: Pick<CastReading, "record" | "clock">, character: string): JsonObject[] {
+  return reading.record
+    .of(character, "growth")
+    .filter((g) => g.fields.proposed !== true)
+    .map((g) => ({ ...g.fields, ...datedAt(reading.clock, g.at) }));
 }
 
 /** A source as answers show it: what it is, which side it defines, its title now, and whether it is gone or newer than the base. */

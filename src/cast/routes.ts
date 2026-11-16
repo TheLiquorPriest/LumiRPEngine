@@ -294,7 +294,7 @@ function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, 
     };
     if (back === null) {
       // As `cast_update` and `perceive` strike knowledge: each secret it gave is let go, unless other knowledge of theirs still gives it.
-      const forgets = forgetsOf(ctx, 1, item.part, character.name, secretsLetGo(r.record, character.id, knowledge), unread);
+      const forgets = forgetsOf(ctx, 1, item.part, character, secretsLetGo(r.record, character.id, knowledge), unread);
       record(forgets.flatMap((f) => f.events));
       return { item: item.id, changed: true, also: also.map((k) => k.id), letGo: forgets.flatMap((f) => (f.events.length > 0 ? [f.fact] : [])), held: [], left: [], unread };
     }
@@ -305,7 +305,7 @@ function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, 
       const fact = secretOf(k);
       if (fact === null || asked.has(fact)) return [];
       asked.add(fact);
-      return secretsHeldAgain(ctx, { n: 1, op: item.part, field: "secret" }, character.name, k.fields.told_by, r.s.turn(k.opened), [fact], confidence, unread);
+      return secretsHeldAgain(ctx, { n: 1, op: item.part, field: "secret" }, character, k.fields.told_by, r.s.turn(k.opened), [fact], confidence, unread);
     });
     record(holds.flatMap((h) => h.events));
     // What stays struck is said, with the secret it gave where no knowledge standing now gives that.

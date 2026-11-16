@@ -17,13 +17,17 @@ import type { ChangeInput, Store } from "../store";
 import { applyEvent, validateEvent } from "../engine/events";
 import { kindIs } from "../engine/scope";
 import type { ReadContext } from "../engine/registry";
+import { IFACE_DEFAULTS } from "../iface/kit";
+import { nearestOf } from "../iface/reading";
+import { textOf } from "../iface/texts";
+import { PACK as MINDS_PACK, readKnowledge } from "../packs/minds/core/state";
 import type { WorldState } from "../engine/state";
 import { mindEdit } from "../packs/minds/core/edit";
 import type { EntityId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import { bookTextHash } from "../shared/lore";
-import { type FactId, type Holding, type KnowledgeFact, MINDS_EVENTS, parseFactId, wiFactIdOfLiveLore } from "../shared/minds";
+import { bookTextHash, loreSourceOf } from "../shared/lore";
+import { type FactId, type Holding, type HoldingBelief, type HoldingHow, type KnowledgeFact, MINDS_EVENTS, parseFactId, wiFactIdOfLiveLore } from "../shared/minds";
 import { parseSecretMarks, wholeEntrySecret } from "../shared/secret-marks";
 import { type CastItem, type CastRecord, type Character, nameKey } from "./record";
 import type { Unread } from "./update";
@@ -95,14 +99,20 @@ export function secretsLetGo(record: CastRecord, character: string, struck: read
   return [...new Set(struck.flatMap(secretOf))].filter((fact) => !still.has(fact));
 }
 
+/** Whose a holding is: a character of the cast, found in the world by the reference its record keeps, else by its name; or a name alone. */
+export type Holder = string | Pick<Character, "name" | "person">;
+
+const holderName = (holder: Holder): string => (typeof holder === "string" ? holder : holder.name);
+const personOf = (ctx: ReadContext, holder: Holder): PersonFound => (typeof holder === "string" ? personNamed(ctx, holder) : personOfCharacter(ctx, holder));
+
 /**
  * The events that take the holdings of `facts` back from the world's person a character is, each
  * with its secret. When no one in the world is that person, why goes to `unread`, kept, so that the
  * strike is written all the same. A chat that plays no world holds no secrets, and has none to take back.
  */
-export function forgetsOf(ctx: ReadContext | null, n: number, op: string, name: string, facts: readonly FactId[], unread: Unread[]): { fact: FactId; events: LedgerEvent[] }[] {
+export function forgetsOf(ctx: ReadContext | null, n: number, op: string, who: Holder, facts: readonly FactId[], unread: Unread[]): { fact: FactId; events: LedgerEvent[] }[] {
   if (ctx === null || facts.length === 0) return [];
-  const holder = oneIn(personNamed(ctx, name), n, op, "drop", name, "no_holder");
+  const holder = oneIn(personOf(ctx, who), n, op, "drop", holderName(who), "no_holder");
   if (typeof holder !== "string") {
     unread.push({ ...holder, kept: true });
     return [];
@@ -110,7 +120,7 @@ export function forgetsOf(ctx: ReadContext | null, n: number, op: string, name: 
   return facts.map((fact) => ({ fact, events: forgetEvents(ctx, holder, fact) }));
 }
 
-/** A holding as a perception gives it: whose, of which secret, told by whom (null: first hand), since when, and how sure. */
+/** A holding as a perception gives it: whose, of which secret, told by whom (null: first hand), since when, how it was learned, whether they believe it and how sure. */
 export interface SecretAsk {
   holder: EntityId;
   fact: FactId;
@@ -118,6 +128,10 @@ export interface SecretAsk {
   /** The message of the turn it was perceived in (null while that turn has none), and the story clock then. */
   since: Holding["since"];
   confidence: number;
+  /** How it was learned, as today's holdings say it; none given: told when there is a teller, else witnessed. */
+  how?: HoldingHow;
+  /** Whether they believe it; none given: they do. */
+  belief?: HoldingBelief;
 }
 
 /**
@@ -126,7 +140,7 @@ export interface SecretAsk {
  * secret; others as `mindEdit` gives them).
  */
 export function holdingEvents(ctx: ReadContext, ask: SecretAsk): LedgerEvent[] | { code: string } {
-  const holding: Holding = { how: ask.teller === null ? "witnessed" : "told", by: ask.teller, evidence: [], since: ask.since, belief: "true", confidence: ask.confidence };
+  const holding: Holding = { how: ask.how ?? (ask.teller === null ? "witnessed" : "told"), by: ask.teller, evidence: [], since: ask.since, belief: ask.belief ?? "true", confidence: ask.confidence };
   const out = mindEdit(ctx, { op: "mind_knowledge", entity: ask.holder, fact: ask.fact, holding });
   if (Array.isArray(out)) return out;
   return out.code === "no_change" ? [] : { code: out.code };
@@ -160,7 +174,9 @@ export async function secretFactEvent(ctx: ReadContext, fact: FactId, read: (boo
       const whole = wholeEntrySecret(content);
       const marks = parseSecretMarks(content);
       const text = ref.mark === null ? (whole?.text ?? (marks.length === 0 ? content : "")) : whole === null ? (marks[ref.mark]?.text ?? "") : "";
-      if (text.trim() !== "") made = { id: fact, kind: "wi", claim: text.replace(/\s+/g, " ").trim(), about: [], truth: "true", textHash: bookTextHash(content) };
+      // About what the world's lore entries made of this book entry link, as today's seeding records it (`markSeeds`).
+      const about = [...new Set(Object.values(ctx.world.lore).flatMap((l) => (isBookEntry(l.source, ref.book, ref.entry) ? l.links : [])))];
+      if (text.trim() !== "") made = { id: fact, kind: "wi", claim: text.replace(/\s+/g, " ").trim(), about, truth: "true", textHash: bookTextHash(content) };
     }
   }
   return made === null ? null : { type: MINDS_EVENTS.fact, data: { fact: made as unknown as JsonObject } };
@@ -178,12 +194,19 @@ export class SecretWorld {
   constructor(
     private readonly load: () => ReadContext | null,
     private readonly read: (book: string, entry: string) => Promise<string | null>,
+    /** The fact a secret named by the id the lore shows it by (`e-112#2`, `w-31`), or by one of today's forms, is; null for one that names none. */
+    private readonly resolve: (said: string) => Promise<FactId | null> = (said) => Promise.resolve(secretFact(said)),
   ) {}
 
   /** The world, or null when the chat plays none the store can read. */
   get ctx(): ReadContext | null {
     if (this.#ctx === undefined) this.#ctx = this.load();
     return this.#ctx;
+  }
+
+  /** The fact a secret's id names. */
+  factOf(said: string): Promise<FactId | null> {
+    return this.resolve(said);
   }
 
   /** The events that make a holding, as `holdingEvents` gives them; a secret the chat does not hold yet has its fact recorded first, from the lore. */
@@ -194,12 +217,24 @@ export class SecretWorld {
     if (!("code" in first) || first.code !== "missing_fact") return first;
     const fact = await secretFactEvent(ctx, ask.fact, this.read);
     if (fact === null || validateEvent(ctx.registry, fact, ctx) !== null) return first;
-    const state = structuredClone(ctx.state) as WorldState;
+    // The fact is laid over the state for this call alone: only the path to where it is written is copied, never the state.
+    const state = withKnowledgeCopied(ctx.state);
     applyEvent(ctx.registry, fact, state, ctx);
     this.#ctx = ctx.registry.context(ctx.world, state);
     this.facts.push(fact);
     return holdingEvents(this.#ctx, ask);
   }
+}
+
+/**
+ * The state with the path to the minds' facts copied (the state itself, its packs, the minds' slice, its knowledge and its facts), so
+ * that recording a fact in it changes the copy and not the state it was made from; everything else is shared, not copied.
+ */
+function withKnowledgeCopied(state: WorldState): WorldState {
+  const slice = state.packs[MINDS_PACK] as unknown as { knowledge?: { facts?: Record<string, unknown>; holdings?: Record<string, unknown> } } | undefined;
+  const copy: WorldState = { ...state, packs: { ...state.packs } };
+  copy.packs[MINDS_PACK] = { ...slice, knowledge: { ...slice?.knowledge, facts: { ...slice?.knowledge?.facts }, holdings: { ...slice?.knowledge?.holdings } } } as unknown as WorldState["packs"][string];
+  return copy;
 }
 
 /** Where a call names secrets, for the answers' lines: its item, what kind of item that is, and the argument. */
@@ -210,38 +245,55 @@ export interface SecretsSaid {
 }
 
 /**
- * Whose holding it is, the character called `name`, and who told them, `teller` (absent: first hand), each found in the world;
- * null when either is not, and why goes to `unread`.
+ * Whose holding it is, the character `holder` (found by the reference its record keeps), and who told them, `teller` (absent: first
+ * hand), each found in the world; null when either is not, and why goes to `unread`. A teller who is the holder is written all the
+ * same, as first hand, and said.
  */
-function holderOf(ctx: ReadContext, where: SecretsSaid, name: string, teller: JsonValue | undefined, unread: Unread[]): { holder: EntityId; by: EntityId | null } | null {
+function holderOf(ctx: ReadContext, where: SecretsSaid, holder: Holder, teller: JsonValue | undefined, unread: Unread[]): { holder: EntityId; by: EntityId | null } | null {
   const { n, op, field } = where;
-  const holder = oneIn(personNamed(ctx, name), n, op, field, name, "no_holder");
-  const by = typeof teller === "string" ? oneIn(personNamed(ctx, teller), n, op, field, teller, "no_teller") : null;
-  if (typeof holder !== "string") unread.push(holder);
-  if (by !== null && typeof by !== "string") unread.push(by);
-  return typeof holder === "string" && (by === null || typeof by === "string") ? { holder, by } : null;
+  const name = holderName(holder);
+  const mine = oneIn(personOf(ctx, holder), n, op, field, name, "no_holder");
+  const told = typeof teller === "string" ? oneIn(personNamed(ctx, teller), n, op, field, teller, "no_teller") : null;
+  if (typeof mine !== "string") unread.push(mine);
+  if (told !== null && typeof told !== "string") unread.push(told);
+  if (typeof mine !== "string" || (told !== null && typeof told !== "string")) return null;
+  if (told === mine) {
+    unread.push({ line: "self_teller", fields: { ...where, who: name }, kept: true });
+    return { holder: mine, by: null };
+  }
+  return { holder: mine, by: told };
 }
 
-/** Why a holding of `secret` could not be made, as the answers' line says it. */
-function heldNot(where: SecretsSaid, name: string, secret: string, code: string): Unread {
-  return { line: code === "missing_fact" ? "unknown_secret" : "secret_refused", fields: { ...where, who: name, secret, code } };
+/** Why a holding of `secret` could not be made, as the answers' line says it; one the chat does not hold names the nearest it does. */
+function heldNot(ctx: ReadContext, where: SecretsSaid, name: string, secret: string, code: string): Unread {
+  if (code !== "missing_fact") return { line: "secret_refused", fields: { ...where, who: name, secret, code } };
+  const near = nearestOf(secret, Object.keys(readKnowledge(ctx.state).facts), IFACE_DEFAULTS).slice(0, IFACE_DEFAULTS.nearMatches);
+  return { line: "unknown_secret", fields: { ...where, who: name, secret, code, near: textOf(near) } };
+}
+
+/** What the writer says of how a secret was learned, beside who told it: how, whether they believe it, how sure; what is left out is the default. */
+export interface HoldingGiven {
+  how?: HoldingHow;
+  belief?: HoldingBelief;
+  sure?: number;
 }
 
 /**
- * The secrets `said` names that the character called `name` can hold now, each with the events that
+ * The secrets `said` names that the character `holder` can hold now, each with the events that
  * hold it: told by `teller` (absent: first hand), learned in `turn` (its message, and its story time,
- * the world's clock while it has none), as sure as `confidence`. What keeps any of them from being
- * held goes to `unread`.
+ * the world's clock while it has none), as sure as `confidence` unless `given` says how sure. What keeps any of them from being
+ * held goes to `unread`. A secret is named by the id the lore shows it by, or by one of today's own forms.
  */
 export async function secretsHeld(
   world: SecretWorld,
   where: SecretsSaid,
-  name: string,
+  holder: Holder,
   teller: JsonValue | undefined,
   turn: { message: string | null; storyTime: number | null } | null,
   said: readonly string[],
   confidence: number,
   unread: Unread[],
+  given: HoldingGiven = {},
 ): Promise<{ fact: FactId; events: LedgerEvent[] }[]> {
   const held: { fact: FactId; events: LedgerEvent[] }[] = [];
   const ctx = world.ctx;
@@ -249,23 +301,23 @@ export async function secretsHeld(
     unread.push({ line: "no_world_secret", fields: { ...where } });
     return held;
   }
-  const who = holderOf(ctx, where, name, teller, unread);
+  const who = holderOf(ctx, where, holder, teller, unread);
   for (const secret of said) {
-    const fact = secretFact(secret);
+    const fact = await world.factOf(secret);
     if (fact === null) {
       unread.push({ line: "not_secret", fields: { ...where, value: secret } });
       continue;
     }
     if (who === null) continue;
-    const events = await world.hold({ holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence });
-    if ("code" in events) unread.push(heldNot(where, name, secret, events.code));
+    const events = await world.hold({ holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence: given.sure ?? confidence, ...(given.how !== undefined ? { how: given.how } : {}), ...(given.belief !== undefined ? { belief: given.belief } : {}) });
+    if ("code" in events) unread.push(heldNot(world.ctx ?? ctx, where, holderName(holder), secret, events.code));
     else held.push({ fact, events });
   }
   return held;
 }
 
 /**
- * The holdings of `facts` given back to the character called `name`, as a strike taken back stands the
+ * The holdings of `facts` given back to the character `holder`, as a strike taken back stands the
  * knowledge that gave them: by the same minds code as `secretsHeld`, from the facts the chat holds
  * (each was recorded when it was first held), so no lore is read and it can be worked out inside the
  * write that stands the knowledge. Told by `teller` (absent: first hand), learned in `turn`, as sure
@@ -274,7 +326,7 @@ export async function secretsHeld(
 export function secretsHeldAgain(
   ctx: ReadContext | null,
   where: SecretsSaid,
-  name: string,
+  holder: Holder,
   teller: JsonValue | undefined,
   turn: { message: string | null; storyTime: number | null } | null,
   facts: readonly FactId[],
@@ -286,12 +338,12 @@ export function secretsHeldAgain(
     unread.push({ line: "no_world_secret", fields: { ...where } });
     return [];
   }
-  const who = holderOf(ctx, where, name, teller, unread);
+  const who = holderOf(ctx, where, holder, teller, unread);
   if (who === null) return [];
   return facts.flatMap((fact) => {
     const events = holdingEvents(ctx, { holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence });
     if (!("code" in events)) return [{ fact, events }];
-    unread.push(heldNot(where, name, fact, events.code));
+    unread.push(heldNot(ctx, where, holderName(holder), fact, events.code));
     return [];
   });
 }
@@ -299,4 +351,18 @@ export function secretsHeldAgain(
 /** The changes that record a holding's events on a turn, in the cast's lane, with who made them. */
 export function holdingChanges(events: readonly LedgerEvent[], lane: ChangeInput["lane"], by: string, job: string | null): ChangeInput[] {
   return events.map((e) => ({ lane, op: e.type, value: e as unknown as JsonValue, by, job }));
+}
+
+/** Turns the id a lore secret is shown by (`e-112`, `e-112#2`, `w-31`) into the fact it is, for a user; null for one that names none (the lore's resolver, `secretIds`). */
+export type SecretFactOf = (user: string, shown: string) => Promise<FactId | null>;
+
+/** What a call reads a secret's id by: the lore's resolver where the host gave one, else today's own forms alone. */
+export function secretResolver(resolve: SecretFactOf | undefined, user: string): (said: string) => Promise<FactId | null> {
+  return resolve === undefined ? (said) => Promise.resolve(secretFact(said)) : (said) => resolve(user, said);
+}
+
+/** Whether a world lore entry's source is this book entry. */
+function isBookEntry(source: unknown, book: string, entry: string): boolean {
+  const at = loreSourceOf(source);
+  return at.kind === "book" && at.bookId === book && at.entryId === entry;
 }

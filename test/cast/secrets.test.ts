@@ -229,8 +229,8 @@ describe("a holding written through cast_update", () => {
     const half = await b.call("cast_update", { operations: [{ op: "knowledge", who: "Odile", text: "The cellar floods in spring.", secret: "wi:vale-book:e-7:5" }] }, third.id);
     expect(half.error).toBeUndefined();
     expect(wordsFromFiles(half)).toBe(true);
-    expect(half.reports).toContain("Operation 1 (knowledge): this chat holds no secret wi:vale-book:e-7:5.");
-    expect(half.reports).toContain("Operation 1 (knowledge) was written without secret. It reads who, id, text, secret, how, drop, why.");
+    expect(half.reports).toContain("Operation 1 (knowledge): this chat holds no secret wi:vale-book:e-7:5; the nearest it holds are wi:vale-book:e-7:0, wi:vale-book:e-7:1.");
+    expect(half.reports).toContain("Operation 1 (knowledge) was written without secret. It reads who, id, text, secret, told_by, learned, belief, sure, about, how, drop, why.");
     const none = await b.call("cast_update", { operations: [{ op: "knowledge", who: "Odile", secret: "the cellar's secret" }] }, third.id);
     expect(none.error).toBe(true);
     expect(wordsFromFiles(none)).toBe(true);
@@ -239,5 +239,86 @@ describe("a holding written through cast_update", () => {
     await b.t.tie(third);
     expect((dataOf(await b.call("cast_query", { who: "Odile", part: "knowledge" }, null)).knowledge as JsonObject[]).map((k) => k.text)).toEqual(["The cellar floods in spring."]);
     expect(heldSecrets(minds(b), "odile").lore).toEqual([]);
+  });
+});
+
+describe("a holding written whole, and held by the character's own person", () => {
+  test("a holding written as inferred, doubted, at 0.4 keeps all three; one written with none takes cast.secretConfidence; a self-teller is kept as first hand and said", async () => {
+    const b = await openBench({ books: shelf().read, settings: { secretConfidence: 0.8 } });
+    await cast(b);
+    const turn = await b.t.begin();
+    const r = await b.call(
+      "perceive",
+      {
+        perceptions: [
+          { who: "Odile", reach: "whole", content: "She works it out from the tracks.", secrets: [SECRET], learned: "inferred", belief: "uncertain", sure: 0.4 },
+          { who: "Wren", reach: "whole", content: "She sees the seal is wrong.", secrets: [SECRET], told_by: "Wren" },
+        ],
+      },
+      turn.id,
+    );
+    expect(r.error).toBeUndefined();
+    expect(wordsFromFiles(r)).toBe(true);
+    expect(r.reports).toContain("Operation 2 (perception): Wren was named as the one who told Wren; it is kept as first hand.");
+    await b.t.tie(turn);
+    const holdings = (minds(b) as unknown as { knowledge: { holdings: Record<string, Record<string, JsonObject>> } }).knowledge.holdings;
+    expect(holdings.odile?.[SECRET]).toMatchObject({ how: "inferred", belief: "uncertain", confidence: 0.4 });
+    expect(holdings.wren?.[SECRET]).toMatchObject({ how: "witnessed", belief: "true", confidence: 0.8 });
+  });
+});
+
+describe("who knows a thing", () => {
+  test("by words or by a secret's id: the character's own statements and what the minds hold for the person it is, each with where it is kept and how it was learned; across the cast, each who knows it", async () => {
+    const b = await openBench({ books: shelf().read });
+    await cast(b);
+    const turn = await b.t.begin();
+    const r = await b.call(
+      "perceive",
+      {
+        perceptions: [
+          { who: "Odile", reach: "told", content: "Bram whispers it.", told_by: "Bram", knows: ["Bram saw the reeve's letter."], secrets: [SECRET], learned: "told" },
+          { who: "Wren", reach: "whole", content: "She reads the reeve's letter over his shoulder.", knows: ["The reeve's letter is forged."] },
+        ],
+      },
+      turn.id,
+    );
+    expect(r.error).toBeUndefined();
+    await b.t.tie(turn);
+
+    const one = dataOf(await b.call("cast_query", { who: "Odile", part: "knowledge" }, null));
+    expect((one.knowledge as JsonObject[]).map((k) => [k.text ?? k.secret, k.kept_in])).toEqual([
+      ["Bram saw the reeve's letter.", "cast"],
+      [SECRET, "cast"],
+    ]);
+    expect(one.held).toEqual([expect.objectContaining({ fact: SECRET, text: "The reeve forged the seal.", how: "told", told_by: "Bram", belief: "true", kept_in: "minds" })]);
+
+    // By a secret's id, in the form today's lore gives it.
+    const bySecret = dataOf(await b.call("cast_query", { secret: SECRET_LIVE }, null));
+    expect((bySecret.knowers as JsonObject[]).map((k) => k.who)).toEqual(["Odile"]);
+
+    // By words, across the cast: each who holds them, from either record.
+    const byWords = dataOf(await b.call("cast_query", { part: "knowledge", words: "letter" }, null));
+    expect((byWords.knowers as JsonObject[]).map((k) => k.who)).toEqual(["Odile", "Wren"]);
+
+    const none = await b.call("cast_query", { part: "knowledge", words: "dragon" }, null);
+    expect(texts(none)).toEqual(["No one the cast holds knows that."]);
+    const unknown = await b.call("cast_query", { who: "Odille", part: "knowledge" }, null);
+    expect(texts(unknown)).toEqual(["There is no Odille in the cast; the nearest names are Odile, Bram, Wren."]);
+  });
+});
+
+describe("what a statement of knowledge is about", () => {
+  test("is kept by ref through the engine's one reading of names (a person, a place), so the record follows a rename; a name the world does not hold is kept as said and answered with the nearest", async () => {
+    const b = await openBench();
+    await cast(b);
+    const turn = await b.t.begin();
+    const r = await b.call("cast_update", { operations: [{ op: "knowledge", who: "Bram", text: "Tam sells at the market, and the Hollow Hall stands empty.", about: ["Tam", "Market Square", "Hollow Hall"] }] }, turn.id);
+    expect(r.error).toBeUndefined();
+    expect(wordsFromFiles(r)).toBe(true);
+    expect(r.reports).toEqual([expect.stringContaining("Hollow Hall")]);
+    await b.t.tie(turn);
+    const [known] = (dataOf(await b.call("cast_query", { who: "Bram", part: "knowledge" }, null)).knowledge as JsonObject[]) ?? [];
+    expect(known).toMatchObject({ kept_in: "cast" });
+    expect((known?.fields as JsonObject | undefined) ?? known).toMatchObject({ about: ["Tam", "Market Square", "Hollow Hall"], about_refs: ["entity:tam", "place:market_square"] });
   });
 });

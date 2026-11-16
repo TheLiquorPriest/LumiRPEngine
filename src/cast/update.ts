@@ -23,12 +23,12 @@ import type { Reply } from "../iface/kit";
 import { type Fields, type Lines, textOf } from "../iface/texts";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { FactId } from "../shared/minds";
+import { type FactId, HOLDING_BELIEFS, HOLDING_HOWS, type HoldingBelief, type HoldingHow } from "../shared/minds";
 import type { Lane } from "../store";
 import { IFACE_DEFAULTS } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
 import { type Provenance, provenanceData } from "../iface/source";
-import { baseView, type CastCall, type CastReading, type CastToolSpec, itemView, readingOr, sourceView, whoView } from "./kit";
+import { baseView, type CastCall, type CastReading, type CastToolSpec, growthOver, itemView, readingOr, sourceView, whoView } from "./kit";
 import { LORE_STAMP, PROVENANCE_READS, readSource, shownReads, sourceLines, stampOn } from "./source";
 import {
   addCharacter,
@@ -57,8 +57,8 @@ import {
   writeCast,
 } from "./record";
 import { fileName, fileNamed, importedFiles, isFiled } from "./imported";
-import { refOf, storyTimeOf, towardOf } from "./refs";
-import { forgetsOf, holdingChanges, personNamed, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
+import { type Named, namesIn, storyTimeOf, towardOf } from "./refs";
+import { forgetsOf, type HoldingGiven, holdingChanges, personNamed, secretResolver, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { type SourceNow, type SourceReader, sourcesNow } from "./sources";
 
 /** The lane every operation of the tool writes to: the cast is the story's side of a turn. */
@@ -86,12 +86,12 @@ const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
   history: { id: "name", text: "text", beats: "texts", ...DROP },
   relationship: { with: "name", text: "text", ...DIMENSIONS, ...DROP },
   away: { whereabouts: "text", place: "name", names: "texts", intention: "text", until: "text", ...DROP },
-  knowledge: { id: "name", text: "text", secret: "name", how: "text", ...DROP },
+  knowledge: { id: "name", text: "text", secret: "name", told_by: "name", learned: HOLDING_HOWS, belief: HOLDING_BELIEFS, sure: { min: 0, max: 1 }, about: "texts", how: "text", ...DROP },
   filed: { files: "texts" },
 };
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "person", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "whereabouts", "place", "names", "intention", "until", "how", "secret", "files", "accept", "drop", "why", ...PROVENANCE_READS];
+const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "person", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "whereabouts", "place", "names", "intention", "until", "how", "secret", "told_by", "learned", "belief", "sure", "about", "files", "accept", "drop", "why", ...PROVENANCE_READS];
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -176,13 +176,13 @@ export function needed(it: ItemRead, fields: readonly string[]): ItemRead {
  * nothing about how it is cast: one a cast operation names is cast by it, any other is made not yet
  * cast, and the answer says so.
  */
-export function characterNamed(call: CastCall, cast: CastReading, fresh: Map<string, string>, said: string): { id: string; name: string } {
+export function characterNamed(call: CastCall, cast: CastReading, fresh: Map<string, string>, said: string): { id: string; name: string; person: string | null } {
   const found = findCharacter(call.deps.store.db, call.scope.user, cast.chats, said);
-  if (found !== null) return { id: found.id, name: found.name };
+  if (found !== null) return { id: found.id, name: found.name, person: found.person };
   const key = nameKey(said);
   const name = fresh.get(key) ?? said.trim();
   fresh.set(key, name);
-  return { id: `new:${key}`, name };
+  return { id: `new:${key}`, name, person: null };
 }
 
 /** Makes, inside the call's write, each character it named that the cast did not hold: their ids, by the stand-in ids its items used. */
@@ -297,6 +297,8 @@ interface Reading {
   world: SecretWorld | null;
   /** The world as the call's turn plays it, read once, for the people and places the words name; null where the chat plays none. */
   ctx: () => ReadContext | null;
+  /** What a word names in the world (the engine's one reading of names), at the call's own point. */
+  names: (said: string) => Named;
 }
 
 /** The bindings of a character as the call has them so far, read live on first use. */
@@ -328,7 +330,7 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
   if (OUTSIDE_TURNS[name] !== true && r.call.scope.turn === undefined) out.fatal.push({ line: "turn_needed_op", fields: { n, op } });
 
   const who = readArg(r.call.lines, n, op, "who", "name", given.who);
-  let character: { id: string; name: string } | null = null;
+  let character: { id: string; name: string; person: string | null } | null = null;
   if (isUnread(who)) out.fatal.push(who);
   else if (who === undefined) out.fatal.push({ line: "needs", fields: { n, op, fields: ["who"] } });
   else character = characterNamed(r.call, r.cast, r.fresh, who as string);
@@ -409,14 +411,14 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       // people they name and the story time the intention is meant for. A word the world holds nothing for is left unreferenced and says so.
       const ctx = r.ctx();
       if (value.place !== undefined) {
-        const named = ctx === null ? ({ near: [] } as const) : refOf(ctx, value.place as string);
+        const named = r.names(value.place as string);
         if ("ref" in named) value.place_ref = named.ref;
         else out.unread.push({ line: "no_ref", fields: { n, op, field: "place", said: value.place as string, near: textOf(named.near) } });
       }
       if (Array.isArray(value.names)) {
         const refs: string[] = [];
         for (const said of value.names as string[]) {
-          const named = ctx === null ? ({ near: [] } as const) : refOf(ctx, said);
+          const named = r.names(said);
           if ("ref" in named) refs.push(named.ref);
           else out.unread.push({ line: "no_ref", fields: { n, op, field: "names", said, near: textOf(named.near) }, kept: true });
         }
@@ -437,6 +439,16 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       const { id, accept, ...fields } = value;
       // Accepting a growth a character's reflection proposed: it is growth from now on.
       planned.value = accept === undefined ? fields : { ...fields, proposed: accept !== true };
+      // What a statement of knowledge is about, by ref: a person, place or thing the engine's reading of names finds; one it does not is kept as said and answered with the nearest.
+      if (name === "knowledge" && Array.isArray(planned.value.about)) {
+        const refs: string[] = [];
+        for (const said of planned.value.about as string[]) {
+          const named = r.names(said);
+          if ("ref" in named) refs.push(named.ref);
+          else out.unread.push({ line: "no_ref", fields: { n, op, field: "about", said, near: textOf(named.near) }, kept: true });
+        }
+        if (refs.length > 0) planned.value.about_refs = refs;
+      }
       let item: CastItem | null = null;
       if (id !== undefined) {
         const found = r.cast.record.items.get(id as string);
@@ -452,7 +464,10 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       } else if (typeof secret === "string" && r.world !== null) {
         const turn = r.call.scope.turn;
         const learned = turn === undefined ? null : r.call.deps.store.user(r.call.scope.user).turn(turn);
-        const [held] = await secretsHeld(r.world, { n, op, field: "secret" }, character.name, undefined, learned, [secret], r.call.settings.secretConfidence, out.unread);
+        // How it was learned, whether they believe it and how sure, as the writer says; who told them, if one did.
+        const v = planned.value;
+        const given: HoldingGiven = { ...(typeof v.learned === "string" ? { how: v.learned as HoldingHow } : {}), ...(typeof v.belief === "string" ? { belief: v.belief as HoldingBelief } : {}), ...(typeof v.sure === "number" ? { sure: v.sure } : {}) };
+        const [held] = await secretsHeld(r.world, { n, op, field: "secret" }, character, v.told_by, learned, [secret], r.call.settings.secretConfidence, out.unread, given);
         if (held === undefined) delete planned.value.secret;
         else {
           planned.value.secret = held.fact;
@@ -478,7 +493,7 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       const replaced = planned.value.drop === true || (typeof planned.value.secret === "string" && planned.value.secret !== item.fields.secret);
       if (name === "knowledge" && replaced && !item.dropped && r.world !== null) {
         const facts = secretsLetGo(r.cast.record, character.id, [item]);
-        if (facts.length > 0) planned.forgets = forgetsOf(r.world.ctx, n, op, character.name, facts, out.unread);
+        if (facts.length > 0) planned.forgets = forgetsOf(r.world.ctx, n, op, character, facts, out.unread);
       }
       return out;
     }
@@ -529,8 +544,8 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
 
   const fresh = new Map<string, string>();
   const at = call.scope.turn;
-  const world = at === undefined ? null : new SecretWorld(() => worldAt(store, scope.user, at, call.agent.job ?? null), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)));
-  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world, ctx: () => (ctxOf ??= worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat)) };
+  const world = at === undefined ? null : new SecretWorld(() => worldAt(store, scope.user, at, call.agent.job ?? null), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)), secretResolver(call.deps.secretFact, scope.user));
+  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world, ctx: () => (ctxOf ??= worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat)), names: namesIn(call) };
   let ctxOf: ReadContext | null | undefined;
   const ops: OpRead[] = [];
   for (const [i, raw] of list.entries()) ops.push(await readOp(reading, i + 1, raw));
@@ -605,7 +620,8 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
       if (p.op === "bind") done.now = states.map(sourceView);
       else {
         const older = states.filter((s) => s.newer);
-        done.now = { ...baseView(baseOf(store.db, user, id, scope.chat), null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
+        const growth = growthOver(after, id);
+        done.now = { ...baseView(baseOf(store.db, user, id, scope.chat), null), ...(growth.length > 0 ? { growth } : {}), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
       }
     } else if (p.op === "filed") {
       done.now = { files: importedFiles(after.record, id).map((f) => ({ file: fileName(f), filed: isFiled(f) })) };

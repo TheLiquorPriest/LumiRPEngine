@@ -4,8 +4,11 @@
 // words, never by what an entry means, and answers in the record's order.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
-import { baseView, type CastCall, type CastReading, type CastToolSpec, datedAt, itemView, readingOr, sourceView, whoView } from "./kit";
+import { IFACE_DEFAULTS, oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
+import { nearestOf } from "../iface/reading";
+import { textOf } from "../iface/texts";
+import { askOf, holdingsFor, minds, whoKnows } from "./knowledge";
+import { baseView, type CastCall, type CastReading, type CastToolSpec, growthOver, itemView, readingOr, sourceView, whoView } from "./kit";
 import { perceptionView } from "./perceive";
 import { baseHistory, baseOf, bindingsOf, type CastItem, castingInForce, castingItemId, castOn, charactersOf, findCharacter, nameKey, type RowPart } from "./record";
 import { sourcesNow } from "./sources";
@@ -22,6 +25,7 @@ const QUERY_PROPERTIES: Record<string, JsonObject> = {
   part: oneOf(QUERY_PARTS),
   with: TEXT,
   words: TEXT,
+  secret: TEXT,
   history: YES_NO,
   skip: WHOLE,
 };
@@ -53,13 +57,26 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
 
   const reading = readingOr(call, reply);
   if (reading === null) return reply;
-  if (typeof args.who !== "string" || args.who.trim() === "") return castList(call, reading, reply);
+  const history = args.history === true;
+  const words = typeof args.words === "string" ? args.words.toLowerCase().split(/\s+/).filter((w) => w !== "") : [];
+  // A question of knowledge may name a secret by the id the lore shows it by: it is asked of the fact that id is.
+  const ask = await askOf(call, words, typeof args.secret === "string" ? args.secret : undefined);
+  if ("none" in ask) return unreadable("secret", ask.none);
   const { db } = call.deps.store;
   const user = call.scope.user;
+  // With no one named, the cast; asked of knowledge (or of a secret), who across the cast knows it.
+  if (typeof args.who !== "string" || args.who.trim() === "") {
+    if (part !== "knowledge" && typeof args.secret !== "string") return castList(call, reading, reply);
+    const knowers = whoKnows(call, reading, charactersOf(db, user, reading.chats), ask);
+    if (knowers.length === 0) return reply.line("no_knowers", {});
+    return reply.data({ knowers });
+  }
   const character = findCharacter(db, user, reading.chats, args.who);
-  if (character === null) return reply.line("no_character", { who: args.who.trim() }).fail();
+  if (character === null) {
+    const near = nearestOf(args.who, charactersOf(db, user, reading.chats).map((c) => c.name), IFACE_DEFAULTS).slice(0, IFACE_DEFAULTS.nearMatches);
+    return reply.line("no_character", { who: args.who.trim(), near: textOf(near) }).fail();
+  }
 
-  const history = args.history === true;
   const casting = castingInForce(reading.record, character);
   const castingNow: JsonObject | null = casting === null ? null : { as: casting.as, ...(casting.pinned ? { pinned: true } : {}), ...(casting.line !== null ? { line: casting.line } : {}) };
   const data: JsonObject = { character: { ...whoView(character), casting: castingNow } };
@@ -72,11 +89,8 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
     if (parts.includes("sources")) data.sources = states.map(sourceView);
     if (parts.includes("base")) {
       const older = states.filter((s) => s.newer);
-      // Growth is laid over the base wherever the base is shown: each accepted change with its date in story time (one a reflection proposed counts once the Author accepts it).
-      const growth = reading.record
-        .of(character.id, "growth")
-        .filter((g) => g.fields.proposed !== true)
-        .map((g) => ({ ...g.fields, ...datedAt(reading.clock, g.at) }));
+      // Growth is laid over the base wherever the base is shown.
+      const growth = growthOver(reading, character.id);
       data.base = { ...baseView(base, history ? baseHistory(db, user, character.id, call.scope.chat) : null), ...(growth.length > 0 ? { growth } : {}), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
     }
   }
@@ -85,7 +99,6 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
     if (item !== undefined) data.casting = itemView(reading, item, true);
   }
 
-  const words = typeof args.words === "string" ? args.words.toLowerCase().split(/\s+/).filter((w) => w !== "") : [];
   const toward = typeof args.with === "string" ? nameKey(args.with) : null;
   const skip = typeof args.skip === "number" ? args.skip : 0;
   const more: { count: number; part: string; skip: number }[] = [];
@@ -94,11 +107,16 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
     if (rowPart === undefined) continue;
     const matches = reading.record
       .of(character.id, rowPart, history)
-      .filter((item) => (toward === null || rowPart !== "relationship" || nameKey(String(item.fields.with ?? "")) === toward) && says(item, words));
+      .filter((item) => (toward === null || rowPart !== "relationship" || nameKey(String(item.fields.with ?? "")) === toward) && says(item, words) && (rowPart !== "knowledge" || ask.fact === null || item.fields.secret === ask.fact));
     const shown = matches.slice(skip, skip + call.settings.queryItems);
-    data[name] = shown.map((item) => (rowPart === "perception" ? { ...perceptionView(reading, item), ...(history ? { history: itemView(reading, item, true).history ?? [] } : {}) } : itemView(reading, item, history)));
+    data[name] = shown.map((item) => (rowPart === "perception" ? { ...perceptionView(reading, item), ...(history ? { history: itemView(reading, item, true).history ?? [] } : {}) } : { ...itemView(reading, item, history), ...(rowPart === "knowledge" ? { kept_in: "cast" } : {}) }));
     const rest = matches.length - skip - shown.length;
     if (rest > 0) more.push({ count: rest, part: name, skip: skip + shown.length });
+  }
+  // What the minds' own record holds for the world's person it is: the facts it holds and the secrets, each as the minds keep it.
+  if (parts.includes("knowledge")) {
+    const held = holdingsFor(minds(call), character, ask);
+    if (held.length > 0) data.held = held;
   }
   reply.data(data);
   for (const m of more) reply.line("more", m);

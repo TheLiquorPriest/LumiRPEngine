@@ -32,7 +32,7 @@ import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording } from "../iface";
 import type { CarriedPort } from "../iface/kit";
 import { indexedSearch } from "../iface/search";
-import { bindingsInForce, EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storedBindings, storePath, storeWorlds } from "../lore";
+import { bindingsInForce, EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretIds, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storedBindings, storePath, storeWorlds } from "../lore";
 import type { PlaceSourcesReader } from "../places";
 import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
@@ -315,11 +315,14 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // A library past `lore.workerCatalogueAt` entries has its catalogue made on a worker thread (`workers/tasks.ts`).
   // A lore search adds what is nearest in meaning where he has an embedding connection: each entry of the chat's catalogue its own vector,
   // its title and readable text embedded again when its revision changes.
+  // The ids the lore shows a secret by (`e-112#2`, `w-31`) are the numbers of its entries: the cast reads them with the lore's own resolver.
+  const entryNumbers = new EntryNumbers(app.db, app.writes);
+  const secretFacts = secretIds({ numbers: entryNumbers, books: options.books });
   const lore = new Lore({
     books: options.books,
     worlds,
     turns: prompts.lore,
-    numbers: new EntryNumbers(app.db, app.writes),
+    numbers: entryNumbers,
     settingsFor: loreSettings,
     lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
     away: (input) => app.workers.run("catalogue", input),
@@ -425,7 +428,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, placeSources, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...asked }),
-      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
+      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
     ]);
