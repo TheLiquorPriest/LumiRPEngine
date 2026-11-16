@@ -221,12 +221,14 @@ export interface MigrationReport {
   /** What the real run carried besides the chats: the worlds, the settings and those with no home in RPE yet, the settings that name a connection in Lumiverse, the connections; null for a rehearsal. */
   carried: CarriedReport | null;
   /**
-   * The world revisions the run carried that RPE's store now keeps for the chats it imported, so a
-   * migrated chat's world can be read and written to (`UserStore.copyMigratedWorlds`): added, kept
-   * already, and left out as not a world document (each listed under what could not be read); null
-   * for a rehearsal.
+   * The worlds the run carried, as RPE's store now keeps them, which Build and play read (`followWorlds`):
+   * revisions added, kept already, and left out as not a world document (each listed under what could not
+   * be read); and, by world id, worlds new to RPE, each index, draft or history followed from today's side,
+   * each kept as RPE has it (changed there since a run put it; `newer`, changed on today's side too), and
+   * each world he removed in RPE, which stays removed. The lists are absent from a report kept before runs
+   * kept them. Null for a rehearsal.
    */
-  worldsInStore: { added: number; held: number; unreadable: number } | null;
+  worldsInStore: { added: number; held: number; unreadable: number; copied?: string[]; followed?: string[]; kept?: { world: string; file: string; newer: boolean }[]; removed?: string[] } | null;
   changes: Changes | null;
   /** The extension's identifier in Lumiverse, which the swap's steps and going back's name. Absent from a report kept before runs named it. */
   identifier?: string;
@@ -534,7 +536,11 @@ export function reportText(report: MigrationReport): string {
   }
   if (report.worldsInStore) {
     const w = report.worldsInStore;
-    lines.push("", `World revisions RPE's store keeps for the imported chats: ${w.added} added, ${w.held} kept already, ${w.unreadable} left out as not a world document${w.unreadable > 0 ? " (listed under what could not be read)" : ""}.`);
+    lines.push("", `World revisions RPE's store keeps for Build and play: ${w.added} added, ${w.held} kept already, ${w.unreadable} left out as not a world document${w.unreadable > 0 ? " (listed under what could not be read)" : ""}.`);
+    if ((w.copied ?? []).length > 0) lines.push(`Worlds new to RPE, put whole: ${(w.copied ?? []).join(", ")}.`);
+    if ((w.followed ?? []).length > 0) lines.push(`Changed on today's side since a run put them, and followed in RPE (RPE's copy was still the run's): ${(w.followed ?? []).join(", ")}.`);
+    for (const k of w.kept ?? []) lines.push(`The world ${k.world}: its ${k.file} was changed in RPE since a run put it, and is kept as RPE has it${k.newer ? "; today's side changed it too, and today's newer file is in RPE's copy of today's worlds and in the backup" : ""}.`);
+    for (const id of w.removed ?? []) lines.push(`The world ${id} was removed in RPE since a run put it, and stays removed; its revisions are kept for the chats that play them.`);
   }
   if (report.carried) {
     const { settings, connections, ownFiles } = report.carried;

@@ -36,6 +36,7 @@ import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, chatEndOf, insideEnds, type MigrationReport, recountRows, refusalsOf } from "./report";
 import { MIGRATE_SETTINGS, type OwnerRow, ownerRowsOf } from "./setting-list";
 import { NO_PLACE_YET } from "./rows";
+import { followWorlds } from "./worlds";
 import { importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
 import { openToday, type Sources } from "./today";
 
@@ -176,6 +177,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
             played: (chat: string) => s.chat(chat) !== null && s.isPlayed(chat),
             recordVersion: (chat: string, turn: string, path: string, before: string | null, after: string | null, definition: string, at: number, stands: boolean) => layout.recordVersion(db, paths.files, sources.userId, chat, turn, path, before, after, { id: "carried", definition }, at, stands),
             forgetVersions: (chat: string) => layout.forgetVersions(db, paths.files, sources.userId, chat),
+            ...(layout.toolNames === undefined ? {} : { toolNames: layout.toolNames.bind(layout, paths.files) }),
           }
         : null;
       const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree, plays: new Set(worlds.keys()), ...(options.settings ? { settings: options.settings } : {}) });
@@ -185,12 +187,11 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       step = "keeping what was carried of each chat";
       const notes = layout ? layout.notes : null;
       for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried({ report, db, s, chat: c.chatId, notes }));
-      // The store keeps the world revisions the run carried (its `world_file` table, left as it is), so a migrated chat's world can be read and written to.
+      // The store keeps the worlds the run carried, which Build and play read: what today's side changed since a run put it is followed where RPE's copy is still the run's, and what he changed or removed in RPE stays (R-79).
       step = "keeping the worlds the chats play";
-      const kept = s.copyMigratedWorlds();
-      report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };
+      const kept = followWorlds(db, s.worlds, sources.userId);
+      report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length, copied: kept.copied, followed: kept.followed, kept: kept.kept, removed: kept.removed };
       for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
-      // Build reads and writes the worlds in the store's own table, which the step above filled: no copy of its own is seeded.
       // Each row counted again from what the run did (R-320, R-321): what of a chat it did not carry is not carried, and is named; what then does not balance is said, and the swap reads it.
       step = "counting what the run did";
       const placeOf = await placesOf(today, report.items, layout !== undefined);

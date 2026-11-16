@@ -95,7 +95,7 @@ describe("what the real run carries besides the chats", () => {
   });
 
   test("RPE's store keeps every world revision the run carried, so a migrated chat's world revision is found by the store's own resolver", async () => {
-    expect(report.worldsInStore).toEqual({ added: 2, held: 0, unreadable: 0 });
+    expect(report.worldsInStore).toEqual({ added: 2, held: 0, unreadable: 0, copied: [fixture.worldId], followed: [], kept: [], removed: [] });
     const db = new Database(join(data, "rpe.db"));
     try {
       const revision = openStore({ db, registry, worlds: () => undefined }).user(USER).chat(CHAT.classic)?.revision ?? null;
@@ -202,8 +202,8 @@ describe("what the real run carries besides the chats", () => {
     await writeFile(lumiah, (await readFile(lumiah, "utf8")).replace('"include"', '"leave_out"'));
     const second = await migrate(fixture.sources, { data, env: fixture.named, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
     expect(second.ran).toBe(true);
-    // The revisions the store keeps already are kept once: a draft edited in Build is no new revision.
-    expect(second.report.worldsInStore).toEqual({ added: 0, held: 2, unreadable: 0 });
+    // The revisions the store keeps already are kept once: a draft edited on today's side is no new revision, and RPE's draft, still the first run's, follows it.
+    expect(second.report.worldsInStore).toEqual({ added: 0, held: 2, unreadable: 0, copied: [], followed: [`${fixture.worldId}/draft.json`], kept: [], removed: [] });
     expect(second.report.changes?.changed.sort()).toEqual([`user storage: worlds/${fixture.worldId}/draft.json`, "user storage: harness/settings.json"].sort());
     await sameWorlds();
     const db = new Database(join(data, "rpe.db"), { readonly: true });
