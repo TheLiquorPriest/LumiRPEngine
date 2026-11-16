@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { CLASS_TRAITS, FINANCE_EVENTS, isAccountClass, isCredit } from "../../shared/finance";
 import type { LedgerEvent } from "../../shared/ledger";
 import { formatMoney } from "../../shared/world";
-import { labelOf, numOf, optionalService, own, rowOf, strOf } from "../../engine/pack-kit";
+import { labelOf, numOf, own, rowOf, strOf } from "../../engine/pack-kit";
 import { calendarOf, dateAt } from "../../engine/calendar";
 import type { ReadContext } from "../../engine/registry";
 import { placeOfEntity } from "../../engine/scope";
@@ -55,21 +55,9 @@ const adjust: WriteDef = {
     const opening = opener !== null && !isOpened(w.state, account.id, opener) ? openingEvent(w.ctx, opener) : null;
     const unopened = opening === null ? null : o.draft.fillWith([opening]);
     if (unopened) return notApplicable(o, unopened.code);
+    // The funds guard advises, never declines: a correction out of an account that is not open, or past what it held, stands as given, and the guard's advice (`account_not_open`, `corrected_past_held`) is its one report.
     const refused = editChange(o, { op: "adjust", account: account.id, cents });
-    if (refused !== null) {
-      // Past what the account holds, the funds guard declines it: today's correction all the same,
-      // its posting marked as today's story payments past cover are (`overdraw`), and reported.
-      if (refused.code !== "declined") return notApplicable(o, refused.code);
-      // Out of an account that is not open, every posting is declined as it folds (the funds guard), so it cannot stand on any path: said as the books' rule, not as a failure.
-      const status = statusOf(w.state, account.id);
-      if (status !== "open") return { line: "not_open", fields: { n: o.n, op: o.op, what: named(o.reading, account.id), status } };
-      const events = optionalService(w.ctx, "economy.adjust")?.(w.ctx, account.id, cents);
-      if (!Array.isArray(events)) return notApplicable(o, refused.code);
-      const bad = o.draft.applyAll(events.map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e)));
-      if (bad) return notApplicable(o, bad.code);
-    }
-    const now = w.state.accounts[account.id] ?? 0;
-    if (cents < 0 && now < 0) o.reply.report("paid_past_held", { n: o.n, op: o.op, payer: named(o.reading, account.id), amount: formatMoney(-cents, o.reading.doc.currency), held: formatMoney(Math.max(0, now - cents), o.reading.doc.currency) });
+    if (refused !== null) return notApplicable(o, refused.code);
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },

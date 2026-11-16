@@ -60,7 +60,8 @@ describe("money", () => {
     const t = await familyRig(BANKED);
     const r = await t.call("gm_adjust_money", { account: "acct_wren", amount: -50, ...SRC });
     appliedInFull(r, "engine");
-    expect((r.reports ?? []).some((x) => x.includes("could pay at most"))).toBe(true);
+    expect(r.reports ?? []).toEqual([expect.stringContaining("cash was corrected down by")]);
+    expect((r.reports ?? []).some((x) => x.includes("paid"))).toBe(false);
     expect(t.s.stateAt(t.turn.id).state.world.accounts.acct_wren ?? 0).toBeLessThan(0);
   });
 
@@ -72,16 +73,15 @@ describe("money", () => {
     expect(r.reports ?? []).toEqual([expect.stringContaining("Wren's coin [acct_wren] was closed with")]);
   });
 
-  test("money put on a closed account is applied; money taken out of one is answered as the books' rule, and nothing is recorded", async () => {
+  test("money put on a closed account is applied, and money taken out of one is applied as given and told once as the account not being open", async () => {
     const t = await familyRig(BANKED);
     await t.call("close_account", { account: "acct_wren", ...SRC });
     appliedInFull(await t.call("gm_adjust_money", { account: "Wren's coin", amount: 5, ...SRC }), "engine");
     const rows = t.s.changes(t.turn.id).length;
     const r = await t.call("gm_adjust_money", { account: "Wren's coin", amount: -5, ...SRC });
-    expect(r.error).toBe(true);
-    expect(texts(r)[0]).toBe("Operation 1 (gm_adjust_money): Wren's coin [acct_wren] is closed, and the books take no money out of an account that is not open, on any path.");
-    expect(texts(r).some((x) => x.includes("cannot apply this at all"))).toBe(false);
-    expect(t.s.changes(t.turn.id).length).toBe(rows);
+    appliedInFull(r, "engine");
+    expect(r.reports ?? []).toEqual([expect.stringContaining("is closed, and")]);
+    expect(t.s.changes(t.turn.id).length).toBeGreaterThan(rows);
     wordsFromFiles(r);
   });
 
