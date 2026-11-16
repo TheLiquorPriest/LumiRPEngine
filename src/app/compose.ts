@@ -242,7 +242,14 @@ export function compose(options: ComposeOptions = {}): Composition {
       carried: async (app, user) => (lastReport(app.db, user)?.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId),
     }),
     castArea(() => ({ store: made().store, files, settings: async (user, chat) => (await settings(user, chat)).cast })),
-    storyArea(() => ({ store: made().store, files, settings: async (user, chat) => (await settings(user, chat)).story })),
+    storyArea(() => ({
+      store: made().store,
+      files,
+      settings: async (user, chat) => (await settings(user, chat)).story,
+      // The history window the last prompt kept and the story so far at the head, as the next briefing works them out.
+      window: (user, chat) => made().lane.windowOf(user, chat),
+      soFar: (user, chat) => made().lane.soFarAt(user, chat),
+    })),
     buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE })),
     playArea(() => ({
       store: made().store,
