@@ -115,6 +115,21 @@ export function drawnLayer(store: Store, scope: Scope, map: MapText): { grid: st
   return place === null ? null : map.text({ state, env: store.env, place, layer: "drawn" });
 }
 
+
+/**
+ * The drawn layer of the map the player's character stands on, at the scope's turn's start or the chat's head, with its grid and version;
+ * null where the chat has no world, or no map is drawn where he stands.
+ */
+export function drawnLayer(store: Store, scope: Scope, map: MapText): { grid: string; drawn: string; text: string } | null {
+  const user = store.user(scope.user);
+  if (user.chat(scope.chat) === null) return null;
+  const turn = scope.turn === undefined ? null : user.turn(scope.turn);
+  const { state } = turn === null || turn.chat !== scope.chat ? user.headState(scope.chat) : user.stateAt(turn.id);
+  const doc = store.env.worlds(state.world.revision);
+  const place = doc === undefined ? null : placeOfEntity(state.world, doc.pov);
+  return place === null ? null : map.text({ state, env: store.env, place, layer: "drawn" });
+}
+
 /** The first `count` words of a text, joined by single spaces. */
 function firstWords(text: string, count: number): string {
   return text.trim().split(/\s+/).slice(0, count).join(" ");
@@ -837,6 +852,27 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }, "keeping the breakdown's word on a regeneration's feedback");
   }
 
+  /**
+   * The breakdown's word on the feedback typed in Lumiverse's regenerate dialog for a regeneration's generation (R-198): where it
+   * disagrees with what the turn kept (told apart at its start, not told apart, or nothing kept), the turn keeps the breakdown's, which
+   * the attempts after it carry, and the correction is told on the turn (`feedback-corrected`) for the Turn page. A generation of no
+   * regeneration of RPE's is passed over.
+   */
+  async #feedbackTold(user: string, generation: string, said: { position: "system" | "user"; text: string } | null): Promise<void> {
+    const run = this.#d.runs.byGeneration(user, generation);
+    if (run === null || (run.kind !== "swipe" && run.kind !== "regenerate")) return;
+    const was = this.#feedbackOf(user, run.turn);
+    const now: Feedback = said === null ? { found: "none" } : { found: "separated", position: said.position, text: said.text };
+    if (was !== null && JSON.stringify(was) === JSON.stringify(now)) return;
+    // Nothing kept and none typed is no correction.
+    if (was === null && now.found === "none") return;
+    const at = this.#d.clock.now();
+    await this.#d.writes.run((db) => {
+      db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, FEEDBACK_TOLD, JSON.stringify(now), at]);
+      db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, "feedback-corrected", JSON.stringify({ was, now }), at]);
+    }, "keeping the breakdown's word on a regeneration's feedback");
+  }
+
   /** The projection book (`lore.projection`) brought up to date for the chat, beside everything else: a failure is logged and touches no turn. */
   #project(user: string, chat: string): void {
     this.#d.projection.refresh(user, chat).catch((error: unknown) => this.#d.log.error("The chat's projection book could not be brought up to date.", { chat, error: words(error) }));
@@ -1526,6 +1562,20 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * The drawn layer's versions the turn's session has been given (plan §10.2): the turn's own where it was briefed already (a settle), else
    * what its parent turn left where that turn played in this session (a swipe takes them as the parent left them); else the session is new
    * and has its opening's, the drawn layer of the grid the player's character stands on where the lead's definition is given `map:drawn`.
+   */
+  async #drawnGiven(scope: Scope & { turn: string }, lead: string | null, map: MapText): Promise<Record<string, string>> {
+    const own = this.#drawnAfter.get(`${scope.user}\n${scope.turn}`);
+    if (own !== undefined) return own;
+    const parent = this.#d.store.user(scope.user).turn(scope.turn)?.parent ?? null;
+    const left = parent === null ? undefined : this.#drawnAfter.get(`${scope.user}\n${parent}`);
+    if (left !== undefined && parent !== null && this.#d.runs.ofTurn(scope.user, parent).some((r) => r.session === scope.session)) return left;
+    // The lead's opening (`opening:` in its definition, R-163) lists each item as a `given` part of its stack.
+    const stack = lead === null ? [] : await this.#d.harness().definitions.stack(scope, lead);
+    const opening = stack.some((p) => p.kind === "given" && p.part === DRAWN_MAP && p.left === undefined) ? drawnLayer(this.#d.store, scope, map) : null;
+    return opening === null ? {} : { [opening.grid]: opening.drawn };
+  }
+
+  /**
    */
   async #drawnGiven(scope: Scope & { turn: string }, lead: string | null, map: MapText): Promise<Record<string, string>> {
     const own = this.#drawnAfter.get(`${scope.user}\n${scope.turn}`);

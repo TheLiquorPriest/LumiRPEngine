@@ -11,6 +11,7 @@ import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loadGuidance } from "../app/guidance";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
+import type { CarriedPort } from "../iface/kit";
 import { mapRoutes } from "../iface/map/routes";
 import { harnessSettings } from "../app/setting-list";
 import type { LoreBooks, LoreProposals, ProjectionBooks } from "../lore";
@@ -43,6 +44,8 @@ export interface TurnTakes {
   /** What RPE writes to his books for the projection book, through the door's writes once it is set up for a Lumiverse. */
   projectionBooks: ProjectionBooks;
   clock?: Clock;
+  /** A migrated turn's record as the old engine kept it, for the agents (the composition reads it from the migration's records). */
+  carried?: (app: App) => CarriedPort;
   /** Tests only: the models agents run on, in place of the model layer's, and RPH's ids. */
   harness?: Pick<CreateHarnessOptions, "models" | "ids">;
 }
@@ -195,6 +198,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
         proposals: takes.proposals,
         projectionBooks: takes.projectionBooks,
         ...(takes.harness !== undefined ? { harness: takes.harness } : {}),
+        ...(takes.carried !== undefined ? { carried: takes.carried(at) } : {}),
       });
       at.routes.add("connections", connectionRoutes(turns.harness.models, turns.harness.jobs, owner, at.log));
       const { harness, lane, runs } = turns;
