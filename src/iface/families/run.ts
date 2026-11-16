@@ -15,6 +15,7 @@ import type { EffectSpec } from "../../shared/world";
 import { resolveEdit } from "../../engine/edits";
 import { applyEffects } from "../../engine/effects";
 import type { Rejection } from "../../engine/registry";
+import { hasLedger } from "../../packs/economy/core/model";
 import { createRng } from "../../engine/rng";
 import { applyItemOp } from "../../engine/thing-ops";
 import type { Lane, StoreState } from "../../store/types";
@@ -135,11 +136,22 @@ export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, 
   return undefined;
 }
 
-/** Today's GM edit of one operation (`engine/edits` `resolveEdit`), applied on the draft: its rejection, or null. */
+/**
+ * Today's GM edit of one operation (`engine/edits` `resolveEdit`), applied on the draft: its rejection, or null. A correction of cash is
+ * measured from what the world authored: the accounts it gave the holder open first, each a change of its own, established and from the
+ * player (`openAuthored`), and the edit draws nothing from the tables to make up money; a holder the world gave none keeps the cash as given.
+ */
 export function editChange(o: OpContext, op: FixOp): Rejection | null {
-  const out = resolveEdit(o.reading.registry, o.reading.doc, o.draft.w.state, [op], { gm: true, runSeed: o.draft.seed(o.n), by: o.call.agent.definition, confirmed: true });
+  const cash = op.op === "set" && op.field === "cash" && typeof op.value === "number";
+  if (cash) {
+    const bad = openAuthored(o, [op.entity]);
+    if (bad) return { code: typeof bad.fields.code === "string" ? bad.fields.code : "failed", reason: "" };
+  }
+  const out = resolveEdit(o.reading.registry, o.reading.doc, o.draft.w.state, [op], { gm: true, runSeed: o.draft.seed(o.n), by: o.call.agent.definition, confirmed: true, ...(cash ? { opened: true } : {}) });
   if ("rejection" in out) return o.draft.note(out.rejection);
-  return o.draft.applyAll(out.events);
+  const failed = o.draft.applyAll(out.events);
+  if (failed === null && cash && !hasLedger(o.draft.w.ctx, op.entity)) o.reply.report("no_accounts", { n: o.n, op: o.op, what: named(o.reading, op.entity) });
+  return failed;
 }
 
 /** One of a pack's effects, run as the packs run it (`engine/effects`), on the draft: its rejection, or null (nothing of it is kept then). */

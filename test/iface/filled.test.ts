@@ -107,7 +107,7 @@ describe("money nobody gave", () => {
     const rows = t.s.changes(t.turn.id);
     const opened = rows.filter((row) => row.op === "materialize");
     expect(opened.length).toBe(1);
-    expect(opened.every(filledIn)).toBe(true);
+    expect(opened.every(authored)).toBe(true);
     expect((opened[0]?.value as JsonObject).group).toBeUndefined();
     // The correction's own unit holds what the call said, and nothing else.
     const corrected = rows.filter((row) => row.op !== "materialize");

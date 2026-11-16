@@ -20,7 +20,6 @@ import { matchCatalog, placeTrade } from "../../packs/economy/core/index";
 import { isOpened } from "../../packs/economy/core/journal";
 import { balance, dayPriceOf, openerOf, priceOf, statusOf, worldProducts } from "../../packs/economy/core/model";
 import { cardsOn, featureFor, NO_WAY_TO_PAY } from "../../packs/economy/core/pay";
-import { openingEvent } from "../../packs/economy/core/process";
 import { NUMBER, TEXT, WHOLE } from "../kit";
 import { find, isUnread, minorUnits, missed, named, notAs, numberArg, outsideList, textArg, type OpContext, type Unread } from "../ops";
 import { openAuthored, paidLines, payPastCover } from "../ops-values";
@@ -50,11 +49,12 @@ const adjust: WriteDef = {
     if (cents === 0) return notAs(o, "amount", o.args.amount ?? null, "amount_not_zero");
     const w = o.draft.w;
     const from = w.events.length;
-    // An account the world authored and nobody has opened opens first, as the economy's correction would open it inside its own unit: no call said its opening, so it is a change of its own.
+    // What the world authored for the account's holder and nobody has opened opens first, each a change of its own: the owner's authored opening, established and from the player (`openAuthored`).
     const opener = openerOf(w.state, account.id);
-    const opening = opener !== null && !isOpened(w.state, account.id, opener) ? openingEvent(w.ctx, opener) : null;
-    const unopened = opening === null ? null : o.draft.fillWith([opening]);
-    if (unopened) return notApplicable(o, unopened.code);
+    if (opener !== null && !isOpened(w.state, account.id, opener)) {
+      const unopened = openAuthored(o, [opener]);
+      if (unopened) return unopened;
+    }
     // The funds guard advises, never declines: a correction out of an account that is not open, or past what it held, stands as given, and the guard's advice (`account_not_open`, `corrected_past_held`) is its one report.
     const refused = editChange(o, { op: "adjust", account: account.id, cents });
     if (refused !== null) return notApplicable(o, refused.code);
