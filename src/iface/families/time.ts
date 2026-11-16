@@ -14,7 +14,10 @@ import { routineGmView } from "../../packs/castlife/core/view";
 import { clockRecorded } from "../../store/blank";
 import { NUMBER, OBJECT, oneOf, TEXT, WHOLE } from "../kit";
 import { find, isUnread, named, notAs, notOneOf, type OpContext, textArg, type Unread, unknownFields } from "../ops";
-import { editChange, effectTool, foundIn, notApplicable, readTool, type WriteDef, writeTool } from "./run";
+import { calmStateOf, weatherTarget } from "../../packs/weather/core";
+import { own } from "../../engine/pack-kit";
+import { textOf } from "../texts";
+import { editChange, effectChange, effectTool, foundIn, isAlready, notApplicable, readTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "time";
 
@@ -71,7 +74,8 @@ const routine: WriteDef = {
     const refused = editChange(o, edit);
     if (refused !== null) {
       if (refused.code === "missing_schedule") return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "schedule", "schedule", String(o.args.schedule), Object.keys(o.reading.doc.schedules)) } };
-      if (refused.code === "bad_value") return notOneOf(o, "value", o.args.value ?? null, []);
+      // A value Cast life cannot read: answered naming it, what a block or a schedule change takes, and Cast life's own problems with it.
+      if (refused.code === "bad_value") return { line: "bad_routine_value", fields: { n: o.n, op: o.op, field: "value", value: JSON.stringify(o.args.value ?? null), wants: o.call.lines.line(o.args.op === "routine_block" ? "wants_block_value" : "wants_schedule_value") ?? "", problems: refused.reason } };
       // Taken off a schedule they do not follow: so already, and said.
       if (refused.code !== "not_owner") return notApplicable(o, refused.code);
       o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, person.id) });
@@ -92,18 +96,53 @@ const weatherSet = effectTool({
   properties: { region: TEXT, state: TEXT, minutes: NUMBER },
   required: ["region", "state"],
   example: { region: "Thornbury", state: "fog", minutes: 120, source: { from: "prose", message: "m-0302" } },
-  bend: (o, code) => (code === "bad_state" ? notOneOf(o, "state", o.args.state ?? null, []) : null),
+  // Where the story says the weather is, it is kept: on the place itself when no region is its own, and as named when the climate does not list it. Each is reported.
+  watch(o, args) {
+    const found = weatherTarget(o.draft.w.ctx, String(args.region));
+    const state = String(args.state);
+    return () => {
+      if (found.region === null && found.place !== null) o.reply.report("no_weather_region", { n: o.n, op: o.op, where: named(o.reading, found.place), state });
+      if (!found.states.some((s) => s.id === state)) o.reply.report("weather_state_unlisted", { n: o.n, op: o.op, state, states: textOf(found.states.map((s) => `${s.label} [${s.id}]`)) });
+    };
+  },
 });
 
-const weatherClear = effectTool({
+/**
+ * Clears the weather: the hold lifts and the sky turns to the state the call gives. With none given, the
+ * season's likeliest calm state is read from the climate's own table and recorded as filled in (assumed,
+ * source default) in a change of its own; the effect itself picks nothing. A place's own weather is taken off.
+ */
+const weatherClear = writeTool({
   name: "weather_clear",
   family: FAMILY,
   lane: "engine",
-  effect: "weather.clear",
-  args: [{ field: "region", want: "point" }, { field: "state" }],
   properties: { region: TEXT, state: TEXT },
   required: ["region"],
   example: { region: "Thornbury", source: { from: "prose", message: "m-0303" } },
+  run(o) {
+    const where = find(o, "region", "point");
+    if (isUnread(where)) return where;
+    const state = textArg(o.args, "state") ?? "";
+    const w = o.draft.w;
+    const found = weatherTarget(w.ctx, where.id);
+    const placeOwn = found.place !== null && own(w.ctx.world.places, found.place)?.fields.weather !== undefined;
+    const from = w.events.length;
+    const refused = effectChange(o, { type: "weather.clear", args: { region: where.id, ...(state !== "" ? { state } : {}) } });
+    if (refused !== null) {
+      if (!isAlready(refused.code)) return notApplicable(o, refused.code);
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, where.id) });
+    } else if (state !== "") {
+      if (!found.states.some((s) => s.id === state)) o.reply.report("weather_state_unlisted", { n: o.n, op: o.op, state, states: textOf(found.states.map((s) => `${s.label} [${s.id}]`)) });
+    } else if (found.region !== null && !placeOwn) {
+      const calm = calmStateOf(w.ctx, found.region);
+      if (calm !== undefined) {
+        const bad = o.draft.fillWith([{ type: "set", entity: found.region, field: "weather", value: calm }]);
+        if (bad) return notApplicable(o, bad.code);
+      }
+    }
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
+    return undefined;
+  },
 });
 
 /**

@@ -107,3 +107,20 @@ store_no_handler: {{#n}}Operation {{n}}: {{/n}}nothing in the engine applies {{o
 store_tied: {{#n}}Operation {{n}} ({{op}}): {{/n}}it was tied to an operation that did not apply, so it did not apply either.
 store_track_reset: {{#n}}Operation {{n}} ({{op}}): {{/n}}{{label}} went back from {{from}} to {{to}}, since this revision of the world no longer has the stage it was at.
 store_replaces_none: {{#n}}Operation {{n}} ({{op}}): {{/n}}no standing fact {{id}} was found to replace, so the fact was recorded beside the others.
+set_nothing_worn: Operation {{n}} ({{op}}): {{who}} wears nothing to keep as {{kind}}, so {{name}} was saved with no pieces.
+set_past_max: Operation {{n}} ({{op}}): {{who}} keeps {{max}} saved outfits and loadouts, which is the most this world's rules keep; {{name}} was saved all the same.
+unknown_by: Operation {{n}} ({{op}}): there is no one called {{name}} to have taken it.{{#other}} By that name there is {{other}}.{{/other}}{{#near}} Near: {{near}}.{{/near}} Something gone missing is item_lose with no by; to put it into a holder use store, and to put it somewhere use move.
+wants_name: a name, of any length, with at least one character
+bad_routine_value: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#wants}} It takes {{wants}}{{/wants}}{{#problems}} Cast life's problems with it: {{problems}}.{{/problems}}
+wants_block_value: an object for one block of the routine (a label, an activity, a kind of fixed, flexible or optional, a length in minutes, and the start time at for a fixed block or a window from and to for another), {"off": true}, or null to put the world's block back.
+wants_schedule_value: an object, either {"off": true, "until": a time or null} or its own slots as a list of {start, end} times (HH:MM) with an optional recurrence {every}, or null to put the world's schedule back.
+no_weather_region: Operation {{n}} ({{op}}): {{where}} has no weather region of its own, so {{state}} was kept on the place itself; the places inside it take it unless they have theirs.
+weather_state_unlisted: Operation {{n}} ({{op}}): the climate lists no state {{state}}; it was recorded as given. Its states are {{states}}.
+odds_no_roll: No roll is needed.
+odds_impossible: Too hard to try.
+odds_story: The story decides{{#chance}}, with odds of {{chance}}%{{/chance}}.
+odds_retry: A retry needs a change.
+odds_retry_once: A retry needs a new scene.
+odds_advantage: With advantage.
+odds_disadvantage: With disadvantage.
+odds_dc: DC {{dc}}.

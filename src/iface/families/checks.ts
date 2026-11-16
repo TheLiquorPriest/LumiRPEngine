@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import { parseMoneyInput } from "../../shared/money";
 import type { ActionDef, ParamDef } from "../../shared/world";
+import { policyFor } from "../../engine/adjudication";
 import { own } from "../../engine/pack-kit";
 import { actionOdds } from "../../engine/resolve";
 import { OBJECT, TEXT, type ToolSpec } from "../kit";
@@ -95,6 +96,23 @@ const odds: ReadDef = {
     const a = actionOdds(r.registry, r.world, r.state.world, { action, actor, params });
     const c = a.check;
     const v = a.verdict;
+    // What the policy makes of it when nothing rolls, its advantage and its DC: each a named line of the answers' file, never code's words.
+    const rolls = !v || v.roll;
+    const retry = policyFor(r.world, r.state.world, action, actor).retry;
+    const says: Record<string, string> = {};
+    if (v && !v.roll) {
+      const name = v.why === "retry" ? (retry === "once" ? "odds_retry_once" : "odds_retry") : v.why === "impossible" ? "odds_impossible" : v.why === "story" ? "odds_story" : "odds_no_roll";
+      const said = r.lines.line(name, { chance: v.chance === null ? "" : Math.round(v.chance * 100) });
+      if (said !== undefined && said.trim() !== "") says.verdict = said;
+    }
+    if (c && rolls && c.advantage !== 0) {
+      const said = r.lines.line(c.advantage > 0 ? "odds_advantage" : "odds_disadvantage");
+      if (said !== undefined && said.trim() !== "") says.advantage = said;
+    }
+    if (c && rolls && c.dc !== null && c.opponent === null) {
+      const said = r.lines.line("odds_dc", { dc: c.dc });
+      if (said !== undefined && said.trim() !== "") says.dc = said;
+    }
     reply.data({
       odds: {
         action: `${action.label} [${action.id}]`,
@@ -105,6 +123,7 @@ const odds: ReadDef = {
         ...(a.odds ? { chances: Object.fromEntries(Object.entries(a.odds).map(([outcome, p]) => [outcome, percent(p)])) } : {}),
         ...(c ? { dice: c.notation, modifier: a.modifier, ...(c.dc !== null ? { dc: c.dc } : {}), ...(c.advantage !== 0 ? { advantage: c.advantage } : {}), ...(c.opponent ? { opponent: named(r, c.opponent) } : {}) } : {}),
         ...(v ? { verdict: { roll: v.roll, why: v.why, outcome: v.outcome, chance: v.chance === null ? null : percent(v.chance), pass: v.pass } } : {}),
+        ...(Object.keys(says).length > 0 ? { says } : {}),
       },
     });
     return undefined;

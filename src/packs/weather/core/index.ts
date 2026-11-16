@@ -20,6 +20,8 @@ import type { FieldFixTarget } from "../../../shared/state-view";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { KindDef } from "../../../shared/world";
 import { formatTemperature } from "../../../shared/world";
+import { chatDraftOf, draftEvent } from "../../../engine/world-draft";
+import { baseWorld } from "../../../engine/places-in-play";
 import { calendarOf, dateAt, dayPartAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
@@ -205,13 +207,57 @@ export function regionOf(ctx: Pick<ReadContext, "world" | "state" | "registry">,
   });
 }
 
-/** The current climate state at a place's region, with its effects; null when there is none. */
+/** The region a place says is its own: its `region` field or an ancestor's, with no default after it; null when none does. */
+export function ownRegionOf(ctx: Pick<ReadContext, "world" | "state">, place: PlaceId | null): EntityId | null {
+  let cur = place ?? undefined;
+  for (let guard = 0; cur && guard < 32; guard++) {
+    const r = own(ctx.world.places, cur)?.fields.region;
+    if (typeof r === "string" && own(ctx.state.entities, r)) return r;
+    cur = own(ctx.world.places, cur)?.parent;
+  }
+  return null;
+}
+
+/** The weather a place has of its own, else that of the nearest place above it that has its own: a climate state's id; null when none up the line says any. */
+export function placeWeatherAt(ctx: Pick<ReadContext, "world">, place: PlaceId | null): string | null {
+  let cur = place ?? undefined;
+  for (let guard = 0; cur && guard < 32; guard++) {
+    const def = own(ctx.world.places, cur);
+    const said = def?.fields.weather;
+    if (typeof said === "string" && said !== "") return said;
+    cur = def?.parent;
+  }
+  return null;
+}
+
+/**
+ * What a weather call's target comes to: the region entity whose weather it sets or clears (one named, the one a place says is its own, or
+ * the world's first for the world itself), and the place named when it is one. A place with no region of its own has none: the weather is
+ * kept on the place itself. `states` are the climate's there, the world's first region's (else the temperate one) for a place with none.
+ */
+export function weatherTarget(ctx: Pick<ReadContext, "world" | "state" | "registry">, target: string): { region: EntityId | null; place: PlaceId | null; states: ClimateState[] } {
+  const place = own(ctx.world.places, target) ? target : null;
+  const region = own(ctx.state.entities, target) ? target : place !== null ? ownRegionOf(ctx, place) : regionOf(ctx, null);
+  const climateRegion = region ?? (place !== null ? regionOf(ctx, place) : null);
+  return { region, place, states: (climateRegion !== null ? climateOf(ctx, climateRegion) : (CLIMATES.temperate as Climate)).states };
+}
+
+/** The state the season most likely gives that closes and slows nothing, from the region's own climate table; none when the climate lists none. */
+export function calmStateOf(ctx: Pick<ReadContext, "world" | "state">, region: EntityId): string | undefined {
+  const climate = climateOf(ctx, region);
+  const season = climateSeason(climate, dateAt(calendarOf(ctx.world), ctx.state.clock).month);
+  const calm = climate.states.filter((s) => s.closes.length === 0 && Object.keys(s.travel).length === 0).map((s) => s.id);
+  return Object.entries(season?.weights ?? {}).filter(([id]) => calm.includes(id)).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0]?.[0] ?? calm[0];
+}
+
+/** The current climate state over a place: its own weather's, else the nearest place above it that has its own, else its region's, with its effects; null when there is none. */
 function stateAt(ctx: ReadContext, place: PlaceId | null): ClimateState | null {
   return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.state\u0000${place ?? "\u0001"}`, () => {
     const region = regionOf(ctx, place);
-    if (!region) return null;
-    const id = strOf(own(ctx.state.entities, region)?.fields.weather);
-    return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+    const placed = placeWeatherAt(ctx, place);
+    if (!region && placed === null) return null;
+    const id = placed ?? strOf(own(ctx.state.entities, region ?? "")?.fields.weather);
+    return (region ? climateOf(ctx, region) : (CLIMATES.temperate as Climate)).states.find((s) => s.id === id) ?? null;
   });
 }
 
@@ -221,13 +267,16 @@ export function buildWeatherView(ctx: ReadContext): WeatherView {
   const here = placeOfEntity(ctx.state, ctx.world.pov);
   const region = regionOf(ctx, here);
   const e = region ? own(ctx.state.entities, region) : undefined;
-  if (level <= 1 || !e) return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
+  const placed = level >= 2 ? placeWeatherAt(ctx, here) : null;
+  const name = e?.name ?? (placed !== null ? (own(ctx.world.places, here ?? "")?.name ?? null) : null);
+  if (level <= 1 || (!e && placed === null)) return { level, label: level === 0 ? "" : MOOD[season], region: name, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
-  const sky = strOf(e.fields.weather, "clear");
-  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const sky = placed ?? strOf(e?.fields.weather, "clear");
+  const heat = e?.fields.temp_c;
+  const raw = level >= 3 && typeof heat === "number" ? heat : null;
   const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? (st?.closes ?? []) : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: name, season, sky, tempC: temp, closed: level >= 4 ? (st?.closes ?? []) : [] };
 }
 
 function stepRegions(slot: { start: number }, ctx: ReadContext, rng: (entity: EntityId) => Rng): LedgerEvent[] {
@@ -273,6 +322,15 @@ function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }
 
+/** A place's own weather written (a state, or none to take it off), as the chat's own draft of the place carries it, the way `set` writes a place's value. */
+function placeWeather(ctx: Pick<ReadContext, "world" | "state">, place: PlaceId, state: string): LedgerEvent {
+  const def = own(ctx.world.places, place);
+  const fields: JsonObject = { ...(def?.fields ?? {}) };
+  if (state === "") delete fields.weather;
+  else fields.weather = state;
+  return draftEvent(baseWorld(ctx.world), chatDraftOf(ctx.state), { collection: "places", id: place, value: { ...(def as unknown as JsonObject), fields } });
+}
+
 export const weatherPack: PackDef = {
   id: "weather",
   label: "Weather",
@@ -283,6 +341,8 @@ export const weatherPack: PackDef = {
     r.kind(REGION);
     r.query("weather.sky", (ctx, place) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2) return null;
+      const placed = placeWeatherAt(ctx, place);
+      if (placed !== null) return placed;
       const region = regionOf(ctx, place);
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather) || null : null;
     });
@@ -304,47 +364,52 @@ export const weatherPack: PackDef = {
       return { entity: region, field: "weather", type: "text", value: strOf(own(ctx.state.entities, region)?.fields.weather, "clear"), options: climateOf(ctx, region).states.map((s) => ({ value: s.id, label: s.label })) };
     });
     r.formula("weather", (ctx, place) => {
-      const region = regionOf(ctx, typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov));
+      const at = typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov);
+      const placed = placeWeatherAt(ctx, at);
+      if (placed !== null) return placed;
+      const region = regionOf(ctx, at);
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather, "clear") : "";
     });
     r.formula("season", (ctx) => seasonAt(ctx));
 
-    // Scripted weather (template `set_weather`): the region (an entity or a place under it) takes the
-    // state, held for `minutes` and/or `until` a condition (an Expr) comes true.
+    // Scripted weather (template `set_weather`): the region (an entity, or one a place says is its own) takes the
+    // state, held for `minutes` and/or `until` a condition (an Expr) comes true. A place with no region of its own
+    // keeps the weather itself, as its own value; any state the call names is kept as named.
     r.effect({
       type: "weather.set",
       args: ["region", "state", "minutes?", "until?"],
       resolve(a, ctx) {
         const target = strOf(a.region);
-        const region = own(ctx.state.entities, target) ? target : regionOf(ctx, own(ctx.world.places, target) ? target : null);
-        if (!region) return reject("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+        const { region, place } = weatherTarget(ctx, target);
         const st = strOf(a.state);
-        if (!climateOf(ctx, region).states.some((s) => s.id === st)) return reject("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
-        const out: LedgerEvent[] = [{ type: "set", entity: region, field: "weather", value: st }];
-        if (typeof a.minutes === "number" && a.minutes > 0) out.push({ type: "set", entity: region, field: "weather_hold", value: ctx.state.clock + Math.round(a.minutes) });
-        if (typeof a.until === "string" && a.until.trim() !== "") out.push({ type: "set", entity: region, field: "weather_hold_until", value: a.until });
-        return out;
+        if (st === "") return reject("bad_args", "weather.set needs a state");
+        const out: LedgerEvent[] = [];
+        if (place !== null && (region === null || own(ctx.world.places, place)?.fields.weather !== undefined)) out.push(placeWeather(ctx, place, st));
+        if (region !== null) {
+          out.push({ type: "set", entity: region, field: "weather", value: st });
+          if (typeof a.minutes === "number" && a.minutes > 0) out.push({ type: "set", entity: region, field: "weather_hold", value: ctx.state.clock + Math.round(a.minutes) });
+          if (typeof a.until === "string" && a.until.trim() !== "") out.push({ type: "set", entity: region, field: "weather_hold_until", value: a.until });
+        }
+        return out.length > 0 ? out : reject("missing_region", `no weather region for ${labelOf(ctx, target)}`);
       },
     });
-    // Ends a scripted state now (a rule's `clear`): the hold lifts and the sky turns to `state`, else the season's likeliest calm state.
+    // Ends a scripted state now (a rule's `clear`): the hold lifts, the sky turns to `state` when one is given and stays as it was
+    // when none is (a caller that wants a state picks it). A place's own weather is taken off, so it takes its parents' again.
     r.effect({
       type: "weather.clear",
       args: ["region", "state?"],
       resolve(a, ctx) {
         const target = strOf(a.region);
-        const region = own(ctx.state.entities, target) ? target : regionOf(ctx, own(ctx.world.places, target) ? target : null);
-        if (!region) return reject("missing_region", `no weather region for ${labelOf(ctx, target)}`);
-        const climate = climateOf(ctx, region);
-        const season = climateSeason(climate, dateAt(calendarOf(ctx.world), ctx.state.clock).month);
-        const calm = climate.states.filter((s) => s.closes.length === 0 && Object.keys(s.travel).length === 0).map((s) => s.id);
-        const likeliest = Object.entries(season?.weights ?? {}).filter(([id]) => calm.includes(id)).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0]?.[0];
-        const st = strOf(a.state) || likeliest || calm[0] || strOf(own(ctx.state.entities, region)?.fields.weather, "clear");
-        if (!climate.states.some((s) => s.id === st)) return reject("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
-        return [
-          { type: "set", entity: region, field: "weather", value: st },
-          { type: "set", entity: region, field: "weather_hold", value: 0 },
-          { type: "set", entity: region, field: "weather_hold_until", value: "" },
-        ];
+        const { region, place } = weatherTarget(ctx, target);
+        const st = strOf(a.state);
+        const out: LedgerEvent[] = [];
+        if (place !== null && own(ctx.world.places, place)?.fields.weather !== undefined) out.push(placeWeather(ctx, place, st));
+        if (region !== null) {
+          if (st !== "") out.push({ type: "set", entity: region, field: "weather", value: st });
+          out.push({ type: "set", entity: region, field: "weather_hold", value: 0 }, { type: "set", entity: region, field: "weather_hold_until", value: "" });
+        }
+        if (out.length > 0) return out;
+        return place !== null ? reject("no_change", `${labelOf(ctx, place)} has no weather of its own to clear`) : reject("missing_region", `no weather region for ${labelOf(ctx, target)}`);
       },
     });
 

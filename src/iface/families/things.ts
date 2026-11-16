@@ -14,23 +14,14 @@ import { isGone, kindDef } from "../../engine/scope";
 import { applyItemOp } from "../../engine/thing-ops";
 import { slotOf, spotOf } from "../../engine/things";
 import { own } from "../../engine/pack-kit";
-import { pieceProblem } from "../../packs/gear/core/sets";
+import { pieceProblem, saveFindings } from "../../packs/gear/core/sets";
 import { oneOf, TEXT, TEXTS, WHOLE, YES_NO } from "../kit";
 import { find, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, textArg, type Unread } from "../ops";
 import { BENT_RULES, putThing } from "../ops-things";
 import { timeArg } from "../ops-time";
-import { editChange, isAlready, itemChange, notApplicable, optionalId, shownValue, type WriteDef, writeTool } from "./run";
+import { editChange, isAlready, itemChange, notApplicable, optionalId, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "things";
-
-/** A loan's, a grant's or a permission's end: a time after now, or none when it is not after now (reported). */
-function endOf(o: OpContext): number | Unread | undefined {
-  const until = timeArg(o, "until");
-  if (until === undefined || isUnread(until)) return until;
-  if (until > o.draft.w.state.clock) return until;
-  o.reply.report("past_until", { n: o.n, op: o.op, until: shownValue(o.args.until) });
-  return undefined;
-}
 
 /** A choice argument that may be left out. */
 function choiceArg<T extends string>(o: OpContext, field: string, choices: readonly T[]): T | Unread | undefined {
@@ -135,7 +126,7 @@ const grant: WriteDef = {
     if (isUnread(basis)) return basis;
     const by = optionalId(o, "by", "entity");
     if (isUnread(by)) return by;
-    const until = endOf(o);
+    const until = timeArg(o, "until");
     if (isUnread(until)) return until;
     return itemChange(o, { do: "grant", item: item.id, who: who.id, ...(basis !== undefined ? { basis } : {}), ...(until !== undefined ? { until } : {}), ...(by !== undefined ? { by } : {}) }, "engine", item.id);
   },
@@ -173,7 +164,7 @@ const permit: WriteDef = {
     if (isUnread(scope)) return scope;
     const by = optionalId(o, "by", "entity");
     if (isUnread(by)) return by;
-    const until = endOf(o);
+    const until = timeArg(o, "until");
     if (isUnread(until)) return until;
     // Leave of one's own things changes nothing.
     if (from.id === to.id) {
@@ -324,8 +315,9 @@ const lose: WriteDef = {
   run(o) {
     const item = find(o, "item", "thing");
     if (isUnread(item)) return item;
+    // Taken by what is not a person is, for this tool, someone who does not exist: the answer gives the nearest people and the operations that record what was meant.
     const by = optionalId(o, "by", "person");
-    if (isUnread(by)) return by;
+    if (isUnread(by)) return by.line === "unknown" ? { ...by, line: "unknown_by" } : by;
     return itemChange(o, { do: "lose", item: item.id, ...(by !== undefined ? { by } : {}) }, "engine", item.id, { ...(by !== undefined ? { asked: by } : {}) });
   },
 };
@@ -369,7 +361,14 @@ const setSave: WriteDef = {
       if (isUnread(piece)) return piece;
       pieces.push({ item: piece.id });
     }
-    return itemChange(o, { do: "set_save", who: who.id, name: textArg(o.args, "name") ?? "", kind, ...(pieces.length > 0 ? { pieces } : {}) }, "engine", who.id);
+    const name = textArg(o.args, "name");
+    if (name === undefined) return notAs(o, "name", o.args.name ?? null, "name");
+    const op = { do: "set_save" as const, who: who.id, name, kind, ...(pieces.length > 0 ? { pieces } : {}) };
+    // Neither a set with nothing in it nor one past the world's number of sets is refused: each is saved, and the answer says so.
+    const found = saveFindings(o.draft.w.ctx, op);
+    const failed = itemChange(o, op, "engine", who.id);
+    if (failed === undefined) for (const f of found) o.reply.report(f.code === "nothing_worn" ? "set_nothing_worn" : "set_past_max", { n: o.n, op: o.op, who: named(o.reading, who.id), name, ...f.values });
+    return failed;
   },
 };
 

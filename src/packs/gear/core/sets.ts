@@ -1,9 +1,9 @@
 // Saved sets (DESIGN §28.16): a person's outfits and loadouts, kept on them (`fields.sets`, by id: a
 // name, a kind and its pieces, each a thing and the slot it goes in when that isn't its own), at
-// most the world's `packs.gear.config.sets.max`. Saving keeps what they wear now of the kind (an
+// most the world's `packs.gear.config.sets.max` (advice only: a set past it is saved and reported). Saving keeps what they wear now of the kind (an
 // outfit what dresses them; a loadout what they carry ready: in hand, holstered, sheathed, in a
 // quiver, on their back or a shoulder, and arms, armor and ammunition worn), or the pieces given.
-// Changing into one (Gear 3) puts each piece on in its slot through the item op `wear`, so what held
+// Changing into one, at every Gear level, puts each piece on in its slot through the item op `wear`, so what held
 // a slot comes off and stays carried; whatever else of the kind they wear comes off too (an
 // outfit's other clothes), and at home what came off goes back where it is kept (`restOf`, as Put
 // away takes it). A piece they can't reach (gone, lost, someone else has it, not on them, here or a
@@ -12,7 +12,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { SET_KIND_LABEL, SET_NAME_MAX, setIdOf, setsOf, thingsConfigOf, type SavedSet, type SetKind, type SetOp, type SetPiece } from "../../../shared/things";
+import { SET_KIND_LABEL, setIdOf, setsOf, thingsConfigOf, type SavedSet, type SetKind, type SetOp, type SetPiece } from "../../../shared/things";
 import { accessFor, reachOf } from "../../../engine/access";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, own } from "../../../engine/pack-kit";
@@ -89,20 +89,33 @@ function written(who: EntityId, sets: Readonly<Record<string, SavedSet>>): Ledge
   return { type: "set", entity: who, field: "sets", value: sets as unknown as JsonValue };
 }
 
-/** Saved: what they wear now of its kind, or the pieces given, under its name (one of the same name is replaced); at most the world's number of sets. */
+/**
+ * What saving a set finds that does not add up, said as data (code and values): nothing of that kind
+ * is worn and no pieces are named, or the set is past the world's number of saved sets. Neither
+ * stops the save; the tool that saves reports each.
+ */
+export function saveFindings(ctx: ReadContext, op: Extract<SetOp, { do: "set_save" }>): { code: "nothing_worn" | "too_many"; values: Record<string, JsonValue> }[] {
+  const who = own(ctx.state.entities, op.who);
+  if (!who) return [];
+  const out: { code: "nothing_worn" | "too_many"; values: Record<string, JsonValue> }[] = [];
+  const pieces = op.pieces ?? wornPieces(ctx, op.who, op.kind);
+  if (pieces.length === 0) out.push({ code: "nothing_worn", values: { kind: SET_KIND_LABEL[op.kind].toLowerCase() } });
+  const sets = setsOf(who.fields);
+  const max = thingsConfigOf(ctx.world).sets.max;
+  if (!Object.hasOwn(sets, setIdOf(op.name.trim())) && Object.keys(sets).length >= max) out.push({ code: "too_many", values: { max } });
+  return out;
+}
+
+/** Saved: what they wear now of its kind, or the pieces given, under its name (one of the same name is replaced). A name of any length is kept; none worn and no pieces named saves no pieces; past the world's number of sets it is saved all the same (`saveFindings` says so). */
 function saveSet(ctx: ReadContext, op: Extract<SetOp, { do: "set_save" }>): LedgerEvent[] | Rejection {
   const who = own(ctx.state.entities, op.who);
   const name = op.name.trim();
-  if (name === "" || name.length > SET_NAME_MAX) return reject("bad_name", `a name is 1–${SET_NAME_MAX} characters`);
+  if (name === "") return reject("bad_name", "a name is at least one character");
   if (!who) return reject("missing_entity", `no one ${labelOf(ctx, op.who)}`);
   const pieces = op.pieces ?? wornPieces(ctx, op.who, op.kind);
-  const word = SET_KIND_LABEL[op.kind].toLowerCase();
-  if (pieces.length === 0) return reject("nothing_worn", `${who.name} wears nothing to keep as ${word === "outfit" ? "an outfit" : "a loadout"}`);
   for (const p of pieces) if (!isThing(ctx, p.item) || isGone(ctx.state, p.item)) return reject("missing_entity", `no thing ${labelOf(ctx, p.item)}`);
   const sets = setsOf(who.fields);
   const id = setIdOf(name);
-  const max = thingsConfigOf(ctx.world).sets.max;
-  if (!Object.hasOwn(sets, id) && Object.keys(sets).length >= max) return reject("too_many", max === 0 ? "This world keeps no saved outfits" : `${who.name} keeps at most ${max} saved outfits and loadouts: drop one first`);
   const set: SavedSet = { name, kind: op.kind, pieces: pieces.map((p) => ({ item: p.item, ...(p.slot !== undefined ? { slot: p.slot } : {}) })) };
   if (JSON.stringify(sets[id]) === JSON.stringify(set)) return reject("no_change", `${name} is saved as it is`);
   return [written(op.who, { ...sets, [id]: set })];
@@ -118,14 +131,13 @@ function dropSet(ctx: ReadContext, op: Extract<SetOp, { do: "set_drop" }>): Ledg
 }
 
 /**
- * Changed into (Gear 3): each piece to hand put on in its slot, what else of the set's kind they
+ * Changed into, at every Gear level: each piece to hand put on in its slot, what else of the set's kind they
  * wear taken off, and at home what came off put back where it is kept; the pieces out of reach
  * named in a note. Refused when none of it is to hand.
  */
 function applySet(ctx: ReadContext, op: Extract<SetOp, { do: "set_apply" }>, opts: ItemOpOptions): LedgerEvent[] | Rejection {
   const who = own(ctx.state.entities, op.who);
   if (!who || !kindIs(ctx.registry, ctx.world, who.kind, "person")) return reject("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
-  if (ctx.levelOf(op.who, "gear") < 3) return reject("level", "outfits are kept from Gear level 3");
   const set = setsOf(who.fields)[op.set];
   if (!set) return reject("no_set", `${who.name} keeps no such outfit`);
   const w = new Working(ctx.registry, ctx.world, ctx.state);
