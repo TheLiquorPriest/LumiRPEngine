@@ -33,7 +33,7 @@ import { charactersOf } from "../cast/record";
 import { holdersOf } from "../quests/holders";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording } from "../iface";
-import type { CarriedPort, EngineDeps } from "../iface/kit";
+import type { CarriedPort, EngineDeps, LastUseKeeper } from "../iface/kit";
 import { indexedSearch } from "../iface/search";
 import { bindingsInForce, EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretIds, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storedBindings, storePath, storeWorlds } from "../lore";
 import type { CastKnowledge, PlaceSourcesReader } from "../places";
@@ -441,6 +441,11 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   );
   // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.
   const due = timeDue(store);
+  /** Keeps the values each line a tool's call said was filled with as its answers part's last use in the chat, over the use before, where the Prompts preview reads them. */
+  const lastUse: LastUseKeeper = async (scope, part, lines) => {
+    const last = (await harness.parts.lastFields(scope, "prompt", part)) ?? {};
+    await harness.parts.keep(scope, "prompt", part, { ...last, ...lines });
+  };
   /**
    * The host's tools for a scope: one list for its session (the contract's `ToolsPort`), every family's in it, each on the chat's own
    * settings. The engine's are given squares on a map for the operations that name one, and the map that `world_query` shows, both
@@ -451,9 +456,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, questHolders, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...(options.worlds !== undefined ? { worlds: options.worlds } : {}), ...asked }),
-      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), search: memorySearch, now: () => clock.now(), settings: settings.cast }),
-      storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, questHolders, lastUse, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...(options.worlds !== undefined ? { worlds: options.worlds } : {}), ...asked }),
+      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), search: memorySearch, now: () => clock.now(), settings: settings.cast, lastUse }),
+      storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story, lastUse }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
     ]);
     return [...engine, ...cast, ...story, ...indexing];
