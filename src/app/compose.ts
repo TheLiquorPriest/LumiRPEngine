@@ -51,6 +51,7 @@ import type { TurnTimes } from "./service-timings";
 import type { App, Area } from "./app";
 import type { SettingsReader } from "./config-read";
 import { RouteError } from "./routes";
+import { writeSetting } from "./settings-routes";
 
 export interface ComposeOptions {
   /** Lumiverse's network as the door reaches it: the machine's when absent. */
@@ -175,6 +176,12 @@ export function compose(options: ComposeOptions = {}): Composition {
     const character = lv.character === null ? null : await reads.character(lv.character);
     return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
   };
+  // The levels of the agents' tree that have a config file, where they are on disk: a chat's own once it has its folder, or placed for a write.
+  const settingLevels = async (chat: string | null, make = false) => {
+    const owner = app().config.lumiverse.user ?? "";
+    const folders = chat === null ? null : make ? await place(owner, chat) : made().chats.folders(owner, chat);
+    return levelFiles({ files: app().paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null });
+  };
   // Every session of a chat, page by page.
   const sessionsOf = async (user: string, chat: string): Promise<SessionView[]> => {
     const all: SessionView[] = [];
@@ -204,14 +211,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       listing,
       settings: (at) => {
         const owner = at.config.lumiverse.user ?? "";
-        // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
-        const placed = (chat: string) => place(owner, chat);
         return {
-          // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder, or made for a write.
-          levels: async (chat, make = false) => {
-            const folders = chat === null ? null : make ? await placed(chat) : made().chats.folders(owner, chat);
-            return levelFiles({ files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null });
-          },
+          levels: settingLevels,
           connections: async () => (await made().harness.models.list(owner)).connections.map((c) => ({ id: c.id, name: c.name })),
         };
       },
@@ -304,7 +305,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       window: (user, chat) => made().lane.windowOf(user, chat),
       soFar: (user, chat) => made().lane.soFarAt(user, chat),
       // The places' settings for the chat, and the lore a place is bound to, each entry as Lumiverse holds it now.
-      places: { settings: async (user, chat) => (await settings(user, chat)).places, sources: made().placeSources },
+      places: { settings: async (user, chat) => (await settings(user, chat)).places, sources: made().placeSources, cast: (user, chat, turn) => made().castKnowledge(user, chat, turn) },
       // The quests' settings for the chat: how many records a page of them holds.
       quests: async (user, chat) => (await settings(user, chat)).quests,
     })),
@@ -321,6 +322,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       requests: made().requests,
       // What RPE writes to Lumiverse through the door, once it is set up for a Lumiverse.
       lumiverse: () => lumiverse().writes,
+      // A chat's own setting written to its RPE.yml as the Settings page writes one (the panels' tidy switch).
+      writeChatSetting: (chat, key, value) => writeSetting({ settings: app().settings, levels: settingLevels }, { level: "chat", chat, key, value }),
     })),
     door.area,
   ];
