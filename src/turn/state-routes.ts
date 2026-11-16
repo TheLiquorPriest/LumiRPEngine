@@ -1,10 +1,12 @@
 // The state route group's reads of a value's history and of what stopped applying (plan §4.4 l.309, §14 l.1551): the World page asks
 // for the history of any value by turn (a field, a relation, a balance, a quest's stage, a fact's key, a world value, an area item's
 // part), every change along the chat's path that wrote it, newest first, a page at a time; and for the changes that no longer apply on
-// the swipes now showing. Both are read from the store alone. Every route is a page's: it answers only for the user this RPE belongs to.
+// the swipes now showing. The command line's sandbox asks for a chat's head as one document (the export). All are read from the store
+// alone. Every route is a page's: it answers only for the user this RPE belongs to.
 
 import { route, RouteError, shape } from "../app";
-import { isRecord } from "../shared/json";
+import { isRecord, type JsonValue } from "../shared/json";
+import { ENGINE_VERSION } from "../shared/world";
 import { JoinedTurnError, type UserStore } from "../store";
 import { valueHistory } from "../store/history";
 import type { Turns } from "./lane";
@@ -54,6 +56,12 @@ const notAppliedReply = shape.named(
   "NotAppliedReply",
   "What no longer applies at the chat's head: the earlier reply that shows another swipe than its later turns were made on (null where none does), and each change that stopped applying.",
   shape.object({ reply: nullable(shape.object({ turn: T, n: N })), items: shape.list(notAppliedShown) }),
+);
+
+const chatExportReply = shape.named(
+  "ChatExportReply",
+  "A chat's head as one document: the chat and the world it plays (null where it plays none), the revision in force, the engine that folded it, the run's seed, the clock in minutes since the world's epoch, the world as played (its document) and the engine's state as plain JSON.",
+  shape.object({ chat: T, world: nullable(T), revision: T, engine: T, seed: T, clock: N, worldDoc: shape.json(), state: shape.json() }),
 );
 
 /** A value of the history as one line of text: a word as it is, anything else as JSON; null where the change took the value off. */
@@ -139,6 +147,23 @@ export function stateRoutes(turns: Turns) {
           return { change: String(x.change), turn: x.turn, n: at < 0 ? path.length + 1 : at + 1, op: x.op, words: x.op, reason: x.reports.map((r) => r.code).join(", ") };
         });
         return { reply: before === undefined ? null : { turn: before, n: first }, items };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/chats/:chat/state/export",
+      access: "page",
+      group: "state",
+      does: "A chat's head as one document, for the command line's sandbox to open a scratch copy of the chat from: the world as played, the engine's state as plain JSON, the revision in force, the engine that folded it, the run's seed and the clock. Read from the store alone, nothing is written. It holds everything the engine knows of the chat, secrets included, so it answers the owner's page alone.",
+      reply: chatExportReply,
+      handle: async ({ user, params }) => {
+        const s = held(user, params.chat);
+        const chat = s.chat(params.chat);
+        if (chat === null) throw new RouteError(404, `RPE holds no chat ${params.chat} of yours.`);
+        const { state } = s.headState(params.chat);
+        const doc = turns.store.env.worlds(state.world.revision);
+        if (doc === undefined) throw new RouteError(404, `The world revision ${state.world.revision} of chat ${params.chat} is not held.`);
+        return { chat: chat.id, world: chat.world, revision: state.world.revision, engine: ENGINE_VERSION, seed: chat.seed, clock: state.world.clock, worldDoc: doc as unknown as JsonValue, state: state.world as unknown as JsonValue };
       },
     }),
   ] as const;
