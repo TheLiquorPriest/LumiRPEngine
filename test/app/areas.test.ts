@@ -110,7 +110,9 @@ describe("each area registers from a file of its own", () => {
       name: "app",
       routes: ["GET /api/v1/backups", "GET /api/v1/command/busy", "GET /api/v1/service", "GET /api/v1/service/log", "GET /api/v1/service/timings", "GET /api/v1/settings", "GET /api/v1/status/proof", "GET /api/v1/switches", "POST /api/v1/ext/arrived", "POST /api/v1/service/restart", "POST /api/v1/signin/end", "POST /api/v1/signin/lumiverse", "POST /api/v1/signin/session", "PUT /api/v1/settings"],
     });
-    for (const name of ["store", "iface"]) expect({ name, routes: added.get(name) ?? [] }).toEqual({ name, routes: [] });
+    expect({ name: "store", routes: added.get("store") ?? [] }).toEqual({ name: "store", routes: [] });
+    // The iface area adds the one route of a level's typed systems.
+    expect({ name: "iface", routes: added.get("iface") ?? [] }).toEqual({ name: "iface", routes: ["GET /api/v1/chats/:chat/state/systems"] });
 
     // Every migration step the database ran is one of an area's own, and every area of tables has an area that brings it.
     const brought = new Map<string, Set<number>>();

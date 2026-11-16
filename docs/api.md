@@ -18,6 +18,7 @@ A route that pages takes `limit` and `cursor` in its query and answers `{ items,
 - [Story](#story)
 - [Lore](#lore)
 - [Files](#files)
+- [Sessions](#sessions)
 - [Jobs](#jobs)
 - [Connections](#connections)
 - [Settings](#settings)
@@ -318,6 +319,19 @@ Tunnel for the previous build's messages: the Undo of a tap, sent as the previou
 | Reply | `ResultMessage | ErrorMessage` |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `POST /api/v1/chats/:chat/edits/:edit/undo`
+
+The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): all of it, the world's defaults given with it included, or none and the answer says why; at once, whatever runs.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `edit` |
+| Query | none |
+| Body | none |
+| Reply | [`TapReply`](#tapreply) |
+
 ### `GET /api/v1/chats/:chat/state`
 
 A chat's state view, at its head or as it stood at one of its turns, in the shape the previous build's pages take.
@@ -346,6 +360,20 @@ What a turn's time brought due, each thing with what the turn recorded for it.
 | Reply | [`DueReply`](#duereply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `GET /api/v1/chats/:chat/state/systems`
+
+A level's typed systems, at the chat's head or as it stood at a turn: each game system that keeps something there as that system keeps it (accounts with their postings and balance, a thing's four facts, a group's positions and ranks, the day, the sky, a vehicle's driver, a sheet), named as the source; what the player could not see is marked secret.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `at`: `string`, The level, by its tree ref (`world`, `place:<id>`, `entity:<id>`) or a bare id<br>`turn` (may be left out): [`TurnId`](#turnid), A turn's id: the systems as they stood at that turn; left out, at the chat's head |
+| Body | none |
+| Reply | [`SystemsReply`](#systemsreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
 ### `POST /api/v1/chats/:chat/taps`
 
 A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed.
@@ -358,20 +386,6 @@ A tap that manages, or a correction from any page, recorded at once as his own e
 | Query | none |
 | Body | [`TapAsk`](#tapask) |
 | Reply | [`TapReply`](#tapreply) |
-
-### `POST /api/v1/chats/:chat/taps/undo`
-
-The Undo of an edit of his, by the id its answer gave: all of it, or none and the answer says why.
-
-| | |
-|---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
-| Params | `chat` |
-| Query | none |
-| Body | [`TapUndoAsk`](#tapundoask) |
-| Reply | [`TapReply`](#tapreply) |
-| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/world`
 
@@ -552,6 +566,71 @@ The lore Lumiverse activated for a turn's prompt, in the tag's order: each entry
 | Body | none |
 | Reply | [`TurnLoreReply`](#turnlorereply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/lore/proposals`
+
+The proposals his agents drafted for his lore, newest first, a page at a time (every chat's when none is named, only those in a state when one is): each with the draft, the turn it came from and where it stands.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, Only the proposals drafted in this chat<br>`status` (may be left out): `"open" | "approved" | "rejected" | "refused"`, Only the proposals in this state<br>`limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: LoreProposal[]; next: string | null }`, a page at a time |
+
+### `POST /api/v1/lore/proposals/:id/approve`
+
+Approves an open proposal, with his edits if he sends any: one write, to his Lumiverse book over HTTP as him, or to his world as its next revision, checked against the entry's revision when the draft was made. An edit changes only the passage it names. Refused (409) where the entry changed meanwhile, is gone, or a draft of his own of the world stands uncommitted; the proposal then says why.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `id` |
+| Query | none |
+| Body | `{ text?: string; title?: string; keys?: string[]; book?: string }` |
+| Reply | [`LoreApproved`](#loreapproved) |
+
+### `POST /api/v1/lore/proposals/:id/reject`
+
+Rejects an open proposal: nothing is written. Answers the proposal as it now stands.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | [`LoreRejected`](#lorerejected) |
+
+### `GET /api/v1/lore/writes`
+
+Every write RPE made to his lore, newest first, a page at a time: each with the entry before and after, so he can put it back.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: LoreWrite[]; next: string | null }`, a page at a time |
+
+### `POST /api/v1/lore/writes/:id/put-back`
+
+Puts an entry back as it was before one of RPE's writes (an entry RPE made is taken away; one of his world goes back as the world's next revision), under the same check as a write: refused (409) where the entry changed since.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | [`LorePutBack`](#loreputback) |
 
 ## Files
 
@@ -841,6 +920,86 @@ Dismisses a suggestion; says the suggestion as it now stands.
 | Body | none |
 | Reply | [`SuggestionDismissedReply`](#suggestiondismissedreply) |
 
+## Sessions
+
+### `GET /api/v1/chats/:chat/sessions`
+
+A chat's sessions in the order they were opened, a page at a time: scenes, and the sessions of its sub-agents, jobs and talks, each with where it stands. Listed from the chat's index; no session file is read.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: SessionShown[]; next: string | null }`, a page at a time |
+
+### `GET /api/v1/chats/:chat/sessions/:session`
+
+One session with what its next turn would carry in the mode asked for (continuing when none is) and each of its compactions, whether it still stands or was undone.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `session` |
+| Query | `carry` (may be left out): [`CarryMode`](#carrymode), Which carry mode to show: continuing, records or nothing; continuing when left out |
+| Body | none |
+| Reply | [`SessionRead`](#sessionread) |
+
+### `POST /api/v1/chats/:chat/sessions/:session/close`
+
+Closes the Author's open scene as his own change, placed after the chat's newest turn: the close is written in the story record, and the scene's session closes with it, hung after that turn so that its Undo, a swipe or a delete of that turn takes the closing back. Refused while a turn of the chat runs, for a session that is not a scene's, or one closed already.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `session` |
+| Query | none |
+| Body | none |
+| Reply | [`SessionClosed`](#sessionclosed) |
+
+### `POST /api/v1/chats/:chat/sessions/:session/compact`
+
+Asks for the open session to be compacted: it runs at the session's next turn, the Author first given its chance to save what it wants kept.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `session` |
+| Query | none |
+| Body | none |
+| Reply | [`SessionOne`](#sessionone) |
+
+### `POST /api/v1/chats/:chat/sessions/:session/reopen`
+
+His Undo of a close: takes back the change the close answered with, so the scene stands open in the story record, and opens the session again.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `session` |
+| Query | none |
+| Body | [`SessionReopenAsk`](#sessionreopenask) |
+| Reply | [`SessionOne`](#sessionone) |
+
+### `POST /api/v1/chats/:chat/sessions/:session/uncompact`
+
+Undoes one compaction of a session by its id: from its next turn the turns the summary stood for are carried whole again, until a later compaction; the file keeps both. Answers the session's compactions.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat`, `session` |
+| Query | none |
+| Body | [`SessionUncompactAsk`](#sessionuncompactask) |
+| Reply | [`SessionCompactions`](#sessioncompactions) |
+
 ## Jobs
 
 ### `POST /api/v1/bootstrap`
@@ -1124,6 +1283,33 @@ Tunnel for the previous build's messages: Build's page sends one of today's mess
 | Reply | [`BuildTunnelReply`](#buildtunnelreply) |
 
 ## Migration
+
+### `GET /api/v1/chats/:chat/carried`
+
+A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.pageMost`).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `from` (may be left out): `number`, How many carried turns to pass over; none when left out<br>`limit` (may be left out): `number`, How many carried turns to give: the setting `migration.page` when left out, and at most `migration.pageMost` |
+| Body | none |
+| Reply | [`CarriedTurnsReply`](#carriedturnsreply) |
+
+### `GET /api/v1/chats/:chat/turns/:turn/carried`
+
+What an old engine recorded on a reply the migration carried, for the reply's Turn page: the engine that played the chat, each part of the record by name, every text it names word for word, why the reply stood with no turn played, and each line where it says something against its turn.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`CarriedTurnReply`](#carriedturnreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/migration`
 
@@ -1782,6 +1968,60 @@ Why a tool call never ran: a limit spent before it started, past the most tool c
 export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: number } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string };
 ```
 
+### `CarriedText`
+
+One text an old engine's record of a reply names, kept word for word beside its turn: the part of the record that names it, where it was in today's user storage, and its words (null where today's clean-up had removed it).
+
+```ts
+export interface CarriedText {
+  part: string;
+  path: string;
+  text: string | null;
+}
+```
+
+### `CarriedTurnReply`
+
+What an old engine recorded on a reply the migration carried, for the reply's Turn page: the engine that played the chat, each part of the record by name, every text it names, why the reply stood with no turn played, and each line where it says something against its turn.
+
+```ts
+export interface CarriedTurnReply {
+  turn: TurnId;
+  chat: string;
+  message: string;
+  swipe: number;
+  /** The engine that played the chat as today's build had it; null where it was not read. */
+  engine: "classic" | "agents" | "harness" | null;
+  /** The record's parts that hold what an old engine recorded (session, agents, memoryNext, finalEdits, finalParts, prompts, diag, harness), by name, as they were. */
+  fields: { name: string; value: JsonValue }[];
+  texts: CarriedText[];
+  /** Why the reply stood with no turn played (stopped, failed, restarted); null where a turn was played. */
+  unplayed: string | null;
+  /** Each line where the reply says something against what its turn decided. */
+  departures: string[];
+}
+```
+
+### `CarriedTurnsReply`
+
+A page of a migrated chat's carried turns, in the order the run imported them: each tied to its message and swipe, with the engine that played it, why it stood unplayed, how many departures and texts it holds. `more` says whether turns follow.
+
+```ts
+export interface CarriedTurnsReply {
+  turns: ({ turn: TurnId; message: string; swipe: number; engine: "classic" | "agents" | "harness" | null; unplayed: string | null; departures: number; texts: number })[];
+  total: number;
+  more: boolean;
+}
+```
+
+### `CarryMode`
+
+How much of a scene's earlier turns its next turn carries: what the Author did in them (continuing), its record of each (records), or only the summary the scene opened with (nothing).
+
+```ts
+export type CarryMode = "continuing" | "records" | "nothing";
+```
+
 ### `CastingRow`
 
 A casting in force: the player's pin, else the Author's; with the Author's line for the character, where it wrote one.
@@ -2026,6 +2266,26 @@ export interface CommandStatus {
   switches: SwitchEntry[];
   /** The builds that meet at RPE in a sentence or two; null where the server does not say. */
   builds: string | null;
+}
+```
+
+### `CompactionShown`
+
+A compaction of a session: its summary, the turn whose work it was, what it stands for, why it was made, its size before and after in tokens, and whether it still stands; one he undid is marked.
+
+```ts
+export interface CompactionShown {
+  id: string;
+  turn: string;
+  summary: string;
+  at: number;
+  of: "turns" | "run";
+  turns: string[];
+  reason?: "would-not-fit" | "refused" | "asked" | "fold";
+  before?: number;
+  after?: number;
+  stands: boolean;
+  undone?: true;
 }
 ```
 
@@ -2807,6 +3067,8 @@ export interface LevelReflection {
   records: number;
   notable: string[];
   open: number;
+  /** What falls due beneath it in the time ahead: how many (null: more than one, uncounted), the minutes until the soonest, and its kind; null when nothing does, or the reading passed no due source. */
+  due: { n: number | null; after: number; kind: string } | null;
   /** The number of the last turn that changed something there. */
   changed: number | null;
   /** An agent's own line on the level. */
@@ -2915,6 +3177,19 @@ How Lumiverse activated an entry: always on, by one of its keys, by meaning, or 
 export type LoreActivation = "constant" | "keyword" | "vector" | "sticky";
 ```
 
+### `LoreApproved`
+
+A proposal as it now stands, and the write its approval made.
+
+```ts
+export interface LoreApproved {
+  /** The proposal, approved. */
+  proposal: LoreProposal;
+  /** The one write the approval made. */
+  write: LoreWrite;
+}
+```
+
 ### `LoreBooks`
 
 The user's books as his choice of the books the lore reads lists them.
@@ -2923,6 +3198,21 @@ The user's books as his choice of the books the lore reads lists them.
 export interface LoreBooks {
   /** Every book of his, the engine's own left out. */
   books: ({ id: string; name: string; attached: boolean; character: boolean; added: number | null })[];
+}
+```
+
+### `LoreEntryFields`
+
+An entry's fields RPE writes: its text, its title and its keys.
+
+```ts
+export interface LoreEntryFields {
+  /** The entry's text. */
+  content: string;
+  /** Its title. */
+  comment: string;
+  /** Its keys. */
+  keys: string[];
 }
 ```
 
@@ -3009,6 +3299,104 @@ The overlays on a chat's path: the Author's notes that the story has moved past 
 export interface LoreOverlays {
   /** In the path's order, and within a turn in the order they were written. */
   overlays: ({ id: number; entry: string; title: string | null; note: string; turn: number; turnId: string; by: string | null; agent: string | null })[];
+}
+```
+
+### `LoreProposal`
+
+What an agent drafted for his lore: a new entry (the book, title and keys it drafted) or an edit to an entry of his books or his world (the passage as it stands and what would replace it), the turn it came from, and where it stands.
+
+```ts
+export interface LoreProposal {
+  /** Its number. */
+  id: number;
+  /** The chat it was drafted in. */
+  chat: string;
+  /** The turn it was drafted in; null for one of no turn. */
+  turn: string | null;
+  /** The definition of the agent that drafted it. */
+  agent: string;
+  /** The entry it edits, by the id the agent named it; null for a new entry. */
+  target: string | null;
+  /** The text proposed: a new entry's, or what replaces the passage (the whole entry's text where no passage is named). */
+  text: string;
+  /** For an edit: the passage as it stands, which `text` replaces. */
+  was: string | null;
+  /** For a new entry: the book the agent drafted it for. */
+  book: string | null;
+  /** For a new entry: the title the agent drafted. */
+  title: string | null;
+  /** For a new entry: the keys the agent drafted. */
+  keys: string[] | null;
+  /** For an entry of his world: the world's id. */
+  world: string | null;
+  /** Why the agent drafted it. */
+  reason: string;
+  /** Where it stands: open, approved, rejected, or refused because the entry changed meanwhile. */
+  status: "open" | "approved" | "rejected" | "refused";
+  /** For a refused one: why. The entry changed after the draft, is gone, or a draft of his own of the world stands uncommitted. */
+  refused: "changed" | "missing" | "draft" | null;
+  /** When it was drafted, in milliseconds since 1970. */
+  created: number;
+  /** When it was decided; null while open. */
+  decided: number | null;
+  /** The write an approval made. */
+  write: number | null;
+}
+```
+
+### `LorePutBack`
+
+The write that put an entry back, and the write it undid as it now stands.
+
+```ts
+export interface LorePutBack {
+  /** The put-back. */
+  write: LoreWrite;
+  /** The write it undid, now marked put back. */
+  of: LoreWrite;
+}
+```
+
+### `LoreRejected`
+
+A proposal as it now stands.
+
+```ts
+export interface LoreRejected {
+  /** The proposal. */
+  proposal: LoreProposal;
+}
+```
+
+### `LoreWrite`
+
+A write RPE made to his lore, with the entry before and after, so it can be put back.
+
+```ts
+export interface LoreWrite {
+  /** Its number. */
+  id: number;
+  /** The proposal it settled; null for a write of his own through Build. */
+  proposal: number | null;
+  /** An edit of an entry, a new entry, or a put-back of an earlier write. */
+  kind: "edit" | "create" | "put_back";
+  /** Lumiverse's id of the entry, or for an entry of his world its key there. */
+  entry: string;
+  /** Its book's id in Lumiverse; empty for an entry of his world. */
+  book: string;
+  /** For an entry of his world: the world's id. */
+  world: string | null;
+  /** The entry's fields before the write; null where there was no entry. */
+  before: LoreEntryFields | null;
+  /** The entry's fields after the write; null where it left none. */
+  after: LoreEntryFields | null;
+  /** For a put-back: the write it undid. */
+  of: number | null;
+  /** The write that put this one back, once one has. */
+  putBack: number | null;
+  /** When it was made, in milliseconds since 1970. */
+  at: number;
 }
 ```
 
@@ -3765,6 +4153,61 @@ export interface Session {
 }
 ```
 
+### `SessionClosed`
+
+A session he closed: the session as it now stands, the scene of the story record closed with it, and the id of his change that closed the scene, which his Undo takes (both null where the record held no scene open).
+
+```ts
+export interface SessionClosed {
+  session: SessionShown;
+  scene: string | null;
+  change: number | null;
+}
+```
+
+### `SessionCompactions`
+
+A session's compactions after one was undone, in the order written.
+
+```ts
+export interface SessionCompactions {
+  compactions: CompactionShown[];
+}
+```
+
+### `SessionOne`
+
+A session as it now stands.
+
+```ts
+export interface SessionOne {
+  session: SessionShown;
+}
+```
+
+### `SessionRead`
+
+One session with what its next turn would carry in the mode asked for (block 3 as it would go; empty where it would carry nothing) and each of its compactions in the order written.
+
+```ts
+export interface SessionRead {
+  session: SessionShown;
+  carry: CarryMode;
+  carried: string;
+  compactions: CompactionShown[];
+}
+```
+
+### `SessionReopenAsk`
+
+His Undo of a close: the change the close answered with, taken back, so the scene stands open again with its session.
+
+```ts
+export interface SessionReopenAsk {
+  change?: number;
+}
+```
+
 ### `SessionReply`
 
 Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).
@@ -3773,6 +4216,39 @@ Whose the page's credential is, and when it runs out (epoch milliseconds; null: 
 export interface SessionReply {
   user: string;
   ends: number | null;
+}
+```
+
+### `SessionShown`
+
+A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), and a compaction asked for that waits for its next turn.
+
+```ts
+export interface SessionShown {
+  id: string;
+  user: string;
+  chat: string;
+  kind: "scene" | "agent" | "job" | "talk";
+  parent?: { session?: string; turn?: string; agent: string; call: string } | { owner: true };
+  agent?: string;
+  offPath?: true;
+  state: "open" | "closed";
+  opened: number;
+  closedBy?: string;
+  by?: "user";
+  from?: { chat: string; session: string; turn: string };
+  turns: number;
+  compactAsked?: true;
+}
+```
+
+### `SessionUncompactAsk`
+
+A compaction to undo, by its id.
+
+```ts
+export interface SessionUncompactAsk {
+  id: string;
 }
 ```
 
@@ -4364,6 +4840,47 @@ export interface SwitchesShown {
 }
 ```
 
+### `SystemRowShown`
+
+One row of a typed system's view at a level: its label, its value, a note, how exact and how sure it is where a change recorded it, and whether it is out of the player's sight.
+
+```ts
+export interface SystemRowShown {
+  label: string;
+  value: string;
+  note: string | null;
+  precision: FactPrecision | null;
+  standing: FactStanding | null;
+  /** Whether the player could not see it: the level, or the thing it is about, is hidden from them. */
+  secret: boolean;
+}
+```
+
+### `SystemShown`
+
+One typed system's view at a level, as the system keeps it, named as the source: its sections of rows.
+
+```ts
+export interface SystemShown {
+  /** The system that keeps it: economy, gear, orgs, calendar, weather, vehicles or sheets. */
+  system: string;
+  title: string;
+  sections: { title: string; rows: SystemRowShown[] }[];
+}
+```
+
+### `SystemsReply`
+
+A level's typed systems, at the chat's head or at a turn: the level as the tree names it, and each system that keeps something there.
+
+```ts
+export interface SystemsReply {
+  /** The level, as the tree names it. */
+  at: string;
+  systems: SystemShown[];
+}
+```
+
 ### `TakenKeyAsk`
 
 The hash of the provider key today's connection holds, which RPE takes over at the swap.
@@ -4401,16 +4918,6 @@ export interface TapReply {
   reports: string[];
   undo: string | null;
   words: string;
-}
-```
-
-### `TapUndoAsk`
-
-The Undo of an edit of his, by the id its answer gave.
-
-```ts
-export interface TapUndoAsk {
-  undo: string;
 }
 ```
 
@@ -4461,7 +4968,7 @@ export interface TraceDelta {
 What RPH did; each kind's fields are the facts of it.
 
 ```ts
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "hook"; hook: string; on: "turn-start" | "before-tool" | "after-tool" | "before-release" | "after-release" | "run-end" | "session-close" | "before-compaction" | "job-start" | "job-end"; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 ```
 
 ### `TraceRecord`
