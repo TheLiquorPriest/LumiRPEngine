@@ -161,12 +161,12 @@ function sceneOf(ctx: ReadContext, drawn: Drawn, ground: StoredMoving, cells: Ce
   };
 }
 
-/** The map as the POV sees it, in `chosen` (the chat's pick), else the world's display; its grids drawn by the chat's map settings (`config`). */
+/** The map as the POV sees it, in the chat's own `map.display` (`config`) when it names one, else `chosen`, else the world's display; its grids drawn by the chat's map settings (`config`). */
 export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null, config: Readonly<MapConfig> = MAP_DEFAULTS): MapView {
   const { world, state } = ctx;
   const level = ctx.levelOf(world.pov, "space");
   const settings = mapSettingsOf(world);
-  const display = chosen ?? settings.display;
+  const display = config.display !== "world" ? config.display : (chosen ?? settings.display);
   const here = placeOfEntity(state, world.pov);
   const path = placePath(world, here);
   const inside = new Set(path);
