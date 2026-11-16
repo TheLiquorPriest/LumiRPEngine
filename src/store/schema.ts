@@ -240,6 +240,16 @@ UPDATE chat SET compared = created WHERE path <> '[]';
 ALTER TABLE change ADD COLUMN told TEXT;
 `,
   },
+  {
+    version: 11,
+    // His own change written again after an import forgot its chat and tied the chat's turns afresh (`restoreOwn`): the turn it stands
+    // just before (`placed`), wherever that turn's moment falls (an import's turns share one), and the moment it is placed by where
+    // that turn is not on the path read (`moment`; a job's end later than it still counts).
+    sql: `
+ALTER TABLE change ADD COLUMN placed TEXT;
+ALTER TABLE change ADD COLUMN moment INTEGER;
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

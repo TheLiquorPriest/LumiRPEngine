@@ -109,6 +109,36 @@ export interface ChangeRow {
   created: number;
 }
 
+/**
+ * His own change of a chat an import forgets (`forgetImport`), kept to be written again once the import has tied the chat's turns
+ * afresh (`restoreOwn`): what it recorded, when it took effect (`at`: its job's end, else when it was made), and the reply of the
+ * chat's own path whose turn it stood just before (`before`: null when it stood after the path's end, in a branch with no turn of its
+ * own, or is a job's not ended yet).
+ */
+export interface KeptOwn {
+  chat: string;
+  lane: Lane;
+  op: string;
+  value: JsonValue;
+  by: string | null;
+  handle: string | null;
+  standing: Standing | null;
+  precision: Precision | null;
+  source: Source | null;
+  cite: JsonValue | null;
+  job: string | null;
+  applied: boolean;
+  /** The store's own reports. */
+  reports: Report[];
+  /** Its tool's reports. */
+  told: Report[];
+  created: number;
+  at: number;
+  /** When its job ended; null: no job, or one not ended. */
+  ended: number | null;
+  before: { message: string; hash: string | null; date: number | null } | null;
+}
+
 export interface ChatRow {
   id: string;
   world: WorldId | null;

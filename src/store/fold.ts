@@ -82,6 +82,8 @@ export interface JobChange extends StoredChange {
 export interface OwnerChange extends StoredChange {
   chat: string;
   at: number;
+  /** One written again after an import forgot its chat (`restoreOwn`): the depth of its chat's turn it stands just before; null: placed by `at`. */
+  placed: number | null;
 }
 
 /** One turn of a path to fold. */
