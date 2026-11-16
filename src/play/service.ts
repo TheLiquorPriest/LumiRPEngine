@@ -1,21 +1,22 @@
 // A chat's play panels, served by RPE (plan §14: today's panels kept, re-pointed to RPE): the chat's
 // state view, read from RPE's store; what a turn's time brought due; and the taps that manage (money, a
-// group, gear, with no words), each ✎ correction, an edit of operations ("Make this a property") and the
-// World page's edit of values and facts, each recorded as his own edit through the one owner's-edit path
-// (`owner-edits.ts`), on the typed route and on today's message tunnel alike. A tap records what he did
-// and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's tables, and the clock's ✎
-// moves the clock without deciding what the time between did. The world's rules advise rather than
-// refuse (plan §6.1): a requirement the world's action does not meet, or a payee who is not there, is
-// applied with what does not add up kept beside it and answered. What is still refused (§6.1: an id that
-// does not exist or that his character cannot know of, input that cannot be parsed) says its true reason,
-// case by case (`unfit.ts`). An Undo, by the edit's own id, records the reversal of all of an edit's
-// changes, the world's defaults given with it included (`UserStore.undo`), or of none and says why. A chat's own choices (today's
-// `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that is no tap that manages is a request of his to the Author (plan
-// §10.10): from the palette, the map or a panel with no words it waits for his next message (`requests.ts`), and the same tap again
-// takes it back; with words, a chip, Send now or a Timelapse with words it plays now, its line put in the chat as his message and a
-// reply started through Lumiverse's own routes as him, nothing written into the message's or the chat's metadata. Setting a chat's
-// own choice, the things browser and the map's display are not served here, and say so. Every word is a line of
-// `.prompts/play-answers.md`. After each change the chat's followers are told its state changed.
+// group, gear, with no words), each ✎ correction, an edit of operations ("Make this a property"), the
+// World page's edit of values and facts and the HUD's time controls (Pause clock, Resume clock), each
+// recorded as his own edit through the one owner's-edit path (`owner-edits.ts`) on its typed route. A tap
+// records what he did and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's
+// tables, and the clock's ✎ moves the clock without deciding what the time between did. The world's rules
+// advise rather than refuse (plan §6.1): a requirement the world's action does not meet, or a payee who is
+// not there, is applied with what does not add up kept beside it and answered. What is still refused
+// (§6.1: an id that does not exist or that his character cannot know of, input that cannot be parsed)
+// says its true reason, case by case (`unfit.ts`). An Undo, by the edit's own id, records the reversal of
+// all of an edit's changes, the world's defaults given with it included (`UserStore.undo`), or of none and
+// says why. A tap that is no tap that manages is a request of his to the Author (plan §10.10): from the
+// palette, the map or a panel with no words it waits for his next message (`requests.ts`), and the same
+// tap again takes it back; with words, a chip, Send now or a Timelapse with words it plays now, its line
+// put in the chat as his message and a reply started through Lumiverse's own routes as him, nothing
+// written into the message's or the chat's metadata. The chat's own choices are its settings, read and
+// written through the settings routes. Every word is a line of `.prompts/play-answers.md`. After each
+// change the chat's followers are told its state changed.
 
 import type { Database } from "bun:sqlite";
 import { readFile } from "node:fs/promises";
@@ -45,8 +46,7 @@ import { hashParts } from "../shared/hash";
 import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
 import type { FixOp, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
-import type { ErrorCode, ErrorMessage, FrontendToBackend, ResultBodies, ResultMessage } from "../shared/protocol";
-import { PROTOCOL_VERSION } from "../shared/protocol";
+import type { ErrorCode } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import type { MapConfig } from "../shared/map-config";
 import { type ItemFix, parseItemFix } from "../shared/things";
@@ -60,7 +60,7 @@ import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/request
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
 import { journalNotes } from "./journal";
 import { chipsOf, meterOf, pendingOf } from "./panel-reads";
-import { TIDY_SWITCH, type TapSettings } from "./settings";
+import type { TapSettings } from "./settings";
 import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
@@ -166,12 +166,6 @@ export interface TapAnswer {
   reports: string[];
   undo: string | null;
   words: string;
-}
-
-type Request<T extends FrontendToBackend["type"]> = Extract<FrontendToBackend, { type: T }>;
-
-function reply<K extends keyof ResultBodies>(r: FrontendToBackend, request: K, body: ResultBodies[K]): ResultMessage {
-  return { lre: PROTOCOL_VERSION, type: "lre.result", reqId: r.reqId, request, body } as ResultMessage;
 }
 
 /** A tap of his alone, which opens nothing of the world's. */
@@ -344,71 +338,20 @@ export class PlayService {
     }
   }
 
-  /** Answers one of today's requests from a play page, as today's dispatcher answers it, or says it is not served. */
-  async act(user: string, chat: string, r: FrontendToBackend): Promise<ResultMessage | ErrorMessage> {
+  /**
+   * The HUD's time controls on their typed route (Pause clock, Resume clock, and the other controls today's time marker carries), each
+   * his own edit at once; a refusal is answered in words with nothing changed.
+   */
+  async time(user: string, chat: string, ask: { control: string; scope: JsonValue; to: JsonValue }): Promise<TapAnswer> {
     try {
-      switch (r.type) {
-        case "lre.action": {
-          // A tap that does not manage is held for his next message (staged: false when the same tap took it back) or played now.
-          const requested = await this.requested(user, chat, r);
-          if (requested !== undefined) return reply(r, "lre.action", "held" in requested ? { staged: requested.held !== null } : { messageId: requested.message });
-          const settings = await this.deps.settings(user, chat);
-          const { undo } = await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.action(head, r, settings));
-          return reply(r, "lre.action", { applied: true, pending: false, undo });
-        }
-        case "lre.fix": {
-          const settings = await this.deps.settings(user, chat);
-          const { reqId: _reqId, chatId: _chatId, lre: _lre, type: _type, ...fix } = r;
-          const { undo } = await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.fix(head, fix as FixAsk, settings));
-          return reply(r, "lre.fix", { pending: false, undo });
-        }
-        case "lre.chat.knowledge": {
-          // This chat's own choices, read as GM → This chat and the Engine page read them: RPE keeps none of today's but the tidy-up's
-          // switch, which is the chat's setting `things.tidy` (null: as the world's tidy.auto says), written at the chat's level. No
-          // engine of today's is named, as the state view names none. Setting the others is not served.
-          if (r.knowledge !== undefined || r.narrator !== undefined || r.engine !== undefined) throw new Refused("unavailable", { line: "chat_choices" });
-          const row = this.deps.store.user(user).chat(chat);
-          if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
-          if (r.tidy !== undefined) await this.deps.writeChatSetting(chat, TIDY_SWITCH, r.tidy);
-          const { tidy } = (await this.deps.settings(user, chat)).taps;
-          return reply(r, "lre.chat.knowledge", { knowledge: null, narrator: null, ...(tidy.on !== null ? { tidy: tidy.on } : {}) });
-        }
-        case "lre.marker": {
-          // The HUD's Pause clock and Resume clock, and the other time controls today's time marker carries, each his own edit at
-          // once; a preview, and any other marker, is not served.
-          if (r.kind !== "time" || r.preview === true) throw new Refused("unavailable", { line: "other", fields: { type: r.type } });
-          const body = validMarkerBody({ kind: "time", control: r.control, scope: r.scope, to: r.to });
-          if (body === null || body.kind !== "time" || !TIME_CONTROLS.some((c) => c === body.control)) throw new Refused("bad_request", { line: "bad_marker" });
-          await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.timeMarker(head, body));
-          return reply(r, "lre.marker", { pending: false });
-        }
-        case "lre.things":
-          throw new Refused("unavailable", { line: "things" });
-        case "lre.map":
-          throw new Refused("unavailable", { line: "map" });
-        default:
-          throw new Refused("unavailable", { line: "other", fields: { type: r.type } });
-      }
+      const body = validMarkerBody({ kind: "time", control: ask.control, scope: ask.scope, to: ask.to });
+      if (body === null || body.kind !== "time" || !TIME_CONTROLS.some((c) => c === body.control)) throw new Refused("bad_request", { line: "bad_marker" });
+      const { undo } = await recordOwnerEdit(this.deps, user, chat, { kind: "time", ...ask } as unknown as JsonObject, null, (head) => this.timeMarker(head, body));
+      return { applied: undo !== null, reports: [], undo, words: undo === null ? await this.words("changes_nothing") : "" };
     } catch (error) {
-      return this.failed(r, error);
+      if (!(error instanceof Refused)) throw error;
+      return { applied: false, reports: [], undo: null, words: await this.refusalWords(error) };
     }
-  }
-
-  /** Undoes an edit of his, by the id its answer gave, as today's Undo chip is sent. */
-  async undo(user: string, chat: string, r: Request<"lre.chip">): Promise<ResultMessage | ErrorMessage> {
-    try {
-      const applied = await this.undone(user, chat, r.chip);
-      if (applied) stateChanged(this.deps.live, chat);
-      return reply(r, "lre.chip", { applied, pending: false });
-    } catch (error) {
-      return this.failed(r, error);
-    }
-  }
-
-  /** Today's message as the cite of the edit it asked for, without its envelope. */
-  private cited(r: FrontendToBackend): JsonObject {
-    const { lre: _lre, reqId: _reqId, chatId: _chatId, ...request } = r as FrontendToBackend & { chatId?: string };
-    return request as unknown as JsonObject;
   }
 
   /**
@@ -682,16 +625,6 @@ export class PlayService {
 
   private async refusalWords(error: Refused): Promise<string> {
     return "words" in error.why ? error.why.words : await this.words(error.why.line, error.why.fields, error.why.codes);
-  }
-
-  private async failed(r: FrontendToBackend, error: unknown): Promise<ErrorMessage> {
-    // A turn joined to another is a fact the server answers in its one place, not a failure of this page's request.
-    if (error instanceof JoinedTurnError) throw error;
-    const fail = (code: ErrorCode, message: string): ErrorMessage => ({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: r.reqId, code, message });
-    if (error instanceof Refused) return fail(error.code, await this.refusalWords(error));
-    const message = error instanceof Error ? error.message : String(error);
-    this.deps.log.error("A play page's request failed inside RPE.", { request: r.type, error: message });
-    return fail("internal", message);
   }
 
   /** This area's words as the guidance folder holds them now (`.prompts/play-answers.md`). */

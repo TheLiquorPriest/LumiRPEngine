@@ -14,6 +14,10 @@ import { engineTools, shippedTexts, stateScan } from "../../../../src/iface/inde
 import { PORTS } from "../../../iface/rig";
 import { playRoutes, PlayService } from "../../../../src/play";
 import { TAP_DEFAULTS } from "../../../../src/play/settings";
+import { MAP_DEFAULTS } from "../../../../src/shared/map-config";
+import { HARNESS_MIGRATIONS } from "../../../../src/turn/tables";
+import { migrateStore } from "../../../../src/store";
+import { Database } from "bun:sqlite";
 import type { ResultBodies } from "../../../../src/shared/protocol";
 import type { Store } from "../../../../src/store";
 import type { WriteQueue } from "../../../../src/app";
@@ -58,19 +62,17 @@ export function servedRpe(): ServedRpe {
   const noLumiverse = (): never => {
     throw new Error("This bed has no Lumiverse to put a message in.");
   };
-  const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, log: bed.log }));
+  // The turn lane's own tables, which the panels read beside the store (runs' usage, questions, carried chips), in a database of their own here.
+  const lane = new Database(":memory:");
+  migrateStore(lane);
+  for (const step of HARNESS_MIGRATIONS) lane.run(step.sql);
+  const play = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, db: lane, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, writeChatSetting: async () => {}, log: bed.log }));
+  worlds.push(...(play as unknown as typeof worlds));
 
   const serve = async (key: string, params: Record<string, string>, body: unknown, query: Record<string, string>): Promise<unknown> => {
-    const chat = params.chat ?? "";
     switch (key) {
       case "POST /api/v1/build":
         return await callRoute(post, { body, user: USER });
-      case "GET /api/v1/chats/:chat/state":
-        return await callRoute(stateRoute, { params: { chat }, query, user: USER });
-      case "POST /api/v1/chats/:chat/actions":
-        return await callRoute(actionsRoute, { params: { chat }, body, user: USER });
-      case "POST /api/v1/chats/:chat/actions/undo":
-        return await callRoute(undoRoute, { params: { chat }, body, user: USER });
       default: {
         const found = worlds.find((r) => `${r.method} ${r.path}` === key);
         if (found === undefined) throw new RpeError(404, `No route ${key}.`);

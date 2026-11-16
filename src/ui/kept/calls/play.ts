@@ -79,6 +79,7 @@ export const calls: CallFile = {
     request.type === "lre.fix" ||
     request.type === "lre.edit" ||
     (request.type === "lre.chat.knowledge" && request.engine === undefined) ||
+    (request.type === "lre.marker" && request.kind === "time" && request.preview !== true) ||
     (request.type === "lre.chip" && (request.choice === "undo" || request.chip.startsWith(APPROVAL_CHIP))),
   async serve(request, ctx): Promise<ServedBody> {
     switch (request.type) {
@@ -109,6 +110,12 @@ export const calls: CallFile = {
       }
       case "lre.chat.knowledge":
         return await choices(ctx, chatOf(request, ctx), request);
+      case "lre.marker": {
+        if (request.kind !== "time") throw new Refusal("internal", "The play calls take the clock's time controls alone.");
+        const reply = await ctx.client.call("POST /api/v1/chats/:chat/time", { chat: chatOf(request, ctx) }, { body: { control: request.control, scope: request.scope, to: request.to } });
+        if (!reply.applied && reply.words !== "") throw new Refusal("bad_request", reply.words);
+        return { pending: false };
+      }
       default:
         throw new Refusal("internal", `The play calls do not take ${request.type}.`);
     }

@@ -1266,14 +1266,6 @@ export interface JournalQuestRow {
 /** How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which gives its key and what it is now (null: none, all kept). */
 export type KeptFor = { by: "never" } | { by: "chat" } | { by: "setting"; setting: string; value: number | null };
 
-/** One message of a model call's request as it was sent: its role, its text, and the block the harness placed it as (`opening`, `frame`, `prompt`, `session:carry`, `briefing`, a given name, `brief`); none for the run's own conversation. */
-export interface KeptMessage {
-  role: string;
-  text: string;
-  /** The block it was placed as; absent for the run's own conversation. */
-  block?: string;
-}
-
 /** A new key of a kind, shown once; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did. */
 export interface KeyAsk {
   /** Which key. */
@@ -2380,6 +2372,16 @@ export interface QuestStageRow {
   current: boolean | null;
 }
 
+/** One message of a rebuilt request as it was sent, with the file of the turn's folder its text points into, as a path in the agents' view (`<turn folder>/briefing.md`); none for text kept inline (the opening, the frame, the run's own conversation). */
+export interface RebuiltMessage {
+  role: string;
+  text: string;
+  /** The block it was placed as; absent for the run's own conversation. */
+  block?: string;
+  /** The file of the turn's folder its text points into; absent for text kept inline. */
+  file?: string;
+}
+
 /** A tool the registry holds for a chat: its name, its family, and whose it is: RPH's own, the host's, or his own from a manifest. */
 export interface RegisteredTool {
   name: string;
@@ -2466,8 +2468,8 @@ export interface RequestReply {
   name: string;
   /** What was rebuilt is what was sent, by the hash the file keeps; false where it is not, and nothing is shown. */
   same: boolean;
-  /** Every message as it was sent, in order; none where `same` is false. */
-  messages: KeptMessage[];
+  /** Every message as it was sent, in order, each with the file its text points into; none where `same` is false. */
+  messages: RebuiltMessage[];
   /** Each tool declared, in order; none where `same` is false. */
   tools: { name: string; file?: string }[];
 }
@@ -3666,18 +3668,6 @@ export interface TurnTold {
   dropped: { agent: AgentRef; at: number }[];
 }
 
-/** Today's Undo of a tap, as the previous build's Undo chip sends it: `{ lre: 1, type: "lre.chip", reqId, chatId, chip, choice: "undo" }`, the chip being the tap's id. */
-export interface UndoAsk {
-  lre: 1;
-  type: "lre.chip";
-  reqId: string;
-  chatId: string;
-  /** The tap's id: `tap:<turn>:<tap>`, the turn it was recorded on and its own id there. */
-  chip: string;
-  choice: "undo";
-  payload?: { [key: string]: JsonValue };
-}
-
 /** What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes: a part a later change has written since, or one with no reversal. */
 export interface UndoReply {
   recorded: string[];
@@ -4118,26 +4108,6 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: false;
-  };
-  /** Tunnel for the previous build's messages: a panel's action as a page sends it, answered with today's `lre.result` or `lre.error`. */
-  "POST /api/v1/chats/:chat/actions": {
-    params: { chat: string };
-    query: Record<string, never>;
-    body: FrontendToBackend;
-    reply: ResultMessage | ErrorMessage;
-    paged: false;
-    long: false;
-    joined: false;
-  };
-  /** Tunnel for the previous build's messages: the Undo of a tap, sent as the previous build's Undo chip is, answered with today's `lre.result` or `lre.error`; a tap of a turn joined to another is answered with the turn it joined. */
-  "POST /api/v1/chats/:chat/actions/undo": {
-    params: { chat: string };
-    query: Record<string, never>;
-    body: UndoAsk;
-    reply: ResultMessage | ErrorMessage;
-    paged: false;
-    long: false;
-    joined: true;
   };
   /** His word on a question a lane set to Confirm is waiting on: go ahead, or not with a reason the agent is given. Says whether it reached a question that was waiting. */
   "POST /api/v1/chats/:chat/approvals/:approval/answer": {
@@ -5015,6 +4985,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: { key: string; left: boolean };
     reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One of the HUD's time controls (Pause clock, Resume clock, and the others the clock's controls carry), at its scope and with its value, recorded at once as his own edit; a refusal is answered in words with nothing changed. */
+  "POST /api/v1/chats/:chat/time": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: { control: string; scope: JsonValue; to: JsonValue };
+    reply: TapReply;
     paged: false;
     long: false;
     joined: false;

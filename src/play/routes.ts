@@ -1,22 +1,17 @@
 // The routes of a chat's play panels (plan §14): the chat's state view, at its head or at one of its
-// turns, in the shape today's pages take; today's panel actions as a page sends them, each answered
-// with today's `lre.result` or `lre.error`; and the Undo of a tap, sent as today's Undo chip is. Every
-// route is a page's: it answers only for the user this RPE belongs to. The actions and the undo are a
-// tunnel for the previous build's message envelope, declared as such (`src/app/tunnel.ts`), until the
-// panels have routes of their own.
+// turns, in the shape today's pages take; what a turn's time brought due; a tap that manages and its
+// Undo; the HUD's time controls; a panel's tap held for his next message, and a tap that plays now.
+// Every route is a page's: it answers only for the user this RPE belongs to.
 
-import { errorMessage, requestMessage, resultMessage, route, RouteError, shape, stateView } from "../app";
+import { route, shape, stateView } from "../app";
 import { requestShown } from "../turn/shapes";
-import { isRecord } from "../shared/json";
-import type { FrontendToBackend } from "../shared/protocol";
 import type { PlayService } from "./service";
 
 export const STATE_PATH = "/api/v1/chats/:chat/state";
-export const ACTIONS_PATH = "/api/v1/chats/:chat/actions";
-export const UNDO_PATH = "/api/v1/chats/:chat/actions/undo";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
 export const TAPS_PATH = "/api/v1/chats/:chat/taps";
 export const EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo";
+export const TIME_PATH = "/api/v1/chats/:chat/time";
 export const PANEL_REQUEST_PATH = "/api/v1/chats/:chat/requests/panel";
 export const PLAYS_PATH = "/api/v1/chats/:chat/plays";
 
@@ -103,38 +98,6 @@ const dueReply = shape.named(
   }),
 );
 
-/** One of today's requests, with the parts its own type needs where this road serves it. */
-function request(value: FrontendToBackend): FrontendToBackend {
-  if (value.type === "lre.action" && (typeof value.action !== "string" || !isRecord(value.params) || typeof value.source !== "string")) throw new RouteError(400, "An lre.action names its action, its params and its source.");
-  if (value.type === "lre.fix" && !["hint", "time", "thing", "things", "field"].some((k) => k in value)) throw new RouteError(400, "An lre.fix names a field, a time, a hint, a thing or things.");
-  return value;
-}
-
-/** A request for the chat the path names: one that names another chat is refused. */
-function forChat<R extends FrontendToBackend>(r: R, chat: string): R {
-  const named = "chatId" in r ? r.chatId : undefined;
-  if (named !== undefined && named !== chat) throw new RouteError(400, `The message names chat ${String(named)}, and the path chat ${chat}.`);
-  return r;
-}
-
-/** Today's answer to a request: a result, or an error. */
-const answered = shape.union(resultMessage, errorMessage);
-
-/** Today's Undo of a tap: a chip's request with the choice `undo`, its chip the tap's id. */
-const undoAsk = shape.named(
-  "UndoAsk",
-  'Today\'s Undo of a tap, as the previous build\'s Undo chip sends it: `{ lre: 1, type: "lre.chip", reqId, chatId, chip, choice: "undo" }`, the chip being the tap\'s id.',
-  shape.object({
-    lre: shape.literal(1),
-    type: shape.literal("lre.chip"),
-    reqId: shape.text(),
-    chatId: shape.text(),
-    chip: shape.field(shape.turnId("tap:<turn>:<tap>"), "The tap's id: `tap:<turn>:<tap>`, the turn it was recorded on and its own id there."),
-    choice: shape.literal("undo"),
-    payload: shape.optional(shape.record(shape.json())),
-  }),
-);
-
 export function playRoutes(play: PlayService) {
   return [
     route({
@@ -150,24 +113,13 @@ export function playRoutes(play: PlayService) {
     }),
     route({
       method: "POST",
-      path: ACTIONS_PATH,
+      path: TIME_PATH,
       access: "page",
       group: "state",
-      does: "Tunnel for the previous build's messages: a panel's action as a page sends it, answered with today's `lre.result` or `lre.error`.",
-      body: requestMessage,
-      reply: answered,
-      handle: ({ user, params, body }) => play.act(user, params.chat, forChat(request(body), params.chat)),
-    }),
-    route({
-      method: "POST",
-      path: UNDO_PATH,
-      access: "page",
-      group: "state",
-      does: "Tunnel for the previous build's messages: the Undo of a tap, sent as the previous build's Undo chip is, answered with today's `lre.result` or `lre.error`; a tap of a turn joined to another is answered with the turn it joined.",
-      body: undoAsk,
-      reply: answered,
-      joined: true,
-      handle: ({ user, params, body }) => play.undo(user, params.chat, forChat(body, params.chat)),
+      does: "One of the HUD's time controls (Pause clock, Resume clock, and the others the clock's controls carry), at its scope and with its value, recorded at once as his own edit; a refusal is answered in words with nothing changed.",
+      body: shape.object({ control: T, scope: shape.field(shape.json(), "Where it holds: every scene, a kind of scene, an activity, or an interrupt."), to: shape.json() }),
+      reply: tapReply,
+      handle: ({ user, params, body }) => play.time(user, params.chat, body),
     }),
     route({
       method: "GET",

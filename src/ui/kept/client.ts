@@ -5,9 +5,9 @@
 // a test on the request (its type, its op, the fields that choose its function) and sends each to its
 // typed route through the page's client. No call's body carries today's `lre`, `type` or `reqId`: the
 // file's route takes what the route takes, and the file hands back today's result body, which this
-// seam puts in an `lre.result` under the request's id. A request no call file takes yet goes by the
-// road it went by: Build's one route for what Build asks, the chat's actions route for what Play
-// asks, until the area's last package deletes that road.
+// seam puts in an `lre.result` under the request's id. A request no call file takes goes, on Build's
+// App, by Build's one route until Build's last package deletes that road; on a chat's App the chat's
+// old actions route is gone, and the page answers it itself as not served by this build.
 //
 // Nothing here remembers an answer. An answer that depends on a state that changes (no turn yet, no
 // revision) is asked again at the next request. A road failure, when RPE was not reached, is said as
@@ -16,10 +16,10 @@
 
 import type { Transport } from "../../frontend/protocol-client";
 import type { RequestBody } from "../../frontend/registry";
-import type { LiveEvent, UndoAsk } from "../../shared/api";
+import type { LiveEvent } from "../../shared/api";
 import { type ErrorCode, type ErrorMessage, type FrontendToBackend, PROTOCOL_VERSION, type ResultBodies, type ResultMessage } from "../../shared/protocol";
 import type { LintIssue } from "../../shared/lint";
-import { ConnectFailure, replyOf, RpeError, type RpeClient } from "../client";
+import { ConnectFailure, RpeError, type RpeClient } from "../client";
 import { errorWords } from "../words";
 import { CALLS } from "./calls";
 
@@ -132,25 +132,22 @@ export function keptTransport(deps: TransportDeps): KeptTransport {
       },
     );
   };
-  /** A request no call file takes yet, by the road it went by. */
+  /** A request no call file takes: Build's by its one route, a chat's answered here as not served (RPE's refusal, so the page says it). */
   const byOldRoad = (message: FrontendToBackend): Promise<unknown> => {
     const chat = deps.chat();
-    const onBuild = deps.oldRoad === "build" || message.type === "lre.world" || chat === null;
-    const run: Promise<ResultMessage | ErrorMessage> = onBuild
-      ? deps.client.call("POST /api/v1/build", {}, { body: message }).then((answer) => {
-          // Build's route answers with the pushes the request caused too: they come after the result.
-          queueMicrotask(() => {
-            if (!closed) for (const push of answer.pushes) hand(push);
-          });
-          return answer.result;
-        })
-      : message.type === "lre.chip" && message.choice === "undo"
-        ? deps.client.call("POST /api/v1/chats/:chat/actions/undo", { chat }, { body: message as unknown as UndoAsk }).then(replyOf)
-        : deps.client.call("POST /api/v1/chats/:chat/actions", { chat }, { body: message });
-    return run.then((answer) => {
+    if (!(deps.oldRoad === "build" || message.type === "lre.world" || chat === null)) {
+      refused.add(message.reqId);
+      return Promise.resolve(errorOf(message.reqId, "unavailable", `This page's request ${message.type} is not served by this build of RPE.`));
+    }
+    return deps.client.call("POST /api/v1/build", {}, { body: message }).then((answer) => {
+      // Build's route answers with the pushes the request caused too: they come after the result.
+      queueMicrotask(() => {
+        if (!closed) for (const push of answer.pushes) hand(push);
+      });
+      const result = answer.result as ResultMessage | ErrorMessage;
       // RPE's own refusal of a request it does not serve: told apart by the request it answers.
-      if (answer.type === "lre.error" && answer.code === "unavailable" && answer.reqId !== null) refused.add(answer.reqId);
-      return answer;
+      if (result.type === "lre.error" && result.code === "unavailable" && result.reqId !== null) refused.add(result.reqId);
+      return result;
     });
   };
   return {

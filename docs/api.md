@@ -419,33 +419,6 @@ Stops a turn going on now; says whether it was running.
 
 ## State
 
-### `POST /api/v1/chats/:chat/actions`
-
-Tunnel for the previous build's messages: a panel's action as a page sends it, answered with today's `lre.result` or `lre.error`.
-
-| | |
-|---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
-| Params | `chat` |
-| Query | none |
-| Body | [`FrontendToBackend`](#frontendtobackend) |
-| Reply | `ResultMessage | ErrorMessage` |
-
-### `POST /api/v1/chats/:chat/actions/undo`
-
-Tunnel for the previous build's messages: the Undo of a tap, sent as the previous build's Undo chip is, answered with today's `lre.result` or `lre.error`; a tap of a turn joined to another is answered with the turn it joined.
-
-| | |
-|---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
-| Params | `chat` |
-| Query | none |
-| Body | [`UndoAsk`](#undoask) |
-| Reply | `ResultMessage | ErrorMessage` |
-| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
-
 ### `POST /api/v1/chats/:chat/edits/:edit/undo`
 
 The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): all of it, the world's defaults given with it included, or none and the answer says why; at once, whatever runs.
@@ -773,6 +746,19 @@ Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft
 | Query | none |
 | Body | `{ key: string; left: boolean }` |
 | Reply | `JsonValue` |
+
+### `POST /api/v1/chats/:chat/time`
+
+One of the HUD's time controls (Pause clock, Resume clock, and the others the clock's controls carry), at its scope and with its value, recorded at once as his own edit; a refusal is answered in words with nothing changed.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | `{ control: string; scope: JsonValue; to: JsonValue }` |
+| Reply | [`TapReply`](#tapreply) |
 
 ### `GET /api/v1/chats/:chat/walk`
 
@@ -5591,19 +5577,6 @@ How long a kind is kept: for good, until the chat is deleted or he prunes it, or
 export type KeptFor = { by: "never" } | { by: "chat" } | { by: "setting"; setting: string; value: number | null };
 ```
 
-### `KeptMessage`
-
-One message of a model call's request as it was sent: its role, its text, and the block the harness placed it as (`opening`, `frame`, `prompt`, `session:carry`, `briefing`, a given name, `brief`); none for the run's own conversation.
-
-```ts
-export interface KeptMessage {
-  role: string;
-  text: string;
-  /** The block it was placed as; absent for the run's own conversation. */
-  block?: string;
-}
-```
-
 ### `KeyAsk`
 
 A new key of a kind, shown once; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did.
@@ -7265,6 +7238,21 @@ export interface QuestStageRow {
 }
 ```
 
+### `RebuiltMessage`
+
+One message of a rebuilt request as it was sent, with the file of the turn's folder its text points into, as a path in the agents' view (`<turn folder>/briefing.md`); none for text kept inline (the opening, the frame, the run's own conversation).
+
+```ts
+export interface RebuiltMessage {
+  role: string;
+  text: string;
+  /** The block it was placed as; absent for the run's own conversation. */
+  block?: string;
+  /** The file of the turn's folder its text points into; absent for text kept inline. */
+  file?: string;
+}
+```
+
 ### `RegisteredTool`
 
 A tool the registry holds for a chat: its name, its family, and whose it is: RPH's own, the host's, or his own from a manifest.
@@ -7420,8 +7408,8 @@ export interface RequestReply {
   name: string;
   /** What was rebuilt is what was sent, by the hash the file keeps; false where it is not, and nothing is shown. */
   same: boolean;
-  /** Every message as it was sent, in order; none where `same` is false. */
-  messages: KeptMessage[];
+  /** Every message as it was sent, in order, each with the file its text points into; none where `same` is false. */
+  messages: RebuiltMessage[];
   /** Each tool declared, in order; none where `same` is false. */
   tools: { name: string; file?: string }[];
 }
@@ -9238,23 +9226,6 @@ export interface TurnTold {
   rules: { firing: RuleFiring; at: number }[];
   attachments: { agent: AgentRef; refs: JsonValue; at: number }[];
   dropped: { agent: AgentRef; at: number }[];
-}
-```
-
-### `UndoAsk`
-
-Today's Undo of a tap, as the previous build's Undo chip sends it: `{ lre: 1, type: "lre.chip", reqId, chatId, chip, choice: "undo" }`, the chip being the tap's id.
-
-```ts
-export interface UndoAsk {
-  lre: 1;
-  type: "lre.chip";
-  reqId: string;
-  chatId: string;
-  /** The tap's id: `tap:<turn>:<tap>`, the turn it was recorded on and its own id there. */
-  chip: string;
-  choice: "undo";
-  payload?: { [key: string]: JsonValue };
 }
 ```
 

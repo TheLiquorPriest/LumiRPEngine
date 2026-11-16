@@ -99,7 +99,7 @@ export function makeBed(): Bed {
     throw new Error("The play bed has no Lumiverse to put a message in.");
   };
   const service = new PlayService({ store, writes, live, db, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse, writeChatSetting: async () => {}, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
-  const [stateRoute, actionsRoute, undoRoute] = playRoutes(service);
+  const [stateRoute] = playRoutes(service);
   const call = { query: new URLSearchParams(), request: new Request("http://rpe.test/"), signal: new AbortController().signal };
 
   return {
@@ -148,11 +148,11 @@ export function makeBed(): Bed {
     async state(query = {}, user = USER, chat = CHAT) {
       return await callRoute(stateRoute, { query, params: { chat }, user });
     },
-    async send(message, user = USER, chat = CHAT) {
-      return await callRoute(actionsRoute, { params: { chat }, body: { lre: 1, reqId: `req-${++asked}`, chatId: chat, ...message }, user });
+    async send() {
+      throw new Error("The chat's old actions route is gone: a tap goes to the taps route.");
     },
-    async undo(chip, user = USER, chat = CHAT) {
-      return await callRoute(undoRoute, { params: { chat }, body: { lre: 1, reqId: `req-${++asked}`, type: "lre.chip", chatId: chat, chip, choice: "undo" }, user });
+    async undo() {
+      throw new Error("The chat's old actions route is gone: an Undo goes to the edits' undo route.");
     },
   };
 }
