@@ -34,7 +34,7 @@ import { Play, registry as templateReg } from "../packs/templates/play";
 import { agentsActHere } from "../../src/backend/turn-steps";
 import { stanceLines } from "../../src/packs/castlife/core/index";
 import { hashJson } from "../../src/shared/hash";
-import { upgradePreview } from "../../src/backend/upgrade-preview";
+import { upgradePreview } from "../../src/worlds/upgrade-preview";
 import { planUpgrade } from "../../src/engine/upgrade";
 import { applyMarker } from "../../src/engine/events";
 import { initialState } from "../../src/engine/world-state";

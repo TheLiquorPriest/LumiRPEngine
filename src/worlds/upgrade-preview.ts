@@ -1,0 +1,259 @@
+// The Upgrade preview (DESIGN §4.3 `migrate`): what an Upgrade with picks would bring into the
+// chat, entity by entity and part by part, each with the pick it defaults to and why, worded for
+// the world's owner. It words the very plan the fold applies (`planUpgrade`), so the defaults shown
+// are the fold's. An Upgrade is the owner's tool, like the GM view, so secret entities are listed,
+// but behind the same kind of spoiler gate: a row, a change or a track line that would give a
+// secret away (someone or somewhere the POV can't see, a track it doesn't know) is marked `secret`,
+// and Settings shows it as "A hidden change" until the owner opens the gate. A company made a trust
+// or a trust a company (Build's Change what it is, 6.16) is one change, "Change what it is": its
+// kind, its fields and the memberships that seat its trustees, taken or kept together.
+
+import type { RevisionId } from "../shared/ids";
+import type { EntityUpgradePick, UpgradeAspect } from "../shared/ledger";
+import { UPGRADE_ASPECTS } from "../shared/ledger";
+import { OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, worthShares, type OwnerRole } from "../shared/finance";
+import { isRecord, type JsonObject } from "../shared/json";
+import type { UpgradeChange, UpgradeEntityRow, UpgradePreview, UpgradeTarget } from "../shared/protocol";
+import { tierLabel } from "../shared/tiers";
+import type { FieldDef, RelationInstance, WorldDoc } from "../shared/world";
+import { formatMoney, lifeStateOf } from "../shared/world";
+import { lifeKnownTo } from "../engine/life";
+import { own } from "../engine/pack-kit";
+import type { Registry } from "../engine/registry-impl";
+import { relationDef } from "../engine/relations";
+import { fieldDef, kindDef, kindIs } from "../engine/scope";
+import { GROUP_KIND, MEMBER_OF } from "../engine/selector";
+import type { WorldState } from "../engine/state";
+import { definitionsLag, PLACEMENT_FIELDS, planUpgrade, type EntityDiff, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
+import { canSeeEntity, canSeePlace, trackKnown, visibilityOf } from "../engine/visibility";
+import { WorldError } from "./worlds";
+
+const ASPECT_LABEL: Record<UpgradeAspect, string> = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags", life: "Life state" };
+
+/** How much of a long value (a list of appointments) a row shows. */
+const MAX_TEXT = 140;
+
+const STATUS_ORDER: Record<UpgradeEntityRow["status"], number> = { new: 0, changed: 1, removed: 2 };
+
+function clip(text: string): string {
+  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text;
+}
+
+/** The default pick of a part, and why: take what play never touched, keep what it did. */
+function byDefault(touched: boolean): Pick<UpgradeChange, "pick" | "why" | "options"> {
+  return { pick: touched ? "keep" : "take", why: touched ? "changed in play" : "unchanged", options: ["take", "keep"] };
+}
+
+export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly<WorldState>, after: WorldDoc, inForce: WorldDoc): UpgradePreview {
+  const pov = inForce.pov;
+  // What the POV may see, in both revisions: one hiding it is enough to keep it behind the gate.
+  // Someone new is shown only when the revision makes them public: nobody can know them yet.
+  const entityShown = (id: string): boolean => (own(state.entities, id) ? canSeeEntity(reg, inForce, state, pov, id) && canSeeEntity(reg, after, state, pov, id) : visibilityOf(own(after.entities, id)?.visibility) === "public");
+  const placeShown = (id: string): boolean => [inForce, after].every((w) => !own(w.places, id) || canSeePlace(reg, w, state, pov, id));
+  const trackShown = (id: string): boolean =>
+    [inForce, after].every((w) => {
+      const t = own(w.tracks, id);
+      if (!t) return true;
+      const v = visibilityOf(t.visibility);
+      return v === "public" || (v === "known_by" && trackKnown(reg, w, state, pov, t));
+    });
+  // Whether the change being worded names anything the POV can't see: set as its words are made.
+  let spoils = false;
+  /** An entity's or place's name, for an id a value holds; undefined for anything else. */
+  const nameOf = (id: string): string | undefined => {
+    const name = own(state.entities, id)?.name ?? own(after.entities, id)?.name ?? own(after.places, id)?.name ?? own(inForce.places, id)?.name;
+    if (name !== undefined && !(own(state.entities, id) || own(after.entities, id) ? entityShown(id) : placeShown(id))) spoils = true;
+    return name;
+  };
+  const valueText = (v: unknown, def?: FieldDef): string => {
+    if (v === undefined || v === null) return "—";
+    if (typeof v === "boolean") return v ? "yes" : "no";
+    if (typeof v === "number") return def?.type === "money" ? formatMoney(v, after.currency) : String(v);
+    if (typeof v === "string") return clip(nameOf(v) ?? v);
+    if (Array.isArray(v)) return v.length === 0 ? "none" : clip(`${v.length} × ${JSON.stringify(v)}`);
+    return clip(JSON.stringify(v));
+  };
+  const aspectText = (aspect: UpgradeAspect, v: unknown): string => {
+    if (aspect === "kind" && typeof v === "string") return kindDef(reg, after, v)?.label ?? kindDef(reg, inForce, v)?.label ?? v;
+    if (aspect === "tier" && typeof v === "string") return tierLabel(after, v);
+    if (aspect === "levels" && isRecord(v)) return Object.entries(v).map(([domain, level]) => `${domain} ${String(level)}`).join(", ") || "none";
+    if (aspect === "life" && typeof v === "string") return lifeStateOf(after, v).label;
+    if (aspect === "class" && isRecord(v)) {
+      const classes = isRecord(v.class) ? Object.entries(v.class).map(([facet, values]) => `${own(after.classifications, facet)?.label ?? facet}: ${Array.isArray(values) ? values.join(", ") : ""}`) : [];
+      const tags = Array.isArray(v.tags) && v.tags.length > 0 ? [`tags: ${v.tags.join(", ")}`] : [];
+      return [...classes, ...tags].join("; ") || "none";
+    }
+    return valueText(v);
+  };
+  const linkText = (r: RelationInstance | null): string => (r ? (r.fields && Object.keys(r.fields).length > 0 ? clip(`linked, ${Object.entries(r.fields).map(([k, x]) => `${k.replace(/_/g, " ")} ${valueText(x)}`).join(", ")}`) : "linked") : "not linked");
+  /**
+   * A kind change in words: the new kind, and every link the new kind no longer reads, play's own
+   * included (a company's officers, as members, once it is a trust), so none is dropped unseen.
+   */
+  const kindChangeText = (id: string, diff: PartDiff): string => {
+    const to = aspectText("kind", diff.next);
+    const was = typeof diff.now === "string" ? diff.now : "";
+    const next = typeof diff.next === "string" ? diff.next : "";
+    if (!kindIs(reg, inForce, was, GROUP_KIND) || kindIs(reg, after, next, GROUP_KIND)) return to;
+    const links = Object.keys(state.entities)
+      .sort()
+      .flatMap((holder) => (own(state.entities, holder)?.relations ?? []).filter((r) => r.type === MEMBER_OF && r.to === id).map((r) => `${nameOf(holder) ?? holder}'s ${relationDef(reg, inForce, r.type)?.label ?? "member of"}${typeof r.fields?.role === "string" ? ` (${r.fields.role})` : ""}`));
+    return links.length === 0 ? to : `${to}; it no longer reads ${links.length === 1 ? "this link" : `these ${links.length} links`}: ${links.join(", ")}`;
+  };
+  /** An owners list in words, by role: "Trustees: Sir Alaric Thorne; Beneficiaries: Lady Honoria Thorne (100%)". */
+  const ownersText = (v: unknown): string => {
+    const owners = ownersIn({ owners: Array.isArray(v) ? v : [] } as JsonObject);
+    const shares = worthShares(owners);
+    const parts = (Object.keys(OWNER_ROLE_LABELS) as OwnerRole[]).flatMap((role) => {
+      const names = [...new Set(owners.filter((o) => o.role === role).map((o) => o.party))].map((p) => `${nameOf(p) ?? p}${ROLE_RIGHTS[role].worth ? ` (${Math.round((shares[p] ?? 0) * 100) / 100}%)` : ""}`);
+      return names.length > 0 ? [`${OWNER_ROLE_LABELS[role].many}: ${names.join(", ")}`] : [];
+    });
+    return parts.join("; ") || "no owners";
+  };
+  /** Whether a changed entity is a company made a trust or a trust made a company. */
+  const converts = (d: EntityDiff): boolean => {
+    const k = d.aspects.kind;
+    if (d.status !== "changed" || !k || typeof k.now !== "string" || typeof k.next !== "string") return false;
+    return (kindIs(reg, inForce, k.now, "business") && kindIs(reg, after, k.next, "trust")) || (kindIs(reg, inForce, k.now, "trust") && kindIs(reg, after, k.next, "business"));
+  };
+  // Conversions, and the memberships of others that seat their trustees: those go with the conversion, never on their holders' rows.
+  const conversions = new Set(plan.entities.filter(converts).map((d) => d.id));
+  const seats = new Map<string, { holder: string; diff: RelationDiff }[]>();
+  const rows: UpgradeEntityRow[] = [];
+  const shown = new Set<string>();
+  for (const d of plan.entities) {
+    for (const r of d.relations) {
+      if (r.rel !== MEMBER_OF || !conversions.has(r.to)) continue;
+      seats.set(r.to, [...(seats.get(r.to) ?? []), { holder: d.id, diff: r }]);
+      shown.add(`${d.id}\u0000${r.rel}\u0000${r.to}`);
+    }
+  }
+  /**
+   * A conversion as one change: from its kind and owners, to its new kind and owners, the fields it
+   * drops and whom it seats, its kind, every field and those seats its targets, played's touch on any
+   * one keeping the whole.
+   */
+  const conversionChange = (d: EntityDiff, kindDiff: PartDiff): Omit<UpgradeChange, "secret"> => {
+    const fields = Object.entries(d.fields).filter(([f]) => !PLACEMENT_FIELDS.includes(f));
+    const owners = own(d.fields, "owners");
+    const was = typeof kindDiff.now === "string" ? kindDiff.now : "";
+    const dropped = fields.filter(([f, diff]) => f !== "owners" && diff.next === undefined).map(([f]) => fieldDef(reg, inForce, was, f)?.label ?? f.replace(/_/g, " "));
+    const seated = (seats.get(d.id) ?? []).filter((s) => s.diff.next !== null).map((s) => nameOf(s.holder) ?? s.holder);
+    const from = [aspectText("kind", kindDiff.now), ownersText(owners ? owners.now : ownersHeld(d.id))];
+    const to = [aspectText("kind", kindDiff.next), ownersText(owners ? owners.next : ownersHeld(d.id)), dropped.length > 0 ? clip(`drops ${dropped.join(", ")}`) : null, seated.length > 0 ? `seats ${seated.join(", ")} as its trustees did` : null];
+    const touched = kindDiff.touched || fields.some(([, diff]) => diff.touched) || (seats.get(d.id) ?? []).some((s) => s.diff.touched);
+    return {
+      id: `${d.id}:convert`,
+      label: "Change what it is",
+      from: from.join("; "),
+      to: to.filter((part) => part !== null).join("; "),
+      ...byDefault(touched),
+      targets: [{ entity: d.id, part: "kind" }, ...fields.map(([field]): UpgradeTarget => ({ entity: d.id, part: "field", field })), ...(seats.get(d.id) ?? []).map((s): UpgradeTarget => ({ entity: s.holder, part: "relation", rel: s.diff.rel, to: s.diff.to }))],
+    };
+  };
+  /** An entity's owners as the chat holds them, for a conversion whose owners the revision leaves alone. */
+  const ownersHeld = (id: string): unknown => own(state.entities, id)?.fields.owners;
+  for (const d of plan.entities) {
+    const secret = !entityShown(d.id);
+    // A change is worded first (its words may name someone hidden), then marked: an argument is
+    // made before the call that reads `spoils`, which then starts over for the next change.
+    const marked = (change: UpgradeChange): UpgradeChange => {
+      const hidden = spoils;
+      spoils = secret;
+      return hidden ? { ...change, secret: true } : change;
+    };
+    spoils = secret;
+    const held = own(state.entities, d.id);
+    const kind = kindDef(reg, after, d.def.kind)?.label ?? kindDef(reg, inForce, d.def.kind)?.label ?? d.def.kind;
+    const row: UpgradeEntityRow = { entity: d.id, name: held?.name ?? d.def.name, kind, status: d.status, changes: [], ...(secret ? { secret: true } : {}) };
+    const unheard: UpgradeChange[] = [];
+    const whole: UpgradeTarget[] = [{ entity: d.id, part: "entity" }];
+    if (d.status === "new") {
+      const place = typeof d.def.fields.place === "string" ? nameOf(d.def.fields.place) : undefined;
+      row.changes.push(marked({ id: `${d.id}:entity`, label: "Add to the chat", from: "not in the chat", to: place ? `${kind}, at ${place}` : kind, pick: "take", options: ["take", "keep"], why: "new", targets: whole }));
+    } else if (d.status === "removed") {
+      const removal: EntityUpgradePick[] = ["keep", "remove"];
+      row.changes.push(marked({ id: `${d.id}:entity`, label: "Stay in the chat", from: "in the chat", to: "out of the world", pick: "keep", options: removal, why: "removed", targets: whole }));
+    } else {
+      // A conversion's kind and fields are its one change; its other parts are their own.
+      const convert = conversions.has(d.id) ? d.aspects.kind : undefined;
+      if (convert) row.changes.push(marked(conversionChange(d, convert)));
+      for (const aspect of UPGRADE_ASPECTS) {
+        const diff: PartDiff | undefined = d.aspects[aspect];
+        if (!diff || (convert && aspect === "kind")) continue;
+        const change = marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspect === "kind" ? kindChangeText(d.id, diff) : aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] });
+        // A life change the player hasn't heard of is the GM's: it goes to a hidden row of its own, so
+        // this row shows nothing of it, not even that something here is hidden.
+        if (aspect === "life" && !secret && diff.now !== lifeKnownTo(state, d.id, pov)) unheard.push({ ...change, secret: true });
+        else row.changes.push(change);
+      }
+      for (const [field, diff] of Object.entries(d.fields)) {
+        if (PLACEMENT_FIELDS.includes(field) || convert) continue;
+        const def = fieldDef(reg, after, d.def.kind, field);
+        row.changes.push(marked({ id: `${d.id}:field:${field}`, label: def?.label ?? field.replace(/_/g, " "), from: valueText(diff.now, def), to: valueText(diff.next, def), ...byDefault(diff.touched), targets: [{ entity: d.id, part: "field", field }] }));
+      }
+      // Its place and cell are one part: one row, picked for each of them that changes.
+      const placement = PLACEMENT_FIELDS.filter((f) => own(d.fields, f) !== undefined);
+      if (placement.length > 0) {
+        const where = (side: "now" | "next"): string => {
+          const value = (f: string): unknown => {
+            const diff = own(d.fields, f);
+            return diff ? diff[side] : held?.fields[f];
+          };
+          const [place, x, y] = PLACEMENT_FIELDS.map(value);
+          if (typeof place !== "string") return valueText(undefined);
+          return typeof x === "number" && typeof y === "number" ? `${valueText(place)} at ${x}, ${y}` : valueText(place);
+        };
+        row.changes.push(marked({ id: `${d.id}:placement`, label: "Placement", from: where("now"), to: where("next"), ...byDefault(placement.some((f) => own(d.fields, f)?.touched === true)), targets: placement.map((field) => ({ entity: d.id, part: "field", field })) }));
+      }
+      for (const r of d.relations) {
+        const key = `${d.id}\u0000${r.rel}\u0000${r.to}`;
+        if (shown.has(key)) continue;
+        // The other side of a pair changes with it: one row, picked for both.
+        const other: RelationDiff | undefined = r.partner ? plan.entities.find((x) => x.id === r.partner?.holder)?.relations.find((x) => x.rel === r.partner?.rel && x.to === d.id) : undefined;
+        const targets: UpgradeTarget[] = [{ entity: d.id, part: "relation", rel: r.rel, to: r.to }];
+        if (r.partner && other) {
+          targets.push({ entity: r.partner.holder, part: "relation", rel: other.rel, to: other.to });
+          shown.add(`${r.partner.holder}\u0000${other.rel}\u0000${other.to}`);
+        }
+        const label = `${relationDef(reg, after, r.rel)?.label ?? relationDef(reg, inForce, r.rel)?.label ?? r.rel.replace(/_/g, " ")}: ${nameOf(r.to) ?? r.to}`;
+        row.changes.push(marked({ id: `${d.id}:rel:${r.rel}:${r.to}`, label, from: linkText(r.now), to: linkText(r.next), ...byDefault(r.touched || other?.touched === true), targets }));
+      }
+    }
+    if (row.changes.length > 0) rows.push(row);
+    if (unheard.length > 0) rows.push({ ...row, changes: unheard, secret: true });
+  }
+  // Hidden rows go last, so where one falls among the names says nothing of whose it is.
+  rows.sort((a, b) => Number(a.secret === true) - Number(b.secret === true) || STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const tracks = plan.tracks.map((t) => {
+    const def = own(after.tracks, t.track);
+    const was = own(own(inForce.tracks, t.track)?.stages ?? {}, t.stage)?.label ?? t.stage;
+    const text = `${def?.label ?? t.track}: back to ${(def ? own(def.stages, t.start)?.label : undefined) ?? t.start}; this revision has no stage “${was}”`;
+    return trackShown(t.track) ? { text } : { text, secret: true as const };
+  });
+  return { from: plan.from, to: plan.to, entities: rows, tracks };
+}
+
+/** What an Upgrade needs of the store's world: the registry that reads its documents, and a revision's document as the store keeps it. */
+export interface PreviewEnv {
+  registry: Registry;
+  worlds(revision: RevisionId): WorldDoc | undefined;
+}
+
+/**
+ * What an Upgrade of the chat to `to` would bring into it, from `state` (the chat's head): the plan the fold applies, worded
+ * (`upgradePreview`), over the revisions the store keeps. `unmade` is the document `to` names while it is no revision of the world
+ * yet (a draft, named as its commit will name it), so what a commit and the Upgrade after it bring can be shown before either is made.
+ */
+export function previewUpgradeOf(env: PreviewEnv, state: Readonly<WorldState>, to: RevisionId, unmade?: WorldDoc): UpgradePreview {
+  const read = (revision: RevisionId): WorldDoc | undefined => (unmade !== undefined && revision === to ? unmade : env.worlds(revision));
+  const doc = (revision: RevisionId): WorldDoc => {
+    const found = read(revision);
+    if (found === undefined) throw new WorldError("not_found", `revision ${revision} of the world not found`);
+    return found;
+  };
+  // Each revision the plan reads is checked first, so one the store lacks is refused here, in words, and not inside the plan.
+  for (const revision of new Set([definitionsLag(state) ?? state.revision, state.revision, to])) doc(revision);
+  const plan = planUpgrade(state, { worlds: read, types: env.registry }, to);
+  return upgradePreview(env.registry, plan, state, doc(to), doc(state.revision));
+}

@@ -4,6 +4,7 @@
 
 import type { Area } from "../app";
 import { worldLimitsOf } from "../worlds/area";
+import { chatsRoutes } from "./chats-routes";
 import { buildRoutes } from "./routes";
 import { BUILD_MIGRATIONS } from "./schema";
 import { BuildService, type BuildDeps } from "./serve";
@@ -20,7 +21,7 @@ export function buildArea(takes: () => BuildTakes): Area {
     mounted: async (at) => {
       const deps = takes();
       at.routes.add("build", buildRoutes(new BuildService({ writes: at.writes, log: at.log, ...deps })));
-      at.routes.add("worlds", worldsRoutes(deps.worlds, (await worldLimitsOf(at)).bodyBytes));
+      at.routes.add("worlds", [...worldsRoutes(deps.worlds, (await worldLimitsOf(at)).bodyBytes), ...chatsRoutes(deps.worlds)]);
     },
   };
 }

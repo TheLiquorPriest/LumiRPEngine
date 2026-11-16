@@ -25,6 +25,7 @@ import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/w
 import type { Store } from "../store";
 import { storeBacking } from "./backing";
 import { WORLD_LIMIT_DEFAULTS, type WorldLimits } from "./limits";
+import { WorldChats, type WorldChatsDeps } from "./chats";
 import { type DraftNotice, type EditorResult, WorldError, WorldStore } from "./worlds";
 
 /** What the world service stands on. */
@@ -34,6 +35,8 @@ export interface WorldServiceDeps {
   /** The application's one write queue: every write to the store's table goes through it. */
   writes: WriteQueue;
   log: Log;
+  /** What a world's chats need beyond the store: the live hub, whether a turn runs, and a chat's name. Left out, the chats service answers that it has none. */
+  chats?: Omit<WorldChatsDeps, "store" | "writes" | "worlds">;
   /** The limits `worlds.*` give, read at each write; today's values where none is given. */
   limits?: () => WorldLimits | Promise<WorldLimits>;
 }
@@ -67,7 +70,11 @@ export class WorldService {
   readonly worlds: WorldStore;
   readonly registry: Registry;
 
-  constructor(deps: WorldServiceDeps) {
+  private readonly chatDeps: WorldServiceDeps["chats"];
+  private made: WorldChats | null = null;
+
+  constructor(private readonly deps: WorldServiceDeps) {
+    this.chatDeps = deps.chats;
     this.registry = deps.store.env.registry;
     this.worlds = new WorldStore(
       storeBacking(deps.store, deps.writes, (message, fields) => deps.log.warn(`[LumiRPEngine] ${message}`, fields)),
@@ -75,6 +82,12 @@ export class WorldService {
       STARTER_TABLES,
       deps.limits ?? (() => WORLD_LIMIT_DEFAULTS),
     );
+  }
+
+  /** A world's chats, moving a chat on and attaching (`chats.ts`). */
+  get chats(): WorldChats {
+    if (this.chatDeps === undefined) throw new WorldError("bad_request", "This world service was made with no chats to look after: it cannot list or move them.");
+    return (this.made ??= new WorldChats({ store: this.deps.store, writes: this.deps.writes, worlds: this.worlds, ...this.chatDeps }));
   }
 
   // ---------------------------------------------------------------- worlds and revisions

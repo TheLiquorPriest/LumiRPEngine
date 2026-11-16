@@ -2,7 +2,7 @@
 // from the two revisions, the touched record and the owner's picks.
 
 import { describe, expect, test } from "bun:test";
-import { upgradePreview } from "../../src/backend/upgrade-preview";
+import { upgradePreview } from "../../src/worlds/upgrade-preview";
 import { hashJson } from "../../src/shared/hash";
 import type { LedgerEvent, UpgradePicks } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
