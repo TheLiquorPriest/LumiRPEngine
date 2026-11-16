@@ -1,11 +1,11 @@
-// The play panels' taps that manage, on RPE's typed routes (plan §14, §15.4; PlanChatUI-P2 item 1): a
-// panel's action done at once (money, a group, gear, a vehicle), each ✎ correction, an edit of operations
-// ("Make this a property") go to `POST /api/v1/chats/:chat/taps` as typed calls carrying the panel's Tell
-// choice, and each is his own edit, recorded at once; an Undo goes by the id the answer gave, to
+// The play panels' taps, on RPE's typed routes (plan §14, §15.4; PlanChatUI-P2): a panel's action (money,
+// a group, gear, a vehicle, the palette's), each ✎ correction and an edit of operations ("Make this a
+// property") go to `POST /api/v1/chats/:chat/taps` as typed calls carrying the panel's Tell choice. RPE
+// tells what each is: one that manages is his own edit, recorded at once; one that goes with his next
+// message is held as his request (or taken back, where the same tap is pressed again); one with words, a
+// chip or Send now is played now. An Undo goes by the id the answer gave, to
 // `POST /api/v1/chats/:chat/edits/:edit/undo`, not as today's Undo chip. RPE answers a tap it turns down
-// with `applied: false` and its words, which come back as the refusal they are. A tap that goes with
-// the next message, and one that plays now, are not taken here yet (they wait on the hold route and the
-// plays-now route); they go the road they went.
+// with `applied: false` and its words, which come back as the refusal they are.
 
 import type { RequestBody } from "../../../frontend/registry";
 import type { TapAsk } from "../../../shared/api";
@@ -40,12 +40,12 @@ async function tap(ctx: CallContext, chat: string, body: TapAsk) {
 
 export const calls: CallFile = {
   name: "play",
-  takes: (request) => (request.type === "lre.action" && request.now !== true) || request.type === "lre.fix" || request.type === "lre.edit" || (request.type === "lre.chip" && request.choice === "undo"),
+  takes: (request) => request.type === "lre.action" || request.type === "lre.fix" || request.type === "lre.edit" || (request.type === "lre.chip" && request.choice === "undo"),
   async serve(request, ctx): Promise<ServedBody> {
     switch (request.type) {
       case "lre.action": {
         const chat = chatOf(request, ctx);
-        const { undo } = await tap(ctx, chat, { kind: "action", action: request.action, params: request.params, source: request.source, ...(request.text === undefined ? {} : { text: request.text }), ...(request.tell === undefined ? {} : { tell: request.tell }) });
+        const { undo } = await tap(ctx, chat, { kind: "action", action: request.action, params: request.params, source: request.source, ...(request.text === undefined ? {} : { text: request.text }), ...(request.now === true ? { now: true } : {}), ...(request.tell === undefined ? {} : { tell: request.tell }) });
         return { applied: true, pending: false, undo };
       }
       case "lre.fix": {
