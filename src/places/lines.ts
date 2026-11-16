@@ -3,11 +3,13 @@
 // a count of the rest and the query that reads them. The words of each kind are the world-state layout's (`.prompts/world-state.md`);
 // this gives data. A part with nothing recorded says so with its own line.
 
-import type { ViewLine } from "../store";
+import type { Store, UserStore, ViewLine } from "../store";
 import { MAP_DEFAULTS, type MapConfig } from "../iface/map";
-import { accessOf, factReader, featuresOf, type PlaceAt, rowFields, sinceOf } from "./record";
+import { accessOf, factReader, featuresOf, type PlaceAt, placeAtState, rowFields, sinceOf } from "./record";
 import type { PlaceFactPart } from "./parts";
+import { baseAt } from "./base";
 import type { PlacesSettings } from "./settings";
+import type { PlaceSources } from "./sources";
 import type { PlaceFactRow } from "./shapes";
 
 /** The line kind of each part whose entries are facts. */
@@ -22,6 +24,11 @@ export interface PlaceLinesInput {
   depth: number;
   /** Asked for one part whole (`world_query`'s `part`): every entry of it, none of the others. */
   part?: PlaceFactPart;
+  /**
+   * The entries bound to the place as Lumiverse holds them now (read ahead: they cannot be read where the lines are made): given, the
+   * lines carry the place's base and its sources, the base marked older than a source that changed. Left out, neither is given.
+   */
+  sources?: PlaceSources;
 }
 
 /** The query that reads what a part left out: `world_query` at the place, asking for the part whole. */
@@ -45,6 +52,14 @@ export function placeLines(input: PlaceLinesInput): ViewLine[] {
   const none = (part: string): void => {
     lines.push({ kind: "place_none", depth, fields: { part } });
   };
+
+  if (input.sources !== undefined && input.part === undefined) {
+    const base = baseAt(at, place, input.sources);
+    if (base.text === null) none("base");
+    else lines.push({ kind: "place_base", depth, fields: { text: base.text, ...(base.world ? { world: true } : {}), ...(base.older ? { older: true } : {}), ...(base.by !== null ? { by: base.by } : {}) } });
+    for (const src of input.sources.sources) lines.push({ kind: "place_source", depth, fields: { entry: src.entry, aspect: src.aspect, ...(src.title !== null ? { title: src.title } : { gone: true }), ...(src.newer ? { newer: true } : {}) } });
+    if (input.sources.sources.length === 0) none("sources");
+  }
 
   if (wanted("since")) {
     const since = sinceOf(at, place, settings, reader);
@@ -88,4 +103,22 @@ export function withPlaceLines(lines: readonly ViewLine[], input: Omit<PlaceLine
     out.push(l);
   });
   return out;
+}
+
+/**
+ * The hook the world state calls for each place it shows in full (the scene's place at hand): the place's lines as the turn `turn` of
+ * `chat` stands, the plain facts that carry a part given up for them. A ref that is not a place, or a state whose world cannot be found,
+ * leaves the lines as they are.
+ */
+export function placeLinesAt(u: UserStore, env: Store["env"], chat: string, turn: string, settings: PlaceLinesInput["settings"], config?: MapConfig): (ref: string, lines: readonly ViewLine[]) => ViewLine[] {
+  let at: PlaceAt | null | undefined;
+  return (ref, lines) => {
+    if (!ref.startsWith("place:")) return [...lines];
+    if (at === undefined) {
+      const state = u.stateAt(turn).state;
+      const doc = env.worlds(state.world.revision);
+      at = doc === undefined ? null : placeAtState(u, env, chat, turn, state, env.registry.context(doc, state.world));
+    }
+    return at === null ? [...lines] : withPlaceLines(lines, { at, place: ref.slice("place:".length), settings, ...(config !== undefined ? { config } : {}) });
+  };
 }
