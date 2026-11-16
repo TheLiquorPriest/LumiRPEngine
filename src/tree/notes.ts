@@ -183,6 +183,18 @@ export class TreeNotes {
     }, "recording a carried note's version");
   }
 
+  /**
+   * Forgets the versions the migration recorded for a chat (`recordVersion`, whose writer's id is `carried`) and the standing it gave
+   * them, so a later run that replaces the chat's imported turns leaves no version of a turn that is gone. RPE's own writes stay.
+   */
+  async forgetCarried(user: string, chat: string): Promise<void> {
+    await this.#d.writes.run((db) => {
+      const carried = "SELECT id FROM note_version WHERE user = ?1 AND chat = ?2 AND json_extract(agent, '$.id') = 'carried'";
+      db.run(`DELETE FROM tree_applied WHERE user = ?1 AND chat = ?2 AND write_id IN (${carried})`, [user, chat]);
+      db.run("DELETE FROM note_version WHERE user = ?1 AND chat = ?2 AND json_extract(agent, '$.id') = 'carried'", [user, chat]);
+    }, "forgetting the note versions a migration carried");
+  }
+
   /** What a write found and what it left. */
   #texts(id: number): { before: string | null; text: string | null } {
     return this.#d.db.query<{ before: string | null; text: string | null }, [number]>("SELECT before, text FROM note_version WHERE id = ?").get(id) ?? { before: null, text: null };

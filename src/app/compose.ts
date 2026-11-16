@@ -87,6 +87,12 @@ export function compose(options: ComposeOptions = {}): Composition {
     lumiverse: door.lumiverse,
     migrated: (app, store) => ({ part: MIGRATED_PART, notice: MIGRATED_NOTICE, fields: (user, chat) => migratedChat({ db: app.db, store, user, chat }) }),
     proposals: () => proposals(),
+    // The projection book is written to his books through the door's writes, once it is set up for a Lumiverse.
+    projectionBooks: {
+      create: (user, chat, name) => lumiverse().writes.createProjection(user, chat, name),
+      replace: (user, book, entries) => lumiverse().writes.replaceProjection(user, book, entries),
+      remove: (user, book) => lumiverse().writes.removeProjection(user, book),
+    },
     ...(options.clock !== undefined ? { clock: options.clock } : {}),
     ...(options.harness !== undefined ? { harness: options.harness } : {}),
   });
@@ -208,6 +214,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) },
       secrecy: { settingsFor: made().secretSettings, wording: made().secretMarks, log: (message) => made().env.log.warn(message) },
       proposals: proposals(),
+      projection: made().projection,
     })),
     ifaceArea(() => ({ store: made().store })),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
