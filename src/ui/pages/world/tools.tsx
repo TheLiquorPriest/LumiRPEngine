@@ -253,7 +253,7 @@ function Systems(props: { chat: string; level: string; turn: TurnId | null; onCl
             <div key={section.title}>
               <span class="rpe-caption">{section.title}</span>
               {section.rows.map((row, i) => (
-                <Row key={`${row.label}${i}`} label={row.label} value={row.value} sub={[row.note, row.precision === null && row.standing === null ? null : [row.precision, row.standing].filter((w) => w !== null).join(", ")].filter((w) => w !== null).join(" · ") || undefined} />
+                <Row key={`${row.label}${i}`} label={row.label} value={row.value} sub={[row.secret ? "the player could not see this" : null, row.note, row.precision === null && row.standing === null ? null : [row.precision, row.standing].filter((w) => w !== null).join(", ")].filter((w) => w !== null).join(" · ") || undefined} />
               ))}
             </div>
           ))}

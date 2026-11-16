@@ -1,6 +1,6 @@
 // What the World page reads of RPE that the route table does not hold yet (see ./index.ts).
 
-import type { FactPrecision, FactStanding, TurnId } from "../../shared/api";
+import type { TurnId } from "../../shared/api";
 import type { ChangeShown, WantedRoute } from "./index";
 
 /** One change that wrote a value (a field, a relation, a balance, a fact's key, an area item's part), newest first on its page. */
@@ -18,28 +18,6 @@ export interface ValueHistoryReply {
   part: string;
   items: ValueChangeShown[];
   next: string | null;
-}
-
-/** One row of a typed system's view at a level: its label, its value, a note, and how exact and how sure it is. */
-export interface SystemRowShown {
-  label: string;
-  value: string;
-  note: string | null;
-  precision: FactPrecision | null;
-  standing: FactStanding | null;
-}
-
-/** One typed system's view at a level, as the system keeps it: its sections of rows (an account's postings and balance, a price, a thing's four facts, a group's ranks). */
-export interface SystemShown {
-  /** The system: economy, gear, groups, calendar, weather, vehicles, sheets. */
-  system: string;
-  title: string;
-  sections: { title: string; rows: SystemRowShown[] }[];
-}
-
-export interface SystemsReply {
-  at: string;
-  systems: SystemShown[];
 }
 
 /** A change that no longer applies on the swipe now showing, and why. */
@@ -61,6 +39,5 @@ export interface NotAppliedReply {
 /** The World page's routes. */
 export interface WorldRoutes {
   "GET /api/v1/chats/:chat/state/history": WantedRoute<{ chat: string }, { at: string; part: string; turn?: TurnId; limit?: number; cursor?: string }, undefined, ValueHistoryReply>;
-  "GET /api/v1/chats/:chat/state/systems": WantedRoute<{ chat: string }, { at: string; turn?: TurnId }, undefined, SystemsReply>;
   "GET /api/v1/chats/:chat/state/not-applied": WantedRoute<{ chat: string }, Record<string, never>, undefined, NotAppliedReply>;
 }
