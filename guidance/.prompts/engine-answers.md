@@ -194,6 +194,11 @@ no_combat_rules: Operation {{n}} ({{op}}): this world has no combat rules, so th
 nowhere: Operation {{n}} ({{op}}): the fighters do not all stand in one place and none was named with at, so the fight is recorded at no place.
 not_here: Operation {{n}} ({{op}}): {{who}} does not stand at {{place}}, where the fight is; they are in it all the same.
 cannot_fight: Operation {{n}} ({{op}}): {{who}} cannot take part by the world's combat rules (no hit points to fight on, or unable to act); they are in the fight all the same.
+acted_twice: Operation {{n}} ({{op}}): {{who}} has acted in round {{round}} already (this is act {{times}} of theirs in it); it was recorded all the same.
+out_of_turn: Operation {{n}} ({{op}}): the order has {{whose}} next, not {{who}}; {{who}}'s act was recorded all the same and the fight went on to the turn after.
+out_of_reach: Operation {{n}} ({{op}}): {{target}} is beyond {{who}}'s reach on the map; the act was recorded all the same.
+rounds_clock: Operation {{n}} ({{op}}): {{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}} on the grid moved the clock {{seconds}} seconds.
+wants_fight_action: an object with who (a fighter) and did (what they did), and optionally to (whom it was aimed at), result (how it came out) and roll (the id of the roll that decided it)
 fight_broke_off: Operation {{n}} ({{op}}): the fight under way was ended as the story moved on; no winner was recorded.
 fight_still_on: Operation {{n}} ({{op}}): the fight under way is still on; nothing was recorded.
 joined: Operation {{n}} ({{op}}): {{who}} joined the fight {{fight}}, which was under way; no one else was added.
