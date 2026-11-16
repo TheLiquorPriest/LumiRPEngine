@@ -12,7 +12,7 @@
 // nothing, its fact is answered in words for the page, with a status by what kind of fact it is. A
 // job's change of state reaches every page that follows his jobs through `JOB_KIND` (`jobs.ts`).
 
-import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, UserScope } from "rp-harness/contract";
+import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, Usage, UserScope } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, jobView, route, RouteError, shape, traceRecord, usage } from "../app";
 import { type ConfigRead, portTexts, readConfig } from "../app/config-read";
 import { harnessSettings } from "../app/setting-list";
@@ -162,19 +162,22 @@ export function jobRoutes(deps: JobRoutesDeps) {
   /** The switches, with each limit in force for jobs (for the chat's levels, or the shared ones) and its use over the last 24 hours. */
   const switches = async (user: string, chat: string | undefined) => {
     // The settings that limit jobs, as RPH lists them: its `jobs.*` settings (none per connection) and the day's tokens of every agent.
-    const defs = harnessSettings().filter((s) => (s.key.startsWith("jobs.") && !s.key.includes("<")) || s.key === "limits.day.tokens");
-    const read = chat === undefined ? deps.shared() : readConfig(await portTexts(turns.files, { user, chat, session: NO_SESSION }), null, defs);
-    const [held, running, day] = await Promise.all([jobs.switches(user), jobs.list({ user, states: ["running", "asking"] }), turns.harness.usage.day(user)]);
+    const listed = harnessSettings();
+    const defs = listed.filter((s) => (s.key.startsWith("jobs.") && !s.key.includes("<")) || s.key === "limits.day.tokens");
+    const weightDef = listed.find((d) => d.key === "limits.cachedWeight");
+    const read = chat === undefined ? deps.shared() : readConfig(await portTexts(turns.files, { user, chat, session: NO_SESSION }), null, weightDef === undefined ? defs : [...defs, weightDef]);
+    const [held, running, day, jobsDay] = await Promise.all([jobs.switches(user), jobs.list({ user, states: ["running", "asking"] }), turns.harness.usage.day(user), turns.harness.usage.day(user, "jobs")]);
     const since = turns.env.clock.now() - DAY_MS;
     const started = turns.store.db.query<{ n: number }, [string, number]>("SELECT COUNT(*) AS n FROM job WHERE user = ? AND value IS NOT NULL AND started >= ?").get(user, since)?.n ?? 0;
-    // The day's tokens count a token read again from a cache at the weight `jobs.cachedWeight` gives, as RPH counts them.
-    const weightDef = defs.find((d) => d.key === "jobs.cachedWeight");
-    const weight = weightDef === undefined ? 0 : read.value(weightDef);
-    const cached = typeof weight === "number" ? weight : 0;
+    // Tokens as RPH counts them against a day's cap: sent, a token read again from a cache at `limits.cachedWeight`, and written.
+    const weight = weightDef === undefined ? 1 : read.value(weightDef);
+    const cached = typeof weight === "number" ? weight : 1;
+    const tokens = (u: Usage): number => Math.round(u.input - u.cacheRead + u.cacheRead * cached) + u.output;
     const used: Record<string, number> = {
       "jobs.atOnce": running.jobs.length,
       "jobs.perDay": started,
-      "limits.day.tokens": day.input + day.cacheWrite + day.output + day.cacheRead * cached,
+      "jobs.tokensPerDay": tokens(jobsDay),
+      "limits.day.tokens": tokens(day),
     };
     return { off: held.off, held: held.held, limits: defs.map((def) => ({ key: def.key, value: read.value(def), used: used[def.key] ?? null })) };
   };
