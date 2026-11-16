@@ -10,7 +10,9 @@
 // through this file.
 
 import type { CatalogueInput } from "../../lore/lore";
+import type { WorldDoc } from "../../shared/world";
 import type { FoldDone, FoldJob, StoreBrief } from "../../store/away";
+import type { LabStepInput, LabStepOutput } from "../../worker/background-lane";
 import { INDEX_TASKS } from "../index-file/thread";
 import { grepLines } from "./grep";
 
@@ -32,6 +34,10 @@ export const TASKS = {
   },
   /** A large library's catalogue (`Lore.catalog`): each entry's id, title, keys, size, how it activates, revision and public text, from the rows alone. */
   catalogue: async (input: CatalogueInput) => (await import("../../lore/lore")).catalogueOf(input),
+  /** One step of Build's Playtest or Check world, played by the pure engine on a thread (`worker/background-lane.ts`). */
+  labStep: async (input: LabStepInput): Promise<LabStepOutput> => (await import("../../worker/background-lane")).labStep(input),
+  /** The lint a lab job ends with. */
+  labLint: async (world: WorldDoc) => (await import("../../worker/background-lane")).labLint(world),
   ...INDEX_TASKS,
 } as const;
 
