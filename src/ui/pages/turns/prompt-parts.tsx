@@ -83,7 +83,17 @@ const HOW_WORDS: Readonly<Record<NonNullable<TurnLoreRow["how"]>, string>> = {
   sticky: "still in force from earlier",
 };
 
-/** The lore Lumiverse activated for the turn's prompt, each entry by its map id, its book and its title, with how it activated or "not said" where the turn's tag does not say. */
+const RECEIPT_WORDS = {
+  "kept-out": "kept out: RPE's check on the prompt's arrival took it out of the lore the Author was given",
+  reworded: "worded otherwise: RPE's check on the prompt's arrival changed its words before the Author was given it",
+} as const;
+
+/** What RPE's check on the prompt's arrival did to an entry (the lore owner's `receipt`): kept it out of the Author's lore, or worded it otherwise; null where it left the entry as Lumiverse gave it, or says nothing. */
+export function receiptOf(row: TurnLoreRow): keyof typeof RECEIPT_WORDS | null {
+  return "receipt" in row && (row.receipt === "kept-out" || row.receipt === "reworded") ? row.receipt : null;
+}
+
+/** The lore Lumiverse activated for the turn's prompt, each entry by its map id, its book and its title, with how it activated or "not said" where the turn's tag does not say; an entry the check on receipt kept out or reworded says so. */
 export function LoreMapRows(props: { rows: readonly TurnLoreRow[] | null | undefined }) {
   const { rows } = props;
   if (rows === null || rows === undefined) return null;
@@ -92,15 +102,19 @@ export function LoreMapRows(props: { rows: readonly TurnLoreRow[] | null | undef
     <div class="lre-stack" data-lore-map>
       <span class="rpe-caption">Its lore map</span>
       <ul class="rpe-reports">
-        {rows.map((row) => (
-          <li key={row.id}>
-            <code class="lre-id">{row.id}</code> {row.title}
-            <span class="rpe-meta">
-              {" "}
-              ({row.book === "" ? "book not said" : `book ${row.book}`}; {row.how === null ? "not said how it activated" : HOW_WORDS[row.how]})
-            </span>
-          </li>
-        ))}
+        {rows.map((row) => {
+          const receipt = receiptOf(row);
+          return (
+            <li key={row.id} data-receipt={receipt ?? undefined}>
+              <code class="lre-id">{row.id}</code> {row.title}
+              <span class="rpe-meta">
+                {" "}
+                ({row.book === "" ? "book not said" : `book ${row.book}`}; {row.how === null ? "not said how it activated" : HOW_WORDS[row.how]})
+              </span>
+              {receipt === null ? null : <span class="rpe-meta"> · {RECEIPT_WORDS[receipt]}</span>}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
