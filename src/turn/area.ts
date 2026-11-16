@@ -69,6 +69,11 @@ export function turnArea(takes: TurnTakes): TurnArea {
     book: (user, id) => booksNow().book(user, id),
     entries: (user, book) => booksNow().entries(user, book),
     entry: (user, id) => booksNow().entry(user, id),
+    list: async (user, chat) => {
+      const now = booksNow();
+      if (now.list === undefined) throw new Error("The door's books give no list of the user's books.");
+      return await now.list(user, chat);
+    },
   };
 
   const area: Area = {

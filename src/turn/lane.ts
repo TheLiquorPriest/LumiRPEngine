@@ -27,7 +27,7 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_SETTINGS, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
@@ -233,7 +233,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
   // What is made once for every chat takes its limits from the global level's settings, read once.
   const global = globalConfig(app.paths.files, app.log);
-  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settings: global.numbers(LORE_SETTING_DEFS) });
+  // The lore's settings for a chat, read once for the lore and its index.
+  const loreSettings = loreSettingsFor(async (at) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS));
+  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
     lore,
@@ -250,7 +252,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     },
     now: () => clock.now(),
     // His own index entry heading the index's file (`lore.index.entry`), read for the chat at each write.
-    settingsFor: loreSettingsFor(async (at) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS)),
+    settingsFor: loreSettings,
     log: app.log,
     // A batch handed to a job is held for it while the job may still write it.
     jobRunning: async (user, job) => {
