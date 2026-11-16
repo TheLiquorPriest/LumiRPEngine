@@ -666,6 +666,7 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "lint"; worldId: WorldId; revision?: RevisionId }
     | { op: "attach"; worldId: WorldId; chatId: ChatId }
     | { op: "upgrade"; chatId: ChatId; to: RevisionId; merge?: UpgradePicks }
+    | { op: "undo_upgrade"; chatId: ChatId; edit: string }
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
     | { op: "templates" }
     | { op: "chats"; worldId?: WorldId; chatId?: ChatId }
@@ -727,6 +728,8 @@ export interface WorldChatInfo {
   worldId: WorldId;
   revision: RevisionId | null;
   behind: boolean;
+  /** The world's head revision, which a chat that is behind moves to; null where the world is gone. */
+  head?: RevisionId | null;
   reason?: string;
 }
 
@@ -1366,7 +1369,7 @@ export interface ResultBodies {
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[] };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop or the harness (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's); `harnessBlocked`, for a request that asked which engines can be chosen (`engines`): why the harness can't play the user's chats now and what to do about it, in words the page shows under the Engine switch (absent: it can). */

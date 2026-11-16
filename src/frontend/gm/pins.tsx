@@ -12,7 +12,7 @@ import type { WorldDoc, WorldIndex } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, List, ListRow, Section, useBusy } from "../components";
 import { humanize } from "../format";
-import { UpgradePanel } from "../settings/upgrade";
+import { UpgradePanel } from "../build/upgrade";
 
 /** How many newer tables the notice names before it counts the rest. */
 const NAMED = 4;

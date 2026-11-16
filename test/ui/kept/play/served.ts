@@ -9,7 +9,7 @@
 import { expect } from "bun:test";
 import type { HostTool, JsonObject, ToolCtx } from "rp-harness/contract";
 import { LiveHub, RouteError } from "../../../../src/app";
-import { buildRoutes, worldsRoutes } from "../../../../src/build";
+import { buildRoutes, chatsRoutes, worldsRoutes } from "../../../../src/build";
 import { engineTools, shippedTexts, stateScan } from "../../../../src/iface/index";
 import { PORTS } from "../../../iface/rig";
 import { playRoutes, PlayService } from "../../../../src/play";
@@ -53,7 +53,7 @@ export function servedRpe(): ServedRpe {
   const running = new Set<string>();
   const service = buildServiceOn(bed);
   const [post] = buildRoutes(service);
-  const worlds = worldsRoutes(service.worlds, 4 * 1024 * 1024);
+  const worlds = [...worldsRoutes(service.worlds, 4 * 1024 * 1024), ...chatsRoutes(service.worlds)];
   // This bed holds no asks for the next message and has no Lumiverse to put a message in.
   const noLumiverse = (): never => {
     throw new Error("This bed has no Lumiverse to put a message in.");

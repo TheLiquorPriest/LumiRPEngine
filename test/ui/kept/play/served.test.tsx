@@ -61,7 +61,7 @@ describe("the Play page on RPE's own routes", () => {
     await act(() => button(picker() as PageElement, "Attach").click());
     await until("the world's HUD and Play's bar", () => root.querySelector(".rpe-play-hud .lre-hud") !== null && root.querySelector(".lre-play .lre-bottomnav") !== null);
     expect(page.window.confirms.at(-1)).toContain("Fernwick");
-    expect(rpe.asked.filter((call) => call.key === "POST /api/v1/build").map((call) => call.body)).toContainEqual(expect.objectContaining({ type: "lre.world", op: "attach", worldId: world.id, chatId: NO_WORLD }));
+    expect(rpe.asked.filter((call) => call.key === "POST /api/v1/worlds/:world/attach").map((call) => call.body)).toContainEqual({ chat: NO_WORLD });
     expect(rpe.store.user(USER).chat(NO_WORLD)?.world).toBe(world.id);
     expect(hud(root)).toContain(timeOf(await stateOf(rpe, NO_WORLD)));
     expect(picker()).toBeNull();

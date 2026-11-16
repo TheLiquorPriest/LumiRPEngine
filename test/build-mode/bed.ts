@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { JsonValue, Log } from "rp-harness/contract";
-import { WriteQueue } from "../../src/app";
+import { LiveHub, WriteQueue } from "../../src/app";
 import type { Migration } from "../../src/app/migrations";
 import { BUILD_MIGRATIONS } from "../../src/build/schema";
 import { type BuildAnswer, buildRoutes, BuildService } from "../../src/build/index";
@@ -102,7 +102,8 @@ export interface Page {
 let asked = 0;
 /** Build's route service over a bed: the world service on the bed's store, and Build's words. */
 export function buildServiceOn(bed: Bed): BuildService {
-  return new BuildService({ worlds: new WorldService({ store: bed.store, writes: bed.writes, log: bed.log }), writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE });
+  const chats = { live: new LiveHub({ queueEvents: 16, now: () => 0 }), turning: () => false, name: async () => null };
+  return new BuildService({ worlds: new WorldService({ store: bed.store, writes: bed.writes, log: bed.log, chats }), writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE });
 }
 
 export function makePage(bed: Bed, service = buildServiceOn(bed)): Page {

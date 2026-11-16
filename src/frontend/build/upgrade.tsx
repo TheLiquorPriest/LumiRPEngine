@@ -1,15 +1,16 @@
-// GM → This chat → Pins and upgrade → Upgrade (DESIGN §4.3 `migrate`, §12): what the Upgrade
-// brings into the chat, entity by entity. Each change shows the chat's value, the revision's, and
-// why it defaults to take (unchanged in play) or keep (changed in play); the owner flips any of
-// them, and the Upgrade goes out with the picks that differ from the defaults. Changes that would
-// give a secret away wait behind their own spoiler gate, as GM mode's truth does: each reads "A
-// hidden change", with its pick still there, until the owner shows the spoilers.
+// Build → a world → its chats → Upgrade (DESIGN §4.3 `migrate`, §12; PlanChatUI-B4): what the Upgrade brings into the chat, entity by
+// entity. Each change shows the chat's value, the revision's, and why it defaults to take (unchanged in play) or keep (changed in
+// play); the owner flips any of them, and the Upgrade goes out with the picks that differ from the defaults. Changes that would give a
+// secret away wait behind their own spoiler gate, as GM mode's truth does: each reads "A hidden change", with its pick still there,
+// until the owner shows the spoilers. A move takes effect from the chat's next turn (a turn that runs now keeps the revision it
+// started with), and Undo takes it back whole. The world home lists each of the world's chats and the Upgrade of the ones behind.
 
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import type { WorldId } from "../../shared/ids";
 import type { EntityUpgradePick } from "../../shared/ledger";
-import type { UpgradeChange, UpgradePreview } from "../../shared/protocol";
-import { useApp } from "../app";
-import { Badge, Banner, Button, Seg, useBusy } from "../components";
+import type { UpgradeChange, UpgradePreview, WorldChatInfo } from "../../shared/protocol";
+import { useApp, useView } from "../app";
+import { Badge, Banner, Button, List, ListRow, Section, Seg, useBusy } from "../components";
 import { ActionRow, ActionRows, GmCard } from "../gm/ui";
 import { upgradeRequest } from "../requests";
 
@@ -19,7 +20,7 @@ const STATUS_LABEL: Record<UpgradePreview["entities"][number]["status"], string>
 /** What a change behind the spoiler gate reads as. */
 const HIDDEN = "A hidden change";
 
-export function UpgradePanel(props: { chatId: string; preview: UpgradePreview; onDone(): void }) {
+export function UpgradePanel(props: { chatId: string; preview: UpgradePreview; onDone(done?: { edit: string | null }): void }) {
   const app = useApp();
   const [choices, setChoices] = useState<Record<string, EntityUpgradePick>>({});
   const [inPlayOnly, setInPlayOnly] = useState(false);
@@ -42,8 +43,8 @@ export function UpgradePanel(props: { chatId: string; preview: UpgradePreview; o
     run(async () => {
       const result = await app.request(upgradeRequest(props.chatId, props.preview, choices));
       if (!result) return;
-      app.toast(`Upgraded to revision ${to}.`, "info");
-      props.onDone();
+      app.toast(result.pending === true ? `Upgrading to revision ${to}: the next turn plays it.` : `Upgraded to revision ${to}: the next turn plays it.`, "info");
+      props.onDone({ edit: result.undo ?? null });
     });
   return (
     <div class="lre-stack lre-gm-upgrade" data-lre-upgrade-preview>
@@ -109,10 +110,87 @@ export function UpgradePanel(props: { chatId: string; preview: UpgradePreview; o
         <Button variant="primary" busy={busy} onClick={confirm}>
           Upgrade with these picks
         </Button>
-        <Button variant="ghost" disabled={busy} onClick={props.onDone}>
+        <Button variant="ghost" disabled={busy} onClick={() => props.onDone()}>
           Cancel
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A world's home: the chats that play it, each with the revision it plays and whether the world has gone on past it. A chat that is
+ * behind opens the Upgrade sheet over today's preview and picks; once moved, Undo takes the move back whole. The open chat is marked.
+ */
+export function WorldChatsSection(props: { worldId: WorldId }) {
+  const app = useApp();
+  const open = useView();
+  const [chats, setChats] = useState<WorldChatInfo[] | null>(null);
+  const [sheet, setSheet] = useState<{ chat: string; preview: UpgradePreview } | null>(null);
+  const [undo, setUndo] = useState<Record<string, string>>({});
+  const [busy, run] = useBusy();
+  const load = (): void => void app.request({ type: "lre.world", op: "chats", worldId: props.worldId }).then((result) => setChats(result?.chats ?? []));
+  useEffect(load, [props.worldId]);
+  if (chats === null || chats.length === 0) return null;
+  const named = (chat: string): string => chats.find((c) => c.chatId === chat)?.name ?? chat;
+  const preview = (chat: WorldChatInfo): void =>
+    run(async () => {
+      if (chat.head === undefined || chat.head === null) return;
+      const result = await app.request({ type: "lre.marker", chatId: chat.chatId, kind: "migrate", to: chat.head, preview: true });
+      if (result?.preview?.upgrade) setSheet({ chat: chat.chatId, preview: result.preview.upgrade });
+    });
+  const takeBack = (chat: string): void =>
+    run(async () => {
+      const edit = undo[chat];
+      if (edit === undefined) return;
+      const result = await app.request({ type: "lre.world", op: "undo_upgrade", chatId: chat, edit });
+      if (!result) return;
+      app.toast(result.undone === true ? `${named(chat)} goes back to the revision it came from, from its next turn.` : (result.words ?? "Nothing was taken back."), "info");
+      setUndo(({ [chat]: _taken, ...rest }) => rest);
+      load();
+    });
+  return (
+    <div data-lre-world-chats>
+      <Section title="Chats" aside={<Badge>{chats.length}</Badge>} flush>
+        <List>
+          {chats.map((chat) => (
+            <ListRow
+              key={chat.chatId}
+              icon="link"
+              title={chat.name}
+              subtitle={chat.reason ?? (chat.behind ? `Plays revision ${(chat.revision ?? "").slice(0, 8)}; the world has a newer one` : `Plays revision ${(chat.revision ?? "").slice(0, 8)}, the world's latest`)}
+              badge={
+                <>
+                  {open?.chatId === chat.chatId ? <Badge tone="accent">This chat</Badge> : null}
+                  {chat.behind ? <Badge tone="warn">Behind</Badge> : null}
+                </>
+              }
+              chevron={chat.behind}
+              disabled={busy || !chat.behind}
+              onClick={chat.behind ? () => preview(chat) : undefined}
+            />
+          ))}
+        </List>
+      </Section>
+      {Object.keys(undo).map((chat) => (
+        <div key={chat} class="lre-inline" data-lre-upgrade-undo={chat}>
+          <span class="lre-small lre-muted">{named(chat)} was moved on.</span>
+          <Button size="sm" variant="ghost" icon="undo" disabled={busy} onClick={() => takeBack(chat)}>
+            Undo the move
+          </Button>
+        </div>
+      ))}
+      {sheet ? (
+        <UpgradePanel
+          chatId={sheet.chat}
+          preview={sheet.preview}
+          onDone={(done) => {
+            setSheet(null);
+            if (done?.edit) setUndo((held) => ({ ...held, [sheet.chat]: done.edit ?? "" }));
+            load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -34,6 +34,7 @@ import { RevealItem } from "./contents";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
 import { DataUpdatesSection, useTableUpdates } from "./data-updates";
 import { ChangedElsewhere, useHeld } from "./held";
+import { WorldChatsSection } from "./upgrade";
 import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
@@ -535,6 +536,7 @@ function WorldHome() {
           ) : null}
         </List>
       </Section>
+      <WorldChatsSection worldId={draft.worldId} />
     </div>
   );
 }

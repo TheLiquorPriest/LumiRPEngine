@@ -1,12 +1,14 @@
-// Build's editor on RPE's typed routes (plan §4.4, §14; PlanChatUI-B6 item 4): today's `lre.world` (every op but attach, chats and
-// upgrade), `lre.editor`, and `lre.things` and `lre.character` in Build's scope go to the worlds routes, and the answer comes back
-// as today's result body, so today's components are unchanged. A draft write that the route says found the draft moved on (nothing
-// was written) is the `conflict` today's editor reloads on; a commit the world's errors block is `validation` with their lint. A
-// draft change made anywhere else (RPE's live feed, kind `world` on the user's own channel) is today's `lre.draft.changed`.
+// Build's editor on RPE's typed routes (plan §4.4, §14; PlanChatUI-B6 item 4, B4 item 5): today's `lre.world` (every op, attach, a
+// world's chats and an Upgrade among them), `lre.editor`, `lre.things` and `lre.character` in Build's scope, and the preview of an Upgrade
+// (today's `lre.marker` of kind `migrate` with `preview`) go to the worlds routes, and the answer comes back as today's result body, so
+// today's components are unchanged. A draft write that the route says found the draft moved on (nothing was written) is the `conflict`
+// today's editor reloads on; a commit the world's errors block is `validation` with their lint. A draft change made anywhere else (RPE's
+// live feed, kind `world` on the user's own channel) is today's `lre.draft.changed`.
 
 import type { RequestBody } from "../../../frontend/registry";
 import type { LiveEvent } from "../../../shared/api";
-import { PROTOCOL_VERSION, type LintIssue, type ResultBodies } from "../../../shared/protocol";
+import type { JsonValue } from "../../../shared/json";
+import { PROTOCOL_VERSION, type LintIssue, type ResultBodies, type UpgradePreview } from "../../../shared/protocol";
 import type { CallContext, CallFile, ServedBody } from "../client";
 import { Refusal } from "../client";
 /** What a route answers, as the result body today's components read: the routes carry documents as JSON, whose shapes the world service holds. */
@@ -17,8 +19,8 @@ function todays<T>(answer: unknown): T {
 
 type Of<T extends RequestBody["type"]> = Extract<RequestBody, { type: T }>;
 
-/** The ops of `lre.world` that are not the worlds routes' (a chat's world: B4). */
-const OTHER_WORLD_OPS: readonly string[] = ["attach", "chats", "upgrade"];
+/** What attaching a world to a chat that plays another one says: the page shows it as it shows any refusal. */
+const otherWorld = (name: string, revision: string): string => `This chat plays ${name} already, at revision ${revision.slice(0, 8)}; a chat plays one world.`;
 
 /** What a write that found the draft moved on says, as today's editor words its conflict. */
 const moved = (version: number): Refusal => new Refusal("conflict", `the draft changed since you read it (it is at version ${version} now); reload and retry`);
@@ -51,8 +53,27 @@ async function world(request: Of<"lre.world">, ctx: CallContext): Promise<Result
       if (made.revision === null) throw new Refusal("validation", made.message ?? "the world has errors", made.lint as unknown as LintIssue[]);
       return { revision: made.revision, lint: made.lint as unknown as LintIssue[] };
     }
+    case "attach": {
+      const done = await call("POST /api/v1/worlds/:world/attach", { world: request.worldId }, { body: { chat: request.chatId } });
+      if (done.attached || done.plays === undefined) return { revision: done.revision };
+      if (done.plays.world !== request.worldId) throw new Refusal("conflict", otherWorld(done.plays.name, done.plays.revision));
+      // It plays an older revision of this world: the Upgrade is offered, not refused.
+      return { revision: done.plays.revision, chats: [{ chatId: request.chatId, name: "", worldId: request.worldId, revision: done.plays.revision, behind: done.plays.behind }] };
+    }
+    case "chats":
+      return await call("GET /api/v1/worlds/chats", {}, { query: { ...(request.worldId === undefined ? {} : { world: request.worldId }), ...(request.chatId === undefined ? {} : { chat: request.chatId }) } }).then((answer) => ({
+        chats: answer.chats.map((c) => ({ chatId: c.chat, name: c.name, worldId: c.world, revision: c.revision, behind: c.behind, head: c.head, ...(c.reason === undefined ? {} : { reason: c.reason }) })),
+      }));
+    case "upgrade": {
+      const done = await call("POST /api/v1/chats/:chat/upgrade", { chat: request.chatId }, { body: { to: request.to, ...(request.merge === undefined ? {} : { merge: request.merge as unknown as JsonValue }) } });
+      return { revision: done.revision, ...(done.waiting ? { pending: true } : {}), ...(done.edit === null ? {} : { undo: done.edit }) };
+    }
+    case "undo_upgrade": {
+      const done = await call("POST /api/v1/chats/:chat/upgrade/undo", { chat: request.chatId }, { body: { edit: request.edit } });
+      return { undone: done.undone, words: done.words };
+    }
     default:
-      throw new Refusal("internal", `The worlds calls do not take lre.world ${request.op}.`);
+      throw new Refusal("internal", "The worlds calls do not take this lre.world op.");
   }
 }
 
@@ -109,7 +130,7 @@ async function things(request: Of<"lre.things">, ctx: CallContext): Promise<Resu
 
 export const calls: CallFile = {
   name: "worlds",
-  takes: (request) => (request.type === "lre.world" && !OTHER_WORLD_OPS.includes(request.op)) || request.type === "lre.editor" || (request.type === "lre.things" && request.scope === "build") || (request.type === "lre.character" && request.scope === "build"),
+  takes: (request) => request.type === "lre.world" || request.type === "lre.editor" || (request.type === "lre.things" && request.scope === "build") || (request.type === "lre.character" && request.scope === "build") || (request.type === "lre.marker" && request.kind === "migrate" && request.preview === true),
   async serve(request, ctx): Promise<ServedBody> {
     switch (request.type) {
       case "lre.world":
@@ -121,6 +142,11 @@ export const calls: CallFile = {
       case "lre.character": {
         if (request.scope !== "build") throw new Refusal("internal", "The worlds calls take a character in Build's scope alone.");
         return (await ctx.client.call("GET /api/v1/worlds/:world/characters/:entity", { world: request.worldId, entity: request.entity })) as ServedBody;
+      }
+      case "lre.marker": {
+        if (request.kind !== "migrate") throw new Refusal("internal", "The worlds calls take the preview of an Upgrade alone.");
+        const upgrade = await ctx.client.call("GET /api/v1/chats/:chat/upgrade", { chat: request.chatId }, { query: { to: request.to } });
+        return { pending: false, preview: { lines: [], upgrade: upgrade as unknown as UpgradePreview } };
       }
       default:
         throw new Refusal("internal", `The worlds calls do not take ${request.type}.`);
