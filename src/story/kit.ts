@@ -6,9 +6,9 @@
 
 import type { Database } from "bun:sqlite";
 import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
-import { calendarOf, clockOfStamp, formatClock, placeOffset } from "../engine/calendar";
+import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
-import { resolveTarget, typedSpan } from "../engine/time";
+import { writtenTime } from "../engine/time";
 import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
 import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type TreeView } from "../store";
@@ -158,16 +158,8 @@ export function storyClock(store: Store, user: string, chat: string, turn: strin
   const shown = clockRecorded(folded);
   return {
     now: state.clock,
-    read(said) {
-      const text = said.trim();
-      const stamp = clockOfStamp(cal, text);
-      if (stamp !== null) return stamp - offset(stamp);
-      const target = typedSpan(cal, state.clock, ` ${text} `);
-      if (target === null) return null;
-      if (target.type === "duration") return state.clock + target.minutes;
-      const resolved = resolveTarget(store.env.registry, doc, state, target);
-      return "code" in resolved ? null : resolved.to;
-    },
+    // A time as it is written, read as the engine's own tools read one: words that name none are kept as words by the caller.
+    read: (said) => writtenTime(cal, state.clock, said, offset),
     text: (at) => (shown ? formatClock(cal, at, offset(at)) : null),
   };
 }

@@ -10,7 +10,7 @@ import { heldBy } from "../shared/finance";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/ledger";
 import { activitySpanEnd, type WorldDoc } from "../shared/world";
-import { calendarOf, clockAt, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, placeOffset, shortestSlot, slotIndexAt, slotStart, type Calendar } from "./calendar";
+import { calendarOf, clockAt, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, placeOffset, shortestSlot, slotIndexAt, slotStart, type Calendar } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -404,6 +404,82 @@ export function typedSpan(cal: Calendar, now: number, words: string, anchorAt?: 
   for (const m of t.matchAll(COMMITMENT_SPAN)) found.push({ type: m[1] === "shift" || m[1] === "work" ? "shift" : "commitment" });
   const distinct = [...new Map(found.map((f) => [JSON.stringify(f), f])).values()];
   return distinct.length === 1 ? (distinct[0] ?? null) : null;
+}
+
+// ---------------------------------------------------------------- a time as it is written
+
+/** The counts a written span gives before its unit: a number or a number word, never a vague one ("a couple of", "a few", "next"). */
+const WRITTEN_COUNTS: Readonly<Record<string, number>> = Object.fromEntries(Object.entries(SPAN_COUNTS).filter(([word]) => word !== "next" && !word.includes("couple")));
+/** One length of a written span: a count, a unit, and "and a half" before or after the unit. */
+const WRITTEN_TERM = new RegExp(`^(${longestFirst(Object.keys(WRITTEN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?`);
+/** Words that lead a written time without changing it: "until 22:00", "in two hours", "at noon", "the next hour". */
+const WRITTEN_LEAD = /^(?:(?:in|for|over|after|until|till|til|by|at|to|on|the next|another|the|this) )+/;
+/** A clock time as it is written: 22:00, 9:30pm, 10pm. */
+const WRITTEN_CLOCK = /^(?:(\d{1,2}):(\d{2}) ?(am|pm)?|(\d{1,2}) ?(am|pm))$/;
+
+/** The minutes a written span is, summed over its lengths ("an hour and twenty minutes"); null when the words are anything but lengths. */
+function writtenSpan(words: string): number | null {
+  let rest = words;
+  let total = 0;
+  for (;;) {
+    const m = WRITTEN_TERM.exec(rest);
+    if (!m) return null;
+    const count = WRITTEN_COUNTS[m[1] ?? ""] ?? Number(m[1]);
+    total += (count + (m[2] || m[4] ? 0.5 : 0)) * (SPAN_UNITS[m[3] ?? ""] ?? 0);
+    rest = rest.slice(m[0].length);
+    if (rest === "") break;
+    const between = /^(?: and)? /.exec(rest);
+    if (!between) return null;
+    rest = rest.slice(between[0].length);
+  }
+  return total > 0 ? Math.round(total) : null;
+}
+
+/** The minute of a day a written clock time names: noon, midnight, 22:00, 10pm, or the start of a part of the world's day by its id or label, exactly; null otherwise. */
+function writtenMinute(cal: Calendar, words: string): number | null {
+  if (words === "noon") return 720;
+  if (words === "midnight") return 0;
+  const m = WRITTEN_CLOCK.exec(words);
+  if (m) {
+    const hour = Number(m[1] ?? m[4]);
+    const minute = Number(m[2] ?? 0);
+    const suffix = m[3] ?? m[5];
+    if (minute > 59) return null;
+    if (suffix !== undefined) return hour >= 1 && hour <= 12 ? (hour % 12) * 60 + minute + (suffix === "pm" ? 720 : 0) : null;
+    return hour <= 23 ? hour * 60 + minute : null;
+  }
+  const part = cal.dayParts.find((p) => plain(p.id) === words || plain(p.label) === words);
+  return part === undefined ? null : parseHHMM(part.start);
+}
+
+/**
+ * A time as it is written, in minutes of the world's clock (`clock`; `offsetAt` is the scene's zone at a clock reading, for a time
+ * written as a clock reading there). It reads a date and time (`YYYY-MM-DD HH:MM`); a clock time ("22:00", "10pm", "noon",
+ * "midnight") or a part of the world's day named by its id or label, exactly, as the next time the clock shows it, or tomorrow's
+ * after "tomorrow"; and a span of counted lengths ("two hours", "an hour and twenty minutes", "half an hour") from `now`. Nothing
+ * else: no vague span ("a while", "a few hours"), no turn of the day the calendar does not name, nothing read from anyone's
+ * routine. Null when the words are none of these.
+ */
+export function writtenTime(cal: Calendar, now: number, said: string, offsetAt: (clock: number) => number = () => 0): number | null {
+  const stamp = clockOfStamp(cal, said);
+  if (stamp !== null) return stamp - offsetAt(stamp);
+  const words = said
+    .toLowerCase()
+    .replace(/([ap])\.\s?m\.?/g, "$1m")
+    .replace(/[^a-z0-9:.]+/g, " ")
+    .replace(/\.+(?= |$)/g, "")
+    .trim()
+    .replace(/\b(?:a |an )?half (?:an? )?hour\b/g, "30 minutes")
+    .replace(/\b(?:a |an )?quarter (?:of )?(?:an? )?hour\b/g, "15 minutes");
+  const led = words.replace(WRITTEN_LEAD, "");
+  const span = writtenSpan(led);
+  if (span !== null) return now + span;
+  const tomorrow = /^tomorrow(?: |$)/.test(led);
+  const minute = writtenMinute(cal, tomorrow ? led.replace(/^tomorrow ?/, "").replace(WRITTEN_LEAD, "") : led);
+  if (minute === null) return null;
+  const offset = offsetAt(now);
+  const local = now + offset;
+  return (tomorrow ? clockAt(cal, dateAt(cal, local).dayIndex + 1, minute) : nextTimeOfDay(cal, local, minute)) - offset;
 }
 
 // ---------------------------------------------------------------- timelapse

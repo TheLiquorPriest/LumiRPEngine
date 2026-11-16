@@ -1,17 +1,18 @@
 // Time (the time skill): `pass_time` moves the clock and answers with what the span brings due, from
 // the store's list (`src/store/due.ts`); it applies none of it, and runs nothing of today's
 // simulation across the span (plan §6.1: code lists what is due when time passes, and never decides
-// what it did). A time is read as today's engine reads one: a date and time of day in the world's
-// calendar, words for a span ("two hours", "until dawn"), or the words of a day's clock ("midnight",
-// "22:00", "dusk") as the next time the clock shows them. A move to a time named as a date and time
+// what it did). A time is read as it is written (`writtenTime`, `src/engine/time.ts`): a date and time of the
+// world's calendar, a clock time or a part of the world's own day by its name ("22:00", "midnight", "evening") as the next
+// time the clock shows it, or a counted span ("two hours"). Nothing else is a time: a vague span or a turn of the day the
+// calendar does not name is refused, naming what a time takes. A move to a time named as a date and time
 // sets the clock as well (`settingClock`); until something has, a chat with no world keeps a date
 // nobody chose, so an answer gives a time as how long it is from now, never as that date.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { type Calendar, calendarOf, clockOfPhrase, clockOfStamp, formatClock, nextTimeOfDay, parseHHMM, placeOffset } from "../engine/calendar";
+import { calendarOf, clockOfStamp, formatClock, placeOffset } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { placeOfEntity } from "../engine/scope";
-import { resolveTarget, typedSpan } from "../engine/time";
+import { clockPaused, writtenTime } from "../engine/time";
 import { minutesBetween } from "../engine/world-state";
 import type { WorldState } from "../engine/state";
 import type { LedgerEvent } from "../shared/ledger";
@@ -23,25 +24,6 @@ import type { Reading } from "./reading";
 import { findOptional, isUnread, notAs, type OpContext, type OpDef, type Unread } from "./ops";
 import type { Lines } from "./texts";
 
-/** Words for a turn of the day that the calendar may name no part by, each read as the start of the part it falls in, where the calendar has that part. */
-const TURNS_OF_DAY: Readonly<Record<string, string>> = { dawn: "morning", dusk: "evening" };
-
-/**
- * The words of a day's clock as the next time the clock shows them, read as today's engine reads a
- * loan's end (noon, midnight, a part of the world's day, 22:00, 10pm, tomorrow), and dawn and dusk
- * where the calendar names no part so. Null when the words read as none of them.
- */
-function clockOfDay(cal: Calendar, now: number, said: string): number | null {
-  const read = clockOfPhrase(cal, now, said);
-  if (read !== null) return read;
-  const words = ` ${said.toLowerCase().replace(/[^a-z]+/g, " ")} `;
-  for (const [turn, part] of Object.entries(TURNS_OF_DAY)) {
-    const start = words.includes(` ${turn} `) ? cal.dayParts.find((p) => p.id === part)?.start : undefined;
-    if (start !== undefined) return nextTimeOfDay(cal, now, parseHHMM(start));
-  }
-  return null;
-}
-
 /** The clock a date and time of the calendar (`YYYY-MM-DD HH:MM`) names at `place`; null when `said` is not one. */
 function stampAt(world: WorldDoc, place: string | null, said: string): number | null {
   const stamp = clockOfStamp(calendarOf(world), said.trim());
@@ -49,26 +31,14 @@ function stampAt(world: WorldDoc, place: string | null, said: string): number | 
 }
 
 /**
- * A time as today's engine reads one, in minutes since the world's epoch: a date and time of day at
- * the scene's place (`YYYY-MM-DD HH:MM`), words for a span from now ("two hours", "until dawn"), or
- * the words of a day's clock at the scene's place ("midnight", "22:00") as the next time it shows
- * them. Null when it reads as none of these.
+ * A time as it is written, in minutes since the world's epoch (`writtenTime`): a date and time of day at the scene's place
+ * (`YYYY-MM-DD HH:MM`), a clock time or a part of the world's day at the scene's place as the next time it shows it, or a counted
+ * span from now. Null when it reads as none of these.
  */
 export function timeFrom(reading: Reading, state: Readonly<WorldState>, said: string): number | null {
   const world = reading.registry.context(reading.doc, state).world;
-  const cal = calendarOf(world);
   const place = placeOfEntity(state, world.pov);
-  const stamp = stampAt(world, place, said);
-  if (stamp !== null) return stamp;
-  const target = typedSpan(cal, state.clock, ` ${said.trim()} `);
-  if (target === null) {
-    const offset = placeOffset(world, state.clock, place);
-    const local = clockOfDay(cal, state.clock + offset, said);
-    return local === null ? null : local - offset;
-  }
-  if (target.type === "duration") return state.clock + target.minutes;
-  const resolved = resolveTarget(reading.registry, reading.doc, state, target);
-  return "code" in resolved ? null : resolved.to;
+  return writtenTime(calendarOf(world), state.clock, said, (at) => placeOffset(world, at, place));
 }
 
 /** A time an argument names (see `timeFrom`), on the draft as it stands. */
@@ -127,6 +97,8 @@ export function listDue(o: Pick<OpContext, "reading" | "reply" | "call">, listin
 export function setClock(o: OpContext, to: number): Unread | undefined {
   const w = o.draft.w;
   const now = w.state.clock;
+  // A clock he paused for the scene is moved as given, and the move is said; the pause stays as he set it.
+  if (to !== now && clockPaused(w.ctx.world, w.state)) o.reply.report("clock_paused", { n: o.n, op: o.op });
   if (to === now) {
     o.reply.line("already_so", { n: o.n, op: o.op, what: clockText(o, now) });
     return undefined;

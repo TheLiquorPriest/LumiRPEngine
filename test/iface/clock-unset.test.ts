@@ -56,7 +56,7 @@ describe("on a chat with no world, whose clock nobody has set", () => {
   test("a move to a time of day, or by a count of minutes, only moves the clock; a time set to a date and time sets it, and then every answer and view gives dates", async () => {
     const t = await rig({}, "blank");
     const moves: JsonObject[] = [
-      { op: "pass_time", until: "dusk" },
+      { op: "pass_time", until: "evening" },
       { op: "pass_time", minutes: 30 },
       { op: "set", at: "world", key: "time", add: 15 },
       { op: "set", at: "world", key: "time", value: "22:00" },

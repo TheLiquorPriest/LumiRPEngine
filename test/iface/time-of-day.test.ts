@@ -52,7 +52,7 @@ describe("pass_time reads a time of day", () => {
     expect(r.error).toBeUndefined();
     expect(clock(t)).toBe(at(0, 12));
     expect(r.reports).toEqual([
-      'Operation 1 (pass_time): until cannot be read, you sent "when the tide turns", so it was left out and for was applied. It takes a date and time, YYYY-MM-DD HH:MM; a time of day, such as midnight, dawn or 22:00, as the next time the clock shows it; or words for a span, such as two hours.',
+      expect.stringContaining('Operation 1 (pass_time): until cannot be read, you sent "when the tide turns", so it was left out and for was applied. It takes a date and time, YYYY-MM-DD HH:MM; a clock time, such as 22:00, 10pm, noon or midnight'),
     ]);
   });
 
@@ -60,14 +60,15 @@ describe("pass_time reads a time of day", () => {
     const t = await blankAt(at(0, 8));
     const steps: [string, number][] = [
       ["noon", at(0, 12)],
-      ["dusk", at(0, 18)],
       ["22:00", at(0, 22)],
       ["midnight", at(1, 0)],
-      ["dawn", at(1, 6)],
       ["10pm", at(1, 22)],
       ["morning", at(2, 6)],
       ["evening", at(2, 18)],
       ["night", at(3, 0)],
+      ["tomorrow at 9:30am", at(4, 9, 30)],
+      ["an hour and twenty minutes", at(4, 10, 50)],
+      ["half an hour", at(4, 11, 20)],
     ];
     for (const [until, to] of steps) {
       const r = await play(t, { op: "pass_time", until, source: SRC });
@@ -82,5 +83,14 @@ describe("pass_time reads a time of day", () => {
     expect(r.error).toBe(true);
     expect(texts(r)[0]).toStartWith('Operation 1 (pass_time): until cannot be read, you sent "when the tide turns". It takes a date and time');
     expect(t.s.changes(t.turn.id).length).toBe(before);
+  });
+
+  test("a vague span, and a turn of the day the calendar does not name, are not times: pass_time for a while and until dusk are refused naming what a time takes", async () => {
+    const t = await blankAt(at(0, 8));
+    for (const words of ["a while", "a few hours", "dusk", "dawn", "until dinner"]) {
+      const r = await play(t, { op: "pass_time", [words === "a while" || words === "a few hours" ? "for" : "until"]: words, source: SRC });
+      expect({ words, error: r.error, clock: clock(t) }).toEqual({ words, error: true, clock: at(0, 8) });
+      expect(texts(r)[0]).toContain("It takes a date and time");
+    }
   });
 });

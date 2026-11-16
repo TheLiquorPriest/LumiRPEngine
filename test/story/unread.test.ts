@@ -135,14 +135,14 @@ describe("story_record, as the Author met it live", () => {
   test("a future due at a time given in words no date can be counted from is recorded with those words, shown as given, and said once", async () => {
     const b = await bench();
     const turn = await b.t.begin();
-    const r = await b.play({ operations: [{ op: "beat", text: "The gale rises." }, { op: "future", text: "The lamp fails.", due: "midnight", tier: "2" }] }, turn.id);
+    const r = await b.play({ operations: [{ op: "beat", text: "The gale rises." }, { op: "future", text: "The lamp fails.", due: "when the lamp gutters", tier: "2" }] }, turn.id);
     expect(r.error).toBeUndefined();
     wordsFromFiles(r);
     expect(r.reports).toEqual([
-      'Operation 2 (future): due is kept as you wrote it, "midnight", but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM), a clock time (18:30) or a span from now (two days) can be counted.',
+      'Operation 2 (future): due is kept as you wrote it, "when the lamp gutters", but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM), a clock time (18:30) or a span from now (two days) can be counted.',
     ]);
-    expect(b.t.record(turn).of("future").map((x) => x.fields)).toEqual([{ text: "The lamp fails.", due: "midnight", tier: 2 }]);
+    expect(b.t.record(turn).of("future").map((x) => x.fields)).toEqual([{ text: "The lamp fails.", due: "when the lamp gutters", tier: 2 }]);
     const [, future] = JSON.parse(texts(r).find(isJson) ?? "{}").operations as JsonObject[];
-    expect((future?.wrote as JsonObject).due).toBe("midnight");
+    expect((future?.wrote as JsonObject).due).toBe("when the lamp gutters");
   });
 });
