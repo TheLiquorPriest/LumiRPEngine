@@ -4,12 +4,26 @@
 
 import { expect, test } from "bun:test";
 import { systemsAt } from "../../src/iface/systems";
+import { STARTER_WORLDS } from "../../src/packs/index";
+import { hashJson } from "../../src/shared/hash";
+import type { WorldDoc } from "../../src/shared/world";
 import { JoinedTurnError } from "../../src/store";
-import { CHAT, makeBed, USER } from "../play/bed";
+import { type Bed, CHAT, makeBed, USER } from "../play/bed";
+
+/** The chat plays the modern starter world, named as the store takes a world's name. */
+async function plays(bed: Bed): Promise<void> {
+  const doc = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("modern", "modern_slice_of_life");
+  const revision = hashJson(doc);
+  const s = bed.store.user(USER);
+  await bed.writes.run(() => {
+    s.putWorld(revision, doc);
+    s.createChat({ id: CHAT, world: doc.id, revision });
+  });
+}
 
 test("a person's level gives each system's view as it keeps it", async () => {
   const bed = makeBed();
-  await bed.plays("modern_slice_of_life");
+  await plays(bed);
   await bed.turn();
   const read = systemsAt(bed.store, USER, CHAT, "entity:pov", null);
   expect(read.systems.map((s) => s.system)).toEqual(["economy", "gear", "orgs", "vehicles", "sheets"]);
@@ -24,7 +38,7 @@ test("a person's level gives each system's view as it keeps it", async () => {
 
 test("asked at a joined turn's id, the read is refused naming the turn it joined and reads no state", async () => {
   const bed = makeBed();
-  await bed.plays("modern_slice_of_life");
+  await plays(bed);
   const first = await bed.turn();
   const s = bed.store.user(USER);
   const held = await bed.writes.run(() => {
