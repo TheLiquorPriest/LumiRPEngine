@@ -14,8 +14,8 @@
 import type { RequestBody } from "../../../frontend/registry";
 import type { TapAsk } from "../../../shared/api";
 import type { JsonValue } from "../../../shared/json";
+import type { NarratorView } from "../../../shared/narrator-view";
 import type { ResultBodies } from "../../../shared/protocol";
-import type { NarratorView } from "../../../shared/settings";
 import type { CallContext, CallFile, ServedBody } from "../client";
 import { Refusal } from "../client";
 
