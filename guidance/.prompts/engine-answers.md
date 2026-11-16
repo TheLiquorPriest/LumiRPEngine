@@ -7,8 +7,8 @@ no_turn: There is no turn {{id}} in this chat.{{#exist}} Its latest are: {{exist
 scope_gone: This call belongs to {{what}} {{id}}, which takes no more changes: its staged changes were dropped, or its run has ended. Nothing was recorded.
 turn_joined: Turn {{id}} was joined to turn {{into}}, which holds its changes now; turn {{id}} itself is not read, so how things stand is not shown. Address turn {{into}}.
 engine_fault: {{tool}} failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.
+no_chat_run: {{tool}} works on a chat's world, and this run belongs to no chat: nothing was done.
 nothing_of_kind: Nothing that is {{sought}} is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.
-turn_needed: This call belongs to no turn, so nothing can be recorded. Reading needs no turn.
 needs_field: This call needs {{field}}.
 needs_one_field: This call needs one of {{fields}}, and only one.
 unknown: {{#n}}Operation {{n}} ({{op}}): {{/n}}there is nothing called {{name}} that is {{sought}}.{{#other}} By that name there is {{other}}.{{/other}}{{#near}} Near: {{near}}.{{/near}}{{#nothing}} {{nothing}}{{/nothing}}

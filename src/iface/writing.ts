@@ -257,9 +257,9 @@ export class Draft {
     this.inputs.push({ lane, op: change.op, value: change.value, by: this.call.agent.definition, handle: this.call.agent.id, standing: prov.standing, precision: prov.precision, source: prov.source?.from ?? null, cite: citeOf(prov), job: this.call.agent.job ?? null });
   }
 
-  /** A seed for what an operation draws (a made thing's id, a level-up's dice): the turn, the call and the operation. */
+  /** A seed for what an operation draws (a made thing's id, a level-up's dice): the turn (a call of no turn: its job, else its session), the call and the operation. */
   seed(n: number): string {
-    return hashParts("rpe.iface", this.base.turn?.id ?? this.call.scope.chat, this.call.callId, String(n));
+    return hashParts("rpe.iface", this.base.turn?.id ?? this.call.agent.job ?? this.call.scope.session, this.call.callId, String(n));
   }
 }
 
@@ -282,6 +282,8 @@ export interface Worked<T> {
  * `work` runs inside the write, so it reads the state as it stands then: a call made at the same
  * time as another of the turn is worked out on what the other left, never on the state both read
  * before either was recorded. The draft it gives is recorded on that same state; none records nothing.
+ * It goes where the store's one write target says (`writeTarget`, R-73): a call of a turn to the turn, a job's to the turn that
+ * started it with the job, a call of no turn (a job he started, a Talk) to his own changes of the chat, never refused for that.
  * A turn dropped, a job ended or a turn joined to another by the time it records is told (`gone`), never thrown.
  */
 export async function commit<T>(call: Call, work: () => { out: T; draft: Draft | null }): Promise<Worked<T>> {
@@ -290,18 +292,19 @@ export async function commit<T>(call: Call, work: () => { out: T; draft: Draft |
     const { out, draft } = work();
     if (draft === null) return { out, done: null };
     const turn = draft.base.turn;
-    if (turn === null) throw new Error("a draft is recorded only on a turn");
+    const job = call.agent.job ?? null;
+    const chat = call.scope.chat;
     try {
-      if (draft.inputs.length === 0) return { out, done: { rows: [], state: store.stateFor(turn.id, call.agent.job ?? null).state } };
-      const { changes, state } = store.addChanges(turn.id, draft.inputs);
+      if (draft.inputs.length === 0) return { out, done: { rows: [], state: (turn === null ? store.headFor(chat, job) : store.stateFor(turn.id, job)).state } };
+      const { changes, state } = store.record(store.writeTarget({ chat, turn: turn?.id ?? null, job }), draft.inputs);
       return { out, done: { rows: changes, state } };
     } catch (error) {
       if (error instanceof JoinedTurnError) return { out, done: null, gone: { missing: "joined", id: error.turn, into: error.joined } };
       if (!(error instanceof StoreInputError)) throw error;
-      // What the store refuses for what is no longer there: a turn dropped with its staged changes, or a job that has ended.
-      if (store.turn(turn.id)?.status === "dropped") return { out, done: null, gone: { missing: "gone", id: turn.id, what: "turn" } };
-      const job = call.agent.job;
-      if (job !== undefined) return { out, done: null, gone: { missing: "gone", id: job, what: "job" } };
+      // What the store refuses for what is no longer there: a turn dropped with its staged changes, a job that has ended, or the chat itself.
+      if (turn !== null && store.turn(turn.id)?.status === "dropped") return { out, done: null, gone: { missing: "gone", id: turn.id, what: "turn" } };
+      if (job !== null) return { out, done: null, gone: { missing: "gone", id: job, what: "job" } };
+      if (store.chat(chat) === null) return { out, done: null, gone: { missing: "chat", id: chat, exist: store.chats().slice(-call.settings.nearMatches).map((c) => c.id) } };
       throw error;
     }
   }, call.tool);
@@ -432,7 +435,9 @@ export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: 
   const store = draft.call.deps.store;
   let view: TreeView | null = null;
   try {
-    view = store.viewAt(draft.base.turn?.id ?? "");
+    const turn = draft.base.turn;
+    const job = draft.call.agent.job ?? null;
+    view = turn === null ? store.viewHeadFor(draft.call.scope.chat, job) : store.viewFor(turn.id, job);
   } catch (error) {
     if (!(error instanceof JoinedTurnError)) throw error;
     reply.line("turn_joined", { id: error.turn, into: error.joined });

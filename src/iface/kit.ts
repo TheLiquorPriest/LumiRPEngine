@@ -358,7 +358,10 @@ export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: Eng
     parameters: described(spec.properties, spec.required, text),
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      const call: Call = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: words.lines, tree: words.tree, reply: () => new Reply(words.lines) };
+      // A job of no chat has no chat's world to work on: said in the answers' words, nothing read or written.
+      const { scope } = ctx;
+      if (scope.chat === undefined) return new Reply(words.lines).line("no_chat_run", { tool: spec.name }).fail().result();
+      const call: Call = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: words.lines, tree: words.tree, reply: () => new Reply(words.lines) };
       try {
         return (await spec.run(given, call)).result();
       } catch (error) {

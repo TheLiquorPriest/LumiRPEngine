@@ -128,9 +128,8 @@ type RollBy = { dice: string } | { check: string; def: CheckDef };
 function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null, sum: { expression: string; total: number } | null): { out: JsonObject | Reply; draft: Draft | null } {
   const reply = call.reply();
   const turn = reading.turn;
-  if (turn === null) return { out: reply.line("turn_needed", {}).fail(), draft: null };
-  // A roll is drawn from the turn, who rolls and how many rolls the turn has recorded for them: no wording moves it.
-  const rng = createRng(hashParts("rpe.roll", turn.id, who.id, String(rollsBefore(call, turn.id, who.id))));
+  // A roll is drawn from the turn, who rolls and how many rolls the turn has recorded for them; a call of no turn, from its job or session and the call: no wording moves it.
+  const rng = createRng(turn === null ? hashParts("rpe.roll", call.agent.job ?? call.scope.session, call.callId, who.id) : hashParts("rpe.roll", turn.id, who.id, String(rollsBefore(call, turn.id, who.id))));
   const data: JsonObject = { actor: who.id, for: purpose };
   if ("dice" in by) {
     let rolled;
@@ -227,7 +226,6 @@ export const ROLL: ToolSpec = {
     if (sum !== null && args.dice === undefined && args.check === undefined) return reply.data({ sum });
     const reading = readingOr(call, reply);
     if (reading === null) return reply;
-    if (reading.turn === null) return reply.line("turn_needed", {}).fail();
     const who = foundOr(reading, reply, "who", args.who, "entity");
     if (who === null) return reply;
     const purpose = typeof args.for === "string" ? args.for.trim() : "";

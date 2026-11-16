@@ -330,7 +330,6 @@ export async function runOperations(call: Call, asked: readonly Asked[], askArgs
   const first = call.reply();
   const base = readingOr(call, first);
   if (base === null) return first;
-  if (base.turn === null) return first.line("turn_needed", {}).fail();
   // (S17Story, places) The entries bound to a place a call writes a base of, as Lumiverse holds them now: what the base is drawn against.
   await prepareBases(call, asked);
   // Read first on the state as it stands, so the player is asked nothing about a call that cannot be read.

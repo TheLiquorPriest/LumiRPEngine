@@ -103,7 +103,7 @@ export class Reading {
   /**
    * The state the call reads: at its turn, with what the turn has staged, and for a job's agent with
    * what the job has recorded so far (plan §10.9: nobody else sees that until the job ends), or at the
-   * chat's head when the call belongs to no turn. When the scope has none, why: the chat or turn it names
+   * chat's head when the call belongs to no turn (a job he started reads it with its own changes so far on top). When the scope has none, why: the chat or turn it names
    * is an id the store does not have (with what does exist), its staged changes were dropped, or it was
    * joined to another turn (the fact is told, never followed: PlanTurn's one place resolves a join). A
    * chat's world revision that is kept is loaded; one that cannot be is a fault, and throws.
@@ -121,7 +121,7 @@ export class Reading {
     }
     let folded;
     try {
-      folded = turn ? store.stateFor(turn.id, call.agent.job ?? null) : store.headState(call.scope.chat);
+      folded = turn ? store.stateFor(turn.id, call.agent.job ?? null) : store.headFor(call.scope.chat, call.agent.job ?? null);
     } catch (error) {
       if (error instanceof JoinedTurnError) return { missing: "joined", id: error.turn, into: error.joined };
       throw error;
@@ -154,7 +154,7 @@ export class Reading {
   /** The tree over this state. A turn joined to another since this reading was made is told as the fact (`ScopeError`), never thrown as the store's. */
   view(): TreeView {
     try {
-      this.tree ??= this.turn ? this.call.deps.store.viewFor(this.turn.id, this.call.agent.job ?? null) : this.call.deps.store.view(this.call.scope.chat);
+      this.tree ??= this.turn ? this.call.deps.store.viewFor(this.turn.id, this.call.agent.job ?? null) : this.call.deps.store.viewHeadFor(this.call.scope.chat, this.call.agent.job ?? null);
     } catch (error) {
       if (error instanceof JoinedTurnError) throw new ScopeError({ missing: "joined", id: error.turn, into: error.joined });
       throw error;
