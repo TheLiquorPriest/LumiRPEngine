@@ -4,7 +4,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { LoreIndexRow } from "../../src/shared/api";
+import type { LoreIndexRow, LoreProposal } from "../../src/shared/api";
+import { refreshedWords } from "../../src/ui/pages/lore/projection";
+import { approvalOf } from "../../src/ui/pages/lore/proposals";
 import { type IndexingShown, loreMatches, LoreView, type LoreViewProps } from "../../src/ui/pages/lore";
 import { readIndex, startIndexing } from "../../src/ui/pages/lore/read";
 import { askingClient, settle } from "./asking";
@@ -77,5 +79,22 @@ describe("the Lore page", () => {
     asked.find((a) => a.key === "POST /api/v1/chats/:chat/lore/index/jobs")?.answer({ job: "j-1", state: "queued" });
     await settle();
     expect((await started).job).toBe("j-1");
+  });
+});
+
+describe("proposals, writes and the projection", () => {
+  const proposal = (over: Partial<LoreProposal> = {}): LoreProposal => ({ id: 3, chat: "c1", turn: "t-2", agent: "historian", target: "e-1", text: "The ferry runs at dawn.", was: "The ferry runs at noon.", book: null, title: null, keys: null, world: null, reason: "The story moved it.", status: "open", refused: null, created: 1, decided: null, write: null, ...over });
+
+  test("an approval sends only what he changed of the draft", () => {
+    const p = proposal();
+    expect(approvalOf(p, { text: p.text, title: "", keys: "", book: "" })).toEqual({});
+    expect(approvalOf(p, { text: "The ferry runs at dusk.", title: "x", keys: "a", book: "b" })).toEqual({ text: "The ferry runs at dusk." });
+    const made = proposal({ target: null, was: null, title: "Ferry", keys: ["ferry"], book: "bk" });
+    expect(approvalOf(made, { text: made.text, title: "The ferry", keys: "ferry, river", book: "bk" })).toEqual({ title: "The ferry", keys: ["ferry", "river"] });
+  });
+
+  test("what an Apply now did is said in words", () => {
+    expect(refreshedWords({ on: false, book: null, written: false, removed: "bk" })).toContain("taken away");
+    expect(refreshedWords({ on: true, book: "bk", written: true, removed: null })).toContain("written again");
   });
 });

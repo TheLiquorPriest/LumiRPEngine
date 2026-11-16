@@ -34,6 +34,7 @@ export const PAGE_SETTING_DEFS = {
   chatsAtATime: { key: "pages.chatsAtATime", default: 50, least: 1, most: 500, name: "Chats read at a time on Storage", about: "Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take." },
   logLines: { key: "pages.logLines", default: 200, least: 10, most: 2000, name: "Log lines shown per page on Runtime", about: "Lines of RPE's own log the Runtime page reads at a time, the newest first; older lines are read on request (RPE keeps service.logLines of them)." },
   sessionsAtATime: { key: "pages.sessionsAtATime", default: 50, least: 1, most: 500, name: "Sessions and their turns read at a time", about: "Sessions of a chat, and turns of one session, the Sessions page reads from RPE at a time (the list goes on until every session is read, since the newest are shown first)." },
+  lorePerPage: { key: "pages.lorePerPage", default: 30, least: 1, most: 200, name: "Lore proposals and writes read at a time", about: "Proposals and writes to his lore the Lore page reads from RPE at a time; more are read on request." },
 } as const satisfies Record<string, PageSettingDef>;
 
 /** The page's settings by the name the page reads each under; every value is a whole number: milliseconds, or a count where the setting's words say so. */

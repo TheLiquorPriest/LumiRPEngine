@@ -3,6 +3,7 @@
 // it is bound to; entries no run has indexed yet shown by title and keys; "Index now", naming the connection the
 // indexing runs on; and where this chat's story moved past an entry, each overlay with its turn.
 
+import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { LoreIndexRow, LoreIndexStatus, LoreOverlays } from "../../../shared/api";
 import { useApp } from "../../app";
@@ -10,6 +11,8 @@ import { Badge, Banner, Button, Empty, PageHeader, Row, Section } from "../../at
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { counted, errorWords } from "../../words";
+import { ProjectionSection } from "./projection";
+import { ProposalsSection, WritesSection } from "./proposals";
 import { readIndex, readIndexStatus, readOverlays, startIndexing } from "./read";
 
 const ACTIVATION_WORDS: Readonly<Record<string, string>> = { constant: "always in", keyword: "by its keys", vector: "by meaning" };
@@ -74,6 +77,10 @@ export interface LoreViewProps {
   onMore(): void;
   onIndex(): void;
   onTurn(turn: string): void;
+  /** The proposals waiting on him, above the index. */
+  top?: ComponentChildren;
+  /** The writes made to his lore and the projection switch, below the overlays. */
+  bottom?: ComponentChildren;
 }
 
 export function LoreView(props: LoreViewProps) {
@@ -82,6 +89,7 @@ export function LoreView(props: LoreViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="lore">
       <PageHeader title="Lore" sub="His books and the world's own lore, as RPE understands them." />
+      {props.top}
       <Section title="Indexing" id="indexing">
         {props.statusProblem === null ? null : (
           <Banner tone="neg" icon="alert" title="Where indexing stands could not be read">
@@ -159,6 +167,7 @@ export function LoreView(props: LoreViewProps) {
           </ul>
         )}
       </Section>
+      {props.bottom}
     </div>
   );
 }
@@ -168,6 +177,7 @@ export function LorePage(props: { chat: string }) {
   const { chat } = props;
   const [query, setQuery] = useState("");
   const [indexing, setIndexing] = useState<IndexingShown>({ busy: false, job: null, problem: null });
+  const [written, setWritten] = useState(0);
   const index = usePaged((cursor) => readIndex(app.client, chat, cursor), [chat]);
   const status = useRead(() => readIndexStatus(app.client, chat), [chat, indexing.job]);
   const overlays = useRead(() => readOverlays(app.client, chat), [chat]);
@@ -194,6 +204,13 @@ export function LorePage(props: { chat: string }) {
         );
       }}
       onTurn={(turn) => app.go({ page: "turns", chat, at: [turn] })}
+      top={<ProposalsSection chat={chat} onTurn={(turn) => app.go({ page: "turns", chat, at: [turn] })} onWritten={() => setWritten((n) => n + 1)} />}
+      bottom={
+        <>
+          <WritesSection reload={written} />
+          <ProjectionSection chat={chat} />
+        </>
+      }
     />
   );
 }
