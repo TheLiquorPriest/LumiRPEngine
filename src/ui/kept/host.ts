@@ -23,6 +23,8 @@ export interface KeptHost extends HostBridge {
 export interface WebHostOptions {
   /** How long a download's link is kept before the browser lets it go (ms): `pages.downloadRevokeMs`. */
   revokeMs(): number;
+  /** The connections RPE lists (`GET /api/v1/connections`), for the model picker's choice of one; none where the page lists none. */
+  connections?(): Promise<{ id: string; name: string; model: string | null }[]>;
 }
 
 /** Where a control is mounted: the element itself, or the one a selector names. */
@@ -183,7 +185,7 @@ export function webHost(options: WebHostOptions): KeptHost {
     components: PAGE_CONTROLS,
     confirm: async (title, message) => window.confirm(`${title}\n\n${message}`),
     worldBooks: async () => [],
-    connections: async () => [],
+    connections: options.connections ?? (async () => []),
     download(fileName, text) {
       const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
       const anchor = Object.assign(document.createElement("a"), { href: url, download: fileName });
