@@ -1,11 +1,11 @@
 // What the tests of the kept Build page share: a client whose one road is RPE's own Build route, run in
 // this process over a fresh database (test/build-mode/bed.ts), and timers the test moves by hand.
 
-import { buildRoutes, BuildService } from "../../../src/build";
+import { buildRoutes } from "../../../src/build";
 import type { KeptTransport } from "../../../src/ui/kept/client";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
 import type { Timers } from "../../../src/ui/roads";
-import { GUIDANCE, makeBed, USER, words } from "../../build-mode/bed";
+import { buildServiceOn, makeBed, USER, words } from "../../build-mode/bed";
 import { callRoute } from "../../app/call";
 
 export { USER, words };
@@ -21,7 +21,7 @@ export interface RouteClient {
 /** A client whose one road is RPE's own Build route; every body goes and comes back as JSON, as over a road. */
 export function routeClient(): RouteClient {
   const bed = makeBed();
-  const [post] = buildRoutes(new BuildService({ db: bed.db, writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE }));
+  const [post] = buildRoutes(buildServiceOn(bed));
   const route = `${post.method} ${post.path}`;
   const asked: RouteClient["asked"] = [];
   const call = async (key: string, _params: unknown, options?: { body?: unknown }): Promise<unknown> => {

@@ -1,27 +1,25 @@
 // Build → World → Minds (DESIGN §24.2): what the narrator gets of a mind (secrecy),
 // the fidelity ladder's thresholds and focus weights, who is always Live and who never gets a mind,
-// the memory defaults, what each person knows from the start (§24.11), and the world's own step
-// templates for the minds steps, written in the step-template editor. Saved whole as `lre.editor set
+// and what each person knows from the start (§24.11). Saved whole as `lre.editor set
 // part minds` from the sticky bar; a world left at the defaults keeps no config. Each group shows the
-// lint under its own path. Styles: styles/minds.ts and styles/forms.ts.
+// lint under its own path. Styles: styles/minds.ts and styles/forms.ts. The memory defaults and the world's own
+// step templates for the minds steps are not drawn: nothing RPE keeps reads them (the world document keeps the fields).
 
 import { useMemo, useState } from "preact/hooks";
 import { hasOwn } from "../../shared/json";
 import type { JsonObject } from "../../shared/json";
-import type { AuthoredHolding, AuthoredHoldings, FidelityWeights, HoldingBelief, Limit, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
-import { DEFAULT_WORLD_MINDS, factId, HOLDING_BELIEFS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf, worldMindTemplate } from "../../shared/minds";
+import type { AuthoredHolding, AuthoredHoldings, FidelityWeights, HoldingBelief, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
+import { DEFAULT_WORLD_MINDS, factId, HOLDING_BELIEFS, MINDS_RANGES, worldMindsOf } from "../../shared/minds";
 import type { LintIssue } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
-import { Badge, Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, Seg, useBusy } from "../components";
+import { Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, Seg, useBusy } from "../components";
 import { Icon } from "../../ui/icons";
-import { STEP_LABEL } from "../../shared/steps";
-import { MEMORY_FIELDS, memoryValue } from "../settings/minds-patch";
 import { useSelect } from "../../ui/store";
-import { itemLabel, PART_INFO } from "./chrome";
+import { PART_INFO } from "./chrome";
 import { draftSend } from "./draft";
 import type { RefOption } from "./form-kit";
-import { AddPicker, CheckField, Chip, FormGroup, Issues, ItemRow, RefPicker } from "./form-kit";
+import { AddPicker, Chip, FormGroup, Issues, RefPicker } from "./form-kit";
 import { useHeld } from "./held";
 import { lintAt } from "./schema-form";
 import { kindIs, SelectorEditor } from "./selector-editor";
@@ -103,58 +101,6 @@ function Roles(props: { doc: WorldDoc; roles: Record<string, number>; lint: read
         <p class="lre-minds-note">This world has no classifications yet.</p>
       ) : null}
     </div>
-  );
-}
-
-/** The world's step templates for the minds steps: each opens in the step-template editor; a new one starts from the built-in prompt. */
-function MindTemplates(props: { doc: WorldDoc; worldId: string; unsaved: boolean }) {
-  const app = useApp();
-  const send = useMemo(() => draftSend(app), [app]);
-  const [busy, run] = useBusy();
-  const open = (id: string) => app.ui.update((ui) => ({ ...ui, build: { view: "item", worldId: props.worldId, collection: "steps", id } }));
-  const add = (purpose: MindPurpose) =>
-    run(async () => {
-      let n = 1;
-      while (props.doc.steps[`${purpose}_${n}`]) n++;
-      const id = `${purpose}_${n}`;
-      const message = await send({ type: "lre.editor", worldId: props.worldId, base: null, op: "put", collection: "steps", id, value: { id, purpose, template: MIND_PROMPT_DEFAULTS[purpose], output: "text", signals: [] } });
-      if (message.type === "lre.result") open(id);
-    });
-  return (
-    <FormGroup title="Step templates">
-      <p class="lre-minds-note">A world's template for a step wins over the built-in prompt, and a player's own prompt wins over it; only a step's first template (by id) with any text is used, and its signals are ignored. A new template starts from the built-in prompt and goes into the draft straight away, as its own item in Step templates.</p>
-      {/* A new template opens its own page, which would drop the edits above. */}
-      {props.unsaved && MIND_PURPOSES.some((purpose) => !Object.values(props.doc.steps).some((t) => t.purpose === purpose)) ? <p class="lre-minds-note">Save or revert your changes first.</p> : null}
-      {MIND_PURPOSES.map((purpose) => {
-        const templates = Object.values(props.doc.steps)
-          .filter((t) => t.purpose === purpose)
-          .sort((a, b) => a.id.localeCompare(b.id));
-        const used = worldMindTemplate(props.doc, purpose);
-        return (
-          <div key={purpose} class="lre-minds-tpl" data-lre-minds-templates={purpose}>
-            <div class="lre-minds-tpl-head">
-              <span class="lre-minds-tpl-text">
-                <span class="lre-minds-subhead">{STEP_LABEL[purpose]}</span>
-                {templates.length === 0 ? <span class="lre-minds-note">None: the player's prompt, else the built-in</span> : null}
-              </span>
-              {templates.length === 0 ? (
-                <Button size="sm" icon="plus" disabled={props.unsaved} busy={busy} onClick={() => add(purpose)}>
-                  New template
-                </Button>
-              ) : null}
-            </div>
-            {templates.length > 0 ? (
-              <div class="lre-form-items">
-                {templates.map((t) => {
-                  const name = itemLabel("steps", t.id, t);
-                  return <ItemRow key={t.id} title={name} subtitle={<IdText id={t.id} />} badge={t === used ? undefined : <Badge tone="warn">{t.template.trim() === "" ? "Blank: not used" : "Not used"}</Badge>} openLabel={`Open the template ${name}`} onOpen={() => open(t.id)} />;
-                })}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </FormGroup>
   );
 }
 
@@ -370,29 +316,7 @@ export function MindsEditor() {
         <Issues issues={lintAt(draft.lint, "minds.never")} />
         <p class="lre-minds-note">A selector with nothing in it picks no one. The player's own character never gets a mind.</p>
       </FormGroup>
-      <FormGroup title="Memory defaults">
-        <p class="lre-minds-note">How this world's characters remember. A player's own Settings → Minds → Memory wins.</p>
-        <div class="lre-minds-fields">
-          {MEMORY_FIELDS.map((field) => {
-            const current = memoryValue(value.memory, field);
-            const set = (v: Limit | boolean) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...(value.memory[field.part] as unknown as JsonObject), [field.key]: v } } });
-            const key = `${field.part}.${field.key}`;
-            if (!field.range) return <CheckField key={key} label={field.label} checked={current === true} disabled={busy} onChange={set} />;
-            const range = field.range;
-            // A field that may have no limit has its switch; back from none it starts at the built-in default.
-            const builtIn = memoryValue(DEFAULT_WORLD_MINDS.memory, field);
-            return (
-              <div key={key} class="lre-minds-fields">
-                {field.none ? <CheckField label={`${field.label}: ${field.none}`} checked={current === "none"} disabled={busy} onChange={(none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : range[0])} /> : null}
-                {current === "none" ? null : <NumberStepper label={field.label} value={typeof current === "number" ? current : null} min={range[0]} max={range[1]} step={field.step ?? 1} integer={field.integer === true} disabled={busy} onChange={set} />}
-              </div>
-            );
-          })}
-        </div>
-        <Issues issues={lintAt(draft.lint, "minds.memory")} />
-      </FormGroup>
       <StartHoldings doc={draft.doc} value={value.holdings} lint={lintAt(draft.lint, "minds.holdings")} disabled={busy} onChange={(holdings) => setValue({ ...value, holdings })} />
-      <MindTemplates doc={draft.doc} worldId={draft.worldId} unsaved={changed} />
       <SaveBar>
         <Button variant="primary" disabled={!changed} busy={busy} onClick={() => save(mindsPartValue(value))}>
           Save to draft

@@ -100,8 +100,12 @@ export interface Page {
 }
 
 let asked = 0;
+/** Build's route service over a bed: the world service on the bed's store, and Build's words. */
+export function buildServiceOn(bed: Bed): BuildService {
+  return new BuildService({ worlds: new WorldService({ store: bed.store, writes: bed.writes, log: bed.log }), writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE });
+}
 
-export function makePage(bed: Bed, service = new BuildService({ worlds: new WorldService({ store: bed.store, writes: bed.writes, log: bed.log }), writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE })): Page {
+export function makePage(bed: Bed, service = buildServiceOn(bed)): Page {
   const [post] = buildRoutes(service);
   return {
     service,

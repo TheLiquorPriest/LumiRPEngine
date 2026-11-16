@@ -9,7 +9,7 @@
 import { expect } from "bun:test";
 import type { HostTool, JsonObject, ToolCtx } from "rp-harness/contract";
 import { LiveHub, RouteError } from "../../../../src/app";
-import { buildRoutes, BuildService } from "../../../../src/build";
+import { buildRoutes } from "../../../../src/build";
 import { engineTools, shippedTexts, stateScan } from "../../../../src/iface/index";
 import { PORTS } from "../../../iface/rig";
 import { playRoutes, PlayService } from "../../../../src/play";
@@ -18,7 +18,7 @@ import type { ResultBodies } from "../../../../src/shared/protocol";
 import type { Store } from "../../../../src/store";
 import type { WriteQueue } from "../../../../src/app";
 import { type LiveListener, type RpeClient, RpeError } from "../../../../src/ui/client";
-import { GUIDANCE, makeBed, USER } from "../../../build-mode/bed";
+import { buildServiceOn, GUIDANCE, makeBed, USER } from "../../../build-mode/bed";
 import { asHarnessPasses } from "../../../story/rig";
 import { callRoute } from "../../../app/call";
 
@@ -51,7 +51,7 @@ export function servedRpe(): ServedRpe {
   const bed = makeBed();
   const live = new LiveHub({ queueEvents: 64, now: () => 0 });
   const running = new Set<string>();
-  const [post] = buildRoutes(new BuildService({ db: bed.db, writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE }));
+  const [post] = buildRoutes(buildServiceOn(bed));
   const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS }), log: bed.log }));
 
   const serve = async (key: string, chat: string, body: unknown, query: Record<string, string>): Promise<unknown> => {
