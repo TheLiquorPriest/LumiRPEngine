@@ -58,7 +58,7 @@ async function playIn(t: Table, shown: ShownMessage[]): Promise<TurnRow> {
   shown.push({ id: `b-u${shown.length}`, user: true, hash: hashOf("the player's line in the branch"), hidden: false });
   await t.writes.run(() => t.s.sync(BRANCH, shown));
   const turn = await t.writes.run(() => t.s.beginTurn({ chat: BRANCH, kind: "new" }));
-  const reply = { id: `b-r${shown.length}`, user: false, hash: hashOf("The branch goes its own way."), date: 9_000 };
+  const reply = { id: `b-r${shown.length}`, user: false, hash: hashOf("The branch goes its own way."), date: 9_000, hidden: false };
   const tied = await t.writes.run(() => t.s.tieTurn(turn.id, { message: reply.id, hash: reply.hash, date: reply.date }));
   shown.push(reply);
   await t.writes.run(() => t.s.sync(BRANCH, shown));

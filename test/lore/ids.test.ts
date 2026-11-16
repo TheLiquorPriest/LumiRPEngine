@@ -126,7 +126,8 @@ describe("lore ids", () => {
     db.run("INSERT INTO lore_index (user, world, entry, revision, kind, related) VALUES (?, '', 'e-1', '1', 'place', ?)", [USER, JSON.stringify(["w-cove_route"])]);
     db.run("INSERT INTO lore_overlay (user, chat, turn, entry, note, created) VALUES (?, ?, 'turn-1', 'w-tithe_law', 'The tithe was lifted.', 0)", [USER, CHAT]);
     db.run("INSERT INTO lore_proposal (user, chat, agent, target, text, reason, status, created) VALUES (?, ?, 'scribe', 'w-cove_route', 'Sefa runs brandy.', 'canon', 'open', 0)", [USER, CHAT]);
-    migrate(db, upTo(LORE_MIGRATIONS), { user: USER, version: "after", backups, now: () => 0 });
+    // The step that moves the overlays onto the store's changes (12) is the story's: the numbering is what is looked at here.
+    migrate(db, upTo(LORE_MIGRATIONS.filter((m) => m.version < 12)), { user: USER, version: "after", backups, now: () => 0 });
 
     const queue = new WriteQueue(db, 50);
     const numbers = new EntryNumbers(db, queue);

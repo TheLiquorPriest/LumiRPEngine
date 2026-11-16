@@ -158,4 +158,19 @@ describe("the story so far", () => {
     expect(storySoFarBudget(200_000, STORY_SO_FAR_DEFAULTS)).toBe(10_000);
     expect(storySoFarBudget(32_000, STORY_SO_FAR_DEFAULTS)).toBe(6_000);
   });
+
+  test("a beat that stands for a stretch is printed with its range, and a summary whose messages were deleted says so where its turn stands", () => {
+    const out = storySoFar({ record: record({ beats: [{ at: 300, to: 340, text: "The long march." }, { at: 341, text: "Camp." }], scenes: [{ from: 350, to: 350, text: "The old scene.", gone: true }] }), keptFrom: 400, layout, ...roomy });
+    expect(out.text).toContain("- Message 300 to 340: The long march.");
+    expect(out.text).toContain("- Message 341: Camp.");
+    expect(out.text).toContain("Scene summary; its messages are gone from the chat, it was written at message 350:\nThe old scene.");
+  });
+
+  test("a chat with no record is one line naming every message not covered, and beats covering the end leave the rest named", () => {
+    const none = storySoFar({ record: record({ uncovered: [{ from: 0, to: 1999 }] }), keptFrom: 1960, layout, ...roomy });
+    expect(none.text.trim()).toBe("Not covered by the record: messages 0 to 1959.");
+    const some = storySoFar({ record: record({ beats: beats(1900, 1959), uncovered: [{ from: 0, to: 1899 }, { from: 1960, to: 1999 }] }), keptFrom: 1960, layout, ...roomy });
+    expect(some.text).toContain("Not covered by the record: messages 0 to 1899.");
+    expect(some.text).not.toContain("1960");
+  });
 });

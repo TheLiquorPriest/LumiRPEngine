@@ -10,11 +10,12 @@
 // beat, each with the messages it stands for, in the shape `src/story/sofar` takes.
 
 import type { JsonObject } from "rp-harness/contract";
-import type { Store } from "../store";
+import type { PathEntry, Store } from "../store";
+import { coverageOf } from "./cover";
 import { allSpans, itemView, namesOf, storyClock } from "./kit";
 import { storyAt } from "./path";
 import { nameKey, type SpanPart, type StoryItem, StoryRecord } from "./record";
-import type { StoryRecordParts, StorySoFarInput, StorySummary } from "./sofar/index";
+import type { StoryBeat, StoryRecordParts, StorySoFarInput, StorySummary } from "./sofar/index";
 
 /** Which record to read: whose, in which chat, at which turn (null: the chat's head). */
 export interface StoryPoint {
@@ -22,6 +23,8 @@ export interface StoryPoint {
   user: string;
   chat: string;
   turn: string | null;
+  /** The messages of the line the reading goes along, where it is not the chat's own (the path a generation was made on); the chat's path when left out. */
+  messages?: readonly PathEntry[];
 }
 
 /** A list the layout shows under one heading: the heading's block is the object, its lines the items. */
@@ -45,7 +48,7 @@ export interface StoryBrief {
 }
 
 function readAt(point: StoryPoint): StoryRecord {
-  return StoryRecord.read(point.store.db, point.user, storyAt(point.store.user(point.user), point.chat, point.turn));
+  return StoryRecord.read(point.store, point.user, storyAt(point.store.user(point.user), point.chat, point.turn, point.messages));
 }
 
 /**
@@ -79,23 +82,37 @@ export function storyBrief(point: StoryPoint & { layout: StorySoFarInput["layout
   return { text: point.layout.render(fields).text.trimEnd(), fields };
 }
 
-/** The written summaries of a timeline part, each with the messages it stands for. */
+
+/** The written summaries of a timeline part, each with the messages it stands for; one whose messages were deleted stands where the turn that wrote it does, marked. One not placed yet (its turn is still open) is left out. */
 function summaries(record: StoryRecord, part: SpanPart): StorySummary[] {
   const spans = record.spans(part);
-  return record.of(part).flatMap((item) => {
+  return record.of(part).flatMap((item): StorySummary[] => {
     const span = spans.get(item.id);
     const text = item.fields.summary;
-    if (typeof text !== "string" || span?.from == null || span.to == null || span.to < span.from) return [];
-    return [{ from: span.from, to: span.to, text }];
+    if (typeof text !== "string") return [];
+    if (span?.from != null && span.to != null) return span.to < span.from ? [] : [{ from: span.from, to: span.to, text }];
+    if (item.fields.first === undefined && item.fields.last === undefined) return [];
+    const at = record.at.replyOf(item.rows.findLast((r) => typeof r.value.summary === "string")?.turn ?? item.touched);
+    return at === null ? [] : [{ from: at, to: at, text, gone: true }];
   });
 }
 
-/** What the story so far is drawn from: chapter and scene summaries and the beats, each where it lies in the chat. Anything the record cannot place in the chat is left out. */
+/**
+ * What the story so far is drawn from: chapter and scene summaries and the beats, each where it lies in the chat (a beat that stands
+ * for a stretch with the last message of it), what the record holds of messages that were deleted where the turn that wrote it stands,
+ * marked, and the stretches of the chat the record covers nowhere.
+ */
 export function storyRecordParts(point: StoryPoint): StoryRecordParts {
   const record = readAt(point);
-  const beats = record.of("beat").flatMap((beat) => {
-    const at = record.beatAt(beat);
-    return at === null || typeof beat.fields.text !== "string" ? [] : [{ at, text: beat.fields.text }];
+  const beats = record.of("beat").flatMap((beat): StoryBeat[] => {
+    if (typeof beat.fields.text !== "string") return [];
+    const { from, to } = record.beatSpan(beat);
+    if (from !== null) return [{ at: from, ...(to !== null && to > from ? { to } : {}), text: beat.fields.text }];
+    const at = beat.fields.message === undefined ? null : record.at.replyOf(beat.opened);
+    return at === null ? [] : [{ at, text: beat.fields.text, gone: true }];
   });
-  return { chapters: summaries(record, "chapter"), scenes: summaries(record, "scene"), beats };
+  const uncovered = coverageOf(record)
+    .stretches.filter((s) => !s.covered)
+    .map((s) => ({ from: s.from, to: s.to }));
+  return { chapters: summaries(record, "chapter"), scenes: summaries(record, "scene"), beats, uncovered };
 }

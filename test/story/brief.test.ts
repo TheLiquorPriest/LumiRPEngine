@@ -146,6 +146,7 @@ describe("the record's parts for the story so far", () => {
         { at: 3, text: "Wren's boots fill with water." },
         { at: 4, text: "A carter offers a ride." },
       ],
+      uncovered: [{ from: 5, to: 6 }],
     });
 
     // The shape the story so far takes: the summary stands for its beats, the later beat is printed.

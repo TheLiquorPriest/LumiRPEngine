@@ -24,12 +24,16 @@ export interface StoryAt {
   startOf(turn: string): number | null;
 }
 
-/** The story's path in `chat`, read at `turn` (null: the chat's head). */
-export function storyAt(user: UserStore, chat: string, turn: string | null): StoryAt {
-  const messages = user.path(chat);
+/**
+ * The story's path in `chat`, read at `turn` (null: the chat's head). `given` is the messages of a line the caller reads along that
+ * is not the chat's own (the path a generation was made on, a swipe's own line): the numbers and the replies are then those of that
+ * line; left out, it is the chat's path as the store last compared it.
+ */
+export function storyAt(user: UserStore, chat: string, turn: string | null, given?: readonly PathEntry[]): StoryAt {
+  const messages = given ?? user.path(chat);
   const numbers = new Map(messages.map((m, i) => [m.message, i]));
   // The chat's line of turns, each at the reply it stands at (`UserStore.line`): a turn a branch shares stays on it after a continue.
-  const line = user.line(chat);
+  const line = given === undefined ? user.line(chat) : messages.flatMap((m, i) => (m.turn !== null && !m.user ? [{ turn: m.turn, at: i }] : []));
   const replies = new Map(line.map((l) => [l.turn, l.at]));
   const onPath = line.map((l) => l.turn);
   let turns = onPath;

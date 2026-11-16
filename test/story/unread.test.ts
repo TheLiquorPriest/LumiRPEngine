@@ -68,7 +68,8 @@ describe("story_record, as the Author met it live", () => {
     const turn = await b.t.begin();
     const r = await b.play({ operations: [SCENE, { op: "beat", text: "Marta bolts the lamp room door behind them.", who: "Marta Venn" }] }, turn.id);
     expect(r.error).toBeUndefined();
-    expect(r.reports ?? []).toEqual([]);
+    // The scene's place is words that name no place of the invented world: kept as written, tied to none, and said once.
+    expect(r.reports ?? []).toEqual(["Operation 1 (scene): the place Gull Skerry light names no place of this world, so it is kept as the words you wrote and tied to none."]);
     wordsFromFiles(r);
     const record = b.t.record(turn);
     expect(record.of("scene").map((x) => x.fields)).toEqual([
@@ -112,6 +113,18 @@ describe("story_record, as the Author met it live", () => {
       'Operation 2 (thread): the story record on this path holds no thread "th-999".',
       "thread reads id, text, kind, state, stakes, who, payoff, hot, close, drop, why, and a new one needs text. It does not read mood.",
       'Operation 3: op cannot be read, you sent "sing". It is one of: premise, chapter, scene, beat, thread, arc, player, future, canon, retcon, record, overlay.',
+      "premise reads text, tone, rules, role.",
+      "chapter reads id, new, title, place, time, summary, from, to, close, drop, why.",
+      "scene reads id, new, title, place, time, who, purpose, tension, wants, ends, summary, from, to, close, drop, why.",
+      "beat reads id, text, who, place, time, message, from, to, drop, why, and a new one needs text.",
+      "thread reads id, text, kind, state, stakes, who, payoff, hot, close, drop, why, and a new one needs text.",
+      "arc reads who, began, stands, next, drop, why, and needs who.",
+      "player reads id, text, kind, drop, why, and a new one needs text.",
+      "future reads id, text, tier, due, standing, who, place, close, drop, why, and a new one needs text.",
+      "canon reads id, text, who, message, drop, why, and a new one needs text.",
+      "retcon reads id, text, why, of, drop, and a new one needs text.",
+      "record reads intent, decided, why, rulings, consents, next.",
+      "overlay reads entry, text, and needs entry, text.",
       "Nothing was recorded. Send the call again with that put right.",
     ]);
     expect(b.t.record(turn).items.size).toBe(0);
@@ -126,7 +139,7 @@ describe("story_record, as the Author met it live", () => {
     expect(r.error).toBeUndefined();
     wordsFromFiles(r);
     expect(r.reports).toEqual([
-      'Operation 2 (future): due is kept as you wrote it, "midnight", but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn) can be counted.',
+      'Operation 2 (future): due is kept as you wrote it, "midnight", but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM), a clock time (18:30) or a span from now (two days) can be counted.',
     ]);
     expect(b.t.record(turn).of("future").map((x) => x.fields)).toEqual([{ text: "The lamp fails.", due: "midnight", tier: 2 }]);
     const [, future] = JSON.parse(texts(r).find(isJson) ?? "{}").operations as JsonObject[];

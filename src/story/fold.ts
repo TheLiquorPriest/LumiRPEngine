@@ -8,7 +8,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { AreaChange, AreaOp, AreaOutcome, AreaPart, StoreArea, StoreState } from "../store";
+import type { AreaOp, AreaOutcome, AreaPart, StoreArea, StoreState } from "../store";
 
 /** The parts of the record, as the plan names them (§8.1). */
 export const STORY_PARTS = ["premise", "chapter", "scene", "beat", "thread", "arc", "player", "future", "canon", "retcon", "record"] as const;
@@ -27,6 +27,8 @@ export const STORY_OPS = {
   overlay: "story.overlay",
   /** An overlay taken off again (what undoes one): `{ entry, note }`. */
   unoverlay: "story.unoverlay",
+  /** The Author's horizon (§6.4), replaced whole by one change: `{ list }`, each entry a tree ref or the Author's words, with a depth if set. */
+  horizon: "story.horizon",
 } as const;
 
 /** One write of an item as its change holds it. */
@@ -69,12 +71,20 @@ export interface OverlayDoc {
   by: string | null;
 }
 
+/** An entry of the horizon as the slice keeps it: a tree ref or the Author's words as he wrote them, and how deep the world state shows it (`full` when he set none). */
+export interface HorizonEntry {
+  at: string;
+  depth: number | "full";
+}
+
 /** The area's slice of the folded state. */
 export interface StorySlice {
   /** The record's items by id, in the order they were first written (an object keeps its keys in the order they were made, and no id is a whole number). */
   items: Record<string, StoryItemDoc>;
   /** The lore's overlays, in the order they were written along the path. */
   overlays: OverlayDoc[];
+  /** The Author's horizon: one list for the chat, replaced whole by each change that sets it. */
+  horizon: HorizonEntry[];
 }
 
 /** The id a new item of `part` is given: its part's prefix and the id of its first change, so an id says its part and is the change's. */
@@ -95,7 +105,7 @@ export function keyedItemId(part: "premise" | "arc" | "record", key: string): st
 }
 
 export function emptySlice(): StorySlice {
-  return { items: {}, overlays: [] };
+  return { items: {}, overlays: [], horizon: [] };
 }
 
 /** The story's slice of a folded state; the starting one where the state holds none. */
@@ -237,11 +247,80 @@ const UNOVERLAY: AreaOp = {
   },
 };
 
+/** What a horizon change sends: a list whose entries are a tree ref or words, or an object with the entry in `at` and a `depth` (a whole number, or `full`). */
+function horizonEntry(e: unknown): HorizonEntry | string {
+  if (typeof e === "string") return e.trim() === "" ? "an entry of the horizon is not empty" : { at: e, depth: "full" };
+  if (!isRecord(e) || typeof e.at !== "string" || e.at.trim() === "") return "an entry of the horizon is a tree ref or words, or an object with its place in `at`";
+  const depth = e.depth ?? "full";
+  if (depth !== "full" && !(typeof depth === "number" && Number.isInteger(depth) && depth >= 0)) return "an entry's depth is a whole number or `full`";
+  return { at: e.at, depth };
+}
+
+const HORIZON: AreaOp = {
+  check(value) {
+    if (!isRecord(value) || !Array.isArray(value.list)) return "the horizon is sent as `{ list }`";
+    const bad = value.list.map(horizonEntry).find((e) => typeof e === "string");
+    return typeof bad === "string" ? bad : null;
+  },
+  apply(slice, change): AreaOutcome {
+    // `check` has read the value: it is `{ list }` of entries `horizonEntry` reads.
+    const sent = change.value as { list: unknown[] };
+    const horizon = sent.list.map(horizonEntry) as HorizonEntry[];
+    return { slice: json({ ...asSlice(slice), horizon }) };
+  },
+  touches: () => [{ ref: "story:horizon", part: "list" }],
+  undo: (_value, before) => [{ op: "horizon", value: { list: horizonOf(asSlice(before)) as unknown as JsonValue } }],
+};
+
+/** The horizon of a slice, as the Author last set it. */
+export function horizonOf(slice: Readonly<StorySlice>): HorizonEntry[] {
+  return slice.horizon ?? [];
+}
+
+function namesIn(field: JsonValue | undefined): string[] {
+  if (typeof field === "string") return [field];
+  return Array.isArray(field) ? field.filter((w): w is string => typeof w === "string") : [];
+}
+
+function placeIn(item: StoryItemDoc): string | null {
+  const place = item.fields.place;
+  return typeof place === "string" && place.trim() !== "" ? place : null;
+}
+
+/**
+ * The scene the chat is in, as the slice alone tells it: the one made last that is neither closed nor struck and names no end of its
+ * own (a scene with a `last` is a stretch of the past). The story's readers that know the chat's messages place it by where it
+ * starts (`StoryRecord.current`); this is the read the store and the world state ask, which hold no messages.
+ */
+export function openSceneOf(slice: Readonly<StorySlice>): StoryItemDoc | null {
+  let found: StoryItemDoc | null = null;
+  for (const item of Object.values(slice.items)) if (item.part === "scene" && item.closedBy === null && !item.dropped && item.fields.last === undefined) found = item;
+  return found;
+}
+
+/** The threads still open, in the order they were made, with the names and the place the Author recorded on each and every field it holds. */
+export function openThreadsOf(slice: Readonly<StorySlice>): { id: string; who: string[]; place: string | null; fields: JsonObject }[] {
+  return Object.values(slice.items)
+    .filter((i) => i.part === "thread" && i.closedBy === null && !i.dropped)
+    .map((i) => ({ id: i.id, who: namesIn(i.fields.who), place: placeIn(i), fields: i.fields }));
+}
+
+const READS: NonNullable<StoreArea["reads"]> = {
+  /** The horizon: `[{ at, depth }]`. */
+  horizon: (slice) => horizonOf(asSlice(slice)) as unknown as JsonValue,
+  /** The scene the chat is in: `{ scene, place, who }`, null when none is open. */
+  scene(slice) {
+    const scene = openSceneOf(asSlice(slice));
+    return scene === null ? null : { scene: scene.id, place: placeIn(scene), who: namesIn(scene.fields.who) };
+  },
+  /** The threads still open: `[{ id, who, place, fields }]`. */
+  threads: (slice) => openThreadsOf(asSlice(slice)) as unknown as JsonValue,
+};
+
 /** The story's area, as the store opens with it. */
 export const STORY_STORE_AREA: StoreArea = {
   id: STORY_AREA_ID,
   initial: () => json(emptySlice()),
-  ops: { write: WRITE, restore: RESTORE, overlay: OVERLAY, unoverlay: UNOVERLAY },
+  ops: { write: WRITE, restore: RESTORE, overlay: OVERLAY, unoverlay: UNOVERLAY, horizon: HORIZON },
+  reads: READS,
 };
-
-export type { AreaChange };

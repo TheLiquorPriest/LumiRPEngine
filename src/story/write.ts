@@ -16,8 +16,8 @@ import type { Reply } from "../iface/kit";
 import { type Fields, type Lines, textOf } from "../iface/texts";
 import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
-import { type Lane, STANDINGS } from "../store";
-import { allSpans, itemView, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, valueView } from "./kit";
+import { type Lane, STANDINGS, type TreeView } from "../store";
+import { allSpans, itemView, placeRefOf, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, treeOf, valueView } from "./kit";
 import { keyedItemId, recordStory, type StoryOverlayWrite, type StoryPart, type StoryRecord, type StoryRecorded, type StoryWrite } from "./record";
 
 /** The lane every operation of the tool writes to. */
@@ -44,6 +44,9 @@ export const PLAYER_KINDS = ["enjoys", "avoids", "pacing", "request", "line"] as
 
 const DROP = { drop: "flag", why: "text" } as const;
 
+/** The parts whose `place` words are tied to the place's ref where they name one. */
+const PLACED: Readonly<Partial<Record<StoryPart, true>>> = { scene: true, beat: true, future: true };
+
 const OPS: readonly OpDef[] = [
   { name: "premise", part: "premise", finds: "premise", args: { text: "text", tone: "text", rules: "text", role: "text" } },
   { name: "chapter", part: "chapter", finds: "span", args: { title: "text", place: "text", time: "text", summary: "text", from: "message", to: "message", close: "flag", ...DROP } },
@@ -53,7 +56,7 @@ const OPS: readonly OpDef[] = [
     finds: "span",
     args: { title: "text", place: "text", time: "text", who: "names", purpose: "text", tension: "text", wants: "text", ends: "text", summary: "text", from: "message", to: "message", close: "flag", ...DROP },
   },
-  { name: "beat", part: "beat", finds: "new-or-id", args: { text: "text", who: "names", place: "text", time: "text", message: "message", ...DROP }, needs: ["text"] },
+  { name: "beat", part: "beat", finds: "new-or-id", args: { text: "text", who: "names", place: "text", time: "text", message: "message", from: "message", to: "message", ...DROP }, needs: ["text"] },
   { name: "thread", part: "thread", finds: "new-or-id", args: { text: "text", kind: THREAD_KINDS, state: "text", stakes: "text", who: "names", payoff: "text", hot: "flag", close: "flag", ...DROP }, needs: ["text"] },
   { name: "arc", part: "arc", finds: "arc", args: { began: "text", stands: "text", next: "text", ...DROP } },
   { name: "player", part: "player", finds: "new-or-id", args: { text: "text", kind: PLAYER_KINDS, ...DROP }, needs: ["text"] },
@@ -128,6 +131,8 @@ interface Reading {
   clock: StoryClock | null;
   turn: string;
   lines: Lines;
+  /** The ref of the place a name or id names in the world the turn stands in; null when it names none there, undefined when that world has no place to name. */
+  placeRef(words: string): string | null | undefined;
 }
 
 function isUnread(v: unknown): v is Unread {
@@ -147,7 +152,8 @@ function readArg(r: Reading, n: number, op: string, field: string, kind: Kind, s
   if (said === undefined || said === null) return undefined;
   const unreadable = (choices: readonly JsonValue[] = [], wants?: string): Unread => ({
     line: "unreadable_op",
-    fields: { n, op, field, value: JSON.stringify(said), choices: textOf(choices), ...(wants !== undefined ? { wants: r.lines.line(`wants_${wants}`) ?? "" } : {}) },
+    // Whatever was meant that a fixed list cannot hold can go in the item's `text`, which takes any words.
+    fields: { n, op, field, value: JSON.stringify(said), choices: textOf(choices), ...(wants !== undefined ? { wants: r.lines.line(`wants_${wants}`) ?? "" } : {}), ...(choices.length > 0 && field !== "text" && BY_NAME.get(op)?.args.text !== undefined ? { says: "text" } : {}) },
   });
   if (Array.isArray(kind)) return typeof said === "string" && kind.includes(said.trim()) ? said.trim() : unreadable(kind);
   switch (kind) {
@@ -250,7 +256,8 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   for (const [field, kind] of Object.entries(def.args)) {
     const got = readArg(r, n, op, field, kind, given[field]);
     if (isUnread(got)) out.unread.push(got);
-    else if (got !== undefined) value[field === "from" ? "first" : field === "to" ? "last" : field] = got;
+    // A stretch is kept as its first and last message; a beat's first is the message it came from, as a carried beat's is.
+    else if (got !== undefined) value[field === "from" ? (def.part === "beat" ? "message" : "first") : field === "to" ? "last" : field] = got;
   }
   const found = findItem(r, def, n, given, value);
   if (isUnread(found)) {
@@ -258,6 +265,12 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
     return out;
   }
   const reports: Unread[] = [];
+  // A place named by words is tied to the place's ref, the words kept beside it; words that name none stay words, and the answer says so.
+  if (typeof value.place === "string" && PLACED[def.part] === true) {
+    const ref = r.placeRef(value.place);
+    if (typeof ref === "string") value.place_ref = ref;
+    else if (ref === null) reports.push({ line: "place_unresolved", fields: { n, op, place: value.place } });
+  }
   const before = r.record.items.get(found.item);
   if (value.close === true && before !== undefined && before.closedBy !== null) reports.push({ line: "already_closed", fields: { n, op, id: found.item } });
   // Said with both times; on a clock play has not set, which shows no date, said with neither: the future is due all the same.
@@ -291,7 +304,14 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   const record = recordOr(call, reply);
   if (record === null) return reply;
   const { store, writes } = call.deps;
-  const reading: Reading = { record, clock: storyClock(store, call.scope.user, call.scope.chat, turn), turn, lines: call.lines };
+  let view: TreeView | undefined;
+  const reading: Reading = {
+    record,
+    clock: storyClock(store, call.scope.user, call.scope.chat, turn),
+    turn,
+    lines: call.lines,
+    placeRef: (words) => placeRefOf((view ??= treeOf(call)), words),
+  };
   const ops = list.map((raw, i) => readOp(reading, i + 1, raw));
   if (ops.some((o) => o.fatal.length > 0)) {
     // Every operation's trouble is said, each with what that kind of operation reads, so the call can be sent again put right in one go.
@@ -300,6 +320,13 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
       if (o.op === undefined || o.fatal.length + o.unread.length + o.ignored.length === 0) continue;
       const { reads, needs, newNeeds } = takesOf(o.op);
       reply.line("op_takes", { op: o.op, reads: textOf(reads), needs: textOf(needs), new_needs: textOf(newNeeds), ignored: textOf(o.ignored) });
+    }
+    // An operation the tool does not have is answered with every operation and what each reads, so the call can be sent again with the one that records what was meant.
+    if (ops.some((o) => o.fatal.some((u) => u.line === "unknown_op"))) {
+      for (const name of STORY_OPERATIONS) {
+        const { reads, needs, newNeeds } = takesOf(name);
+        reply.line("op_takes", { op: name, reads: textOf(reads), needs: textOf(needs), new_needs: textOf(newNeeds), ignored: "" });
+      }
     }
     return reply.line("nothing_recorded", {}).fail();
   }

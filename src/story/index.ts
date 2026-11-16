@@ -4,7 +4,8 @@
 // story writes, and joining a continue's held writes to the turn it extended, are the store's own.
 
 export { STORY_MIGRATIONS } from "./schema";
-export { STORY_AREA_ID, STORY_OPS, STORY_STORE_AREA, storySliceOf, type OverlayDoc, type StoryItemDoc, type StorySlice } from "./fold";
+export { type HorizonEntry, horizonOf, openSceneOf, openThreadsOf, STORY_AREA_ID, STORY_OPS, STORY_STORE_AREA, storySliceOf, type OverlayDoc, type StoryItemDoc, type StorySlice } from "./fold";
+export { type LeftOpen, leftOpen, type OpenThread } from "./open";
 export { storyTools, STORY_TOOLS } from "./tools";
 export { storyBrief, storyRecordParts, type StoryBrief, type StoryBriefFields, type StoryPoint } from "./brief";
 export { STORY_ANSWERS, STORY_DEFAULTS, type LoreOverlay, type StoryDeps, type StorySettings } from "./kit";

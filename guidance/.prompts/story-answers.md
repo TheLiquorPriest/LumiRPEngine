@@ -8,7 +8,7 @@ turn_needed: This call belongs to no turn, so nothing can be recorded. Reading n
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
-unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
+unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}{{#says}} What you meant can go in {{says}}, which takes any words.{{/says}}
 wants_names: a name, or a list of names
 op_takes: {{op}} reads {{reads}}{{#needs}}, and needs {{needs}}{{/needs}}{{#new_needs}}, and a new one needs {{new_needs}}{{/new_needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
 not_read: Operation {{n}} ({{op}}) was recorded without {{left}}. It reads {{reads}}.
@@ -28,6 +28,7 @@ due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it
 overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#near}} Near: {{near}}.{{/near}}
 store_unread: The story record could not read that call: {{why}}
 turn_joined: This turn, {{turn}}, was joined to turn {{joined}}, the turn the continue extended, so nothing was read or recorded here. Address turn {{joined}} instead.
+place_unresolved: Operation {{n}} ({{op}}): the place {{place}} names no place of this world, so it is kept as the words you wrote and tied to none.
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
 more: {{count}} more match. Ask again with a part, a range or a name to see them; the next is {{next}}.

@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
-import { allSpans, itemView, namesOf, recordOr, type StoryCall, storyClock, type StoryToolSpec } from "./kit";
+import { allSpans, itemView, namesOf, placeRefOf, recordOr, type StoryCall, storyClock, type StoryToolSpec, treeOf } from "./kit";
 import { nameKey, STORY_PARTS, type Span, type StoryItem, type StoryPart, type StoryRecord } from "./record";
 
 const QUERY_PROPERTIES: Record<string, JsonObject> = {
@@ -14,6 +14,7 @@ const QUERY_PROPERTIES: Record<string, JsonObject> = {
   from: WHOLE,
   to: WHOLE,
   who: TEXT,
+  place: TEXT,
   open: YES_NO,
   due: YES_NO,
   hot: YES_NO,
@@ -48,6 +49,7 @@ async function query(args: JsonObject, call: StoryCall): Promise<Reply> {
   for (const field of ["from", "to"]) if (args[field] !== undefined && !(typeof args[field] === "number" && Number.isInteger(args[field]))) return unreadable(field, args[field]);
   for (const field of ["open", "due", "hot", "history"]) if (args[field] !== undefined && typeof args[field] !== "boolean") return unreadable(field, args[field], [true, false]);
   if (args.who !== undefined && typeof args.who !== "string") return unreadable("who", args.who);
+  if (args.place !== undefined && typeof args.place !== "string") return unreadable("place", args.place);
   if (args.id !== undefined && typeof args.id !== "string") return unreadable("id", args.id);
 
   const record = recordOr(call, reply);
@@ -66,9 +68,12 @@ async function query(args: JsonObject, call: StoryCall): Promise<Reply> {
   const from = typeof args.from === "number" ? args.from : 0;
   const to = typeof args.to === "number" ? args.to : Number.POSITIVE_INFINITY;
   const who = typeof args.who === "string" ? nameKey(args.who) : null;
+  // A place asked by words is read as the world's own place where one goes by them; beats tied to its ref and beats that name it in words both match.
+  const place = typeof args.place === "string" ? { words: nameKey(args.place), ref: placeRefOf(treeOf(call), args.place) ?? null } : null;
   const matches: StoryItem[] = [];
   for (const p of part === undefined ? STORY_PARTS : [part as StoryPart]) {
     for (const item of record.of(p)) {
+      if (place !== null && !(item.fields.place_ref === place.ref || nameKey(typeof item.fields.place === "string" ? item.fields.place : "") === place.words)) continue;
       if (args.open === true && (CLOSABLE[item.part] !== true || item.closedBy !== null)) continue;
       if (args.hot === true && !(item.part === "thread" && item.fields.hot === true)) continue;
       if (args.due === true) {

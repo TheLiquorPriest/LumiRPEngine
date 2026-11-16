@@ -6,6 +6,7 @@ arguments:
   from: "Only what lies from this message on, by number."
   to: "Only what lies up to this message, by number."
   who: "Only what involves this name; for a scene, who is on stage."
+  place: "Only what happened or lies at this place: its name or id; a place of the world is matched by its ref, any other by its words."
   open: "true: only chapters, scenes, threads and futures not closed."
   due: "true: only futures whose time has come."
   hot: "true: only the threads you hold hot."

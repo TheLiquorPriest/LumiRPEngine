@@ -11,9 +11,9 @@ import { placeOfEntity } from "../engine/scope";
 import { resolveTarget, typedSpan } from "../engine/time";
 import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
-import { clockRecorded, JoinedTurnError, type Store, StoreInputError } from "../store";
+import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type TreeView } from "../store";
 import { storyAt } from "./path";
-import { type Span, type StoryItem, StoryRecord } from "./record";
+import { nameKey, type Span, type StoryItem, StoryRecord } from "./record";
 
 /** Every fixed value of the story tools, each a setting with this default. */
 export const STORY_DEFAULTS = Object.freeze({
@@ -222,4 +222,27 @@ export function namesOf(item: StoryItem): string[] {
   const who = item.fields.who;
   if (typeof who === "string") return [who];
   return Array.isArray(who) ? who.filter((w): w is string => typeof w === "string") : [];
+}
+
+/** The tree a call reads: at its turn (a job's own, with its own writes on top), or at the chat's head when it has none. */
+export function treeOf(call: StoryCall): TreeView {
+  const user = call.deps.store.user(call.scope.user);
+  return call.scope.turn === undefined ? user.view(call.scope.chat) : user.viewFor(call.scope.turn, call.agent.job ?? null);
+}
+
+/**
+ * The ref of the place that `words` name in a world's tree: its id, its ref, or its name (spaces and case ignored), when exactly one
+ * place goes by it; null when none does or several do; undefined when the tree holds no place at all, so there is nothing to tie words to.
+ */
+export function placeRefOf(view: TreeView, words: string): string | null | undefined {
+  const asked = nameKey(words);
+  const places: string[] = [];
+  const queue = [...view.childrenOf("world")];
+  for (let ref = queue.shift(); ref !== undefined; ref = queue.shift()) {
+    if (ref.startsWith("place:")) places.push(ref);
+    queue.push(...view.childrenOf(ref));
+  }
+  if (places.length === 0) return undefined;
+  const same = places.filter((ref) => ref === words.trim() || ref === `place:${words.trim()}` || nameKey(view.nameOf(ref) ?? "") === asked);
+  return same.length === 1 ? (same[0] ?? null) : null;
 }

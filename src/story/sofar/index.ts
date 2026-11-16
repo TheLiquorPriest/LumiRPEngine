@@ -8,25 +8,36 @@
 // are the shipped prompt part `.prompts/story-so-far.md`, filled in here.
 
 import type { TemplatePart } from "rp-harness";
+import type { JsonObject } from "../../shared/json";
 
-/** A summary from the record, with the messages it stands for (places in the chat, both ends kept). */
+/** A summary from the record, with the messages it stands for (places in the chat, both ends kept). `gone`: its messages are not in the chat any more, so it stands where the turn that wrote it does. */
 export interface StorySummary {
   from: number;
   to: number;
   text: string;
+  gone?: boolean;
 }
 
-/** A beat from the record, with the message it came from. */
+/** A beat from the record, with the message it came from, and the last message of the stretch it stands for where it stands for more than one. `gone`: as for a summary. */
 export interface StoryBeat {
   at: number;
+  to?: number;
   text: string;
+  gone?: boolean;
 }
 
-/** What the record hands over: the summaries that have been written, and the beats. Order does not matter. */
+/** A stretch of the chat, both ends kept. */
+export interface StoryStretch {
+  from: number;
+  to: number;
+}
+
+/** What the record hands over: the summaries that have been written, the beats, and the stretches of the chat it covers nowhere. Order does not matter. */
 export interface StoryRecordParts {
   chapters: readonly StorySummary[];
   scenes: readonly StorySummary[];
   beats: readonly StoryBeat[];
+  uncovered?: readonly StoryStretch[];
 }
 
 export interface StorySoFarSettings {
@@ -71,12 +82,15 @@ export interface StorySoFar {
 
 /** The fields of `.prompts/story-so-far.md`: each part is one of these, oldest first. */
 export type StorySoFarPart =
-  | { chapter: { from: number; to: number; text: string } }
-  | { scene: { from: number; to: number; text: string } }
-  | { beats: { from: number; to: number; lines: { at: number; text: string }[] } }
+  | { chapter: { from: number; to: number; text: string; gone?: true } }
+  | { scene: { from: number; to: number; text: string; gone?: true } }
+  | { beats: { from: number; to: number; lines: { at: number; through?: number; text: string; gone?: true }[] } }
+  | { gap: StoryStretch }
   | { left_out: StorySoFarLeftOut };
 
-type Item = { kind: "scene"; summary: StorySummary; from: number; to: number } | { kind: "beat"; beat: StoryBeat; from: number; to: number };
+type Item = { kind: "scene"; summary: StorySummary; from: number; to: number } | { kind: "beat"; beat: StoryBeat; from: number; to: number } | { kind: "gap"; from: number; to: number };
+
+const RANK = { scene: 0, gap: 1, beat: 2 } as const;
 
 /** A stretch that goes into the block, or out of it, as one: a summarized chapter with all it holds, or one item outside any. */
 interface Unit {
@@ -113,13 +127,16 @@ function unitsOf(record: StoryRecordParts, keptFrom: number): Unit[] {
     }
     return last >= 0 && (reach[last] ?? Number.NEGATIVE_INFINITY) >= at;
   };
-  const beats = record.beats.filter((b) => b.at < keptFrom && !told(b.at));
+  const beats = record.beats.filter((b) => (b.at < keptFrom || b.gone === true) && !told(b.at));
+  // The stretches the record covers nowhere, as far as the window leaves them out.
+  const gaps = (record.uncovered ?? []).filter((g) => g.from < keptFrom).map((g): StoryStretch => ({ from: g.from, to: Math.min(g.to, keptFrom - 1) }));
   const items: Item[] = [
     ...scenes.map((summary): Item => ({ kind: "scene", summary, from: summary.from, to: summary.to })),
-    ...beats.map((beat): Item => ({ kind: "beat", beat, from: beat.at, to: beat.at })),
-  ].sort((a, b) => a.from - b.from || (a.kind === b.kind ? 0 : a.kind === "scene" ? -1 : 1));
+    ...beats.map((beat): Item => ({ kind: "beat", beat, from: beat.at, to: Math.max(beat.at, beat.to ?? beat.at) })),
+    ...gaps.map((g): Item => ({ kind: "gap", from: g.from, to: g.to })),
+  ].sort((a, b) => a.from - b.from || RANK[a.kind] - RANK[b.kind]);
 
-  const chapters = record.chapters.filter((c) => c.from < keptFrom).sort((a, b) => a.from - b.from);
+  const chapters = record.chapters.filter((c) => c.from < keptFrom || c.gone === true).sort((a, b) => a.from - b.from);
   const units: Unit[] = chapters.map((chapter) => ({ chapter, items: [], from: chapter.from, to: chapter.to }));
   // An item goes to the first chapter, by where chapters start, that holds where it starts. Items come in that order,
   // so a chapter that ends before one item ends before every later one.
@@ -141,7 +158,7 @@ function partsOf(units: readonly Unit[], levels: readonly Level[]): { parts: Sto
     const last = parts[parts.length - 1];
     if (level === 0) {
       const scenes = unit.items.filter((it) => it.kind === "scene").length;
-      const counted = { chapters: unit.chapter === null ? 0 : 1, scenes, beats: unit.items.length - scenes };
+      const counted = { chapters: unit.chapter === null ? 0 : 1, scenes, beats: unit.items.filter((it) => it.kind === "beat").length };
       if (last !== undefined && "left_out" in last) {
         const run = last.left_out;
         run.from = Math.min(run.from, unit.from);
@@ -157,16 +174,21 @@ function partsOf(units: readonly Unit[], levels: readonly Level[]): { parts: Sto
       return;
     }
     if (unit.chapter !== null && (level === 1 || unit.items.length === 0)) {
-      parts.push({ chapter: { from: unit.chapter.from, to: unit.chapter.to, text: unit.chapter.text } });
+      parts.push({ chapter: { from: unit.chapter.from, to: unit.chapter.to, text: unit.chapter.text, ...(unit.chapter.gone === true ? { gone: true as const } : {}) } });
       return;
     }
     for (const item of unit.items) {
       const tail = parts[parts.length - 1];
-      if (item.kind === "scene") parts.push({ scene: { from: item.summary.from, to: item.summary.to, text: item.summary.text } });
-      else if (tail !== undefined && "beats" in tail) {
-        tail.beats.to = item.beat.at;
-        tail.beats.lines.push({ at: item.beat.at, text: item.beat.text });
-      } else parts.push({ beats: { from: item.beat.at, to: item.beat.at, lines: [{ at: item.beat.at, text: item.beat.text }] } });
+      if (item.kind === "scene") parts.push({ scene: { from: item.summary.from, to: item.summary.to, text: item.summary.text, ...(item.summary.gone === true ? { gone: true as const } : {}) } });
+      else if (item.kind === "gap") parts.push({ gap: { from: item.from, to: item.to } });
+      else {
+        // A line's own end is `through`, a name no part around it holds, so the layout never reads the part's `to` for it.
+        const line = { at: item.beat.at, ...(item.to > item.beat.at ? { through: item.to } : {}), text: item.beat.text, ...(item.beat.gone === true ? { gone: true as const } : {}) };
+        if (tail !== undefined && "beats" in tail) {
+          tail.beats.to = Math.max(tail.beats.to, item.to);
+          tail.beats.lines.push(line);
+        } else parts.push({ beats: { from: item.beat.at, to: item.to, lines: [line] } });
+      }
     }
   });
   return { parts, leftOut };
@@ -204,7 +226,8 @@ export function storySoFar(input: StorySoFarInput): StorySoFar {
     let laid = laidOut.get(key);
     if (laid === undefined) {
       const { parts, leftOut } = partsOf(units, levels);
-      const text = input.layout.render({ parts }).text;
+      // The parts are JSON by construction: a mark that does not hold is left out of its part, never set to nothing.
+      const text = input.layout.render({ parts } as unknown as JsonObject).text;
       laid = { text, tokens: input.tokens(text), leftOut };
       laidOut.set(key, laid);
     }
