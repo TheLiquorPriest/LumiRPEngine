@@ -24,6 +24,7 @@ import { bunSocket } from "../adapter/lumiverse/socket";
 import type { AdapterDeps, LumiverseDoor } from "../adapter/lumiverse/mount";
 import { agentsArea } from "../agents/area";
 import { buildArea } from "../build/area";
+import { worldsArea } from "../worlds/area";
 import { castArea } from "../cast/area";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
@@ -120,13 +121,10 @@ export function compose(options: ComposeOptions = {}): Composition {
       return await now.list(user, chat);
     },
   };
-  // Build, whose world store is the one write path to his worlds: a proposal for a world's entry is approved through it, once Build is mounted.
-  const build = buildArea(() => ({ store: made().store, guidance: RPE_GUIDANCE }));
-  const worldWrites = (): LoreWorldWrites => {
-    const store = build.worlds();
-    if (store === null) throw new Error("Build is not mounted yet, so his worlds cannot be written.");
-    return worldEntryWrites(store);
-  };
+  // His worlds, kept by the worlds area: Build edits them through its service, and a proposal for a world's entry is approved through its store, once mounted.
+  const worlds = worldsArea(() => ({ store: made().store }));
+  const build = buildArea(() => ({ store: made().store, worlds: worlds.service(), guidance: RPE_GUIDANCE }));
+  const worldWrites = (): LoreWorldWrites => worldEntryWrites(worlds.service().worlds);
   // The agents' suggestions about lore, kept as proposals and written to his books only on his approval: one queue, made when first asked for.
   let proposed: LoreProposals | null = null;
   const proposals = (): LoreProposals =>
@@ -286,6 +284,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       window: (user, chat) => made().lane.windowOf(user, chat),
       soFar: (user, chat) => made().lane.soFarAt(user, chat),
     })),
+    worlds,
     build,
     playArea(() => ({
       store: made().store,
