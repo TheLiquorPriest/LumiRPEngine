@@ -64,7 +64,8 @@ export function chipsOf(db: Database, s: UserStore, user: string, chat: string):
   for (const row of carried) {
     if (!onPath.has(row.turn)) continue;
     const chip = carriedChip(JSON.parse(row.data));
-    if (chip === null || chip.kind === "keep_report") continue;
+    // A carried review card and Keep report are shown where RPE keeps them (the turn's card, the Migration page), not under the reply.
+    if (chip === null || chip.kind === "keep_report" || chip.kind === "review") continue;
     out.push({ ...chip, id: row.id, actions: [], expires: "never" });
   }
   const waiting = db
