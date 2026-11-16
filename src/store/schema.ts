@@ -196,6 +196,20 @@ CREATE TRIGGER snapshot_parts_unnamed AFTER DELETE ON snapshot BEGIN
 END;
 `,
   },
+  {
+    version: 7,
+    // A fold mark for each chat (plan §6.3 l.616, 619): a write voids the states held for the chats whose path runs through what it
+    // writes, and no other chat's. Marks only ever stand for states held in memory, so the user's marks before this go with it.
+    sql: `
+DROP TABLE fold_mark;
+CREATE TABLE fold_mark (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  mark TEXT NOT NULL,
+  PRIMARY KEY (user, chat)
+);
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

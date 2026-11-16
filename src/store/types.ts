@@ -203,6 +203,11 @@ export interface PathReport {
   branched: { from: string; at: string | null } | null;
   /** What no longer applies on the head's path, when a stretch is rebased. */
   notApplied: NotApplied[];
+  /**
+   * Where following a message's branch links back stopped at `store.branchHops`: the chat and message it reached, and how many links it
+   * followed; the turns beyond are not found. Absent when none stopped.
+   */
+  branchStopped?: { chat: string; message: string; hops: number }[];
 }
 
 /** An agent's own line on a level of the tree. */

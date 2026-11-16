@@ -41,6 +41,8 @@ export interface ViewOptions {
   ownOnly: readonly string[];
   /** How many names of note a reflection gives. */
   notable: number;
+  /** How many places up the tree a place's values are inherited from (`store.placeDepth`). */
+  placeDepth: number;
 }
 
 /** What a level of the tree is: the world, a place, an entity, or one of the two levels the tree adds (the groups, and what is elsewhere). */
@@ -196,6 +198,8 @@ export class TreeView {
   /** Agents' own lines by the level each names now. */
   private readonly notes = new Map<string, string>();
   private readonly ctx: ReadContext;
+  /** While a query runs: each place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
+  private stopsSeen: Map<string, { place: string; at: string }> | null = null;
 
   constructor(
     readonly env: FoldEnv,
@@ -413,9 +417,14 @@ export class TreeView {
   /** A place's own fields and those of the places above it, nearest first. */
   private placeChain(place: string | null): { id: string; name: string; fields: Record<string, JsonValue> }[] {
     const out: { id: string; name: string; fields: Record<string, JsonValue> }[] = [];
-    for (let id = place ?? undefined, guard = 0; id !== undefined && guard < 64; guard++) {
+    for (let id = place ?? undefined, depth = 0; id !== undefined; depth++) {
       const p = own(this.doc.places, id);
       if (!p || out.some((x) => x.id === id)) break;
+      // As many places up as `store.placeDepth` says; a query that met the end says where the chain above stopped.
+      if (depth >= this.options.placeDepth) {
+        if (place !== null) this.stopsSeen?.set(place, { place, at: id });
+        break;
+      }
       out.push({ id, name: p.name, fields: p.fields });
       id = p.parent;
     }
@@ -611,6 +620,7 @@ export class TreeView {
     if (ref === null) return null;
     const max = depth === "full" ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(depth));
     const lines: ViewLine[] = [];
+    this.stopsSeen = new Map();
     readPass(() => {
       const walk = (r: string, level: number): void => {
         const node = this.nodes.get(r) as Node;
@@ -621,6 +631,9 @@ export class TreeView {
       };
       walk(ref, 0);
     });
+    const stops = this.stopsSeen;
+    this.stopsSeen = null;
+    for (const s of stops.values()) lines.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.placeDepth" } });
     for (const cut of walkCuts(this.state.world, this.doc)) lines.push({ kind: "walk_stopped", depth: 0, fields: { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit } });
     return { lines };
   }
