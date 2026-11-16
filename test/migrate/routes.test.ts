@@ -30,14 +30,14 @@ describe("the Migration page's route", () => {
   });
 
   const ask = async (db: Database, user: string): Promise<unknown> => {
-    const [page] = migrateRoutes({ db, identifier: IDENT });
+    const [page] = migrateRoutes({ db, identifier: IDENT, globalConfig: join(data, "RPE-global.yml") });
     if (page === undefined) throw new Error("no route");
     return await callRoute(page, { user });
   };
 
   test("is one read for a page, and answers what the page's data function gives for that user", async () => {
-    const routes = migrateRoutes({ db: new Database(":memory:"), identifier: IDENT });
-    expect(routes.map((r) => [r.method, r.path, r.access])).toEqual([["GET", MIGRATION_PATH, "page"]]);
+    const routes = migrateRoutes({ db: new Database(":memory:"), identifier: IDENT, globalConfig: join(data, "RPE-global.yml") });
+    expect(routes.map((r) => [r.method, r.path, r.access])).toEqual([["GET", MIGRATION_PATH, "page"], ["GET", "/api/v1/chats/:chat/carried", "page"], ["GET", "/api/v1/chats/:chat/turns/:turn/carried", "page"]]);
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
       const answered = await ask(db, USER);
@@ -54,6 +54,26 @@ describe("the Migration page's route", () => {
       const answered = (await ask(db, "someone-else")) as { report: unknown; chats: unknown[] };
       expect(answered.report).toBeNull();
       expect(answered.chats).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a migrated chat's carried turns are listed, and a turn gives each text its record names word for word, with the engine that played it", async () => {
+    const db = new Database(join(data, "rpe.db"), { readonly: true });
+    try {
+      const [, list, one] = migrateRoutes({ db, identifier: IDENT, globalConfig: join(data, "RPE-global.yml") });
+      if (list === undefined || one === undefined) throw new Error("no route");
+      const chat = db.query<{ chat: string }, []>("SELECT chat FROM imported_record WHERE record LIKE '%\"texts\"%' LIMIT 1").get()?.chat;
+      if (chat === undefined) throw new Error("no carried turn holds a text");
+      const page = (await callRoute(list, { user: USER, params: { chat }, query: { limit: "1" } })) as { turns: { turn: string; texts: number }[]; total: number; more: boolean };
+      expect(page.turns.length).toBe(1);
+      expect(page.total).toBeGreaterThan(0);
+      const withTexts = db.query<{ turn: string }, [string]>("SELECT turn FROM imported_record WHERE chat = ? AND record LIKE '%\"texts\"%' LIMIT 1").get(chat)?.turn ?? "";
+      const shown = (await callRoute(one, { user: USER, params: { chat, turn: withTexts } })) as { engine: string | null; texts: { part: string; path: string; text: string | null }[] };
+      expect(shown.engine).not.toBeNull();
+      expect(shown.texts.length).toBeGreaterThan(0);
+      expect(shown.texts.some((t) => t.text !== null)).toBe(true);
     } finally {
       db.close();
     }

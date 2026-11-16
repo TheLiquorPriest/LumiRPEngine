@@ -3,6 +3,7 @@
 // names. The run reads them from `RPE-global.yml` at the global level, as every setting of RPE is read,
 // when it starts.
 
+import { diskTexts, readConfig } from "../app/config-read";
 import { isMapping, type Mapping, type Setting } from "../app/setting-list";
 
 /** The fates he may give a thing: kept in the backup and listed (`archived`), or kept word for word as what it belongs to (`attached`). Carrying one needs a reader in code (§22 l.2117), which is not his to give. */
@@ -37,7 +38,38 @@ export const MIGRATE_SETTINGS: readonly Setting[] = [
     about: "A file the migration finds that no row of its table names fails the report by name. A row given here (its path, what becomes of it, and your line saying what it is) is counted, kept in the backup and listed in the report as yours; nothing is carried that has no reader.",
     effect: "use",
   },
+  {
+    key: "migration.page",
+    default: 20,
+    takes: { type: "whole", least: 1, most: 1000 },
+    levels: ["global"],
+    perConnection: false,
+    name: "Carried turns per page",
+    about: "How many of a migrated chat's turns a page of its list of carried turns holds, each with what the old engine recorded of it.",
+    effect: "use",
+  },
+  {
+    key: "migration.pageMost",
+    default: 200,
+    takes: { type: "whole", least: 1, most: 5000 },
+    levels: ["global"],
+    perConnection: false,
+    name: "Most carried turns a page may ask for",
+    about: "The most carried turns one request for a chat's list may ask for with `limit`; a larger ask is given this many.",
+    effect: "use",
+  },
 ];
+
+/** How many carried turns a page of a chat's list holds, and the most one request may ask for, as the global config says now. */
+export async function carriedPage(globalConfig: string): Promise<{ size: number; most: number }> {
+  const read = readConfig(await diskTexts([{ level: "global", file: globalConfig, disk: globalConfig }]), null, MIGRATE_SETTINGS);
+  const number = (key: string): number => {
+    const def = MIGRATE_SETTINGS.find((s) => s.key === key);
+    const value = def === undefined ? undefined : read.read(def).value;
+    return typeof value === "number" ? value : 0;
+  };
+  return { size: number("migration.page"), most: number("migration.pageMost") };
+}
 
 /** The rows a config holds, from the records the reader gives for the setting (`ConfigRead.read`): each entry that is a whole row. */
 export function ownerRowsOf(value: unknown): OwnerRow[] {

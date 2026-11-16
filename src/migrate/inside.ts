@@ -83,12 +83,47 @@ export function countLedgers(ledgers: readonly (MessageLedger | null)[], tally: 
   for (const ledger of ledgers) if (ledger) for (const rec of Object.values(ledger.swipes)) countRecord(rec, tally);
 }
 
-/** The blob hashes a record names (`RecSession`'s and LumiAH's `TurnRecord`'s), by store. */
-export function recordBlobs(rec: Rec): { agents: string[]; harness: string[] } {
-  const agents = [rec.session?.segment, rec.session?.summary, rec.session?.archived, rec.session?.transcript].filter((h): h is string => typeof h === "string");
+/** One text a record names, by the part of the record that names it and the store it is in. */
+export interface RecordPart {
+  /** Where the record names it: `session.segment`, `harness.transcript`, `harness.kept[0]`, `harness.jobs[<id>].report`. */
+  part: string;
+  store: "agents" | "harness";
+  hash: string;
+}
+
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** The blobs a record names (`RecSession`'s and LumiAH's `TurnRecord`'s: its session, summary and transcript, the segments it keeps and its jobs' reports), each by the part that names it. */
+export function recordParts(rec: Rec): RecordPart[] {
+  const out: RecordPart[] = [];
+  const session = rec.session;
+  for (const part of ["segment", "summary", "archived", "transcript"] as const) {
+    const hash = session?.[part];
+    if (typeof hash === "string") out.push({ part: `session.${part}`, store: "agents", hash });
+  }
   const record = rec.harness?.record;
-  const harness = isRecord(record) ? [record.segment, record.transcript, record.summary, record.workspace].filter((h): h is string => typeof h === "string" && /^[0-9a-f]{64}$/.test(h)) : [];
-  return { agents, harness };
+  if (isRecord(record)) {
+    for (const part of ["segment", "transcript", "summary", "workspace"] as const) {
+      const hash = record[part];
+      if (typeof hash === "string" && SHA256.test(hash)) out.push({ part: `harness.${part}`, store: "harness", hash });
+    }
+    const kept = record.kept;
+    if (Array.isArray(kept)) kept.forEach((hash, i) => typeof hash === "string" && SHA256.test(hash) && out.push({ part: `harness.kept[${i}]`, store: "harness", hash }));
+    const jobs = record.jobs;
+    if (Array.isArray(jobs)) for (const job of jobs) if (isRecord(job) && typeof job.report === "string" && SHA256.test(job.report)) out.push({ part: `harness.jobs[${typeof job.id === "string" ? job.id : ""}].report`, store: "harness", hash: job.report });
+  }
+  return out;
+}
+
+/** Where a blob is in the user's storage. */
+export function blobPath(store: "agents" | "harness", hash: string): string {
+  return store === "agents" ? `agents/blobs/${hash}` : `harness/blobs/${hash.slice(0, 2)}/${hash}`;
+}
+
+/** The blob hashes a record names, by store. */
+export function recordBlobs(rec: Rec): { agents: string[]; harness: string[] } {
+  const parts = recordParts(rec);
+  return { agents: parts.filter((p) => p.store === "agents").map((p) => p.hash), harness: parts.filter((p) => p.store === "harness").map((p) => p.hash) };
 }
 
 /**

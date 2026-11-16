@@ -5,6 +5,7 @@
 // carries as they are: their fields are named here, each as JSON, and the page shows them as the report's
 // printed text. The parts the page reads are held to the migration's own types.
 
+import type { OldListed, OldRecord } from "./old-records";
 import { type Exactly, type Holds, type Infer, shape } from "../app";
 import type { WorldsSeeded } from "../build/seed";
 import type { MigrationPage, PageChat, Waiting } from "./page";
@@ -122,6 +123,40 @@ export const migrationReply = shape.named(
 );
 export type MigrationShown = Infer<typeof migrationReply>;
 
+const oldText = shape.named(
+  "CarriedText",
+  "One text an old engine's record of a reply names, kept word for word beside its turn: the part of the record that names it, where it was in today's user storage, and its words (null where today's clean-up had removed it).",
+  shape.object({ part: T, path: T, text: nullable(T) }),
+);
+
+const oldEngine = shape.oneOf("classic", "agents", "harness");
+
+export const carriedTurnReply = shape.named(
+  "CarriedTurnReply",
+  "What an old engine recorded on a reply the migration carried, for the reply's Turn page: the engine that played the chat, each part of the record by name, every text it names, why the reply stood with no turn played, and each line where it says something against its turn.",
+  shape.object({
+    turn: shape.turnId(),
+    chat: T,
+    message: T,
+    swipe: N,
+    engine: field(nullable(oldEngine), "The engine that played the chat as today's build had it; null where it was not read."),
+    fields: field(shape.list(shape.object({ name: T, value: json })), "The record's parts that hold what an old engine recorded (session, agents, memoryNext, finalEdits, finalParts, prompts, diag, harness), by name, as they were."),
+    texts: shape.list(oldText),
+    unplayed: field(nullable(T), "Why the reply stood with no turn played (stopped, failed, restarted); null where a turn was played."),
+    departures: field(shape.list(T), "Each line where the reply says something against what its turn decided."),
+  }),
+);
+
+export const carriedTurnsReply = shape.named(
+  "CarriedTurnsReply",
+  "A page of a migrated chat's carried turns, in the order the run imported them: each tied to its message and swipe, with the engine that played it, why it stood unplayed, how many departures and texts it holds. `more` says whether turns follow.",
+  shape.object({
+    turns: shape.list(shape.object({ turn: shape.turnId(), message: T, swipe: N, engine: nullable(oldEngine), unplayed: nullable(T), departures: N, texts: N })),
+    total: N,
+    more: shape.yesNo(),
+  }),
+);
+
 // The parts the page reads, held to the migration's own types.
 type WorldsMirrored = Holds<Exactly<Infer<typeof worldsInBuild>, WorldsSeeded>>;
 type OutcomeMirrored = Holds<Exactly<Infer<typeof outcome>, PageChat["outcome"]>>;
@@ -132,3 +167,7 @@ type DifferenceMirrored = Holds<Exactly<Infer<typeof difference>, PageChat["chec
 type ReportFieldsMirrored = Holds<Exactly<keyof NonNullable<MigrationShown["report"]>, keyof MigrationReport>>;
 /** The checks above hold, and are read by no one. */
 export type Mirrors = [WorldsMirrored, OutcomeMirrored, WaitingMirrored, BackupMirrored, GoingMirrored, DifferenceMirrored, ReportFieldsMirrored];
+type CarriedMirrored = Holds<Exactly<Infer<typeof carriedTurnReply>, OldRecord>>;
+type CarriedListMirrored = Holds<Exactly<Infer<typeof carriedTurnsReply>["turns"][number], OldListed>>;
+/** The checks of the carried turns' routes, read by no one. */
+export type CarriedMirrors = [CarriedMirrored, CarriedListMirrored];

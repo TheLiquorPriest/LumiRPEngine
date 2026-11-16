@@ -9,6 +9,7 @@
 // (`NO_PLACE_YET`) is kept in the backup only.
 
 import type { Database } from "bun:sqlite";
+import { attachTexts } from "./old-records";
 import { modelsPort } from "../app/connections";
 import type { DataPaths } from "../app/config";
 import { SecretsFile } from "../app/secrets";
@@ -124,6 +125,8 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   };
   const minds = await carryMinds({ db, store, s, chats, areas: turnAreas, people, now, fate });
   const story = db.transaction(() => carryStory({ db, store, s, chats, people, now, inside: new Map(report.chats.map((c) => [c.chatId, c.story])), fate }))();
+  // What the old engines recorded on each carried reply, with every text it names, word for word beside its turn (read after the minds and the story took the records as they were).
+  const old = await attachTexts(today, db, user, chats);
   const [mindsFound, storyFound] = (["mind-files", "story-record"] as const).map((row) => report.rows.find((r) => r.row === row)?.inside?.count ?? 0);
   const files = new Set(minds.characters.flatMap((c) => c.files.map((f) => `${c.character}\u0000${f}`))).size;
   const characters = new Set(minds.characters.map((c) => c.character)).size;
@@ -137,6 +140,7 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     "model-choices": `Listed for you: ${settings.lumiverseConnections.length} setting(s) name a connection that lives in Lumiverse, which RPE can't use; that work uses RPE's default connection until you pick one of RPE's`,
     "runtime-settings": "Listed by name with your settings: RPE's config has no setting for the runtime's tuning or memory limit yet; its update choice is RPE's update.restart, carried with them",
     loopback: "At the swap (rpe up): the hash of its key among RPE's provider keys, RPE answering at today's address under today's model name; the connection in Lumiverse is left as it is",
+    sessions: `In the migration's imported_record, beside each carried turn and read-only, with the words of every text its record names word for word: ${old.texts} text(s) on ${old.turns} turn(s)${old.missing.length > 0 ? `; ${old.missing.length} text(s) today's clean-up had removed are listed by path as not read` : ""}`,
     // What this run carried, against what the rehearsal found, and where the rest is: each part named.
     "mind-files": [
       `On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): ${minds.versions} version(s) of ${files} file(s) of ${characters} character(s), ${minds.versions - minds.unlisted} of the ${mindsFound} found in today's areas${minds.unlisted > 0 ? ` and ${minds.unlisted} read from the area a turn's record names, which no area document of its chat holds` : ""}`,

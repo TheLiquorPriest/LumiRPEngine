@@ -13,6 +13,6 @@ export function migrateArea(takes: MigrateTakes): Area {
     name: "migrate",
     tables: [{ area: "migrate", migrations: MIGRATE_TABLES }],
     settings: MIGRATE_SETTINGS,
-    mount: (at) => at.routes.add("migration", migrateRoutes({ db: at.db, identifier: takes.identifier })),
+    mount: (at) => at.routes.add("migration", migrateRoutes({ db: at.db, identifier: takes.identifier, globalConfig: at.paths.globalConfig })),
   };
 }
