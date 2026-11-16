@@ -115,13 +115,9 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       const recorded = (): number => mine().length;
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
-        let count = 0;
-        for (let i = turns.length - 1; i >= 0; i--) {
-          const t = turns[i];
-          if (t !== undefined && user.changes(t).some((c) => c.lane === "engine")) break;
-          count++;
-        }
-        out["turns.since.engine.change"] = { count };
+        // One read along the line, however long: the newest turn on it that recorded an engine-lane change.
+        const newest = turns.length === 0 ? null : user.newestWith(turns, "engine");
+        out["turns.since.engine.change"] = { count: newest === null ? turns.length : turns.length - 1 - turns.lastIndexOf(newest) };
       }
       if (names.includes("turn.recorded")) out["turn.recorded"] = { count: recorded() };
       if (names.includes("unsourced.writes")) out["unsourced.writes"] = { count: mine().filter((c) => c.source === null).length };

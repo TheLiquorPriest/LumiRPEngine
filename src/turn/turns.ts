@@ -778,6 +778,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (user !== null) for (const { chat } of this.#d.runs.chats(user)) this.#project(user, chat);
   }
 
+    // What changed while the socket was closed may have moved any chat's path: each chat played on RPE has its projection book checked.
+    const user = this.#d.owner();
+    if (user !== null) for (const { chat } of this.#d.runs.chats(user)) this.#project(user, chat);
+  }
+
   /**
    * What was missed while the event socket was closed is found again at each chat's next intake, by the comparison and by `#catchUp`. A
    * generation whose end was missed is no longer known to run: what is heard next is taken as heard outside one.
