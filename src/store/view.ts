@@ -34,6 +34,7 @@ import { isOpened } from "../packs/economy/core/journal";
 import { openerOf } from "../packs/economy/core/model";
 import { cashAccount } from "../packs/economy/core/pay";
 import { regionOf } from "../packs/weather/core/index";
+import { whereOf } from "../packs/space/core/grid-play";
 import { BLANK_REVISION, clockRecorded } from "./blank";
 import { standing } from "./facts";
 import type { FoldEnv } from "./fold";
@@ -600,6 +601,10 @@ export class TreeView {
       const e = this.state.world.entities[node.id] as EntityState;
       lines.push({ key: "tier", value: tierLabel(doc, e.tier), ...(marks.tier ? { mark: marks.tier } : {}) });
       if (e.life !== undefined) lines.push({ key: "life", value: e.life, ...(marks.life ? { mark: marks.life } : {}) });
+      // Where play said it is within its place besides its square, which the place's map shows: a named zone, words, or both.
+      const where = whereOf(this.state.world, node.id);
+      if (where?.zone !== undefined) lines.push({ key: "zone", value: where.zone, from: { system: "space" } });
+      if (where?.words !== undefined) lines.push({ key: "position", value: where.words, from: { system: "space" } });
       if (node.category === "person" || node.category === "group") {
         const cash = optionalQuery(this.ctx, "economy.carried_cash")?.(this.ctx, node.id) ?? null;
         if (cash !== null) lines.push({ key: "coin", value: formatMoney(cash, doc.currency), from: { system: "economy" }, ...this.coinMark(node.id) });
