@@ -33,6 +33,7 @@ want_entity: a person or a thing
 want_person: a person
 want_thing: a thing
 want_holder: someone or something that holds things
+want_in: a place, or someone or something that holds things
 want_place: a place
 want_point: a place, a person or a thing
 want_track: a quest
@@ -51,6 +52,7 @@ wants_key: a field name
 wants_point: world, a place, or someone or something
 wants_change: a number other than 0
 wants_list: a list of places, people and things, by name or id
+wants_names: a name, or a list of names, each a text
 wants_delta: a whole number, below 0 for wear and damage, above 0 for mending
 wants_qty: a whole number of at least 1
 wants_specs: a list of { label, value }
@@ -72,7 +74,6 @@ already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
 placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
-made_unrecorded: Operation {{n}} ({{op}}): nothing recorded went by {{name}}, so it was made as a thing, {{made}}.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
 against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).
