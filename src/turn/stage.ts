@@ -83,12 +83,12 @@ export function stageAt(store: Store, user: string, chat: string, turn: string |
 
 /**
  * The stretches of a chat RPE names for agents (`ChatInfo.ranges`): `scene`, from the first message of the scene the story record
- * holds open at the chat's head to the end of the chat's path as RPE last compared it. None while no scene is open, or for a scene
- * whose start the record cannot place.
+ * holds open at `turn`'s own reading (the chat's head for null) to the end of that line's messages, so a swipe's scene is the one its
+ * parent left and never one the replaced attempt opened. None while no scene is open, or for a scene whose start the record cannot place.
  */
-export function namedStretches(store: Store, user: string, chat: string): Record<string, HistoryRange> {
+export function namedStretches(store: Store, user: string, chat: string, turn: string | null): Record<string, HistoryRange> {
   if (store.user(user).chat(chat) === null) return {};
-  const record = StoryRecord.read(store, user, storyAt(store.user(user), chat, null));
+  const record = StoryRecord.read(store, user, storyAt(store.user(user), chat, turn));
   const scene = record.current("scene");
   const from = scene === null || scene.closedBy !== null ? null : record.startOf(scene);
   return from === null ? {} : { scene: { from, to: record.at.messages.length } };

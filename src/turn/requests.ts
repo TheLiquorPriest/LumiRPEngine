@@ -138,15 +138,18 @@ export class Requests {
   }
 
   /**
-   * What a turn is told: one that answers a new message (`attempts` null), what waits in the chat; a swipe or a regenerate, which answers
-   * the message its earlier attempts answered (`attempts`), what they were told.
+   * What a turn is told: one that answers a new message (`attempts` null), what waits in the chat but a swipe's mode, which waits for the
+   * next swipe; a swipe or a regenerate, which answers the message its earlier attempts answered (`attempts`), what they were told but
+   * the mode of an earlier swipe, and the swipe's mode that waits, asked for this attempt.
    */
   forTurn(user: string, chat: string, attempts: readonly string[] | null): RequestRecord[] {
-    if (attempts === null) return this.waiting(user, chat);
-    return this.db
+    const waiting = this.waiting(user, chat);
+    if (attempts === null) return waiting.filter((r) => r.kind !== "swipe");
+    const told = this.db
       .query<RequestRow, [string, string, string]>("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.turn IN (SELECT value FROM json_each(?)) ORDER BY r.at, r.rowid")
       .all(user, chat, JSON.stringify(attempts))
       .map(recordOf);
+    return [...told.filter((r) => r.kind !== "swipe"), ...waiting.filter((r) => r.kind === "swipe")];
   }
 
   /** Keeps what a turn was told with it, inside the caller's write: each request that waits, or whose turn no longer stands, is now its. */

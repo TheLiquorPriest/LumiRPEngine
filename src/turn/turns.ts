@@ -23,6 +23,7 @@ import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
+import type { Feedback } from "../adapter/lumiverse/feedback";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
 import type { Cut, PromptNotice } from "../adapter/lumiverse/receipt";
@@ -42,14 +43,14 @@ import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecord
 import { storyAt } from "../story/path";
 import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
 import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
-import { type Attempt, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
+import { type Attempt, type AttemptFeedback, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
 import { ownerEditsBefore } from "./owner-changes";
 import type { OffstageSettings } from "../shared/offstage";
 import type { Writes } from "./kv";
 import type { TurnPrompts } from "./prompt";
 import type { TurnMarks } from "./marks";
-import type { PanelAsk, Requests } from "./requests";
+import type { ComposerAsk, PanelAsk, Requests } from "./requests";
 import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
 import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs";
@@ -84,6 +85,9 @@ export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState
 
 /** The briefing's header field that names the cast's views of the characters on stage the Author is given (`castPresentViews`). */
 export const ON_STAGE_VIEWS = "on_stage_views";
+
+/** What a turn keeps of the feedback typed in Lumiverse's regenerate dialog, in `turn_told`: a `Feedback`, the newest the word that stands. */
+export const FEEDBACK_TOLD = "feedback";
 
 /**
  * A text's tokens as the model layer counts a prompt (`ModelsApi.count`): at RPH's characters to a token for the chat
@@ -657,16 +661,23 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, named ?? begun, found)]);
         run.notGiven = notGiven;
         // What he asked for beside his words (`requests.ts`): a turn that answers a new message is told what waits; a swipe or a regenerate,
-        // what the earlier attempts at its message were told; a continue is told nothing again. A panel's tap is one line of `asked`, in
-        // the notices part's words.
+        // what the earlier attempts at its message were told and the swipe's mode that waits; a continue is told nothing again. Each is one
+        // line of `asked`, in the notices part's words: a panel's tap, a depth asked for the message, a swipe's mode with what he typed.
         const asking = tag.kind === "continue" ? [] : this.#d.requests.forTurn(user, chat, replaced === null ? null : earlierAttempts);
+        const said = (line: string | undefined): string[] => (line === undefined || line.trim() === "" ? [] : [line]);
         const asked = asking.flatMap((r) => {
-          if (r.kind !== "panel") return [];
+          if (r.kind !== "panel") {
+            const { choice, words: typed } = r.asked as ComposerAsk;
+            return said(lines(notices)?.line(r.kind === "depth" ? "depth_asked" : "swipe_asked", { [r.kind === "depth" ? "depth" : "mode"]: choice, ...(typed !== null && typed.trim() !== "" ? { words: typed } : {}) }));
+          }
           const tap = r.asked as PanelAsk;
           const values = Object.entries(tap.values).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
-          const line = lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}) });
-          return line === undefined || line.trim() === "" ? [] : [line];
+          return said(lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}) }));
         });
+        // The feedback he typed in Lumiverse's regenerate dialog, where the door told it apart for certain (R-198): a line of `asked` too,
+        // before the Author's first call. Not told apart, it stands where Lumiverse put it in the prompt, and no line comes from it.
+        const typed = tagged.feedback;
+        if (typed?.found === "separated") asked.push(...said(lines(notices)?.line("feedback_typed", { text: typed.text, position: typed.position })));
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
@@ -695,11 +706,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // `turn`), as the migration keeps a carried turn's. A continue's held turn is a row of its own: joined to the turn it extended,
         // that turn keeps its own.
         const timed = storyTime !== null;
-        if (told.length > 0 || asking.length > 0 || timed) {
+        // The feedback is kept with this attempt, so the attempts after it carry it with the one it replaced.
+        const kept = typed !== undefined && typed.found !== "none";
+        if (told.length > 0 || asking.length > 0 || timed || kept) {
           await this.#d.writes.run((db) => {
             if (told.length > 0) this.#d.since.told(db, user, (named ?? begun).id, told);
             this.#d.requests.tell(db, user, asking.map((r) => r.id), begun.id);
             if (timed) store.updateTurn(begun.id, { storyTime });
+            if (kept) db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, begun.id, FEEDBACK_TOLD, JSON.stringify(typed), this.#d.clock.now()]);
           }, "keeping what a turn was told and its story time");
           if (asking.length > 0) this.#d.requests.changed(user, chat);
         }
@@ -712,7 +726,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           const sent = tagged.lore[i]?.text;
           return sent === undefined ? entry : { ...entry, text: sent };
         });
-        ask = { scope, guidance, tagged, messages, request, loreMap, lore, attempts: replaced === null ? [] : this.#attempts(user, chat, replaced), cast, received };
+        ask = { scope, guidance, tagged, messages, request, loreMap, lore, attempts: replaced === null ? [] : this.#attempts(user, chat, replaced, begun.id), cast, received };
         lap("kept");
       } catch (error) {
         // The run never began: it ends here, failed, so the turn after it does not wait for it. The throw tells Lumiverse.
@@ -788,6 +802,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     else if (change.kind === "message-swiped") work = this.#atRest(user, change.chat);
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
     else if (change.kind === "lore-activated") work = this.#loreHeard(user, change.chat, change.lore);
+    // Lumiverse's breakdown of a saved reply names the feedback typed in its regenerate dialog: its word governs what the turn kept.
+    else if (change.kind === "feedback-told") work = this.#feedbackTold(user, change.generation, change.feedback);
     // A chat deleted in Lumiverse: its folders are kept as a deleted chat's, and its turns stay in the store.
     else if (change.kind === "chat-deleted") work = this.#d.chats.deleted(user, change.chat, this.#d.clock.now()).then(() => this.#d.forgetChat(user, change.chat));
     if (work === null) return;
@@ -796,6 +812,27 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     void done.finally(() => this.#recording.delete(done));
     // A change of the path (a delete, a swipe, an edit, a branch) brings the projection book into step with it.
     if (change.kind === "message-deleted" || change.kind === "message-edited" || change.kind === "message-swiped" || change.kind === "chat-forked") void done.then(() => this.#project(user, change.chat));
+  }
+
+  /**
+   * The breakdown's word on the feedback typed in Lumiverse's regenerate dialog for a regeneration's generation (R-198): where it
+   * disagrees with what the turn kept (told apart at its start, not told apart, or nothing kept), the turn keeps the breakdown's, which
+   * the attempts after it carry, and the correction is told on the turn (`feedback-corrected`) for the Turn page. A generation of no
+   * regeneration of RPE's is passed over.
+   */
+  async #feedbackTold(user: string, generation: string, said: { position: "system" | "user"; text: string } | null): Promise<void> {
+    const run = this.#d.runs.byGeneration(user, generation);
+    if (run === null || (run.kind !== "swipe" && run.kind !== "regenerate")) return;
+    const was = this.#feedbackOf(user, run.turn);
+    const now: Feedback = said === null ? { found: "none" } : { found: "separated", position: said.position, text: said.text };
+    if (was !== null && JSON.stringify(was) === JSON.stringify(now)) return;
+    // Nothing kept and none typed is no correction.
+    if (was === null && now.found === "none") return;
+    const at = this.#d.clock.now();
+    await this.#d.writes.run((db) => {
+      db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, FEEDBACK_TOLD, JSON.stringify(now), at]);
+      db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, "feedback-corrected", JSON.stringify({ was, now }), at]);
+    }, "keeping the breakdown's word on a regeneration's feedback");
   }
 
   /** The projection book (`lore.projection`) brought up to date for the chat, beside everything else: a failure is logged and touches no turn. */
@@ -1338,15 +1375,41 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     return entry === undefined || turn === null ? null : { turn, node: entry.node };
   }
 
-  /** The earlier attempts at a message a swipe or regenerate writes again, oldest first: each one's reply as kept, and its intent record. */
-  #attempts(user: string, chat: string, message: string): Attempt[] {
-    return this.#d.store
+  /**
+   * The earlier attempts at a message a swipe or regenerate writes again (every attempt but `now`, the turn writing it), oldest first: each
+   * one's reply as kept, its intent record, and what he said with the attempt that replaced it (the next one, or `now`).
+   */
+  #attempts(user: string, chat: string, message: string, now: string): Attempt[] {
+    const earlier = this.#d.store
       .user(user)
       .swipes(chat, message)
-      .map((t) => {
-        const run = this.#d.runs.reply(user, t.id);
-        return { turn: t.id, intent: t.intent, reply: run === null ? null : (run.saved ?? run.base + run.reply) };
-      });
+      .filter((t) => t.id !== now);
+    return earlier.map((t, i) => {
+      const run = this.#d.runs.reply(user, t.id);
+      return { turn: t.id, intent: t.intent, reply: run === null ? null : (run.saved ?? run.base + run.reply), feedback: this.#saidWith(user, earlier[i + 1]?.id ?? now) };
+    });
+  }
+
+  /**
+   * What he said with an attempt that replaced another: the composer's swipe mode and his words kept with it, and the feedback kept with
+   * it from Lumiverse's regenerate dialog (as told apart at its start, or as the breakdown corrected it after its reply).
+   */
+  #saidWith(user: string, turn: string): AttemptFeedback {
+    const swipe = this.#d.requests.ofTurn(user, turn, null).find((r) => r.kind === "swipe");
+    const asked = swipe === undefined ? null : (swipe.asked as ComposerAsk);
+    const typed = this.#feedbackOf(user, turn);
+    return {
+      mode: asked?.choice ?? null,
+      words: asked?.words ?? null,
+      typed: typed?.found === "separated" ? typed.text : null,
+      unseparated: typed?.found === "unseparated" ? { position: typed.position } : null,
+    };
+  }
+
+  /** The feedback from Lumiverse's regenerate dialog kept with a turn, the newest word on it; null where none was kept. */
+  #feedbackOf(user: string, turn: string): Feedback | null {
+    const row = this.#d.store.db.query<{ body: string }, [string, string, string]>("SELECT body FROM turn_told WHERE user = ? AND turn = ? AND kind = ? ORDER BY id DESC LIMIT 1").get(user, turn, FEEDBACK_TOLD);
+    return row === null ? null : (JSON.parse(row.body) as Feedback);
   }
 
   /**

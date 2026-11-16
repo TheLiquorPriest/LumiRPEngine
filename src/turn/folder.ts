@@ -34,11 +34,42 @@ export const TURN_FILES = {
 /** The prompt parts the files are laid out by. */
 export const FOLDER_PARTS = { lore: "turn-lore", attempt: "turn-attempt" } as const;
 
-/** An earlier attempt at the reply a swipe or regenerate writes again: its reply where RPE kept it, and its intent record where it wrote one. */
+/**
+ * An earlier attempt at the reply a swipe or regenerate writes again: its reply where RPE kept it, its intent record where it wrote
+ * one, and what the player said with the swipe or regenerate that replaced it.
+ */
 export interface Attempt {
   turn: string;
   reply: string | null;
   intent: string | null;
+  feedback: AttemptFeedback;
+}
+
+/**
+ * What the player said with the swipe or regenerate that replaced an attempt: the mode he asked of the composer's swipe and the words he
+ * typed with it; the feedback he typed in Lumiverse's regenerate dialog where it was told apart; and, where it could not be, where it
+ * stands if he typed any (inside his last line, or a message at the prompt's end; null where that is not known).
+ */
+export interface AttemptFeedback {
+  mode: string | null;
+  words: string | null;
+  typed: string | null;
+  unseparated: { position: "system" | "user" | null } | null;
+}
+
+/** An attempt's fields for its part: the feedback as `feedback` (his words, then what he typed in the dialog), `mode`, and where unseparated feedback stands. */
+function attemptFields(a: Attempt, n: number): Fields {
+  const { feedback: f } = a;
+  const said = [f.words, f.typed].filter((t): t is string => t !== null && t.trim() !== "").join("\n\n");
+  return {
+    n,
+    turn: a.turn,
+    ...(a.intent !== null ? { intent: a.intent } : {}),
+    ...(a.reply !== null ? { reply: a.reply } : {}),
+    ...(said !== "" ? { feedback: said } : {}),
+    ...(f.mode !== null ? { mode: f.mode } : {}),
+    ...(f.unseparated !== null ? { unseparated: true, ...(f.unseparated.position !== null ? { position: f.unseparated.position } : {}) } : {}),
+  };
 }
 
 /** A character on stage at the turn, by the name the scene gives, and the cast's views of them that hold anything, each laid out by its part. */
@@ -143,7 +174,7 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
     write(TURN_FILES.lore, lorePart?.render(loreFields(ask, loreMap)).text),
     write(TURN_FILES.worldState, ask.request.briefing.find((b) => b.name === "world-state")?.text),
     ...ask.attempts.map((a, i) =>
-      write(`${TURN_FILES.attempts}attempt-${i + 1}.md`, attemptPart?.render({ n: i + 1, turn: a.turn, ...(a.intent !== null ? { intent: a.intent } : {}), ...(a.reply !== null ? { reply: a.reply } : {}) }).text),
+      write(`${TURN_FILES.attempts}attempt-${i + 1}.md`, attemptPart?.render(attemptFields(a, i + 1)).text),
     ),
     ...cast.flatMap((c) => {
       const named = castFolderName(c.name);

@@ -64,10 +64,15 @@ export function turnArea(takes: TurnTakes): TurnArea {
   const owner = (): string => app?.config.lumiverse.user ?? "";
   /** A chat's settings as its levels' config files set them, read outside any session. */
   const chatSettings = (chat: string) => turnSettings(made().files, { user: owner(), chat, session: NO_SESSION }, made().env.log);
-  /** The messages the story record covers at the chat's head, for the window's hold: none for a chat RPE has not played, which has no record. */
-  const covered = (chat: string): ReadonlySet<string> => {
+  /**
+   * The messages the story record covers, for the window's hold: read along `turn`'s own line (the turn the coming one follows, so a
+   * swipe's hold is the state its parent left and never the replaced attempt's records), or at the chat's head with `turn` undefined;
+   * none at the world's start (`turn` null), or for a chat RPE has not played, which has no record.
+   */
+  const covered = (chat: string, turn?: string | null): ReadonlySet<string> => {
     const { store } = made();
-    return store.user(owner()).chat(chat) === null ? new Set() : storyCoverage({ store, user: owner(), chat, turn: null }).covered;
+    if (turn === null || store.user(owner()).chat(chat) === null) return new Set();
+    return storyCoverage({ store, user: owner(), chat, turn: turn ?? null }).covered;
   };
   /** The user's books as the lore reads them: through the door's reads, once it is set up for a Lumiverse. */
   const booksNow = (): LoreBooks => {
@@ -99,10 +104,11 @@ export function turnArea(takes: TurnTakes): TurnArea {
       door: {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
         changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
-        // The history window on the chat's settings: the first history message the prompt keeps; with the window off the chat's path is never read.
+        // The history window on the chat's settings: the first history message the prompt keeps; with the window off the chat's path is
+        // never read. Its hold reads the record the coming turn starts from: the turn it follows.
         window: async (ask) => {
           const { window } = await chatSettings(ask.chat);
-          return window.size === null ? null : historyWindow(await ask.path(), window, covered(ask.chat)).first;
+          return window.size === null ? null : historyWindow(await ask.path(), window, covered(ask.chat, (await ask.follows())?.turn ?? null)).first;
         },
         // Where a turn not yet begun will start on the question's path, from RPE's own store alone (R-5): the hidden marks it holds laid on
         // the path. A long fold runs on a worker (`afar`), so the question never stalls other chats.
@@ -111,7 +117,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
           return await store.afar(() => store.user(owner()).turnStart(ask.chat, ask.path, ask.point));
         },
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
-        ranges: async (chat) => namedStretches(made().store, owner(), chat),
+        ranges: async (chat, turn) => namedStretches(made().store, owner(), chat, turn),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
         // `chat_search` by meaning: the chat's messages in the index of vectors (`src/search/meaning.ts`), on his embedding connection.
         meaning: (chat, text, limit, docs) => made().meaning.nearest(owner(), chat, "chat", text, limit, docs),
