@@ -156,7 +156,7 @@ want_organization: an organization
 life_takes: Operation {{n}} ({{op}}): a life change needs a state (state), one of {{states}}, or someone to tell about it (tell), a list of people by name or id; or both.
 removed_life: Operation {{n}} ({{op}}): {{who}} is out of the world, and took the state all the same.
 pov_removed: Operation {{n}} ({{op}}): {{who}} is the player's character, and was removed all the same.
-pov_agent: Operation {{n}} ({{op}}): {{who}} is the player's character, and was made an agent all the same; whether they have a mind of their own stays the owner's setting.
+pov_agent: Operation {{n}} ({{op}}): {{who}} is the player's character, and was made an agent all the same; whether they have a mind of their own stays the player's setting.
 single_class: Operation {{n}} ({{op}}): {{problem}} They were recorded all the same.
 related_to_self: Operation {{n}} ({{op}}): {{who}} was related to themselves by {{relation}}; it was recorded all the same.
 relation_kind: Operation {{n}} ({{op}}): {{relation}} joins a {{takes}} at its {{end}} end and {{who}} is not one; it was recorded all the same.
