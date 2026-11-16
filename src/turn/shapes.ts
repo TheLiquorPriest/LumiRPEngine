@@ -334,6 +334,8 @@ export const turnReply = shape.named(
     changes: field(shape.list(shape.object({ lane: T, changes: shape.list(changeShown) })), "Its changes by lane, each lane's in order."),
     told: toldShown,
     carried: field(nullable(shape.object({ message: T, swipe: N, record: shape.json() })), "For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other."),
+    card: field(T, "The route of the turn's review card, where each of its changes is reviewed and undone."),
+    quests: field(shape.list(shape.object({ id: T, name: T, kind: T })), "The open quests the turn touched: opened, called a stage of, or wrote anything of."),
   }),
 );
 

@@ -17,8 +17,11 @@
 
 import type { AgentRef, Scope, TraceRecord, Usage } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
+import { marksOf } from "../quests/record";
 import { isRecord, type JsonValue } from "../shared/json";
 import { type ChangeRow, JoinedTurnError, type NodeView, type ValuesShown } from "../store";
+import { storyAt } from "../story/path";
+import { StoryRecord } from "../story/record";
 import { toldOf, toldRows } from "./events";
 import { TURN_FILES } from "./folder";
 import type { Turns } from "./lane";
@@ -287,7 +290,19 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       changes: changesByLane(user, r.turn),
       told: toldTo(user, { turn: r.turn }),
       carried: carriedOf(user, r.turn),
+      card: `/api/v1/chats/${encodeURIComponent(r.chat)}/turns/${encodeURIComponent(r.turn)}/card`,
+      quests: questsTouched(user, r.chat, r.turn),
     };
+  };
+
+  /** The open quests a turn touched, read along its own line: one it opened, called a stage of or wrote anything of. */
+  const questsTouched = (user: string, chat: string, turn: string): { id: string; name: string; kind: string }[] => {
+    const { quests: slice } = StoryRecord.read(turns.store, user, storyAt(turns.store.user(user), chat, turn));
+    return Object.values(slice.quests).flatMap((q) => {
+      const marks = marksOf(slice, q.id);
+      const touched = q.opened === turn || q.touched === turn || marks.touched === turn || q.rows.some((row) => row.turn === turn);
+      return marks.closed === null && touched ? [{ id: q.id, name: q.name, kind: q.kind }] : [];
+    });
   };
 
   const runQuery = {

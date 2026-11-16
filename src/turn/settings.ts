@@ -167,7 +167,7 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   storyNewest: "directive",
   gapSnippet: 240,
   // Appendix D.1: "Write permission, each lane: Auto"; the external tier has its own, with the same three values.
-  permissions: { story: "auto", engine: "auto", external: "auto" },
+  permissions: { story: "auto", engine: "auto", external: "auto" } satisfies TurnSettings["permissions"],
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
