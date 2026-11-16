@@ -12,18 +12,28 @@ import { CastRecord, chatLine, findCharacter } from "../../src/cast/record";
 import { CAST_STORE_AREA } from "../../src/cast";
 import { importedText } from "../../src/cast/imported";
 import { createRegistry } from "../../src/engine/registry-impl";
+import type { MigrationPageInput } from "../../src/migrate/page";
+import { Rehearsals } from "../../src/migrate/rehearse-job";
 import type { MigrationReport } from "../../src/migrate/report";
 import { ALL_PACKS } from "../../src/packs/index";
 import { openStore, type Store, storedWorlds, type UserStore } from "../../src/store";
 import { STORY_STORE_AREA } from "../../src/story";
 import { NOTES_FOLDER, TreeChats } from "../../src/tree";
-import { USER } from "./fixture";
+import { IDENT, USER, type Fixture } from "./fixture";
 import { readable } from "./tree";
 
 const registry = createRegistry(ALL_PACKS);
 
 /** The store each user's store was opened by, so a look at a character reads through it. */
 const opened = new WeakMap<UserStore, Store>();
+
+/** The Migration page's input over RPE's database `db`, with no rehearsal and the runtime's folders as the fixture has them. */
+export function pageInput(db: Database, fixture: Pick<Fixture, "sources">): MigrationPageInput {
+  const none = async (): Promise<never> => {
+    throw new Error("no rehearsal here");
+  };
+  return { db, user: USER, identifier: IDENT, rehearsals: new Rehearsals(none, Date.now), database: null, runtime: fixture.sources.runtime ?? { configDir: "", dataDir: "" } };
+}
 
 /** RPE's database in the data folder `data` and the user's store in it, its worlds the store's own, for one look. */
 export function look<T>(data: string, at: (db: Database, s: UserStore, store: Store) => T): T {

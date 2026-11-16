@@ -1611,61 +1611,116 @@ export interface MessageStretch {
   to: number;
 }
 
-/** One chat as the last run left it: what came of it and why it was not imported; the turns imported of its own; the messages it shares with the chat it was made from; its check against today's fold (matched at the head and at how many swipes, where it differed, and where its swipes were placed); and what the run carried of it. */
-export interface MigrationChatRow {
-  chat: string;
-  outcome: ChatImportOutcome;
-  why: string | null;
-  turns: number;
-  shares: { chat: string; messages: number } | null;
-  check: { matched: { head: boolean; swipes: number; of: number }; differences: FoldDifference[]; placed: { own: number; shown: number; lost: number } };
-  /** What the run that imported it carried of it, over its whole path (a document the migration kept as JSON); null for a chat no run of this build imported. */
+/** One chat of a report in full: as listed, what today's readers found of it (a document the migration kept as JSON), and what the last real run that imported it carried of it. */
+export interface MigrationChatReply {
+  chat: MigrationChatShown;
+  read: JsonValue | null;
   carried: JsonValue | null;
 }
 
-/** The Migration page's data, in one read: the last real run's report and its text as the run printed it; each chat's check, what came of it and what was carried of it; the backup with its checksum, and whether it is still there; what is waiting on the user; the steps of going back with the permissions the previous build asks for; and what today's build put in Lumiverse. */
+/** One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and whether it is still off RPE. */
+export interface MigrationChatShown {
+  chat: string;
+  name: string | null;
+  engine: "classic" | "agents" | "harness" | null;
+  turns: number;
+  replies: number;
+  journal: "read" | "none" | "unreadable" | "malformed" | "from another run of this chat" | "not opened" | null;
+  waiting: { questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean } | null;
+  outcome: ChatImportOutcome | null;
+  why: string | null;
+  imported: number;
+  shares: { chat: string; messages: number } | null;
+  check: { matched: { head: boolean; swipes: number; of: number }; placed: { own: number; shown: number; lost: number }; differences: number } | null;
+  offRpe: boolean;
+}
+
+/** A page of a report's chats, in the order the report holds them. */
+export interface MigrationChatsReply {
+  items: MigrationChatShown[];
+  next: string | null;
+}
+
+/** A page of where a chat's state differed from today's fold, in the order the run checked it. */
+export interface MigrationDifferencesReply {
+  items: FoldDifference[];
+  next: string | null;
+}
+
+/** A report whole, to be saved as a file: the name to save it under, the report (a document the migration made, as JSON: counts, paths and checksums, never content) and its printed text. */
+export interface MigrationFileReply {
+  name: string;
+  report: JsonValue;
+  text: string;
+}
+
+/** One thing a report found: where it is, its path, its size and SHA-256, its row and fate (null: found, not classified), and the report's note on it. */
+export interface MigrationItemShown {
+  where: "user storage" | "extension storage" | "runtime" | "Lumiverse database";
+  path: string;
+  bytes: number;
+  sha256: string;
+  row: string | null;
+  fate: "carried" | "attached" | "archived" | null;
+  note?: string;
+}
+
+/** A page of the things a report found, in the order it found them. */
+export interface MigrationItemsReply {
+  items: MigrationItemShown[];
+  next: string | null;
+}
+
+/** The Migration page's summary: the last real run and the page's rehearsal in brief; the folders a rehearsal reads; the backup with its checksum and whether it is still there; what is waiting on the user; the swap's steps; going back's steps with the permissions the previous build asks for; and what today's build put in Lumiverse. Before any run as after. */
 export interface MigrationReply {
-  /** Null before any run. */
-  report: MigrationReportShown | null;
-  text: string | null;
-  chats: MigrationChatRow[];
+  /** Null before any real run. */
+  run: MigrationSummaryShown | null;
+  rehearsal: RehearsalShown;
+  /** The folders a rehearsal from the page reads: the last run's, else Lumiverse's database's folder as RPE's config names it and today's runtime's own. */
+  sources: { lumiverse: string | null; runtime: { configDir: string; dataDir: string } | null };
   /** The backup the last run took before it wrote anything. */
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
   /** In the order the plan lists it: GUIDANCE.md first. */
   waiting: WaitingOnUser[];
+  swap: string[];
   goingBack: { steps: string[]; permissions: string[] };
   /** What today's build put in Lumiverse, left as it is until the user says they will not go back. */
   lumiverse: JsonValue | null;
 }
 
-/** The last real run's report as the run printed it, whole (counts and checksums, never content): every field is the migration's own document, carried as JSON. */
-export interface MigrationReportShown {
-  format: JsonValue;
-  at: JsonValue;
-  mode: JsonValue;
-  layout: JsonValue;
-  database: JsonValue;
-  rows: JsonValue;
-  items: JsonValue;
-  notClassified: JsonValue;
-  chats: JsonValue;
-  unreadable: JsonValue;
-  unsent: JsonValue;
-  runtime?: JsonValue;
-  given?: JsonValue;
-  standIn: JsonValue;
-  lumiverse: JsonValue;
-  disk: JsonValue;
-  underWay: JsonValue;
-  imports: JsonValue;
-  backup: JsonValue;
-  landed: JsonValue;
-  carried: JsonValue;
-  worldsInStore: JsonValue;
-  identifier?: JsonValue;
-  offRpe?: JsonValue;
-  changes: JsonValue;
-  refusals: JsonValue;
+/** A row of the plan's table as a report counts it: what it holds, how it is found, its things' ends (found, carried, attached, archived, kept in the backup only), those with no place and why, their bytes and digest, what it counts inside other rows' things (a document the migration kept as JSON), and after a real run where its things now are. */
+export interface MigrationRowShown {
+  row: string;
+  what: string;
+  found: "own" | "inside" | "not read";
+  why?: string;
+  count: { found: number; carried: number; attached: number; archived: number; backup: number };
+  stranded: { count: number; why: string[] } | null;
+  bytes: number;
+  digest: string;
+  inside: JsonValue | null;
+  landed: string | null;
+}
+
+/** A page of a report's rows, in the plan's order. */
+export interface MigrationRowsReply {
+  items: MigrationRowShown[];
+  next: string | null;
+}
+
+/** A migration report in brief: a rehearsal or the real run, when it read today's data, why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took. */
+export interface MigrationSummaryShown {
+  mode: "rehearsal" | "real run";
+  at: string;
+  refusals: string[];
+  counts: { rows: number; chats: number; items: number; notClassified: number; unreadable: number; differences: number; offRpe: number };
+  disk: { backup: number; import: number; total: number; free: number | null };
+  backup: { path: string; bytes: number; sha256: string } | null;
+}
+
+/** A report's printed text, as the rehearsal or the run printed it. */
+export interface MigrationTextReply {
+  text: string;
 }
 
 /** A list of carried mind files, bounded as the entries are. */
@@ -2182,6 +2237,20 @@ export interface RegisteredTool {
   from: "rph" | "host" | "owner";
 }
 
+/** Where a rehearsal from the page reads today's data: Lumiverse's data folder (the one holding lumiverse.db), and today's runtime's two folders, or none where the server runs no runtime of today's build. Left out: the folders the page's summary gives. */
+export interface RehearsalAsk {
+  lumiverse?: string;
+  runtime?: { configDir: string; dataDir: string } | null;
+}
+
+/** The rehearsal started from the page, once read: its report in brief, which the page then reads a page at a time. */
+export interface RehearsalReply {
+  summary: MigrationSummaryShown;
+}
+
+/** The rehearsal started from the page, held in memory by the running RPE: none since it started, under way since a time (ms), read (in brief), or failed with why. */
+export type RehearsalShown = { state: "none" } | { state: "running"; since: number } | { state: "ready"; summary: MigrationSummaryShown } | { state: "failed"; why: string };
+
 /** The reply's release: whose text, in which form, the file for a file released, and its length. */
 export interface Release {
   by: AgentRef;
@@ -2253,12 +2322,12 @@ export interface RequestReply {
   tools: { name: string; file?: string }[];
 }
 
-/** Something he asked for beside his words: a panel's tap, or a composer control (depth, swipe), with what was asked as data, whether it was played now as a message of its own, the turn it is kept with (null while it waits) and when it was made. */
+/** Something he asked for beside his words: a panel's tap, or a composer control (depth, swipe), with what was asked as data, whether it was played now as a message of its own, the turn it is kept with (null while it waits) and when it was made. A turn's asked lines also give the feedback typed in Lumiverse's regenerate dialog, as kind `feedback`. */
 export interface RequestShown {
   id: string;
   chat: string;
-  kind: "panel" | "depth" | "swipe";
-  asked: { action: string | null; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now" | "command"; what: string; on: string | null } | { choice: string; words: string | null };
+  kind: "panel" | "depth" | "swipe" | "feedback";
+  asked: { action: string | null; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now" | "command"; what: string; on: string | null } | { choice: string; words: string | null } | { feedback: { text: string; at: number; settled: "start" | "confirmed" | "corrected" | "completed" } };
   /** Played now, as a message of its own, rather than with the next message. */
   played: boolean;
   /** The message it was sent as, where it was played now. */
@@ -3297,7 +3366,7 @@ export interface TurnLoreReply {
   entries: TurnLoreRow[];
 }
 
-/** An entry Lumiverse activated for a turn's prompt: its lore map id, its id and its book's id in Lumiverse, its title, and how it activated where the turn's tag says. */
+/** An entry Lumiverse activated for a turn's prompt: its lore map id, its id and its book's id in Lumiverse, its title, how it activated where the turn's tag says, and what RPE's check of the lore on receipt did to it. */
 export interface TurnLoreRow {
   /** The id the Author's lore map gives the entry: `e-` and its number. */
   id: string;
@@ -3309,6 +3378,8 @@ export interface TurnLoreRow {
   title: string;
   /** How it activated; null where the tag does not say. */
   how: LoreActivation | null;
+  /** Where the extension applied its own verdict on the secrets and RPE checked the lore on receipt: kept out of the prompt, worded otherwise, or its text not found in the prompt (so RPE's verdict was not applied to it); null where the check left it as it was, or nothing was checked. */
+  receipt: "kept-out" | "reworded" | "not-found" | null;
 }
 
 /** A mark a turn carries apart from its run's status: interrupted (RPE restarted while a run of it went on), saved otherwise (what Lumiverse saved is not what was released, beyond the prefill in front and a continue's join), or standing on a message of the player's he edited, or inserted before it, since it was played; with that message, and when the mark was set. */
@@ -3381,6 +3452,8 @@ export interface TurnReply {
   todos: { agent: string; open: string[] }[];
   /** Its changes by lane, each lane's in order. */
   changes: { lane: string; changes: TurnChange[] }[];
+  /** The Unsettled list: each change of the turn, and each placed after it before the next turn, that carries a report, did not apply, has no source, or is an invention with no gap check or consent. */
+  unsettled: ({ change: TurnChange; lane: string; turn: string | null; about: string[]; why: ("reported" | "not_applied" | "unsourced" | "unchecked")[] })[];
   told: TurnTold;
   /** For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other. */
   carried: { message: string; swipe: number; record: JsonValue } | null;
@@ -5224,7 +5297,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The Migration page's data: the last run's report and its printed text, each chat's check, the backup, what waits on the user, and the steps of going back. */
+  /** The Migration page's summary: the last real run and the page's rehearsal in brief, the folders a rehearsal reads, the backup, what waits on the user, the swap's steps and going back's with the permissions by name; before any run as after. */
   "GET /api/v1/migration": {
     params: Record<string, never>;
     query: Record<string, never>;
@@ -5232,6 +5305,86 @@ export interface ApiRoutes {
     reply: MigrationReply;
     paged: false;
     long: false;
+    joined: false;
+  };
+  /** A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and whether it is still off RPE. `q` keeps those whose name or id holds it. */
+  "GET /api/v1/migration/:of/chats": {
+    params: { of: string };
+    query: { q?: string; limit?: number; cursor?: string };
+    body: undefined;
+    reply: MigrationChatsReply;
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** One chat of a report in full: as the chats' list gives it, what today's readers found of it, and what the last real run that imported it carried of it. */
+  "GET /api/v1/migration/:of/chats/:chat": {
+    params: { of: string; chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: MigrationChatReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A page of where a chat's state differed from today's fold, in the order the run checked it: at a swipe or at the head, the values that differ by path, and whether today's state there is kept as the turn's start. */
+  "GET /api/v1/migration/:of/chats/:chat/differences": {
+    params: { of: string; chat: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: MigrationDifferencesReply;
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** A report whole, with its printed text and the name to save it under, for the page to save as a file: counts, paths and checksums, never content. */
+  "GET /api/v1/migration/:of/file": {
+    params: { of: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: MigrationFileReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A page of the things a report found, in the order it found them: where each is, its path, size and SHA-256, its row and fate. `q` keeps those whose place, path, row or note holds it; `row` those of one row (`none`: found, not classified). */
+  "GET /api/v1/migration/:of/items": {
+    params: { of: string };
+    query: { q?: string; row?: string; limit?: number; cursor?: string };
+    body: undefined;
+    reply: MigrationItemsReply;
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** A page of a report's rows (`run`: the last real run's; `rehearsal`: the page's), in the plan's order: each row's things counted to their ends, those with no place and why, and after a real run where they now are. */
+  "GET /api/v1/migration/:of/rows": {
+    params: { of: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: MigrationRowsReply;
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** A report's printed text, as the rehearsal or the run printed it. */
+  "GET /api/v1/migration/:of/text": {
+    params: { of: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: MigrationTextReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Starts a rehearsal over today's data, read-only as `rpe migrate --rehearse` reads it, and answers its report in brief once read; the running RPE holds the report in memory beside the last real run's, and nothing of it is written, RPE's database included. One under way is refused. */
+  "POST /api/v1/migration/rehearsals": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: RehearsalAsk;
+    reply: RehearsalReply;
+    paged: false;
+    long: true;
     joined: false;
   };
   /** Every rule of a chat's stack, in force or not and why; with no chat, those of the shipped and global levels, as a new chat takes them. */

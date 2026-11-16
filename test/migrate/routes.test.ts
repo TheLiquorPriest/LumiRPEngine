@@ -1,19 +1,22 @@
-// The Migration page's route after a real run on the migration fixture: it answers, for the user RPE
-// belongs to, exactly what the page's data function gives, and for a database no run has touched it
-// answers a page with no report.
+// The Migration page's routes after a real run on the migration fixture: the summary answers what the page's data function
+// gives for the user RPE belongs to, and before any run (another user) the steps and the permissions all the same; and a
+// migrated chat's carried turns are listed and given.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { configOf, dataPaths } from "../../src/app/config";
+import { PREVIOUS_PERMISSIONS } from "../../src/migrate/going-back";
 import { migrate } from "../../src/migrate/migrate";
 import { migrationPage } from "../../src/migrate/page";
 import { MIGRATION_PATH, migrateRoutes } from "../../src/migrate/routes";
 import { buildFixture, IDENT, STRAY, USER, type Fixture } from "./fixture";
+import { pageInput } from "./look";
 import { TREE as tree } from "./tree";
 import { callRoute } from "../app/call";
 
-describe("the Migration page's route", () => {
+describe("the Migration page's routes", () => {
   let fixture: Fixture;
   let data: string;
 
@@ -29,31 +32,23 @@ describe("the Migration page's route", () => {
     await fixture.remove();
   });
 
-  const ask = async (db: Database, user: string): Promise<unknown> => {
-    const [page] = migrateRoutes({ db, identifier: IDENT, globalConfig: join(data, "RPE-global.yml") });
-    if (page === undefined) throw new Error("no route");
-    return await callRoute(page, { user });
+  const routesOver = (db: Database) =>
+    migrateRoutes({ db, identifier: IDENT, paths: dataPaths(data), config: configOf({ port: 0, lumiverse: { url: null, user: USER } }, {}, "the test's config"), rehearsals: pageInput(db, fixture).rehearsals, env: {}, home: "/nowhere" });
+  const routeAt = (db: Database, method: string, path: string) => {
+    const found = routesOver(db).find((r) => r.method === method && r.path === path);
+    if (found === undefined) throw new Error(`no route ${method} ${path}`);
+    return found;
   };
 
-  test("is one read for a page, and answers what the page's data function gives for that user", async () => {
-    const routes = migrateRoutes({ db: new Database(":memory:"), identifier: IDENT, globalConfig: join(data, "RPE-global.yml") });
-    expect(routes.map((r) => [r.method, r.path, r.access])).toEqual([["GET", MIGRATION_PATH, "page"], ["GET", "/api/v1/chats/:chat/carried", "page"], ["GET", "/api/v1/chats/:chat/turns/:turn/carried", "page"]]);
+  test("the summary answers what the page's data function gives; another user is answered no run, with the steps and the permissions", async () => {
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
-      const answered = await ask(db, USER);
-      expect(answered).toEqual(migrationPage({ db, user: USER, identifier: IDENT }));
-      expect((answered as { report: unknown }).report).not.toBeNull();
-    } finally {
-      db.close();
-    }
-  });
-
-  test("another user is answered a page with no report and no chats", async () => {
-    const db = new Database(join(data, "rpe.db"), { readonly: true });
-    try {
-      const answered = (await ask(db, "someone-else")) as { report: unknown; chats: unknown[] };
-      expect(answered.report).toBeNull();
-      expect(answered.chats).toEqual([]);
+      const answered = (await callRoute(routeAt(db, "GET", MIGRATION_PATH), { user: USER })) as { run: unknown };
+      expect(answered.run).toEqual(migrationPage(pageInput(db, fixture)).run);
+      const other = (await callRoute(routeAt(db, "GET", MIGRATION_PATH), { user: "someone-else" })) as { run: unknown; swap: string[]; goingBack: { permissions: string[] } };
+      expect(other.run).toBeNull();
+      expect(other.swap.length).toBe(4);
+      expect(other.goingBack.permissions).toEqual([...PREVIOUS_PERMISSIONS]);
     } finally {
       db.close();
     }
@@ -62,8 +57,8 @@ describe("the Migration page's route", () => {
   test("a migrated chat's carried turns are listed, and a turn gives each text its record names word for word, with the engine that played it", async () => {
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
-      const [, list, one] = migrateRoutes({ db, identifier: IDENT, globalConfig: join(data, "RPE-global.yml") });
-      if (list === undefined || one === undefined) throw new Error("no route");
+      const list = routeAt(db, "GET", "/api/v1/chats/:chat/carried");
+      const one = routeAt(db, "GET", "/api/v1/chats/:chat/turns/:turn/carried");
       const chat = db.query<{ chat: string }, []>("SELECT chat FROM imported_record WHERE record LIKE '%\"texts\"%' LIMIT 1").get()?.chat;
       if (chat === undefined) throw new Error("no carried turn holds a text");
       const page = (await callRoute(list, { user: USER, params: { chat }, query: { limit: "1" } })) as { turns: { turn: string; texts: number }[]; total: number; more: boolean };

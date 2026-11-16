@@ -9,7 +9,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MIGRATED_PART, migratedChat } from "../../src/migrate/briefing";
 import { migrate } from "../../src/migrate/migrate";
-import { migrationPage } from "../../src/migrate/page";
+import { chatOne } from "../../src/migrate/page";
 import { reportText, type MigrationReport } from "../../src/migrate/report";
 import { AREAS, buildFixture, CHAT, IDENT, PEOPLE, STRAY, USER, type Fixture } from "./fixture";
 import { accounted, look, mindAt, notesOf, turnOf, versionsOf } from "./look";
@@ -112,8 +112,8 @@ describe("a turn's area as LumiAH reads it", () => {
           shipped.remove();
         }
         // The Migration page says the turns it shares, and with which chat.
-        const page = look(data, (db) => migrationPage({ db, user: USER, identifier: IDENT }));
-        expect(page.chats.find((c) => c.chat === branch)).toMatchObject({ turns: 0, shares: { chat: CHAT.harness, messages: 2 }, carried: { turns: 1, shared: { chat: CHAT.harness, turns: 1 } } });
+        const chat = look(data, (db) => chatOne({ db, user: USER }, report, new Map(), branch, "run"));
+        expect(chat).toMatchObject({ imported: 0, shares: { chat: CHAT.harness, messages: 2 }, carried: { turns: 1, shared: { chat: CHAT.harness, turns: 1 } } });
       },
     );
   });

@@ -1,7 +1,6 @@
-// The Migration page's data, as a route serves it after a real run on the migration fixture: the
-// report and its text, each chat's check and what was carried of it, the backup with its checksum and
-// whether it is still there, what waits on the user with GUIDANCE.md first, and the four steps of
-// going back with the previous build's permissions by name.
+// The Migration page's data after a real run on the migration fixture: the run in brief and each chat's check and what was
+// carried of it, the backup with its checksum and whether it is still there, what waits on the user with GUIDANCE.md first,
+// the swap's steps, and going back's four steps with the previous build's permissions by name.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
@@ -9,9 +8,10 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PREVIOUS_PERMISSIONS } from "../../src/migrate/going-back";
 import { migrate } from "../../src/migrate/migrate";
-import { type MigrationPage, migrationPage } from "../../src/migrate/page";
-import { reportText, type MigrationReport } from "../../src/migrate/report";
-import { buildFixture, CHAT, IDENT, PEOPLE, RUNTIME, STRAY, USER, type Fixture } from "./fixture";
+import { chatOne, chatsOf, type MigrationPage, migrationPage } from "../../src/migrate/page";
+import type { MigrationReport } from "../../src/migrate/report";
+import { buildFixture, CHAT, PEOPLE, RUNTIME, STRAY, USER, type Fixture } from "./fixture";
+import { pageInput } from "./look";
 import { TREE as tree } from "./tree";
 
 describe("the Migration page's data", () => {
@@ -19,14 +19,15 @@ describe("the Migration page's data", () => {
   let data: string;
   let report: MigrationReport;
 
-  const page = (): MigrationPage => {
+  const withDb = <T>(read: (db: Database) => T): T => {
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
-      return migrationPage({ db, user: USER, identifier: IDENT });
+      return read(db);
     } finally {
       db.close();
     }
   };
+  const page = (): MigrationPage => withDb((db) => migrationPage(pageInput(db, fixture)));
 
   beforeAll(async () => {
     fixture = await buildFixture("operator");
@@ -41,13 +42,12 @@ describe("the Migration page's data", () => {
     await fixture.remove();
   });
 
-  test("holds the last run's report and its text, and each chat's check with what was carried of it", () => {
+  test("holds the last run in brief, and each chat's check with what was carried of it", () => {
     const p = page();
-    expect(p.report?.at).toBe(report.at);
-    expect(p.text).toBe(reportText(report));
-    expect(p.chats.map((c) => c.chat).sort()).toEqual((report.imports ?? []).map((c) => c.chatId).sort());
-    const harness = p.chats.find((c) => c.chat === CHAT.harness);
-    expect(harness).toMatchObject({ outcome: "imported", turns: 3, check: { matched: { head: true } } });
+    expect(p.run?.at).toBe(report.at);
+    expect(chatsOf(report, new Map(), null).filter((c) => c.outcome !== null).map((c) => c.chat).sort()).toEqual((report.imports ?? []).map((c) => c.chatId).sort());
+    const harness = withDb((db) => chatOne({ db, user: USER }, report, new Map(), CHAT.harness, "run"));
+    expect(harness).toMatchObject({ outcome: "imported", imported: 3, check: { matched: { head: true } } });
     expect(harness?.carried?.characters).toEqual([
       { name: PEOPLE.ada.name, files: ["core.md", "memory.md"] },
       { name: PEOPLE.bo.name, files: ["profile.md"] },
@@ -71,8 +71,10 @@ describe("the Migration page's data", () => {
     expect(waiting).toContainEqual({ kind: "filing", chat: CHAT.harness, characters: 2, notes: true });
   });
 
-  test("gives the four steps of going back, the runtime's own install line among them, and the previous build's permissions by name", () => {
-    const back = page().goingBack;
+  test("gives the swap's steps, the four steps of going back, the runtime's own install line among them, and the previous build's permissions by name", () => {
+    const p = page();
+    expect(p.swap).toHaveLength(4);
+    const back = p.goingBack;
     expect(back.steps).toHaveLength(4);
     expect(back.steps[0]).toStartWith("1. Run rpe down:");
     expect(back.steps[3]).toContain(`up --name ${RUNTIME} --systemd`);
