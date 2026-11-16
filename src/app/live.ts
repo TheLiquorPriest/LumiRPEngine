@@ -72,6 +72,7 @@ export const ruleFiring = shape.named(
     tool: opt(T),
     matched: opt(T),
     fact: opt(shape.object({ name: T, value: factValue })),
+    reminded: opt(shape.literal("connection")),
     action: shape.oneOf("cut", "remind", "hold", "follow-up", "briefing", "call"),
     dropped: opt(T),
     then: opt(ruleThen),
@@ -172,7 +173,8 @@ const traceEvent = shape.named(
   "What RPH did; each kind's fields are the facts of it.",
   shape.union(
     shape.object({ kind: shape.literal("run_started"), run: shape.oneOf("turn", "job", "talk"), turn: opt(shape.named("TurnKind", "What a generation asks for.", shape.oneOf("new", "swipe", "regenerate", "continue", "impersonate"))), lead: T }),
-    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T) }),
+    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T), tools: opt(shape.object({ tokens: N, most: N })) }),
+    shape.object({ kind: shape.literal("tool_unheld"), tool: T, definition: T, reason: shape.oneOf("unregistered", "shadowed", "withdrawn") }),
     shape.object({ kind: shape.literal("intent_began") }),
     shape.object({ kind: shape.literal("intent"), text: T }),
     shape.object({ kind: shape.literal("call_started"), call: N, connection: T, model: T, sampling: opt(sampling), maxTokens: opt(N), messages: N, tools: N, request: opt(T), toolTokens: opt(N), openingTokens: opt(N) }),
@@ -184,6 +186,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("tool_update"), callId: T, tool: T, partial: toolResult }),
     shape.object({ kind: shape.literal("tool_ended"), callId: T, tool: T, result: toolResult, clean: shape.yesNo(), endedRun: shape.yesNo(), ms: N, permission: opt(callPermission), refused: opt(callRefusal) }),
     shape.object({ kind: shape.literal("rule_fired"), firing: ruleFiring }),
+    shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("time"), length: N }),
     shape.object({
       kind: shape.literal("hook"),
       hook: T,
@@ -201,8 +204,24 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("said"), call: N, text: T }),
     shape.object({ kind: shape.literal("released"), release }),
     shape.object({ kind: shape.literal("progress_missing"), time: N }),
-    shape.object({ kind: shape.literal("compacted"), session: T, before: N, after: N, keptTurns: N }),
-    shape.object({ kind: shape.literal("session"), session: T, change: shape.oneOf("opened", "closed", "forked", "reopened"), from: opt(T) }),
+    shape.object({
+      kind: shape.literal("compacted"),
+      session: T,
+      reason: shape.oneOf("would-not-fit", "refused", "asked", "fold"),
+      of: shape.oneOf("turns", "run"),
+      before: N,
+      after: N,
+      keptTurns: opt(N),
+    }),
+    shape.object({
+      kind: shape.literal("session"),
+      session: T,
+      change: shape.oneOf("opened", "closed", "forked", "reopened", "unreadable"),
+      from: opt(T),
+      turn: opt(T),
+      by: opt(shape.literal("user")),
+      reason: opt(T),
+    }),
     shape.object({ kind: shape.literal("job"), job: jobView }),
     shape.object({ kind: shape.literal("agent_ended"), status: shape.oneOf("done", "asked", "limit", "stopped", "failed"), limit: opt(limitHit), usage }),
     shape.object({ kind: shape.literal("run_ended"), outcome: runOutcome }),
@@ -210,8 +229,8 @@ const traceEvent = shape.named(
 );
 export const traceRecord = shape.named(
   "TraceRecord",
-  "An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it.",
-  shape.object({ seq: N, run: T, scope, at: N, agent: agentRef, parent: opt(shape.object({ agent: T, run: T, call: T })), event: traceEvent }),
+  "An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it. No agent for a record of the host's word outside any agent's work (a session opened, closed, forked or opened again by a call of the sessions API).",
+  shape.object({ seq: N, run: T, scope, at: N, agent: opt(agentRef), parent: opt(shape.object({ agent: T, run: T, call: T })), event: traceEvent }),
 );
 const traceDelta = shape.named("TraceDelta", "Text of a model call as it streams: what arrived since the last piece, never numbered.", shape.object({ run: T, agent: T, call: N, text: opt(T), thinking: opt(T), at: N }));
 type TraceMirrored = Holds<Exactly<Infer<typeof traceRecord>, TraceRecord>>;

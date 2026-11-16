@@ -188,7 +188,7 @@ const viewFields = {
   default: shape.yesNo(),
   signedIn: opt(shape.yesNo(), "For a connection that signs in: whether the sign-in holds."),
 } as const;
-const providers = { default: shape.nullable(T), providers: shape.list(shape.named("ProviderOffer", "A provider the Connections page offers, how its connections may sign their calls, the APIs it speaks, and whether a connection of it must give its address.", shape.object({ id: T, name: T, auth: shape.list(auth), apis: shape.list(T), needsBaseUrl: shape.yesNo() }))) } as const;
+const providers = { default: shape.nullable(T), providers: shape.list(shape.named("ProviderOffer", "A provider the Connections page offers, how its connections may sign their calls, the APIs it speaks, whether a connection of it must give its address, and whether it makes embeddings (for a connection that signs with a key or with nothing; one signed in makes none).", shape.object({ id: T, name: T, auth: shape.list(auth), apis: shape.list(T), needsBaseUrl: shape.yesNo(), embeds: shape.yesNo() }))) } as const;
 const tested = { ok: { ok: shape.literal(true), ms: N, model: T }, failed: { ok: shape.literal(false), ms: N, error: T } } as const;
 const connectionView = shape.object({ ...viewFields, key: shape.nullable(shape.object({ set: shape.yesNo(), waiting: shape.yesNo() })) });
 const connectionInput = shape.named(
