@@ -290,14 +290,22 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     listOf("due_beyond", [null]);
     sections.due = dueLists.flatMap((l) => l.lines);
   }
+  // Open business (plan §6.9): the quests and threads that touch the horizon (what they name is shown on it, or in the chains above
+  // it), and those that name no one and nowhere in the tree, which are the whole world's.
   if (want("open")) {
+    const touches = (refs: readonly string[]): boolean => refs.length === 0 || refs.some((r) => within.has(r) || chain.includes(r));
     sections.open = [];
     for (const [id, t] of Object.entries(view.world.tracks)) {
       const stage = state.world.tracks[id]?.stage ?? t.start;
       const at = own(t.stages, stage);
       const owner = trackOwner(t);
-      if ((at?.next.length ?? 0) === 0 || owner === undefined || !within.has(`entity:${owner}`)) continue;
-      sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, owner: nameOf(`entity:${owner}`), ...markFields(state.marks[`track:${id}`]?.stage) } });
+      if ((at?.next.length ?? 0) === 0 || !touches(owner === undefined ? [] : [`entity:${owner}`])) continue;
+      sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, ...(owner === undefined ? {} : { owner: nameOf(`entity:${owner}`) }), ...markFields(state.marks[`track:${id}`]?.stage) } });
+    }
+    for (const t of view.threads()) {
+      if (!touches(t.refs)) continue;
+      const words = Object.fromEntries(["text", "kind", "state", "stakes"].flatMap((k) => (typeof t.fields[k] === "string" && t.fields[k] !== "" ? [[k, t.fields[k] as string]] : [])));
+      sections.open.push({ kind: "thread", depth: 0, fields: { id: t.id, ...words, ...(t.fields.hot === true ? { hot: true } : {}), ...(t.refs.length > 0 ? { names: { names: t.refs.map(nameOf) } } : {}) } });
     }
   }
   // What changed since the turn before began: its own changes (a job's written on it count where they take effect) and what is

@@ -190,6 +190,9 @@ function reflectionPieces(r: Reflection): JsonObject[] {
  */
 export const HORIZON = { area: "story", read: "horizon", op: "story.horizon" } as const;
 
+/** The story area's read of its threads still open (`[{ id, who, place, fields }]`; PlanStory). */
+const THREADS_READ = "threads";
+
 /** An entry of the horizon: a tree ref or the Author's own words, and how deep the world state shows it (`full` when he set none). */
 export interface HorizonEntry {
   at: string;
@@ -248,6 +251,8 @@ export class TreeView {
   private stopsSeen: Map<string, { place: string; at: string }> | null = null;
   /** While a reading that passed one runs: what time brings due, for the reflections. */
   private reading: ViewReading | null = null;
+  /** The story's open threads with the levels each names, read once (`threads`). */
+  private openThreads: { id: string; refs: string[]; fields: JsonObject }[] | null = null;
 
   constructor(
     readonly env: FoldEnv,
@@ -360,16 +365,43 @@ export class TreeView {
     return cat !== 0 ? cat : (x.name ?? "").localeCompare(y.name ?? "") || x.id.localeCompare(y.id);
   }
 
+  /**
+   * The story's threads still open (its `threads` read), each with the levels it names found in the tree: its people, by id or by
+   * name, and its place; none found, it is the whole world's.
+   */
+  threads(): { id: string; refs: string[]; fields: JsonObject }[] {
+    if (this.openThreads !== null) return this.openThreads;
+    const area = this.env.areas?.get(HORIZON.area);
+    const read = area?.reads && Object.hasOwn(area.reads, THREADS_READ) ? area.reads[THREADS_READ] : undefined;
+    const list = read?.(this.state.areas?.[HORIZON.area] ?? area?.initial?.() ?? {}, {});
+    const byName = new Map<string, string>();
+    for (const node of this.nodes.values()) if (node.name !== null && !byName.has(node.name.toLowerCase())) byName.set(node.name.toLowerCase(), node.ref);
+    this.openThreads = (Array.isArray(list) ? list : []).flatMap((t) => {
+      if (!isRecord(t) || typeof t.id !== "string") return [];
+      const named = [...(Array.isArray(t.who) ? t.who : []), t.place].filter((w): w is string => typeof w === "string" && w.trim() !== "");
+      const refs = [...new Set(named.flatMap((w) => this.resolve(w) ?? byName.get(w.trim().toLowerCase()) ?? []))];
+      return [{ id: t.id, refs, fields: isRecord(t.fields) ? t.fields : {} }];
+    });
+    return this.openThreads;
+  }
+
   /** Counts, names of note, what is open and the last change, summed up the tree from the leaves. */
   private aggregate(): void {
+    // What is open under each level (plan §6.4): each quest in progress, at its owner, and each open thread, at what it names; the
+    // whole world's where it names nothing in the tree. Each counts once at every level above what it names.
     const opens = new Map<string, number>();
+    const count = (refs: readonly string[]): void => {
+      const under = new Set<string>();
+      for (const ref of refs.length > 0 ? refs : ["world"]) for (let at: string | null = ref; at !== null && !under.has(at); at = this.nodes.get(at)?.parent ?? null) under.add(at);
+      for (const ref of under) opens.set(ref, (opens.get(ref) ?? 0) + 1);
+    };
     for (const [id, t] of Object.entries(this.doc.tracks)) {
       const stage = this.state.world.tracks[id]?.stage ?? t.start;
       if ((own(t.stages, stage)?.next.length ?? 0) === 0) continue;
       const owner = trackOwner(t);
-      const ref = owner !== undefined && this.nodes.has(`entity:${owner}`) ? `entity:${owner}` : "world";
-      opens.set(ref, (opens.get(ref) ?? 0) + 1);
+      count(owner !== undefined && this.nodes.has(`entity:${owner}`) ? [`entity:${owner}`] : []);
     }
+    for (const t of this.threads()) count(t.refs);
     const order: Node[] = [];
     const stack: Node[] = [this.nodes.get("world") as Node];
     while (stack.length > 0) {
@@ -378,7 +410,7 @@ export class TreeView {
       for (const c of node.children) stack.push(this.nodes.get(c) as Node);
     }
     for (const node of order.reverse()) {
-      node.open += opens.get(node.ref) ?? 0;
+      node.open = opens.get(node.ref) ?? 0;
       const own = this.state.touched[node.ref];
       if (own && (!node.changed || own.n > node.changed.n)) node.changed = own;
       const parent = node.parent === null ? undefined : this.nodes.get(node.parent);
@@ -388,7 +420,6 @@ export class TreeView {
       parent.places += node.places;
       parent.groups += node.groups;
       parent.records += node.records;
-      parent.open += node.open;
       if (node.changed && (!parent.changed || node.changed.n > parent.changed.n)) parent.changed = node.changed;
       let names = [...parent.notable, ...node.notable];
       if (!node.gone) {
