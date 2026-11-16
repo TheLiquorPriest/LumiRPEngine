@@ -8,7 +8,7 @@ import { grantedPermissions } from "../../adapter/lumiverse/swap-reads";
 import { stopAfterSwitch, swapSteps } from "../../migrate/going-back";
 import { runtimeFoldersOf } from "../../migrate/runtime-folders";
 import { type Loopback, otherBuildInstalled, swapCheck, swapRun, swapStands, type TakenConnection, todaysBuildInstalled } from "../../migrate/swap";
-import { HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
+import { carryJob, HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
 import { isRecord } from "../../shared/json";
 import { BUILDS_PATH } from "../app";
 import type { CliIO } from "../cli";
@@ -166,7 +166,7 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
     if (left.length > 0) sayLeft(left, io);
     return 0;
   }
-  const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout(), runs: { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun } }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs, reach: (is) => connectionsWhere(call, is) }, swapIo);
+  const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout(), runs: { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob } }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs, reach: (is) => connectionsWhere(call, is) }, swapIo);
   if (plan === null) return 1;
 
   // Every connection in Lumiverse that reaches today's runtime is kept as it is and becomes RPE's own (R-109); RPE makes its own only where Lumiverse holds none.

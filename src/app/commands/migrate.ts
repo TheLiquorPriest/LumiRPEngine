@@ -2,7 +2,7 @@
 
 import { resolve } from "node:path";
 import { migrateCli } from "../../migrate/cli";
-import { HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
+import { carryJob, HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
 import type { CliIO } from "../cli";
 import { compose } from "../compose";
 import { dataPaths, defaultDataFolder, loadConfig } from "../config";
@@ -32,7 +32,7 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
   };
   const registry = () => gatherSettings(compose({ fetch: async () => noLumiverse(), open: noLumiverse, sleep: async () => noLumiverse() }).areas);
   // The turn lane's writer of a carried turn's run record, handed in: the migration may not import the turn lane.
-  const migrate = (): Promise<number> => migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry(), { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun });
+  const migrate = (): Promise<number> => migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry(), { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
   if (rest.includes("--rehearse") || folder === undefined || folder.startsWith("--")) return await migrate();
   const paths = dataPaths(folder);
   const config = await loadConfig(paths, io.env);
