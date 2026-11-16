@@ -30,6 +30,20 @@ The reply already begins with these words. The chat application puts them in fro
 - {{.}}
 {{/since.items}}
 {{/since}}
+{{#session_unreadable}}
+
+## This session's file
+
+{{#reason}}
+It could not be read: {{reason}} You hold nothing of this scene's earlier turns this turn. The turn goes on, and the next one reads the file again.
+{{/reason}}
+{{^reason}}
+Some lines of it could not be read and were passed over, so what this scene carries is short of them. The turn goes on, and the next one reads the file again. The lines:
+{{#lines}}
+- {{.}}
+{{/lines}}
+{{/reason}}
+{{/session_unreadable}}
 {{#files_changed}}
 
 ## Files changed since this session opened

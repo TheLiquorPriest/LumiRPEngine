@@ -16,7 +16,7 @@ const SHIPPED = shippedTexts();
 const ASKS = /\b(must|should|always|never|please|make sure|remember to)\b/i;
 
 /** The names the briefing's template may put in or test at its top level: what RPH fills (`harness/turn.ts` `#briefing`), and the blocks RPE's turn hands it by name (`BLOCKS`, `-` as `_`); `path`, `id` and `title` are the fields of the items of the cache's lists. */
-const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract", "cache", "path", "id", "title"];
+const BRIEFING_FILLED = ["turn", "turn_facts", "asked", "prefill", "since", "files_changed", "files_added", "rules_due", "world_state", "on_stage", "lore_map", "prompt_notices", "prompt_cut", "not_given", "story_so_far", "story_brief", "turn_files", "intent_path", "reply_contract", "cache", "session_unreadable", "reason", "lines", "path", "id", "title"];
 
 /** The notices of `notices.md`, by name, and the fields a use of each fills. Each is a fact; none asks. */
 const NOTICES: Record<string, Record<string, unknown>> = {
@@ -164,6 +164,13 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(cached).toContain("- The prompt map as this scene has it: sessions/s-1/cache/prompt-map.md");
     expect(cached).toContain("- From the host: sessions/s-1/cache/base/wren.md");
     expect(text).not.toContain("already looked up");
+    // A session file that could not be read, whole or in lines, is told with what is so, and only then.
+    const whole = part.render({ ...full, session_unreadable: { reason: "The host refused it." } }).text;
+    expect(whole).toContain("## This session's file\n\nIt could not be read: The host refused it. You hold nothing of this scene's earlier turns this turn.");
+    const partly = part.render({ ...full, session_unreadable: { lines: [4, 9] } }).text;
+    expect(partly).toContain("Some lines of it could not be read and were passed over");
+    expect(partly).toContain("- 4\n- 9");
+    expect(text).not.toContain("This session's file");
     // In the tags form there is no intent file to name.
     const tagged = part.render({ ...full, intent_path: undefined }).text;
     expect(tagged).not.toContain("intent file");
