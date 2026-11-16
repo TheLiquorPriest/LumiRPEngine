@@ -191,6 +191,7 @@
       "calendar.school": "8f8b2a866c57b80725af82648a9d868c",
       "calendar.shifts": "113c38bc463f6b9ab542629d3905c178",
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
+      "combat.bestiary": "7a1ae5225aa007ef7d961970c3902e76",
       "economy.catalog": "4d663016e223ef86d6db1a92afa6b20b",
       "economy.categories": "3537edd70ead270059aa1f8c96555595",
       "economy.exempt": "f6de734f9c98da99975b404f3c0094cf",
@@ -12798,6 +12799,22 @@
           "note": "Plan a 30-minute day VFR reserve (45 minutes at night) on top of the trip's fuel."
         }
       }
+    },
+    "combat.bestiary": {
+      "id": "combat.bestiary",
+      "pack": "combat",
+      "schema": "lre-table/combat.bestiary/v1",
+      "revision": "7a1ae5225aa007ef7d961970c3902e76",
+      "label": "Bestiary",
+      "columns": {
+        "name": {"type": "text"},
+        "kind": {"type": "text"},
+        "tier": {"type": "text", "optional": true},
+        "fields": {"type": "json"},
+        "carries": {"type": "list", "of": "text", "optional": true},
+        "description": {"type": "text", "optional": true}
+      },
+      "rows": {}
     }
   },
   "realism": {

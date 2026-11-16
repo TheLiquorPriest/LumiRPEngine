@@ -34,6 +34,7 @@ import { placeOfEntity, truthy } from "../../../engine/scope";
 import { selectorMatches } from "../../../engine/selector";
 import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
+import { BESTIARY_COLUMNS, BESTIARY_SCHEMA, BESTIARY_TABLE, emptyBestiary } from "./bestiary";
 import { breakOff, fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
 import { attacks, canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fightById, fightsOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, removeEncounter, rulesOf, sameHp, stalemateRounds, stalledHolds, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
 import { buildEncounterView, fightOffers, type EncounterView } from "./view";
@@ -396,6 +397,8 @@ export const combatPack: PackDef = {
   requires: [],
   register(r) {
     for (const def of events) r.event<PackEvent>(def);
+    // The bestiary: the world's own ordinary foes and strangers, shipped with no rows so every world has the table and Build's editor lists it.
+    r.table({ id: BESTIARY_TABLE, schema: BESTIARY_SCHEMA, columns: BESTIARY_COLUMNS, defaults: emptyBestiary(), shipped: [] });
 
     r.effect({ type: "combat.start", args: ["with?", "foes?", "at?", "order?", "roll_initiative?"], resolve: (a, ctx) => startFight(a, ctx) });
     r.effect({ type: "combat.join", args: ["fight", "with?", "foes?", "order?", "roll_initiative?"], resolve: (a, ctx) => joinFight(a, ctx) });

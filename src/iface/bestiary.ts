@@ -1,28 +1,15 @@
 // The bestiary (plan §6.5, the ruleset-and-sheets skill): ordinary foes and strangers the world's
 // rules know, for the GM to read and to draw someone from who comes into view with no sheet. It is
 // a data table of the world's rules, as its other tables are (`DataTable`, in the world document's
-// `tables`), under the combat pack's name. Code reads it and copies a row's values onto someone
-// made from it; which row fits a stranger is the GM's to say.
+// `tables`), which the combat pack registers (`packs/combat/core/bestiary.ts`), empty. Code reads it and
+// copies a row's values onto someone made from it; which row fits a stranger is the GM's to say.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
+import { BESTIARY_TABLE } from "../packs/combat/core/bestiary";
 import type { TableRow } from "../shared/tables";
 import type { RulesetDef, WorldDoc } from "../shared/world";
 
-/** The table's id in a world's `tables`. */
-export const BESTIARY_TABLE = "combat.bestiary";
-
-/** The row shape version the bestiary is read at. */
-export const BESTIARY_SCHEMA = "lre-table/combat.bestiary/v1";
-
-/** Its columns: what each row of the bestiary holds. */
-export const BESTIARY_COLUMNS = {
-  name: { type: "text", label: "Name" },
-  kind: { type: "text", label: "Kind" },
-  tier: { type: "text", label: "Tier" },
-  fields: { type: "json", label: "Sheet values" },
-  carries: { type: "list", of: "text", label: "Carries" },
-  description: { type: "text", label: "Description" },
-} as const;
+export { BESTIARY_COLUMNS, BESTIARY_SCHEMA, BESTIARY_TABLE } from "../packs/combat/core/bestiary";
 
 /** One row of the bestiary: someone ordinary of a kind, with the sheet values the world's rules give them. */
 export interface BestiaryRow {

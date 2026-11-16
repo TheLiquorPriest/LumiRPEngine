@@ -56,7 +56,7 @@ describe("Data updates", () => {
     const updates = tableUpdates(oldPortAlder(), reg.tables);
     // The unemployment taxes' rows and columns and the tax-exempt statuses (ORG-SPEC §3.11, Phase 5) came after 58b2ac44 too, and so did the
     // vehicle classes from the bicycle to the aircraft with the air's factors, and the arsenal's slots and items (Build C).
-    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "update", "vehicles.factors": "update" });
+    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "combat.bestiary": "missing", "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "update", "vehicles.factors": "update" });
     const catalog = updates.find((u) => u.table === "economy.catalog");
     expect(catalog?.label).toBe("Price catalog");
     expect(catalog?.shipped.columns.added).toEqual(["aliases", "size", "holds"]);
@@ -104,6 +104,7 @@ describe("Data updates", () => {
       const world = oldStarter(id);
       const updates = tableUpdates(world, reg.tables, STARTER_TABLES);
       expect(Object.fromEntries(updates.map((u) => [u.table, [u.status, u.starter?.name ?? "packs"]]))).toEqual({
+        "combat.bestiary": ["missing", "packs"],
         "economy.catalog": ["update", name],
         "economy.exempt": ["missing", "packs"],
         "economy.finance": ["update", "packs"],
@@ -126,10 +127,10 @@ describe("Data updates", () => {
         expect(ownTable(id, table).revision).not.toBe(reg.tables.get(table)?.defaults?.revision);
       }
       expect(shippedVersion(world, reg.tables, STARTER_TABLES, "gear.containers")).toBe(reg.tables.get("gear.containers")?.defaults ?? null);
-      expect(statuses({ tables: { ...world.tables, "economy.catalog": ownTable(id, "economy.catalog"), "gear.items": ownTable(id, "gear.items"), "vehicles.classes": ownTable(id, "vehicles.classes") } })).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update", "gear.slots": "update", "vehicles.factors": "update" });
+      expect(statuses({ tables: { ...world.tables, "economy.catalog": ownTable(id, "economy.catalog"), "gear.items": ownTable(id, "gear.items"), "vehicles.classes": ownTable(id, "vehicles.classes") } })).toEqual({ "combat.bestiary": "missing", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update", "gear.slots": "update", "vehicles.factors": "update" });
       // Without the starters' histories, their prices and items are the world's own, as before they shipped; their vehicle classes,
       // the Modern US classes beside the starter's own, read as the packs' classes edited, now that the packs ship newer ones.
-      expect(Object.fromEntries(tableUpdates(world, reg.tables).map((u) => [u.table, u.status]))).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "edited", "vehicles.factors": "update" });
+      expect(Object.fromEntries(tableUpdates(world, reg.tables).map((u) => [u.table, u.status]))).toEqual({ "combat.bestiary": "missing", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "edited", "vehicles.factors": "update" });
     }
   });
 
