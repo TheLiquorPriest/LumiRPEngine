@@ -139,7 +139,8 @@ describe("no words of the store reach an agent", () => {
     const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due, map: { text: () => ({ grid: "g", drawn: "d", text: "#.#" }) }, charsPerToken: 4 });
     for (const section of ["horizon", "above", "around", "outline", "due", "open", "changed", "unsettled"] as const) expect([section, (block.sections[section]?.length ?? 0) > 0]).toEqual([section, true]);
     // What the store kept of each change (its reports' codes and values) is recorded data too.
-    expect(foreign(block.sections, vocabulary(world, changes, s.changes(t.id), labels, t.id, "the bell rings", "#.#"))).toEqual([]);
+    // The realism preset's id is a code, as a report's is.
+    expect(foreign(block.sections, vocabulary(world, changes, s.changes(t.id), labels, t.id, "the bell rings", "#.#", ["story", "grounded", "simulation", "custom"]))).toEqual([]);
     expect(worldState(s, { chat: "c", turn: next.id, layout: "", due, charsPerToken: 4 }).text).toBe("");
   });
 

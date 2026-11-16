@@ -17,15 +17,17 @@
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { TidyFinding } from "../shared/thing-gm";
+import { DOMAINS } from "../shared/ids";
 import { trackOwner } from "../shared/world";
 import { calendarOf, formatClock, placeOffset, placeZone } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
+import { presetOf } from "../engine/realism";
 import { clockPaused } from "../engine/time";
 import { clockRecorded } from "./blank";
 import { standing } from "./facts";
-import { eventOf, type FoldEnv } from "./fold";
+import { aboutOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
-import { LANES, STORE_OPS, StoreInputError, type ChangeRow, type Mark, type StoreState, type UnsettledChange } from "./types";
+import { LANES, StoreInputError, type ChangeRow, type Mark, type StoreState, type UnsettledChange } from "./types";
 import { factFields, HORIZON, markFields, type TreeView, type ViewReading } from "./view";
 import { readPart, wordLine, type Part, type ViewLine } from "./words";
 
@@ -233,16 +235,14 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     ];
   }
   if (want("above")) sections.above = chain.flatMap((ref) => view.level(ref, 0, "own", reading) ?? []);
-  if (want("around")) {
-    const beside = around(view, scenePlace, new Set([...within, ...chain]));
-    const room = settings.budget * input.charsPerToken;
-    sections.around = [...beside.flatMap((ref) => view.level(ref, 0, "none", reading) ?? []), ...onTheWay(view, scenePlace === null ? [] : [scenePlace, ...beside], input.due, settings.dueAhead, room, nameOf)];
-  }
+  const budget = settings.budget * input.charsPerToken;
+  // The places beside the scene's place: around it, and the due list's middle list.
+  const beside = around(view, scenePlace, new Set([...within, ...chain]));
+  if (want("around")) sections.around = [...beside.flatMap((ref) => view.level(ref, 0, "none", reading) ?? []), ...onTheWay(view, scenePlace === null ? [] : [scenePlace, ...beside], input.due, settings.dueAhead, budget, nameOf)];
   const before = turn.parent === null ? null : store.turn(turn.parent);
   const lastRows = before === null ? [] : store.changes(before.id);
   // How many more a section's span holds than its lines list (null: more, uncounted); its cut counts them with what it leaves out.
   const beyond: Partial<Record<WorldStateSection, number | null>> = {};
-  const budget = settings.budget * input.charsPerToken;
   const now = state.world.clock;
   // On a clock nobody set (the blank world's, until play sets it) a time is given only as how long from now, or how long ago.
   const dated = clockRecorded(state);
@@ -264,11 +264,31 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     }
   }
   // Without a source of what falls due (a world state read where no clock runs) there is no section to give.
+  // What is due in the time ahead (plan §6.9), in three lists, each with its own share of the section's room, so what falls due
+  // elsewhere never pushes the scene's own out: in the scene (its place and what is in it), around it (the places beside it), and
+  // beyond. An item is listed with its place; one that names none, where the people it concerns stand (as the due source lists a
+  // part of the tree); one that names neither, beyond, once. Its span is the user's own `dueAhead`.
+  const dueLists: DueList[] = [];
   if (want("due") && input.due !== undefined) {
-    // Its span is the user's own `dueAhead`.
-    const listed = dueShown(part, input.due, state, { from: now, to: now + settings.dueAhead }, budget, (d) => dueLine("due", d, { after: d.at - now }));
-    sections.due = listed.lines;
-    beyond.due = listed.more;
+    const source = input.due;
+    const span = { from: now, to: now + settings.dueAhead };
+    const line = (d: DueEntry): ViewLine => dueLine("due", d, { after: d.at - now });
+    const seen = new Set<string>();
+    const keyOf = (d: DueEntry): string => JSON.stringify([d.at, d.kind, d.where ?? null, d.who ?? [], d.what]);
+    const listOf = (head: string, ats: readonly (string | null)[]): void => {
+      const list: DueList = { lines: [], more: 0 };
+      for (const at of ats) {
+        const shown = dueShown(part, source, state, span, Math.floor(budget / 3), line, at, (d) => seen.has(keyOf(d)));
+        for (const d of shown.items) seen.add(keyOf(d));
+        list.lines.push(...shown.lines);
+        list.more = list.more === null || shown.more === null ? null : list.more + shown.more;
+      }
+      if (list.lines.length > 0) dueLists.push({ lines: [{ kind: head, depth: 0, fields: {} }, ...list.lines], more: list.more });
+    };
+    if (scenePlace !== null) listOf("due_scene", [scenePlace]);
+    if (beside.length > 0) listOf("due_around", beside);
+    listOf("due_beyond", [null]);
+    sections.due = dueLists.flatMap((l) => l.lines);
   }
   if (want("open")) {
     sections.open = [];
@@ -280,7 +300,9 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
       sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, owner: nameOf(`entity:${owner}`) } });
     }
   }
-  if (want("changed")) sections.changed = changedLines(view, lastRows, nameOf);
+  // What changed since the turn before began: its own changes (a job's written on it count where they take effect) and what is
+  // placed before this turn (a job's that took effect, his own).
+  if (want("changed")) sections.changed = changedLines(view, [...lastRows.filter((c) => c.job === null).map((change) => ({ change, applied: change.applied })), ...store.changesBefore(turn.id)], nameOf);
   if (want("unsettled")) {
     const lines: ViewLine[] = [];
     for (const ref of [...within, ...chain]) {
@@ -330,13 +352,17 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   let left = budget;
   let sharing = needs.length + (want("outline") ? 1 : 0);
   for (const [s, need] of needs.sort((a, b) => a[1] - b[1])) {
-    const kept = fit(part, s, sections[s] ?? [], Math.min(need, Math.floor(left / sharing)), beyond[s] ?? 0);
+    const room = Math.min(need, Math.floor(left / sharing));
+    const kept = s === "due" && dueLists.length > 0 ? fitLists(part, dueLists, room) : fit(part, s, sections[s] ?? [], room, beyond[s] ?? 0);
     sections[s] = kept.lines;
     left -= kept.used;
     sharing--;
   }
-  // The world's own line opens the outline unless the chain above shows it.
-  if (want("outline")) sections.outline = outline(view, part, left, new Set(horizon), !(want("above") && chain.length > 0));
+  // The world's realism opens the outline, then the world's own line unless the chain above shows it.
+  if (want("outline")) {
+    const realism = realismLine(state);
+    sections.outline = [realism, ...outline(view, part, left - costOf(part, realism), new Set(horizon), !(want("above") && chain.length > 0))];
+  }
   const texts: Partial<Record<WorldStateSection, string>> = {};
   let used = 0;
   for (const s of WORLD_STATE_SECTIONS) {
@@ -436,20 +462,49 @@ function holdLine(h: TidyFinding, nameOf: (ref: string) => string, view: TreeVie
 }
 
 /**
- * What `span` brings due as the lines of a section, the soonest first: as many as all of `room` could show at each line's own
- * cost, and one more where the span holds more, with how many more it holds than those (null: more, not counted). The due list
- * is asked for in batches, each twice the last, so what a span costs is what the lines its budget can show cost, however long
- * the span. A layout that words none of the lines asked for shows none, and is asked for no more.
+ * What `span` brings due under `at` (null: the whole world) as the lines of a section, the soonest first, less what `skip` says is
+ * listed already: as many as all of `room` could show at each line's own cost, and one more where the span holds more, with how many
+ * more it holds than those (null: more, not counted). The due list is asked for in batches, each twice the last, so what a span costs
+ * is what the lines its budget can show cost, however long the span. A layout that words none of the lines asked for shows none, and
+ * is asked for no more.
  */
-function dueShown(part: Part, source: DueSource, state: StoreState, span: { from: number; to: number }, room: number, line: (d: DueEntry) => ViewLine): { lines: ViewLine[]; more: number | null } {
+function dueShown(part: Part, source: DueSource, state: StoreState, span: { from: number; to: number }, room: number, line: (d: DueEntry) => ViewLine, at: string | null = null, skip: (d: DueEntry) => boolean = () => false): { lines: ViewLine[]; items: DueEntry[]; more: number | null } {
   for (let most = 1; ; most *= 2) {
-    const listing = source.due(state, span, null, most);
-    const lines = listing.items.map(line);
+    const listing = source.due(state, span, at, most);
+    const items = listing.items.filter((d) => !skip(d));
+    const lines = items.map(line);
     let used = 0;
     let k = 0;
     for (; k < lines.length && used + costOf(part, lines[k] as ViewLine) <= room; k++) used += costOf(part, lines[k] as ViewLine);
-    if (k < lines.length || used === 0 || listing.more === 0 || listing.items.length < most) return { lines, more: listing.more };
+    if (k < lines.length || used === 0 || listing.more === 0 || listing.items.length < most) return { lines, items, more: listing.more };
   }
+}
+
+/** One of the due section's lists: its heading line and items, and how many more its span holds than it lists (null: more, uncounted). */
+interface DueList {
+  lines: ViewLine[];
+  more: number | null;
+}
+
+/** The due section's lists within `room`: the smallest needs met first, each while no more than an even share of what is left, so no list crowds out another; in their own order. */
+function fitLists(part: Part, lists: readonly DueList[], room: number): { lines: ViewLine[]; used: number } {
+  const kept = new Map<DueList, ViewLine[]>();
+  let left = room;
+  const needOf = (l: DueList): number => l.lines.reduce((n, x) => n + costOf(part, x), 0);
+  [...lists]
+    .sort((a, b) => needOf(a) - needOf(b))
+    .forEach((l, i, all) => {
+      const got = fit(part, "due", l.lines, Math.min(needOf(l), Math.floor(left / (all.length - i))), l.more);
+      kept.set(l, got.lines);
+      left -= got.used;
+    });
+  return { lines: lists.flatMap((l) => kept.get(l) ?? []), used: room - left };
+}
+
+/** The world's realism (R-76) as the chat has it: its preset and each domain's level; each domain is shown as closely as its level says. */
+function realismLine(state: StoreState): ViewLine {
+  const realism = state.world.realism;
+  return { kind: "realism", depth: 0, fields: { preset: presetOf(realism), ...Object.fromEntries(DOMAINS.map((d) => [d, realism.levels[d] ?? null])) } };
 }
 
 /** The maps a world state prints through the map port (Maps-4): each grid once, its drawn layer only where the session was not given that version. */
@@ -535,41 +590,47 @@ function around(view: TreeView, scenePlace: string | null, shown: ReadonlySet<st
   return out;
 }
 
-/** What the turn before changed, a line for each lane: how many changes, which operations, what they touched, how many did not apply. */
-function changedLines(view: TreeView, rows: readonly ChangeRow[], nameOf: (ref: string) => string): ViewLine[] {
+/**
+ * What changed since the turn before began, a line for each lane (plan §6.9): how many changes, which operations, what they touched,
+ * who made them, how many did not apply; his own edits told apart as his, a line for each lane they reach; a lane with nothing, a
+ * line that says so.
+ */
+function changedLines(view: TreeView, rows: readonly { change: ChangeRow; applied: boolean }[], nameOf: (ref: string) => string): ViewLine[] {
   const out: ViewLine[] = [];
-  for (const lane of LANES) {
-    const mine = rows.filter((r) => r.lane === lane);
-    if (mine.length === 0) continue;
+  const lineOf = (kind: string, lane: string, mine: readonly { change: ChangeRow; applied: boolean }[]): ViewLine => {
     const touched: string[] = [];
-    const touch = (ref: string | null): void => {
-      if (ref === null || view.resolve(ref) !== ref) return;
-      const name = nameOf(ref);
-      if (!touched.includes(name)) touched.push(name);
-    };
     for (const r of mine) {
       if (!r.applied) continue;
-      const v = isRecord(r.value) ? r.value : {};
-      const ev = eventOf(r.op, r.value);
-      if (r.op === STORE_OPS.fact) touch(typeof v.about === "string" ? v.about : null);
-      else if (r.op === STORE_OPS.note) touch(typeof v.at === "string" ? view.resolve(v.at) : null);
-      else if (ev) for (const t of view.env.registry.get(ev.type)?.touches?.(ev) ?? []) touch(`entity:${t.entity}`);
+      for (const at of aboutOf(view.env, r.change.op, r.change.value)) {
+        const ref = view.resolve(at);
+        if (ref !== null && !touched.includes(nameOf(ref))) touched.push(nameOf(ref));
+      }
     }
+    const by = [...new Set(mine.flatMap((r) => (r.change.by === null ? [] : [r.change.by])))];
     const unapplied = mine.filter((r) => !r.applied).length;
-    const fields: JsonObject = { lane, n: mine.length, one: mine.length === 1, ops: { list: [...new Set(mine.map((r) => r.op))] } };
+    const fields: JsonObject = { lane, n: mine.length, one: mine.length === 1, ops: { list: [...new Set(mine.map((r) => r.change.op))] } };
     if (touched.length > 0) fields.touched = { names: touched };
+    if (by.length > 0) fields.by = { names: by };
     if (unapplied > 0) fields.unapplied = unapplied;
-    out.push({ kind: "changed", depth: 0, fields });
+    return { kind, depth: 0, fields };
+  };
+  // His own edit: a change of his chat made by no job.
+  const his = (c: ChangeRow): boolean => c.chat !== null && c.job === null;
+  for (const lane of LANES) {
+    const theirs = rows.filter((r) => r.change.lane === lane && !his(r.change));
+    const mine = rows.filter((r) => r.change.lane === lane && his(r.change));
+    if (theirs.length > 0) out.push(lineOf("changed", lane, theirs));
+    if (mine.length > 0) out.push(lineOf("changed_his", lane, mine));
+    if (theirs.length === 0 && mine.length === 0) out.push({ kind: "changed_none", depth: 0, fields: { lane } });
   }
   return out;
 }
 
 /**
- * The rest of the world in outline, within `room` characters: a line for each level in the world,
- * then breadth first each level's levels while they fit. A level whose levels are not shown is marked
- * with the query that opens it, and the mark is counted as soon as its line is. A horizon entry, shown
- * in full, is not opened here. Where even a line for each level does not fit, the layout's line
- * counting what is left out ends the outline.
+ * The rest of the world in outline, within `room` characters: a line for each level in the world, and for each level of the groups
+ * heading, so every region and every group has one; then breadth first each level's levels while they fit. A level whose levels are
+ * not shown is marked with the query that opens it, and the mark is counted as soon as its line is. A horizon entry, shown in full,
+ * is not opened here. Where even the floor does not fit, the layout's line counting what is left out ends the outline.
  */
 function outline(view: TreeView, part: Part, room: number, horizon: ReadonlySet<string>, root: boolean): ViewLine[] {
   const lines = new Map<string, ViewLine>();
@@ -601,7 +662,15 @@ function outline(view: TreeView, part: Part, room: number, horizon: ReadonlySet<
     shown.add(x.ref);
     used += closed(x.ref, x.depth);
   }
-  let layer = first;
+  // A heading (the groups level) is no layer of its own: its levels are on the floor too.
+  let layer = first.flatMap((x) => {
+    if (view.node(x.ref)?.kind !== "groups" || !opensFrom(x.ref)) return [x];
+    const kids = view.childrenOf(x.ref).map((ref) => ({ ref, depth: x.depth + 1 }));
+    used += kids.reduce((n, k) => n + closed(k.ref, k.depth), 0) - (closed(x.ref, x.depth) - cost(lineOf(x.ref, x.depth)));
+    opened.add(x.ref);
+    for (const k of kids) shown.add(k.ref);
+    return kids;
+  });
   while (layer.length > 0) {
     const next: { ref: string; depth: number }[] = [];
     for (const x of layer) {
