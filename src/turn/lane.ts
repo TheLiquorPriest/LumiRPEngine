@@ -18,7 +18,7 @@
 // anything that runs a command or calls out, and before a provider key goes to a connection whose place changed.
 
 import { join } from "node:path";
-import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
+import { createHarness, type CreateHarnessOptions, type LinesPart, loadGuidance } from "rp-harness";
 import type { AgentRef, Clock, Environment, Harness, HostTool, JsonValue, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
@@ -27,7 +27,7 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, secretSettingsFor, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayWrite, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
@@ -37,7 +37,6 @@ import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, 
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser, storeUsers } from "./kv";
-import { PlayerSide } from "./player";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { TurnMarks } from "./marks";
 import { Requests, REQUESTS_KIND } from "./requests";
@@ -178,13 +177,16 @@ export interface Turns {
   chats: TreeChats;
   prompts: TurnPrompts;
   runs: Runs;
-  player: PlayerSide;
   /** What he asks for beside his words, waiting or kept with the turn that answered it. */
   requests: Requests;
   /** The marks each turn carries apart from its run's status. */
   marks: TurnMarks;
   trace: TurnTrace;
   lore: Lore;
+  /** A chat's secrecy settings, as the turn's start records them and the lore's secrecy lane reads them. */
+  secretSettings: SecretSettingsFor;
+  /** The words of the secrecy marks in force for a chat (`.prompts/secret-marks.md`); undefined where the part is off. */
+  secretMarks: (at: LoreScope) => Promise<LinesPart | undefined>;
   /** The lore index: what indexing runs wrote of each entry of a chat's lore, beside what the database holds. */
   loreIndex: LoreIndex;
   /** The notes agents write, which follow the turn. */
@@ -229,7 +231,6 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     app.log,
   );
   const runs = new Runs(app.db, app.writes);
-  const player = new PlayerSide(app.db);
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));
   const marks = new TurnMarks(app.db, app.writes);
   const since = new SinceKept(app.db);
@@ -362,7 +363,6 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     loreIndex,
     secretSettings,
     runs,
-    player,
     requests,
     marks,
     since,
@@ -396,5 +396,6 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   for (const user of storeUsers(app.db)) {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, requests, marks, trace, lore, loreIndex, notes, suggestions };
+  const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions };
 }

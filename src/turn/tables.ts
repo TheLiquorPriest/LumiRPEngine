@@ -9,9 +9,9 @@
 // page shows it (`turn_run`: where it stands, its timings, what went to the chat), what each run spent (`usage`: its calls, its
 // tokens and its lore lookups, a row per run), the consents, gap checks and rules that fired (`consent`, `gap_check`,
 // `rule_firing`: each of a turn's, or of a job the user started, which belongs to no turn), what else RPH told RPE about the run
-// (`turn_told`: suggestions, attachments asked for, drops, the release and the end), the player's messages as RPE read them
-// (`player_text`), what the player asked for beside his words, kept with the turn that answered it (`request`), what a comparison
-// of a chat's path found (`since_found`), which of these a turn was told (`since_told`), and each job as RPH last told of it (`turn_job`).
+// (`turn_told`: suggestions, attachments asked for, drops, the release and the end), what the player asked for beside his words,
+// kept with the turn that answered it (`request`), what a comparison of a chat's path found (`since_found`), which of these a turn
+// was told (`since_told`), the marks each turn carries (`turn_mark`), and each job as RPH last told of it (`turn_job`).
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -57,6 +57,17 @@ CREATE TABLE prompt_located (
     sql: `
 ALTER TABLE turn_prompt ADD COLUMN speaker TEXT;
 ALTER TABLE turn_prompt ADD COLUMN persona TEXT;
+`,
+  },
+  {
+    version: 3,
+    name: "the player's message each turn answered, as it was sent it",
+    // Kept with the turn's request record and let go with it (plan §4.2, §5.5): an edit of his message is told with this text.
+    sql: `
+ALTER TABLE turn_prompt ADD COLUMN answered TEXT;
+ALTER TABLE turn_prompt ADD COLUMN answered_hash TEXT;
+ALTER TABLE turn_prompt ADD COLUMN answered_text TEXT;
+CREATE INDEX turn_prompt_answered ON turn_prompt (user, chat, answered) WHERE answered IS NOT NULL;
 `,
   },
 ];
@@ -458,6 +469,14 @@ CREATE TABLE turn_mark (
 );
 INSERT OR IGNORE INTO turn_mark (user, turn, kind, message, at)
   SELECT user, turn, 'saved-otherwise', '', COALESCE(settled, ended, received) FROM turn_run WHERE saved IS NOT NULL;
+`,
+  },
+  {
+    version: 19,
+    name: "no copy of the player's messages",
+    // `player_text` goes (plan §4.2, Y15): the text of a message he edits is the one kept with the request of the turn that answered it.
+    sql: `
+DROP TABLE player_text;
 `,
   },
 ];

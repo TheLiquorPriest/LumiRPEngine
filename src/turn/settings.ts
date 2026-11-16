@@ -20,6 +20,10 @@
 //   since:
 //     editedBudget: null         tokens the briefing's "Since the last turn" spends on replies edited after their
 //                                turns, told in full, the newest first; the rest named in one line; null tells all
+//     deletedBudget: 1000        tokens it spends quoting the first words of the replies of turns a delete took; the rest
+//                                by message numbers in one line
+//     deletedWords: 24           words of each such reply it quotes
+//     notAppliedBudget: 1500     tokens it spends listing what no longer applies after a flip; past it, a count
 //   reply:
 //     lastText: false            a turn that ends with no reply sends the Author's last plain text in place of the error line
 //   passConnection: <name>       the connection a request with no tag is passed on to (global level only;
@@ -63,6 +67,12 @@ export interface TurnSettings {
   lastText: boolean;
   /** Tokens the replies edited after their turns may take in full in a briefing; null for no bound. */
   editedBudget: number | null;
+  /** Tokens the briefing spends quoting the first words of the replies of turns a delete took. */
+  deletedBudget: number;
+  /** Words of each deleted turn's reply the briefing quotes. */
+  deletedWords: number;
+  /** Tokens the briefing spends listing what no longer applies after a flip. */
+  notAppliedBudget: number;
   /** The history window (`src/story/window`). */
   window: WindowSettings;
   /** The cast's tools and views, for the chat. */
@@ -102,6 +112,10 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   // Plan §6.3 l.628: every edited reply is told with its old and new text whole, however many a carried chat brings to its first turn.
   // A bound is his to set, off as shipped.
   editedBudget: null,
+  // PlanTurnKinds-3: the turns a delete took, quoted while they fit; what a flip stopped, listed while it fits.
+  deletedBudget: 1000,
+  deletedWords: 24,
+  notAppliedBudget: 1500,
   // Appendix D.1, as the window's own module keeps them.
   window: WINDOW_DEFAULTS,
   // Appendix D.1, as each area keeps its own.
@@ -183,6 +197,33 @@ const DEFS = {
     perConnection: false,
     name: "Edited replies in the briefing",
     about: "Off as shipped, every edited reply is told with both its texts whole. Set, the tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named by message in one line, with no text.",
+    effect: "turn",
+  },
+  deletedBudget: {
+    key: "since.deletedBudget",
+    default: TURN_DEFAULTS.deletedBudget,
+    takes: { type: "whole", least: 0 },
+    perConnection: false,
+    name: "Deleted turns in the briefing",
+    about: "The tokens the briefing spends naming the turns a delete took with the first words of each one's reply, the newest first; the rest are named by message number in one line.",
+    effect: "turn",
+  },
+  deletedWords: {
+    key: "since.deletedWords",
+    default: TURN_DEFAULTS.deletedWords,
+    takes: { type: "whole", least: 1 },
+    perConnection: false,
+    name: "Words quoted of a deleted turn",
+    about: "How many of the first words of each deleted turn's reply the briefing quotes to name it.",
+    effect: "turn",
+  },
+  notAppliedBudget: {
+    key: "since.notAppliedBudget",
+    default: TURN_DEFAULTS.notAppliedBudget,
+    takes: { type: "whole", least: 0 },
+    perConnection: false,
+    name: "What a flip stopped, in the briefing",
+    about: "The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them.",
     effect: "turn",
   },
   window: {
@@ -289,6 +330,9 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     hiddenReadable: read.value(DEFS.hiddenReadable) as boolean,
     lastText: read.value(DEFS.lastText) as boolean,
     editedBudget: read.value(DEFS.editedBudget) as number | null,
+    deletedBudget: read.value(DEFS.deletedBudget) as number,
+    deletedWords: read.value(DEFS.deletedWords) as number,
+    notAppliedBudget: read.value(DEFS.notAppliedBudget) as number,
     window: {
       size: read.value(DEFS.window) as number | null,
       step: read.value(DEFS.step) as number | null,

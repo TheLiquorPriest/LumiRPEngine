@@ -44,7 +44,6 @@ import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type Tree
 import { type Attempt, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
 import type { Writes } from "./kv";
-import type { PlayerSide } from "./player";
 import type { TurnPrompts } from "./prompt";
 import type { TurnMarks } from "./marks";
 import type { PanelAsk, Requests } from "./requests";
@@ -53,7 +52,7 @@ import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf }
 import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import { type TurnSettings, turnSettings } from "./settings";
-import { type FoundItem, foundItems, type KeptItem, type SinceKept } from "./since";
+import { type FoundItem, foundItems, type GoneTurn, type KeptItem, type SinceKept } from "./since";
 import { stageAt } from "./stage";
 import { generationStart, seenOf } from "./start";
 import { guidanceTexts } from "./texts";
@@ -86,6 +85,11 @@ const CHARS_PER_TOKEN = 3.2;
 /** A text's tokens as the turn counts what it gives against a budget (the story so far, what comes to mind): RPH's own estimate. */
 export function turnTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+/** The first `count` words of a text, joined by single spaces. */
+function firstWords(text: string, count: number): string {
+  return text.trim().split(/\s+/).slice(0, count).join(" ");
 }
 
 /**
@@ -157,8 +161,6 @@ export interface TurnLaneDeps {
   /** The lore index, whose full lore map the briefing holds. */
   loreIndex: LoreIndex;
   runs: Runs;
-  /** The player's messages as RPE read them. */
-  player: PlayerSide;
   /** What he asks for beside his words (`requests.ts`): told to the turn that answers it, and kept with it. */
   requests: Requests;
   /** The marks each turn carries apart from its run's status (`marks.ts`). */
@@ -310,6 +312,9 @@ interface Found {
   hiddenReadable: boolean;
   /** Tokens the replies edited after their turns may take in full (`since.editedBudget`); null for no bound. */
   editedBudget: number | null;
+  /** The turns a delete took, quoted while they fit (`since.deletedBudget`, `since.deletedWords`), and what a flip stopped, listed while it fits (`since.notAppliedBudget`). */
+  deleted: { budget: number; words: number };
+  notAppliedBudget: number;
 }
 
 /**
@@ -609,7 +614,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // turn-errors line that says so.
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
+        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
@@ -938,7 +943,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
-        const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
+        const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(guidance, settings.lead, user, turn.id);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
         const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
@@ -1173,7 +1178,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const compared = store.sync(chat, shown, heardUpTo);
       const path = store.path(chat);
       const head = path.findLast((e) => e.turn !== null)?.turn ?? null;
-      const found = foundItems(compared, was, steps);
+      const found = foundItems(compared, was, steps, this.#d.since.stoppedBefore(user, chat));
       this.#d.since.keep(db, user, chat, head, found, this.#d.store.now());
       const known = new Set(was.map((e) => e.message));
       const marking: { message: string; kind: "edited-message" | "inserted-message" }[] = [
@@ -1397,7 +1402,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * adds for it and the rules whose `turns:` name it are given for this turn.
    */
   async #since(reads: LumiverseReads, user: string, turn: TurnRow, found: Found): Promise<{ items: SinceItem[]; told: string[] }> {
-    const { steps, notices, guidance, last, stopped, again, replaced, hiddenReadable, editedBudget } = found;
+    const { steps, notices, guidance, last, stopped, again, replaced, hiddenReadable, editedBudget, deleted, notAppliedBudget } = found;
     const { chat } = turn;
     const store = this.#d.store.user(user);
     const items: SinceItem[] = [];
@@ -1417,14 +1422,58 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const attempts = replaced === null ? [] : store.swipes(chat, replaced).filter((t) => t.id !== turn.id);
     const kept = this.#keptFor(user, turn, again, attempts);
     const of = <K extends FoundItem["kind"]>(kind: K): Extract<FoundItem, { kind: K }>[] => kept.flatMap((k) => (k.item.kind === kind ? [k.item as Extract<FoundItem, { kind: K }>] : []));
-    // Turns gone, counted once each, whichever comparison found them.
-    const gone = new Set(of("deleted").flatMap((d) => d.turns));
-    if (gone.size > 0) add("delete", notices?.line("deleted", { count: gone.size }));
+    // Turns gone, counted once each, whichever comparison found them; each named by its message's number as the chat stood before the
+    // deletion (the numbers chat_read used) and the first words of its reply, the newest first, while they fit `since.deletedBudget`;
+    // the rest by their numbers in one line.
+    const gone = new Map<string, GoneTurn | null>();
+    for (const d of of("deleted")) {
+      for (const t of d.turns) if (!gone.has(t)) gone.set(t, null);
+      for (const g of d.gone ?? []) gone.set(g.turn, g);
+    }
+    if (gone.size > 0) {
+      const quoted: { message: number | string; words: string }[] = [];
+      const more: number[] = [];
+      let spent = 0;
+      for (const g of [...gone.values()].flatMap((g) => (g === null ? [] : [g])).sort((a, b) => (b.n ?? -1) - (a.n ?? -1))) {
+        const run = this.#d.runs.ofTurn(user, g.turn).findLast((r) => r.kind !== "settle");
+        const words = run === undefined ? "" : firstWords(run.saved ?? run.base + run.reply, deleted.words);
+        const cost = turnTokens(`${g.n ?? g.message} ${words}`);
+        if (spent + cost <= deleted.budget) {
+          spent += cost;
+          quoted.push({ message: g.n ?? g.message, words });
+        } else if (g.n !== null) more.push(g.n);
+      }
+      add("delete", notices?.line("deleted", { count: gone.size, turns: { ".": quoted }, more: more.sort((a, b) => a - b).join(", ") }));
+    }
     // Another swipe showing on the newest reply: its turn (none, for a swipe made without RPE) is the path now, with its own changes.
     for (const s of of("swiped")) add("swiped", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
-    // Another swipe showing on an earlier reply: the turns after it stand with their changes applied again on it.
-    // What no longer applies, as data: the operations by name. Why each does not is a code the store's own wording gives words to.
-    for (const f of of("flipped")) add("restacked", notices?.line("swipe_flipped", { message: f.message, dropped: f.dropped }), f.to !== null ? { turn: f.to } : {});
+    // Another swipe showing on an earlier reply: the turns after it stand with their changes applied again on it, the stretch named by
+    // message numbers as an unplayed stretch is. What that flip stopped from applying, change by change: its operation, its value, the
+    // message of the turn it came from, and why, each report code in the notices part's words (its `keys`), while they fit
+    // `since.notAppliedBudget`; the rest counted (the world state lists them all).
+    const keys = isRecord(notices?.header.keys) ? notices.header.keys : {};
+    for (const f of of("flipped")) {
+      const from = f.stretch === null || f.stretch === undefined ? undefined : place.get(f.stretch.from);
+      const to = f.stretch === null || f.stretch === undefined ? undefined : place.get(f.stretch.to);
+      const listed: { op: string; value: string; message: number | string; why: string }[] = [];
+      let spent = 0;
+      let left = 0;
+      for (const s of f.stopped ?? []) {
+        const change = store.changes(s.turn).find((c) => c.id === s.change);
+        const tiedTo = store.turn(s.turn)?.message ?? null;
+        const why = [...new Set(s.codes)].map((code) => (typeof keys[code] === "string" ? keys[code] : code)).join("; ");
+        const entry = { op: s.op, value: change === undefined ? "" : JSON.stringify(change.value), message: tiedTo === null ? s.turn : (place.get(tiedTo) ?? tiedTo), why };
+        const cost = turnTokens(`${entry.message} ${entry.op} ${entry.value} ${entry.why}`);
+        if (spent + cost > notAppliedBudget) {
+          left++;
+          continue;
+        }
+        spent += cost;
+        listed.push(entry);
+      }
+      const range = from === undefined || to === undefined ? undefined : from === to ? `${from}` : `${from}-${to}`;
+      add("restacked", notices?.line("swipe_flipped", { message: f.message, ...(range !== undefined ? { range } : {}), stopped: { ".": listed }, ...(left > 0 ? { more: left } : {}) }), f.to !== null ? { turn: f.to } : {});
+    }
 
     // The texts Lumiverse holds now: of each reply edited since its turn was tied, of each of the player's messages edited since RPE
     // last read it, and of the player's newest message where RPE has not kept it as it reads now, so that an edit of it can later be
@@ -1434,7 +1483,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const edited = of("edited");
     const edits = of("player_edited");
     const newest = steps.findLast((s) => s.role === "user");
-    const unkept = newest !== undefined && !hidden.has(newest.id) && this.#d.player.textOf(user, chat, newest.id, newest.shown.hash) === null ? [newest.id] : [];
+    // The player's newest message, which this turn answers: read now, its text kept with the turn's request record (`prompts.answered`).
+    const unkept = newest !== undefined && !hidden.has(newest.id) ? [newest.id] : [];
     const ids = [...new Set([...edited.map((e) => e.message), ...edits.map((e) => e.message), ...unkept])].filter((id) => !hidden.has(id));
     const now = new Map((ids.length === 0 ? [] : await reads.messagesById(chat, ids)).map((m) => [m.id, m]));
     const textNow = (message: string): { new?: string } => {
@@ -1462,12 +1512,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       add("edit", notices?.line("edited_more", { count: named.length, messages: numbers.join(", ") }));
     }
     for (const told of editLines) if (inFull.has(told)) add("edit", told.line, { turn: told.edit.turn });
+    // His edit of a message is told with its text as the turn that answered it was sent it, kept with that turn's request record and let
+    // go with the turn folder's retention; a message no kept turn answered is told as edited without its old text.
     for (const e of edits) {
-      const old = hidden.has(e.message) ? null : this.#d.player.textOf(user, chat, e.message, e.had);
+      const old = hidden.has(e.message) ? null : this.#d.prompts.answeredText(user, chat, e.message, e.had);
       add("edit", notices?.line("player_edited", { message: e.message, ...(old !== null ? { old } : {}), ...textNow(e.message) }));
     }
-    const keep = [...now.values()].filter((m) => m.role === "user").map((m) => ({ message: m.id, hash: m.shown.hash, text: shownText(m) }));
-    if (keep.length > 0) await this.#d.writes.run((db) => this.#d.player.keepTexts(db, user, chat, keep), "keeping the player's messages as read");
+    const answered = newest === undefined ? undefined : now.get(newest.id);
+    if (answered !== undefined) await this.#d.writes.run((db) => this.#d.prompts.answered(db, user, turn.id, { message: answered.id, hash: answered.shown.hash, text: shownText(answered) }), "keeping the message the turn answered");
 
     // Messages are numbered as `chat_read` numbers them, the chat's first message 0.
     for (const u of of("unplayed")) {
@@ -1787,8 +1839,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // Its own rows are taken back once its run, which may still be winding down, is over.
       if (into !== null) await live?.over;
       const record = settle();
-      // Lumiverse saved its join after the text the turn is tied to: the turn is tied to what it stored, which is that text still.
-      const tiedAgain = written !== null && into !== null && written.text !== before && into.hash === textHash(before);
+      // Lumiverse saved its join after the text it went on: the turn is tied to what it stored, whether or not he had edited that text
+      // before the continue (his edit was told to the continue's run), so the next turn hears of no edit that is only the join.
+      const tiedAgain = written !== null && into !== null && written.text !== before;
       const dropped = await this.#d.writes.run((db) => {
         this.#d.runs.put(db, record);
         if (store.turn(heldTurn)?.status !== "open") return false;

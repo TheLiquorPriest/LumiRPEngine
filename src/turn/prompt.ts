@@ -30,6 +30,10 @@ export interface Received {
 export interface TurnPrompts extends PromptPort {
   /** Keeps what a turn's request carried; inside a queued write. */
   keep(db: Database, received: Received): void;
+  /** Keeps with a turn's request record the text of the player's message it answered, as it was sent it; inside a queued write. */
+  answered(db: Database, user: string, turn: string, message: { message: string; hash: string; text: string }): void;
+  /** The text a message of the player's had when a kept turn answered it with that hash; null where no kept turn did. */
+  answeredText(user: string, chat: string, message: string, hash: string): string | null;
   /** Joins lore Lumiverse said activated for a turn's generation, heard after its request was kept, to the turn's record; inside a queued write. */
   addLore(db: Database, user: string, turn: string, lore: readonly ActivatedEntry[]): void;
   /** The messages Lumiverse's memory stands in for with a summary in the chat's latest prompt. */
@@ -100,6 +104,16 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
         r.speaker,
         r.persona,
       ]);
+    },
+    answered(into, user, turn, m) {
+      into.run("UPDATE turn_prompt SET answered = ?, answered_hash = ?, answered_text = ? WHERE user = ? AND turn = ?", [m.message, m.hash, m.text, user, turn]);
+    },
+    answeredText(user, chat, message, hash) {
+      return (
+        db
+          .query<{ text: string }, [string, string, string, string]>("SELECT answered_text AS text FROM turn_prompt WHERE user = ? AND chat = ? AND answered = ? AND answered_hash = ? ORDER BY received DESC LIMIT 1")
+          .get(user, chat, message, hash)?.text ?? null
+      );
     },
 
     addLore(into, user, turn, lore) {

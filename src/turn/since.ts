@@ -15,14 +15,32 @@ import type { PathEntry, PathReport } from "../store";
 /** How Lumiverse's text of a message with nothing written in it reads as a hash. */
 const NOTHING_WRITTEN = textHash("");
 
+/** A turn a delete took: its id, its message, and that message's number as the chat stood before the deletion (the first 0; null where RPE did not hold it). */
+export interface GoneTurn {
+  turn: string;
+  message: string;
+  n: number | null;
+}
+
+/** A change that no longer applies after a flip: the change, the turn it came from, its operation, and why, as the store's report codes. */
+export interface StoppedChange {
+  change: number;
+  turn: string;
+  op: string;
+  codes: string[];
+}
+
 /** One thing a comparison found, as data. */
 export type FoundItem =
-  /** Turns whose messages are gone from the chat. */
-  | { kind: "deleted"; turns: string[] }
+  /** Turns whose messages are gone from the chat, each with its message and number. */
+  | { kind: "deleted"; turns: string[]; gone: GoneTurn[] }
   /** Another swipe showing on the newest reply: its turn, none for a swipe made without RPE. */
   | { kind: "swiped"; message: string; to: string | null }
-  /** Another swipe showing on an earlier reply, and the operations that no longer apply after it. */
-  | { kind: "flipped"; message: string; to: string | null; dropped: string[] }
+  /**
+   * Another swipe showing on an earlier reply: the stretch of the turns applied again on it (its first and last message), and the
+   * changes this flip stopped from applying, none a flip before it had stopped.
+   */
+  | { kind: "flipped"; message: string; to: string | null; stretch: { from: string; to: string } | null; stopped: StoppedChange[] }
   /** A reply edited after its turn was tied. */
   | { kind: "edited"; message: string; turn: string }
   /** A player's message edited since RPE last read it: `had` is the hash it had then. */
@@ -38,19 +56,22 @@ export interface KeptItem {
 }
 
 /**
- * What a comparison found, each thing found once. `was` is the path as RPE held it before the comparison, for the player's own messages
- * (the store compares replies) and for the replies no turn is tied to: the store's comparison finds every one of those again, so only
- * those `was` did not hold as they read now, new since or changed since, are found, in stretches broken by a played reply or by one
- * found before. A message with nothing written in it (what Lumiverse keeps of a generation stopped or failed before its first word) is
- * no reply anyone wrote, and is not found.
+ * What a comparison found, each thing found once. `was` is the path as RPE held it before the comparison, for the numbers of the
+ * messages a delete took, the player's own messages (the store compares replies) and the replies no turn is tied to: the store's
+ * comparison finds every one of those again, so only those `was` did not hold as they read now, new since or changed since, are found,
+ * in stretches broken by a played reply or by one found before. A message with nothing written in it (what Lumiverse keeps of a
+ * generation stopped or failed before its first word) is no reply anyone wrote, and is not found. `stoppedBefore`: the changes the
+ * chat's last flip had stopped, which this one does not list again.
  */
-export function foundItems(report: PathReport, was: readonly PathEntry[], steps: readonly LvStep[]): FoundItem[] {
+export function foundItems(report: PathReport, was: readonly PathEntry[], steps: readonly LvStep[], stoppedBefore: ReadonlySet<number> = new Set()): FoundItem[] {
   const items: FoundItem[] = [];
-  const gone = report.gone.flatMap((g) => (g.turn === null ? [] : [g.turn]));
-  if (gone.length > 0) items.push({ kind: "deleted", turns: gone });
+  const number = new Map(was.map((e, i) => [e.message, i]));
+  const gone = report.gone.flatMap((g) => (g.turn === null ? [] : [{ turn: g.turn, message: g.message, n: number.get(g.message) ?? null }]));
+  if (gone.length > 0) items.push({ kind: "deleted", turns: gone.map((g) => g.turn), gone });
   if (report.swiped !== null) items.push({ kind: "swiped", message: report.swiped.message, to: report.swiped.to });
-  const dropped = report.notApplied.map((n) => n.op);
-  for (const f of report.flipped) items.push({ kind: "flipped", message: f.message, to: f.to, dropped });
+  const stopped = report.notApplied.filter((n) => !stoppedBefore.has(n.change)).map((n) => ({ change: n.change, turn: n.turn, op: n.op, codes: n.reports.map((r) => r.code) }));
+  const stretch = report.rebased === null ? null : { from: report.rebased.from, to: report.rebased.to };
+  for (const f of report.flipped) items.push({ kind: "flipped", message: f.message, to: f.to, stretch, stopped });
   for (const e of report.edited) items.push({ kind: "edited", message: e.message, turn: e.turn });
   const heard = new Map(was.flatMap((e) => (e.user ? [[e.message, e.hash] as const] : [])));
   for (const s of steps) {
@@ -94,6 +115,15 @@ export class SinceKept {
       .query<{ id: string; at: number; item: string }, [string, string, string | null]>("SELECT id, at, item FROM since_found WHERE user = ? AND chat = ? AND after IS ? ORDER BY at, rowid")
       .all(user, chat, after)
       .map((r) => ({ id: r.id, at: r.at, item: JSON.parse(r.item) as FoundItem }));
+  }
+
+  /** The changes the chat's last flip kept here had stopped from applying; none before its first. */
+  stoppedBefore(user: string, chat: string): Set<number> {
+    const row = this.db
+      .query<{ item: string }, [string, string]>("SELECT item FROM since_found WHERE user = ? AND chat = ? AND json_extract(item, '$.kind') = 'flipped' ORDER BY at DESC, rowid DESC LIMIT 1")
+      .get(user, chat);
+    const item = row === null ? null : (JSON.parse(row.item) as FoundItem);
+    return new Set(item?.kind === "flipped" ? (item.stopped ?? []).map((s) => s.change) : []);
   }
 
   /** The ids of what `turn` was told. */
