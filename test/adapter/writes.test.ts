@@ -41,7 +41,7 @@ test("an approved write lands; a second, after the entry changed in Lumiverse, i
 });
 
 test("the projection book is made, attached to one chat only with nothing else of its metadata changed, rewritten in order, and detached and removed", async () => {
-  const { db, reads, server, writes } = await bed();
+  const { db, reads, writes } = await bed();
   const book = await writes.createProjection(USER, "chat-1", "Projection");
   expect(JSON.parse(String(db.rows("SELECT metadata FROM chats WHERE id = 'chat-1'")[0]?.metadata))).toEqual({ note: "keep me", chat_world_book_ids: ["book-1", book] });
   expect((await reads.book(book))?.metadata).toMatchObject({ lumi_rp_engine: true });
@@ -54,8 +54,7 @@ test("the projection book is made, attached to one chat only with nothing else o
   expect((await reads.entries(book)).map((e) => e.comment)).toEqual(["B"]);
   await writes.removeProjection(USER, book);
   expect(JSON.parse(String(db.rows("SELECT metadata FROM chats WHERE id = 'chat-1'")[0]?.metadata))).toEqual({ note: "keep me", chat_world_book_ids: ["book-1"] });
-  // The stand-in has no route that deletes a book (the book-removal package adds it): what is checked is that RPE asked for it.
-  expect(server.requests.some((r) => r.method === "DELETE" && r.path === `/api/v1/world-books/${book}`)).toBe(true);
+  expect(await reads.book(book)).toBeNull();
 });
 
 test("a panel action's line is appended as his message, text only; and across every write RPE wrote to Lumiverse only what §4.2's table lists", async () => {

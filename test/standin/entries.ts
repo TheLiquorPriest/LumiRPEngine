@@ -232,3 +232,11 @@ export function deleteEntry(db: StandInDb, user: string, id: string, now: number
   touch(db, String(existing.world_book_id), now);
   return { ok: true, body: { success: true }, event: { name: "WORLD_BOOK_ENTRY_DELETED", payload: { id, worldBookId: existing.world_book_id } } };
 }
+
+/** `deleteWorldBook` (`services/world-books.service.ts:1237-1253`, route `routes/world-books.routes.ts:428-432`): the user's book and its entries gone, `WORLD_BOOK_DELETED` told; null for a book that is not the user's. */
+export function deleteBook(db: StandInDb, user: string, id: string): Written | null {
+  if (db.rows("SELECT id FROM world_books WHERE id = ? AND user_id = ?", id, user)[0] === undefined) return null;
+  db.run("DELETE FROM world_book_entries WHERE world_book_id = ?", id);
+  db.run("DELETE FROM world_books WHERE id = ? AND user_id = ?", id, user);
+  return { ok: true, body: { success: true }, event: { name: "WORLD_BOOK_DELETED", payload: { id } } };
+}

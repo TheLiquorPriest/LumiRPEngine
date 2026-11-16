@@ -10,6 +10,8 @@ import { StandIn } from "../standin/lumiverse";
 
 export interface StoresBed {
   db: StandInDb;
+  /** The stand-in Lumiverse, which holds each chat beside its rows. */
+  host: StandIn;
   server: LumiverseServer;
   session: LumiverseSession;
   reads: LumiverseReads;
@@ -43,5 +45,5 @@ export async function createChatReadsStub(closing: (() => void)[], tokenizedMode
     server.stop();
     db.close();
   });
-  return { db, server, session, reads };
+  return { db, host, server, session, reads };
 }

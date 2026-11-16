@@ -8,6 +8,7 @@
 
 import { isRecord } from "../../shared/json";
 import { ENGINE_BOOK_MARK } from "./books";
+import { chatBooksNow, removeBook, setChatBooks, type BookRemoved } from "./book-removal";
 import type { LumiverseReads } from "./reads";
 import { entryFrom, messageFrom, type LvEntry, type LvMessage } from "./rows";
 import { LumiverseError, type LumiverseSession } from "./session";
@@ -45,6 +46,8 @@ export interface Writes {
   replaceProjection(user: string, book: string, entries: readonly EntryFields[]): Promise<void>;
   /** The projection book detached from every chat that has it, and deleted. */
   removeProjection(user: string, book: string): Promise<void>;
+  /** A book of his removed and taken out of every chat that has it, through Lumiverse's own routes as him, with nothing else of any chat changed; what it changed. */
+  removeBook(user: string, book: string): Promise<BookRemoved>;
   /** A line of his appended to the chat as his message, text only; the message as Lumiverse stored it. */
   appendMessage(user: string, chat: string, text: string): Promise<LvMessage>;
   /** A generation started in the chat; Lumiverse's id of it. Its reply comes on the connection the chat uses, tagged as any other. */
@@ -110,16 +113,8 @@ export function createWrites(deps: WriteDeps): Writes {
     return (await deps.reads.entry(entry))?.book ?? null;
   }
 
-  /** The chat's `chat_world_book_ids` as Lumiverse holds it now. */
-  async function attachedNow(chat: string): Promise<string[] | null> {
-    const body = await session.json("GET", `/api/v1/chats/${enc(chat)}?messages=false`);
-    if (!isRecord(body)) return null;
-    const meta = isRecord(body.metadata) ? body.metadata : {};
-    return Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((id): id is string => typeof id === "string") : [];
-  }
-
   /** The chat's one key set, by Lumiverse's atomic merge (`PATCH /chats/:id/metadata`): every other key of the metadata is left as it is. */
-  const attach = (chat: string, ids: readonly string[]): Promise<Answer> => expect("PATCH", `/api/v1/chats/${enc(chat)}/metadata`, { chat_world_book_ids: ids }, [200]);
+  const attach = (chat: string, ids: readonly string[]): Promise<void> => setChatBooks(session, chat, ids);
 
   return {
     async update(user, entry, fields, revision) {
@@ -161,7 +156,7 @@ export function createWrites(deps: WriteDeps): Writes {
       const made = await expect("POST", "/api/v1/world-books", { name, description: "", metadata: { [ENGINE_BOOK_MARK]: true } }, [201]);
       const id = isRecord(made.body) && typeof made.body.id === "string" ? made.body.id : null;
       if (id === null) throw new LumiverseError("protocol", "Lumiverse answered a book's creation with no id.");
-      const had = await attachedNow(chat);
+      const had = await chatBooksNow(session, chat);
       if (had === null) throw new LumiverseError("protocol", `The chat ${chat} is not one of this user's: the book made for it was not attached.`, 404);
       await attach(chat, [...had.filter((b) => b !== id), id]);
       return id;
@@ -179,8 +174,11 @@ export function createWrites(deps: WriteDeps): Writes {
     },
     async removeProjection(user, book) {
       own(user);
-      await detachBook(deps, book);
-      await expect("DELETE", `/api/v1/world-books/${enc(book)}`, undefined, [200, 404]);
+      await removeBook(deps, book);
+    },
+    async removeBook(user, book) {
+      own(user);
+      return await removeBook(deps, book);
     },
     async appendMessage(user, chat, text) {
       own(user);
@@ -198,20 +196,4 @@ export function createWrites(deps: WriteDeps): Writes {
       return id;
     },
   };
-}
-
-/**
- * The book taken out of the `chat_world_book_ids` of every chat of the user's that has it, nothing else of those chats changed. The chats it changed.
- * Lumiverse's atomic merge sets the one key; the chats are found through the door's reads.
- */
-export async function detachBook(deps: WriteDeps, book: string): Promise<string[]> {
-  const changed: string[] = [];
-  for (const chat of await deps.reads.chats()) {
-    const ids = chat.metadata.chat_world_book_ids;
-    if (!Array.isArray(ids) || !ids.includes(book)) continue;
-    const a = await deps.session.request("PATCH", `/api/v1/chats/${enc(chat.id)}/metadata`, { chat_world_book_ids: ids.filter((id) => id !== book) });
-    if (a.status !== 200) throw new LumiverseError("protocol", `Lumiverse answered ${a.status} when RPE took a book out of chat ${chat.id}.`, a.status);
-    changed.push(chat.id);
-  }
-  return changed;
 }

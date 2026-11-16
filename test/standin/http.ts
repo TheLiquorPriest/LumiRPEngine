@@ -19,7 +19,7 @@ import { databankAnswer, macroAnswer, memoryAnswer, openCortex, tokenAnswer, typ
 import { appendMessage, clamped, generationInput, patchChatMetadata, resolveGeneration, SERVER_ERROR, startRoute, type Env, type Reply } from "./chatwrites";
 import type { StandInDb } from "./db";
 import { embeddingConfig } from "./embeddings";
-import { createBook, createEntry, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
+import { createBook, createEntry, deleteBook, deleteEntry, entryOf, updateEntry, type Written } from "./entries";
 import type { Outcome, StandIn } from "./lumiverse";
 import { Profiles } from "./profiles";
 import { Refused, type Viewer } from "./spindle";
@@ -594,6 +594,12 @@ export class LumiverseServer {
     if (method === "POST" && path === "/api/v1/world-books") {
       const body = await bodyOf();
       return body === null ? new Response("Internal Server Error", { status: 500, headers: { "content-type": "text/plain; charset=UTF-8" } }) : sent(createBook(db, user, body, now), 201);
+    }
+    // `DELETE /api/v1/world-books/:id` (`routes/world-books.routes.ts:428-432`): 200 `{success: true}`, 404 for a book that is not the user's.
+    const whole = method === "DELETE" ? /^\/api\/v1\/world-books\/([^/]+)$/.exec(path) : null;
+    if (whole !== null) {
+      const gone = deleteBook(db, user, decodeURIComponent(whole[1]!));
+      return gone === null ? json(404, { error: "Not found" }) : sent(gone);
     }
     const route = /^\/api\/v1\/world-books\/([^/]+)\/entries(?:\/([^/]+))?$/.exec(path);
     if (route === null) return null;
