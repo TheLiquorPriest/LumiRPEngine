@@ -2,7 +2,7 @@
 description: cast_query as the model is told it - what the tool does, and what each of its arguments is.
 arguments:
   who: "The character, by name or id. Leave it out for who is in the cast, and as what."
-  part: "Which part: sources, base, casting, growth, mind, relationships, knowledge, history or perceptions. Leave it out for every part."
+  part: "Which part: sources, base, casting, growth, mind, relationships, knowledge, history, perceptions, or away (where a principal out of view is and what it means to do). Leave it out for every part."
   with: "relationships: only toward this person."
   words: "Only entries that hold all of these words."
   history: "true: every version of the base, and each entry with every write of it, oldest first; struck entries too."

@@ -1,11 +1,11 @@
 ---
 description: How the tools of the cast are called - cast_query, cast_update and perceive, and a character's own recall, remember, reflect, dream, mind_set and relate. It says how to call them, not when. Delete this file and an agent that holds one of them is given no such guide.
 ---
-cast_query reads a character's record as it stands on this turn's path: `who` by name or id (leave it out for who is in the cast), `part` one of sources, base, casting, growth, mind, relationships, knowledge, history or perceptions, and `with`, `words`, `history` and `skip` to narrow it.
+cast_query reads a character's record as it stands on this turn's path: `who` by name or id (leave it out for who is in the cast), `part` one of sources, base, casting, growth, mind, relationships, knowledge, history, perceptions or away, and `with`, `words`, `history` and `skip` to narrow it.
 
     cast_query {"who": "Bram", "part": "relationships", "with": "Wren"}
 
-cast_update takes `operations`, written in order in one write: `cast`, `bind`, `base`, `growth`, `history`, `relationship`, `knowledge` or `filed`, each with `who` and that operation's fields. perceive takes `perceptions`, one per character and moment: `who`, `moment`, how much reached them (`reach`: whole, part, told or none), what did (`content`), what did not (`missed`), what they now know (`knows`) and any secrets they now hold, by the id the lore map shows (`secrets`).
+cast_update takes `operations`, written in order in one write: `cast`, `bind`, `base`, `growth`, `history`, `relationship`, `away`, `knowledge` or `filed`, each with `who` and that operation's fields. `cast` may name the world's `person` the character is; `away` keeps where a principal out of view is (`whereabouts`, `place`), what it means to do (`intention`) and by when (`until`), and `drop` true when it is back. perceive takes `perceptions`, one per character and moment: `who`, `moment`, how much reached them (`reach`: whole, part, told or none), what did (`content`), what did not (`missed`), what they now know (`knows`) and any secrets they now hold, by the id the lore map shows (`secrets`).
 
     cast_update {"operations": [{"op": "knowledge", "who": "Bram", "text": "The reeve's seal has a chipped corner.", "how": "He saw it on the letter."}]}
     perceive {"perceptions": [{"who": "Bram", "moment": "Wren opens the letter", "reach": "part", "content": "From behind the bar: Wren breaks a seal and goes pale.", "missed": "What the letter says.", "knows": ["Wren had a sealed letter."]}]}
