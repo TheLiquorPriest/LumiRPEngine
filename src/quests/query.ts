@@ -58,6 +58,7 @@ export function queryQuests(call: Call, reading: Reading, reply: Reply, said: un
     items: storySliceOf(reading.state).items,
     settings,
     sources,
+    holders: call.deps.questHolders?.(call.scope.user, call.scope.chat, turn?.id ?? null, view.id) ?? [],
     messageOf: (item) => record.beatAt(item),
   });
   return reply.data(shown);

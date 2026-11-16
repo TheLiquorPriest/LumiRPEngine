@@ -493,6 +493,13 @@ const READS: NonNullable<StoreArea["reads"]> = {
   quests: (slice) => Object.values(asSlice(slice).quests) as unknown as JsonValue,
   /** One quest by id or name: `QuestDoc`, null where none has it. Takes `{ quest }`. */
   quest: (slice, args) => (findQuest(asSlice(slice), typeof args.quest === "string" ? args.quest : "") ?? null) as unknown as JsonValue,
+  /** The quests opened in play that are not closed, for the tree's count of what is open: `[{ id, at }]`, `at` the tree refs it names (who and where), none: the whole world's. */
+  open: (slice) => {
+    const s = asSlice(slice);
+    return Object.values(s.quests)
+      .filter((q) => marksOf(s, q.id).closed === null)
+      .map((q) => ({ id: q.id, at: [...q.who, ...q.where] })) as unknown as JsonValue;
+  },
 };
 
 /** The quests' area, as the store opens with it. */

@@ -8,6 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { StageDef, TrackDef } from "../shared/world";
 import type { StoryItemDoc } from "../story/fold";
 import { type QuestDoc, type QuestSlice, type QuestStageView, type QuestView, questViews, seenOf } from "./record";
+import type { QuestHolder } from "./holders";
 import type { QuestsSettings } from "./settings";
 import { questEvents, threadClosedAt } from "./thread";
 
@@ -98,6 +99,8 @@ export interface QuestReadInput {
   settings: Pick<QuestsSettings, "history">;
   /** The entries bound to the quest as the lore keeps them: each with its aspect. */
   sources: readonly { entry: string; aspect: string; title: string | null }[];
+  /** The characters whose knowledge names the quest or one of its stages (the cast's), with what they hold. */
+  holders: readonly QuestHolder[];
   /** The message number a turn's reply lies at, for a beat's place in the chat; null when it is not on the path. */
   messageOf(item: StoryItemDoc): number | null;
 }
@@ -150,6 +153,7 @@ export function questRead(i: QuestReadInput): JsonObject {
     player_sees: seen.whole ? "all" : seen.stages.length > 0 ? [...seen.stages] : "none",
     closed: view.closed === null ? null : { outcome: view.closed.outcome, why: view.closed.why },
     sources: i.sources.map((s) => ({ entry: s.entry, aspect: s.aspect, title: s.title })),
+    holders: i.holders.map((h) => ({ character: h.character, name: h.name, text: h.text, stage: h.stage })),
     thread: thread === undefined ? null : { id: thread.id, text: typeof thread.fields.text === "string" ? thread.fields.text : null, state: thread.closedBy === null ? "open" : "closed", ...(closedThread !== null ? { closed_at: closedThread.turn } : {}) },
     history: historyOfQuest(i.items, view.id, i.settings.history, i.messageOf) as unknown as JsonValue,
     events: i.doc === undefined ? [] : (questEvents(i.doc, i.slice, thread).map((e) => ({ turn: e.turn, what: e.what })) as unknown as JsonValue),

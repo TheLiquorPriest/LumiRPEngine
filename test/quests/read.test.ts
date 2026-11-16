@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import { questSliceOf } from "../../src/quests";
+import { holdersOf } from "../../src/quests/holders";
 import { STORY_OPS } from "../../src/story/fold";
 import { dataOf, rig, texts, world } from "../iface/rig";
 
@@ -74,5 +75,18 @@ describe("the beats that moved a quest", () => {
     const quest = dataOf(await t.call("world_query", { at: "The missing ferryman" }));
     expect((quest.history as { items: { text: string }[] }).items.map((h) => h.text)).toEqual(["The ferrywoman is cold.", "Wren asks at the landing."]);
     expect((quest.history as { more: number }).more).toBe(0);
+  });
+});
+
+describe("who holds a quest's secret", () => {
+  test("the record shows the characters whose knowledge names the quest or a stage of it, and the journal is not changed by it", async () => {
+    const item = (character: string, about_refs: string[], text: string) => ({ part: "knowledge" as const, id: `k-${character}`, character, fields: { about_refs, text }, opened: "t", touched: "t", at: null, dropped: false, rows: [] });
+    const known = [item("c-1", ["quest:errand/done"], "The warden sent it himself."), item("c-2", ["quest:other"], "Something else."), item("c-3", ["quest:errand"], "There is a letter.")];
+    const t = await rig({ questHolders: (_user, _chat, _turn, quest) => holdersOf(known, (c) => ({ "c-1": "Wren", "c-3": "Odile" })[c], quest) });
+    const letter = dataOf(await t.call("world_query", { at: "quest:errand" }));
+    expect(letter.holders).toEqual([
+      { character: "c-1", name: "Wren", text: "The warden sent it himself.", stage: "done" },
+      { character: "c-3", name: "Odile", text: "There is a letter.", stage: null },
+    ]);
   });
 });
