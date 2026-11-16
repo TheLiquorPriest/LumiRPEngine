@@ -150,6 +150,14 @@ export interface ChatRow {
   created: number;
   /** When the chat was deleted while a branch still shares its turns. */
   deleted: number | null;
+  /** The chat's own seed, the run's seed an outside client's copy starts from: a carried chat keeps the old engine's; a chat made on RPE gets its own. */
+  seed: string;
+  /** When the chat started, in ms: a carried chat keeps the old engine's; one made on RPE, when it was made. */
+  started: number;
+  /** A carried chat: whether the old engine was on for it before the swap; null for a chat made on RPE. */
+  wasOn: boolean | null;
+  /** A carried chat: which engine played it (`classic`, `agents`, `harness`, as the carrier names it); null for a chat made on RPE. */
+  engine: string | null;
 }
 
 export interface TurnRow {
@@ -174,6 +182,8 @@ export interface TurnRow {
   status: TurnStatus;
   /** The hash the chat showed last when it differs from the saved one: the reply was edited. */
   edited: string | null;
+  /** The text the reply was played on, kept with a carried turn (an RPE turn's is in its folder): what an edit since is told against. */
+  text: string | null;
   /**
    * The turn whose changes it joined (`UserStore.joinTurn`): a continue's held turn, joined to the turn it extended when the
    * generation's end named that turn's message. Null for any other. A write or a reading of its state addressed to it is refused.
@@ -258,10 +268,16 @@ export interface PathReport {
   flipped: { message: string; from: string | null; to: string | null }[];
   /** The turns now applied on top of a path other than the one they were made on: the stretch to look over. */
   rebased: { from: string; to: string; turns: string[] } | null;
-  /** Replies whose text differs from what was saved when their turn was tied (newly so). */
-  edited: { turn: string; message: string; saved: string; now: string }[];
-  /** Replies after the chat's first turn that no turn is tied to. */
-  unplayed: { from: string; to: string; count: number }[];
+  /**
+   * Replies whose text differs from what was saved when their turn was tied (newly so); `text` is what the turn was played on where the store
+   * keeps it (a carried turn's), the old text whole.
+   */
+  edited: { turn: string; message: string; saved: string; now: string; text?: string }[];
+  /**
+   * Replies after the chat's first turn that no turn is tied to, in runs. `why` names, among the run's messages, each that stands with a reason
+   * kept for it (a carried reply: stopped, failed, restarted); absent when none has one.
+   */
+  unplayed: { from: string; to: string; count: number; why?: { message: string; why: StretchWhy }[] }[];
   /** A branch seen for the first time: the chat it was made from, and where. */
   branched: { from: string; at: string | null } | null;
   /** What no longer applies on the head's path, when a stretch is rebased. */
@@ -274,6 +290,9 @@ export interface PathReport {
   /** Messages now standing before a played turn that were not on the path before, each with the first turn after it. Absent: none. */
   inserted?: { message: string; before: string }[];
 }
+
+/** Why a reply stands with no turn played, as the old engine recorded it: the reply was stopped, failed, or restarted. */
+export type StretchWhy = "stopped" | "failed" | "restarted";
 
 /**
  * Where a write goes (plan §10.9, R-73): to a turn (a turn's own call; an agent's job, to the turn that started it, with the job), or to

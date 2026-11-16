@@ -54,6 +54,7 @@ import {
   type Source,
   type Standing,
   type StoreState,
+  type StretchWhy,
   type TurnPoint,
   type TurnRow,
   type TurnStart,
@@ -180,6 +181,7 @@ interface TurnDb {
   swipe_date: number | null;
   status: string;
   edited: string | null;
+  text: string | null;
   joined: string | null;
   intent: string | null;
   story_time: number | null;
@@ -230,6 +232,10 @@ interface ChatDb {
   /** When the chat was first compared (`sync`); null before. */
   compared: number | null;
   deleted: number | null;
+  seed: string | null;
+  started: number | null;
+  was_on: number | null;
+  engine: string | null;
 }
 
 interface Cached {
@@ -270,6 +276,7 @@ function turnOf(r: TurnDb): TurnRow {
     date: r.swipe_date,
     status: r.status as TurnStatus,
     edited: r.edited,
+    text: r.text,
     joined: r.joined,
     intent: r.intent,
     storyTime: r.story_time,
@@ -308,7 +315,7 @@ function changeOf(r: ChangeDb): ChangeRow {
 }
 
 function chatOf(r: ChatDb): ChatRow {
-  return { id: r.id, world: r.world as WorldId | null, revision: r.revision as RevisionId | null, sourceChat: r.source_chat, sourceMessage: r.source_message, head: r.head, created: r.created, deleted: r.deleted };
+  return { id: r.id, world: r.world as WorldId | null, revision: r.revision as RevisionId | null, sourceChat: r.source_chat, sourceMessage: r.source_message, head: r.head, created: r.created, deleted: r.deleted, seed: r.seed ?? r.id, started: r.started ?? r.created, wasOn: r.was_on === null ? null : r.was_on === 1, engine: r.engine };
 }
 
 /**
@@ -817,10 +824,27 @@ export class UserStore {
 
   // ------------------------------------------------------------ chats
 
-  /** A new chat, starting on `revision` of `world`. */
-  createChat(input: { id: string; world?: WorldId | null; revision?: RevisionId | null }): ChatRow {
+  /**
+   * A new chat, starting on `revision` of `world`. It keeps its own record: its seed and when it started (one made on RPE gets its
+   * own; a carried chat is given the old engine's), and, for a carried chat, whether the old engine was on for it before the swap and
+   * which engine played it. Every caller reads them with the chat (`ChatRow`).
+   */
+  createChat(input: { id: string; world?: WorldId | null; revision?: RevisionId | null; seed?: string; started?: number; wasOn?: boolean | null; engine?: string | null }): ChatRow {
     if (this.chat(input.id)) throw new StoreInputError(`chat ${input.id} exists`);
-    this.write(false, () => this.db.run("INSERT INTO chat (user, id, world, revision, created) VALUES (?, ?, ?, ?, ?)", [this.id, input.id, input.world ?? null, input.revision ?? null, this.store.now()]));
+    const now = this.store.now();
+    this.write(false, () =>
+      this.db.run("INSERT INTO chat (user, id, world, revision, created, seed, started, was_on, engine) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+        this.id,
+        input.id,
+        input.world ?? null,
+        input.revision ?? null,
+        now,
+        input.seed ?? crypto.randomUUID(),
+        input.started ?? now,
+        input.wasOn === undefined || input.wasOn === null ? null : input.wasOn ? 1 : 0,
+        input.engine ?? null,
+      ]),
+    );
     return this.chat(input.id) as ChatRow;
   }
 
@@ -899,7 +923,8 @@ export class UserStore {
       if (h !== undefined) heard[now] = h;
     }
     this.write(false, () => {
-      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, head, path, heard, heard_count, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      const made = this.store.now();
+      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, head, path, heard, heard_count, created, seed, started) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
         this.id,
         input.id,
         source.world,
@@ -910,7 +935,9 @@ export class UserStore {
         JSON.stringify(path),
         JSON.stringify(heard),
         source.heard_count,
-        this.store.now(),
+        made,
+        crypto.randomUUID(),
+        made,
       ]);
       const link = this.db.query("INSERT OR REPLACE INTO message_link (user, chat, message, source_chat, source_message) VALUES (?, ?, ?, ?, ?)");
       for (const [old, now] of Object.entries(input.map)) link.run(this.id, input.id, now, input.from, old);
@@ -965,7 +992,7 @@ export class UserStore {
     );
     this.db.run(`DELETE FROM change WHERE user = ?1 AND (turn IN (${turns}) OR chat = ?2)`, [this.id, id]);
     this.db.run(`DELETE FROM path_node WHERE user = ?1 AND turn IN (${turns})`, [this.id, id]);
-    for (const table of ["turn", "session", "message_link"]) this.db.run(`DELETE FROM ${table} WHERE user = ? AND chat = ?`, [this.id, id]);
+    for (const table of ["turn", "session", "message_link", "reply_reason"]) this.db.run(`DELETE FROM ${table} WHERE user = ? AND chat = ?`, [this.id, id]);
     this.db.run("DELETE FROM chat WHERE user = ? AND id = ?", [this.id, id]);
   }
 
@@ -1166,15 +1193,18 @@ export class UserStore {
    * reply saved only in part is `cut`. A continue ties the same turn again to the longer text. The
    * turn joins its chat's path at once where it extends it (a new reply after the head, a swipe of
    * the newest reply, or a turn begun after the one its message holds: a branch's continue of a
-   * reply it shares); anything else waits for the next comparison (`sync`).
+   * reply it shares); anything else waits for the next comparison (`sync`). An importer gives, with
+   * `text`, the text a carried reply was played on, kept with the turn: where the chat shows other
+   * text, a comparison tells the edit with it.
    */
-  tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut" }): TurnRow {
+  tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut"; text?: string | null }): TurnRow {
     const t = this.turnToWrite(id);
     if (t.status === "dropped") throw new StoreInputError(`turn ${id} was dropped`);
     // A finished turn every `snapshotEvery` along its path keeps its state, so a cold start is short.
     const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.foldNode(t.node) : null;
     this.write(false, () => {
       this.db.run("UPDATE turn SET message = ?, hash = ?, swipe_date = ?, status = ?, edited = NULL WHERE user = ? AND id = ?", [input.message, input.hash, input.date ?? null, input.status ?? "done", this.id, id]);
+      if (input.text !== undefined) this.db.run("UPDATE turn SET text = ? WHERE user = ? AND id = ?", [input.text, this.id, id]);
       this.joinPath(t, { message: input.message, user: false, turn: id, node: t.node, own: true, hash: input.hash, date: input.date ?? null });
       if (keep) {
         const doc: SnapshotDoc = { state: keep.folded.state, notApplied: keep.folded.notApplied, rebased: keep.folded.rebased };
@@ -1367,7 +1397,7 @@ export class UserStore {
         const match = matchTurn(tied.get(m.id) ?? [], m, turn, swipesOf === undefined ? undefined : () => swipesOf(m.id));
         turn = match.turn?.id ?? null;
         if (match.turn && match.edited && match.turn.edited !== m.hash) {
-          edited.push({ turn: match.turn.id, message: m.id, saved: match.turn.hash ?? "", now: m.hash });
+          edited.push({ turn: match.turn.id, message: m.id, saved: match.turn.hash ?? "", now: m.hash, ...(typeof match.turn.text === "string" ? { text: match.turn.text } : {}) });
           flags.push([match.turn.id, m.hash]);
         } else if (match.turn && !match.edited && match.turn.edited !== null) flags.push([match.turn.id, null]);
       }
@@ -1434,7 +1464,54 @@ export class UserStore {
       ]);
       return found.rebased ? this.headState(chat).notApplied : [];
     });
-    return { ...found, edited, branched, notApplied, ...(branchStopped.length > 0 ? { branchStopped } : {}), ...(inserted.length > 0 ? { inserted } : {}) };
+    return { ...found, unplayed: this.withReasons(chat, found.unplayed, after), edited, branched, notApplied, ...(branchStopped.length > 0 ? { branchStopped } : {}), ...(inserted.length > 0 ? { inserted } : {}) };
+  }
+
+  /**
+   * Keeps why a reply stands with no turn played (`stopped`, `failed`, `restarted`), by its message, as a carrier gives it from what the
+   * old engine recorded on the reply; null takes it off. A comparison lists it with the reply's unplayed stretch.
+   */
+  setReason(chat: string, message: string, why: StretchWhy | null): void {
+    this.chatOrThrow(chat);
+    this.write(false, () => {
+      if (why === null) this.db.run("DELETE FROM reply_reason WHERE user = ? AND chat = ? AND message = ?", [this.id, chat, message]);
+      else this.db.run("INSERT INTO reply_reason (user, chat, message, why) VALUES (?, ?, ?, ?) ON CONFLICT (user, chat, message) DO UPDATE SET why = excluded.why", [this.id, chat, message, why]);
+    });
+  }
+
+  /** Each unplayed stretch with the reasons kept for the replies in it (`setReason`); none kept: the stretches as compared. */
+  private withReasons(chat: string, stretches: PathReport["unplayed"], after: readonly PathEntry[]): PathReport["unplayed"] {
+    if (stretches.length === 0) return stretches;
+    const kept = new Map(this.db.query<{ message: string; why: string }, [string, string]>("SELECT message, why FROM reply_reason WHERE user = ? AND chat = ?").all(this.id, chat).map((r) => [r.message, r.why as StretchWhy]));
+    if (kept.size === 0) return stretches;
+    const replies = after.filter((e) => !e.user).map((e) => e.message);
+    return stretches.map((s) => {
+      const why = replies.slice(replies.indexOf(s.from), replies.indexOf(s.to) + 1).flatMap((message) => (kept.has(message) ? [{ message, why: kept.get(message) as StretchWhy }] : []));
+      return why.length === 0 ? s : { ...s, why };
+    });
+  }
+
+  /**
+   * Lets the next comparison tell the edits this chat's turns carry as it tells any: the mark that a reply was edited (`TurnRow.edited`) is the
+   * comparison's record that it told it, and the path keeps the hash each reply showed then; both go back to the text the turn was saved on,
+   * so the next comparison finds the reply showing other text and tells it. An import's own comparisons are not the Author's. The turns
+   * keep the text they were played on. How many replies it was done for.
+   */
+  forgetEdits(chat: string): number {
+    const row = this.chatOrThrow(chat);
+    const marked = new Map(
+      this.db
+        .query<{ id: string; hash: string | null }, [string, string]>("SELECT id, hash FROM turn WHERE user = ? AND chat = ? AND edited IS NOT NULL")
+        .all(this.id, chat)
+        .map((t) => [t.id, t.hash ?? ""]),
+    );
+    if (marked.size === 0) return 0;
+    const path = pathOf(row.path).map((e) => (e.turn !== null && marked.has(e.turn) ? { ...e, hash: marked.get(e.turn) as string } : e));
+    this.write(false, () => {
+      this.db.run("UPDATE turn SET edited = NULL WHERE user = ? AND chat = ? AND edited IS NOT NULL", [this.id, chat]);
+      this.db.run("UPDATE chat SET path = ? WHERE user = ? AND id = ?", [JSON.stringify(path), this.id, chat]);
+    });
+    return marked.size;
   }
 
   /** What was heard of a chat (`row`) that a comparison of `shown` (taken as `after`), read once `upto` was heard, does not take. */
@@ -2033,20 +2110,26 @@ export class UserStore {
   }
 
   /**
-   * A starting state that stands for the engine's state after a turn on its own path (a migrated
-   * chat's, where today's fold and this one differ, plan §15.3 item 7): folds start from it, whatever
-   * the turns before it hold, and a change recorded on the turn afterwards (a correction) is folded on
-   * top of it. What the store keeps beside the engine's state (agents' lines, what changed last, the
-   * areas' slices) is the turn's own as folded.
+   * A starting state that stands for the engine's state after a turn on a path (a migrated chat's, where today's fold and this one
+   * differ, plan §15.3 item 7): folds start from it, whatever the turns before it hold, and a change recorded on the turn afterwards
+   * (a correction) is folded on top of it. What the store keeps beside the engine's state (agents' lines, what changed last, the areas'
+   * slices) is the turn's own as folded. Any turn of a chat takes one, on the chat's path or off it (another swipe of a message); it
+   * stands at the path node of the turn made on its own path unless `at` names another node the turn stands at (the head of a
+   * rebased chat, where the turn's own path is not the one shown): every path through that node, the later turns of it included,
+   * folds from it.
    */
-  setBase(turnId: string, world: WorldState): void {
+  setBase(turnId: string, world: WorldState, at?: string): void {
     const turn = this.turnToWrite(turnId);
-    const own = this.foldNode(turn.node).folded.state;
+    const node = at ?? turn.node;
+    if (at !== undefined && this.db.query<{ turn: string }, [string, string]>("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, at)?.turn !== turnId) {
+      throw new StoreInputError(`${at} is not a path node of turn ${turnId}`);
+    }
+    const own = this.foldNode(node).folded.state;
     const doc: SnapshotDoc = { state: { ...own, world }, notApplied: [], rebased: [] };
     this.write(this.throughTurn(turn), () => {
       // Every change of this user's recorded so far stands within the base or before it; ids only grow.
       const upto = this.db.query<{ n: number | null }, [string]>("SELECT max(id) AS n FROM change WHERE user = ?").get(this.id)?.n ?? 0;
-      this.store.storeSnapshot(this.id, turn.node, "base", upto, snapshotRows(doc));
+      this.store.storeSnapshot(this.id, node, "base", upto, snapshotRows(doc));
       this.dropSnapshotsThrough(turnId);
     });
   }

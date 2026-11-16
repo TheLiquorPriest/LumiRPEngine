@@ -281,10 +281,31 @@ CREATE INDEX world_part_file ON world_part (file);
       keepWorldsOnce(db, Date.now());
     },
   },
+  {
+    version: 14,
+    // What the old engines recorded, kept in the store (plan §15.2): a chat's own record (its seed, when it started, whether the engine was on
+    // for it before the swap, which engine played it; a chat made before this has its id for a seed and the day it was made), the text a
+    // carried turn was played on, and why a reply stands with no turn (stopped, failed, restarted), kept by its message.
+    sql: `
+ALTER TABLE chat ADD COLUMN seed TEXT;
+ALTER TABLE chat ADD COLUMN started INTEGER;
+ALTER TABLE chat ADD COLUMN was_on INTEGER;
+ALTER TABLE chat ADD COLUMN engine TEXT;
+UPDATE chat SET seed = id, started = created;
+ALTER TABLE turn ADD COLUMN text TEXT;
+CREATE TABLE reply_reason (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  message TEXT NOT NULL,
+  why TEXT NOT NULL,
+  PRIMARY KEY (user, chat, message)
+);
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
-export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job_end", "snapshot_part"];
+export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job_end", "snapshot_part", "reply_reason"];
 
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {
