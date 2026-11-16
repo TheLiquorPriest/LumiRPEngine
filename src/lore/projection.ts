@@ -9,7 +9,7 @@
 // With the setting off nothing of it runs, and a book made while it was on is taken away.
 
 import type { Database } from "bun:sqlite";
-import type { Fields, LinesPart } from "rp-harness";
+import type { Fields, LinesPart } from "../app/guidance";
 import { hashJson } from "../shared/hash";
 import type { LoreWrites } from "./ids";
 import type { Lore, LoreAt } from "./lore";

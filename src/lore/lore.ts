@@ -18,7 +18,7 @@
 // lore found by its own fields, each secret mark of it its own secret, held by those it names and those the story made holders; a mark a
 // character does not hold is left out of what it reads, and an entry it may not know is not there for it.
 
-import type { LinesPart } from "rp-harness";
+import type { LinesPart } from "../app/guidance";
 import type { ActivatedLore, LoreEntry, LoreHit, LoreKnowing, LoreQuery, LoreSecret } from "rp-harness/contract";
 import { blankWorld } from "../engine/authoring";
 import { loreReadable, loreSearch, SEARCH_LIMITS, type SearchLimits, wordsOf } from "../engine/lore";

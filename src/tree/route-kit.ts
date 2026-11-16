@@ -3,7 +3,6 @@
 // path of the view, a chat, a level.
 
 import type { Database } from "bun:sqlite";
-import type { Guidance } from "rp-harness";
 import type { LayerLevel, StackPart } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { entryAt, listingContext, type TreeFileEntry, treeListing } from "./catalog";
@@ -11,6 +10,7 @@ import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { defaultStanding } from "./defaults";
 import { OwnFiles } from "./own-files";
 import type { ChatMeasurer } from "./storage";
+import type { GuidanceReads } from "./standing";
 import type { TreeSuggestions } from "./suggestions";
 import { type ChatLocation, locate } from "./view";
 
@@ -45,7 +45,7 @@ export interface TreeRoutesDeps {
   /** Places a chat RPE has not played yet, by Lumiverse's own names for it and its character, as its first turn places it; absent where RPE cannot. */
   place?(user: string, chat: string): Promise<ChatFolders>;
   /** What RPH makes of the files of the chat's view: what it holds out, what it found wrong, whose stacks they join; with no chat, of the shipped and global levels. */
-  guidance(user: string, chat: string | null): Guidance;
+  guidance(user: string, chat: string | null): GuidanceReads;
   /** The data folder's backups: the migration's, the copies of the database taken before migrations, the archives `rpe backup` made. */
   backups: string;
   /** How many of those copies are kept (`database.copiesKept`). */

@@ -4,7 +4,7 @@
 // own id. The wording is a line of `.prompts/lore-answers.md` (`secret_mark`); with no such line a mark is left out, as it is from any
 // reader's text, which fails closed.
 
-import type { LinesPart } from "rp-harness";
+import type { LinesPart } from "../../app/guidance";
 import type { LoreSecret } from "rp-harness/contract";
 import { bookLoreId } from "../../secrecy/book-lore";
 import { bookLoreFieldsOf, loreIsSecret } from "../../shared/lore";

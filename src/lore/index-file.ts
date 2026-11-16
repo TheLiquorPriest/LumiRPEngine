@@ -2,7 +2,7 @@
 // written by code from the table whenever the index changes, never by an agent. Its words are lines of
 // `.prompts/lore-answers.md`: a head, a count, and one line for each entry.
 
-import type { LinesPart } from "rp-harness";
+import type { LinesPart } from "../app/guidance";
 import type { IndexedEntry } from "./indexing";
 import type { LoreAt } from "./lore";
 import { entryFields, loreLine } from "./tools";

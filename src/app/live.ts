@@ -48,6 +48,12 @@ const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
 export const scope = shape.named("Scope", "Where work is: the user, the chat, the session, and the turn where it belongs to one.", shape.object({ user: T, chat: T, session: T, turn: opt(T) }));
+const userSessionScope = shape.named(
+  "UserSessionScope",
+  "Where a job the owner started for no chat runs: the user and the job's own session, at the user's level; no chat and no turn.",
+  shape.object({ user: T, session: T, chat: opt(shape.nothing()), turn: opt(shape.nothing()) }),
+);
+export const runScope = shape.named("RunScope", "Where a run's work happens: a chat's, or that of a job of no chat.", shape.union(scope, userSessionScope));
 export const agentRef = shape.named("AgentRef", "One agent of a run: its handle, its definition, the agent that started it, its job, and the character it plays.", shape.object({ id: T, definition: T, parent: opt(T), job: opt(T), plays: opt(T) }));
 export const usage = shape.named("Usage", "Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.", shape.object({ calls: N, input: N, cacheRead: N, cacheWrite: N, output: N, reasoning: opt(N) }));
 export const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
@@ -117,7 +123,7 @@ const callPermission = shape.named(
 );
 const callRefusal = shape.named(
   "CallRefusal",
-  "Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, or a permission or rule that could not be asked.",
+  "Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, a permission or rule that could not be asked, or a hook of his that blocked it with its reason.",
   shape.union(
     shape.object({ by: shape.literal("limit"), hit: limitHit }),
     shape.object({ by: shape.literal("answer"), max: N }),
@@ -126,6 +132,7 @@ const callRefusal = shape.named(
     shape.object({ by: shape.literal("declined"), lane: T, reason: opt(T) }),
     shape.object({ by: shape.literal("hold"), rule: T }),
     shape.object({ by: shape.literal("unasked"), error: T }),
+    shape.object({ by: shape.literal("hook"), hook: T, reason: T }),
   ),
 );
 const jobLimits = shape.named(
@@ -135,13 +142,13 @@ const jobLimits = shape.named(
 );
 export const jobView = shape.named(
   "JobView",
-  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, and where it asks.",
+  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.",
   shape.object({
     id: T,
     agent: T,
     brief: T,
     state: shape.named("JobState", "Where a job stands.", shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted")),
-    scope,
+    scope: runScope,
     startedBy: shape.union(agentRef, shape.literal("user")),
     started: N,
     ended: opt(N),
@@ -154,10 +161,12 @@ export const jobView = shape.named(
     wrote: opt(shape.list(shape.named("JobWrite", "A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer.", shape.object({ tool: T, lane: opt(T), line: T }))), "Each write it made, its sub-agents' included, in order."),
     repeats: opt(T, "For a job the owner started again: the job it repeats."),
     asks: opt(shape.object({ at: N, tokens: N }), "For a job that asks: the ask point it reached, and the tokens it had spent when it did."),
+    more: opt(jobLimits, "What the owner gave it beyond its limits by carrying it on, added up over every time he did."),
   }),
 );
 export const replyError = shape.object({
-  code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed", "no-definition", "no-tags"),
+  code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed", "no-definition", "no-tags", "hook"),
+  hook: opt(T, "For hook: the turn-start hook that blocked the turn; detail is its reason."),
   limit: opt(limitHit),
   detail: opt(T),
   agent: opt(T, "For no-definition and no-tags: the agent definition the turn named as its lead."),
@@ -173,7 +182,7 @@ const traceEvent = shape.named(
   "What RPH did; each kind's fields are the facts of it.",
   shape.union(
     shape.object({ kind: shape.literal("run_started"), run: shape.oneOf("turn", "job", "talk"), turn: opt(shape.named("TurnKind", "What a generation asks for.", shape.oneOf("new", "swipe", "regenerate", "continue", "impersonate"))), lead: T }),
-    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T), tools: opt(shape.object({ tokens: N, most: N })) }),
+    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T), tools: opt(shape.object({ tokens: N, most: N })), judges: opt(shape.object({ rule: T, agent: T })) }),
     shape.object({ kind: shape.literal("tool_unheld"), tool: T, definition: T, reason: shape.oneOf("unregistered", "shadowed", "withdrawn") }),
     shape.object({ kind: shape.literal("intent_began") }),
     shape.object({ kind: shape.literal("intent"), text: T }),
@@ -188,12 +197,15 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("rule_fired"), firing: ruleFiring }),
     shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("time"), length: N }),
     shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("command"), detail: T }),
+    shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("judge"), detail: T }),
     shape.object({
       kind: shape.literal("hook"),
       hook: T,
       on: shape.oneOf("turn-start", "before-tool", "after-tool", "before-release", "after-release", "run-end", "session-close", "before-compaction", "job-start", "job-end"),
       outcome: shape.oneOf("ok", "added", "changed", "blocked", "failed", "timed-out"),
       ms: N,
+      callId: opt(T),
+      text: opt(T),
     }),
     shape.object({ kind: shape.literal("approval_asked"), callId: T, tool: T, lane: T }),
     shape.object({ kind: shape.literal("approval_answered"), callId: T, tool: T, lane: T, answer: approvalAnswer }),
@@ -231,7 +243,7 @@ const traceEvent = shape.named(
 export const traceRecord = shape.named(
   "TraceRecord",
   "An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it. No agent for a record of the host's word outside any agent's work (a session opened, closed, forked or opened again by a call of the sessions API).",
-  shape.object({ seq: N, run: T, scope, at: N, agent: opt(agentRef), parent: opt(shape.object({ agent: T, run: T, call: T })), event: traceEvent }),
+  shape.object({ seq: N, run: T, scope: runScope, at: N, agent: opt(agentRef), parent: opt(shape.object({ agent: T, run: T, call: T })), event: traceEvent }),
 );
 const traceDelta = shape.named("TraceDelta", "Text of a model call as it streams: what arrived since the last piece, never numbered.", shape.object({ run: T, agent: T, call: N, text: opt(T), thinking: opt(T), at: N }));
 type TraceMirrored = Holds<Exactly<Infer<typeof traceRecord>, TraceRecord>>;

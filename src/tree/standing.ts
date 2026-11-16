@@ -1,11 +1,21 @@
 // What RPH itself makes of the files of a chat's view (plan §5.2, §14 Files): which rule it holds out
 // because what its `needs:` names is not in force, or because its header does not parse, what it found
-// wrong with each file in its own words, and which agents' stacks each instruction file and rule joins
-// (a file `instructions:` names joins every stack it reaches). RPH is the one that loads guidance; this
-// asks it and hands the answer to the listing, so the page shows a file as RPH will find it.
+// wrong with a file in its own words, and which agents' stacks each instruction file and rule joins
+// (a file `instructions:` names joins every stack it reaches). RPH is the one that lists them (its rules,
+// its definitions and their stacks, what it found wrong with a file that runs or calls out); this asks
+// it and hands the answer to the listing, so the page shows a file as RPH will find it.
 
-import type { Guidance } from "rp-harness";
+import type { DefinitionView, RuleView, StackPart } from "rp-harness/contract";
 import type { TreeFileEntry } from "./catalog";
+
+/** What the tree reads of RPH's own listing of the files in force for a chat's view (or, with no chat, the shipped and global levels). */
+export interface GuidanceReads {
+  rules(): Promise<readonly RuleView[]>;
+  definitions(): Promise<readonly DefinitionView[]>;
+  stack(agent: string): Promise<readonly StackPart[]>;
+  /** What RPH found wrong with a file, in its words, by the file's path in the view. */
+  problems(): Promise<readonly { path: string; line?: number; message: string }[]>;
+}
 
 /** What RPH says of one file. */
 export interface FileStanding {
@@ -15,8 +25,8 @@ export interface FileStanding {
 }
 
 /** RPH's standing of every file it has something to say of, by its path in the chat's view. */
-export async function rphStanding(guidance: Guidance): Promise<Map<string, FileStanding>> {
-  const [problems, rules, definitions] = await Promise.all([guidance.problems(), guidance.rules(), guidance.definitions()]);
+export async function rphStanding(reads: GuidanceReads): Promise<Map<string, FileStanding>> {
+  const [problems, rules, definitions] = await Promise.all([reads.problems(), reads.rules(), reads.definitions()]);
   const out = new Map<string, FileStanding>();
   const at = (path: string): FileStanding => {
     const found = out.get(path) ?? { held: null, problems: [], joins: [] };
@@ -25,9 +35,9 @@ export async function rphStanding(guidance: Guidance): Promise<Map<string, FileS
   };
   for (const p of problems) at(p.path).problems.push(p.line === undefined ? p.message : `Line ${p.line}: ${p.message}`);
   for (const r of rules) if (r.why === "needs" || r.why === "broken") at(r.path).held = r.why;
-  const stacks = await Promise.all(definitions.filter((d) => !d.off).map(async (d) => [d.name, await guidance.stack(d.name)] as const));
+  const stacks = await Promise.all(definitions.filter((d) => !d.off).map(async (d) => [d.name, await reads.stack(d.name)] as const));
   for (const [agent, stack] of stacks) {
-    for (const e of stack.entries) if (e.left === undefined && e.kind !== "definition" && !at(e.path).joins.includes(agent)) at(e.path).joins.push(agent);
+    for (const e of stack) if (e.left === undefined && e.kind !== "definition" && e.kind !== "given" && !at(e.path).joins.includes(agent)) at(e.path).joins.push(agent);
   }
   return out;
 }

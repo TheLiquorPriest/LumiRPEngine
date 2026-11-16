@@ -17,7 +17,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { LinesPart } from "rp-harness";
+import type { LinesPart } from "../app/guidance";
 import type { ActivatedLore, FactDef, FactValue, LoreEntry, Log, Scope } from "rp-harness/contract";
 import { readText, writeWhole } from "../app/disk";
 import type { LoreSettingsFor } from "./chat-settings";

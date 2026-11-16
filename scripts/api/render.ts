@@ -144,7 +144,7 @@ class Names {
         return `{ ${entries
           .map(([name, f]) => {
             const { of, optional } = fieldOf(f);
-            return `${key(name)}${optional ? "?" : ""}: ${this.ts(of)}`;
+            return `${key(name)}${optional ? "?" : ""}: ${of.kind === "nothing" ? "undefined" : this.ts(of)}`;
           })
           .join("; ")} }`;
       }

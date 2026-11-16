@@ -164,7 +164,7 @@ export interface JsonShape extends ShapeOf<JsonValue> {
   readonly kind: "json";
 }
 
-/** No value: a reply of nothing (204), or a body a route does not take. */
+/** No value: a reply of nothing (204), a body a route does not take, or a field an object never has (`optional(nothing())`, a field of `undefined`). */
 export interface NothingShape extends ShapeOf<void> {
   readonly kind: "nothing";
 }
@@ -202,10 +202,12 @@ export type Mutually<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) 
 export type Holds<T extends true> = T;
 
 type FieldOf<F> = F extends FieldShape<infer S, boolean> ? S : F;
+/** A field's value: a field of nothing is one the object never has, as `undefined`. */
+type FieldValue<S> = S extends NothingShape ? undefined : Infer<S>;
 type OptionalNames<F extends Fields> = { [K in keyof F]: F[K] extends FieldShape<AnyShape, true> ? K : never }[keyof F];
 type Flat<T> = { [K in keyof T]: T[K] };
 /** The object type a set of fields describes. */
-export type FieldsOut<F extends Fields> = Flat<{ [K in Exclude<keyof F, OptionalNames<F>>]: Infer<FieldOf<F[K]>> } & { [K in OptionalNames<F>]?: Infer<FieldOf<F[K]>> }>;
+export type FieldsOut<F extends Fields> = Flat<{ [K in Exclude<keyof F, OptionalNames<F>>]: FieldValue<FieldOf<F[K]>> } & { [K in OptionalNames<F>]?: FieldValue<FieldOf<F[K]>> }>;
 
 const TEXT: TextShape = { kind: "text", blank: true };
 const NULL: LiteralShape<null> = { kind: "literal", value: null };

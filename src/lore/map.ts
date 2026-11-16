@@ -10,7 +10,7 @@
 // `.prompts/lore-map.md`, and each entry's line is a line of `.prompts/lore-answers.md`; these are the
 // fields they lay out. `Lore.loreMap` gives the first form, parts 1 and 3 by id and title alone.
 
-import type { Fields, LinesPart } from "rp-harness";
+import type { Fields, LinesPart } from "../app/guidance";
 import type { ActivatedLore, JsonObject } from "rp-harness/contract";
 import type { LoreBinding, LoreNamedFields } from "./indexing";
 import type { OverlayNote } from "./overlays";

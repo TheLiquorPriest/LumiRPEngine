@@ -11,7 +11,7 @@
 // on batch after batch for as long as its own limits let it. What a run is asked to do is its
 // definition's (`.agents/indexer.md`); nothing here starts one.
 
-import type { Fields, Guidance, LinesPart } from "rp-harness";
+import type { Fields, Guidance, LinesPart } from "../app/guidance";
 import type { AgentRef, HostTool, JsonObject, JsonSchema, JsonValue, Log, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
 import { JoinedTurnError, type Lane } from "../store";
 import type { IndexedEntry, LoreBinding, LoreIndex, LoreIndexInput, LoreNamedFields } from "./indexing";
@@ -356,6 +356,8 @@ export async function loreTools(deps: LoreToolDeps): Promise<HostTool[]> {
       parameters: described(spec.properties, spec.required, typeof said === "object" && said !== null && !Array.isArray(said) ? said : {}),
       async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
         const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
+        // A job of no chat has no chat's lore to index: said in the answers' words (`no_chat`), nothing written.
+        if (ctx.scope.chat === undefined) return new Answer(lines).data({ refused: "no_chat" }).line("no_chat", { tool: spec.name }).fail().result();
         const at: LoreAt = { user: ctx.scope.user, chat: ctx.scope.chat, ...(ctx.scope.turn !== undefined ? { turn: ctx.scope.turn } : {}) };
         const call = { at, ctx, deps, answer: new Answer(lines) };
         try {

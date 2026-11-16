@@ -9,7 +9,7 @@
 // The same verdict is asked two ways: at the question (`secrecyRules`), and on receipt over the entries RPE read itself (`secrecyAt`),
 // where an entry the world's secrets were indexed from, with no mark, is switched off and what the verdict would switch on is listed.
 
-import type { Guidance, LinesPart } from "rp-harness";
+import type { Guidance, LinesPart } from "../../app/guidance";
 import { worldInfoVerdict } from "../../secrecy/verdict";
 import type { WorldState } from "../../engine/state";
 import type { JsonObject } from "../../shared/json";

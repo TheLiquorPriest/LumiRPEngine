@@ -8,7 +8,7 @@
 import { appendFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Places, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "rp-harness/contract";
+import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, OwnerWrite, Places, Range, Refused, RunScope, Scope, Unapplied, UserScope, Writer, Written } from "rp-harness/contract";
 import { type GrepLines, grepLines, TaskTimedOut, type Workers } from "../app";
 import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
@@ -16,14 +16,20 @@ import { areaOf, MOUNTS } from "./layout";
 import { treeSettingsOf } from "./settings";
 import { scan } from "./ranged";
 import { linesOf, RunningFiles } from "./running";
-import { type ChatLocation, entriesOf, fileKey, kindOf, type Located, locate, type Lookup, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
+import { type ChatLocation, entriesOf, fileKey, kindOf, type Located, locate, type Lookup, ownerRefusalFor, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
 
 /** The levels every chat shares, which a scope that names only the user sees. */
 const SHARED: readonly LayerLevel[] = ["shipped", "global"];
 
-/** Whether a scope names a chat: one that names only the user has no chat in view. */
-function namesChat(scope: Scope | UserScope): scope is Scope {
-  return "chat" in scope;
+/** Whether a scope names a chat: one that names only the user, or a job of no chat, has no chat in view. */
+function namesChat(scope: RunScope | UserScope): scope is Scope {
+  return "chat" in scope && typeof scope.chat === "string";
+}
+
+/** The run a scope is: a chat's, a job's of no chat (its user and session), or none for a scope that names only the user. */
+function runOf(scope: RunScope | UserScope): RunScope | undefined {
+  if (namesChat(scope)) return scope;
+  return "session" in scope && typeof scope.session === "string" ? { user: scope.user, session: scope.session } : undefined;
 }
 
 export interface TreeFilesDeps {
@@ -184,41 +190,43 @@ async function apply(at: Located & { disk: string }, op: FileOp, running: Runnin
 export function treeFiles(deps: TreeFilesDeps): TreeFiles {
   /** What RPE knows of the files it has appended to or read a range of: their hash, size and lines. */
   const running = new RunningFiles();
-  function check(scope: Scope | UserScope): void {
+  function check(scope: RunScope | UserScope): void {
     if (scope.user !== deps.user) throw new Error(`This RPE belongs to the Lumiverse user ${JSON.stringify(deps.user)}, not ${JSON.stringify(scope.user)}.`);
-    if (!namesChat(scope)) return;
-    safeId("session", scope.session);
-    if (scope.turn !== undefined) safeId("turn", scope.turn);
+    const run = runOf(scope);
+    if (run === undefined) return;
+    safeId("session", run.session);
+    if (run.turn !== undefined) safeId("turn", run.turn);
   }
 
-  /** Where a scope's levels are on disk: its chat's, or, with no chat in view, the tree's folder alone. */
-  function location(scope: Scope | UserScope): ChatLocation {
+  /** Where a scope's levels are on disk: its chat's; a job of no chat's notes and sessions under `jobs/`; or, with no chat in view, the tree's folder alone. */
+  function location(scope: RunScope | UserScope): ChatLocation {
     check(scope);
-    if (!namesChat(scope)) return { files: deps.files, character: null, chat: null };
+    if (!namesChat(scope)) return { files: deps.files, character: null, chat: null, ...(runOf(scope) === undefined ? {} : { jobs: true as const }) };
     const folders = deps.chats.folders(scope.user, scope.chat);
     return { files: deps.files, character: folders?.character ?? null, chat: folders?.chat ?? null };
   }
 
-  /** Finds a path of the scope's view: with no chat in view, a path at a character's or a chat's level, the root among them, is outside it. */
-  async function lookupIn(scope: Scope | UserScope, loc: ChatLocation, path: string): Promise<Lookup> {
+  /** Finds a path of the scope's view: with no chat in view, a path at a character's or a chat's level, the root among them, is outside it, save a job's own notes and sessions (`locate` keeps it to them). */
+  async function lookupIn(scope: RunScope | UserScope, loc: ChatLocation, path: string): Promise<Lookup> {
     const found = await locate(loc, path);
-    if (found.ok && !namesChat(scope) && !SHARED.includes(found.at.level)) return { ok: false, path: found.at.path, reason: "outside" };
+    if (found.ok && !namesChat(scope) && !SHARED.includes(found.at.level) && !(loc.jobs === true && found.at.level === "chat")) return { ok: false, path: found.at.path, reason: "outside" };
     return found;
   }
 
   /** The scope's places: its session's and its turn's ids name folders, each no longer than the setting `files.idChars` at the chat's levels. */
-  async function places(scope: Scope): Promise<Places> {
+  async function places(scope: RunScope): Promise<Places> {
     const { idChars } = await treeSettingsOf(location(scope));
     for (const [what, id] of [["session", scope.session], ["turn", scope.turn]] as const) {
       if (id !== undefined && id.length > idChars) throw new Error(`A ${what} id names a folder, so it is at most ${idChars} characters (the setting files.idChars), and this one is ${id.length}.`);
     }
-    return placesOf(scope, scope.turn === undefined ? null : await deps.turnFolder(scope));
+    return placesOf(scope, namesChat(scope) && scope.turn !== undefined ? await deps.turnFolder(scope) : null);
   }
 
-  async function refusal(scope: Scope | UserScope, path: string, reason: Refused["reason"], writer: Writer | undefined): Promise<Refused> {
-    // A scope that names only the user writes nowhere.
-    if (!namesChat(scope)) return { status: "refused", path, reason, writable: [] };
-    const at = await places(scope);
+  async function refusal(scope: RunScope | UserScope, path: string, reason: Refused["reason"], writer: Writer | OwnerWrite | undefined): Promise<Refused> {
+    // A scope that names only the user writes nowhere; the owner's own press writes his config files alone.
+    const run = runOf(scope);
+    if (run === undefined || writer === "owner") return { status: "refused", path, reason, writable: [] };
+    const at = await places(run);
     return { status: "refused", path, reason, writable: writer === undefined ? at.writable : writableFor(at, writer) };
   }
 
@@ -372,11 +380,17 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
       const loc = location(scope);
       const lookup = await lookupIn(scope, loc, path);
       if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, by);
-      // With no chat in view, what is found is a level every chat shares: no one's to write through the port.
-      if (!namesChat(scope)) return await refusal(scope, lookup.at.path, "mounted", by);
-      const writable = writableFor(await places(scope), by);
-      const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writable);
-      if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", by);
+      const run = runOf(scope);
+      if (by === "owner") {
+        // The owner's own press writes the chat's config file or the global one; with no chat in view, the global one alone. Never journaled.
+        const reason = lookup.at.disk === null ? "outside" : !namesChat(scope) && lookup.at.level !== "global" ? "mounted" : ownerRefusalFor(lookup.at);
+        if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", by);
+      } else {
+        // With no chat in view, what is found is a level every chat shares: no one's to write through the port; save a job's own notes and session folder.
+        if (run === undefined || (!namesChat(run) && lookup.at.level !== "chat")) return await refusal(scope, lookup.at.path, "mounted", by);
+        const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writableFor(await places(run), by));
+        if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", by);
+      }
       // One queue for each file on disk, however its path is spelt: a disk that folds case or Unicode holds `a.md` and `A.md` as one.
       return oneFileAtATime(await fileKey(deps.files, lookup.at.disk), async () => {
         // Found again in this file's turn, so a write that waited sees what the one before it left.
@@ -385,14 +399,14 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", by);
         const before = await sizeOfFile(again.at.disk);
         const { result, old, after } = await apply({ ...again.at, disk: again.at.disk }, op, running);
-        if (result.status === "written" && again.at.level === "chat") await deps.chats.grew(scope.user, scope.chat, areaOf(again.at.rest), result.bytes - before);
+        if (result.status === "written" && again.at.level === "chat" && run !== undefined && namesChat(run)) await deps.chats.grew(run.user, run.chat, areaOf(again.at.rest), result.bytes - before);
         // A note written in a turn is recorded against it, with what the file held before and after, and stands in the chat's notes
         // folder (`notes.ts`), so a swipe, a delete, a branch or the lead dropping a sub-agent's writes can put the notes back.
-        if (result.status === "written" && result.kind === "notes" && by !== "harness" && scope.turn !== undefined) {
-          const turn = scope.turn;
+        if (result.status === "written" && result.kind === "notes" && by !== "harness" && by !== "owner" && run !== undefined && namesChat(run) && run.turn !== undefined) {
+          const { user, chat, turn } = run;
           await deps.writes.run((db) => {
-            const row = db.run("INSERT INTO note_version (user, chat, turn, agent, path, before, after, text, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [scope.user, scope.chat, turn, JSON.stringify(by), result.path, old, result.hash, after, deps.now()]);
-            db.run("INSERT INTO tree_applied (user, chat, write_id) VALUES (?, ?, ?)", [scope.user, scope.chat, Number(row.lastInsertRowid)]);
+            const row = db.run("INSERT INTO note_version (user, chat, turn, agent, path, before, after, text, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [user, chat, turn, JSON.stringify(by), result.path, old, result.hash, after, deps.now()]);
+            db.run("INSERT INTO tree_applied (user, chat, write_id) VALUES (?, ?, ?)", [user, chat, Number(row.lastInsertRowid)]);
           }, "recording an agent's note");
         }
         return result;

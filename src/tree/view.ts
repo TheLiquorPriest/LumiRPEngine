@@ -15,8 +15,8 @@
 import { lstat, readdir } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { FileKind, Layer, LayerLevel, Places, RefusalReason, Scope, Writer } from "rp-harness/contract";
-import { CHARACTER_FOLDERS, CHAT_CONFIG, CHAT_FOLDERS, CHATS_FOLDER, GENERATED_FILES, GLOBAL_CONFIG, GLOBAL_FOLDERS, MOUNTS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, TURN_WRITABLE, TURNS_FOLDER } from "./layout";
+import type { FileKind, Layer, LayerLevel, OwnerWrite, Places, RefusalReason, RunScope, Writer } from "rp-harness/contract";
+import { CHARACTER_FOLDERS, CHAT_CONFIG, CHAT_FOLDERS, CHATS_FOLDER, GENERATED_FILES, GLOBAL_CONFIG, GLOBAL_FOLDERS, JOBS_FOLDER, MOUNTS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, TURN_WRITABLE, TURNS_FOLDER } from "./layout";
 
 /** The levels, farthest first, as every chat has them. */
 export function treeLayers(): Layer[] {
@@ -36,8 +36,8 @@ export function safeId(what: string, id: string): string {
   return id;
 }
 
-/** A scope's places, its turn's folder named `turnFolder`. */
-export function placesOf(scope: Scope, turnFolder: string | null): Places {
+/** A scope's places, its turn's folder named `turnFolder`; a job of no chat's are its notes and its session's folder, under `jobs/`. */
+export function placesOf(scope: RunScope, turnFolder: string | null): Places {
   const notes = `${NOTES_FOLDER}/`;
   const session = `${SESSIONS_FOLDER}/${safeId("session", scope.session)}/`;
   if (scope.turn === undefined || turnFolder === null) return { notes, session, writable: [notes] };
@@ -45,16 +45,24 @@ export function placesOf(scope: Scope, turnFolder: string | null): Places {
   return { notes, session, turn, writable: [notes, ...TURN_WRITABLE.map((f) => `${turn}${f}/`)] };
 }
 
-/** Where a writer may write: its places, and for RPH itself the session's folder too (`Writer`). */
-export function writableFor(places: Places, writer: Writer): string[] {
+/** Where a writer may write: its places, and for RPH itself the session's folder too (`Writer`); the owner's own press (`OwnerWrite`) is listed as an agent is. */
+export function writableFor(places: Places, writer: Writer | OwnerWrite): string[] {
   return writer === "harness" ? [...places.writable, places.session] : places.writable;
 }
 
-/** Where a chat's levels are on disk: the tree's folder, and the chat's character folder and its own folder; null for a chat not placed yet, whose two levels hold nothing. */
+/** Why the owner's own press may not write `at`: through the port only the config file of the chat's level or the global one is his to write (`OwnerWrite`). */
+export function ownerRefusalFor(at: Located): RefusalReason | undefined {
+  const config = at.level === "chat" ? CHAT_CONFIG : at.level === "global" ? GLOBAL_CONFIG : null;
+  if (config !== null && at.rest.length === 1 && at.rest[0] === config) return undefined;
+  return at.level === "shipped" ? "mounted" : "yours";
+}
+
+/** Where a chat's levels are on disk: the tree's folder, and the chat's character folder and its own folder; null for a chat not placed yet, whose two levels hold nothing. `jobs`: a job of no chat's view, whose chat level is the tree's `jobs/` folder (its notes and sessions alone). */
 export interface ChatLocation {
   files: string;
   character: string | null;
   chat: string | null;
+  jobs?: true;
 }
 
 /** A path in the view, found. */
@@ -90,6 +98,7 @@ export function viewPath(level: LayerLevel, rest: readonly string[]): string {
 export function levelBase(loc: ChatLocation, level: LayerLevel): string[] | null {
   if (level === "shipped") return [SHIPPED_FOLDER];
   if (level === "global") return [];
+  if (level === "chat" && loc.jobs === true) return [JOBS_FOLDER];
   if (loc.character === null) return null;
   if (level === "character") return [CHATS_FOLDER, loc.character];
   return loc.chat === null ? null : [CHATS_FOLDER, loc.character, loc.chat];
@@ -185,7 +194,7 @@ async function asOnDisk(levelDisk: string, level: LayerLevel, rest: readonly str
  */
 export async function topRule(loc: ChatLocation, level: LayerLevel): Promise<((entry: BigIntStats) => boolean) | null> {
   if (level === "global") {
-    const hidden = (await Promise.all([stat(join(loc.files, CHATS_FOLDER)), stat(join(loc.files, SHIPPED_FOLDER))])).filter((s): s is BigIntStats => s !== null);
+    const hidden = (await Promise.all([stat(join(loc.files, CHATS_FOLDER)), stat(join(loc.files, SHIPPED_FOLDER)), stat(join(loc.files, JOBS_FOLDER))])).filter((s): s is BigIntStats => s !== null);
     return (entry) => !hidden.some((h) => same(h, entry));
   }
   if (level === "character") {
@@ -223,6 +232,8 @@ export async function locate(loc: ChatLocation, path: string): Promise<Lookup> {
   const base = levelBase(loc, level);
   const rest = folds && base !== null ? await asOnDisk(join(loc.files, ...base), level, spelt) : spelt;
   const normalized = viewPath(level, rest);
+  // A job of no chat sees, at the root, its notes and `sessions/` and nothing else of a character's or a chat's level.
+  if (loc.jobs === true && (level === "character" || (level === "chat" && rest[0] !== NOTES_FOLDER && rest[0] !== SESSIONS_FOLDER))) return { ok: false, path: normalized, reason: "outside" };
   const kind = kindOf(level, rest);
   if (base === null) return { ok: true, at: { path: normalized, level, rest, disk: null, kind, is: "none" } };
   const disk = join(loc.files, ...base, ...rest);

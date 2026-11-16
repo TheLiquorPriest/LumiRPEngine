@@ -40,6 +40,8 @@ export const NOTES_FOLDER = "persistent-workspace";
 export const NOTE_FOLDERS = ["story", "engine", "prose", "notes"] as const;
 /** The chat's sessions (plan §5 `sessions/<session-id>/`), each with its turns' folders. */
 export const SESSIONS_FOLDER = "sessions";
+/** Where the owner's jobs of no chat keep their notes and sessions (C-23), under the tree's folder: in such a job's view its notes folder and `sessions/` stand at the root, and nothing else of a chat's level. RPE serves one user, so it is one folder. */
+export const JOBS_FOLDER = "jobs";
 /** A session's turn folders. */
 export const TURNS_FOLDER = "turns";
 /** The folders of a turn agents may write in (plan §5.1). */

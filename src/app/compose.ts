@@ -15,7 +15,7 @@
 // install's database holds them at this build's version whether or not a migration ever ran there. The
 // turn lane reads no migration: what one carried of a chat is handed to it from here.
 
-import { type Clock, type CreateHarnessOptions, loadGuidance } from "rp-harness";
+import type { Clock, CreateHarnessOptions } from "rp-harness";
 import type { SessionView } from "rp-harness/contract";
 import { doorArea } from "../adapter/lumiverse/area";
 import { loreBooks } from "../adapter/lumiverse/books";
@@ -237,7 +237,17 @@ export function compose(options: ComposeOptions = {}): Composition {
       ],
       dropStored: (user, chat) => app().writes.run(() => made().store.user(user).deleteChat(chat), "removing a deleted chat's turns"),
       // What RPH itself makes of the files of a chat's view, for the Files page.
-      guidance: (user, chat) => loadGuidance(made().files, scope(user, chat ?? NO_CHAT)),
+      guidance: (user, chat) => {
+        const at = scope(user, chat ?? NO_CHAT);
+        const { definitions, external, rules } = made().harness;
+        return {
+          rules: () => rules.list(at),
+          definitions: () => definitions.list(at),
+          stack: (agent) => definitions.stack(at, agent),
+          // What RPH found wrong with a file that runs a command or calls out: RPH lists no other file's problems for a host.
+          problems: async () => (await external.list(at)).flatMap((e) => (e.problem === undefined ? [] : [{ path: e.path, message: e.problem }])),
+        };
+      },
       written: (saved) => listing.written(saved),
     })),
     turn.area,

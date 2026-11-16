@@ -3,7 +3,7 @@
 // folders are kept as the tree is written, and checked against the disk in the background: once when the
 // server starts for every chat not yet kept, and then every `storage.recheckHours`.
 
-import { SHIPPED_GUIDANCE } from "rp-harness";
+import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
 import { type Area, NO_OWNER } from "../app";
 import { TREE_TABLES } from "./chats";
 import { layDefaults } from "./defaults";
