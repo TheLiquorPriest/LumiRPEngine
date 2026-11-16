@@ -15,7 +15,7 @@ describe("who is on stage at a turn (R-56)", () => {
   test("with a scene open, its people and those the state places in its place are on stage, one it names who stands elsewhere included", async () => {
     const t = await openTable();
     const turn = await t.begin();
-    await t.writes.run(() => writeStory(t.store, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ part: "scene", item: null, value: { who: ["Bram"], place: "The Cellar" } }]));
+    await t.writes.run(() => writeStory(t.store, { user: USER, chat: CHAT, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ part: "scene", item: null, value: { who: ["Bram"], place: "The Cellar" } }]));
     const stage = stageAt(t.store, USER, CHAT, turn.id);
     expect(stage).toMatchObject({ who: ["Bram", "Odile"], place: "The Cellar", how: "scene" });
     expect(stage?.things).toEqual(["Cask of cider"]);

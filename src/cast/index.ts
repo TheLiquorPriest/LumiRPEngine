@@ -13,8 +13,8 @@ export { CAST_FACT_DEFS, castFacts, type CastFacts, type OnStage, UNPERCEIVED_GR
 export { CAST_VIEWS, castPresentViews, castViews, type CastPresentView, type CastView, type CastViewInput, type CastViewName } from "./views";
 export { type SourceNow, type SourceReader } from "./sources";
 export { type BookReader } from "./secrets";
-export { CAST_PATH, CHARACTER_PATH, CHARACTER_STRIKE_PATH, castRoutes, type CastRoutesDeps } from "./routes";
-export { type CastBaseShown, type CastCharacter, type CastCounts, type CastEntryShown, type CastFileShown, type CastHeld, type CastingShown, type CastKind, type CastList, type CastMemberShown, type CastMemoryShown, type CastPerceptionShown, type CastSourceShown, type CastStrike, type CastStruck, type CastWriteShown } from "./shapes";
+export { CAST_PATH, CHARACTER_PATH, CHARACTER_PERCEPTIONS_PATH, CHARACTER_STRIKE_PATH, castRoutes, PERCEPTIONS_PATH, type CastRoutesDeps } from "./routes";
+export { type CastBaseShown, type CastCharacter, type CastCounts, type CastEntryShown, type CastFileShown, type CastHeld, type CastingShown, type CastKind, type CastList, type CastMemberShown, type CastMemoryShown, type CastPerceptionAsk, type CastPerceptionShown, type CastPerceptionWritten, type CastSourceShown, type CastStrike, type CastStruck, type CastWriteShown, type PerceptionRecord, type StagePersonShown, type StageTurnShown } from "./shapes";
 export {
   addCharacter,
   BASE_PARTS,

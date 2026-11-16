@@ -65,6 +65,11 @@ describe("a character's game side", () => {
         "- place: common_room",
         "- home: lamp_ladle",
         "- description: A courier with mud on her boots.",
+        "- owner: bram",
+        "- law: the watch's rules",
+        "- curfew: midnight",
+        "- region: region_vale",
+        "- currency: USD ($)",
       ].join("\n"),
     );
 

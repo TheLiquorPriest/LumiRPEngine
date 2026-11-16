@@ -8,7 +8,8 @@ import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolRes
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
-import { described, Reply, type Writes } from "../iface/kit";
+import { described, IFACE_DEFAULTS, Reply, type Writes } from "../iface/kit";
+import { nearestOf } from "../iface/reading";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
 import { clockRecorded, type Store, type UserStore } from "../store";
 import { castAt } from "./path";
@@ -213,6 +214,11 @@ export function readingOr(call: CastCall, reply: Reply): CastReading | null {
     record: CastRecord.read(call.deps.store, call.scope.user, castAt(user, call.scope.chat, turn), call.agent.job ?? null),
     clock: castClock(call.deps.store, call.scope.user, call.scope.chat, turn),
   };
+}
+
+/** The nearest of `ids` to what was said, no more than an answer about a name that is not there lists (`engine.nearMatches`): offered where an id is none of the character's. */
+export function nearIds(said: string, ids: readonly string[]): string[] {
+  return nearestOf(said, ids, IFACE_DEFAULTS).slice(0, IFACE_DEFAULTS.nearMatches);
 }
 
 // ---------------------------------------------------------------- what answers show

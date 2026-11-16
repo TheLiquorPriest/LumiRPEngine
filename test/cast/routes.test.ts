@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { JsonObject } from "rp-harness/contract";
-import { type CastCharacter, type CastList, castRoutes, type CastRoutesDeps, type CastStruck } from "../../src/cast/index";
+import { type CastCharacter, type CastList, type CastPerceptionWritten, castRoutes, type CastRoutesDeps, type CastStruck, type PerceptionRecord } from "../../src/cast/index";
 import { addCharacter, type CastWrite, pinCasting } from "../../src/cast/record";
 import type { BookReader } from "../../src/cast/secrets";
 import { knowersOf } from "../../src/packs/minds/core/knowledge";
@@ -31,23 +31,29 @@ const PLANS = "Sell the cellar wine before the tax.";
 
 interface Page {
   t: Table;
-  running: Set<string>;
   list(query?: Record<string, string>, user?: string, chat?: string): Promise<CastList>;
   one(character: string, query?: Record<string, string>, user?: string, chat?: string): Promise<CastCharacter>;
   strike(character: string, body: unknown, user?: string, chat?: string): Promise<CastStruck>;
+  record(query?: Record<string, string>, user?: string, chat?: string): Promise<PerceptionRecord>;
+  perceive(character: string, body: unknown, user?: string, chat?: string): Promise<CastPerceptionWritten>;
+}
+
+/** The player's own changes to the engine's state (the holdings a strike lets go or holds again): of no turn, with their source. */
+function ownChanges(t: Table): { op: string; source: string | null }[] {
+  return t.db.query<{ op: string; source: string | null }, [string]>("SELECT op, source FROM change WHERE chat = ? AND by = 'player' AND op NOT LIKE 'cast.%' ORDER BY ord").all(CHAT);
 }
 
 /** The Cast page over a table: the routes as the application mounts them, called through each route's own reader and handler. */
-function pageOn(t: Table): Page {
-  const running = new Set<string>();
-  const deps: CastRoutesDeps = { store: t.store, writes: t.writes, turning: (_user, chat) => running.has(chat), files: () => shippedTexts(), settings: async () => ({}), now: () => 7 };
-  const [listRoute, oneRoute, strikeRoute] = castRoutes(deps);
+function pageOn(t: Table, onStage: CastRoutesDeps["onStage"] = async () => new Map()): Page {
+  const deps: CastRoutesDeps = { store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({}), onStage, now: () => 7 };
+  const [listRoute, oneRoute, strikeRoute, recordRoute, perceiveRoute] = castRoutes(deps);
   return {
     t,
-    running,
     list: async (query = {}, user = USER, chat = CHAT) => await callRoute(listRoute, { params: { chat }, query, user }),
     one: async (character, query = {}, user = USER, chat = CHAT) => await callRoute(oneRoute, { params: { chat, character }, query, user }),
     strike: async (character, body, user = USER, chat = CHAT) => await callRoute(strikeRoute, { params: { chat, character }, body, user }),
+    record: async (query = {}, user = USER, chat = CHAT) => await callRoute(recordRoute, { params: { chat }, query, user }),
+    perceive: async (character, body, user = USER, chat = CHAT) => await callRoute(perceiveRoute, { params: { chat, character }, body, user }),
   };
 }
 
@@ -270,7 +276,7 @@ async function playIn(t: Table, shown: ShownMessage[]): Promise<TurnRow> {
   shown.push({ id: `b-u${shown.length}`, user: true, hash: hashOf("the player's line in the branch"), hidden: false });
   await t.writes.run(() => t.s.sync(BRANCH, shown));
   const turn = await t.writes.run(() => t.s.beginTurn({ chat: BRANCH, kind: "new" }));
-  const reply = { id: `b-r${shown.length}`, user: false, hash: hashOf("The branch goes its own way."), date: 9_000 };
+  const reply = { id: `b-r${shown.length}`, user: false, hash: hashOf("The branch goes its own way."), date: 9_000, hidden: false };
   const tied = await t.writes.run(() => t.s.tieTurn(turn.id, { message: reply.id, hash: reply.hash, date: reply.date }));
   shown.push(reply);
   await t.writes.run(() => t.s.sync(BRANCH, shown));
@@ -297,7 +303,7 @@ describe("striking from the page", () => {
     const done = await page.strike("Wren", { id: ids.seal, struck: true, why: "She never saw the seal up close." });
     expect(done).toMatchObject({ changed: true, alsoStruck: [], letGo: [], notes: [] });
     expect(done.entry).toMatchObject({ id: ids.seal, struck: true, turn: first.id, by: "author" });
-    expect(done.entry.writes.at(-1)).toEqual({ turn: second.id, message: 5, imported: false, by: "player", wrote: { drop: true, why: "She never saw the seal up close." } });
+    expect(done.entry.writes.at(-1)).toEqual({ turn: null, message: null, imported: false, by: "player", wrote: { drop: true, why: "She never saw the seal up close." } });
     // Read at the chat's newest turn it is struck; as the turn before stood, it is not.
     expect((await page.list()).characters.find((c) => c.id === wren)?.counts.knowledge).toEqual({ held: 0, struck: 2 });
     expect((await page.one("Wren", { turn: first.id })).knowledge.map((k) => k.struck)).toEqual([false, false]);
@@ -306,7 +312,7 @@ describe("striking from the page", () => {
     expect({ changed: again.changed, writes: again.entry.writes.length }).toEqual({ changed: false, writes: 2 });
     // Taken back: it stands again, by the player's own write.
     const back = await page.strike(wren, { id: ids.seal, struck: false });
-    expect({ changed: back.changed, struck: back.entry.struck, last: back.entry.writes.at(-1) }).toEqual({ changed: true, struck: false, last: { turn: second.id, message: 5, imported: false, by: "player", wrote: { drop: false } } });
+    expect({ changed: back.changed, struck: back.entry.struck, last: back.entry.writes.at(-1) }).toEqual({ changed: true, struck: false, last: { turn: null, message: null, imported: false, by: "player", wrote: { drop: false } } });
     // What the Author struck is the player's to take back too.
     expect((await page.strike(wren, { id: ids.rent, struck: false })).entry.struck).toBe(false);
     expect((await page.list()).characters.find((c) => c.id === wren)?.counts.knowledge).toEqual({ held: 2, struck: 0 });
@@ -331,17 +337,14 @@ describe("striking from the page", () => {
       [true, "player"],
       [true, "player"],
     ]);
-    // The holding is taken back by the player's own change, on the turn the strike is written on.
-    expect(b.t.s.changes(tied.id).flatMap((c) => (c.by === "player" && c.op !== "cast.write" ? [{ op: c.op, lane: c.lane, source: c.source }] : []))).toEqual([{ op: "minds.forget", lane: "story", source: "player" }]);
+    // The holding is taken back by the player's own change, which belongs to no turn.
+    expect(ownChanges(b.t)).toEqual([{ op: "minds.forget", source: "player" }]);
   });
 
-  test("refuses in the cast's words while a turn of the chat runs, for an entry the character has not, and for what it cannot read; writes nothing", async () => {
+  test("refuses in the cast's words for an entry the character has not, and for what it cannot read; writes nothing", async () => {
     const { page, wren, ids } = await played();
     const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'cast.write'").get()?.n ?? 0;
     const before = rows();
-    page.running.add(CHAT);
-    await expect(page.strike("Wren", { id: ids.seal, struck: true })).rejects.toMatchObject({ status: 409, message: words("page_turning") });
-    page.running.delete(CHAT);
     // Another character's entry, the casting, an id the record does not hold, someone the cast does not hold.
     await expect(page.strike("Bram", { id: ids.seal, struck: true })).rejects.toMatchObject({ status: 404, message: words("page_no_entry", { who: "Bram", id: ids.seal }) });
     await expect(page.strike("Wren", { id: `casting:${wren}`, struck: true })).rejects.toMatchObject({ status: 404, message: words("page_no_entry", { who: "Wren", id: `casting:${wren}` }) });
@@ -352,7 +355,6 @@ describe("striking from the page", () => {
     // One user's chat is not another's to strike.
     await expect(page.strike("Wren", { id: ids.seal, struck: true }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
     expect(rows()).toBe(before);
-    expect(words("page_turning")).not.toBe("");
   });
 
   test("taking back a perception's strike stands the knowledge its strike struck with it and holds that knowledge's secret again; knowledge struck apart stays struck, and the answer says so", async () => {
@@ -383,43 +385,34 @@ describe("striking from the page", () => {
     expect(knowersOf(minds(b.t), SECRET)).toEqual([]);
     expect(await page.strike("Wren", { id: secret, struck: false })).toMatchObject({ changed: true, alsoStood: [], heldAgain: [SECRET], notes: [] });
     expect(knowersOf(minds(b.t), SECRET)).toEqual(["wren"]);
-    expect(b.t.s.changes(turn.id).flatMap((c) => (c.by === "player" && c.op !== "cast.write" ? [{ op: c.op, source: c.source }] : []))).toEqual([
+    expect(ownChanges(b.t)).toEqual([
       { op: "minds.forget", source: "player" },
       { op: "minds.learn", source: "player" },
     ]);
   });
 
-  test("in a branch with no turn of its own, a strike is refused in the cast's words and the chat it was branched from keeps its record; once the branch has played a turn, its strike is its own", async () => {
+  test("in a branch with no turn of its own, a strike lands as his own change of that branch alone; the chat it was branched from keeps its record", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'cast.write'").get()?.n ?? 0;
-    const shown = await branchOf(page.t);
-    const before = rows();
-    await expect(page.strike("Wren", { id: ids.seal, struck: true }, USER, BRANCH)).rejects.toMatchObject({ status: 409, message: words("page_branch_no_turn") });
-    await expect(page.strike("Wren", { id: ids.rent, struck: false }, USER, BRANCH)).rejects.toMatchObject({ status: 409, message: words("page_branch_no_turn") });
-    expect(rows()).toBe(before);
+    await branchOf(page.t);
     const standing = [
       [ids.seal, false],
       [ids.rent, true],
     ];
-    expect((await page.one("Wren")).knowledge.map((k) => [k.id, k.struck])).toEqual(standing);
-
-    const own = await playIn(page.t, shown);
     const done = await page.strike("Wren", { id: ids.seal, struck: true }, USER, BRANCH);
-    expect(done.entry.writes.at(-1)).toMatchObject({ turn: own.id, by: "player", wrote: { drop: true } });
+    expect(done.entry.writes.at(-1)).toMatchObject({ by: "player", wrote: { drop: true } });
     expect((await page.one("Wren", {}, USER, BRANCH)).knowledge.map((k) => k.struck)).toEqual([true, true]);
     expect((await page.one("Wren")).knowledge.map((k) => [k.id, k.struck])).toEqual(standing);
-    expect(words("page_branch_no_turn")).not.toBe("");
   });
 
-  test("a turn that begins while a strike waits for its write is not written under: the strike is refused in that write, in the cast's words", async () => {
+  test("a strike made while a turn of the chat is open is applied after the newest reply: it is his own change, not written under the open turn", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'cast.write'").get()?.n ?? 0;
-    const before = rows();
-    // A continue takes its marks and holds its run in one write, queued before the strike's own.
-    const began = page.t.writes.run(() => page.running.add(CHAT));
-    const strike = page.strike("Wren", { id: ids.seal, struck: true });
-    await began;
-    await expect(strike).rejects.toMatchObject({ status: 409, message: words("page_turning") });
-    expect(rows()).toBe(before);
+    const open = await page.t.begin();
+    const own = page.t.s.changes(open.id).length;
+    await page.strike("Wren", { id: ids.seal, struck: true });
+    expect(page.t.s.changes(open.id)).toHaveLength(own);
+    expect((await page.one("Wren")).knowledge.map((k) => [k.id, k.struck])).toEqual([
+      [ids.seal, true],
+      [ids.rent, true],
+    ]);
   });
 });

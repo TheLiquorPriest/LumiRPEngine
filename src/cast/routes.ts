@@ -20,15 +20,16 @@
 
 import type { JsonObject } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
-import type { Writes } from "../iface/kit";
+import { type Writes, Reply } from "../iface/kit";
 import { type Fields, type GuidanceFiles } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { fileName, IMPORTED_KIND, importedText, isFiled } from "./imported";
-import { CAST_DEFAULTS, type CastClock, castClock, castLines, type CastSettings } from "./kit";
+import type { OnStage, StageRead } from "./facts";
+import { CAST_DEFAULTS, type CastCall, type CastClock, castClock, castLines, type CastSettings } from "./kit";
 import { memoriesNow, type Tier } from "./memory";
 import { castAt } from "./path";
-import { perceivedTurn } from "./perceive";
+import { perceivedTurn, perceiveAsPlayer } from "./perceive";
 import {
   baseHistory,
   type BasePart,
@@ -49,12 +50,14 @@ import {
   writeCast,
 } from "./record";
 import { forgetsOf, holdingChanges, secretsHeldAgain, secretsLetGo, worldAt } from "./secrets";
-import { type CastCharacter, type CastCounts, type CastEntryShown, type CastHeld, type CastKind, type CastList, type CastMemberShown, type CastStrike, type CastStruck, type CastWriteShown, castReply, castStrikeBody, castStrikeReply, characterReply } from "./shapes";
+import { type CastCharacter, type CastCounts, type CastEntryShown, type CastHeld, type CastKind, type CastList, type CastMemberShown, type CastPerceptionWritten, type CastStrike, type CastStruck, type CastWriteShown, castReply, castStrikeBody, castStrikeReply, characterReply, type PerceptionRecord, perceptionBody, perceptionRecordReply, perceptionWrittenReply, type StagePersonShown, type StageTurnShown } from "./shapes";
 import { CAST_LANE, type Unread } from "./update";
 
 export const CAST_PATH = "/api/v1/chats/:chat/cast";
 export const CHARACTER_PATH = "/api/v1/chats/:chat/cast/:character";
 export const CHARACTER_STRIKE_PATH = "/api/v1/chats/:chat/cast/:character/strike";
+export const PERCEPTIONS_PATH = "/api/v1/chats/:chat/perceptions";
+export const CHARACTER_PERCEPTIONS_PATH = "/api/v1/chats/:chat/cast/:character/perceptions";
 
 /** Who a change from the page is by, and where it came from: the player, as the store's sources name them and the play panels record their taps. */
 const PLAYER = "player";
@@ -64,12 +67,12 @@ export interface CastRoutesDeps {
   store: Store;
   /** The application's write queue: every write goes through it. */
   writes: Writes;
-  /** Whether a turn of the user's chat runs now: nothing is struck or restored while one does. */
-  turning(user: string, chat: string): boolean;
   /** The guidance files in force for the chat: the page's words are lines of `.prompts/cast-answers.md`. */
   files(user: string, chat: string): GuidanceFiles;
   /** The cast's settings for the chat, over `CAST_DEFAULTS`: what memories' tiers and fading are worked out by. */
   settings(user: string, chat: string): Promise<Partial<CastSettings>>;
+  /** Who was on stage in each of some turns and how that was read: the turn lane's one reading of a stage (R-56). */
+  onStage: OnStage;
   /** Milliseconds since 1970, for the time of a strike's rows; `Date.now` when absent. */
   now?: () => number;
 }
@@ -197,14 +200,12 @@ function struckWith(perception: CastItem, gave: readonly CastItem[]): { with: Ca
 }
 
 /**
- * Writes a strike, or takes one back, as the player's on the chat's newest turn, inside one queued write that reads the record it
- * changes. It is refused in that write while a turn of the chat runs: a continue takes its marks in a write of its own, and a strike
- * that checked before its own write could land after them and be taken back with the continue. It is refused too where that newest
- * turn is another chat's (a branch with no turn of its own yet), since a strike written there would change that chat as well.
+ * Writes a strike, or takes one back, as the player's own change (the store's own changes: of no turn, placed after the newest reply),
+ * inside one queued write that reads the record it changes. It lands while a turn of the chat runs, and in a branch with no turn of its
+ * own, as every edit of his does; the next briefing tells the Author of it.
  */
 function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, ask: StrikeAsked, confidence: number): Promise<StrikeDone> {
   return deps.writes.run((db) => {
-    if (deps.turning(user, chat)) throw new Refused(409, "page_turning");
     const r = readingAt(deps.store, user, chat, null);
     const character = findCharacter(db, user, r.chats, said);
     if (character === null) throw new Refused(404, "no_character", { who: said });
@@ -212,10 +213,8 @@ function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, 
     // A casting is set, never struck: striking it would change nothing that is read.
     if (item === undefined || item.character !== character.id || item.part === "casting") throw new Refused(404, "page_no_entry", { who: character.name, id: ask.id });
     if (item.dropped === ask.struck) return { item: item.id, changed: false, also: [], letGo: [], held: [], left: [], unread: [] };
-    // The entry was written on a turn of the chat's path, so the path has a newest turn.
-    const turn = r.record.at.turns.at(-1) as string;
-    if (r.s.turn(turn)?.chat !== chat) throw new Refused(409, "page_branch_no_turn");
-    const writer: CastWriter = { user, turn, by: PLAYER, agent: null, job: null, at: r.clock?.now ?? null, now: (deps.now ?? Date.now)() };
+    // His own change, of no turn: placed after the newest reply, so it lands whatever runs, and in a branch with no turn of its own.
+    const writer: CastWriter = { user, turn: null, chat, by: PLAYER, agent: null, job: null, at: r.clock?.now ?? null, now: (deps.now ?? Date.now)(), source: PLAYER };
     const value: JsonObject = ask.struck ? { drop: true, ...(ask.why !== null ? { why: ask.why } : {}) } : { drop: false };
     // As `perceive` strikes a perception: the knowledge it gave goes with it. Taken back, what went with it stands again with it,
     // and knowledge struck apart from it stays struck.
@@ -229,9 +228,9 @@ function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, 
     );
     const unread: Unread[] = [];
     const knowledge = item.part === "knowledge" ? [item] : also;
-    const ctx = knowledge.length > 0 ? worldAt(deps.store, user, turn) : null;
+    const ctx = knowledge.length > 0 ? worldAt(deps.store, user, null, null, chat) : null;
     const record = (events: readonly LedgerEvent[]): void => {
-      if (events.length > 0) r.s.addChanges(turn, holdingChanges(events, CAST_LANE, PLAYER, null).map((c) => ({ ...c, source: PLAYER })));
+      if (events.length > 0) r.s.record(r.s.writeTarget({ chat }), holdingChanges(events, CAST_LANE, PLAYER, null).map((c) => ({ ...c, source: PLAYER })));
     };
     if (back === null) {
       // As `cast_update` and `perceive` strike knowledge: each secret it gave is let go, unless other knowledge of theirs still gives it.
@@ -315,7 +314,7 @@ function membersOf(r: Reading, characters: readonly Character[]): CastMemberShow
 }
 
 function writeShown(r: Reading, row: CastRow): CastWriteShown {
-  return { turn: row.turn, message: r.record.at.replyOf(row.turn), imported: r.imported(row.turn), by: row.by, wrote: row.value };
+  return { turn: row.turn === "" ? null : row.turn, message: r.record.at.replyOf(row.turn), imported: r.imported(row.turn), by: row.by, wrote: row.value };
 }
 
 function entryShown(r: Reading, item: CastItem): CastEntryShown {
@@ -324,7 +323,7 @@ function entryShown(r: Reading, item: CastItem): CastEntryShown {
     part: item.part as CastEntryShown["part"],
     fields: item.fields,
     date: item.at !== null && r.clock !== null ? r.clock.text(item.at) : null,
-    turn: item.opened,
+    turn: item.opened === "" ? null : item.opened,
     message: r.record.at.replyOf(item.opened),
     imported: r.imported(item.opened),
     by: item.rows[0]?.by ?? null,
@@ -430,6 +429,85 @@ export function castRoutes(deps: CastRoutesDeps) {
             alsoStood: ask.struck ? [] : done.also,
             heldAgain: done.held,
             notes: [...done.left.flatMap((l) => lines.line("page_still_struck", { ...l }) ?? []), ...done.unread.flatMap((u) => lines.line(u.line, u.fields) ?? [])],
+          };
+        }),
+    }),
+    route({
+      method: "GET",
+      path: PERCEPTIONS_PATH,
+      access: "page",
+      group: "cast",
+      does: "The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none.",
+      query: { turn: turnQuery, count: shape.optional(shape.whole({ least: 1 }), "How many turns of the path, ending at the turn read; left out, that turn alone.") },
+      reply: perceptionRecordReply,
+      joined: true,
+      handle: ({ user, params, query }) =>
+        inWords(deps, user, params.chat, async (): Promise<PerceptionRecord> => {
+          const turn = asked(deps.store, user, params.chat, query.turn);
+          // The perceptions are read at the chat's head, his own later ones among them: a gap he filled is closed.
+          const r = readingAt(deps.store, user, params.chat, null);
+          const stretch = castAt(r.s, params.chat, turn).turns.slice(-(query.count ?? 1));
+          const stage = stretch.length === 0 ? new Map<string, StageRead>() : await deps.onStage({ user, chat: params.chat }, stretch);
+          const perceived = new Map<string, string[]>();
+          for (const item of r.record.items.values()) if (item.part === "perception" && !item.dropped) perceived.set(`${perceivedTurn(item)}\n${item.character}`, [...(perceived.get(`${perceivedTurn(item)}\n${item.character}`) ?? []), item.id]);
+          const turns = stretch.map((t): StageTurnShown => {
+            const read = stage.get(t);
+            const people = (read?.who ?? []).map((name): StagePersonShown => {
+              const character = findCharacter(deps.store.db, user, r.chats, name);
+              return { name, character: character?.id ?? null, casting: character === null ? null : (castingInForce(r.record, character)?.as ?? null), perceptions: character === null ? [] : (perceived.get(`${t}\n${character.id}`) ?? []) };
+            });
+            return { turn: t, message: r.record.at.replyOf(t), read: read?.how ?? "none", people };
+          });
+          return { chat: params.chat, turns };
+        }),
+    }),
+    route({
+      method: "POST",
+      path: CHARACTER_PERCEPTIONS_PATH,
+      access: "page",
+      group: "cast",
+      does: "Writes a perception for a character, corrects one or strikes one, as the player's own change placed after the newest reply: it lands while a run goes on and in a branch with no turn of its own, and the Author is told of it at the next turn. `knows` as an empty list says the character now knows nothing from it.",
+      body: perceptionBody,
+      reply: perceptionWrittenReply,
+      joined: true,
+      handle: ({ user, params, body }) =>
+        inWords(deps, user, params.chat, async (): Promise<CastPerceptionWritten> => {
+          chatHeld(deps.store, user, params.chat);
+          // The turn it is of: one the store has, not joined to another, and on the chat's path.
+          const of = body.turn === undefined ? null : asked(deps.store, user, params.chat, body.turn);
+          const before = readingAt(deps.store, user, params.chat, null);
+          const character = findCharacter(deps.store.db, user, before.chats, params.character);
+          if (character === null) throw new Refused(404, "no_character", { who: params.character });
+          const message = of === null ? undefined : before.record.at.replyOf(of);
+          if (of !== null && message === null) throw new Refused(404, "no_turn", { id: of });
+          const { turn: _turn, ...said } = body;
+          const lines = await castLines(deps.files(user, params.chat));
+          const settings: CastSettings = { ...CAST_DEFAULTS, ...(await deps.settings(user, params.chat)) };
+          const call: CastCall = {
+            scope: { user, chat: params.chat, session: "" },
+            agent: { id: PLAYER, definition: PLAYER },
+            callId: crypto.randomUUID(),
+            signal: new AbortController().signal,
+            tool: "writing a perception from the Cast page",
+            deps: { store: deps.store, writes: deps.writes, files: deps.files(user, params.chat), sources: async () => null, ...(deps.now !== undefined ? { now: deps.now } : {}) },
+            settings,
+            lines,
+            reply: () => new Reply(lines),
+          };
+          const answer = await perceiveAsPlayer({ perceptions: [{ who: character.id, ...said, ...(message !== undefined && message !== null ? { message } : {}) }] }, call);
+          const words = answer.parts.flatMap((p, i) => (answer.kinds[i] === "line" && p.type === "text" ? [p.text] : []));
+          if (answer.failed) throw new RouteError(422, [...words, ...answer.reports].join(" "));
+          const data = answer.parts.flatMap((p, i) => (answer.kinds[i] === "data" && p.type === "text" ? [JSON.parse(p.text) as { perceptions?: { id: string | null; knowledge?: string[]; struck?: string[]; lets_go?: string[] }[] }] : []))[0];
+          const done = data?.perceptions?.[0];
+          const now = readingAt(deps.store, user, params.chat, null);
+          const item = done?.id == null ? undefined : now.record.items.get(done.id);
+          return {
+            id: done?.id ?? null,
+            entry: item === undefined ? null : { ...entryShown(now, item), of: { turn: perceivedTurn(item), message: now.record.at.replyOf(perceivedTurn(item)) } },
+            knowledge: done?.knowledge ?? [],
+            struck: done?.struck ?? [],
+            letGo: done?.lets_go ?? [],
+            notes: [...words, ...answer.reports],
           };
         }),
     }),

@@ -5,6 +5,7 @@
 
 import { type Exactly, type Holds, type Infer, shape } from "../app";
 import type { Tier } from "./memory";
+import { REACHES } from "./perceive";
 import { type BasePart, BASE_PARTS, CASTINGS, type Casting, ROW_PARTS, type RowPart, SOURCE_KINDS, type SourceKind } from "./record";
 
 const T = shape.text();
@@ -80,7 +81,7 @@ const writeRow = shape.named(
   "EntryWriteRow",
   "One write of an entry, as the record keeps it: its turn, that turn's reply on the path (null: on none), whether a migration wrote that turn, who wrote it, and what it said.",
   shape.object({
-    turn: shape.turnId(),
+    turn: field(nullable(shape.turnId()), "The turn that wrote it; null for the player's own change, of no turn, placed after the newest reply."),
     message: field(nullable(N), "The number of that turn's reply on the chat's path, from 0; null while the turn is on no path (open, or left behind)."),
     imported: field(shape.yesNo(), "That turn was written by a migration's import, not played on RPE."),
     by: field(nullable(T), "Who wrote it: an agent's definition (`author`, a character's own), `player`, or the migration."),
@@ -94,7 +95,7 @@ const entryFields = {
   part: entryPart,
   fields: field(shape.record(shape.json()), "Every field its writes set, the latest of each: its words among them, as they were written."),
   date: field(nullable(T), "Story time of its first write, as the engine shows a time; null where the chat keeps none."),
-  turn: field(shape.turnId(), "Its first write: the turn."),
+  turn: field(nullable(shape.turnId()), "Its first write: the turn; null where the player wrote it, his own change of no turn, placed after the newest reply."),
   message: field(nullable(N), "That turn's reply on the path."),
   imported: field(shape.yesNo(), "Whether a migration's import wrote that turn."),
   by: field(nullable(T), "Who wrote it."),
@@ -178,6 +179,62 @@ export const castStrikeReply = shape.named(
   }),
 );
 export type CastStruck = Infer<typeof castStrikeReply>;
+
+const stageReading = shape.named("StageReading", "How a turn's stage was read: from the open scene and who the state places in its place (scene), from where the owner's character stands when no scene was recorded (owner), or not recorded at all (none).", shape.oneOf("scene", "owner", "none"));
+
+const stagePerson = shape.named(
+  "StagePerson",
+  "Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; and the perceptions of that turn it has, by id, struck ones left out: none listed is a gap.",
+  shape.object({ name: T, character: field(nullable(T), "The cast's character of that name; null where the cast holds none."), casting: field(nullable(castRole), "Its casting in force at the turn; null: none."), perceptions: shape.list(T) }),
+);
+export type StagePersonShown = Infer<typeof stagePerson>;
+
+const stageTurn = shape.named(
+  "StageTurn",
+  "One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none.",
+  shape.object({ turn: shape.turnId(), message: field(nullable(N), "That turn's reply on the chat's path, from 0; null where it is on none."), read: stageReading, people: shape.list(stagePerson) }),
+);
+export type StageTurnShown = Infer<typeof stageTurn>;
+
+export const perceptionRecordReply = shape.named(
+  "PerceptionRecordReply",
+  "The perception record of a turn or a stretch of turns ending at it, oldest first: for each, who was on stage with how that was read, and which of them have a perception of it.",
+  shape.object({ chat: T, turns: shape.list(stageTurn) }),
+);
+export type PerceptionRecord = Infer<typeof perceptionRecordReply>;
+
+export const perceptionBody = shape.named(
+  "PerceptionAsk",
+  "A perception the player writes, corrects or strikes for a character: with `id` it corrects (or, with `drop`, strikes) that one; without, it writes a new one of the turn named (`turn`), else of the chat's newest. `knows` as an empty list says the character now knows nothing from it. His own change, placed after the newest reply.",
+  shape.object({
+    id: shape.optional(shape.text({ blank: false })),
+    turn: shape.optional(shape.turnId(), "The turn the perception is of; left out, the chat's newest."),
+    reach: shape.optional(shape.oneOf(...REACHES)),
+    moment: shape.optional(T),
+    content: shape.optional(T),
+    missed: shape.optional(T),
+    knows: shape.optional(shape.list(T)),
+    told_by: shape.optional(T),
+    reliability: shape.optional(T),
+    drop: shape.optional(shape.yesNo()),
+    why: shape.optional(T),
+  }),
+);
+export type CastPerceptionAsk = Infer<typeof perceptionBody>;
+
+export const perceptionWrittenReply = shape.named(
+  "PerceptionWrittenReply",
+  "What writing, correcting or striking a perception did: its id, the knowledge it gave, written now, the knowledge struck with it, the secrets let go, and what could not be done, in the cast's words.",
+  shape.object({
+    id: field(nullable(T), "The perception's id; null where nothing was written."),
+    entry: field(nullable(perceptionRow), "The perception as it stands now at the chat's newest."),
+    knowledge: field(shape.list(T), "The knowledge written with it, by id."),
+    struck: field(shape.list(T), "The knowledge struck with it, by id."),
+    letGo: field(shape.list(T), "The secrets whose holding it let go."),
+    notes: field(shape.list(T), "What it left out or could not do, in the cast's words."),
+  }),
+);
+export type CastPerceptionWritten = Infer<typeof perceptionWrittenReply>;
 
 /** The checks above hold, and are read by no one. */
 export type Mirrors = [RoleMirrored, BandMirrored, DocumentMirrored, BindingMirrored, PartMirrored];

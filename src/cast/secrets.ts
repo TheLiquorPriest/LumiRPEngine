@@ -45,11 +45,13 @@ export function secretFact(said: string): FactId | null {
 }
 
 /**
- * The world as the state plays it at a turn (its staged changes in), for finding people and making a holding; for a job's call, with
- * the job's own changes so far on top (`stateFor`), so a job sees what it recorded. Null when the chat plays no world the store can read.
+ * The world as the state plays it at a turn (its staged changes in), or at the chat's head for none, for finding people and making a
+ * holding; for a job's call, with the job's own changes so far on top (`stateFor`), so a job sees what it recorded. Null when the chat
+ * plays no world the store can read.
  */
-export function worldAt(store: Store, user: string, turn: string, job: string | null = null): ReadContext | null {
-  const state = store.user(user).stateFor(turn, job).state.world;
+export function worldAt(store: Store, user: string, turn: string | null, job: string | null = null, chat = ""): ReadContext | null {
+  const u = store.user(user);
+  const state = (turn === null ? u.headState(chat) : u.stateFor(turn, job)).state.world;
   const doc = store.env.worlds(state.revision);
   return doc === undefined ? null : store.env.registry.context(doc, state);
 }

@@ -20,11 +20,12 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
+import { textOf } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
 import type { FactId } from "../shared/minds";
 import { isRecord } from "../shared/json";
-import { type CastCall, type CastReading, type CastToolSpec, readingOr, whoView } from "./kit";
-import { type CastItem, type CastWrite, writeCast } from "./record";
+import { type CastCall, type CastReading, type CastToolSpec, nearIds, readingOr, whoView } from "./kit";
+import { type CastItem, type CastWrite, type CastWriter, writeCast } from "./record";
 import { forgetsOf, holdingChanges, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { CAST_LANE, characterNamed, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, makeFresh, needed, readArg, type Reads, refused, type Unread } from "./update";
 
@@ -105,6 +106,8 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
     else if (got !== undefined) value[field] = got;
   }
   const { id, who, message, knows, secrets, ...fields } = value;
+  // `knows: []` is a correction that says the character now knows nothing from it: read as given, since an empty list is no value to read.
+  const cleared = Array.isArray(given.knows) && given.knows.length === 0;
   if (typeof who !== "string") return needed(out, ["who"]);
   const character = characterNamed(call, cast, fresh, who);
 
@@ -112,10 +115,11 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
   if (id !== undefined) {
     const found = cast.record.items.get(id as string);
     if (found === undefined || found.part !== "perception" || found.character !== character.id) {
-      out.fatal.push({ line: "unknown_id", fields: { n, op: OP, who: character.name, part: OP, id: JSON.stringify(id) } });
+      const near = nearIds(String(id), cast.record.of(character.id, "perception", true).map((p) => p.id));
+      out.fatal.push({ line: "unknown_id", fields: { n, op: OP, who: character.name, part: OP, id: JSON.stringify(id), near: textOf(near) } });
       return out;
     }
-    if (Object.keys(fields).length === 0 && message === undefined && knows === undefined && secrets === undefined) {
+    if (Object.keys(fields).length === 0 && message === undefined && knows === undefined && secrets === undefined && !cleared) {
       out.fatal.push({ line: "needs_one", fields: { n, op: OP, fields: Object.keys(ARGS).filter((f) => f !== "id" && f !== "who") } });
       return out;
     }
@@ -124,7 +128,7 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
 
   // The turn it is of: the reply named, else the one it was first written of, else this call's. A reply the path does not have is left out.
   const at = cast.record.at;
-  let of: string | null = item === null ? (call.scope.turn ?? null) : perceivedTurn(item);
+  let of: string | null = item === null ? (call.scope.turn ?? at.turns.at(-1) ?? null) : perceivedTurn(item);
   const named = message === undefined ? undefined : at.turns.find((t) => at.replyOf(t) === message);
   if (named !== undefined) of = named;
   else if (message !== undefined) out.unread.push({ line: "no_message", fields: { n, op: OP, field: "message", message } });
@@ -140,19 +144,20 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
   // goes. Each secret it gave is let go unless other knowledge of theirs still gives it.
   const gave = item === null ? [] : cast.record.of(character.id, "knowledge").filter((k) => k.fields.from === item.id);
   const holds = new Set(held.map((s) => s.fact));
+  // A correction that says they now know nothing (`knows: []`) takes back all it gave, the secrets they hold from it too, unless it names secrets they hold.
   const struck =
     fields.drop === true
       ? item !== null && !item.dropped
         ? gave
         : []
-      : gave.filter((k) => (knows !== undefined && typeof k.fields.text === "string" && !(knows as string[]).includes(k.fields.text)) || (holds.size > 0 && typeof k.fields.secret === "string" && !holds.has(k.fields.secret)));
+      : gave.filter((k) => (knows !== undefined && typeof k.fields.text === "string" && !(knows as string[]).includes(k.fields.text)) || (holds.size > 0 && typeof k.fields.secret === "string" && !holds.has(k.fields.secret)) || (cleared && !(typeof k.fields.secret === "string" && holds.has(k.fields.secret))));
   const forgets = forgetsOf(world.ctx, n, OP, character.name, secretsLetGo(cast.record, character.id, struck), out.unread);
   // What the knowledge it keeps already gives is not written again.
   const kept = gave.filter((k) => !struck.includes(k));
   const keptTexts = new Set(kept.flatMap((k) => (typeof k.fields.text === "string" ? [k.fields.text] : [])));
   const keptSecrets = new Set(kept.flatMap((k) => (typeof k.fields.secret === "string" ? [k.fields.secret] : [])));
   const row: JsonObject = { ...(item === null || named !== undefined ? { of } : {}), ...fields };
-  if (knows !== undefined) row.knows = knows;
+  if (knows !== undefined || cleared) row.knows = knows ?? [];
   if (held.length > 0) row.secrets = held.map((s) => s.fact);
   out.planned = {
     n,
@@ -170,16 +175,29 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
 }
 
 async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
+  return perceiveAs(args, call, false);
+}
+
+/**
+ * `perceive` as the player writes it from a page: the same reading and the same writes, his own change of no turn (`writeTarget`,
+ * source `player`), placed after the newest reply, so it lands while a run goes on and in a branch with no turn of its own. A
+ * perception with no reply named is of the newest turn of the path. The call is of no turn.
+ */
+export function perceiveAsPlayer(args: JsonObject, call: CastCall): Promise<Reply> {
+  return perceiveAs(args, call, true);
+}
+
+async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Promise<Reply> {
   const reply = call.reply();
   const list = args.perceptions;
   if (!Array.isArray(list) || list.length === 0) return reply.line("no_perceptions", {}).fail();
   const cast = readingOr(call, reply);
   if (cast === null) return reply;
-  const turn = call.scope.turn;
-  if (turn === undefined) return reply.line("perceive_turn", {}).fail();
+  const turn = player ? null : (call.scope.turn ?? null);
+  if (!player && turn === null) return reply.line("perceive_turn", {}).fail();
 
   const world = new SecretWorld(
-    () => worldAt(call.deps.store, call.scope.user, turn, call.agent.job ?? null),
+    () => worldAt(call.deps.store, call.scope.user, turn, call.agent.job ?? null, call.scope.chat),
     (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books({ user: call.scope.user, chat: call.scope.chat }, book, entry)),
   );
   const fresh = new Map<string, string>();
@@ -189,7 +207,8 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
   const planned = reads.flatMap((x) => (x.planned === undefined ? [] : [x.planned]));
 
   const user = call.scope.user;
-  const writer = { user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now: (call.deps.now ?? Date.now)() };
+  const job = call.agent.job ?? null;
+  const writer: CastWriter = { user, turn, chat: call.scope.chat, by: call.agent.definition, agent: player ? null : call.agent.id, job, at: cast.clock?.now ?? null, now: (call.deps.now ?? Date.now)(), ...(player ? { source: "player" as const } : {}) };
   const written = await call.deps.writes.run((db) => {
     // Each character named that the cast did not hold is made first, not yet cast.
     const ids = makeFresh(db, call, fresh, writer.now);
@@ -208,7 +227,10 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
     }
     // A secret's fact is recorded before anyone holds it; each perception's holdings, then what its strike lets go.
     const events = [...world.facts, ...planned.flatMap((p) => [...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events)])];
-    if (events.length > 0) call.deps.store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));
+    if (events.length > 0) {
+      const u = call.deps.store.user(user);
+      u.record(u.writeTarget({ chat: call.scope.chat, turn, job }), holdingChanges(events, CAST_LANE, player ? "player" : call.agent.id, job).map((c) => (player ? { ...c, source: "player" as const } : c)));
+    }
     return out;
   }, call.tool);
   for (const name of fresh.values()) reply.line("added", { who: name });
