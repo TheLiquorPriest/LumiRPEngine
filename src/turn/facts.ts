@@ -16,9 +16,15 @@
 //                              began to go out before any intent record of its run had ended, in the order the two reached RPE; else 0
 //   previous.run.stopped       the runs of the turn before that this turn stopped at the wait's limit as it began
 //   story.from, story.newest   the chat's story choice (R-176), 1 in the group the chat's settings name
+//   threads.quests.split       a story thread and a quest naming it where one side is closed and the other open, at the turn, by
+//                              which side is closed (PlanStory-12's link, read off the story record's path)
+// A scope naming a past turn reads every one of them as that turn would have (C-10): its line, its changes, its runs.
+
 import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
+import { pairMarks } from "../quests/thread";
 import type { ChangeRow, Store } from "../store";
 import { storyAt } from "../story/path";
+import { StoryRecord } from "../story/record";
 import type { RunRecord } from "./runs";
 import { STORY_FROM, STORY_NEWEST, type StoryFrom, type StoryNewest } from "./settings";
 
@@ -99,13 +105,15 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       { name: "previous.run.stopped", counts: "Runs of the turn before that this turn stopped at the wait's limit as it began, their work left as it stood." },
       { name: "story.from", counts: "Whose messages are the chat's story: 1 in the group the chat's setting story.from names.", by: [...STORY_FROM] },
       { name: "story.newest", counts: "With the replies as the story, his newest message: 1 in the group the chat's setting story.newest names.", by: [...STORY_NEWEST] },
+      { name: "threads.quests.split", counts: "A story thread and a quest naming it where one is closed and the other open, at this turn, by which side is the closed one; named by the quest.", by: ["thread", "quest"] },
     ],
     async read(scope, names) {
       const user = store.user(scope.user);
       // A chat RPE has not met yet has no turns on its path: every count is 0. A turn still open is not yet one of the turns counted,
       // so a swipe counts the line it follows, not the attempt it replaces.
       const known = user.chat(scope.chat) !== null;
-      const line = known ? storyAt(user, scope.chat, scope.turn ?? null).turns : [];
+      const at = known ? storyAt(user, scope.chat, scope.turn ?? null) : null;
+      const line = at?.turns ?? [];
       const turns = scope.turn !== undefined && user.turn(scope.turn)?.status === "open" ? line.filter((t) => t !== scope.turn) : line;
       const turn = known && scope.turn !== undefined && user.turn(scope.turn)?.chat === scope.chat ? scope.turn : null;
       const runNow = turn === null ? null : (runs(scope.user, turn).at(-1) ?? null);
@@ -134,6 +142,12 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
         const before = turns.at(-1);
         const last = before === undefined ? undefined : runs(scope.user, before).findLast((r) => r.released !== null);
         out["turn.last.without.intent"] = { count: last?.withoutIntent === true ? 1 : 0 };
+      }
+      if (names.includes("threads.quests.split")) {
+        const record = at === null ? null : StoryRecord.read(store, scope.user, at);
+        const marks = record === null ? [] : pairMarks(record.of("thread"), record.quests);
+        const closed = (side: "thread" | "quest") => marks.filter((m) => m.closed === side);
+        out["threads.quests.split"] = { count: marks.length, names: marks.map((m) => m.quest), by: { thread: closed("thread").length, quest: closed("quest").length }, namesBy: { thread: closed("thread").map((m) => m.quest), quest: closed("quest").map((m) => m.quest) } };
       }
       return out;
     },
