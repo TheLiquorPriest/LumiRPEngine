@@ -570,6 +570,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         });
       admitted();
       lap("begin");
+      // The chat's PROMPT-MAP.md follows the preset this turn's prompt came from and its map, written only where its text changed.
+      void this.#d.prompts.mapFile(user, chat);
 
       let request: TurnRequest;
       let ask: FolderAsk;

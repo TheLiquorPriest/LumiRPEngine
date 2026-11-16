@@ -32,13 +32,13 @@ import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
-import { CHATS_FOLDER, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
+import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser, storeUsers } from "./kv";
 import { riskyPattern } from "./pattern";
 import { PlayerSide } from "./player";
-import { type TurnPrompts, turnPrompts } from "./prompt";
+import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
 import { RunTimes } from "./spans";
@@ -214,7 +214,19 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       now: () => clock.now(),
     }),
   );
-  const prompts = turnPrompts(app.db, app.writes, () => clock.now());
+  // Each chat's PROMPT-MAP.md, laid out by the part `prompt-map-file` in force for the chat; switched off, none is written.
+  const generated = new GeneratedFiles({ files: app.paths.files, chats });
+  const prompts = turnPrompts(
+    app.db,
+    app.writes,
+    () => clock.now(),
+    async (user, chat, map, layout) => {
+      const part = await loadGuidance(files, { user, chat, session: NO_SESSION }).part(PROMPT_MAP_FILE);
+      if (part?.format !== "template") return;
+      await generated.write(user, chat, PROMPT_MAP_FILENAME, `${part.render(promptMapFields(map, layout)).text.trim()}\n`);
+    },
+    app.log,
+  );
   const runs = new Runs(app.db, app.writes);
   const player = new PlayerSide(app.db);
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));

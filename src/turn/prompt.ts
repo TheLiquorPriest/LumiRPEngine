@@ -6,7 +6,7 @@
 // are kept only while its folder is kept whole (`prune`); the maps stay.
 
 import type { Database } from "bun:sqlite";
-import type { AgentRef, LocatedSlices, PromptMap, PromptPort, RawLayout, Scope } from "rp-harness/contract";
+import type { AgentRef, LocatedSlices, Log, PromptMap, PromptPort, RawLayout, Scope } from "rp-harness/contract";
 import type { ActivatedEntry, LoreTurns } from "../lore";
 import { isRecord } from "../shared/json";
 import type { Writes } from "./kv";
@@ -45,9 +45,21 @@ export interface TurnPrompts extends PromptPort {
   prune(db: Database, user: string, chat: string, keep: number, going: ReadonlySet<string>): void;
   /** The lore that activated for each turn's prompt, as the lore lane asks for it. */
   readonly lore: LoreTurns;
+  /**
+   * Brings the chat's `PROMPT-MAP.md` up to date with the map of the preset its latest turn was played on, or that turn's raw layout
+   * where no map is learned yet; the file is written only where its text changed. A failure is logged.
+   */
+  mapFile(user: string, chat: string): Promise<void>;
 }
 
-export function turnPrompts(db: Database, writes: Writes, now: () => number): TurnPrompts {
+/** Writes a chat's `PROMPT-MAP.md` from its preset's map (undefined: none learned yet) and its latest layout. */
+export type MapFileWriter = (user: string, chat: string, map: PromptMap | undefined, layout: RawLayout | null) => Promise<void>;
+
+/** The prompt part `PROMPT-MAP.md` is laid out by, and the file's name at the top of the chat's folder. */
+export const PROMPT_MAP_FILE = "prompt-map-file";
+export const PROMPT_MAP_FILENAME = "PROMPT-MAP.md";
+
+export function turnPrompts(db: Database, writes: Writes, now: () => number, writeMapFile?: MapFileWriter, log?: Log): TurnPrompts {
   const layoutOf = (user: string, turn: string): RawLayout | null => {
     const row = db.query<{ layout: string }, [string, string]>("SELECT layout FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
     return row === null ? null : (JSON.parse(row.layout) as RawLayout);
@@ -60,7 +72,20 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number): Tu
         : db.query<{ preset: string | null }, [string, string]>("SELECT preset FROM turn_prompt WHERE user = ? AND chat = ? ORDER BY received DESC LIMIT 1").get(scope.user, scope.chat);
     return row?.preset ?? null;
   };
+  const mapOf = (user: string, preset: string | null): PromptMap | undefined => {
+    const row = preset === null ? null : db.query<{ map: string }, [string, string]>("SELECT map FROM prompt_map WHERE user = ? AND preset = ?").get(user, preset);
+    return row === null ? undefined : (JSON.parse(row.map) as PromptMap);
+  };
+  const mapFile = async (user: string, chat: string): Promise<void> => {
+    if (writeMapFile === undefined) return;
+    const row = db.query<{ layout: string; preset: string | null }, [string, string]>("SELECT layout, preset FROM turn_prompt WHERE user = ? AND chat = ? ORDER BY received DESC LIMIT 1").get(user, chat);
+    if (row === null) return;
+    await writeMapFile(user, chat, mapOf(user, row.preset), JSON.parse(row.layout) as RawLayout).catch((error: unknown) =>
+      log?.error("A chat's PROMPT-MAP.md could not be written.", { chat, error: error instanceof Error ? error.message : String(error) }),
+    );
+  };
   return {
+    mapFile,
     keep(into, r) {
       into.run("INSERT OR REPLACE INTO turn_prompt (user, turn, chat, preset, layout, lore, cut, received, summarized, speaker, persona) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
         r.user,
@@ -120,10 +145,7 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number): Tu
     },
 
     async map(scope) {
-      const preset = presetOf(scope);
-      if (preset === null) return undefined;
-      const row = db.query<{ map: string }, [string, string]>("SELECT map FROM prompt_map WHERE user = ? AND preset = ?").get(scope.user, preset);
-      return row === null ? undefined : (JSON.parse(row.map) as PromptMap);
+      return mapOf(scope.user, presetOf(scope));
     },
 
     async saveMap(scope, map: PromptMap, by: AgentRef) {
@@ -138,6 +160,11 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number): Tu
           ]),
         "keeping a prompt map",
       );
+      // Each chat played on the preset now shows the map as saved.
+      const chats = db
+        .query<{ chat: string; preset: string | null }, [string]>("SELECT chat, preset FROM turn_prompt t WHERE user = ? AND received = (SELECT max(received) FROM turn_prompt u WHERE u.user = t.user AND u.chat = t.chat)")
+        .all(scope.user);
+      for (const c of chats) if (c.preset === map.preset.id) await mapFile(scope.user, c.chat);
     },
 
     async saveLocated(scope, located: LocatedSlices) {
