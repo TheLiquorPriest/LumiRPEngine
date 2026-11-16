@@ -11,7 +11,8 @@ import type { MapCellDef, WorldDoc } from "../../shared/world";
 import { playedWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { cellKey, editedMap, SQUARES_EVENT, squareEditsOf } from "../../packs/space/core/grid-play";
-import type { Report } from "../../store/types";
+import { pathText } from "../../shared/schema-check";
+import type { ChangeInput, Report } from "../../store/types";
 import { cellOf, indexOf, squareKey, type Drawn, type Square } from "../../packs/space/core/grid-model";
 import type { Laid } from "./lay";
 import { squaresEvent } from "./record";
@@ -62,10 +63,12 @@ function strokeOn(grid: Pick<Drawn, "width" | "height">, stroke: Stroke): { on: 
 
 /**
  * The grid of `place` with `strokes` drawn on it and `legend` laid over its legend (a symbol given
- * null is taken out), as one change kept square by square over its map. A stroke that reaches off
- * the grid is reported once, with how many of its squares lie off it, and each symbol no legend
- * names is reported; the rest is drawn. A change the map's format cannot hold is not recorded and
- * says why. `world` is the revision the chat plays, `state` its state now.
+ * null is taken out), as a change kept square by square over its map. A stroke that reaches off
+ * the grid is reported once, with how many of its squares lie off it. A symbol no legend names is
+ * read as the compiler reads it (floor), reported once, and its squares are a change of their own
+ * that stands as assumed, from the default, so the GM names the symbol; the rest is drawn as the
+ * call says. A change the map's format cannot hold is not recorded and says why. `world` is the
+ * revision the chat plays, `state` its state now.
  */
 export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: PlaceId, strokes: readonly Stroke[], legend: Readonly<Record<string, MapCellDef | null>> = {}): Laid {
   const played = playedWorld(world, state);
@@ -76,13 +79,17 @@ export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: Pla
   const legendNow: Record<string, MapCellDef | null> = { ...(was?.legend ?? {}), ...legend };
   const reports: Report[] = [];
   const drawn = new Map<string, { at: Square; symbol: string }>();
+  const unnamed = new Set<string>();
   for (const [k, stroke] of strokes.entries()) {
     if ([...stroke.symbol].length !== 1) {
       reports.push({ code: "bad_symbol", values: { symbol: stroke.symbol } });
       continue;
     }
     const named = hasOwn(legendNow, stroke.symbol) ? legendNow[stroke.symbol] !== null : hasOwn(map.legend ?? {}, stroke.symbol) || hasOwn(DEFAULT_LEGEND, stroke.symbol);
-    if (!named) reports.push({ code: "not_in_legend", values: { symbol: stroke.symbol } });
+    if (!named && !unnamed.has(stroke.symbol)) {
+      unnamed.add(stroke.symbol);
+      reports.push({ code: "not_in_legend", values: { symbol: stroke.symbol } });
+    }
     const { on, off } = strokeOn(grid, stroke);
     if (off > 0n) reports.push({ code: "fell_off", values: { stroke: k + 1, symbol: stroke.symbol, count: off <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(off) : off.toString(), width: grid.width, height: grid.height } });
     for (const s of on) drawn.set(squareKey(s), { at: s, symbol: stroke.symbol });
@@ -94,6 +101,12 @@ export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: Pla
     cells[cellKey(c.x, c.y)] = d.symbol;
   }
   const { problems } = readMap(editedMap(map, { cells, legend: legendNow }));
-  if (problems.length > 0) return { changes: [], scope: place, reports: [...reports, ...problems.map((p) => ({ code: "bad_map", values: { at: p.path } }))] };
-  return { changes: [{ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(map.id, [...drawn.values()], legend) }], scope: place, reports };
+  if (problems.length > 0) return { changes: [], scope: place, reports: [...reports, ...problems.map((p) => ({ code: "bad_map", values: { at: pathText(p.path), why: p.message } }))] };
+  const squares = [...drawn.values()];
+  const kept = squares.filter((d) => !unnamed.has(d.symbol));
+  const guessed = squares.filter((d) => unnamed.has(d.symbol));
+  const changes: ChangeInput[] = [];
+  if (kept.length > 0 || Object.keys(legend).length > 0) changes.push({ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(map.id, kept, legend) });
+  if (guessed.length > 0) changes.push({ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(map.id, guessed, {}), standing: "assumed", source: "default" });
+  return { changes, scope: place, reports };
 }

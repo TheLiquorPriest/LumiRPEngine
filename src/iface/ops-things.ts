@@ -114,14 +114,14 @@ interface SaidWhere {
  * (beside someone with no square to stand on), and whether it was put on a square, which leaves no
  * old words behind.
  */
-interface Soft {
+export interface Soft {
   said: SaidWhere[];
   words: string[];
   zone?: string;
   squared: boolean;
 }
 
-const noSoft = (): Soft => ({ said: [], words: [], squared: false });
+export const noSoft = (): Soft => ({ said: [], words: [], squared: false });
 
 /**
  * Puts someone or something at a square, beside someone, or in a zone of the place's map, through
@@ -154,7 +154,7 @@ function placeOnMap(o: OpContext, who: EntityId, place: string | null, args: Jso
     return undefined;
   }
   const grid = o.call.deps.grid;
-  const placed = grid.place({ state: { ...o.reading.state, world: o.draft.w.state }, env: o.call.deps.env, who, place, ...(square ? { square } : {}), ...(near ? { near: near.id } : {}), ...(zone !== undefined ? { zone } : {}) });
+  const placed = grid.place({ state: { ...o.reading.state, world: o.draft.w.state }, env: o.call.deps.env, who, place, nearMatches: o.call.settings.nearMatches, ...(square ? { square } : {}), ...(near ? { near: near.id } : {}), ...(zone !== undefined ? { zone } : {}) });
   if ("problem" in placed) return { line: placed.problem, fields: { n: o.n, op: o.op, ...placed.fields } };
   if ("kept" in placed) {
     if (placed.kept.zone !== undefined) soft.zone = placed.kept.zone;
@@ -188,7 +188,7 @@ function whereNamed(o: OpContext, field: string, want: Want, said: SaidWhere[]):
  * (`space.where`, written whole): words that name nothing, a zone, and words already worded. Put on a
  * square with nothing else said, it leaves the words it had behind. Said once in the answer.
  */
-function keepWhere(o: OpContext, id: EntityId, soft: Soft): Unread | undefined {
+export function keepWhere(o: OpContext, id: EntityId, soft: Soft): Unread | undefined {
   const words = [...soft.said.map((s) => `${s.field} ${s.words}`), ...soft.words];
   if (words.length === 0 && soft.zone === undefined && !(soft.squared && hasWhere(o.draft.w.state, id))) return undefined;
   const bad = o.draft.applyAll([whereEvent(id, { ...(soft.zone !== undefined ? { zone: soft.zone } : {}), ...(words.length > 0 ? { words: words.join(", ") } : {}) }) as unknown as LedgerEvent]);

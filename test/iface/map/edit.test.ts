@@ -41,11 +41,14 @@ describe("changing part of a grid", () => {
       { code: "fell_off", values: { stroke: 5, symbol: "#", count: 1, width: 9, height: 5 } },
     ]);
     const { changes, state } = s.addChanges(turn.id, edited.changes.map((c) => ({ ...c, by: "gm", source: "gm" as const })));
-    expect(changes.map((c) => [c.op, c.applied, c.reports])).toEqual([["space.squares", true, []]]);
-    // The change holds the squares it drew, not the map: seven squares, and no layout.
-    const data = changes[0]?.value;
-    expect(isRecord(data) && isRecord(data.data) && Array.isArray(data.data.squares) ? data.data.squares.length : 0).toBe(7);
-    expect(JSON.stringify(data)).not.toContain("layout");
+    // The squares of a symbol no legend names are a change of their own, which stands as assumed.
+    expect(changes.map((c) => [c.op, c.applied, c.reports, c.standing ?? null])).toEqual([
+      ["space.squares", true, [], null],
+      ["space.squares", true, [], "assumed"],
+    ]);
+    const count = (c: (typeof changes)[number] | undefined): number => (isRecord(c?.value) && isRecord(c.value.data) && Array.isArray(c.value.data.squares) ? c.value.data.squares.length : 0);
+    expect([count(changes[0]), count(changes[1])]).toEqual([6, 1]);
+    expect(JSON.stringify(changes[0]?.value)).not.toContain("layout");
     const d = drawnOf(playedWorld(world, state.world), "cellar", MAP_DEFAULTS, state.world);
     if (!d) throw new Error("the cellar lost its grid");
     expect(picture(printMap(d, NOTHING_MOVES))).toBe(["      1 2 3 4 5 6 7 8 9", "   1  # # # # # # # # #", "   2  # ~ . . # t t . #", "   3  # . ~ . # . . . #", "   4  # . . ~ # . . ? #", "   5  # # # # # # # # #"].join("\n"));

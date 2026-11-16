@@ -58,9 +58,12 @@ describe("a room grid over one square of a coarse map", () => {
     const laid = layOverSquare(world, start, "thornbury", [3, 2], { id: "kettle_taproom", title: "The taproom", rows: plainRows(8, 6, [[1, 3]]) });
     expect(laid.scope).toBe("crooked_kettle");
     expect(laid.reports).toEqual([]);
-    expect(laid.changes.map((c) => c.op)).toEqual(["engine.world", "space.pos", "space.pos"]);
+    // The town's map draws the inn, so its square opens onto the room grid.
+    expect(laid.changes.map((c) => c.op)).toEqual(["engine.world", "space.pos", "space.pos", "engine.world"]);
+    expect(laid.opens).toBe("thornbury_streets");
     const { changes, state } = record([...laid.changes, ...apart]);
-    expect(outcome(changes)).toEqual(["engine.world", "space.pos", "space.pos", "space.pos", "space.pos"].map((op) => [op, true, []]));
+    expect(outcome(changes)).toEqual(["engine.world", "space.pos", "space.pos", "engine.world", "space.pos", "space.pos"].map((op) => [op, true, []]));
+    expect(playedWorld(world, state.world).maps.thornbury_streets?.places?.find((p) => p.id === "crooked_kettle")?.opens).toBe("kettle_taproom");
     const played = playedWorld(world, state.world);
     const inn = grid(played, "crooked_kettle");
     expect([inn.width, inn.height, inn.scale.feet, squareAt(inn, [...inn.doors][0] ?? -1)]).toEqual([8, 6, 5, [1, 3]]);
@@ -79,7 +82,7 @@ describe("a room grid over one square of a coarse map", () => {
     const world = townWorld();
     const { record, start } = chatOn(world);
     expect(layOverSquare(world, start, "thornbury", [4, 3], { id: "forge_floor", rows: plainRows(5, 4) }).reports).toEqual([{ code: "needs_place", values: { square: [4, 3] } }]);
-    const laid = layOverSquare(world, start, "thornbury", [4, 3], { id: "forge_floor", rows: plainRows(5, 4), place: { id: "smithy", name: "The Smithy" } });
+    const laid = layOverSquare(world, start, "thornbury", [4, 3], { id: "forge_floor", rows: plainRows(5, 4) }, undefined, { id: "smithy", name: "The Smithy", made: true });
     expect(laid.scope).toBe("smithy");
     const { changes, state } = record(laid.changes);
     expect(outcome(changes)).toEqual([
@@ -91,12 +94,14 @@ describe("a room grid over one square of a coarse map", () => {
     expect(grid(played, "smithy").scale.feet).toBe(5);
   });
 
-  test("a square off the coarse map, or a place that has its own grid already, lays nothing and says so", () => {
+  test("a square off the coarse map, or a place with no grid to lay over, lays nothing and says so; a place that has its own grid is laid over and told", () => {
     const world = townWorld();
     const start = initialState(world, "r", registry());
     expect(layOverSquare(world, start, "thornbury", [9, 9], { id: "x", rows: plainRows(3, 3) }).reports[0]?.code).toBe("off_grid");
     expect(layOverSquare(world, start, "market_square", [1, 1], { id: "x", rows: plainRows(3, 3) }).reports).toEqual([{ code: "no_grid", values: { place: "market_square" } }]);
-    expect(layForPlace(world, start, "thornbury", { id: "x", rows: plainRows(3, 3) }).reports).toEqual([{ code: "has_grid", values: { place: "thornbury", grid: "thornbury_streets" } }]);
+    const over = layForPlace(world, start, "thornbury", { id: "x", rows: plainRows(3, 3) });
+    expect(over.reports).toEqual([{ code: "has_grid", values: { place: "thornbury", grid: "thornbury_streets" } }]);
+    expect(over.changes.length).toBeGreaterThan(0);
   });
 });
 

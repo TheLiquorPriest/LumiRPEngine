@@ -211,7 +211,10 @@ describe("map_door and map_measure", () => {
     expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Wren", blocks: "walls" }], ...SRC })).toBe('map_place: blocks cannot be read, you sent "walls". It is one of: way, view, both, none.');
     expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Tram", square: [2, 2] }], ...SRC })).toStartWith("map_place: there is nothing called Tram that is a person or a thing. Near: Bram [bram], Tam [tam]");
     expect(await said("map_door", { at: "The Common Room", door: [3, 3], state: "open", ...SRC })).toBe("map_door: there is no door at (3,3) on the map of The Common Room [common_room]. Its doors: (6,1), (12,5).");
-    expect(await said("map_place", { at: "The Far Road", pieces: [{ who: "Tam", zone: "bank" }], ...SRC })).toBe("map_place: this map has no zone bank. Its zones: ditch, verge.");
+    // A zone the map has not is never refused: the word stays as where Tam is, and the answer says so.
+    const bank = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", zone: "bank" }], ...SRC });
+    expect(bank.error).toBeUndefined();
+    expect(bank.reports?.some((x) => x.includes("could not be put in bank") && x.includes("has no zone by that name"))).toBe(true);
     const burst = await t.call("map_measure", { from: "Wren", area: "burst", size: 1 });
     expect(texts(burst)).toContain("The burst from Wren (3,3), 1 squares (5 ft), covers 8 squares. In it: Bram [bram], Wren [wren].");
     const edited = await t.call("map_edit", { at: "The Common Room", strokes: [{ symbol: "b", squares: [[2, 6]] }], legend: { b: { terrain: "bench", blocked: true }, s: { terrain: "straw" } }, ...SRC });
@@ -283,23 +286,26 @@ describe("map_lay and map_edit", () => {
     wordsFromFiles(laid);
 
     const brought = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", square: [2, 2] }], ...SRC });
-    expect(brought.reports).toBeUndefined();
-    expect(texts(brought)).toContain("map_place: Tam [tam] was at Market Square [market_square], and was brought to The Far Road [far_road] first.");
+    expect(brought.reports).toEqual(["map_place: Tam [tam] was at Market Square [market_square], and was brought to The Far Road [far_road] first."]);
     const run = await t.call("map_measure", { from: "Tam", to: [11, 7] });
     expect(dataOf(run)).toMatchObject({ way: { distance: 9, rounds: 2, seconds: 12 } });
-    expect(texts(await t.call("map_lay", { place: "The Far Road", width: 4, height: 4, ...SRC }))[0]).toBe("map_lay: The Far Road [far_road] has a map already (far_road_map).");
+    // A map laid again where the place has one is laid over it in this chat, and the answer says so.
+    const again = await t.call("map_lay", { place: "The Far Road", width: 4, height: 4, ...SRC });
+    expect(again.error).toBeUndefined();
+    expect(again.reports?.[0]).toStartWith("map_lay: The Far Road [far_road] had a map already (far_road_map). This one is laid over it for this chat only");
   });
 
   test("a room wider or higher than a map can be is refused before it is built, at any size asked", async () => {
     const t = await mapRig(worldWith(INN));
     const wide = await t.call("map_lay", { place: "The Far Road", width: 65, height: 8, ...SRC });
     expect(wide.error).toBe(true);
-    expect(texts(wide)).toEqual(["map_lay: a map is at most 64 by 64 squares, and this one would be 65 by 8.", "Nothing was recorded. Send the call again with that put right."]);
+    expect(texts(wide)[0]).toStartWith("map_lay: a map is at most 64 by 64 squares, and this one would be 65 by 8. Lay it in parts:");
+    expect(texts(wide)[1]).toBe("Nothing was recorded. Send the call again with that put right.");
     wordsFromFiles(wide);
     const started = performance.now();
     const huge = await t.call("map_lay", { place: "The Far Road", width: 50_000, height: 50_000, ...SRC });
     expect(performance.now() - started).toBeLessThan(1000);
-    expect(texts(huge)[0]).toBe("map_lay: a map is at most 64 by 64 squares, and this one would be 50000 by 50000.");
+    expect(texts(huge)[0]).toStartWith("map_lay: a map is at most 64 by 64 squares, and this one would be 50000 by 50000. Lay it in parts:");
     expect(t.s.changes(t.first.id).length).toBe(0);
     const most = await t.call("map_lay", { place: "The Far Road", width: 64, height: 64, ...SRC });
     expect(opOf(most).laid).toMatchObject({ width: 64, height: 64 });
@@ -310,9 +316,9 @@ describe("map_lay and map_edit", () => {
     const edited = await t.call("map_edit", { at: "The Cellar", strokes: [{ symbol: "b", line: [[6, 2], [6, 4]] }, { symbol: "?", squares: [[8, 2]] }], legend: { b: { terrain: "bar", blocked: true, seeThrough: true } }, ...SRC });
     expect(edited.error).toBeUndefined();
     expect(texts(edited)).toContain("4 squares of the map of The Cellar [cellar] were drawn anew, and its legend changed for b.");
-    expect(edited.reports).toBeUndefined();
-    expect(texts(edited)).toContain("map_edit: no legend names ?, so it reads as floor.");
-    expect(t.s.changes(t.first.id).map((c) => c.op)).toEqual(["space.squares"]);
+    // `?` is no symbol of the legend: read as floor, reported so the GM names it, and its square a change of its own that stands as assumed.
+    expect(edited.reports).toEqual(["map_edit: no legend names ?, so it reads as floor, and what was drawn with it is recorded as assumed. Give it an entry in the legend to say what it is."]);
+    expect(t.s.changes(t.first.id).map((c) => [c.op, c.standing ?? null])).toEqual([["space.squares", null], ["space.squares", "assumed"]]);
     wordsFromFiles(edited);
     // Through the open door and over the bar: seen, and no way across.
     const view = await t.call("map_measure", { at: "The Cellar", from: [2, 3], to: [8, 3] });
@@ -397,5 +403,80 @@ describe("the map's part switched off", () => {
       });
       expect(r.reports ?? []).toEqual([]);
     }
+  });
+});
+
+describe("what the map tools never refuse", () => {
+  test("a place with no map is answered with that, and only a square is what does not exist there; a zone or words stay as the position", async () => {
+    const t = await mapRig(worldWith(INN));
+    const view = await t.call("map_view", { at: "The Far Road" });
+    expect(view.error).toBeUndefined();
+    expect(texts(view)[0]).toBe("The Far Road [far_road] has no map of squares yet. map_lay lays one for it. Places near it that have a map: The Common Room [common_room].");
+    wordsFromFiles(view);
+    const square = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", square: [2, 2] }], ...SRC });
+    expect(square.error).toBe(true);
+    expect(texts(square)[0]).toStartWith("map_place: Tam [tam] cannot be put on square (2,2): no square exists at The Far Road [far_road], which has no map of squares. map_lay lays one.");
+    const words = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", near: "Wren" }], ...SRC });
+    expect(words.error).toBeUndefined();
+    expect(words.reports?.[1]).toBe("map_place: Tam [tam] could not be put on a square: The Far Road [far_road] has no map of squares. It is kept as where Tam [tam] is: near Wren.");
+    wordsFromFiles(words);
+    expect(texts(await t.call("map_view", { at: "The Far Road" }))[0]).toContain("Kept there by a zone or words: Tam [tam]: near Wren.");
+  });
+
+  test("measuring from or to someone on no square says so with where they are kept, and measures what it can", async () => {
+    const t = await mapRig(worldWith(INN));
+    await t.call("map_place", { at: "The Common Room", pieces: [{ who: "Wren", square: [2, 2] }, { who: "Bram", square: [3, 2] }, { who: "Tam", near: "Odile" }], ...SRC });
+    const r = await t.call("map_measure", { from: "Wren", to: "Tam", within: 2 });
+    expect(r.error).toBeUndefined();
+    expect(texts(r)).toContain("to: Tam [tam] stands on no square of the map of The Common Room [common_room]; they are kept as near Odile.");
+    expect(dataOf(r)).toMatchObject({ within: { who: ["Bram [bram]"] }, unplaced: [{ who: "Tam [tam]", where: "near Odile" }] });
+    wordsFromFiles(r);
+  });
+
+  test("beside someone in a full room: put on the nearest square all the same, the square recorded assumed, the standing over reported", async () => {
+    const t = await mapRig(worldWith(INN));
+    await t.call("map_lay", { place: "The Far Road", rows: ["###", "#.#", "###"], ...SRC });
+    await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", square: [2, 2] }], ...SRC });
+    const r = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Wren", near: "Tam" }], ...SRC });
+    expect(r.error).toBeUndefined();
+    expect(texts(r)).toContain("Wren [wren] stands at (2,2).");
+    expect(r.reports).toContain("map_place: Wren [wren] stands over Tam [tam].");
+    expect(t.s.changes(t.first.id).at(-1)).toMatchObject({ op: "space.pos", standing: "assumed", source: "default" });
+    wordsFromFiles(r);
+  });
+
+  test("one map_place records a piece from the prose established and another assumed", async () => {
+    const t = await mapRig(worldWith(INN));
+    const r = await t.call("map_place", { at: "The Common Room", pieces: [{ who: "Wren", square: [2, 2], standing: "established" }, { who: "Bram", square: [4, 4], source: { from: "gm" }, standing: "assumed" }], source: { from: "prose", message: "m-9" } });
+    expect(r.error).toBeUndefined();
+    expect(t.s.changes(t.first.id).map((c) => [c.op, c.standing, c.source])).toEqual([["space.pos", "established", "prose"], ["space.pos", "assumed", "gm"]]);
+    expect((opOf(r).pieces as JsonObject[]).map((p) => [p.who, p.standing])).toEqual([["Wren [wren]", "established"], ["Bram [bram]", "assumed"]]);
+  });
+
+  test("a map laid where the place has one is laid over it in this chat and said so; a name the square does not hold, a long name and a map too large are answered", async () => {
+    const t = await mapRig(worldWith(TOWN, CELLAR));
+    const again = await t.call("map_lay", { place: "The Cellar", rows: ["#####", "#...#", "#####"], ...SRC });
+    expect(again.error).toBeUndefined();
+    expect(again.reports?.[0]).toStartWith("map_lay: The Cellar [cellar] had a map already (cellar_rooms). This one is laid over it for this chat only");
+    expect(texts(await t.call("map_view", { at: "The Cellar" }))[0]).toContain("5 by 3 squares");
+    const held = await t.call("map_lay", { place: "The Old Mill", over: "Thornbury", square: [3, 2], width: 6, height: 5, ...SRC });
+    expect(held.reports).toEqual(["map_lay: The Old Mill is not the place drawn on square (3,2); The Crooked Kettle [crooked_kettle] is, so the map was laid for The Crooked Kettle [crooked_kettle]."]);
+    expect(opOf(held).laid).toMatchObject({ map: "crooked_kettle_map", opensFrom: "thornbury_streets" });
+    const name = "The Extraordinarily Long Named Roadside Tavern And Coaching Inn Of The Western Marches Beyond The Hollow";
+    const long = await t.call("map_lay", { place: name, over: "Thornbury", square: [5, 3], width: 6, height: 5, ...SRC });
+    expect(long.error).toBeUndefined();
+    expect(((opOf(long).laid as JsonObject).map as string).length).toBeLessThanOrEqual(64);
+    const big = await t.call("map_lay", { place: "The Cellar", width: 70, height: 70, ...SRC });
+    expect(big.error).toBe(true);
+    expect(texts(big)[0]).toContain("at most 64 by 64 squares, and this one would be 70 by 70. Lay it in parts");
+    wordsFromFiles(big);
+  });
+
+  test("an unnamed symbol in a laying is reported and the map stands as assumed", async () => {
+    const t = await mapRig(worldWith(INN));
+    const r = await t.call("map_lay", { place: "The Far Road", rows: ["#####", "#.T.#", "#####"], feet: 5, ...SRC });
+    expect(r.reports).toEqual(["map_lay: no legend names T, so it reads as floor, and what was drawn with it is recorded as assumed. Give it an entry in the legend to say what it is."]);
+    expect(t.s.changes(t.first.id).map((c) => [c.op, c.standing, c.source])).toEqual([["engine.world", "assumed", "default"]]);
+    wordsFromFiles(r);
   });
 });

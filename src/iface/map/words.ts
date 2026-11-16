@@ -7,7 +7,7 @@
 
 import type { EntityId, PlaceId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import { standingGrid } from "../../shared/grid";
+import { gridOf, standingGrid } from "../../shared/grid";
 import { VOID_TERRAIN } from "../../shared/maps";
 import type { MapCellDef, WorldDoc } from "../../shared/world";
 import { playedWorld } from "../../engine/places-in-play";
@@ -72,6 +72,30 @@ export function farText(lines: Lines, drawn: Drawn, squares: number): string {
 /** The name an id goes by: an entity's, a place's, else the id. */
 export function nameIn(world: WorldDoc, state: Readonly<WorldState>, id: string): string {
   return own(state.entities, id)?.name ?? own(world.places, id)?.name ?? id;
+}
+
+/** Where someone or something is kept within its place besides a square: its zone and words as recorded, joined; undefined when it has none. */
+export function whereWords(state: Readonly<WorldState>, id: string): string | undefined {
+  const where = whereOf(state, id);
+  const said = where === null ? [] : [where.zone, where.words].filter((t): t is string => t !== undefined && t.trim() !== "");
+  return said.length > 0 ? said.join(", ") : undefined;
+}
+
+/**
+ * The places that have a map of their own, as answers name them (name and id), for a place that has none: those in the place's
+ * own parent, or in the place, or holding it first, then the rest in order of id; at most `limit`, which is the setting for how many near names an answer lists.
+ */
+export function mapsNear(world: WorldDoc, state: Readonly<WorldState>, place: PlaceId | null, limit: number): string[] {
+  const here = place === null ? undefined : own(world.places, place);
+  const rank = (id: string): number => {
+    const p = own(world.places, id);
+    return p !== undefined && here !== undefined && (p.parent === place || (here.parent !== undefined && (p.parent === here.parent || id === here.parent))) ? 0 : 1;
+  };
+  return Object.keys(world.places)
+    .filter((id) => id !== place && gridOf(world, id) !== undefined)
+    .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))
+    .slice(0, limit)
+    .map((id) => `${nameIn(world, state, id)} [${id}]`);
 }
 
 /** The time step's fields every line about time reads: `round`, with its seconds and its squares, on a grid that counts rounds; none on one that counts minutes. */

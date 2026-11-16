@@ -28,7 +28,7 @@
           "type": "object",
           "required": ["per", "seconds", "squares"],
           "additionalProperties": false,
-          "properties": { "per": { "enum": ["round"] }, "seconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 3600 }, "squares": { "type": "integer", "minimum": 1, "maximum": 1000 } }
+          "properties": { "per": { "enum": ["round"] }, "seconds": { "type": "number", "exclusiveMinimum": 0 }, "squares": { "type": "integer", "minimum": 1 } }
         },
         {
           "title": "{\"per\": \"minute\"}",

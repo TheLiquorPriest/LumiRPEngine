@@ -10,6 +10,7 @@ import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { nearestMiddle, standingGrid } from "../../shared/grid";
 import type { WorldDoc } from "../../shared/world";
+import type { GridReport } from "../../packs/space/core/grid-model";
 import { playedWorld } from "../../engine/places-in-play";
 import { placeOfEntity } from "../../engine/scope";
 import type { WorldState } from "../../engine/state";
@@ -17,11 +18,10 @@ import type { GridFinding, GridMoves, GridPlaced } from "./ports";
 import { Lines } from "../texts";
 import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
 import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type Moving, type Square } from "../../packs/space/core/grid-model";
-import { whereOf } from "../../packs/space/core/grid-play";
 import { move } from "../../packs/space/core/grid-path";
 import { between } from "../../packs/space/core/grid-measure";
 import { positionEvent } from "./record";
-import { farText, nameIn, reportFields, type Say, spotText, timeText, whoIs } from "./words";
+import { farText, mapsNear, nameIn, reportFields, type Say, spotText, timeText, whereWords, whoIs } from "./words";
 
 /** The squares nobody may be put on: what blocks the way, and every footprint on the grid. */
 function takenSquares(drawn: Drawn, moving: Moving): Set<number> {
@@ -61,15 +61,25 @@ export function inZone(drawn: Drawn, moving: Moving, zone: string, crowded = fal
   return middle ? squareOf(middle) : null;
 }
 
-/** The pieces at `place` that have a zone or words kept as their position, as the answer lists them. */
-function softAt(world: WorldDoc, state: Readonly<WorldState>, place: string): string {
+/**
+ * What a person put on a square code chose in a crowded room (`crowded`) stands over: one report for
+ * each other piece whose footprint covers it, that the grid's own findings (`said`: a piece that
+ * blocks the way) have not already told, since people do not block one another.
+ */
+export function stackedOn(drawn: Drawn, moving: Moving, id: EntityId, at: Square, said: readonly GridReport[]): GridReport[] {
+  const i = indexOf(drawn, at);
+  const told = new Set(said.filter((r) => r.code === "overlaps").map((r) => r.values.with));
+  return Object.entries(moving.pieces).flatMap(([other, p]) => (other !== id && p.on === undefined && !told.has(other) && i !== null && footprint(drawn, moving, other).includes(i) ? [{ code: "overlaps", values: { what: id, with: other } }] : []));
+}
+
+/** The pieces at `place` that have a zone or words kept as their position, each by its name and id with where it is kept. */
+export function softPositions(world: WorldDoc, state: Readonly<WorldState>, place: string): string[] {
   return Object.keys(state.entities)
     .sort()
     .flatMap((id) => {
-      const w = whereOf(state, id);
-      return w !== null && placeOfEntity(state, id) === place ? [`${nameIn(world, state, id)} [${id}]: ${w.zone ?? w.words}`] : [];
-    })
-    .join("; ");
+      const said = whereWords(state, id);
+      return said !== undefined && placeOfEntity(state, id) === place ? [`${nameIn(world, state, id)} [${id}]: ${said}`] : [];
+    });
 }
 
 /**
@@ -83,7 +93,7 @@ function softAt(world: WorldDoc, state: Readonly<WorldState>, place: string): st
  */
 export function gridMoves(lines: Lines = Lines.none(), config: Readonly<MapConfig> = MAP_DEFAULTS): GridMoves {
   return {
-    place({ state, env, who, place, square, near, zone }) {
+    place({ state, env, who, place, square, near, zone, nearMatches = Infinity }) {
       const doc = env.worlds(state.world.revision);
       if (!doc) return { problem: "not_applicable", fields: { code: "no_world" } };
       const world = playedWorld(doc, state.world);
@@ -95,7 +105,7 @@ export function gridMoves(lines: Lines = Lines.none(), config: Readonly<MapConfi
       };
       /** A square that does not exist: refused, answered in the map's words with what does exist; with none, by its code. */
       const absent = (line: string, code: string, values: Record<string, unknown>): GridPlaced => {
-        const said = lines.line(line, reportFields(say, values));
+        const said = lines.line(line, reportFields(say, { ...values, maps: mapsNear(world, state.world, place, nearMatches).join("; ") }));
         return said !== undefined && said.trim() !== "" ? { problem: "on_map", fields: { said } } : { problem: "not_applicable", fields: { code } };
       };
       const stand = standingGrid(world, place);
@@ -106,26 +116,30 @@ export function gridMoves(lines: Lines = Lines.none(), config: Readonly<MapConfi
         return { kept, reports: found(line, { what: who, place, near, zone, kept: kept.zone ?? kept.words }) };
       };
       if (!drawn) {
-        if (square !== undefined) return absent("no_square_no_map", "no_map", { what: who, place, square, soft: softAt(world, state.world, place) });
+        if (square !== undefined) return absent("no_square_no_map", "no_map", { what: who, place, square, soft: softPositions(world, state.world, place).join("; ") });
         return keep("grid_kept_no_map");
       }
       const { moving } = movingOf(env.registry, world, state.world, drawn);
       const others = lift(moving, who);
-      if (square !== undefined && indexOf(drawn, square) === null) return absent("no_square_off", "off_grid", { what: who, place, square, width: drawn.width, height: drawn.height, soft: softAt(world, state.world, place), zones: Object.keys(drawn.zones).sort().join(", ") });
+      if (square !== undefined && indexOf(drawn, square) === null) return absent("no_square_off", "off_grid", { what: who, place, square, width: drawn.width, height: drawn.height, soft: softPositions(world, state.world, place).join("; "), zones: Object.keys(drawn.zones).sort().join(", ") });
       let to: Square | null = square ?? null;
+      let crowded = false;
       if (to === null && near !== undefined) {
         if (standsAt(others, near) === null) return keep("grid_kept_nowhere");
-        to = beside(drawn, others, near) ?? beside(drawn, others, near, true);
+        to = beside(drawn, others, near);
+        if (to === null) [to, crowded] = [beside(drawn, others, near, true), true];
       } else if (to === null && zone !== undefined) {
         if (!hasOwn(drawn.zones, zone)) return keep("grid_kept_no_zone");
-        to = inZone(drawn, others, zone) ?? inZone(drawn, others, zone, true);
+        to = inZone(drawn, others, zone);
+        if (to === null) [to, crowded] = [inZone(drawn, others, zone, true), true];
       }
       if (to === null) return keep(near !== undefined ? "grid_kept_nowhere" : "grid_kept_no_zone");
       const from = hasOwn(moving.pieces, who) ? (moving.pieces[who]?.at ?? null) : null;
       // One that stood on the grid goes there along the cheapest way, which the answer gives with its time.
       const moved = from ? move(drawn, moving, who, to) : null;
       const way = moved?.walk && moved.took && from ? lines.line("way_taken", { what: whoIs(say, who), from: spotText(say, from), to: spotText(say, to), distance: moved.walk.distance, far: farText(lines, drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say, moved.took) }) : undefined;
-      const reports = (moved ?? putAt(drawn, moving, who, to)).reports.flatMap((r) => found(`grid_${r.code}`, r.values));
+      const found0 = (moved ?? putAt(drawn, moving, who, to)).reports;
+      const reports = [...found0, ...(crowded ? stackedOn(drawn, others, who, to, found0) : [])].flatMap((r) => found(`grid_${r.code}`, r.values));
       return { events: [positionEvent(drawn, who, to, from)], ...(way !== undefined && way.trim() !== "" ? { said: [way] } : {}), ...(reports.length > 0 ? { reports } : {}), ...(square === undefined ? { filled: true as const } : {}) };
     },
   };

@@ -5,8 +5,12 @@
 // A read answers from the state at the call's turn. A write is one operation, run as every
 // searchable write is (`families/run.ts`): what it cannot read refuses the call before anything is
 // recorded, the user's setting for the engine lane is asked, and the rest is applied, recorded in one
-// write, and reported where it does not add up (a square in a wall, no way there). Squares are
-// [column, row], counted from 1 at the top left, as the map prints them.
+// write, and reported where it does not add up (a square in a wall, no way there, a room with no
+// free square). Squares are [column, row], counted from 1 at the top left, as the map prints them.
+// Only what does not exist is refused, and the answer says what does: a square off the map or on a
+// place with no map (with `map_lay` and the places that have one), a name that is not there (with its
+// near names), a door where there is none (with the doors), input that cannot be read (with where);
+// a read where there is no map, or about someone on no square, is answered with that fact.
 //
 // The turn (`src/turn/`) gives the engine's tools, with `lines = await mapLines(files)` read from the chat's
 // files: `deps.grid = gridMoves(lines)` (squares for `world_apply`'s `move` and `place`, with what
@@ -21,7 +25,6 @@ import { standingGrid } from "../shared/grid";
 import { readMap } from "../shared/maps";
 import type { MapCellDef } from "../shared/world";
 import { own } from "../engine/pack-kit";
-import { relocate } from "../engine/relocate";
 import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { isThing } from "../engine/things";
@@ -34,14 +37,15 @@ import { MAP_DEFAULTS, METRES_PER_FOOT, type MapConfig } from "../shared/map-con
 import { between, burst, cone, line, sees, within, type Spot } from "../packs/space/core/grid-measure";
 import { doorState, indexOf, lift, moveTime, place, setDoor, squareAt, standsAt, type Piece, type Square, type Took } from "../packs/space/core/grid-model";
 import { move, walk } from "../packs/space/core/grid-path";
-import { layForPlace, layOverSquare, plainRows, type Laid, type Laying } from "./map/lay";
-import { beside, inZone } from "./map/moves";
+import { idFrom, layForPlace, layOverSquare, plainRows, type Laid, type Laying, type Named } from "./map/lay";
+import { beside, inZone, softPositions, stackedOn } from "./map/moves";
 import { doorEvent, positionEvent, shapeEvent } from "./map/record";
-import { distanceData, farText, layersAt, mapWording, mapWords, reportFields, type MapWording, type Say, spotText, squareGiven, stepFields, timeText, whoIs, type Layers } from "./map/words";
+import { distanceData, farText, layersAt, mapsNear, mapWording, mapWords, reportFields, type MapWording, type Say, spotText, squareGiven, stepFields, timeText, whereWords, whoIs, type Layers } from "./map/words";
 import { NO_LAYOUT } from "./map/layout";
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
-import { putOnSupport, putThing } from "./ops-things";
+import { keepWhere, moveTo, noSoft, putOnSupport, putThing } from "./ops-things";
 import { type Found, isFound, type Reading } from "./reading";
+import { PROVENANCE_PROPERTIES, type Provenance, provenanceData, provenanceOf } from "./source";
 import { textOf } from "./texts";
 
 const FAMILY = "map";
@@ -81,6 +85,11 @@ interface At {
   id?: EntityId;
 }
 
+/** Someone or something named that stands on no square of the map: a measure says so, with where they are kept besides, and measures what it can. */
+interface Unplaced {
+  unplaced: Found;
+}
+
 function tookData(took: Took): JsonObject {
   return { seconds: took.seconds, ...(took.rounds !== undefined ? { rounds: took.rounds } : {}) };
 }
@@ -90,11 +99,33 @@ function configOf(call: Call): MapConfig {
   return call.deps.mapSettings ?? MAP_DEFAULTS;
 }
 
+/** The place a call is about: the place `at` names, or the one the someone or something it names is at; null when it is at none. */
+function placeOfAt(state: Readonly<WorldState>, at: Found): PlaceId | null {
+  return at.ref.startsWith("place:") ? at.id : placeOfEntity(state, at.id);
+}
+
+/** What there is where there is no map: what is kept there by zone or words, and the places near that have a map, so the answer says how a grid is laid (`map_lay`) and what to go by meanwhile. */
+function noGrid(r: Reading, state: Readonly<WorldState>, at: Found, call: Call): Unread {
+  const here = placeOfAt(state, at);
+  const say: Say = { lines: call.lines, world: r.world, state };
+  const soft = here === null ? [] : softPositions(r.world, state, here);
+  const maps = mapsNear(r.world, state, here, call.settings.nearMatches);
+  const inPlace = !at.ref.startsWith("place:") && here !== null ? { place: whoIs(say, here) } : {};
+  return { line: "no_grid", fields: { at: whoIs(say, at.id), ...inPlace, soft: soft.join("; "), maps: textOf(maps) }, data: { soft, maps } };
+}
+
 /** The grid of the place `at` names, or the one the someone or something it names stands on, as `state` has it; or the line that says there is none. */
 function layersOn(r: Reading, state: Readonly<WorldState>, at: Found, call: Call): Layers | Unread {
-  const placeId = at.ref.startsWith("place:") ? at.id : placeOfEntity(state, at.id);
+  const placeId = placeOfAt(state, at);
   const layers = placeId === null ? null : layersAt(r.registry, r.doc, state, placeId, configOf(call));
-  return layers ?? { line: "no_grid", fields: { at: `${at.name} [${at.id}]` } };
+  return layers ?? noGrid(r, state, at, call);
+}
+
+/** A read where there is no map is answered with that fact, as the line and as data; the call is not refused. */
+function answerNoGrid(reply: Reply, none: Unread): undefined {
+  reply.line(none.line, none.fields);
+  reply.data({ map: null, ...(none.data ?? {}) });
+  return undefined;
 }
 
 /** A square on the map `layers` draws, as an argument gives it; or the line that says it cannot be read, or lies off the map. */
@@ -105,8 +136,8 @@ function squareOn(say: Say, layers: Layers, field: string, v: JsonValue | undefi
   return indexOf(drawn, s) !== null ? s : { line: "off_map", fields: { field, column: s[0], row: s[1], place: whoIs(say, drawn.scope), width: drawn.width, height: drawn.height } };
 }
 
-/** A spot an argument gives: a square on the map, or someone or something `findName` finds that stands on it. */
-function spotOn(say: Say, layers: Layers, field: string, v: JsonValue | undefined, findName: (said: string) => Found | Unread): At | Unread {
+/** A spot an argument gives: a square on the map, or someone or something `findName` finds, that stands on it or on none. */
+function spotOn(say: Say, layers: Layers, field: string, v: JsonValue | undefined, findName: (said: string) => Found | Unread): At | Unplaced | Unread {
   if (typeof v !== "string") {
     const s = squareOn(say, layers, field, v);
     return isUnread(s) ? s : { square: s };
@@ -114,14 +145,21 @@ function spotOn(say: Say, layers: Layers, field: string, v: JsonValue | undefine
   const f = findName(v);
   if (isUnread(f)) return f;
   const s = standsAt(layers.moving, f.id);
-  return s ? { square: s, id: f.id } : { line: "not_on_map", fields: { field, name: `${f.name} [${f.id}]`, place: whoIs(say, layers.drawn.scope) } };
+  return s ? { square: s, id: f.id } : { unplaced: f };
+}
+
+/** Says that someone stands on no square of the map, and where they are kept besides (a zone or words); that as data. */
+function notOnMap(reply: Reply, say: Say, layers: Layers, field: string, who: Found): JsonObject {
+  const words = whereWords(say.state, who.id);
+  reply.line("not_on_map", { field, name: whoIs(say, who.id), place: whoIs(say, layers.drawn.scope), ...(words !== undefined ? { words } : {}) });
+  return { who: whoIs(say, who.id), at: null, ...(words !== undefined ? { where: words } : {}) };
 }
 
 function atData(say: Say, at: At): JsonObject {
   return { at: [...at.square], ...(at.id !== undefined ? { who: whoIs(say, at.id) } : {}) };
 }
 
-/** Applies events the grid's records make on the draft; what says the first did not apply, when one does not. */
+/** Applies events the grid's records make on the draft; what says the first did not apply, when one does not (the engine's own reason is in the answer: `unreadAs`). */
 function applied(o: OpContext, events: readonly JsonObject[]): Unread | undefined {
   // The grid's records are today's events, written as JSON.
   const ledger = events as unknown as readonly LedgerEvent[];
@@ -129,34 +167,29 @@ function applied(o: OpContext, events: readonly JsonObject[]): Unread | undefine
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
 }
 
+/** Events code chose the square for, applied as filled in: each recorded as a change of its own that stands as assumed, from the default (`FILLED_IN`), whatever the call's own provenance. */
+function appliedFilled(o: OpContext, events: readonly JsonObject[]): Unread | undefined {
+  const bad = o.draft.fillWith(events as unknown as readonly LedgerEvent[]);
+  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+}
+
 /**
- * The changes of a laying applied on the draft. One that stands as assumed from the default (a
- * grid laid with no square's width given) is filled in: recorded as a change of its own, with
- * standing assumed and source default (`FILLED_IN`), whatever the call's own provenance.
+ * The changes of a laying or an edit applied on the draft. One that stands as assumed from the
+ * default (a grid laid with no square's width given, squares drawn with a symbol no legend names) is
+ * filled in: recorded as a change of its own, with standing assumed and source default
+ * (`FILLED_IN`), whatever the call's own provenance.
  */
 function applyLaid(o: OpContext, changes: readonly ChangeInput[]): Unread | undefined {
   for (const c of changes) {
-    if (c.standing === "assumed" && c.source === "default") {
-      const bad = o.draft.fillWith([c.value as unknown as LedgerEvent]);
-      if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-    } else {
-      const bad = applied(o, [c.value as JsonObject]);
-      if (bad) return bad;
-    }
+    const bad = c.standing === "assumed" && c.source === "default" ? appliedFilled(o, [c.value as JsonObject]) : applied(o, [c.value as JsonObject]);
+    if (bad) return bad;
   }
   return undefined;
 }
 
-/** What the grid says that only tells how something was read or done as asked (brought to the place first, a symbol no legend names read as floor): part of the answer, not a report. */
-const GRID_SAID: Readonly<Record<string, true>> = { brought: true, not_in_legend: true };
-
-/** Each of the grid's reports as its line (`grid_<code>`), with the operation's number and name: in the answer for what `GRID_SAID` names, a report for what does not add up. */
+/** Each of the grid's reports as its line (`grid_<code>`), with the operation's number and name: what the grid says does not add up, or was read or done otherwise than asked. */
 function reportAll(o: OpContext, say: Say, reports: readonly Report[]): void {
-  for (const r of reports) {
-    const fields = { n: o.n, op: o.op, ...reportFields(say, r.values) };
-    if (Object.hasOwn(GRID_SAID, r.code)) o.reply.line(`grid_${r.code}`, fields);
-    else o.reply.report(`grid_${r.code}`, fields);
-  }
+  for (const r of reports) o.reply.report(`grid_${r.code}`, { n: o.n, op: o.op, ...reportFields(say, r.values) });
 }
 
 /** The kinds of square a legend entry may name in words. */
@@ -238,14 +271,17 @@ const view: ReadDef = {
     const at = foundIn(r, "at", args.at, "point");
     if (isUnread(at)) return at;
     const layers = layersOn(r, r.state.world, at, call);
-    if (isUnread(layers)) return layers;
+    if (isUnread(layers)) return answerNoGrid(reply, layers);
     const say: Say = { lines: call.lines, world: layers.world, state: r.state.world };
-    const centre = args.centre === undefined || args.centre === null ? undefined : spotOn(say, layers, "centre", args.centre, (s) => foundIn(r, "centre", s, "entity"));
-    if (isUnread(centre)) return centre;
+    const asked = args.centre === undefined || args.centre === null ? undefined : spotOn(say, layers, "centre", args.centre, (s) => foundIn(r, "centre", s, "entity"));
+    if (asked !== undefined && isUnread(asked)) return asked;
+    // A centre who stands on no square is said so, and the map is shown as it is with none.
+    const lost = asked !== undefined && "unplaced" in asked ? notOnMap(reply, say, layers, "centre", asked.unplaced) : undefined;
+    const centre = asked !== undefined && !("unplaced" in asked) ? asked : undefined;
     const wording = WORDING.get(call) ?? { lines: call.lines, layout: NO_LAYOUT };
     const { text, grid, drawn, printed } = mapWords(wording, layers, r.state.world, { config: configOf(call), facts: r.state.facts, ...(centre ? { centre: centre.square } : {}) });
     reply.tree(text);
-    reply.data({ map: grid, drawn, place: whoIs(say, printed.scope), from: [...printed.from], to: [...printed.to], whole: printed.whole });
+    reply.data({ map: grid, drawn, place: whoIs(say, printed.scope), from: [...printed.from], to: [...printed.to], whole: printed.whole, ...(lost ? { unplaced: [lost] } : {}) });
     return undefined;
   },
 };
@@ -262,13 +298,13 @@ const measure: ReadDef = {
     const where = args.at !== undefined && args.at !== null ? foundIn(r, "at", args.at, "point") : typeof args.from === "string" ? foundIn(r, "from", args.from, "entity") : { line: "needs_field", fields: { field: "at" } };
     if (isUnread(where)) return where;
     const layers = layersOn(r, r.state.world, where, call);
-    if (isUnread(layers)) return layers;
+    if (isUnread(layers)) return answerNoGrid(reply, layers);
     const say: Say = { lines: call.lines, world: layers.world, state: r.state.world };
     const named = (field: string) => (s: string) => foundIn(r, field, s, "entity");
     const from = spotOn(say, layers, "from", args.from, named("from"));
     if (isUnread(from)) return from;
     const to = args.to === undefined || args.to === null ? undefined : spotOn(say, layers, "to", args.to, named("to"));
-    if (isUnread(to)) return to;
+    if (to !== undefined && isUnread(to)) return to;
     const range = args.within;
     if (range !== undefined && range !== null && !(typeof range === "number" && Number.isInteger(range) && range >= 0)) return { line: "unreadable", fields: { field: "within", value: JSON.stringify(range) } };
     const area = args.area;
@@ -276,37 +312,51 @@ const measure: ReadDef = {
     if (area !== undefined && area !== null && !(AREAS as readonly unknown[]).includes(area)) return { line: "unreadable", fields: { field: "area", value: JSON.stringify(area), choices: textOf(AREAS) } };
     const size = args.size;
     if (area !== undefined && area !== null && !(typeof size === "number" && Number.isInteger(size) && size >= 0)) return { line: "needs_field", fields: { field: "size" } };
-    const toward = area === "cone" || area === "line" ? spotOn(say, layers, "toward", args.toward ?? undefined, named("toward")) : undefined;
-    if (isUnread(toward)) return toward;
+    const aimed = area === "cone" || area === "line" ? spotOn(say, layers, "toward", args.toward ?? undefined, named("toward")) : undefined;
+    if (aimed !== undefined && isUnread(aimed)) return aimed;
     if (to === undefined && (range === undefined || range === null) && (area === undefined || area === null)) return { line: "needs_any", fields: { fields: ["to", "within", "area"] } };
+    // What can be measured is: someone on no square is said to be, with where they are kept, and what depends on their square is left out.
+    const lost: JsonObject[] = [];
+    const placed = (field: string, s: At | Unplaced | undefined): At | undefined => {
+      if (s === undefined || !("unplaced" in s)) return s;
+      lost.push(notOnMap(reply, say, layers, field, s.unplaced));
+      return undefined;
+    };
+    const start = placed("from", from);
+    const end = placed("to", to);
+    const toward = placed("toward", aimed);
     const speed = numberArg(args, "speed");
     const { drawn, moving } = layers;
     const spot = (a: At): Spot => a.id ?? a.square;
-    const fromText = spotText(say, from.square, from.id);
-    const data: JsonObject = { from: atData(say, from) };
-    if (to !== undefined) {
-      const toText = spotText(say, to.square, to.id);
-      const squares = between(drawn, moving, spot(from), spot(to)) ?? 0;
-      const seen = sees(drawn, moving, spot(from), spot(to)) === true;
-      const way = walk(drawn, moving, from.square, to.square, from.id, to.id);
-      reply.line("measure_distance", { from: fromText, to: toText, squares, far: farText(call.lines, drawn, squares) });
-      reply.line(seen ? "measure_sees" : "measure_blind", { from: fromText, to: toText });
-      const took = way ? moveTime(drawn.scale, way.cost, speed !== undefined && speed > 0 ? speed : undefined) : null;
-      if (way && took) reply.line("measure_way", { from: fromText, to: toText, distance: way.distance, far: farText(call.lines, drawn, way.distance), cost: way.cost, time: timeText(say, took) });
-      else reply.line("measure_no_way", { from: fromText, to: toText });
-      Object.assign(data, { to: atData(say, to), squares, distance: distanceData(drawn, squares), sees: seen, way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
+    const data: JsonObject = {};
+    if (start !== undefined) {
+      data.from = atData(say, start);
+      const fromText = spotText(say, start.square, start.id);
+      if (end !== undefined) {
+        const toText = spotText(say, end.square, end.id);
+        const squares = between(drawn, moving, spot(start), spot(end)) ?? 0;
+        const seen = sees(drawn, moving, spot(start), spot(end)) === true;
+        const way = walk(drawn, moving, start.square, end.square, start.id, end.id);
+        reply.line("measure_distance", { from: fromText, to: toText, squares, far: farText(call.lines, drawn, squares) });
+        reply.line(seen ? "measure_sees" : "measure_blind", { from: fromText, to: toText });
+        const took = way ? moveTime(drawn.scale, way.cost, speed !== undefined && speed > 0 ? speed : undefined) : null;
+        if (way && took) reply.line("measure_way", { from: fromText, to: toText, distance: way.distance, far: farText(call.lines, drawn, way.distance), cost: way.cost, time: timeText(say, took) });
+        else reply.line("measure_no_way", { from: fromText, to: toText });
+        Object.assign(data, { to: atData(say, end), squares, distance: distanceData(drawn, squares), sees: seen, way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
+      }
+      if (typeof range === "number") {
+        const who = within(drawn, moving, spot(start), range).map((id) => whoIs(say, id));
+        reply.line(who.length > 0 ? "measure_within" : "measure_within_none", { from: fromText, range, far: farText(call.lines, drawn, range), who });
+        data.within = { range, who };
+      }
+      if ((area === "burst" || ((area === "cone" || area === "line") && toward !== undefined)) && typeof size === "number") {
+        const covered = area === "burst" ? burst(drawn, moving, start.square, size) : area === "cone" ? cone(drawn, moving, start.square, toward?.square ?? start.square, size) : line(drawn, moving, start.square, toward?.square ?? start.square, size);
+        const who = covered.who.map((id) => whoIs(say, id));
+        reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, far: farText(call.lines, drawn, size), count: covered.squares.length, who: textOf(who) });
+        data.area = { kind: area, size, squares: covered.squares.map((s) => [...s]), who };
+      }
     }
-    if (typeof range === "number") {
-      const who = within(drawn, moving, spot(from), range).map((id) => whoIs(say, id));
-      reply.line(who.length > 0 ? "measure_within" : "measure_within_none", { from: fromText, range, far: farText(call.lines, drawn, range), who });
-      data.within = { range, who };
-    }
-    if ((area === "burst" || area === "cone" || area === "line") && typeof size === "number") {
-      const covered = area === "burst" ? burst(drawn, moving, from.square, size) : area === "cone" ? cone(drawn, moving, from.square, toward?.square ?? from.square, size) : line(drawn, moving, from.square, toward?.square ?? from.square, size);
-      const who = covered.who.map((id) => whoIs(say, id));
-      reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, far: farText(call.lines, drawn, size), count: covered.squares.length, who: textOf(who) });
-      data.area = { kind: area, size, squares: covered.squares.map((s) => [...s]), who };
-    }
+    if (lost.length > 0) data.unplaced = lost;
     reply.data(data);
     return undefined;
   },
@@ -314,7 +364,7 @@ const measure: ReadDef = {
 
 // ---------------------------------------------------------------- map_place
 
-/** One piece of a placing, read: who, and where it goes (a square, beside someone, in a zone, on a thing, or off the map), its footprint and what it blocks. */
+/** One piece of a placing, read: who, and where it goes (a square, beside someone, in a zone, on a thing, or off the map), its footprint and what it blocks, and the source and standing it names for itself. */
 interface PieceAsk {
   who: Found;
   square?: Square;
@@ -325,9 +375,22 @@ interface PieceAsk {
   walk: boolean;
   size?: Square;
   blocks?: Blocks;
+  prov?: Provenance;
 }
 
 const WAYS = ["square", "near", "zone", "on", "lift"];
+
+/** What a piece names of its own source, precision and standing, over the call's own (what it leaves out is the call's); undefined when it names none, or what cannot be read. */
+function pieceProvenance(o: OpContext, raw: JsonObject): Provenance | Unread | undefined {
+  if (raw.source === undefined && raw.precision === undefined && raw.standing === undefined) return undefined;
+  const merged: JsonObject = {};
+  for (const key of Object.keys(PROVENANCE_PROPERTIES)) {
+    const v = raw[key] ?? o.args[key];
+    if (v !== undefined) merged[key] = v;
+  }
+  const prov = provenanceOf(merged, o.call.agent);
+  return "field" in prov ? { line: "unreadable_op", fields: { n: o.n, op: o.op, field: `pieces.${prov.field}`, value: JSON.stringify(prov.value), choices: textOf(prov.choices) } } : prov;
+}
 
 function readPiece(o: OpContext, raw: JsonValue): PieceAsk | Unread {
   if (!isRecord(raw)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "pieces", value: JSON.stringify(raw) } };
@@ -343,6 +406,8 @@ function readPiece(o: OpContext, raw: JsonValue): PieceAsk | Unread {
   if (size === null || (size && (size[0] > MAP_SIDE_MAX || size[1] > MAP_SIDE_MAX))) return { line: "bad_size", fields: { n: o.n, op: o.op, value: JSON.stringify(raw.size), most: MAP_SIDE_MAX } };
   const blocks = raw.blocks;
   if (blocks !== undefined && blocks !== null && !(BLOCKS as readonly unknown[]).includes(blocks)) return notOneOf(o, "blocks", blocks, BLOCKS);
+  const prov = pieceProvenance(o, raw);
+  if (prov !== undefined && isUnread(prov)) return prov;
   const zone = typeof raw.zone === "string" && raw.zone.trim() !== "" ? raw.zone.trim() : undefined;
   const ways = [square, near, zone, on, raw.lift === true ? true : undefined].filter((x) => x !== undefined).length;
   if (ways > 1 || (ways === 0 && size === undefined && (blocks === undefined || blocks === null))) return { line: "needs_one", fields: { n: o.n, op: o.op, who: `${who.name} [${who.id}]`, fields: WAYS } };
@@ -356,6 +421,7 @@ function readPiece(o: OpContext, raw: JsonValue): PieceAsk | Unread {
     walk: raw.walk === true,
     ...(size ? { size } : {}),
     ...(typeof blocks === "string" ? { blocks: blocks as Blocks } : {}),
+    ...(prov ? { prov } : {}),
   };
 }
 
@@ -373,96 +439,150 @@ function roomAt(layers: Layers, s: Square): PlaceId {
   return room ?? layers.drawn.scope;
 }
 
-/** Moves a person (or anything that is not a thing) to a place through today's one move path. */
-function relocated(o: OpContext, who: EntityId, to: PlaceId): Unread | undefined {
-  const events = relocate(o.draft.w.ctx, who, to, {});
-  if ("code" in events) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: events.code } };
-  const bad = o.draft.applyAll(events);
-  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+/** A square asked for at a place with no map of squares: nothing to put it on, and the answer says what there is instead (`map_lay`, what is kept by zone or words, the places near that have a map). */
+function noSquare(o: OpContext, r: Reading, state: Readonly<WorldState>, at: Found, who: EntityId, square: Square): Unread {
+  const none = noGrid(r, state, at, o.call);
+  const say: Say = { lines: o.call.lines, world: r.world, state };
+  const here = placeOfAt(state, at);
+  return { line: "no_square_no_map", fields: { n: o.n, op: o.op, what: whoIs(say, who), square: spotText(say, square), place: whoIs(say, here ?? at.id), soft: none.fields.soft ?? "", maps: none.fields.maps ?? "" }, ...(none.data ? { data: none.data } : {}) };
 }
 
 /** One piece placed on the draft: its events applied, its lines and reports said, and what it came to added to `out`. */
 function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: JsonObject[]): Unread | undefined {
   const w = o.draft.w;
   const id = p.who.id;
-  let layers = layersOn(o.reading, w.state, at, o.call);
-  if (isUnread(layers)) return layers;
-  const say = (): Say => ({ lines: o.call.lines, world: isUnread(layers) ? o.reading.world : layers.world, state: w.state });
-  const entry: JsonObject = { who: whoIs(say(), id) };
+  // A place with no map has no squares to stand on: a zone or words stay as the position, a square is what does not exist.
+  const refresh = (): Layers | null => {
+    const l = layersOn(o.reading, w.state, at, o.call);
+    return isUnread(l) ? null : l;
+  };
+  let layers = refresh();
+  const room = placeOfAt(w.state, at);
+  const say = (): Say => ({ lines: o.call.lines, world: layers?.world ?? o.reading.world, state: w.state });
+  const entry: JsonObject = { who: whoIs(say(), id), ...(p.prov ? provenanceData(p.prov) : {}) };
+  // What the piece names of its own source and standing marks the events it makes, apart from the call's.
+  let cursor = w.events.length;
+  const flush = (): void => {
+    if (p.prov !== undefined) o.draft.markFilled(w.events.slice(cursor), p.prov);
+    cursor = w.events.length;
+  };
+  const stale = (): Unread | undefined => {
+    const fields = own(w.state.entities, id)?.fields;
+    return typeof fields?.x === "number" || typeof fields?.y === "number" ? applied(o, [positionEvent({ scope: layers?.drawn.scope ?? room ?? "" }, id, null, null)]) : undefined;
+  };
+  /** Someone or something at another place is brought to `to` first, and a thing lying on another comes off it. */
+  const bring = (to: PlaceId | null): Unread | undefined => {
+    const here = placeOfEntity(w.state, id);
+    const onGrid = layers !== null && here !== null && standingGrid(layers.world, here)?.scope === layers.drawn.scope;
+    const held = own(w.state.entities, id)?.relations.some((rel) => rel.type === "in") === true && isThing(w.ctx, id);
+    if (onGrid && !held) return undefined;
+    const target = onGrid && here !== null ? here : to;
+    if (target === null || (!layers && !held && target === here)) return undefined;
+    const failed = moveTo(o, id, target);
+    if (failed) return failed;
+    flush();
+    if (!onGrid) {
+      reportAll(o, say(), [{ code: "brought", values: { what: id, to: target, ...(here !== null ? { from: here } : {}) } }]);
+      // A square kept from the place it came from is no square of this map (today's move between places keeps it).
+      const bad = stale();
+      if (bad) return bad;
+      flush();
+    }
+    layers = refresh();
+    return undefined;
+  };
   if (p.on) {
     // On something (a table, a cart): a thing or someone shares its square and goes where it goes, with no holder's rules.
     const failed = isThing(w.ctx, id) ? putThing(o, id, { on: p.on.id }, why) : putOnSupport(o, id, p.on.id);
     if (failed) return failed;
-    const fields = own(w.state.entities, id)?.fields;
-    if (typeof fields?.x === "number" || typeof fields?.y === "number") {
-      const bad = applied(o, [positionEvent(layers.drawn, id, null, null)]);
-      if (bad) return bad;
-    }
-    layers = layersOn(o.reading, w.state, at, o.call);
-    if (isUnread(layers)) return layers;
-    const s = standsAt(layers.moving, id);
-    if (s === null) reportAll(o, say(), [{ code: "holder_off_grid", values: { what: id, holder: p.on.id } }]);
+    flush();
+    const bad = stale();
+    if (bad) return bad;
+    flush();
+    layers = refresh();
+    const s = layers ? standsAt(layers.moving, id) : null;
+    if (layers && s === null) reportAll(o, say(), [{ code: "holder_off_grid", values: { what: id, holder: p.on.id } }]);
     o.reply.line("piece_on", { what: whoIs(say(), id), holder: whoIs(say(), p.on.id), ...(s ? { square: spotText(say(), s) } : {}) });
     Object.assign(entry, { on: whoIs(say(), p.on.id), at: s ? [...s] : null });
   } else if (p.lift) {
-    const was = layers.moving.pieces[id]?.at;
-    if (was) {
+    const was = layers?.moving.pieces[id]?.at;
+    if (layers && was) {
       const bad = applied(o, [positionEvent(layers.drawn, id, null, was)]);
       if (bad) return bad;
+      flush();
       o.reply.line("piece_lifted", { what: whoIs(say(), id), square: spotText(say(), was) });
     } else o.reply.line("already_so", { n: o.n, op: o.op, what: whoIs(say(), id) });
     entry.at = null;
   } else if (p.square || p.near || p.zone !== undefined) {
     let to: Square | null = p.square ?? null;
-    if (p.near) {
-      to = beside(layers.drawn, lift(layers.moving, id), p.near.id);
-      if (to === null) return { line: "no_square_near", fields: { n: o.n, op: o.op, what: whoIs(say(), id), near: whoIs(say(), p.near.id) } };
-    } else if (p.zone !== undefined) {
-      if (!hasOwn(layers.drawn.zones, p.zone)) return { line: "no_zone", fields: { n: o.n, op: o.op, zone: p.zone, zones: textOf(Object.keys(layers.drawn.zones).sort()) } };
-      to = inZone(layers.drawn, lift(layers.moving, id), p.zone);
-      if (to === null) return { line: "no_square_free", fields: { n: o.n, op: o.op, zone: p.zone } };
-    }
-    if (to === null) return undefined;
-    if (indexOf(layers.drawn, to) === null) return { line: "off_map", fields: { field: "square", column: to[0], row: to[1], place: whoIs(say(), layers.drawn.scope), width: layers.drawn.width, height: layers.drawn.height } };
-    // Someone or something at another place is brought here first, and a thing lying on another comes off it.
-    const here = placeOfEntity(w.state, id);
-    const onGrid = here !== null && standingGrid(layers.world, here)?.scope === layers.drawn.scope;
-    const held = own(w.state.entities, id)?.relations.some((rel) => rel.type === "in") === true && isThing(w.ctx, id);
-    if (!onGrid || held) {
-      const target = onGrid && here !== null ? here : roomAt(layers, to);
-      const failed = isThing(w.ctx, id) ? putThing(o, id, { place: target }, why) : relocated(o, id, target);
-      if (failed) return failed;
-      if (!onGrid) {
-        reportAll(o, say(), [{ code: "brought", values: { what: id, to: target, ...(here !== null ? { from: here } : {}) } }]);
-        // A square kept from the place it came from is no square of this map (today's move between places keeps it).
-        const kept = own(w.state.entities, id)?.fields;
-        if (typeof kept?.x === "number" || typeof kept?.y === "number") {
-          const bad = applied(o, [positionEvent(layers.drawn, id, null, null)]);
-          if (bad) return bad;
-        }
+    // The square code chose (beside someone, in a zone) is an assumption, and in a crowded room one that someone stands on; with none to give, the words or the zone are the position.
+    let chosen = false;
+    let crowded = false;
+    let kept: "kept_no_map" | "kept_nowhere" | "kept_no_zone" | null = null;
+    if (layers === null) {
+      if (p.square) return noSquare(o, o.reading, w.state, at, id, p.square);
+      kept = "kept_no_map";
+    } else if (p.near) {
+      const others = lift(layers.moving, id);
+      if (standsAt(others, p.near.id) !== null) {
+        to = beside(layers.drawn, others, p.near.id);
+        if (to === null) [to, crowded] = [beside(layers.drawn, others, p.near.id, true), true];
       }
-      layers = layersOn(o.reading, w.state, at, o.call);
-      if (isUnread(layers)) return layers;
+      chosen = to !== null;
+      if (to === null) kept = "kept_nowhere";
+    } else if (p.zone !== undefined) {
+      const others = lift(layers.moving, id);
+      if (hasOwn(layers.drawn.zones, p.zone)) {
+        to = inZone(layers.drawn, others, p.zone);
+        if (to === null) [to, crowded] = [inZone(layers.drawn, others, p.zone, true), true];
+      }
+      chosen = to !== null;
+      if (to === null) kept = "kept_no_zone";
     }
-    const before = layers.moving;
-    const from = before.pieces[id]?.at ?? null;
-    const shape: Pick<Piece, "size" | "blocks"> = { ...(p.size ? { size: p.size } : {}), ...(p.blocks ? { blocks: blocksOf(p.blocks) } : {}) };
-    const moved = p.walk && from !== null ? move(layers.drawn, before, id, to) : null;
-    reportAll(o, say(), moved ? moved.reports : place(layers.drawn, before, id, to, shape).reports);
-    const bad = applied(o, [positionEvent(layers.drawn, id, to, from)]);
-    if (bad) return bad;
-    entry.at = [...to];
-    if (moved?.walk && moved.took && from !== null) {
-      o.reply.line("piece_walked", { what: whoIs(say(), id), from: spotText(say(), from), to: spotText(say(), to), distance: moved.walk.distance, far: farText(o.call.lines, layers.drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say(), moved.took) });
-      entry.way = { squares: moved.walk.squares.map((s) => [...s]), distance: moved.walk.distance, cost: moved.walk.cost, ...tookData(moved.took) };
-    } else o.reply.line("piece_at", { what: whoIs(say(), id), square: spotText(say(), to) });
+    if (kept !== null) {
+      const failed = bring(room);
+      if (failed) return failed;
+      const words = p.near ? [`near ${o.reading.nameOf(p.near.id)}`] : [];
+      const stays = keepWhere(o, id, { ...noSoft(), words, ...(p.zone !== undefined ? { zone: p.zone } : {}) });
+      if (stays) return stays;
+      flush();
+      const shown = p.near ? (words[0] ?? "") : (p.zone ?? "");
+      reportAll(o, say(), [{ code: kept, values: { what: id, place: layers?.drawn.scope ?? room ?? at.id, ...(p.near ? { near: p.near.id } : {}), ...(p.zone !== undefined ? { zone: p.zone } : {}), kept: shown } }]);
+      entry.at = null;
+      entry.kept = shown;
+    } else if (to !== null && layers !== null) {
+      if (indexOf(layers.drawn, to) === null) return { line: "off_map", fields: { field: "square", column: to[0], row: to[1], place: whoIs(say(), layers.drawn.scope), width: layers.drawn.width, height: layers.drawn.height } };
+      const failed = bring(roomAt(layers, to));
+      if (failed) return failed;
+      if (layers === null) return undefined;
+      const before = layers.moving;
+      const from = before.pieces[id]?.at ?? null;
+      const shape: Pick<Piece, "size" | "blocks"> = { ...(p.size ? { size: p.size } : {}), ...(p.blocks ? { blocks: blocksOf(p.blocks) } : {}) };
+      const moved = p.walk && from !== null ? move(layers.drawn, before, id, to) : null;
+      const told = moved ? moved.reports : place(layers.drawn, before, id, to, shape).reports;
+      reportAll(o, say(), crowded ? [...told, ...stackedOn(layers.drawn, lift(before, id), id, to, told)] : told);
+      const bad = chosen ? appliedFilled(o, [positionEvent(layers.drawn, id, to, from)]) : applied(o, [positionEvent(layers.drawn, id, to, from)]);
+      if (bad) return bad;
+      if (chosen) cursor = w.events.length;
+      else flush();
+      // Put on a square, it leaves the words it had behind.
+      const stays = keepWhere(o, id, { ...noSoft(), squared: true });
+      if (stays) return stays;
+      flush();
+      entry.at = [...to];
+      if (moved?.walk && moved.took && from !== null) {
+        o.reply.line("piece_walked", { what: whoIs(say(), id), from: spotText(say(), from), to: spotText(say(), to), distance: moved.walk.distance, far: farText(o.call.lines, layers.drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say(), moved.took) });
+        entry.way = { squares: moved.walk.squares.map((s) => [...s]), distance: moved.walk.distance, cost: moved.walk.cost, ...tookData(moved.took) };
+      } else o.reply.line("piece_at", { what: whoIs(say(), id), square: spotText(say(), to) });
+    }
   }
   if (p.size || p.blocks) {
-    const was = layers.moving.pieces[id];
+    const was = layers?.moving.pieces[id];
     const size = p.size ?? was?.size ?? [1, 1];
     const blocks = p.blocks ? blocksOf(p.blocks) : was?.blocks;
     const bad = applied(o, [shapeEvent(id, { size, ...(blocks ? { blocks } : {}) })]);
     if (bad) return bad;
+    flush();
     o.reply.line("piece_shape", { what: whoIs(say(), id), columns: size[0], rows: size[1], blocksWay: blocks?.way === true, blocksView: blocks?.view === true });
     Object.assign(entry, { size: [size[0], size[1]], blocks: { way: blocks?.way === true, view: blocks?.view === true } });
   }
@@ -476,11 +596,11 @@ const placeDef: WriteDef = {
   lane: "engine",
   properties: {
     at: TEXT,
-    pieces: { type: "array", minItems: 1, items: { type: "object", properties: { who: TEXT, square: SQUARE, near: TEXT, zone: TEXT, on: TEXT, lift: YES_NO, walk: YES_NO, size: SQUARE, blocks: oneOf(BLOCKS) }, required: ["who"] } },
+    pieces: { type: "array", minItems: 1, items: { type: "object", properties: { who: TEXT, square: SQUARE, near: TEXT, zone: TEXT, on: TEXT, lift: YES_NO, walk: YES_NO, size: SQUARE, blocks: oneOf(BLOCKS), ...PROVENANCE_PROPERTIES }, required: ["who"] } },
     why: TEXT,
   },
   required: ["at", "pieces"],
-  example: { at: "The Common Room", pieces: [{ who: "Wren", square: [6, 5] }, { who: "Bram", near: "Wren" }, { who: "lantern", on: "long table" }], standing: "assumed", source: { from: "prose", message: "m-0040" } },
+  example: { at: "The Common Room", pieces: [{ who: "Wren", square: [6, 5], source: { from: "prose", message: "m-0040" } }, { who: "Bram", near: "Wren", standing: "assumed" }, { who: "lantern", on: "long table" }], source: { from: "prose", message: "m-0040" } },
   run(o) {
     const at = find(o, "at", "point");
     if (isUnread(at)) return at;
@@ -546,24 +666,20 @@ const doorDef: WriteDef = {
 
 // ---------------------------------------------------------------- map_lay
 
-/** An id for something new, from a name or an id: letters, digits and `_`, not one `taken` holds. */
-function freshId(base: string, taken: (id: string) => boolean): string {
-  const stem = base.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 56) || "map";
-  let id = stem;
-  for (let k = 2; taken(id); k++) id = `${stem}_${k}`;
-  return id;
-}
-
-/** The rows a laying draws: as given, or a walled room of the width and height given with its doors. */
+/** The rows a laying draws: as given, or a walled room of the width and height given with its doors; a map larger than the format holds is answered with the most it takes. */
 function rowsOf(o: OpContext): string[] | Unread {
+  const tooLarge = (width: number, height: number): Unread => ({ line: "too_large", fields: { n: o.n, op: o.op, width, height, most: MAP_SIDE_MAX } });
   const rows = o.args.rows;
-  if (Array.isArray(rows) && rows.length > 0 && rows.every((r) => typeof r === "string" && r !== "")) return rows as string[];
+  if (Array.isArray(rows) && rows.length > 0 && rows.every((r) => typeof r === "string" && r !== "")) {
+    const wide = Math.max(...rows.map((r) => [...String(r)].length));
+    return rows.length > MAP_SIDE_MAX || wide > MAP_SIDE_MAX ? tooLarge(wide, rows.length) : (rows as string[]);
+  }
   if (rows !== undefined && rows !== null) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "rows", value: JSON.stringify(rows) } };
   const width = o.args.width;
   const height = o.args.height;
   if (!(typeof width === "number" && Number.isInteger(width) && width >= 1 && typeof height === "number" && Number.isInteger(height) && height >= 1)) return { line: "needs_rows", fields: { n: o.n, op: o.op } };
-  // The room is built square by square, so a size the format cannot hold is refused before any is.
-  if (width > MAP_SIDE_MAX || height > MAP_SIDE_MAX) return { line: "too_large", fields: { n: o.n, op: o.op, width, height, most: MAP_SIDE_MAX } };
+  // The room is built square by square, so a size the format cannot hold is answered before any is.
+  if (width > MAP_SIDE_MAX || height > MAP_SIDE_MAX) return tooLarge(width, height);
   const doors: Square[] = [];
   const outside: Report[] = [];
   for (const d of Array.isArray(o.args.doors) ? o.args.doors : []) {
@@ -582,7 +698,7 @@ const layDef: WriteDef = {
   lane: "engine",
   properties: { place: TEXT, rows: TEXTS, width: WHOLE, height: WHOLE, doors: SQUARES, legend: OBJECT, feet: NUMBER, title: TEXT, over: TEXT, square: SQUARE },
   required: ["place"],
-  example: { place: "The Far Road", width: 12, height: 8, standing: "assumed", source: { from: "prose", message: "m-0042" } },
+  example: { place: "The Far Road", width: 12, height: 8, source: { from: "prose", message: "m-0042" }, standing: "assumed" },
   run(o) {
     const w = o.draft.w;
     const r = o.reading;
@@ -593,13 +709,13 @@ const layDef: WriteDef = {
     const feet = numberArg(o.args, "feet");
     if (feet !== undefined && !(feet > 0)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "feet", value: JSON.stringify(feet) } };
     const played = r.world;
-    const laying = (scope: string): Laying => ({
-      id: freshId(`${scope}_map`, (id) => hasOwn(played.maps, id) || hasOwn(played.grids, id)),
+    const laying: Laying = {
       rows,
       ...(Object.keys(given.legend).length > 0 ? { legend: given.legend as Record<string, MapCellDef> } : {}),
       ...(textArg(o.args, "title") !== undefined ? { title: textArg(o.args, "title") ?? "" } : {}),
       ...(feet !== undefined ? { metres: feet * METRES_PER_FOOT } : {}),
-    });
+    };
+    const config = configOf(o.call);
     let laid: Laid;
     if (o.args.over !== undefined && o.args.over !== null) {
       const over = find(o, "over", "place");
@@ -608,29 +724,29 @@ const layDef: WriteDef = {
       if (square === null) return o.args.square === undefined ? { line: "needs", fields: { n: o.n, op: o.op, fields: ["square"] } } : { line: "bad_square", fields: { n: o.n, op: o.op, field: "square", value: JSON.stringify(o.args.square) } };
       const said = textArg(o.args, "place") ?? "";
       const known = r.find(said, "place");
-      const id = isFound(known) ? known.id : freshId(said, (x) => hasOwn(played.places, x));
-      laid = layOverSquare(r.doc, w.state, over.id, square, { ...laying(id), ...(isFound(known) ? {} : { place: { id, name: said } }) });
-      if (isFound(known) && laid.scope !== null && laid.scope !== known.id) return { line: "place_elsewhere", fields: { n: o.n, op: o.op, place: `${known.name} [${known.id}]`, square: spotText({ lines: o.call.lines, world: played, state: w.state }, square) } };
+      const named: Named = isFound(known) ? { id: known.id, name: known.name, made: false } : { id: idFrom(said), name: said, made: true };
+      laid = layOverSquare(r.doc, w.state, over.id, square, laying, config, named);
     } else {
       const placeFound = find(o, "place", "place");
       if (isUnread(placeFound)) return placeFound;
-      laid = layForPlace(r.doc, w.state, placeFound.id, laying(placeFound.id));
+      laid = layForPlace(r.doc, w.state, placeFound.id, laying, config);
     }
     const say: Say = { lines: o.call.lines, world: played, state: w.state };
     const first = laid.reports[0];
-    if (laid.changes.length === 0 || laid.scope === null) return first ? { line: `grid_${first.code}`, fields: { n: o.n, op: o.op, ...reportFields(say, first.values) } } : { line: "nothing_recorded", fields: {} };
+    if (laid.changes.length === 0 || laid.scope === null) return first ? { line: `grid_${first.code}`, fields: { n: o.n, op: o.op, ...reportFields(say, first.values), ...(first.code === "no_grid" ? { maps: textOf(mapsNear(played, w.state, null, o.call.settings.nearMatches)) } : {}) } } : { line: "nothing_recorded", fields: {} };
     const from = w.events.length;
     const bad = applyLaid(o, laid.changes);
     if (bad) return bad;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const scope = laid.scope;
-    const now = layersAt(r.registry, r.doc, w.state, scope, configOf(o.call));
+    const now = layersAt(r.registry, r.doc, w.state, scope, config);
     if (now !== null) {
       const after: Say = { lines: o.call.lines, world: now.world, state: w.state };
       const off = laid.changes.filter((c) => c.op === "space.pos").map((c) => (isRecord(c.value) && isRecord(c.value.data) && typeof c.value.data.entity === "string" ? whoIs(after, c.value.data.entity) : ""));
       o.reply.line("laid", { place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, size: farText(o.call.lines, now.drawn, 1), ...(laid.sizeDefaulted ? { defaulted: true } : {}), ...stepFields(now.drawn) });
       if (off.length > 0) o.reply.line("laid_off", { who: off });
-      o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, size: distanceData(now.drawn, 1), ...(laid.sizeDefaulted ? { sizeAssumed: true } : {}), step: { ...now.drawn.scale.step } } }));
+      reportAll(o, after, laid.reports);
+      o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, size: distanceData(now.drawn, 1), ...(laid.sizeDefaulted ? { sizeAssumed: true } : {}), ...(laid.opens !== undefined ? { opensFrom: laid.opens } : {}), step: { ...now.drawn.scale.step } } }));
     }
     sayRead(o, given.read);
     return undefined;
@@ -698,11 +814,10 @@ const editDef: WriteDef = {
     }
     reportAll(o, say, done.reports);
     const from = w.events.length;
-    const bad = applied(o, done.changes.map((c) => c.value as JsonObject));
+    const bad = applyLaid(o, done.changes);
     if (bad) return bad;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
-    const value = done.changes[0]?.value;
-    const count = isRecord(value) && isRecord(value.data) && Array.isArray(value.data.squares) ? value.data.squares.length : 0;
+    const count = done.changes.reduce((n, c) => n + (isRecord(c.value) && isRecord(c.value.data) && Array.isArray(c.value.data.squares) ? c.value.data.squares.length : 0), 0);
     o.reply.line("edited", { place: whoIs(say, layers.drawn.scope), count, symbols: textOf(Object.keys(legend)) });
     o.after(() => ({ edited: { map: layers.drawn.map ?? layers.drawn.id, squares: count, legend: Object.keys(legend) } }));
     sayRead(o, given.read);

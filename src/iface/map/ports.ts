@@ -29,7 +29,7 @@ export interface GridFinding {
 export type GridPlaced = { events: JsonObject[]; said?: string[]; reports?: GridFinding[]; filled?: true } | { kept: { zone?: string; words?: string }; reports?: GridFinding[] } | { problem: string; fields: Fields };
 
 export interface GridMoves {
-  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): GridPlaced;
+  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string; nearMatches?: number }): GridPlaced;
 }
 
 /** The map's two layers: what is drawn (the title, the part shown, the picture, the legend) and what moves (who and what is where, the doors). */
