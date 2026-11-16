@@ -26,6 +26,7 @@ import type { Turns } from "./lane";
 import { turnRecordFields } from "./record";
 import type { RunRecord } from "./runs";
 import { turnSettings } from "./settings";
+import { givenRoutes } from "./given-routes";
 import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
 import { stateRoutes } from "./state-routes";
@@ -539,5 +540,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     ...requestRoutes(turns),
     ...promptRoutes(turns),
     ...stateRoutes(turns),
+    ...givenRoutes(turns),
   ] as const;
 }

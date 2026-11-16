@@ -20,7 +20,7 @@
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { type LinesPart, loadGuidance } from "../app/guidance";
-import type { AgentRef, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
@@ -39,7 +39,7 @@ import type { StoreFailure } from "../store/store";
 import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
-import { turnEvents } from "./events";
+import { type EventsDeps, givenViews, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser, storeUsers } from "./kv";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
@@ -212,6 +212,8 @@ export interface Turns {
   meaning: MeaningIndex;
   /** A world search's index of tokens in the index file: what a prune of a living chat's derived rows forgets (`forget`). */
   stateIndex: StateIndex;
+  /** What RPE gives by each name an agent is given, at a scope as a run's would be joined (`givenViews`): the resolver the turn uses, for the Agents page. */
+  given(scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment): Promise<{ ref: string; text: string | null }[]>;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -380,7 +382,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   };
   const lorePorts = lorePort(lore, loreIndex);
   // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
-  const events = turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log });
+  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log };
+  const events = turnEvents(eventsDeps);
   const env: Environment = {
     id: "rpe",
     version: app.version,
@@ -471,5 +474,6 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex };
+  const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given };
 }
