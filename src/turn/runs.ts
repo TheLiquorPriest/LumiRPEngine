@@ -259,6 +259,40 @@ function recordOf(user: string, r: RunRow): RunRecord {
   };
 }
 
+/** A turn a migration carried, as its reply went out under the old engine: what it released, and what was saved otherwise, if anything. */
+export interface CarriedRun {
+  user: string;
+  chat: string;
+  turn: string;
+  /** When the reply went out, in milliseconds. */
+  at: number;
+  /** The reply as the old engine released it. */
+  released: string;
+  /** What was saved otherwise than released (the old engine's departures from it); null where nothing was. */
+  saved: string | null;
+}
+
+/**
+ * Keeps the run record of a turn a migration carried, so the first turn RPE plays after it is told its reply as it tells any: cut short,
+ * or saved otherwise than released (`saved_differs`, plan §6.3, §10.8). Inside a queued write; one per turn, a second replaces it. It
+ * names no session and no run of RPH's: RPE played no run of it.
+ */
+export function keepCarriedRun(db: Database, run: CarriedRun): void {
+  db.run("INSERT OR REPLACE INTO turn_run (user, id, turn, chat, session, kind, status, received, released, finished, ended, settled, reply, base, saved) VALUES (?, ?, ?, ?, '', 'new', 'released', ?, ?, ?, ?, ?, ?, '', ?)", [
+    run.user,
+    `carried-${run.turn}`,
+    run.turn,
+    run.chat,
+    run.at,
+    run.at,
+    run.at,
+    run.at,
+    run.at,
+    run.released,
+    run.saved,
+  ]);
+}
+
 const key = (user: string, id: string): string => `${user}\u0000${id}`;
 
 export class Runs {
