@@ -27,7 +27,10 @@ import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
 import { type App, LIVE_JOBS } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
-import { type BookReader, CAST_PLAYER_MIND, castFacts, castTools, chatLine, findCharacter, playerMindOf, type SourceReader } from "../cast";
+import { type BookReader, CAST_PLAYER_MIND, castFacts, CastRecord, castTools, chatLine, findCharacter, playerMindOf, type SourceReader } from "../cast";
+import { castAt } from "../cast/path";
+import { charactersOf } from "../cast/record";
+import { holdersOf } from "../quests/holders";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording } from "../iface";
 import type { CarriedPort, EngineDeps } from "../iface/kit";
@@ -410,6 +413,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       return e === undefined ? null : { title: e.title, revision: e.revision ?? hashJson([e.title, e.keys, e.text]) };
     },
   };
+  // Who holds a quest's secret: the cast's items along the chat's line at the turn, each holder by the character's name.
+  const questHolders = (user: string, chat: string, turn: string | null, quest: string) => {
+    const u = store.user(user);
+    const record = CastRecord.read(store, user, castAt(u, chat, turn));
+    const chars = charactersOf(store.db, user, chatLine(u, chat));
+    return holdersOf(record.items.values(), (id) => chars.find((c) => c.id === id)?.name, quest);
+  };
   // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
   // Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use.
   facts.add(
@@ -432,7 +442,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...(options.worlds !== undefined ? { worlds: options.worlds } : {}), ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, questHolders, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...(options.worlds !== undefined ? { worlds: options.worlds } : {}), ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
