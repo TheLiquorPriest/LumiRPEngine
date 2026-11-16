@@ -114,7 +114,9 @@ describe("the composer's controls", () => {
     const feedback = root.querySelectorAll("textarea")[0];
     if (feedback === undefined) throw new Error("no feedback field");
     feedback.value = "Too slow to start.";
-    await act(() => feedback.dispatchEvent(new PageEvent("input")));
+    await act(() => {
+      feedback.dispatchEvent(new PageEvent("input"));
+    });
     await press(button("Set for the next swipe"));
     expect(rpe.posted.at(-1)).toEqual({ kind: "swipe", choice: "afresh", words: "Too slow to start." });
     expect(rpe.posted).toHaveLength(2);
