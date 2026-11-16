@@ -10,8 +10,9 @@ import { appliedInFull, familyRig, SRC } from "./kit";
 function fightWorld(w: WorldDoc): void {
   const kind = w.kinds.character;
   if (kind === undefined) throw new Error("no character kind");
-  Object.assign(kind.fields, { max_hp: { type: "number", default: 12 }, hp: { type: "number", label: "HP", pool: { max: "max_hp" } } });
-  w.ruleset = { ...w.ruleset, combat: { economy: { action: { label: "Action" } }, hp: "hp" } } as WorldDoc["ruleset"];
+  Object.assign(kind.fields, { max_hp: { type: "number", default: 12 }, hp: { type: "number", label: "HP", pool: { max: "max_hp" } }, dex: { type: "number", default: 0 } });
+  w.checks.initiative = { id: "initiative", dice: "d20", modifier: "self.dex" };
+  w.ruleset = { ...w.ruleset, combat: { initiative: "initiative", economy: { action: { label: "Action" } }, hp: "hp" } } as WorldDoc["ruleset"];
   w.entities.wolf = { id: "wolf", kind: "character", name: "Grey wolf", tier: "background", fields: { place: "common_room", max_hp: 7 }, relations: [] };
 }
 
