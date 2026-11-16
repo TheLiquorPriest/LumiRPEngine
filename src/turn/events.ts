@@ -300,10 +300,11 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     if (scope.turn === undefined) throw new Error("RPH told RPE of a turn's work with no turn named.");
     return scope.turn;
   };
-  const tell = async (scope: Scope, kind: string, body: unknown): Promise<void> => {
-    if (scope.turn === undefined) return;
+  /** Keeps what RPH told of a turn, with it; the row's id, or null for a scope of no turn, which has nowhere to keep it. */
+  const tell = async (scope: Scope, kind: string, body: unknown): Promise<number | null> => {
+    if (scope.turn === undefined) return null;
     const { turn } = scope;
-    await deps.writes.run((db) => db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [scope.user, turn, kind, JSON.stringify(body), deps.now()]), "keeping what RPH told of a turn");
+    return await deps.writes.run((db) => Number(db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [scope.user, turn, kind, JSON.stringify(body), deps.now()]).lastInsertRowid), "keeping what RPH told of a turn");
   };
   /**
    * A consent, a gap check or a rule fired, a row of its own table (App. B): with its turn, or, told of a call in a job the user started
@@ -326,8 +327,8 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       const turn = turnOf(scope);
       await deps.writes.run(() => deps.store.user(scope.user).updateTurn(turn, { intent: text }), "keeping the intent record");
     },
-    async attachments(scope, agent, refs) {
-      await tell(scope, "attachments", { agent, refs });
+    async attachments(scope, agent, refs, moment) {
+      await tell(scope, "attachments", { agent, refs, moment });
       // A view RPE gives is given even with nothing in it, in its file's words for that. Every name none of RPE's spaces gives is left
       // out, and RPH says so. What cannot be read leaves out its name alone.
       let guidance: Guidance | undefined;
@@ -372,11 +373,17 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     },
     ruleFired: (scope, firing) => keep(scope, "rule", firing.agent, firing.rule, firing),
     async suggestion(scope, agent, suggestion) {
-      await tell(scope, "suggestion", { agent, suggestion });
-      await deps.suggestions.file(scope, agent, suggestion);
+      const told = await tell(scope, "suggestion", { agent, suggestion });
+      // A file's is kept by the tree, under its own id, unless the chat's open ones are at their most. One of lore is kept with the turn
+      // it was made in, which the Turn page shows, under that row's id; one made in no turn has nowhere to be kept.
+      const filed = await deps.suggestions.file(scope, agent, suggestion);
+      if (filed !== null) return filed.kept ? { kept: true, id: String(filed.id) } : filed;
+      return told === null ? { kept: false, openMost: 0 } : { kept: true, id: `told-${told}` };
     },
     // The run was marked released the moment its reply reached RPE's sink, which the harness finishes before it tells this.
-    released: (scope, release) => tell(scope, "released", release),
+    async released(scope, release) {
+      await tell(scope, "released", release);
+    },
     async ended(scope, outcome) {
       const turn = turnOf(scope);
       const run = deps.runs.running(scope.user, turn);

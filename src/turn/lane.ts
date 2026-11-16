@@ -340,7 +340,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     trace,
     events: {
       intent: (scope, text) => events.intent(scope, text),
-      attachments: (scope, agent, refs) => events.attachments(joined(scope), agent, refs),
+      attachments: (scope, agent, refs, moment) => events.attachments(joined(scope), agent, refs, moment),
       consent: (scope, grant) => events.consent(joined(scope), grant),
       gapCheck: (scope, check) => events.gapCheck(joined(scope), check),
       dropStaged: (scope, agent) => events.dropStaged(joined(scope), agent),

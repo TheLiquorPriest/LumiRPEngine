@@ -24,8 +24,8 @@ export async function openBootBed(options: TurnBedOptions & { carried?: readonly
   // The turn lane's hook: a name an agent is given that is none of RPH's own is the bootstrap's to give, as well as the lane's.
   const events = b.turns.env.events;
   const given = events.attachments.bind(events);
-  events.attachments = async (scope, agent, refs) => {
-    const blocks = await given(scope, agent, refs);
+  events.attachments = async (scope, agent, refs, moment) => {
+    const blocks = await given(scope, agent, refs, moment);
     for (const { ref, own } of refs) {
       if (own) continue;
       const text = await jobs.view(scope, agent, ref);
