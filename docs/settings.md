@@ -510,7 +510,9 @@ Each row says when a change is in force: at the setting's next use, from the nex
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `bootstrap.tokenLimit` | `200000` | RPE-global.yml or a chat's RPE.yml | at its next use | Appendix D.1: Bootstrap asks before | Bootstrap token limit: Tokens sent and written together by a bootstrap job's agents, at which the job ends with what it has. |
+| `bootstrap.tokenLimit` | `200000` | RPE-global.yml or a chat's RPE.yml | at its next use | Appendix D.1: Bootstrap asks before | Bootstrap asks before: Tokens sent and written together by a bootstrap job's agents (a token read again from a cache at the weight jobs.cachedWeight gives), at which the job is held and asks you whether to go on; a go-on gives it as many again unless you say otherwise. |
+| `bootstrap.run.calls` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Calls in a bootstrap job's run: Model calls all the agents of one bootstrap job's run may make between them, in place of the cap other jobs have. |
+| `bootstrap.run.time` | `3600` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Time for a bootstrap job's run: Seconds one bootstrap job's run may take, in place of the cap other jobs have; the clock waits while the job waits for your word. |
 
 ## Characters and their memories
 
@@ -531,6 +533,16 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `cast.recallItems` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Memories one recall brings back: The most memories one recall brings back; the answer says how many more touch the cue. |
 | `cast.dimensionScale` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Scale of a relationship's dimensions: The scale a relationship's trust, warmth, respect and fear are read and reported against: from minus this to this. A value past it is kept as sent, and said to be past. |
 | `cast.playerMind` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | His character has a mind: His own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind. |
+
+## `places`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `places.since` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places: what the story changed, shown: The most entries of a place's `since` one answer shows (the newest, oldest first among them); the answer counts the earlier ones and says the query that reads them. |
+| `places.features` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places: features shown: The most feature entries of a place one answer shows; the answer counts the rest and says the query that reads them. |
+| `places.access` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places: access entries shown: The most access entries of a place one answer shows; the answer counts the rest and says the query that reads them. |
+| `places.page` | `100` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places in one page of the list: The most places one page of the Places list holds. |
+| `places.history` | `20` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Beats in a place's history: The most beats one answer of a place's history gives, newest first; the answer counts the rest. |
 
 ## `worlds`
 
