@@ -12,7 +12,7 @@ export const NEEDS: readonly MissingPermission[] = [
   { permission: "generation_parameters", why: "to carry that mark to RPE with the reply's request; without it RPE's replies are stopped" },
   { permission: "generation", why: "to hear when a reply starts, and to keep lore secrets out of prompts" },
   { permission: "cors_proxy", why: "to reach RPE on this machine, for the questions before each reply and for pages that cannot reach RPE themselves" },
-  { permission: "ui_panels", why: "to show RPE's panel" },
+  { permission: "ui_panels", why: "to open RPE's heads-up display and its panels in your chat" },
 ];
 
 /** What is not granted of what the extension needs, in the order of `NEEDS`. */
