@@ -77,6 +77,8 @@ export interface KeptDeps {
   openBuild?(): void;
   /** Shows one of RPE's pages where the shell shows its pages (the Live page, a turn's page). */
   open?(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
+  /** The overlays the shell opens (the map, the actions sheet, the World sheet); Play's own stand-ins where the shell gives none. */
+  overlays?: Overlays;
   /** The call files; the folder's list unless a test gives its own. */
   calls?: readonly CallFile[];
 }
@@ -252,7 +254,7 @@ export function keptApp(deps: KeptDeps): Kept {
     ui,
     toasts,
     host: deps.host,
-    overlays: deps.mode === "play" ? playOverlays(ui, say) : NO_OVERLAYS,
+    overlays: deps.overlays ?? (deps.mode === "play" ? playOverlays(ui, say) : NO_OVERLAYS),
     drafts: createStore<Draft | null>(null),
     agents: createStore<AgentsView | null>(null),
     toast,

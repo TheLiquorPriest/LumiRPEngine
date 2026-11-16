@@ -3,5 +3,8 @@
 
 import type { SurfaceDef } from "../surface";
 import { surface as composerSurface } from "./composer";
+import { surface as hudSurface } from "./hud";
+import { surface as inputBarSurface } from "./input-bar";
+import { surface as toastsSurface } from "./toasts";
 
-export const SURFACES: readonly SurfaceDef[] = [composerSurface];
+export const SURFACES: readonly SurfaceDef[] = [composerSurface, hudSurface, inputBarSurface, toastsSurface];

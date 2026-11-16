@@ -52,7 +52,7 @@ function recorded(): { env: FrameEnv; posted: unknown[]; deleted: string[]; publ
       return () => listeners.delete(listener);
     },
   } as unknown as RpeClient;
-  const env: FrameEnv = { client, chat: createStore<string | null>("c1"), open: () => undefined, settings: createUiSettings(null), timers: { now: () => 0, setTimeout: () => 0, clearTimeout: () => undefined } };
+  const env: FrameEnv = { client, chat: createStore<string | null>("c1"), open: () => undefined, settings: createUiSettings(null), timers: { now: () => 0, setTimeout: () => 0, clearTimeout: () => undefined }, host: {} as FrameEnv["host"] };
   return {
     env,
     posted,

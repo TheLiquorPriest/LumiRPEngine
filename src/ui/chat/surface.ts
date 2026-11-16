@@ -4,6 +4,7 @@
 // ones the loader takes, written without Spindle's types (the pages import none): a surface made
 // here is one the loader can register as it is.
 
+import type { LumiverseHost } from "../../frontend/host";
 import type { Route } from "../app";
 import type { RpeClient } from "../client";
 import type { Readable } from "../store";
@@ -42,6 +43,7 @@ export interface FloatOptions {
   initialPosition?: { x: number; y: number };
   snapToEdge?: boolean;
   tooltip?: string;
+  chromeless?: boolean;
   resizable?: boolean;
   persistGeometry?: string | false;
   mobileClamp?: boolean;
@@ -76,6 +78,8 @@ export interface FrameEnv {
   open(route: Route): void;
   settings: UiSettings;
   timers: Timers;
+  /** The bridge to Lumiverse the chat's surfaces share (its float widgets, its size, its drawer), made once for the frame. */
+  host: LumiverseHost;
 }
 
 /** One surface file of `surfaces/`: the placements it registers, for the chat open now (asked again each time the chat changes). */

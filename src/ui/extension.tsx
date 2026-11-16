@@ -15,9 +15,10 @@ import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
 import { chatFrame, type SurfaceList } from "./chat";
 import { CHAT_SURFACES_CSS } from "./chat/styles";
+import { PLAY_CSS } from "./kept/play/styles";
 import { Frame, PagesBar, routeFor } from "./frame";
 import { createGate } from "./gate";
-import { type LumiverseContext, lumiverseHost } from "../frontend/host";
+import { type LumiverseContext, type LumiverseHost, lumiverseHost } from "../frontend/host";
 import { browserDeps, type RelayChannel, type RoadDeps } from "./roads";
 import { UI_CSS } from "./styles";
 import { createUiSettings, siteStorage, UiSettingsContext } from "./ui-settings";
@@ -128,12 +129,14 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
     </UiSettingsContext.Provider>,
     root,
   );
-  // The chat's own surfaces, drawn in Lumiverse's chat (the web shell has no chat to adorn and makes none).
-  const frame = chatFrame({ client, chat: active, open: app.go, settings, timers: deps.timers });
-  const removeChatStyle = ctx.dom.addStyle(CHAT_SURFACES_CSS);
+  // The chat's own surfaces, drawn in Lumiverse's chat (the web shell has no chat to adorn and makes none). They share one bridge to Lumiverse.
+  const chatHost = app.keptHost() as LumiverseHost;
+  const frame = chatFrame({ client, chat: active, open: app.go, settings, timers: deps.timers, host: chatHost });
+  const removeChatStyle = ctx.dom.addStyle([PLAY_CSS, CHAT_SURFACES_CSS].join("\n"));
   return {
     unmount() {
       frame.stop();
+      chatHost.dispose();
       removeChatStyle();
       render(null, root);
       for (const off of offs) off();

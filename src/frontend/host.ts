@@ -104,7 +104,11 @@ export function createHost(ctx: SpindleFrontendContext, options: HostOptions = {
   };
 }
 
-/** The bridge in Lumiverse's drawer: over Lumiverse's own context, and its own way to add a stylesheet. */
-export function lumiverseHost(ctx: LumiverseContext, options: HostOptions): Host & { addStyle(css: string): () => void } {
+/** The bridge in Lumiverse's drawer: Lumiverse's own context made into the bridge, and its own way to add a stylesheet. */
+export interface LumiverseHost extends Host {
+  addStyle(css: string): () => void;
+}
+
+export function lumiverseHost(ctx: LumiverseContext, options: HostOptions): LumiverseHost {
   return { ...createHost(ctx, options), addStyle: (css) => ctx.dom.addStyle(css) };
 }
