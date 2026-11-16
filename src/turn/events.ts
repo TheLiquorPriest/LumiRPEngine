@@ -29,7 +29,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "../app/guidance";
-import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, JobView, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type SourceReader } from "../cast";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
@@ -38,7 +38,6 @@ import { storyBrief } from "../story";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
 import type { TreeNotes, TreeSuggestions } from "../tree";
-import { keepJob } from "./jobs";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
 import { turnSettings } from "./settings";
@@ -66,6 +65,8 @@ export interface EventsDeps {
   now(): number;
   /** After a job of a turn ended: the sessions of the turn that started it brought up to date. */
   jobEnded(user: string, chat: string, turn: string): Promise<void>;
+  /** RPH told a job's change of state: told live to every page that follows his jobs, in every chat. */
+  jobTold(job: JobView): void;
   /** What time brings due, for what is due an agent is given by name (`world:due`). */
   due: DueSource;
   /** A view the host adds by name: its text; null for a name that is none of its own. Asked after the turn's own views, before the cast's. */
@@ -432,19 +433,19 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       }
       await tell(scope, "ended", outcome);
     },
+    // RPH keeps the job's record itself, through the store port's typed part (`kv.ts`): the one row of `job`. What is done here is the
+    // store's record of its end, which places what it recorded, and the word to every page that follows his jobs.
     async job(scope, job) {
       const ended = job.ended !== undefined;
-      try {
-        await deps.writes.run((db) => {
-          keepJob(db, job);
-          if (ended) deps.store.user(scope.user).endJob(job.id);
-        }, "keeping what RPH told of a job");
-      } catch (error) {
-        const words = error instanceof Error ? error.message : String(error);
-        if (ended) deps.log.error("A job's end could not be recorded, so what it changed does not take effect.", { job: job.id, error: words });
-        else deps.log.error("A job's new state could not be kept.", { job: job.id, state: job.state, error: words });
-        return;
+      if (ended) {
+        try {
+          await deps.writes.run(() => deps.store.user(scope.user).endJob(job.id), "recording a job's end");
+        } catch (error) {
+          deps.log.error("A job's end could not be recorded, so what it changed does not take effect.", { job: job.id, error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
       }
+      deps.jobTold(job);
       // What the lore handed the job that it never wrote is given back once it ended.
       if (ended) deps.loreIndex.release(job.id);
       if (!ended || scope.turn === undefined) return;

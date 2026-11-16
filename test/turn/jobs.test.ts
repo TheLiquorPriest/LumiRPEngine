@@ -44,12 +44,14 @@ const JOB = "job-ledger";
 /** What a job's agent records, as the engine's tools record it for a job: with the turn that started the job. */
 const sourMood: ChangeInput = { lane: "engine", op: "set", value: { type: "set", entity: "bram", field: "mood", value: "sour" }, by: "steward", source: "gm", job: JOB };
 
-/** The harness telling the host that the job `turn` started has ended (`TurnEvents.job`), as it does when a job ends. */
+/** The harness keeping the record of the job `turn` started and telling the host it ended (`TurnEvents.job`), as it does when a job ends. */
 async function jobEnded(b: TurnBed, turn: string, session: string): Promise<void> {
   const now = Date.now();
   const scope = { user: USER, chat: CHAT, session, turn };
   const usage = { calls: 1, input: 10, cacheRead: 0, cacheWrite: 0, output: 5 };
-  await b.turns.env.events.job?.(scope, { id: JOB, agent: "steward", brief: "Tally the bar's stock.", state: "done", scope, startedBy: { id: "a0", definition: "author" }, started: now - 5, ended: now, usage, report: "The stock is short by a cask." });
+  const view = { id: JOB, agent: "steward", brief: "Tally the bar's stock.", state: "done" as const, scope, startedBy: { id: "a0", definition: "author" }, started: now - 5, ended: now, usage, report: "The stock is short by a cask." };
+  await b.turns.env.store.jobs.set(scope, view);
+  await b.turns.env.events.job?.(scope, view);
 }
 
 test("a job's change takes effect at the first turn to begin after the harness says the job ended, and changes no turn begun before", async () => {

@@ -11,7 +11,7 @@
 // `rule_firing`: each of a turn's, or of a job the user started, which belongs to no turn), what else RPH told RPE about the run
 // (`turn_told`: suggestions, attachments asked for, drops, the release and the end), what the player asked for beside his words,
 // kept with the turn that answered it (`request`), what a comparison of a chat's path found (`since_found`), which of these a turn
-// was told (`since_told`), the marks each turn carries (`turn_mark`), and each job as RPH last told of it (`turn_job`).
+// was told (`since_told`), and the marks each turn carries (`turn_mark`). A job's whole record is one row of the store area's `job`.
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -310,9 +310,10 @@ ALTER TABLE turn_run ADD COLUMN finished INTEGER;
     version: 13,
     name: "RPH's job records in a table of their own",
     // `kv.ts` `jobRecords`: each record whole as JSON in `value`, with the columns a page is chosen and ordered by. The records RPH kept
-    // before as plain keys (`jobs/all/<id>`) are moved here, so the jobs listed before are listed still.
+    // before as plain keys (`jobs/all/<id>`) are moved here, so the jobs listed before are listed still. On a new install the store
+    // area made `job` already (its migration 16), so this makes nothing and moves what there is.
     sql: `
-CREATE TABLE job (
+CREATE TABLE IF NOT EXISTS job (
   user TEXT NOT NULL,
   id TEXT NOT NULL,
   started INTEGER NOT NULL,
@@ -321,7 +322,7 @@ CREATE TABLE job (
   value TEXT NOT NULL,
   PRIMARY KEY (user, id)
 );
-CREATE INDEX job_by_start ON job (user, started DESC, id DESC);
+CREATE INDEX IF NOT EXISTS job_by_start ON job (user, started DESC, id DESC);
 INSERT OR REPLACE INTO job (user, id, started, chat, state, value)
   SELECT user, json_extract(value, '$.id'), json_extract(value, '$.started'), json_extract(value, '$.scope.chat'), json_extract(value, '$.state'), value
   FROM kv
@@ -485,6 +486,19 @@ INSERT OR IGNORE INTO turn_mark (user, turn, kind, message, at)
     // `player_text` goes (plan §4.2, Y15): the text of a message he edits is the one kept with the request of the turn that answered it.
     sql: `
 DROP TABLE player_text;
+`,
+  },
+  {
+    version: 20,
+    name: "a job's whole record in one table",
+    // `turn_job` goes: the turn that started each job, and its view where RPE held no record of it, are carried into `job` (the store
+    // area's, which holds when each ended too), so the Jobs page, the briefing and the placement of a job's changes read one record.
+    sql: `
+INSERT INTO job (user, id, started, chat, turn, state, value)
+  SELECT user, job, json_extract(view, '$.started'), chat, turn, json_extract(view, '$.state'), view FROM turn_job WHERE true
+  ON CONFLICT (user, id) DO UPDATE SET turn = excluded.turn, started = COALESCE(job.started, excluded.started), chat = COALESCE(job.chat, excluded.chat),
+    state = COALESCE(job.state, excluded.state), value = COALESCE(job.value, excluded.value);
+DROP TABLE turn_job;
 `,
   },
 ];

@@ -3,7 +3,8 @@
 // in its scope, and one user's values are never read, listed or changed for another. Reads go straight
 // to the database; every change goes through the application's write queue, so changes to one user's
 // key run one at a time, each seeing the last one's result, and counts kept by agents running at once
-// add up. Its typed part, RPH's job records, is a table of its own (`job`).
+// add up. Its typed part, RPH's job records, is RPE's one record of each job (the `job` table, the store area's, which also holds
+// the turn that started the job and when the store recorded its end): RPH's record is its `value`, kept nowhere else.
 
 import type { Database } from "bun:sqlite";
 import type { JobPage, JobQuery, JobRecords, JobView, JsonValue, StorePort, UserScope } from "rp-harness/contract";
@@ -56,22 +57,24 @@ function placeIn(cursor: string): { started: number; id: string } {
 
 /**
  * The store's typed part for RPH's job records (Appendix B, the `job` table): each record whole, under its user and id, with its
- * start, chat and state beside it so a page is chosen and ordered in the database and only that page is read.
+ * start, chat, turn and state beside it so a page is chosen and ordered in the database and only that page is read. A row the store
+ * made for a job's end alone (an old job RPE held no record of) is no record.
  */
 function jobRecords(db: Database, writes: Writes): JobRecords {
   return {
     async get(scope, id) {
-      const row = db.query<{ value: string }, [string, string]>("SELECT value FROM job WHERE user = ? AND id = ?").get(userOf(scope), id);
+      const row = db.query<{ value: string }, [string, string]>("SELECT value FROM job WHERE user = ? AND id = ? AND value IS NOT NULL").get(userOf(scope), id);
       return row === null ? undefined : (JSON.parse(row.value) as JobView);
     },
     async set(scope, job) {
       const user = userOf(scope);
       // A job of no chat (C-23) is kept under the chat "", which no chat's list names.
-      const row = [user, job.id, job.started, job.scope.chat ?? "", job.state, JSON.stringify(job)];
+      // The store's record of the job's end (`ended`) is the store's alone, never written here.
+      const row = [user, job.id, job.started, job.scope.chat ?? "", job.scope.turn ?? null, job.state, JSON.stringify(job)];
       await writes.run(
         (into) =>
           into.run(
-            "INSERT INTO job (user, id, started, chat, state, value) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET started = excluded.started, chat = excluded.chat, state = excluded.state, value = excluded.value",
+            "INSERT INTO job (user, id, started, chat, turn, state, value) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET started = excluded.started, chat = excluded.chat, turn = excluded.turn, state = excluded.state, value = excluded.value",
             row,
           ),
         "keeping a job's record",
@@ -80,7 +83,7 @@ function jobRecords(db: Database, writes: Writes): JobRecords {
     async list(scope, query: JobQuery): Promise<JobPage> {
       // A scope that names no user holds nothing: there is nothing to list.
       if (scope.user === "" || query.states?.length === 0) return { jobs: [] };
-      const where = ["user = ?"];
+      const where = ["user = ?", "value IS NOT NULL"];
       const args: (string | number)[] = [scope.user];
       if (query.chat !== undefined) {
         where.push("chat = ?");
@@ -105,9 +108,14 @@ function jobRecords(db: Database, writes: Writes): JobRecords {
       const page = jobs.slice(0, query.limit);
       return { jobs: page, next: placeOf(page[page.length - 1] as JobView) };
     },
+    // A job that recorded changes keeps its record past the setting's days: they are listed with it until he undoes them, and its end
+    // places them (plan §10.9).
     async prune(scope, before) {
       const user = userOf(scope);
-      return await writes.run((into) => into.run("DELETE FROM job WHERE user = ? AND started < ?", [user, before]).changes, "removing old job records");
+      return await writes.run(
+        (into) => into.run("DELETE FROM job WHERE user = ? AND started < ? AND NOT EXISTS (SELECT 1 FROM change c WHERE c.user = job.user AND c.job = job.id)", [user, before]).changes,
+        "removing old job records",
+      );
     },
   };
 }

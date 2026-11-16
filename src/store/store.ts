@@ -1052,7 +1052,7 @@ export class UserStore {
     const run = head === null ? [] : this.chainRows(head);
     const rows = this.db
       .query<ChangeDb & { ended: number | null; depth: number | null }, [string, string]>(
-        `SELECT c.*, e.ended, pn.depth FROM change c LEFT JOIN job_end e ON e.user = c.user AND e.job = c.job
+        `SELECT c.*, e.ended, pn.depth FROM change c LEFT JOIN job e ON e.user = c.user AND e.id = c.job
          LEFT JOIN turn pt ON c.placed IS NOT NULL AND pt.user = c.user AND pt.id = c.placed LEFT JOIN path_node pn ON pn.user = c.user AND pn.key = pt.node
          WHERE c.user = ?1 AND c.chat = ?2 ORDER BY c.ord`,
       )
@@ -1117,7 +1117,7 @@ export class UserStore {
         const reports = k.reports.length === 0 ? null : JSON.stringify(k.reports);
         const told = k.told.length === 0 ? null : JSON.stringify(k.told);
         insert.run(this.id, k.chat, ord, k.lane, k.op, JSON.stringify(k.value), k.by, k.handle, k.standing, k.precision, k.source, cite, k.job, k.applied ? 1 : 0, reports, told, k.created, turn, pending ? null : now);
-        if (k.job !== null && k.ended !== null) this.db.run("INSERT OR IGNORE INTO job_end (user, job, ended) VALUES (?, ?, ?)", [this.id, k.job, k.ended]);
+        if (k.job !== null && k.ended !== null) this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, k.job, k.ended]);
       }
     });
     for (const chat of chats) this.dropSnapshots(chat);
@@ -1661,7 +1661,7 @@ export class UserStore {
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
     inputs.forEach((c, i) => checkChange(c, i, this.store.env.areas));
     const jobs = [...new Set(inputs.flatMap((c) => (c.job ? [c.job] : [])))];
-    const ended = jobs.find((j) => this.db.query<{ job: string }, [string, string]>("SELECT job FROM job_end WHERE user = ? AND job = ?").get(this.id, j) !== null);
+    const ended = jobs.find((j) => this.db.query<{ id: string }, [string, string]>("SELECT id FROM job WHERE user = ? AND id = ? AND ended IS NOT NULL").get(this.id, j) !== null);
     if (ended !== undefined) throw new StoreInputError(`job ${ended} has ended: it records nothing more`);
     const inside = this.foldNode(turn.node);
     const own = jobs.length === 1 && inputs.every((c) => c.job === jobs[0]) ? (jobs[0] ?? null) : null;
@@ -1720,7 +1720,7 @@ export class UserStore {
   addOwnerChanges(chat: string, inputs: readonly ChangeInput[], job: string | null = null): { changes: ChangeRow[]; state: StoreState } {
     const row = this.chatOrThrow(chat);
     inputs.forEach((c, i) => checkChange(c, i, this.store.env.areas));
-    if (job !== null && this.db.query<{ job: string }, [string, string]>("SELECT job FROM job_end WHERE user = ? AND job = ?").get(this.id, job) !== null) {
+    if (job !== null && this.db.query<{ id: string }, [string, string]>("SELECT id FROM job WHERE user = ? AND id = ? AND ended IS NOT NULL").get(this.id, job) !== null) {
       throw new StoreInputError(`job ${job} has ended: it records nothing more`);
     }
     const base = this.headState(chat);
@@ -2019,7 +2019,7 @@ export class UserStore {
     return (
       this.db
         .query<{ any: number }, [string, string]>(
-          "SELECT EXISTS(SELECT 1 FROM job_end e WHERE e.user = ?1 AND e.ended >= (SELECT t.created FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2)) AS any",
+          "SELECT EXISTS(SELECT 1 FROM job e WHERE e.user = ?1 AND e.ended >= (SELECT t.created FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2)) AS any",
         )
         .get(this.id, node)?.any === 1
     );
@@ -2057,7 +2057,7 @@ export class UserStore {
     return this.db
       .query<{ id: number; chat: string; op: string; lane: string; value: string; by: string | null; cite: string | null; precision: string | null; standing: string | null; source: string | null; at: number; placed: number | null }, [string, string]>(
         `SELECT c.id, c.chat, c.op, c.lane, c.value, c.by, c.cite, c.precision, c.standing, c.source, MAX(COALESCE(c.moment, 0), COALESCE(e.ended, c.created)) AS at, pn.depth AS placed
-         FROM change c LEFT JOIN job_end e ON e.user = c.user AND e.job = c.job
+         FROM change c LEFT JOIN job e ON e.user = c.user AND e.id = c.job
          LEFT JOIN turn pt ON c.placed IS NOT NULL AND pt.user = c.user AND pt.id = c.placed LEFT JOIN path_node pn ON pn.user = c.user AND pn.key = pt.node
          WHERE c.user = ?1 AND c.chat IN (SELECT value FROM json_each(?2)) AND c.applied = 1 AND (c.job IS NULL OR e.ended IS NOT NULL)
          ORDER BY at, c.id`,
@@ -2362,7 +2362,7 @@ export class UserStore {
     const pending: JobChange[] = [];
     const jobs = this.db
       .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; cite: string | null; applied: number; precision: string | null; standing: string | null; source: string | null; ended: number }, [string, string]>(
-        `SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.cite, c.applied, c.precision, c.standing, c.source, e.ended FROM change c JOIN job_end e ON e.user = c.user AND e.job = c.job
+        `SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.cite, c.applied, c.precision, c.standing, c.source, e.ended FROM change c JOIN job e ON e.user = c.user AND e.id = c.job AND e.ended IS NOT NULL
          WHERE c.user = ?1 AND c.job IS NOT NULL AND c.turn IN (SELECT value FROM json_each(?2)) ORDER BY c.id`,
       )
       .all(this.id, JSON.stringify(path.map((p) => p.turn)));
@@ -2394,7 +2394,7 @@ export class UserStore {
       .query<{ chat: string }, [string, string]>("SELECT DISTINCT COALESCE(c.chat, t.chat) AS chat FROM change c LEFT JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND c.job = ?2")
       .all(this.id, job)
       .flatMap((r) => (r.chat === null ? [] : [r.chat]));
-    this.write(chats, () => this.db.run("INSERT OR IGNORE INTO job_end (user, job, ended) VALUES (?, ?, ?)", [this.id, job, this.store.now()]));
+    this.write(chats, () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, this.store.now()]));
   }
 
   /**

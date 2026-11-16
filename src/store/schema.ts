@@ -302,10 +302,43 @@ CREATE TABLE reply_reason (
 );
 `,
   },
+  {
+    version: 16,
+    name: "a job's whole record in one table",
+    // RPE's one record of each job (Appendix B `job`): RPH's record as its store port keeps it (`value`, with the columns a page is chosen
+    // and ordered by), the turn that started it (none for his own), and when the store recorded its end (`ended`), which places what
+    // the job recorded (plan §10.9). Made here, the earliest area that reads it; an install whose harness area made `job` already has
+    // it made again with the new columns. Each `job_end` row is carried in, a job RPE holds no record of as a row with its end alone.
+    up(db) {
+      const had = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'job'").get() !== null;
+      if (had) {
+        db.run("DROP INDEX IF EXISTS job_by_start");
+        db.run("ALTER TABLE job RENAME TO job_before");
+      }
+      db.run(`CREATE TABLE job (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  started INTEGER,
+  chat TEXT,
+  turn TEXT,
+  state TEXT,
+  value TEXT,
+  ended INTEGER,
+  PRIMARY KEY (user, id)
+)`);
+      db.run("CREATE INDEX job_by_start ON job (user, started DESC, id DESC)");
+      if (had) {
+        db.run("INSERT INTO job (user, id, started, chat, turn, state, value) SELECT user, id, started, chat, json_extract(value, '$.scope.turn'), state, value FROM job_before");
+        db.run("DROP TABLE job_before");
+      }
+      db.run("INSERT INTO job (user, id, ended) SELECT user, job, ended FROM job_end WHERE true ON CONFLICT (user, id) DO UPDATE SET ended = excluded.ended");
+      db.run("DROP TABLE job_end");
+    },
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
-export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job_end", "snapshot_part", "reply_reason"];
+export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job", "snapshot_part", "reply_reason"];
 
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {

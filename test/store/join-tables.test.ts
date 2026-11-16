@@ -55,7 +55,8 @@ const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
   snapshot_part: { user: "none", hash: "none", body: "none", refs: "none" },
   fold_mark: { user: "none", chat: "none", mark: "none" },
   world_part: { user: "none", world: "none", file: "none", bytes: "none", sha256: "none", version: "none", created: "none" },
-  job_end: { user: "none", job: "none", ended: "none" },
+  // A job's record keeps the turn that started it as RPH's record names it (`value`'s scope): the join leaves the record as it was.
+  job: { user: "none", id: "none", started: "none", chat: "none", turn: "none", state: "none", value: "none", ended: "none" },
   reply_reason: { user: "none", chat: "none", message: "none", why: "none" },
 };
 

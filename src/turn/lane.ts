@@ -23,7 +23,7 @@ import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
-import type { App } from "../app";
+import { type App, LIVE_JOBS } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
@@ -41,6 +41,7 @@ import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { type EventsDeps, givenViews, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
+import { JOB_KIND } from "./jobs";
 import { kvStore, servedUser, storeUsers } from "./kv";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { TurnMarks } from "./marks";
@@ -388,8 +389,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     return into === null ? scope : { ...scope, turn: into };
   };
   const lorePorts = lorePort(lore, loreIndex);
-  // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
-  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log };
+  // A job's end is told through `events.job`, which records it; the lane, made below, brings the sessions of its turn up to date. Each
+  // change of a job's state is told to every page that follows his jobs.
+  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), jobTold: (job) => JOB_KIND.publish(app.live, LIVE_JOBS, { job }), log: app.log };
   const events = turnEvents(eventsDeps);
   const env: Environment = {
     id: "rpe",
