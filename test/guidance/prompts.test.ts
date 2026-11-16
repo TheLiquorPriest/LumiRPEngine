@@ -299,6 +299,18 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
   });
 
+  test("secret-marks.md words a secret's mark in its five forms, each keeping the names RPE fills in", async () => {
+    const part = await lines("secret-marks");
+    expect([...part.names].sort()).toEqual(["both", "everyone", "kept", "known", "rule"]);
+    expect(part.line("known", { text: "The vault is empty.", known: "Wren" } as never)).toBe("The vault is empty. [secret; known to Wren]");
+    expect(part.line("kept", { text: "The vault is empty.", kept: "Bram" } as never)).toBe("The vault is empty. [secret; kept from Bram]");
+    expect(part.line("both", { text: "The vault is empty.", known: "Wren", kept: "Bram" } as never)).toBe("The vault is empty. [secret; known to Wren; kept from Bram]");
+    expect(part.line("everyone", {})?.trim()).toBe("everyone");
+    const rule = part.line("rule", { forms: "as [secret; known to X]", everyone: "everyone" } as never) ?? "";
+    expect(rule).toStartWith("A fact marked as a secret, written as [secret; known to X], is known to the people its mark says it is known to");
+    expect({ asks: ASKS.test(rule), unfilled: rule.includes("{{") }).toEqual({ asks: false, unfilled: false });
+  });
+
   test("play-answers.md says case by case why a tap's pick is refused, that a tap the world's rules advise against is applied with their reports, and what an edit of the world cannot do", () => {
     const said = (split(SHIPPED.get(".prompts/play-answers.md") ?? "").header?.["lines"] ?? {}) as Record<string, string>;
     const keys = ["needs_someone", "needs_place", "needs_something", "names_no_one", "names_no_place", "names_nothing", "not_known_someone", "not_known_place", "not_known_something", "not_kind", "not_payee", "pays_no_one", "applied_advised", "edit_at", "fact_remove", "edit_ops_count", "things_count"];
