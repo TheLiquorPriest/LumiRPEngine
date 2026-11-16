@@ -12,7 +12,7 @@ import { writtenTime } from "../engine/time";
 import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
 import { type Fields, type GuidanceFiles, Lines, textOf, toolText } from "../iface/texts";
-import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type TreeView } from "../store";
+import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type StoreState, type TreeView } from "../store";
 import { pairMarks, questsOfThread, threadTouched } from "../quests/thread";
 import { storyAt } from "./path";
 import { nameKey, type Span, type StoryItem, type StoryPart, StoryRecord } from "./record";
@@ -167,11 +167,15 @@ export interface StoryClock {
 export function storyClock(store: Store, user: string, chat: string, turn: string | null): StoryClock | null {
   const u = store.user(user);
   if (u.chat(chat) === null) return null;
-  const folded = (turn === null ? u.headState(chat) : u.stateAt(turn)).state;
+  return clockOfState(store.env, (turn === null ? u.headState(chat) : u.stateAt(turn)).state);
+}
+
+/** The story time of a folded state, as `storyClock` reads it; null where the world the state is played on cannot be found. */
+export function clockOfState(env: Pick<Store["env"], "worlds" | "registry">, folded: StoreState): StoryClock | null {
   const state = folded.world;
-  const doc = store.env.worlds(state.revision);
+  const doc = env.worlds(state.revision);
   if (doc === undefined) return null;
-  const world = store.env.registry.context(doc, state).world;
+  const world = env.registry.context(doc, state).world;
   const cal = calendarOf(world);
   const offset = (at: number): number => placeOffset(world, at, placeOfEntity(state, world.pov));
   const shown = clockRecorded(folded);

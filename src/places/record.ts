@@ -13,16 +13,19 @@ import { madeOf } from "../engine/places-in-play";
 import type { ReadContext } from "../engine/registry";
 import type { WorldState } from "../engine/state";
 import { type Fact, type Store, standing, type StoreState, type UserStore } from "../store";
-import { storyClock } from "../story/kit";
+import { clockOfState } from "../story/kit";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
+import { storySliceOf } from "../story/fold";
+import { questSliceOf } from "../quests";
 import type { PlaceFactPart } from "./parts";
 import type { PlacesSettings } from "./settings";
 import type { PlaceFactRow } from "./shapes";
 
 /** The point of a chat's path a place is read at, with the state folded there and the world as the chat plays it. */
 export interface PlaceAt {
-  store: Store;
+  /** What the store folds with: the registry and the world documents by revision. */
+  env: Store["env"];
   u: UserStore;
   user: string;
   chat: string;
@@ -41,7 +44,15 @@ export function placeAt(store: Store, user: string, chat: string, turn: string |
   const state = (turn === null ? u.headState(chat) : u.stateAt(turn)).state;
   const doc = store.env.worlds(state.world.revision);
   if (doc === undefined) return null;
-  return { store, u, user, chat, turn, state, world: state.world, ctx: store.env.registry.context(doc, state.world) };
+  return { env: store.env, u, user, chat, turn, state, world: state.world, ctx: store.env.registry.context(doc, state.world) };
+}
+
+/**
+ * The point `turn` of `chat` (null: its head) as a reading that already holds the state folded there reads it, for the engine's tools,
+ * which are given the user's store and the fold's environment and the state of the turn they are called in, a job's own changes on it.
+ */
+export function placeAtState(u: UserStore, env: Store["env"], chat: string, turn: string | null, state: StoreState, ctx: ReadContext): PlaceAt {
+  return { env, u, user: u.id, chat, turn, state, world: state.world, ctx };
 }
 
 /** The place's own definition as the chat plays it; undefined where it has none. */
@@ -64,10 +75,10 @@ export interface FactReader {
 /** A reader of fact rows at a point of the path: each turn's story time and the story record are read once. */
 export function factReader(at: PlaceAt): FactReader {
   const times = new Map<string, string | null>();
-  const story = StoryRecord.read(at.store, at.user, storyAt(at.u, at.chat, at.turn));
+  const story = new StoryRecord(storyAt(at.u, at.chat, at.turn), storySliceOf(at.state), questSliceOf(at.state));
   const timeOf = (turn: string): string | null => {
     if (!times.has(turn)) {
-      const clock = storyClock(at.store, at.user, at.chat, turn);
+      const clock = clockOfState(at.env, at.u.stateAt(turn).state);
       times.set(turn, clock === null ? null : clock.text(clock.now));
     }
     return times.get(turn) ?? null;
@@ -151,7 +162,7 @@ export function entryOf(at: PlaceAt, place: string): { audience: string; at: str
 export function doorsOf(at: PlaceAt, place: string, config: MapConfig = MAP_DEFAULTS): { at: number[]; state: "open" | "closed" | "locked" }[] {
   const grid = gridOf(at, place, config);
   if (grid === null) return [];
-  const { moving } = movingOf(at.store.env.registry, at.ctx.world, at.world, grid);
+  const { moving } = movingOf(at.env.registry, at.ctx.world, at.world, grid);
   return [...grid.doors]
     .sort((a, b) => a - b)
     .flatMap((i) => {

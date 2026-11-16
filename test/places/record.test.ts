@@ -5,6 +5,7 @@ import { PLACES_DEFAULTS } from "../../src/places/settings";
 import { accessOf, featuresOf, placeAt, sinceOf } from "../../src/places/record";
 import { factStore } from "../../src/store/facts";
 import type { ChangeInput } from "../../src/store";
+import { CHAT as IFACE_CHAT, rig, texts } from "../iface/rig";
 import { CHAT, openTable, USER } from "../story/rig";
 
 const INN = "lamp_ladle";
@@ -51,5 +52,24 @@ describe("a place's record", () => {
     if (after === null) throw new Error("the chat plays the invented world");
     expect(sinceOf(after, INN, PLACES_DEFAULTS).items).toEqual([]);
     expect(placeLines({ at: after, place: INN, settings: PLACES_DEFAULTS, depth: 1 }).filter((l) => l.kind === "place_none").map((l) => l.fields.part)).toEqual(["since", "feature", "access"]);
+  });
+});
+
+describe("the fact operation's part and beat", () => {
+  test("a fact about a place takes its part and is recorded with it; a part that is none of a place's, or a beat the record does not hold, is read as such", async () => {
+    const t = await rig();
+    const src = { from: "prose", message: "m-1" };
+    const done = await t.call("world_apply", { operations: [{ op: "fact", about: "common_room", key: "hearth", value: "a wide hearth of river stone", part: "feature", source: src }] });
+    expect(texts(done).join("\n")).not.toContain("cannot be read");
+    expect(t.s.headState(IFACE_CHAT).state.facts["place:common_room"]).toBeUndefined();
+    const staged = t.s.stateFor(t.turn.id, null).state.facts["place:common_room"] ?? [];
+    expect(staged.map((f) => [f.key, f.part])).toEqual([["hearth", "feature"]]);
+
+    const wrongPart = await t.call("world_apply", { operations: [{ op: "fact", about: "common_room", key: "k", value: "v", part: "smell", source: src }] });
+    expect(texts(wrongPart).join("\n")).toContain("since, feature, access");
+    const person = await t.call("world_apply", { operations: [{ op: "fact", about: "wren", key: "k", value: "v", part: "since", source: src }] });
+    expect(texts(person).join("\n")).toContain("not a place");
+    const noBeat = await t.call("world_apply", { operations: [{ op: "fact", about: "common_room", key: "k", value: "v", beat: "b-99", source: src }] });
+    expect(texts(noBeat).join("\n")).toContain("holds no beat b-99");
   });
 });

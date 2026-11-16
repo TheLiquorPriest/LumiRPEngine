@@ -67,3 +67,25 @@ export function placeLines(input: PlaceLinesInput): ViewLine[] {
   }
   return lines;
 }
+
+/**
+ * A view's lines with a place's record lines in them: after the place's own level line (the one `level_place` with its id), in place of
+ * the plain fact lines that carry a record part, which the record's lines give with their turn, time and beat. A view without that level
+ * is returned as it is.
+ */
+export function withPlaceLines(lines: readonly ViewLine[], input: Omit<PlaceLinesInput, "depth">): ViewLine[] {
+  const level = lines.findIndex((l) => l.kind === "level_place" && l.fields.id === input.place);
+  if (level < 0) return [...lines];
+  const own = lines[level]?.depth ?? 0;
+  const out = lines.slice(0, level + 1);
+  out.push(...placeLines({ ...input, depth: own + 1 }));
+  // The plain fact lines of this level stand before the next level line.
+  const next = lines.findIndex((l, i) => i > level && l.kind.startsWith("level_"));
+  const end = next < 0 ? lines.length : next;
+  lines.forEach((l, i) => {
+    if (i <= level) return;
+    if (i < end && l.kind === "fact" && l.depth > own && typeof l.fields.part === "string") return;
+    out.push(l);
+  });
+  return out;
+}
