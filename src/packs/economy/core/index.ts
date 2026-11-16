@@ -87,7 +87,7 @@ import {
   type PriceRef,
   worldProducts,
 } from "./model";
-import { accountLevel, asUnit, cardsOn, carriedCash, charge, claimCash, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
+import { accountLevel, asUnit, cardsOn, carriedCash, charge, claimCash, featureFor, fundsAdvice, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
 import { materializeMoney, MONEY_STEP_LEVEL, moneyStep, openAccounts, openingEvent, planStep } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
@@ -499,10 +499,6 @@ function payWith(hooks: FinanceHooks, ctx: ReadContext, p: Payment): LedgerEvent
 function postWith(ctx: ReadContext, lines: PostingLine[], meta: PostMeta): LedgerEvent[] | Rejection {
   const clean = lines.filter((l) => l.amount !== 0);
   if (clean.length < 2 || clean.reduce((a, l) => a + l.amount, 0) !== 0) return reject("unbalanced", `${meta.memo} doesn't balance`);
-  if (!meta.unchecked) {
-    const refused = postGuard(ctx, clean);
-    if (refused) return refused;
-  }
   const bands: LedgerEvent[] = [];
   for (const l of clean) {
     const party = l.account.startsWith("economy.external:") ? l.account.slice("economy.external:".length) : "";
@@ -706,8 +702,8 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     return { catalog: row, category, cents: priceOf(ctx, { catalog: row, place })?.unitCents ?? null, food: hasOwn(FOOD_AND_DRINK, category) };
   });
 
-  // Ledger 1.10: a posting folds only if the accounts it draws on can pay it, or the story made it on an account that can run a debt (`overdraw`).
-  r.guard({ type: "post", validate: (e, ctx) => (e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null) });
+  // Ledger 1.10 as an adviser: a posting that draws on an account that is not open, or past what it covers, stands and says so.
+  r.guard({ type: "post", validate: () => null, advise: (e, ctx) => (e.type === "post" ? fundsAdvice(ctx, e.lines) : null) });
   r.formula("wealth", (ctx, who) => wealthOf(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));
   r.formula("net_worth", (ctx, who) => netWorth(hooks, ctx, String(who ?? ctx.world.pov)));
