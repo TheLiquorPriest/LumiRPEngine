@@ -39,7 +39,7 @@ import type { Writes } from "./kv";
 import type { Runs } from "./runs";
 import { turnSettings } from "./settings";
 import { stageAt } from "./stage";
-import { guidanceTexts, logProblems } from "./texts";
+import { guidanceTexts } from "./texts";
 import { castLayouts, PARTS, turnTokens } from "./turns";
 
 export interface EventsDeps {
@@ -111,7 +111,7 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   const layout = await deps.files.read(scope, statePart.source.path);
   if (layout.status !== "read") return null;
   const part = readPart(layout.text, "world-state");
-  const [settings, map] = await Promise.all([turnSettings(deps.files, scope, deps.log), maps ? mapLines(guidanceTexts(deps.files, scope)).then((lines) => mapView(logProblems(lines, deps.log))) : undefined]);
+  const [settings, map] = await Promise.all([turnSettings(deps.files, scope, deps.log), maps ? mapLines(guidanceTexts(deps.files, scope, deps.log)).then(mapView) : undefined]);
   return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState }) };
 }
 

@@ -43,7 +43,7 @@ import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
 import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
-import { guidanceTexts, logProblems } from "./texts";
+import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
 import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
 
@@ -132,15 +132,17 @@ export const MACHINE_CLOCK: Clock = {
  * RPE's store over the application's database: the shipped packs' handlers fold its changes, a chat on a
  * real world folds over the revision's document the store keeps, and its snapshots are this build's. A
  * handler that throws is an error in the engine, not in the story: its text goes to the log, and to the
- * live view of each chat with a run going on (`going`), the one place a player watches RPE work; the
- * change's report, all a model is shown, says only that it failed. Its limits are the global level's
- * settings, read once: the store is made once for every chat.
+ * live view of the chat whose change failed, with the turn and the change, and of no other chat, whether
+ * or not a run goes on there; the change's report, all a model is shown, says only that it failed. Its
+ * limits are the global level's settings, read once: the store is made once for every chat.
  */
-export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths">, going: () => readonly string[]): Store {
-  const handlerFailed = ({ op, error }: { op: string; error: unknown }): void => {
-    const text = error instanceof Error ? error.message : String(error);
-    app.log.error("An engine handler failed on a change, which is recorded as not applied.", { op, error: text });
-    for (const chat of going()) app.live.publish(chat, { kind: "handler_failed", data: { op, error: text } });
+export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths">): Store {
+  const handlerFailed = (failure: { op: string; error: unknown; user?: string; chat?: string; turn?: string; change?: number | null }): void => {
+    const { op, chat, turn } = failure;
+    const error = failure.error instanceof Error ? failure.error.message : String(failure.error);
+    const change = failure.change ?? null;
+    app.log.error("An engine handler failed on a change, which is recorded as not applied.", { op, error, user: failure.user ?? null, chat: chat ?? null, turn: turn ?? null, change });
+    if (chat !== undefined && turn !== undefined) app.live.publish(chat, { kind: "handler_failed", data: { op, error, turn, change } });
   };
   const global = globalConfig(app.paths.files, app.log);
   const worlds = storedWorlds(app.db, global.numbers(WORLD_DOCS_SETTING_DEFS));
@@ -257,9 +259,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
    * worded by the map's lines in force, and what time brings due; the story's `overlay` operation writes the lore's overlays.
    */
   const hostTools = async (scope: Scope): Promise<HostTool[]> => {
-    const texts = guidanceTexts(files, scope);
+    const texts = guidanceTexts(files, scope, app.log);
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
-    const [lines, settings] = await Promise.all([mapLines(texts).then((read) => logProblems(read, app.log)), turnSettings(files, scope, app.log)]);
+    const [lines, settings] = await Promise.all([mapLines(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, settings: settings.engine, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),

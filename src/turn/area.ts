@@ -126,7 +126,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
     },
     async mount(at) {
       app = at;
-      const store = openAppStore(at, () => turns?.runs.chatsGoing() ?? []);
+      const store = openAppStore(at);
       turns = buildTurns(at, {
         store,
         lumiverse: takes.lumiverse,

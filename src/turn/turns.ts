@@ -54,7 +54,7 @@ import { type TurnSettings, turnSettings } from "./settings";
 import { type FoundItem, foundItems, type KeptItem, type SinceKept } from "./since";
 import { stageAt } from "./stage";
 import { generationStart, seenOf } from "./start";
-import { guidanceTexts, logProblems } from "./texts";
+import { guidanceTexts } from "./texts";
 
 /** The prompt parts the turn lane lays its texts out by (each under `.prompts/`). */
 export const PARTS = {
@@ -127,8 +127,8 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
 }
 
 /** The connection a lead's definition names for the user, by its id: null for his default (`default`, or none named). */
-export async function leadConnection(guidance: Pick<Guidance, "definition">, lead: string, models: Pick<ModelsApi, "list">, user: string): Promise<string | null> {
-  const named = (await guidance.definition(lead))?.model;
+export async function leadConnection(guidance: Pick<Guidance, "definition">, lead: string | null, models: Pick<ModelsApi, "list">, user: string): Promise<string | null> {
+  const named = lead === null ? undefined : (await guidance.definition(lead))?.model;
   return named === undefined || named === "default" ? null : ((await models.list(user)).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
 }
 
@@ -570,6 +570,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       let ask: FolderAsk;
       try {
+        // Who leads is the config's line alone (`lead:`): where no level names one, no agent is chosen here, and the turn ends with the
+        // turn-errors line that says so.
+        if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.
         const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
@@ -880,6 +883,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
       let request: TurnRequest;
       try {
+        if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(guidance, settings.lead, user, turn.id);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
@@ -1211,7 +1215,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const statePart = await guidance.part(PARTS.worldState);
     const layout = statePart === undefined ? null : await this.#d.files.read(scope, statePart.source.path);
     if (layout?.status === "read") {
-      const maps = mapView(logProblems(await mapLines(guidanceTexts(this.#d.files, scope)), this.#d.log));
+      const maps = mapView(await mapLines(guidanceTexts(this.#d.files, scope, this.#d.log)));
       try {
         const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
@@ -1270,7 +1274,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * The lead's model's limits, as the model layer gives them for the turn's user's connection its definition names (`default`, or none,
    * is his default connection): its window, and whether it takes pictures. Null where the model layer cannot tell them; the log says so.
    */
-  async #leadLimits(guidance: Guidance, lead: string, user: string, turn: string): Promise<ModelLimits | null> {
+  async #leadLimits(guidance: Guidance, lead: string | null, user: string, turn: string): Promise<ModelLimits | null> {
     try {
       const models = this.#d.harness().models;
       return await models.limits(user, await leadConnection(guidance, lead, models, user));
@@ -1281,7 +1285,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /** The lead's window in tokens, from its model's limits; where nobody can tell it, 0, so the story so far is given its floor, and the log says so. */
-  #leadWindow(limits: ModelLimits | null, lead: string, turn: string): number {
+  #leadWindow(limits: ModelLimits | null, lead: string | null, turn: string): number {
     const window = limits?.contextWindow ?? null;
     if (window !== null) return window.tokens;
     this.#d.log.info("The lead's window is not known, so the story so far is given its floor.", { turn, lead });

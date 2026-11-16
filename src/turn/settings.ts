@@ -5,7 +5,8 @@
 // else. A value a setting does not take is logged with its file and passed over, and the default
 // holds; it never stops a turn.
 //
-//   lead: author                 the agent definition that leads a turn
+//   lead: null                   the agent definition that leads a turn; the shipped RPE-global.yml names it (author),
+//                                and nothing in code does: with no level naming one, no turn is played
 //   carry: continuing            what a session carries between turns: continuing, records or nothing
 //   limits:
 //     previousRun: 20            seconds a turn waits for the run of the turn before it; then that run is stopped
@@ -17,7 +18,7 @@
 //     hold: false                keeps a message the story record does not cover in the prompt: true or false,
 //                                or { on: true, cap: 40 }, cap being the most messages it holds past the window
 //   since:
-//     editedBudget: 4000         tokens the briefing's "Since the last turn" spends on replies edited after their
+//     editedBudget: null         tokens the briefing's "Since the last turn" spends on replies edited after their
 //                                turns, told in full, the newest first; the rest named in one line; null tells all
 //   reply:
 //     lastText: false            a turn that ends with no reply sends the Author's last plain text in place of the error line
@@ -50,7 +51,8 @@ const RESERVE =
   })();
 
 export interface TurnSettings {
-  lead: string;
+  /** The agent definition that leads a turn, as the config names it; null where no level does, and no turn is played. */
+  lead: string | null;
   carry: Carry;
   /** How long a turn waits for the previous turn's run, in milliseconds. */
   previousRunMs: number;
@@ -77,8 +79,8 @@ export interface TurnSettings {
 
 /** The defaults, where no level sets a value. */
 export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
-  // Plan §13.1: the Author, as RPE ships it (`guidance/.agents/author.md`).
-  lead: "author",
+  // Plan §13.1, §17.2: who leads is the shipped config's line (`RPE-global.yml` `lead: author`), never code's choice.
+  lead: null,
   // Appendix D.1: continuing, until the session measurement says otherwise.
   carry: "continuing",
   // Appendix D.1: 20 s, then stop it.
@@ -87,9 +89,9 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   hiddenReadable: false,
   // Appendix D.1: "When the Author ends with no reply: a plain error line in Lumiverse".
   lastText: false,
-  // Plan §6.3 tells an edited reply with its old and new text. A carried chat may find hundreds at its first turn: the bound keeps that
-  // block within what the world state is given (`worldState.budget`), room for about three ordinary replies with both their texts.
-  editedBudget: 4000,
+  // Plan §6.3 l.628: every edited reply is told with its old and new text whole, however many a carried chat brings to its first turn.
+  // A bound is his to set, off as shipped.
+  editedBudget: null,
   // Appendix D.1, as the window's own module keeps them.
   window: WINDOW_DEFAULTS,
   // Appendix D.1, as each area keeps its own.
@@ -106,7 +108,17 @@ const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
 
 /** Each setting as the files write it, by the name this file reads it under. Each is in force from the next turn, but the connection for requests with no tag, read at each. */
 const DEFS = {
-  lead: { key: "lead", default: TURN_DEFAULTS.lead, takes: { type: "text" }, perConnection: false, name: "Lead agent", about: "The agent definition that leads a turn.", effect: "turn" },
+  lead: {
+    key: "lead",
+    default: TURN_DEFAULTS.lead,
+    takes: { type: "text" },
+    orNone: true,
+    none: "no lead: no turn is played",
+    perConnection: false,
+    name: "Lead agent",
+    about: "The agent definition that leads a turn; the shipped config names the Author.",
+    effect: "turn",
+  },
   carry: {
     key: "carry",
     default: TURN_DEFAULTS.carry,
@@ -155,7 +167,7 @@ const DEFS = {
     none: "every one in full",
     perConnection: false,
     name: "Edited replies in the briefing",
-    about: "Tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named in one line.",
+    about: "Off as shipped, every edited reply is told with both its texts whole. Set, the tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named by message in one line, with no text.",
     effect: "turn",
   },
   window: {
@@ -227,7 +239,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
   const read = readConfig(await portTexts(files, scope), log, TURN_SETTINGS);
   // Each value is one its setting takes, so it is of the type the setting's `takes` says.
   return {
-    lead: read.value(DEFS.lead) as string,
+    lead: read.value(DEFS.lead) as string | null,
     carry: read.value(DEFS.carry) as Carry,
     previousRunMs: (read.value(DEFS.previousRun) as number) * 1000,
     hiddenReadable: read.value(DEFS.hiddenReadable) as boolean,

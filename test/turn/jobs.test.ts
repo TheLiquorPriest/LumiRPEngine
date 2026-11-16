@@ -213,7 +213,7 @@ test("an engine handler that throws is told to the log and to the live view of t
 
   expect(store.stateAt(second).state.world.entities.bram?.fields.mood).toBe("steady");
   expect(b.logged.some((l) => l.level === "error" && l.fields?.op === "set" && l.fields.error === "the set handler broke")).toBe(true);
-  expect(published.filter((e) => e.kind === "handler_failed").map((e) => [e.chat, e.data])).toContainEqual([CHAT, { op: "set", error: "the set handler broke" }]);
+  expect(published.filter((e) => e.kind === "handler_failed").map((e) => [e.chat, e.data])).toContainEqual([CHAT, expect.objectContaining({ op: "set", error: "the set handler broke", turn: first })]);
   expect(b.model.requests.map((r) => JSON.stringify(r.messages)).join("\n")).not.toContain("the set handler broke");
 });
 
@@ -228,5 +228,5 @@ test("an engine handler that throws while world_apply works out a call is told t
   expect(answered).not.toContain("the set handler broke");
   expect(b.turns.store.user(USER).stateAt(turn).state.world.entities.bram?.fields.mood).toBe("steady");
   expect(b.logged.some((l) => l.level === "error" && l.fields?.op === "set" && l.fields.error === "the set handler broke")).toBe(true);
-  expect(published.filter((e) => e.kind === "handler_failed").map((e) => [e.chat, e.data])).toContainEqual([CHAT, { op: "set", error: "the set handler broke" }]);
+  expect(published.filter((e) => e.kind === "handler_failed").map((e) => [e.chat, e.data])).toContainEqual([CHAT, { op: "set", error: "the set handler broke", turn, change: null }]);
 });

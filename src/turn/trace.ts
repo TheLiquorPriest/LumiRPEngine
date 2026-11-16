@@ -33,60 +33,84 @@ export interface TurnTrace extends TracePort {
   records(scope: Scope): Promise<TraceRecord[]>;
 }
 
+/** A turn folder that records are being written to: its place on disk, its chain of appends, the runs whose records go there, and the appends not settled. */
+interface Open {
+  folder: Promise<string | null>;
+  tail: Promise<unknown>;
+  runs: Set<string>;
+  writes: number;
+}
+
 export function turnTrace(deps: TraceDeps): TurnTrace {
-  /** Each turn folder's place on disk, once found. */
-  const folders = new Map<string, Promise<string | null>>();
+  /**
+   * Each folder records are being written to, by its scope: kept while a run's records go there or an append to it is not settled, then
+   * let go, so nothing is held for a turn whose run has ended. A past turn's folder is looked up again when it is read.
+   */
+  const open = new Map<string, Open>();
+  /** Each run going on, by RPH's id for it, from its records: its chat and the folder its records go to; let go when the run ends. */
+  const going = new Map<string, { chat: string; key: string }>();
   const pending = new Set<Promise<unknown>>();
-  /** Appends to one file run in the order given. */
-  const tails = new Map<string, Promise<unknown>>();
-  /** The chat of each run going on, by RPH's id for the run, from its records; let go when the run ends. */
-  const chats = new Map<string, string>();
+
+  const keyOf = (scope: Scope): string => JSON.stringify([scope.user, scope.chat, scope.session, scope.turn ?? null]);
+  const lookup = (scope: Scope): Promise<string | null> => (scope.turn === undefined ? deps.files.sessionDisk(scope) : deps.files.turnDisk(scope));
+  const release = (key: string): void => {
+    const at = open.get(key);
+    if (at !== undefined && at.runs.size === 0 && at.writes === 0) open.delete(key);
+  };
 
   /** Follows which runs are going on, and where: a turn's run ends with its `run_ended`, a job's with the view that says it ended. */
-  const follow = (record: TraceRecord): void => {
+  const follow = (record: TraceRecord, key: string, at: Open): void => {
     const { event } = record;
-    if (event.kind === "run_ended") chats.delete(record.run);
-    else if (event.kind === "job" && event.job.ended !== undefined) chats.delete(event.job.id);
-    else chats.set(record.run, record.scope.chat);
-  };
-
-  const folderOf = (scope: Scope): Promise<string | null> => {
-    const key = JSON.stringify([scope.user, scope.chat, scope.session, scope.turn ?? null]);
-    let found = folders.get(key);
-    if (found === undefined) {
-      found = scope.turn === undefined ? deps.files.sessionDisk(scope) : deps.files.turnDisk(scope);
-      folders.set(key, found);
+    const ended = event.kind === "run_ended" ? record.run : event.kind === "job" && event.job.ended !== undefined ? event.job.id : null;
+    if (ended === null) {
+      going.set(record.run, { chat: record.scope.chat, key });
+      at.runs.add(record.run);
+      return;
     }
-    return found;
+    const was = going.get(ended);
+    going.delete(ended);
+    at.runs.delete(ended);
+    if (was !== undefined && was.key !== key) {
+      open.get(was.key)?.runs.delete(ended);
+      release(was.key);
+    }
   };
 
-  const keep = (record: TraceRecord): void => {
-    const done = (async () => {
-      const folder = await folderOf(record.scope);
+  const keep = (record: TraceRecord, key: string, at: Open): void => {
+    at.writes++;
+    const next = at.tail.then(async () => {
+      const folder = await at.folder;
       if (folder === null) return;
-      const file = join(folder, TRANSCRIPTS, TRACE_FILE);
-      const before = tails.get(file) ?? Promise.resolve();
-      const next = before.then(async () => {
-        await mkdir(join(folder, TRANSCRIPTS), { recursive: true });
-        await appendFile(file, `${JSON.stringify(record)}\n`, "utf8");
+      await mkdir(join(folder, TRANSCRIPTS), { recursive: true });
+      await appendFile(join(folder, TRANSCRIPTS, TRACE_FILE), `${JSON.stringify(record)}\n`, "utf8");
+    });
+    at.tail = next.catch(() => undefined);
+    const done = next
+      .catch((error: unknown) => deps.log.error("A trace record could not be kept in the turn's folder.", { run: record.run, error: error instanceof Error ? error.message : String(error) }))
+      .finally(() => {
+        at.writes--;
+        release(key);
       });
-      tails.set(file, next.catch(() => undefined));
-      await next;
-    })().catch((error: unknown) => deps.log.error("A trace record could not be kept in the turn's folder.", { run: record.run, error: error instanceof Error ? error.message : String(error) }));
     pending.add(done);
     void done.finally(() => pending.delete(done));
   };
 
   return {
     event(record) {
-      follow(record);
+      const key = keyOf(record.scope);
+      let at = open.get(key);
+      if (at === undefined) {
+        at = { folder: lookup(record.scope), tail: Promise.resolve(), runs: new Set(), writes: 0 };
+        open.set(key, at);
+      }
+      follow(record, key, at);
       deps.runs.record(record);
       deps.live.publish(record.scope.chat, { kind: "trace", data: record });
-      keep(record);
+      keep(record, key, at);
     },
     delta(delta: TraceDelta) {
       deps.runs.delta(delta);
-      const chat = chats.get(delta.run);
+      const chat = going.get(delta.run)?.chat;
       if (chat !== undefined) deps.live.publish(chat, { kind: "delta", data: delta });
     },
     async flush() {
@@ -94,13 +118,13 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     },
     async records(scope) {
       while (pending.size > 0) await Promise.allSettled([...pending]);
-      const folder = await folderOf(scope);
+      const folder = await (open.get(keyOf(scope))?.folder ?? lookup(scope));
       if (folder === null) return [];
       const out: TraceRecord[] = [];
       const file = Bun.file(join(folder, TRANSCRIPTS, TRACE_FILE));
       // No record was kept yet: the run has not begun.
       if (!(await file.exists())) return [];
-      // A line torn by a crash, or written over, costs that line: the rest of the trace is read.
+      // A line torn by a crash, or written over, costs that line: the rest of the trace is read, and the log says how many were passed over.
       let unreadable = 0;
       for (const line of (await file.text()).split("\n")) {
         if (line.trim() === "") continue;

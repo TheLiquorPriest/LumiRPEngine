@@ -17,7 +17,7 @@ import type { AgentRef, JobRefusal, JobState, JobView, JsonValue, Scope } from "
 import { isRecord } from "../../shared/json";
 import type { Turns } from "../lane";
 import { turnSettings } from "../settings";
-import { NO_SESSION } from "../turns";
+import { NO_SESSION, turnErrorWords } from "../turns";
 import { type DoneEnough, doneEnough } from "./facts";
 import { bootstrapSettings } from "./settings";
 
@@ -184,6 +184,7 @@ export class BootstrapJobs {
     const skill = await loadGuidance(turns.files, scope).skill(BOOTSTRAP_SKILL);
     if (skill === undefined) return refused(409, `No bootstrap job was started: the skill ${BOOTSTRAP_SKILL} is switched off or missing in the files of chat ${chat}.`);
     const [{ lead }, { tokenLimit }] = await Promise.all([turnSettings(turns.files, scope, turns.env.log), bootstrapSettings(turns.files, scope, turns.env.log)]);
+    if (lead === null) return refused(409, await turnErrorWords(turns.files, scope, "no_lead"));
     const ask: BootstrapAsk = { relive, tokenLimit };
     this.#asking.set(place, ask);
     try {
