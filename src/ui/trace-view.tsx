@@ -440,7 +440,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
     case "tool_unheld":
       return <NoteHead icon="alert" title={`Tool ${event.tool} of ${event.definition}: ${UNHELD_WORDS[event.reason]}`} />;
     case "rule_failed":
-      return <NoteHead icon="alert" title={`Rule ${event.rule} (${event.path}) ran out of time on a text of ${counted(event.length, "character")}: counted as no match`} />;
+      return <NoteHead icon="alert" title={event.why === "time" ? `Rule ${event.rule} (${event.path}) ran out of time on a text of ${counted(event.length, "character")}: counted as no match` : `Rule ${event.rule} (${event.path}) could not run its command: ${event.detail}`} />;
     case "job":
       return (
         <div class="lre-stack">

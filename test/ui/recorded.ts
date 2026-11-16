@@ -340,7 +340,7 @@ export const CHATS: ChatsReply = {
   ],
 };
 
-const quiet = (over: Partial<LevelReflection> = {}): LevelReflection => ({ people: 0, things: 0, places: 0, groups: 0, records: 0, notable: [], open: 0, changed: null, note: null, ...over });
+const quiet = (over: Partial<LevelReflection> = {}): LevelReflection => ({ people: 0, things: 0, places: 0, groups: 0, records: 0, notable: [], open: 0, due: null, changed: null, note: null, ...over });
 
 /** The story's world as the store's tree holds it, every level with all its values (what it inherits among them). */
 export const WORLD: readonly LevelNode[] = [

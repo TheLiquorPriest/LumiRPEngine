@@ -106,8 +106,8 @@ export const STORY: StoryReply = {
     record: listOf([]),
   },
   horizon: [
-    { at: "the reeve's hall", ref: "place:hall", name: "The Reeve's Hall" },
-    { at: "a storm upriver", ref: null, name: null },
+    { at: "the reeve's hall", ref: "place:hall", name: "The Reeve's Hall", depth: 1 },
+    { at: "a storm upriver", ref: null, name: null, depth: "full" },
   ],
   futures: listOf([item("fu-1", "future", null, null, { text: "The reeve is found out at the spring fair." })]),
 };
