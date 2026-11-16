@@ -69,7 +69,7 @@ describe("the report's table", () => {
 });
 
 describe("the report's counts of the mind files and the story record", () => {
-  test("of a chat the run can't import, its mind files and story entries are counted against the same total, and named as in the backup only", async () => {
+  test("of a chat the run can't import, its mind files and story entries have none of the three ends: named with why, and the report does not pass", async () => {
     await withFixture(async (fixture, data) => {
       lumiverse(fixture, (db) => db.query(`UPDATE chats SET metadata = json_set(metadata, '$.${IDENT}.revision', 'rev-unreadable') WHERE id = ?`).run(CHAT.harness));
       const report = await migrated(fixture, data, 9);
@@ -80,11 +80,13 @@ describe("the report's counts of the mind files and the story record", () => {
       expect(text).toContain(landed(report, "mind-files"));
       expect(report.landed?.["mind-files"]).toEndWith(`0 version(s) of 0 file(s) of 0 character(s), 0 of the 5 found in today's areas; 5 version(s) of 1 chat(s) this run did not import (${why}): in the backup only`);
       expect(report.landed?.["story-record"]).toEndWith(`0 of the 8 entr(ies) found in today's records; 8 entr(ies) of 1 chat(s) this run did not import (${why}): in the backup only`);
-      // And the list of what is in the backup only names them, so nobody reads the run as complete.
-      const kept = text.slice(text.indexOf("Kept in the backup only"));
-      const what = (row: string): string => report.rows.find((r) => r.row === row)?.what ?? "";
-      expect(kept).toContain(`  ${what("mind-files")}: 5 version(s) of 1 chat(s) this run did not import (${why}), inside other rows' things`);
-      expect(kept).toContain(`  ${what("story-record")}: 8 entr(ies) of 1 chat(s) this run did not import (${why}), inside other rows' things`);
+      // Counted after the run (R-320, R-321): of a chat it did not carry, they end nowhere, are named with why, and the report does not pass.
+      for (const [row, n] of [["mind-files", 5], ["story-record", 8]] as const) {
+        const inside = report.rows.find((r) => r.row === row)?.inside;
+        expect(inside?.stranded).toEqual({ count: n, why: [`1 chat(s) this run did not import (${why})`] });
+        expect(text).toContain(`, and ${n} with no place (1 chat(s) this run did not import (${why}))`);
+      }
+      expect(report.refusals.length).toBeGreaterThan(0);
     });
   });
 

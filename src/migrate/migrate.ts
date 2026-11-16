@@ -19,7 +19,6 @@ import { openDatabase } from "../app/database";
 import { migrate as migrateTables, Migrations } from "../app/migrations";
 import { diskTexts, readConfig } from "../app/config-read";
 import { BUILD_MIGRATIONS } from "../build/schema";
-import { seedCarriedWorlds } from "../build/seed";
 import { CAST_MIGRATIONS, CAST_STORE_AREA } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { LORE_MIGRATIONS } from "../lore";
@@ -28,13 +27,13 @@ import type { WorldDoc } from "../shared/world";
 import { openStore, STORE_MIGRATIONS } from "../store";
 import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
-import { carry } from "./carry";
+import { carry, placesOf } from "./carry";
 import { checkConnectionsSteady } from "./connections";
 import { type CarriedRuns, chatsToImport, importChats } from "./import-chats";
 import { type ChatNames, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
-import { BACKUP_ONLY, type MigrationReport } from "./report";
+import { BACKUP_ONLY, chatEndOf, insideEnds, type MigrationReport, recountRows, refusalsOf } from "./report";
 import { MIGRATE_SETTINGS, type OwnerRow, ownerRowsOf } from "./setting-list";
 import { NO_PLACE_YET } from "./rows";
 import { importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
@@ -191,8 +190,14 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const kept = s.copyMigratedWorlds();
       report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };
       for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
-      // Build's own copy of each carried world: copied in, replaced where it is still what an earlier run put there, and kept where it was changed in RPE since.
-      report.worldsInBuild = seedCarriedWorlds(db, sources.userId);
+      // Build reads and writes the worlds in the store's own table, which the step above filled: no copy of its own is seeded.
+      // Each row counted again from what the run did (R-320, R-321): what of a chat it did not carry is not carried, and is named; what then does not balance is said, and the swap reads it.
+      step = "counting what the run did";
+      const placeOf = await placesOf(today, report.items, layout !== undefined);
+      const end = chatEndOf(report, (chat) => s.chat(chat) !== null);
+      recountRows(report, (i) => (i.fate === "carried" || i.fate === "attached" ? placeOf(i) : undefined), end);
+      insideEnds(report, end, layout !== undefined);
+      report.refusals = refusalsOf(report, { user: sources.userId, known: true, owner: null, earlier: [] }, { missing: null, undecided: null });
       step = "recording the run";
       keepRun(db, sources.userId, run, report, (row) => report.landed?.[row as keyof typeof report.landed] ?? (Object.hasOwn(NO_PLACE_YET, row) ? BACKUP_ONLY : ""));
     } finally {

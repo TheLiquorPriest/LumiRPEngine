@@ -7,7 +7,6 @@
 
 import type { OldListed, OldRecord } from "./old-records";
 import { type Exactly, type Holds, type Infer, shape } from "../app";
-import type { WorldsSeeded } from "../build/seed";
 import type { MigrationPage, PageChat, Waiting } from "./page";
 import type { MigrationReport } from "./report";
 
@@ -66,19 +65,12 @@ const waiting = shape.named(
     shape.object({ kind: shape.literal("chat"), chat: T, questions: N, staged: N, chips: N, reviewCards: N, rollback: shape.yesNo() }),
     shape.object({ kind: shape.literal("own"), agents: N, skills: N, texts: N }),
     shape.object({ kind: shape.literal("filing"), chat: T, characters: N, notes: shape.yesNo() }),
-    shape.object({ kind: shape.literal("world"), world: T, name: nullable(T) }),
   ),
-);
-
-const worldsInBuild = shape.named(
-  "WorldsInBuildShown",
-  "What a run did with each world it carried into Build's own copy, by the world's id: copied in, replaced (Build's copy was still a run's), unchanged, or kept as RPE has it (changed or made there); of those kept, which are newer on today's side too; and each world's name as today's index gives it. The last two are absent from a report kept before runs told them.",
-  shape.object({ copied: shape.list(T), replaced: shape.list(T), unchanged: shape.list(T), kept: shape.list(T), newer: opt(shape.list(T)), names: opt(shape.record(T)) }),
 );
 
 const report = shape.named(
   "MigrationReportShown",
-  "The last real run's report as the run printed it, whole (counts and checksums, never content): the page reads of it what became of each world in Build; every other field is the migration's own document, carried as JSON.",
+  "The last real run's report as the run printed it, whole (counts and checksums, never content): every field is the migration's own document, carried as JSON.",
   shape.object({
     format: json,
     at: json,
@@ -102,7 +94,8 @@ const report = shape.named(
     landed: json,
     carried: json,
     worldsInStore: json,
-    worldsInBuild: opt(worldsInBuild),
+    identifier: opt(json),
+    offRpe: opt(json),
     changes: json,
     refusals: json,
   }),
@@ -158,7 +151,6 @@ export const carriedTurnsReply = shape.named(
 );
 
 // The parts the page reads, held to the migration's own types.
-type WorldsMirrored = Holds<Exactly<Infer<typeof worldsInBuild>, WorldsSeeded>>;
 type OutcomeMirrored = Holds<Exactly<Infer<typeof outcome>, PageChat["outcome"]>>;
 type WaitingMirrored = Holds<Exactly<Infer<typeof waiting>, Waiting>>;
 type BackupMirrored = Holds<Exactly<NonNullable<MigrationShown["backup"]>, NonNullable<MigrationPage["backup"]>>>;
@@ -166,7 +158,7 @@ type GoingMirrored = Holds<Exactly<MigrationShown["goingBack"], MigrationPage["g
 type DifferenceMirrored = Holds<Exactly<Infer<typeof difference>, PageChat["check"]["differences"][number]>>;
 type ReportFieldsMirrored = Holds<Exactly<keyof NonNullable<MigrationShown["report"]>, keyof MigrationReport>>;
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [WorldsMirrored, OutcomeMirrored, WaitingMirrored, BackupMirrored, GoingMirrored, DifferenceMirrored, ReportFieldsMirrored];
+export type Mirrors = [OutcomeMirrored, WaitingMirrored, BackupMirrored, GoingMirrored, DifferenceMirrored, ReportFieldsMirrored];
 type CarriedMirrored = Holds<Exactly<Infer<typeof carriedTurnReply>, OldRecord>>;
 type CarriedListMirrored = Holds<Exactly<Infer<typeof carriedTurnsReply>["turns"][number], OldListed>>;
 /** The checks of the carried turns' routes, read by no one. */

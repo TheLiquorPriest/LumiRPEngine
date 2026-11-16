@@ -232,11 +232,12 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
 /**
  * Lumiverse's tables, made with the very statements of its `src/db/baseline.sql` (the stand-in's
  * `LUMIVERSE_DDL` for the tables the adapter reads, and `extensions` `:323-337` and `regex_scripts`
- * `:789-813` for the two the migration alone reads): the migration's door checks them before it reads.
+ * `:789-813` for the two the migration alone reads, `connection_profiles` `:122-133` for the chats still off RPE): the migration's door checks them before it reads.
  */
 const EXTRA_DDL = `
 CREATE TABLE extensions (id TEXT PRIMARY KEY, identifier TEXT NOT NULL UNIQUE, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL, description TEXT DEFAULT '', github TEXT NOT NULL, homepage TEXT DEFAULT '', permissions TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, installed_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), metadata TEXT DEFAULT '{}', install_scope TEXT NOT NULL DEFAULT 'operator', installed_by_user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, branch TEXT DEFAULT NULL);
 CREATE TABLE regex_scripts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, find_regex TEXT NOT NULL, replace_string TEXT NOT NULL DEFAULT '', flags TEXT NOT NULL DEFAULT 'gi', placement TEXT NOT NULL DEFAULT '["ai_output"]', scope TEXT NOT NULL DEFAULT 'global', scope_id TEXT, target TEXT NOT NULL DEFAULT 'response', min_depth INTEGER, max_depth INTEGER, trim_strings TEXT NOT NULL DEFAULT '[]', run_on_edit INTEGER NOT NULL DEFAULT 0, substitute_macros TEXT NOT NULL DEFAULT 'none', disabled INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), folder TEXT NOT NULL DEFAULT '', script_id TEXT NOT NULL DEFAULT '', pack_id TEXT, preset_id TEXT, character_id TEXT, actions TEXT NOT NULL DEFAULT '[]', owner_extension_identifier TEXT);
+CREATE TABLE connection_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, api_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', preset_id TEXT, is_default INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), has_api_key INTEGER NOT NULL DEFAULT 0, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE);
 `;
 
 /** Writes Lumiverse's database: WAL mode, as Lumiverse runs it. */

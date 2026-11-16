@@ -24,11 +24,12 @@ import { classifyRuntime, classifyStorage, EXTENSION_WIDE, type Classified, type
 import { namedFiles, readBytes, sha256 } from "./files";
 import { areaFiles, areaHead, countLedgers, countLink, countSettings, countWorldDoc, INSIDE_UNIT, MIND_FILE, recordBlobs, Tally, type Unreadable } from "./inside";
 import type { ChatRow, LumiverseDb } from "./lumiverse-db";
-import { changesSince, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
+import { CHAT_HELD, chatEndOf, changesSince, countRow, insideEnds, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
 import { placesOf, type Place } from "./carry";
-import { NO_PLACE_YET, ROW, ROWS, type RowId } from "./rows";
+import { ROW, ROWS, type RowId } from "./rows";
 import type { OwnerRow } from "./setting-list";
 import { runtimeOrigins } from "./today/lumiah/runtime/lumiverse";
+import { loopbackModel, loopsBack, runtimeBase } from "./today/lumiah/link/contract";
 import { openToday, type Sources, type Today } from "./today";
 
 export interface RehearseOptions {
@@ -271,6 +272,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       const read = await reader.read(chat.id as ChatId, userId);
       const before = tally.counts.get("ledger") ?? 0;
       const stories = tally.counts.get("story-record") ?? 0;
+      const held = new Map(CHAT_HELD.map((row) => [row, tally.counts.get(row) ?? 0]));
       countLedgers(read.ledgers, tally);
       for (const ledger of read.ledgers) {
         for (const rec of Object.values(ledger?.swipes ?? {})) {
@@ -292,7 +294,8 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       for (const f of Object.values(meta.learned)) nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", `a file of chat ${chat.id}'s learned area`);
       for (const h of [...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) nameBlob(`agents/blobs/${h}`, "assistant-threads", `a message or proposal of chat ${chat.id}'s assistant thread`);
       unreadable.push(...read.unreadable);
-      chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, turns: (tally.counts.get("ledger") ?? 0) - before, story: (tally.counts.get("story-record") ?? 0) - stories, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting, held: read.held });
+      const inside = Object.fromEntries(CHAT_HELD.flatMap((row) => ((tally.counts.get(row) ?? 0) - (held.get(row) ?? 0) > 0 ? [[row, (tally.counts.get(row) ?? 0) - (held.get(row) ?? 0)]] : [])));
+      chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, inside, turns: (tally.counts.get("ledger") ?? 0) - before, story: (tally.counts.get("story-record") ?? 0) - stories, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting, held: read.held });
     }
 
     // The agents engine's global workspace: its files, by the blobs they name.
@@ -420,22 +423,13 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     const places = new Map<Item, Place>(items.flatMap((i): [Item, Place][] => (i.fate === "carried" || i.fate === "attached" ? [[i, placeOf(i)]] : [])));
     const rows: RowReport[] = ROWS.map((r) => {
       const own = items.filter((i) => i.row === r.id);
-      const landing = (fate: "carried" | "attached"): number => own.filter((i) => i.fate === fate && places.get(i) === "lands").length;
-      // Only a row of the table of rows with no place yet may keep its things in the backup only.
-      const later = Object.hasOwn(NO_PLACE_YET, r.id) ? own.filter((i) => places.get(i) === "later").length : 0;
-      const none = own.flatMap((i) => {
-        const at = places.get(i);
-        if (at === undefined || at === "lands") return [];
-        return at === "later" ? (Object.hasOwn(NO_PLACE_YET, r.id) ? [] : ["this build has no place for it, and its row is not one that may be kept in the backup only"]) : [at.none];
-      });
       const unit = INSIDE_UNIT[r.id];
       return {
         row: r.id,
         what: r.what,
         found: r.found,
         ...("why" in r ? { why: r.why } : {}),
-        count: { found: own.length, carried: landing("carried"), attached: landing("attached"), archived: own.filter((i) => i.fate === "archived").length, backup: later },
-        stranded: none.length === 0 ? null : { count: none.length, why: [...new Set(none)] },
+        ...countRow(r.id, own, (i) => places.get(i)),
         bytes: own.reduce((n, i) => n + i.bytes, 0),
         digest: sha256(own.map((i) => `${i.where}\t${i.path}\t${i.sha256}`).join("\n")),
         inside: unit === undefined ? null : { count: tally.counts.get(r.id) ?? 0, unit },
@@ -449,6 +443,16 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     const disk = { backup: backupBytes, import: importBytes, total: backupBytes + importBytes, free: options.target === undefined ? null : await freeAt(options.target) };
     const logged = { debug: 0, info: 0, warn: 0, error: 0 };
     for (const line of standIn.logged) logged[line.level]++;
+    // RPE's connections once swapped: every connection in Lumiverse that reaches the runtime the run takes (R-109). A chat that was on today and is pinned to none of them, or to none at all, is his to put on RPE (N-14).
+    const taken = found.runtime.runtimes[0] ?? null;
+    const model = loopbackModel(sources.identifier);
+    const rpeConnections = new Set(taken === null ? [] : db.connectionProfiles().flatMap((c) => (loopsBack(c, model, [runtimeBase(taken.config.listen, taken.config.port)]) ? [c.id] : [])));
+    const offRpe = chatRows.flatMap((c) => {
+      if (readRun(c.metadata) === null && !isRecord(c.metadata[`lumiah_chat_${sources.identifier}`])) return [];
+      const pin = c.metadata.connection_profile_id;
+      const pinned = typeof pin === "string" && pin.trim() !== "" ? pin.trim() : null;
+      return pinned !== null && rpeConnections.has(pinned) ? [] : [{ chat: c.id, pinned }];
+    });
     const report: MigrationReport = {
       format: REPORT_FORMAT,
       at,
@@ -473,8 +477,12 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       carried: null,
       worldsInStore: null,
       changes: null,
+      identifier: sources.identifier,
+      offRpe,
       refusals: [],
     };
+    // Each row found only inside other rows' things gets its three ends where this run would put them, every chat as the import would take it.
+    insideEnds(report, chatEndOf(report, () => true), options.tree ?? false);
     report.refusals = refusalsOf(report, { user: sources.userId, known: found.username !== null, owner: options.rpe?.owner ?? null, earlier: options.rpe?.earlier ?? [] }, { missing: found.runtimeMissing, undecided: found.runtime.undecided });
     if (options.previous) report.changes = changesSince(options.previous, report);
     return report;

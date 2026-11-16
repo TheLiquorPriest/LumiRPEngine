@@ -5,13 +5,13 @@
 // today's own readers; the disk the real run will take. A run may be compared with the one before
 // it, since each is a full read of today's data: what was added, changed and gone since.
 
-import type { WorldsSeeded } from "../build/seed";
 import type { AttemptedWrite } from "./stand-in";
 import type { Unreadable } from "./inside";
 import type { LumiverseMarks } from "./lumiverse-db";
-import { type Fate, type Found, NO_PLACE_YET, type RowId } from "./rows";
+import { type Fate, type Found, NO_PLACE_YET, ROW, type RowId } from "./rows";
 import type { ChatEngine, JournalRead } from "./chats";
-import type { CarriedReport } from "./carry";
+import type { CarriedReport, Place } from "./carry";
+import { goingBack, swapSteps } from "./going-back";
 import type { RuntimeFolders } from "./runtime-folders";
 
 export const REPORT_FORMAT = "rpe-migration-report-v1";
@@ -51,8 +51,13 @@ export interface RowReport {
   bytes: number;
   /** One SHA-256 over every item's where, path and checksum, in order: equal digests, equal rows. */
   digest: string;
-  /** What the row's things inside other rows' files and entries count to, and what is counted. */
-  inside: { count: number; unit: string } | null;
+  /**
+   * What the row's things inside other rows' files and entries count to, and what is counted. For a
+   * row found only inside other rows' things, its own three ends too, counted from where the run puts
+   * them (`ends`), and those it has no place for, with why (`stranded`): the gate checks that the
+   * ends add up to the count. Both absent from a report kept before runs counted them.
+   */
+  inside: { count: number; unit: string; ends?: { carried: number; attached: number; archived: number }; stranded?: { count: number; why: string[] } | null } | null;
 }
 
 export interface ChatReport {
@@ -61,6 +66,8 @@ export interface ChatReport {
   worldId: string | null;
   messages: number;
   replies: number;
+  /** What its records hold of the rows found inside chats' things (pack state, knowledge, its places, story entries, unplayed replies, departures), by row. Absent from a report kept before runs counted them by chat. */
+  inside?: Partial<Record<RowId, number>>;
   turns: number;
   /** Entries its records' story parts hold, as stored: what the story-record row counts inside it. */
   story: number;
@@ -220,10 +227,17 @@ export interface MigrationReport {
    * for a rehearsal.
    */
   worldsInStore: { added: number; held: number; unreadable: number } | null;
-  /** What became of each carried world in Build's own table, by world id (`seedCarriedWorlds`); absent for a rehearsal. */
-  worldsInBuild?: WorldsSeeded;
   changes: Changes | null;
-  /** Why the real run won't start on this report; none: it may. */
+  /** The extension's identifier in Lumiverse, which the swap's steps and going back's name. Absent from a report kept before runs named it. */
+  identifier?: string;
+  /**
+   * Each chat that was on today and is on none of RPE's connections once swapped (N-14, R-109): RPE's are every connection in
+   * Lumiverse that reaches the runtime the run takes. By id, with the connection it is pinned to in Lumiverse (null: none, so it
+   * follows the connection active for him). RPE writes nothing into his chats: choosing one of RPE's for it puts it on RPE.
+   * Absent from a report kept before runs listed them.
+   */
+  offRpe?: { chat: string; pinned: string | null }[];
+  /** Why the real run won't start on this report; none: it may. After a real run, what of it did not balance once counted from what the run did, which the swap reads. */
   refusals: string[];
 }
 
@@ -257,10 +271,133 @@ export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified
   for (const r of report.rows) {
     const { found, carried, attached, archived, backup } = r.count;
     if (found !== carried + attached + archived + backup) out.push(`Row "${r.what}": ${found} found, but ${carried} carried, ${attached} attached, ${archived} archived and ${backup} ${KEPT}${r.stranded ? `; ${r.stranded.count} have no place in this run: ${r.stranded.why.join("; ")}` : ""}.`);
+    // A row found only inside other rows' things has its own three ends, which must add up to what was found of it.
+    const i = r.inside;
+    if (r.found === "inside" && i !== null && i.ends !== undefined) {
+      const e = i.ends;
+      if (i.count !== e.carried + e.attached + e.archived) out.push(`Row "${r.what}": ${i.count} found inside other rows' things, but ${e.carried} carried, ${e.attached} attached and ${e.archived} archived${i.stranded ? `; ${i.stranded.count} have no place in this run: ${i.stranded.why.join("; ")}` : ""}.`);
+    }
   }
   if (report.notClassified.length > 0) out.push(`${report.notClassified.length} found, not classified: ${report.notClassified.map((i) => `${i.where}: ${i.path}`).join("; ")}.`);
   if (report.disk.free !== null && report.disk.free < report.disk.total) out.push(`The real run needs ${report.disk.total} bytes where it writes, and ${report.disk.free} are free.`);
   return out;
+}
+
+/** Where a run's things of one chat end: carried (the run imported it, or an earlier run's import of it stands in RPE), or not, with why. */
+export type ChatEnd = { carried: true } | { carried: false; why: string };
+
+/** The chat an item belongs to, by its path: its entries in Lumiverse's database, its run data, its area of the harness's docs; null for one of no chat. */
+export function chatOfItem(item: Pick<Item, "path">): string | null {
+  return /^(?:chats|runs|harness\/docs\/chats)\/([^/]+)\//.exec(item.path)?.[1] ?? null;
+}
+
+/**
+ * How each chat's things end in a run, as its import's outcome says: a chat it imported, or one an
+ * earlier run's import of which stands (`stands`), is carried; one it did not import is not, with
+ * the outcome's words. A chat the run has no outcome for (before the import, or a rehearsal) is
+ * taken as the import would take it: carried.
+ */
+export function chatEndOf(report: Pick<MigrationReport, "imports">, stands: (chat: string) => boolean): (chat: string) => ChatEnd {
+  const imports = new Map((report.imports ?? []).map((c) => [c.chatId, c]));
+  return (chat) => {
+    const c = imports.get(chat);
+    if (c === undefined || c.outcome === "imported" || c.outcome === "replaced" || stands(chat)) return { carried: true };
+    return { carried: false, why: `${c.outcome}${c.why ? `: ${c.why}` : ""}` };
+  };
+}
+
+/**
+ * A row's own things counted by where the run puts each (`place`; undefined for one archived or not
+ * classified): carried and attached where they land, archived, kept in the backup only where the
+ * row may be (`NO_PLACE_YET`), and those with no place, with why.
+ */
+export function countRow(row: RowId, own: readonly Item[], place: (item: Item) => Place | undefined): Pick<RowReport, "count" | "stranded"> {
+  const landing = (fate: "carried" | "attached"): number => own.filter((i) => i.fate === fate && place(i) === "lands").length;
+  const mayWait = Object.hasOwn(NO_PLACE_YET, row);
+  const later = mayWait ? own.filter((i) => place(i) === "later").length : 0;
+  const none = own.flatMap((i) => {
+    const at = place(i);
+    if (at === undefined || at === "lands") return [];
+    return at === "later" ? (mayWait ? [] : ["this build has no place for it, and its row is not one that may be kept in the backup only"]) : [at.none];
+  });
+  return {
+    count: { found: own.length, carried: landing("carried"), attached: landing("attached"), archived: own.filter((i) => i.fate === "archived").length, backup: later },
+    stranded: none.length === 0 ? null : { count: none.length, why: [...new Set(none)] },
+  };
+}
+
+/**
+ * Counts each row's own things again from what the run did (R-320): a thing of a chat the run did not
+ * carry is not carried, whatever was planned for it, and is named with why.
+ */
+export function recountRows(report: Pick<MigrationReport, "rows" | "items">, place: (item: Item) => Place | undefined, end: (chat: string) => ChatEnd): void {
+  const after = (item: Item): Place | undefined => {
+    const at = place(item);
+    const chat = at === "lands" ? chatOfItem(item) : null;
+    if (chat === null) return at;
+    const e = end(chat);
+    return e.carried ? at : { none: `chat ${chat} was not carried (${e.why})` };
+  };
+  for (const r of report.rows) Object.assign(r, countRow(r.row, report.items.filter((i) => i.row === r.row), after));
+}
+
+/** The rows found inside chats' records, counted chat by chat (`ChatReport.inside`). */
+export const CHAT_HELD: readonly RowId[] = ["pack-state", "secret-holdings", "chat-places", "story-record", "unplayed", "departures"];
+
+/**
+ * Each row found only inside other rows' things gets its three ends (R-321): before the run, where
+ * the run would put them; after a real run (`report.carried` set), from what it did. Of the mind
+ * files and the story record the carry's own counts say; of the rest held in chats' records, each
+ * chat's count ends where its chat does; of the rest, the row's fate where its things have a place.
+ * `tree`: whether the run is given the file tree's places, where GUIDANCE.md and his own agents go.
+ */
+export function insideEnds(report: Pick<MigrationReport, "rows" | "chats" | "carried">, end: (chat: string) => ChatEnd, tree: boolean): void {
+  const c = report.carried;
+  for (const r of report.rows) {
+    const inside = r.inside;
+    if (r.found !== "inside" || inside === null) continue;
+    const fate = ROW[r.row].fate;
+    const ends = { carried: 0, attached: 0, archived: 0 };
+    const none: string[] = [];
+    let stranded = 0;
+    const put = (n: number, to: Fate | { none: string }): void => {
+      if (n <= 0) return;
+      if (typeof to === "string") ends[to] += n;
+      else {
+        stranded += n;
+        none.push(to.none);
+      }
+    };
+    const apart = (list: readonly Apart[]): void => {
+      for (const a of list) put(a.count, a.kept ? fate : { none: `${a.chats} chat(s) this run did not import (${a.why})` });
+    };
+    if (r.row === "mind-files" && c !== null) {
+      const m = c.minds;
+      put(m.versions - m.unlisted + m.shared, "attached");
+      // Versions no imported turn ended with, and those whose text today's clean-up had removed (listed as not read): kept in the backup, and listed.
+      put(m.untied + m.gone, "archived");
+      apart(m.apart);
+    } else if (r.row === "story-record" && c !== null) {
+      const s = c.story;
+      put(s.beats + s.struck + s.futures + s.castings + s.shared, "carried");
+      // Damaged entries today's reader leaves out are kept word for word beside their turns; those on records no imported turn holds are kept in the backup, and listed.
+      put(s.leftOut, "attached");
+      put(s.unheld, "archived");
+      apart(s.apart);
+    } else if (CHAT_HELD.includes(r.row)) {
+      let seen = 0;
+      for (const chat of report.chats) {
+        const n = chat.inside?.[r.row] ?? 0;
+        seen += n;
+        const e = end(chat.chatId);
+        put(n, e.carried ? fate : { none: `chat ${chat.chatId} was not carried (${e.why})` });
+      }
+      put(inside.count - seen, fate);
+    } else if ((r.row === "guidance" || r.row === "own-agents") && !tree) put(inside.count, { none: "this run was not given the file tree's places" });
+    else put(inside.count, fate);
+    inside.ends = ends;
+    inside.stranded = stranded === 0 ? null : { count: stranded, why: [...new Set(none)] };
+  }
 }
 
 /** What changed between an earlier report and this one. */
@@ -289,26 +426,13 @@ export function changesSince(before: MigrationReport, now: Pick<MigrationReport,
   return { since: before.at, added, changed, gone, rows, chats };
 }
 
-/** Whether a row keeps anything in the backup only: things of its own there, or, for a row found only inside other rows' things and with no place yet, any it holds. */
-function keptOnly(r: RowReport): boolean {
-  return r.count.backup > 0 || (r.found === "inside" && Object.hasOwn(NO_PLACE_YET, r.row) && (r.inside?.count ?? 0) > 0);
-}
-
-/**
- * What of the rows found inside chats' things a real run keeps in the backup only, by row: what is of
- * chats it did not import and no earlier run's import of which stands, and of the chats it did
- * import, what no imported turn ended with or holds. (A report kept by an earlier build has none.)
- */
-function keptInside(report: MigrationReport): { row: RowId; text: string }[] {
-  const c = report.carried;
-  if (c === null) return [];
-  const apart = (row: RowId, list: readonly Apart[] | undefined, unit: string) => (list ?? []).filter((a) => !a.kept).map((a) => ({ row, text: `${a.count} ${unit} of ${a.chats} chat(s) this run did not import (${a.why})` }));
-  return [
-    ...apart("mind-files", c.minds.apart, "version(s)"),
-    ...(c.minds.untied > 0 ? [{ row: "mind-files" as const, text: `${c.minds.untied} version(s) in areas no imported turn ended with` }] : []),
-    ...apart("story-record", c.story.apart, "entr(ies)"),
-    ...(c.story.unheld > 0 ? [{ row: "story-record" as const, text: `${c.story.unheld} entr(ies) on records no imported turn holds` }] : []),
-  ];
+/** A row's count inside other rows' things, with its own three ends where it is found only there. */
+function insideWords(r: RowReport): string {
+  const i = r.inside;
+  if (i === null) return "";
+  const e = i.ends;
+  const ends = r.found === "inside" && e !== undefined ? ` = ${e.carried} + ${e.attached} + ${e.archived}${i.stranded ? `, and ${i.stranded.count} with no place (${i.stranded.why.join("; ")})` : ""}` : "";
+  return `; inside: ${i.count} ${i.unit}${ends}`;
 }
 
 /** The report in plain words, as the rehearsal prints it. */
@@ -322,7 +446,7 @@ export function reportText(report: MigrationReport): string {
   for (const r of report.rows) {
     const c = r.count;
     const own = r.found === "not read" ? `not read: ${r.why ?? ""}` : `${c.found} = ${c.carried} + ${c.attached} + ${c.archived} + ${c.backup} (${r.bytes})`;
-    lines.push(`  ${r.what}: ${own}${r.inside ? `; inside: ${r.inside.count} ${r.inside.unit}` : ""}`);
+    lines.push(`  ${r.what}: ${own}${insideWords(r)}`);
   }
   if (report.notClassified.length > 0) {
     lines.push("", "Found, not classified:");
@@ -334,6 +458,11 @@ export function reportText(report: MigrationReport): string {
     const waits = [c.waiting.questions > 0 ? `${c.waiting.questions} keep-or-discard question(s)` : "", c.waiting.staged > 0 ? "a staged action" : "", c.waiting.chips > 0 ? `${c.waiting.chips} chip(s), ${c.waiting.reviewCards} of them review cards` : "", c.waiting.rollback ? "a rollback that was never applied" : "", held.waiting.length > 0 ? `${held.waiting.length} held write(s) still waiting for a reply that is under way (${held.waiting.map((w) => w.kind).join(", ")}), which no fold applies` : ""].filter((w) => w !== "");
     const landed = [held.landed > 0 ? `${held.landed} held write(s) landed on their turns` : "", held.refused > 0 ? `${held.refused} held write(s) refused as their window closed` : ""].filter((w) => w !== "");
     lines.push(`  ${c.chatId} (${c.engine ?? "no world"}): ${c.turns} turns over ${c.replies} replies; journal ${c.journal}${c.underWay > 0 ? `; ${c.underWay} turn(s) under way` : ""}${landed.length > 0 ? `; ${landed.join(", ")}` : ""}${waits.length > 0 ? `; waiting: ${waits.join(", ")}` : ""}`);
+  }
+  // The chats he must put on RPE himself (N-14): RPE plays only what reaches it on its own connections, and writes nothing into his chats.
+  if ((report.offRpe ?? []).length > 0) {
+    lines.push("", "Chats that were on today and are on none of RPE's connections once swapped (every connection that reaches today's runtime becomes RPE's): in Lumiverse, choose one of RPE's connections for each, and it is on RPE.");
+    for (const c of report.offRpe ?? []) lines.push(`  ${c.chat}: ${c.pinned === null ? "pinned to no connection, so it follows the one active for you" : `pinned to connection ${c.pinned}`}`);
   }
   if (report.imports !== null) {
     lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against today's fold");
@@ -375,29 +504,37 @@ export function reportText(report: MigrationReport): string {
   lines.push("", `In Lumiverse, left as they are: ${m.engineBooks} engine book(s) with ${m.engineEntries} entries, attached to ${m.chatsWithEngineBook} chat(s); ${m.markedEntries} entries of your own books with engine fields; ${m.regexScripts} regex script(s); ${m.presetBlocks} preset block(s) and ${m.outletReferences} outlet reference(s); ${m.panelMessages} message(s) the panels put in your chats; ${m.chatsPinned} chat(s) pinned to the engine's connection, ${m.chatsPinnedToModel} of them to a model too; ${m.schedulerExclusions === null ? "no scheduler exclusions set" : `${m.schedulerExclusions.listed} origin(s) on the scheduler's exclusions, ${m.schedulerExclusions.engine} of them the engine's address`}.`);
   lines.push("", `Disk: the backup takes ${report.disk.backup} bytes and the import ${report.disk.import}, ${report.disk.total} in all${report.disk.free === null ? "" : `; ${report.disk.free} are free`}.`);
   if (report.backup) lines.push(`Backup taken: ${report.backup.path} (${report.backup.bytes} bytes, sha256 ${report.backup.sha256}).`);
+  // Each world revision, by its path, with its checksum: what the real run copies into RPE byte for byte.
+  const revisions = report.items.filter((i) => i.row === "worlds" && /^worlds\/[^/]+\/rev\/[^/]+\.json$/.test(i.path));
+  if (revisions.length > 0) {
+    lines.push("", `World revisions ${report.mode === "real run" ? "copied" : "the real run copies"}, byte for byte, with their checksums:`);
+    for (const i of revisions) lines.push(`  ${i.path}: sha256 ${i.sha256}`);
+  }
+  // What the depth engine left, kind by kind (N-6): archived, kept in the backup, and nothing of it loaded.
+  const depth = new Map<string, number>();
+  for (const i of report.items) if (i.row === "depth-engine") depth.set(i.note ?? "", (depth.get(i.note ?? "") ?? 0) + 1);
+  if (depth.size > 0) {
+    lines.push("", "What the depth engine left, archived in the backup and not loaded, by kind:");
+    for (const [kind, n] of depth) lines.push(`  ${n} × ${kind}`);
+  }
+  // The swap's steps, and going back's with the previous build's permissions by name (R-80), as the swap and going back say them.
+  if (report.identifier !== undefined) {
+    const taken = report.runtime?.taken ?? null;
+    lines.push("", "The swap, once you choose to make it:", ...swapSteps({ identifier: report.identifier }));
+    lines.push("", ...goingBack({ identifier: report.identifier, runtime: taken === null ? null : { name: taken.name, source: taken.source }, downRun: false }));
+  }
   if (report.landed) {
     lines.push("", "Where each row's things are now in RPE:");
     for (const r of report.rows) {
       const at = report.landed[r.row];
       if (at !== undefined) lines.push(`  ${r.what}: ${at}`);
-      else if (keptOnly(r)) lines.push(`  ${r.what}: ${BACKUP_ONLY}`);
+      else if (r.count.backup > 0) lines.push(`  ${r.what}: ${BACKUP_ONLY}`);
       else if (r.count.archived > 0) lines.push(`  ${r.what}: archived, kept in the backup for good, as the plan has it`);
     }
   }
   if (report.worldsInStore) {
     const w = report.worldsInStore;
     lines.push("", `World revisions RPE's store keeps for the imported chats: ${w.added} added, ${w.held} kept already, ${w.unreadable} left out as not a world document${w.unreadable > 0 ? " (listed under what could not be read)" : ""}.`);
-  }
-  if (report.worldsInBuild) {
-    const w = report.worldsInBuild;
-    const named = (id: string): string => (w.names?.[id] === undefined ? id : `${w.names[id]} (${id})`);
-    lines.push("", "Worlds in Build, which edits RPE's own copy of each:");
-    for (const id of w.copied) lines.push(`  ${named(id)}: copied in`);
-    for (const id of w.replaced) lines.push(`  ${named(id)}: replaced by this run's files, as Build's copy was still the one a run put there`);
-    for (const id of w.unchanged) lines.push(`  ${named(id)}: unchanged, as Build's copy is this run's files already`);
-    for (const id of w.kept) lines.push(`  ${named(id)}: changed or removed in RPE since a run put it there, so kept as RPE has it`);
-    if (w.copied.length + w.replaced.length + w.unchanged.length + w.kept.length === 0) lines.push("  none");
-    for (const id of w.newer ?? []) lines.push("", `Waiting on you: the world ${named(id)} was changed in RPE's Build, and on today's side too, since a run put it into Build. Build keeps its own; today's newer files are in RPE's copy of today's worlds and in the backup, not in Build.`);
   }
   if (report.carried) {
     const { settings, connections, ownFiles } = report.carried;
@@ -448,16 +585,12 @@ export function reportText(report: MigrationReport): string {
     const c = report.changes;
     lines.push("", `Since the run of ${c.since}: ${c.added.length} added, ${c.changed.length} changed, ${c.gone.length} gone; ${c.rows.length} row(s) and ${c.chats.length} chat(s) differ.`);
   }
-  // Last, so that nobody reads such a run as complete: what it keeps in the backup only, by row; and what of the rows found inside chats' things it did not carry.
-  const kept = report.rows.filter(keptOnly);
-  const inside = keptInside(report);
-  if (kept.length + inside.length > 0) {
-    const total = kept.reduce((n, r) => n + r.count.backup, 0);
-    const header = report.mode !== "real run" ? "The real run will keep these in the backup only, as this build has no place for them in RPE yet:" : inside.length === 0 ? "Kept in the backup only, as this build has no place for them in RPE yet: this run did not carry everything. A later run carries them once it has a place for them." : "Kept in the backup only: this run did not carry everything. A later run carries them once this build has a place for them, or once it imports the chats they are in.";
-    lines.push("", header);
-    for (const r of kept) lines.push(`  ${r.what}: ${r.count.backup > 0 ? `${r.count.backup} thing(s)` : `${r.inside?.count ?? 0} ${r.inside?.unit ?? ""}, inside other rows' things`}`);
-    for (const i of inside) lines.push(`  ${report.rows.find((r) => r.row === i.row)?.what ?? i.row}: ${i.text}, inside other rows' things`);
-    lines.push(`  In all: ${total} thing(s), of ${kept.length} row(s).`);
+  // Last, so that nobody reads such a run as complete: what it keeps in the backup only, by row.
+  const kept = report.rows.filter((r) => r.count.backup > 0);
+  if (kept.length > 0) {
+    lines.push("", report.mode !== "real run" ? "The real run will keep these in the backup only, as this build has no place for them in RPE yet:" : "Kept in the backup only, as this build has no place for them in RPE yet: this run did not carry everything. A later run carries them once it has a place for them.");
+    for (const r of kept) lines.push(`  ${r.what}: ${r.count.backup} thing(s)`);
+    lines.push(`  In all: ${kept.reduce((n, r) => n + r.count.backup, 0)} thing(s), of ${kept.length} row(s).`);
   }
   return `${lines.join("\n")}\n`;
 }

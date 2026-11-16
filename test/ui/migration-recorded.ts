@@ -13,11 +13,11 @@ const STEPS = goingBack({ identifier: "lumi_rp_engine", runtime: { name: "lamp-h
 
 export const NOT_RUN: MigrationReply = { report: null, text: null, chats: [], backup: null, waiting: [], goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] }, lumiverse: null };
 
-/** The report's own document is carried as JSON; the page reads of it what became of each world in Build. */
-export const REPORT: Omit<MigrationReportShown, "worldsInBuild"> = { format: 1, at: null, mode: null, layout: null, database: null, rows: null, items: null, notClassified: null, chats: null, unreadable: null, unsent: null, standIn: null, lumiverse: null, disk: null, underWay: null, imports: null, backup: null, landed: null, carried: null, worldsInStore: null, changes: null, refusals: null };
+/** The report's own document is carried as JSON. */
+export const REPORT: MigrationReportShown = { format: 1, at: null, mode: null, layout: null, database: null, rows: null, items: null, notClassified: null, chats: null, unreadable: null, unsent: null, standIn: null, lumiverse: null, disk: null, underWay: null, imports: null, backup: null, landed: null, carried: null, worldsInStore: null, changes: null, refusals: null };
 
 export const MIGRATED: MigrationReply = {
-  report: { ...REPORT, worldsInBuild: { copied: ["w-harbour"], replaced: ["w-moor"], unchanged: [], kept: ["w-isle", "w-old"], newer: ["w-isle"], names: { "w-harbour": "Harbour Town", "w-isle": "The Isle" } } },
+  report: REPORT,
   text: [
     "Migration report: the real run of 13 Nov 2026, 21:04.",
     "Chats:",
@@ -55,7 +55,6 @@ export const MIGRATED: MigrationReply = {
     { kind: "chat", chat: "chat-harbour", questions: 1, staged: 2, chips: 0, reviewCards: 1, rollback: true },
     { kind: "own", agents: 2, skills: 1, texts: 3 },
     { kind: "filing", chat: "chat-calder", characters: 2, notes: true },
-    { kind: "world", world: "w-isle", name: "The Isle" },
   ],
   goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] },
   lumiverse: null,
