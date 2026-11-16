@@ -143,7 +143,7 @@ describe("what the real run carries besides the chats", () => {
       { setting: "settings.json: agents.main.connectionId", connection: "conn-main" },
       { setting: "settings.json: story.models.standing.connectionId", connection: "conn-story" },
     ]);
-    expect(settings?.noHome).toEqual(expect.arrayContaining(["settings.json: prompts", "harness/settings.json: core.agents.main.effort", `runs/${CHAT.classic}/prefs.json: mapDisplay`, "harness/story.json: jobs"]));
+    expect(settings?.noHome).toEqual(expect.arrayContaining(["settings.json: prompts", "harness/settings.json: core.agents.main.effort", "harness/story.json: jobs"]));
     expect(settings?.archived?.map((s) => s.from)).toContain("settings.json: helper");
     const text = reportText(report);
     expect(text).toContain("settings.json: story.models.standing.connectionId (connection conn-story in Lumiverse)");

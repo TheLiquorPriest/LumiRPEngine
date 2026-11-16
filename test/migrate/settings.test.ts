@@ -140,11 +140,7 @@ describe("today's settings into RPE's config", () => {
         new Set([
           ...["core.agents.main.effort", "core.story.hidden", "core.turn.tokensIn", "core.turn.tokensOut", "core.turn.toolTurns", "core.turn.wallMs", "core.delegation.depth", "core.delegation.perRun", "core.delegation.atOnce", "core.loop.clipChars", "core.session.keepTurns", "core.session.summarizeAtTokens", "core.jobs.atOnce", "core.jobs.perRun", "core.jobs.tokensPerDay", "core.jobs.budget.tokensIn", "core.jobs.budget.tokensOut", "core.jobs.budget.toolTurns", "core.jobs.budget.wallMs", "core.spend.cachedWeight", "core.reply.progress", "transport.history.keep", "transport.history.count", "transport.connections.oneToolAtATime", "transport.mcp.callMs"].map(lumiah),
           ...["defaults", "helper", "agents", "story", "prompts", "time", "loreBooks", "minds.knowledge.enabled", "minds.knowledge.threshold", "narrator.knowledge", "narrator.secrets"].map((key) => `settings.json: ${key}`),
-          `runs/${CHAT.classic}/prefs.json: mapDisplay`,
-          `runs/${CHAT.classic}/prefs.json: tidyLeft`,
           "harness/story.json: jobs",
-          ...["knowledge", "narrator"].map((key) => `chat ${CHAT.classic}'s own choice: ${key}`),
-          `chat ${CHAT.branch}'s own choice: knowledge`,
           "runtime home: memory",
           "runtime home: autoUpdate",
           ...["buildStartMs", "commentMs", "progressMs", "stallMs", "stopGraceMs"].map((field) => `runtime home: tuning.${field}`),

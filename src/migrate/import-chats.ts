@@ -56,24 +56,21 @@ export interface ChatToImport {
   swipes: ReadonlyMap<string, SwipeFacts>;
   /** Lumiverse's own note on a branch: the chat it was made from, and the message it was made at. */
   branch: { from: string; at: string } | null;
-  /** Whether the engine was switched on for the chat today: LumiAH's own switch where it kept one, else on, as the chat's metadata holds its run. */
+  /** Whether the engine was switched on for the chat today: LumiAH's own switch for a chat it plays, else on, as the chat's metadata holds its run. */
   wasOn: boolean;
   /** The engine that played it, as the chat's own choice holds it (classic where none). */
   engine: string;
 }
 
-/** Where LumiAH's `chats.json` says the engine is switched on or off, by chat. */
-function switchedOn(text: string | null): Map<string, boolean> {
-  const out = new Map<string, boolean>();
+/** The chats LumiAH's own `harness/chats.json` says the engine is switched on for; null where it keeps no such file. */
+function switchedOn(text: string | null): Set<string> | null {
   let doc: unknown = null;
   try {
     doc = text === null ? null : (JSON.parse(text) as unknown);
   } catch {
-    return out;
+    return null;
   }
-  const on = isRecord(doc) ? doc.on : undefined;
-  if (isRecord(on)) for (const [chat, value] of Object.entries(on)) if (typeof value === "boolean") out.set(chat, value);
-  return out;
+  return isRecord(doc) && isRecord(doc.on) ? new Set(Object.keys(doc.on)) : null;
 }
 
 /** Every chat of the user's that plays a world, read by today's reader; and those today's reader can't open, with why (fixed words). */
@@ -81,7 +78,7 @@ export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport
   const user = today.sources.userId as UserId;
   const chats: ChatToImport[] = [];
   const notOpened: { chatId: string; why: string }[] = [];
-  const switched = switchedOn(await today.userView.read("chats.json"));
+  const switched = switchedOn(await today.userView.read("harness/chats.json"));
   for (const row of today.chats) {
     const run = readRun(row.metadata);
     if (!run) continue;
@@ -100,7 +97,7 @@ export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport
       revisions: read.revisions,
       swipes: today.standIn.swipes(row.id as ChatId),
       branch: typeof from === "string" && typeof at === "string" ? { from, at } : null,
-      wasOn: switched.get(row.id) ?? true,
+      wasOn: switched === null || switched.has(row.id) || chatKnowledgePrefsOf(row.metadata).engine !== "harness",
       engine: chatKnowledgePrefsOf(row.metadata).engine ?? "classic",
     });
   }
@@ -230,7 +227,7 @@ interface Imported {
 function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToImport, link: Link | null, turnOfShared: (link: Link, index: number, swipe: number) => string | null): Imported {
   const chain = chat.input.chain;
   const id = chat.chatId;
-  if (link) s.branchChat({ id, from: link.from, map: link.map, at: link.at });
+  if (link) s.branchChat({ id, from: link.from, map: link.map, at: link.at, seed: chat.run.runSeed, started: chat.run.startedAt, wasOn: chat.wasOn, engine: chat.engine });
   else s.createChat({ id, world: chat.run.worldId as WorldId, revision: chat.run.revision, seed: chat.run.runSeed, started: chat.run.startedAt, wasOn: chat.wasOn, engine: chat.engine });
   const facts = (m: ChainMessage): SwipeFacts | undefined => chat.swipes.get(m.id);
   const hashOf = (m: ChainMessage, swipe: number): string => facts(m)?.hashes[swipe] ?? textHash(m.swipes[swipe] ?? "");
