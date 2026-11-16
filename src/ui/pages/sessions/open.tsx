@@ -162,7 +162,7 @@ export function SessionOpen(props: SessionOpenProps) {
   const [said, setSaid] = useState<string | null>(null);
   const [made, setMade] = useState<CarryMode | null>(null);
   const gate = useSelect(app.gate, (open) => open.has(chat));
-  const perPage = useUiSetting("sessionsAtATime");
+  const perPage = useUiSetting("rowsAtOnce");
   const turns = usePaged(
     (cursor) => app.client.call("GET /api/v1/chats/:chat/sessions/:session/turns", { chat, session: session.id }, { query: { limit: perPage, ...(cursor === undefined ? {} : { cursor }) } }).then((page): PageOf<SessionTurnRow> => ({ items: page.items, next: page.next })),
     [chat, session.id],

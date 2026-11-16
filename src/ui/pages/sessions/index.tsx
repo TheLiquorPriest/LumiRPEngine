@@ -132,7 +132,7 @@ export function SessionsPage(props: { chat: string; at: readonly string[] | unde
   const app = useApp();
   const { chat } = props;
   const [changed, setChanged] = useState<ReadonlyMap<string, SessionShown>>(new Map());
-  const perPage = useUiSetting("sessionsAtATime");
+  const perPage = useUiSetting("rowsAtOnce");
   const list = usePaged((cursor) => app.client.call("GET /api/v1/chats/:chat/sessions", { chat }, { query: { limit: perPage, ...(cursor === undefined ? {} : { cursor }) } }), [chat]);
   // The route lists in the order opened; the newest are shown first, so the list is read to its end.
   useEffect(() => {

@@ -145,7 +145,7 @@ function ProposalCard(props: { p: LoreProposal; onDecided(done: ProposalDecided)
 export function ProposalsSection(props: { chat: string; onTurn(turn: string): void; onWritten(): void }) {
   const app = useApp();
   const { chat } = props;
-  const perPage = useUiSetting("lorePerPage");
+  const perPage = useUiSetting("rowsAtOnce");
   const [all, setAll] = useState(false);
   const [decided, setDecided] = useState(false);
   const [done, setDone] = useState<ProposalDecided | null>(null);
@@ -292,7 +292,7 @@ function WriteCard(props: { w: LoreWrite; onPutBack(done: { write: LoreWrite; of
 /** Every write RPE made to his lore, newest first, each put back on his word. */
 export function WritesSection(props: { reload: number }) {
   const app = useApp();
-  const perPage = useUiSetting("lorePerPage");
+  const perPage = useUiSetting("rowsAtOnce");
   const [changed, setChanged] = useState<ReadonlyMap<number, LoreWrite>>(new Map());
   const list = usePaged((cursor) => app.client.call("GET /api/v1/lore/writes", {}, { query: { limit: perPage, ...(cursor === undefined ? {} : { cursor }) } }), [props.reload]);
   const items = list.items.map((w) => changed.get(w.id) ?? w);
