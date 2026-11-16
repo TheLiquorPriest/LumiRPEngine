@@ -11,8 +11,12 @@
 // service switched off. A failure anywhere from the stop on puts back what was done, in reverse:
 // RPE's service stopped, its config as it was, what was stopped running again.
 // Of today's it switches off the unit alone: the runtime's config and folders stay as they were, so
-// its own install line brings it back (§15.6 step 4); and it never calls Lumiverse.
+// its own install line brings it back (§15.6 step 4); and it never calls Lumiverse. It records the
+// cutover for going back (the identifier used, the connections taken, RPE's own earlier ones, and each
+// chat left off RPE's connections with the connection it was on), and names those chats, each with its
+// engine and the one step that puts it on RPE, in its closing lines.
 
+import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { loopbackModel, loopsBack, runtimeBase } from "./today/lumiah/link/contract";
@@ -21,10 +25,11 @@ import { dataPaths } from "../app/config";
 import { localUrl, mustRun, removeRpeService, type RpeService, startRpeService, type Systemctl } from "../app/up";
 import { isRecord } from "../shared/json";
 import { readText } from "./files";
-import { LIGHT_PERMISSIONS, NEW_BUILD_BRANCH, PREVIOUS_PERMISSIONS, stopAfterSwitch } from "./going-back";
+import { dropSwap, keepSwap, LIGHT_PERMISSIONS, NEW_BUILD_BRANCH, PREVIOUS_PERMISSIONS, previousBranch, stopAfterSwitch, type SwapRecord } from "./going-back";
 import { loopbackKeyHash } from "./inside";
+import { LumiverseDb } from "./lumiverse-db";
 import { earlierRuns, migrate, type MigrateOptions, type MigrateResult } from "./migrate";
-import { type MigrationReport, refusalsOf, reportText } from "./report";
+import { type ChatReport, type MigrationReport, refusalsOf, reportText } from "./report";
 import { runtimeConfig, type SavedRuntime } from "./runtime-folders";
 import { openToday, type Sources } from "./today";
 
@@ -80,6 +85,8 @@ export interface SwapPlan {
    * runtime is taken, or `swapCheck` was given no way to read them.
    */
   connections: TakenConnection[];
+  /** The branch the previous build is kept on (`migration.previousBranch`), which every stop's way back names. */
+  branch: string;
 }
 
 /** RPE's side of the swap, which the command line gives. */
@@ -112,6 +119,8 @@ export interface RpeStart {
    * the file on disk is not the backend Lumiverse runs.
    */
   extension?: { build: string; registered(): Promise<string | null> };
+  /** RPE's own connections in Lumiverse from before this swap, which nothing answers once it takes today's: kept in the swap's record, for going back. */
+  earlier?: readonly string[];
 }
 
 /** How often RPE is asked whether it answers yet, once its service is started, where RPE's config gives none: the default of `commandLine.askEveryMs`. */
@@ -308,8 +317,9 @@ function passed(report: MigrationReport): boolean {
  */
 export async function swapCheck(input: { sources: Sources; options: MigrateOptions; rpe: Place; waitMs: number; reach?: (is: Loopback["is"]) => Promise<TakenConnection[]> }, io: SwapIo): Promise<SwapPlan | null> {
   const { sources, options } = input;
+  const branch = await previousBranch(dataPaths(options.data).globalConfig);
   const stop = (why: string): null => {
-    for (const line of stopAfterSwitch({ identifier: sources.identifier }, why)) io.out(line);
+    for (const line of stopAfterSwitch({ identifier: sources.identifier, branch }, why)) io.out(line);
     return null;
   };
   const { previous } = earlierRuns(dataPaths(options.data).database, sources.userId);
@@ -346,7 +356,7 @@ export async function swapCheck(input: { sources: Sources; options: MigrateOptio
   const base = localUrl(at.address, at.port);
   if (took === null && (await answering(base, input.waitMs, io)) === "other") return stop(`Something other than RPE answers at ${base}, where RPE's config has it answer: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again.`);
   const connections = took === null || input.reach === undefined ? [] : await input.reach(took.loopback.is);
-  return { sources, options, took, at, connections };
+  return { sources, options, took, at, connections, branch };
 }
 
 /**
@@ -367,7 +377,7 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
   if (took !== null) {
     if (!(await idle(identifier, took.name, took.config, io))) return false;
     if (took.unit === null && (await underWay(took.config, io)) !== null) {
-      for (const line of stopAfterSwitch({ identifier }, `Today's runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`)) io.out(line);
+      for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, `Today's runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`)) io.out(line);
       return false;
     }
   }
@@ -383,6 +393,8 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
   const going = (): void => {
     if (told !== null) throw new Error(`it was told to stop (${told})`);
   };
+  // The swap's run's report, for the closing lines on the chats that were on today and are on none of RPE's connections.
+  let ran: MigrationReport | null = null;
   io.out(`${took === null ? "The swap starts now, and RPE answers" : `Today's runtime ${took.name} stops now, and RPE answers in its place`} once the migration has run again: do not interrupt the swap. Interrupted all the same, it puts back what it did before it ends.`);
   try {
     // Only a unit that runs is stopped, and started again on a failure: one stopped already (today's, after an earlier swap) stays so. systemctl says 3 for a unit that doesn't run.
@@ -405,6 +417,16 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     io.out(reportText(run.report).replace(/\n$/, ""));
     if (!run.ran) throw new Error("the run was refused, as the report says");
     going();
+    ran = run.report;
+    // The cutover, recorded for going back: the identifier used, the connections taken, RPE's own earlier ones, and each chat left off RPE's connections with the one it was on.
+    const record: SwapRecord = { at: run.report.at, identifier, lumiverse: plan.sources.lumiverse, taken: plan.connections.map((c) => c.id), earlier: [...(rpe.earlier ?? [])], chats: (run.report.offRpe ?? []).map((c) => ({ chat: c.chat, pinned: c.pinned })) };
+    const database = dataPaths(plan.options.data).database;
+    try {
+      onRpe(database, (db) => keepSwap(db, plan.sources.userId, record));
+      undo.push({ what: "the swap's record is taken out", run: async () => onRpe(database, (db) => dropSwap(db, plan.sources.userId, record.at)) });
+    } catch (error) {
+      io.out(`The swap's record could not be kept (${error instanceof Error ? error.message : String(error)}): going back will not name the chats moved onto RPE's connections since, nor RPE's own earlier connection.`);
+    }
     const putBack = await rpe.takeOver();
     undo.push({ what: "RPE's config is as it was", run: putBack });
     // Each connection that reaches today's runtime is made RPE's own, before RPE answers it, in its own metadata and nothing else of it; a mark it did not write is not taken off again.
@@ -445,12 +467,58 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     io.out(putBack.length > 0 ? `Put back as it was: ${putBack.join("; ")}.` : "Nothing was stopped.");
     for (const line of failed) io.out(`Could not be put back, do it by hand: ${line}.`);
     // Today's service runs again, and what the swap did to Lumiverse stays what the switch did: said, with the way back.
-    if (failed.length === 0) for (const line of stopAfterSwitch({ identifier }, "Nothing of today's was changed.")) io.out(line);
+    if (failed.length === 0) for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, "Nothing of today's was changed.")) io.out(line);
     return false;
   } finally {
     letGo();
   }
   io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where today's runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
   if (took?.unit) io.out(`Stopped and switched off ${took.unit}, today's service. Its unit, and today's runtime's config and folders, stay as they were, for going back.`);
+  if (ran !== null) for (const line of offRpeLines(plan, ran)) io.out(line);
   return true;
+}
+
+/** Runs `use` on RPE's database at `file`, open for writing while the swap is its one writer. */
+function onRpe(file: string, use: (db: Database) => void): void {
+  const db = new Database(file);
+  try {
+    use(db);
+  } finally {
+    db.close();
+  }
+}
+
+/** An old engine in words, as he knows it. */
+const ENGINE_WORDS: Readonly<Record<NonNullable<ChatReport["engine"]>, string>> = { classic: "the classic pipeline", agents: "the agents engine", harness: "today's harness engine" };
+
+/**
+ * The swap's closing lines on the chats that were on today and are on none of RPE's connections (N-14's
+ * default: RPE writes nothing into his chats): each by its name and the engine that played it, with the
+ * one step that puts it on RPE. Names are read from Lumiverse's database; a chat it cannot name is given
+ * by its id.
+ */
+function offRpeLines(plan: SwapPlan, report: MigrationReport): string[] {
+  const chats = report.offRpe ?? [];
+  if (chats.length === 0) return [];
+  const names = new Map<string, string>();
+  try {
+    const db = LumiverseDb.open(plan.sources.lumiverse, plan.sources.userId);
+    try {
+      for (const c of db.chats()) names.set(c.id, `"${c.name}"`);
+      for (const p of db.connectionProfiles()) names.set(`connection ${p.id}`, `"${p.name}"`);
+    } finally {
+      db.close();
+    }
+  } catch {
+    // Unnamed, each is given by its id.
+  }
+  const engines = new Map((report.chats ?? []).map((c) => [c.chatId, c.engine]));
+  const rpe = plan.connections.length === 0 ? "the connection RPE answers on" : `one of RPE's connections (${plan.connections.map((c) => `"${c.name}"`).join(", ")})`;
+  return [
+    `${chats.length === 1 ? "One chat was" : `${chats.length} chats were`} on today's build and ${chats.length === 1 ? "is" : "are"} on none of RPE's connections: RPE plays only what reaches it on its own connections, and writes nothing into your chats. In Lumiverse, choose ${rpe} as each one's connection, and it is on RPE.`,
+    ...chats.map((c) => {
+      const engine = engines.get(c.chat) ?? null;
+      return `  ${names.get(c.chat) ?? c.chat}, played by ${engine === null ? "today's build" : ENGINE_WORDS[engine]}: ${c.pinned === null ? "on no connection of its own, so it follows the one active for you" : `on ${names.get(`connection ${c.pinned}`) ?? `the connection ${c.pinned}`}`}`;
+    }),
+  ];
 }

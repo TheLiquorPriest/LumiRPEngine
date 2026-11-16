@@ -615,7 +615,7 @@ describe("the swap, and going back", () => {
     expect(out).toContain(`Stopped and removed ${UNIT}. RPE's data stays where it is, in ${data}.`);
     expect(out).toContain("To go back to the previous build: today's data was never changed, and neither was its connection in Lumiverse.");
     expect(out).toContain(`switch the installed extension (${IDENT}) to the branch the previous build is kept on`);
-    expect(out).toContain(`approve the permissions the previous build asks for, then switch the extension off and on again, so that it starts with them in hand: ${PREVIOUS_PERMISSIONS.join(", ")}.`);
+    expect(out).toContain(`Then switch the extension off and on again, so that it starts with them in hand. The ${PREVIOUS_PERMISSIONS.length} permissions it asks for: ${PREVIOUS_PERMISSIONS.join(", ")}.`);
     expect(out).toContain(`bun <the extension's folder>/dist/lumiah.js up --name ${RUNTIME} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the swap only switched off, with the memory cap it holds: all as the swap left them.`);
     // Today's unit is where today's install line finds it, switched off, with the memory cap it held.
     expect(await readFile(join(unitFolder, "lumiah-home.service"), "utf8")).toBe(TODAYS_UNIT);
