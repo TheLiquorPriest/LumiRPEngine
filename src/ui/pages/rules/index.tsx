@@ -203,7 +203,7 @@ export function RulesPage(props: { chat: string | null; at: readonly string[] | 
             )}
             {rules.loading && rules.value === null ? <p class="lre-muted rpe-line">Reading the rules…</p> : null}
             <p class="rpe-meta">{counted(list.filter((r) => r.inForce).length, "rule")} in force of {list.length}.</p>
-            <HooksList rows={hooks.value?.rows ?? []} loading={hooks.loading} problem={hooks.problem} stopped={hooks.value?.stopped ?? false} open={openHook} onOpen={(row) => go(hookAddress(row))} />
+            <HooksList rows={hooks.value?.rows ?? []} broken={hooks.value?.broken ?? []} loading={hooks.loading} problem={hooks.problem} stopped={hooks.value?.stopped ?? false} open={openHook} onOpen={(row) => go(hookAddress(row))} />
             <WaitingSection switches={waiting} problem={switches.problem} />
           </div>
           {view === null ? null : view === HOOKS ? (
