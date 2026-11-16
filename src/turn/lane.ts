@@ -242,7 +242,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const config = async (at: LoreScope) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS);
   const loreSettings = loreSettingsFor(config);
   const secretSettings = secretSettingsFor(config);
-  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings });
+  // The lore-answers lines in force for the chat word the secrets in an entry's text when an agent reads it.
+  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings, lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })) });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
     lore,
