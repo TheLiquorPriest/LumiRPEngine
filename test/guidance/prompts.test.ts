@@ -38,6 +38,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   job_off_path: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   panel_request: { what: "Add a quay", on: "the harbour", from: "palette", values: "name: Quay", action: "add-place" },
   player_edit: { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal: it is older than the turn"] },
+  player_inserted: { message: 7, new: "Wren walks in." },
   depth_asked: { depth: "full" },
   swipe_asked: { mode: "afresh" },
   change_awaiting: { what: "Wren's purse goes to the harbour master" },
@@ -309,6 +310,12 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const notices = await lines("notices");
     expect(notices.line("player_edit", { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal"] } as never)).toBe("The player made an edit to the record before this turn: Wren's coin, from 3 to 5. Recorded: set coin 5. Not applied: fact seal. What was pressed: {\"edit\":\"coin\"}");
     expect(notices.line("player_edit", { undo: true, of: "Wren's coin, from 3 to 5", request: "{\"undo\":\"u-1\"}", changes: [], not_applied: [] } as never)).toBe("The player undid an earlier edit: Wren's coin, from 3 to 5. What was pressed: {\"undo\":\"u-1\"}");
+  });
+
+  test("notices.md tells a message the player inserted before a played turn with its number and, where agents may read it, its text", async () => {
+    const notices = await lines("notices");
+    expect(notices.line("player_inserted", { message: 7, new: "Wren walks in." } as never)).toBe("The player inserted a message before a turn already played. It is message 7, counting the chat's first message as 0, and the messages after it are numbered one higher than they were. It reads: Wren walks in.");
+    expect(notices.line("player_inserted", { message: 7 } as never)).not.toContain("It reads");
   });
 
   test("notices.md tells the turns a deletion took with the first words of each reply, and a swipe flipped earlier with what did not apply again and why, the reasons worded under keys", async () => {
