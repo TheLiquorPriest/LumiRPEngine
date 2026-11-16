@@ -88,11 +88,11 @@ describe("the fact store", () => {
     const at = text.findIndex((l) => l.startsWith("  · posted: -$4.00"));
     expect(text[at]).toBe("  · posted: -$4.00 (economy) — exact, turn 1");
     expect(text[at + 1]).toMatch(/^ {2}· posted: "spent most of it on drink" \(vague, turn 2\) \[f-[0-9a-f]{12}\]$/);
-    // A later exact payment moves the amount; the fact stays as it was.
+    // A later exact payment moves the amount and settles the vague fact, which stays in its history (R-62).
     play(s, "c", "m3", "She pays her tab.", 3, exact(100, "A tab"));
     const after = s.view("c").node("acct_wren");
     expect(after?.values.find((v) => v.key === "posted")).toMatchObject({ value: "-$5.00", mark: { n: 3, precision: "exact" } });
-    expect(after?.facts.map((f) => f.value)).toEqual(["spent most of it on drink"]);
+    expect(after?.facts.map((f) => f.value)).toEqual([]);
     // A payment of about some amount: the balance, a sum over it, is now inexact, and stays so.
     play(s, "c", "m4", "She tips the boy something.", 4, exact(50, "A tip", "approximate"));
     play(s, "c", "m5", "She buys bread.", 5, exact(20, "Bread"));

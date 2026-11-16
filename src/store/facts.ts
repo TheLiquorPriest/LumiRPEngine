@@ -9,7 +9,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import { STORE_OPS, type Fact, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
+import { STORE_OPS, type Fact, type Mark, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
 
 /** A fact as its writer gives it. */
 export interface FactInput {
@@ -57,9 +57,17 @@ export const factStore = {
   },
 };
 
-/** The facts standing on `about` (a tree ref), oldest first: those no later fact replaced, with a value. */
+/**
+ * Whether a later exact record settles a fact (R-62): the last record of the value its key names, on the same level, made on a later
+ * turn than the fact and exact (or of no stated precision). Matched by the key, never by the words; the fact stays in its history.
+ */
+export function settled(f: Fact, mark: Mark | undefined): boolean {
+  return mark !== undefined && mark.n > f.n && (mark.precision === null || mark.precision === "exact");
+}
+
+/** The facts standing on `about` (a tree ref), oldest first: those no later fact replaced, with a value, that no later exact record of their key settled. */
 export function standing(state: StoreState, about: string): Fact[] {
-  return (state.facts[about] ?? []).filter((f) => f.replacedBy === undefined && f.value !== "");
+  return (state.facts[about] ?? []).filter((f) => f.replacedBy === undefined && f.value !== "" && !settled(f, state.marks[about]?.[f.key]));
 }
 
 /**

@@ -36,7 +36,7 @@ import { cashAccount } from "../packs/economy/core/pay";
 import { regionOf } from "../packs/weather/core/index";
 import { whereOf } from "../packs/space/core/grid-play";
 import { BLANK_REVISION, clockRecorded } from "./blank";
-import { standing } from "./facts";
+import { settled, standing } from "./facts";
 import type { FoldEnv } from "./fold";
 import type { Fact, Mark, StoreState, Touched } from "./types";
 import type { View, ViewLine } from "./words";
@@ -673,7 +673,10 @@ export class TreeView {
     return out;
   }
 
-  /** A level's lines: its own line and, as asked, its values with the facts standing beside them, one level further in. */
+  /**
+   * A level's lines: its own line and, as asked, its values with the facts standing beside them, one level further in. A fact a later
+   * exact record of the value beside it settles (the coin's posting among them) stands no more (R-62).
+   */
   private levelLines(node: Node, depth: number, shown: ValuesShown): ViewLine[] {
     const out: ViewLine[] = [this.levelLine(node, depth)];
     if (shown === "none") return out;
@@ -681,11 +684,10 @@ export class TreeView {
     const placed = new Set<string>();
     for (const v of this.valuesOf(node, shown === "all")) {
       const beside = facts.filter((f) => f.key === v.key);
-      out.push({ kind: "value", depth: depth + 1, fields: valueFields(v, beside.length) });
-      for (const f of beside) {
-        placed.add(f.id);
-        out.push({ kind: "fact", depth: depth + 1, fields: factFields(f) });
-      }
+      for (const f of beside) placed.add(f.id);
+      const standingBeside = beside.filter((f) => !settled(f, v.mark));
+      out.push({ kind: "value", depth: depth + 1, fields: valueFields(v, standingBeside.length) });
+      for (const f of standingBeside) out.push({ kind: "fact", depth: depth + 1, fields: factFields(f) });
     }
     for (const f of facts) if (!placed.has(f.id)) out.push({ kind: "fact", depth: depth + 1, fields: factFields(f) });
     return out;

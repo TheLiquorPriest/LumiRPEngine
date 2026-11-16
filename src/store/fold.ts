@@ -253,13 +253,22 @@ function markTouched(state: StoreState, touches: readonly Touch[], item: Item, c
     const time = { ...mark, precision: item.precision ?? null, ...provenance };
     state.marks.world = { ...state.marks.world, time, ...(setsClock(item.value) ? { [CLOCK_SET]: { ...time } } : {}) };
   }
+  // A change from the old value (an add, a subtract, a posting) keeps the least exact of the old precision and its own: about 20 less
+  // an exact 4 is about 16.
+  const relative = isRecord(item.value) && item.value.type === "add";
   for (const t of touches) {
     const ref = `entity:${t.entity}`;
     state.touched[ref] = mark;
     const name = "field" in t ? t.field : "rel" in t ? t.rel : t.aspect;
     const marks = state.marks[ref];
     const precision = item.precision ?? null;
-    state.marks[ref] = { ...marks, [name]: { ...mark, precision: name === "posted" ? lessExact(marks?.[name]?.precision ?? null, precision) : precision, ...provenance } };
+    state.marks[ref] = { ...marks, [name]: { ...mark, precision: name === "posted" || relative ? lessExact(marks?.[name]?.precision ?? null, precision) : precision, ...provenance } };
+  }
+  // A quest's stage, which no entity holds, is marked on its track.
+  if (isRecord(item.value) && item.value.type === "stage" && typeof item.value.track === "string") {
+    const ref = `track:${item.value.track}`;
+    state.touched[ref] = mark;
+    state.marks[ref] = { ...state.marks[ref], stage: { ...mark, precision: item.precision ?? null, ...provenance } };
   }
 }
 

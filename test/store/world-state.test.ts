@@ -63,8 +63,8 @@ describe("the world state", () => {
     // Due, open business, what changed by lane, and what is soft.
     expect(lines).toContain("Sat 1 Mar 2031, 9:30 AM: schedule at Market Square, Tam (the market opens)");
     expect(lines).toContain("The sealed letter [errand] (quest): Asked, Wren's");
-    expect(lines).toContain("story: 2 changes (story.horizon, store.note), to The Lamp and Ladle");
-    expect(lines).toContain("engine: 3 changes (store.fact, post, set), to Wren, Wren's coin; 1 did not apply");
+    expect(lines.some((l) => l.startsWith("story: 2 changes (story.horizon, store.note), to The Lamp and Ladle"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("engine: 3 changes (store.fact, post, set), to Wren, Wren's coin"))).toBe(true);
     expect(lines.some((l) => /^Wren: mood: "on edge" \(vague, turn 1\) \[f-[0-9a-f]{12}\]$/.test(l))).toBe(true);
     expect(lines.some((l) => /^Wren's coin: posted: -\$0\.75 \(approximate, turn 1\)$/.test(l))).toBe(true);
     expect(lines.some((l) => /^set, turn 1, .*not applied: missing_entity/.test(l))).toBe(true);

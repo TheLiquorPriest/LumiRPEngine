@@ -297,7 +297,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
       const at = own(t.stages, stage);
       const owner = trackOwner(t);
       if ((at?.next.length ?? 0) === 0 || owner === undefined || !within.has(`entity:${owner}`)) continue;
-      sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, owner: nameOf(`entity:${owner}`) } });
+      sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, owner: nameOf(`entity:${owner}`), ...markFields(state.marks[`track:${id}`]?.stage) } });
     }
   }
   // What changed since the turn before began: its own changes (a job's written on it count where they take effect) and what is
