@@ -524,16 +524,13 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
  * revision lacks kept and named in the notes.
  */
 export function migrate(state: WorldState, body: Extract<MarkerBody, { kind: "migrate" }>, env: MarkerEnv): string[] {
+  const to = revisionDoc(env, body.to);
   // This chat's own changes to the world go with it to the new revision (`world-draft.ts`).
-  if (chatDraftOf(state) !== NO_DRAFT) carryDraft(state, revisionDoc(env, body.to));
-  if (body.merge) {
-    const notes = applyUpgrade(state, planUpgrade(state, env, body.to), body.merge, env);
-    return [...notes, ...carrySpace(state, revisionDoc(env, body.to))];
-  }
+  if (chatDraftOf(state) !== NO_DRAFT) carryDraft(state, to);
+  if (body.merge) return [...applyUpgrade(state, planUpgrade(state, env, body.to), body.merge, env), ...carrySpace(state, to)];
   const lag = definitionsLag(state);
   if (lag === null && body.to !== state.revision) setLag(state, state.revision);
   else if (lag === body.to) setLag(state, null);
   state.revision = body.to;
-  const to = env.worlds(body.to);
-  return to === undefined ? [] : carrySpace(state, to);
+  return carrySpace(state, to);
 }
