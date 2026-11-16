@@ -18,6 +18,9 @@ import { initialState } from "../../../src/engine/world-state";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
+import { positionEvent } from "../../../src/iface/map/record";
+import { drawnOf } from "../../../src/packs/space/core/grid-model";
+import { INN, worldWith } from "../../iface/map/fixtures";
 import { startState } from "../support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -306,5 +309,20 @@ describe("the narrator's place line", () => {
     expect(place(world, state)).toEqual([`Place: ${HIDDEN_PLACE_NAME}.`]);
     state.entities.you!.fields.place = "safehouse";
     expect(place(world, state)).toEqual([`Place: ${HIDDEN_PLACE_NAME} (in Riverton).`]);
+  });
+});
+
+describe("the panel's view of a room grid, as the POV may see it", () => {
+  test("a hidden guest on a square is not in the view", () => {
+    const world = worldWith(INN);
+    const room = drawnOf(world, "common_room");
+    if (!room) throw new Error("the room has no grid");
+    const bram = world.entities.bram;
+    if (bram) bram.visibility = "secret";
+    const w = new Working(reg, world, initialState(world, "r", reg));
+    expect(w.apply(positionEvent(room, "bram", [5, 5], null) as unknown as LedgerEvent)).toBeNull();
+    const ids = buildMapView(reg.context(world, w.state)).scopes.find((s) => s.id === "common_room")?.grid?.pieces?.map((p) => p.id) ?? [];
+    expect(ids).not.toContain("bram");
+    expect(ids).toContain("long_table");
   });
 });

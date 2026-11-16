@@ -7,25 +7,32 @@
 // the POV is shown, the cells of places it can't see as nothing, and in fog the cells it hasn't
 // seen as blank ground, a hidden place's among them, so fog never outlines one. A grid carries the
 // POV's cell when it stands on it; a thing lying in a cell shows only where the POV sees it now,
-// never where it once saw it.
+// never where it once saw it. Where the geometry draws a grid (`grid-model.ts`), the grid is that
+// geometry as the chat plays it, the squares the chat changed laid over the map, and carries what
+// is on it besides: every person and thing the POV may see (`pieces`), those at the place with no
+// square (`unplaced`), each door as it stands, the squares seen now and the dark ones, and the
+// scale and time step. Someone the POV cannot see is not in the view.
 
 import type { JsonObject } from "../../../shared/json";
-import type { ActionId, PlaceId, TravelMode } from "../../../shared/ids";
+import type { ActionId, EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import { addCells, areaOf, cellIndex, gridOf, hasCell, standingGrid } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
-import type { GridDef, MapDisplay, WorldDoc } from "../../../shared/world";
+import { ALIVE, type GridDef, type MapDisplay, type WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
+import { MAP_DEFAULTS, type MapConfig } from "../../../shared/map-config";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { entryFor, entryRefusal } from "../../../engine/entry";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { cellsSeen, placeVisit } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
-import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type CellView, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
+import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type CellView, type GridScene, type MapDoorView, type MapItemView, type MapPieceView, type MapScopeView, type MapUnplacedView, type ScopeFilter } from "./map-scope";
+import { cellOf, doorState, drawnOf, indexOf, movingOf, squareAt, standsAt, type Drawn, type StoredMoving } from "./grid-model";
+import { whereOf } from "./grid-play";
 import { hiddenCells, sightFor } from "./positions";
 import { closedRoutes, goMinutes, routeAt } from "./travel";
 import type { TravelPart } from "../../../shared/travel";
 
-export type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView } from "./map-scope";
+export type { MapDoorView, MapGridView, MapItemView, MapPieceView, MapPlaceView, MapRouteView, MapScaleView, MapScopeView, MapUnplacedView } from "./map-scope";
 
 export interface MapView {
   level: number;
@@ -96,8 +103,64 @@ function standIn(world: Pick<WorldDoc, "places">, n: number): PlaceId {
   return id;
 }
 
-/** The map as the POV sees it, in `chosen` (the chat's pick), else the world's display. */
-export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null): MapView {
+/**
+ * What a grid shows beyond its terrain, from the geometry as the chat plays it (`grid-model.ts`): every
+ * person and thing the POV may see standing on it (in its sight on the grid it stands on, else in its
+ * place), with its square, footprint, what it blocks, what it lies on or in and its life state; the
+ * unplaced of the POV's place with where they are kept; each door as it stands; and, on the grid the
+ * POV stands on with the grid system on, the squares it sees now (lit) and the shown squares it does
+ * not (dark). Someone the POV cannot see is not there, a square it is not shown holds none, and the
+ * scale and time step go with the grid.
+ */
+function sceneOf(ctx: ReadContext, drawn: Drawn, ground: StoredMoving, cells: CellView, sight: ReadonlySet<number> | null, standing: boolean, here: PlaceId | null): GridScene {
+  const { world, state } = ctx;
+  const shown = (i: number): boolean => !cells.blank.has(i) && !cells.void.has(i);
+  const may = (id: EntityId): boolean => id !== world.pov && canSeeEntity(ctx.registry, world, state, world.pov, id);
+  const pieces: MapPieceView[] = [];
+  for (const [id, p] of Object.entries(ground.moving.pieces)) {
+    const e = own(state.entities, id);
+    const square = standsAt(ground.moving, id);
+    const index = square === null ? null : indexOf(drawn, square);
+    if (!e || square === null || index === null || !shown(index) || !may(id)) continue;
+    if (sight !== null ? !sight.has(index) : placeOfEntity(state, id) !== here) continue;
+    const { x, y } = cellOf(square);
+    pieces.push({
+      id,
+      name: e.name,
+      kind: e.kind,
+      x,
+      y,
+      ...(p.size !== undefined && (p.size[0] !== 1 || p.size[1] !== 1) ? { size: [p.size[0], p.size[1]] as [number, number] } : {}),
+      ...(p.blocks !== undefined ? { blocks: { ...p.blocks } } : {}),
+      ...(p.on !== undefined && may(p.on) ? { on: p.on, ...(p.within ? { within: true as const } : {}) } : {}),
+      ...(e.life !== undefined && e.life !== ALIVE ? { state: e.life } : {}),
+    });
+  }
+  const unplaced: MapUnplacedView[] = [];
+  for (const id of ground.unplaced) {
+    const e = own(state.entities, id);
+    if (!e || !may(id) || placeOfEntity(state, id) !== here) continue;
+    unplaced.push({ id, name: e.name, kind: e.kind, ...(whereOf(state, id) ?? {}) });
+  }
+  const doors: MapDoorView[] = [];
+  for (const index of [...drawn.doors].sort((a, b) => a - b)) {
+    const at = doorState(drawn, ground.moving, index);
+    if (at !== null && shown(index)) doors.push({ ...cellOf(squareAt(drawn, index)), state: at });
+  }
+  const lit = standing && sight !== null ? [...sight].filter(shown).sort((a, b) => a - b) : null;
+  const dark = lit === null ? null : Array.from({ length: drawn.width * drawn.height }, (_, i) => i).filter((i) => shown(i) && !sight?.has(i));
+  const { metres, feet, unit, diagonal, step } = drawn.scale;
+  return {
+    ...(pieces.length > 0 ? { pieces } : {}),
+    ...(unplaced.length > 0 ? { unplaced } : {}),
+    ...(doors.length > 0 ? { doors } : {}),
+    ...(lit !== null && dark !== null ? { lit, dark } : {}),
+    scale: { metres, feet, unit, diagonal, step },
+  };
+}
+
+/** The map as the POV sees it, in `chosen` (the chat's pick), else the world's display; its grids drawn by the chat's map settings (`config`). */
+export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null, config: Readonly<MapConfig> = MAP_DEFAULTS): MapView {
   const { world, state } = ctx;
   const level = ctx.levelOf(world.pov, "space");
   const settings = mapSettingsOf(world);
@@ -153,7 +216,10 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
     const unvisited = (children.get(id) ?? []).filter((p) => filter.drawn(p) && filter.known(p) && !filter.visited(p) && !inside.has(p));
     const cells = cellsShown(ctx, grid, display, seen, unvisited);
     const inSight = settings.grid.movement ? (stand?.scope === id ? sight : new Set<number>()) : null;
-    scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, cells, items: itemsOn(ctx, id, grid, cells, inSight, here), ...(pov && stand?.scope === id ? { pov } : {}), ...(cells.seen !== undefined ? { seen: cells.seen } : {}) }));
+    // The geometry as the chat plays it: the squares it changed laid over the map, everyone and everything the POV may see on it, the doors as they stand.
+    const drawn = drawnOf(world, id, config, state);
+    const scene = drawn === null ? undefined : sceneOf(ctx, drawn, movingOf(ctx.registry, world, state, drawn), cells, inSight, stand?.scope === id && settings.grid.movement, here);
+    scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, cells, items: itemsOn(ctx, id, grid, cells, inSight, here), ...(pov && stand?.scope === id ? { pov } : {}), ...(cells.seen !== undefined ? { seen: cells.seen } : {}), ...(drawn !== null && scene !== undefined ? { drawn: { width: drawn.width, height: drawn.height, terrain: drawn.terrain, blocked: [...drawn.blocked] }, scene } : {}) }));
   }
   const scope = defaultScope(world, here, children, filter);
   const shownScope = scope === null ? null : filter.shown(scope);

@@ -10,6 +10,8 @@ import { isRecord } from "../../../shared/json";
 import { VOID_TERRAIN, type PlaceMark, type PlaceMarkView } from "../../../shared/maps";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
+import type { DoorState } from "./grid-play";
+import type { TimeStep } from "./grid-model";
 import { HIDDEN_PLACE_NAME } from "../../../engine/visibility";
 
 /** What the breadcrumbs call the outermost scope, the world's top-level places. */
@@ -45,6 +47,50 @@ export interface MapItemView {
   y: number;
 }
 
+/** Someone or something standing on a square of a grid, where the POV may see it. */
+export interface MapPieceView {
+  id: EntityId;
+  name: string;
+  kind: string;
+  /** Its cell: the top left of its footprint, from 0 like the grid's other cells. */
+  x: number;
+  y: number;
+  /** Its footprint [columns, rows], when it covers more than one square. */
+  size?: [number, number];
+  /** What its footprint blocks, when it blocks the way or the view. */
+  blocks?: { way?: boolean; view?: boolean };
+  /** What it lies on or in, where the POV may see that (`within`: in it, a holder's contents). */
+  on?: EntityId;
+  within?: true;
+  /** Its life state, when it is not alive. */
+  state?: string;
+}
+
+/** Someone or something at the place the grid draws with no square on it, where the POV may see it, with where it is kept besides. */
+export interface MapUnplacedView {
+  id: EntityId;
+  name: string;
+  kind: string;
+  zone?: string;
+  words?: string;
+}
+
+/** A door of the grid as it stands now. */
+export interface MapDoorView {
+  x: number;
+  y: number;
+  state: DoorState;
+}
+
+/** A grid's scale and how time passes on it: what the panel reads distances and rounds by. */
+export interface MapScaleView {
+  metres: number;
+  feet: number;
+  unit: "feet" | "metres";
+  diagonal: "one" | "alternate";
+  step: TimeStep;
+}
+
 export interface MapRouteView {
   from: PlaceId;
   to: PlaceId;
@@ -67,7 +113,18 @@ export interface MapGridView {
   seen?: string;
   /** Things lying at cells of this grid where the POV sees them now: in its sight on the grid it stands on with the grid system, else in its place. */
   items?: MapItemView[];
+  /** What the grid shows beyond its terrain, when the geometry draws it (`view.ts`): who and what is on it, the doors as they stand, what is lit and dark, and the scale and time step. */
+  pieces?: MapPieceView[];
+  unplaced?: MapUnplacedView[];
+  doors?: MapDoorView[];
+  /** The squares (indexes, row by row) the POV sees now, and the squares it is shown that it does not: only on the grid it stands on, with the grid system on. */
+  lit?: number[];
+  dark?: number[];
+  scale?: MapScaleView;
 }
+
+/** What a grid's scene adds to the grid as the view draws it. */
+export type GridScene = Pick<MapGridView, "pieces" | "unplaced" | "doors" | "lit" | "dark" | "scale">;
 
 /** Which cells of a scope's grid the viewer isn't shown: blank ones (in fog, never seen) and void ones (of places it can't see). */
 export interface CellView {
@@ -196,7 +253,7 @@ function ring(ids: readonly PlaceId[], frame: { width: number; height: number })
  * blank and void (in fog, an unseen cell of a place the viewer can't see) goes out blank, exactly
  * as any other unseen cell, so fog never outlines a hidden room.
  */
-export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[]; cells?: CellView }): MapScopeView {
+export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[]; cells?: CellView; drawn?: { width: number; height: number; terrain: readonly string[]; blocked: readonly number[] }; scene?: GridScene }): MapScopeView {
   const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn).sort(byShownId(filter));
   const def = scope === null ? undefined : own(world.places, scope);
   const grid = def?.grid ? own(world.grids, def.grid) : undefined;
@@ -259,16 +316,20 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
     const unshown = (i: number): boolean => cells !== undefined && (cells.blank.has(i) || cells.void.has(i));
     const areas: Record<PlaceId, number[]> = {};
     for (const id of kids) if (own(grid.zones, id)) areas[filter.shown(id)] = (own(grid.zones, id) ?? []).filter((i) => !unshown(i));
+    // The grid as play stands: the squares the chat changed laid over the map's own, where the geometry drew it (`opts.drawn`).
+    const terrain = opts.drawn?.terrain ?? grid.terrain;
+    const blocked = opts.drawn?.blocked ?? grid.blocked;
     shown = {
-      width: grid.width,
-      height: grid.height,
+      width: opts.drawn?.width ?? grid.width,
+      height: opts.drawn?.height ?? grid.height,
       ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}),
-      terrain: cells ? grid.terrain.map((t, i) => (cells.blank.has(i) ? "" : cells.void.has(i) ? VOID_TERRAIN : t)) : grid.terrain,
-      blocked: cells ? [...grid.blocked.filter((i) => !unshown(i)), ...[...cells.void].filter((i) => !cells.blank.has(i))].sort((a, b) => a - b) : grid.blocked,
+      terrain: cells ? terrain.map((t, i) => (cells.blank.has(i) ? "" : cells.void.has(i) ? VOID_TERRAIN : t)) : [...terrain],
+      blocked: cells ? [...blocked.filter((i) => !unshown(i)), ...[...cells.void].filter((i) => !cells.blank.has(i))].sort((a, b) => a - b) : [...blocked],
       areas,
       ...(opts.pov && opts.level >= 3 ? { pov: opts.pov } : {}),
       ...(opts.seen !== undefined ? { seen: opts.seen } : {}),
       ...(opts.items && opts.items.length > 0 ? { items: opts.items } : {}),
+      ...(opts.scene ?? {}),
     };
   }
   return {

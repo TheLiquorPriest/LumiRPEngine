@@ -14,6 +14,12 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { HIDDEN_PLACE_NAME } from "../../../src/engine/visibility";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
+import { Working } from "../../../src/engine/working";
+import { initialState } from "../../../src/engine/world-state";
+import { doorEvent, positionEvent, squaresEvent, whereEvent } from "../../../src/iface/map/record";
+import { drawnOf } from "../../../src/packs/space/core/grid-model";
+import type { LedgerEvent } from "../../../src/shared/ledger";
+import { INN, worldWith } from "../../iface/map/fixtures";
 import { startState } from "../support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -185,5 +191,24 @@ describe("map scopes", () => {
     const go = reg.actions.get("go");
     expect(go ? paramCandidates(reg, world, state, go, "to") : []).toEqual(expect.arrayContaining(["saltreach", "boathouse", "gatehouse"]));
     expect(typedIntent(reg, world, state, "I walk to Saltreach")).toMatchObject({ action: "go", params: { to: "saltreach" } });
+  });
+});
+
+describe("the panel's view of a room grid", () => {
+  test("lists the innkeeper and the traveller on their squares, a guest by the hearth among the unplaced, the north door closed and the bar drawn in play", () => {
+    const world = worldWith(INN);
+    const w = new Working(reg, world, initialState(world, "r", reg));
+    const room = drawnOf(world, "common_room");
+    if (!room) throw new Error("the room has no grid");
+    for (const e of [positionEvent(room, "wren", [3, 3], null), positionEvent(room, "bram", [5, 5], null), doorEvent({ scope: "common_room" }, [6, 1], "closed"), squaresEvent("inn_room", [{ at: [3, 4], symbol: "#" }], {}), whereEvent("odile", { words: "by the hearth" })]) {
+      expect(w.apply(e as unknown as LedgerEvent)).toBeNull();
+    }
+    const grid = scopeOf(buildMapView(reg.context(world, w.state)), "common_room").grid;
+    expect(grid?.pieces?.map((p) => [p.id, p.x, p.y])).toContainEqual(["bram", 4, 4]);
+    expect(grid?.pieces?.find((p) => p.id === "lantern")).toMatchObject({ on: "long_table" });
+    expect(grid?.doors).toContainEqual({ x: 5, y: 0, state: "closed" });
+    expect(grid?.terrain[36 + 3]).toBe("bar");
+    expect(grid?.terrain[36 + 2]).toBe("wall");
+    expect(grid?.scale).toMatchObject({ feet: 5, unit: "feet", step: { per: "round", seconds: 6, squares: 6 } });
   });
 });

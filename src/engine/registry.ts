@@ -18,6 +18,7 @@ import type { OrgMember, OrgPower } from "../shared/org";
 import type { LintIssue } from "../shared/protocol";
 import type { ColumnDef, DataTable, ShippedRevision } from "../shared/tables";
 import type { ActionDef, EffectSpec, FeedScope, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
+import type { MapConfig } from "../shared/map-config";
 import type { Value } from "./expr";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
@@ -336,6 +337,8 @@ export interface LintRule {
 export interface ViewPrefs {
   /** The map's display the player picked for this chat; null follows the world's `mapSettings.display`. */
   mapDisplay: MapDisplay | null;
+  /** The chat's map settings (`map:` in its config), for the scale and time step a grid is drawn with; absent, their defaults. */
+  mapConfig?: MapConfig;
 }
 
 /** Builds a pack panel's view model (pure; the frontend renders it). */

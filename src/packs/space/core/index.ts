@@ -412,7 +412,7 @@ export const spacePack: PackDef = {
     // The place's lore, after what the place itself shows, so a section cut to its tokens loses lore first.
     r.renderer({ slot: "place", source: "place_lore", label: "Lore about the place", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
 
-    r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) as unknown as JsonValue });
+    r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay, prefs.mapConfig) as unknown as JsonValue });
 
     // A reply's move names its place by id, or by its name as the read was offered it: the place the
     // POV can see by that name, the nearest when several share it (DESIGN §9.4).
