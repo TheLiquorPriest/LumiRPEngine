@@ -103,7 +103,7 @@ describe("the new fold", () => {
     play(s, "c", "m1", "Morning.", 1, engine(tick(10)));
     const open = s.beginTurn({ chat: "c", kind: "normal" });
     s.addChanges(open.id, engine(goTo(POV, "cellar")));
-    s.addChanges(open.id, engine(make("map", "Folded map", POV)).map((c) => ({ ...c, by: "helper" })));
+    s.addChanges(open.id, engine(make("map", "Folded map", POV)).map((c) => ({ ...c, by: "helper-definition", handle: "helper" })));
     expect(s.stateAt(open.id).state.world.entities[POV]?.fields.place).toBe("cellar");
     expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("common_room");
     // The lead takes back one helper's writes; the rest stay staged.

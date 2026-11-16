@@ -14,7 +14,7 @@
 
 import { Database } from "bun:sqlite";
 import { hashParts } from "../shared/hash";
-import type { JsonValue } from "../shared/json";
+import type { JsonObject, JsonValue } from "../shared/json";
 import { deepFreeze, isRecord } from "../shared/json";
 import type { RevisionId, WorldId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
@@ -23,6 +23,7 @@ import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engi
 import type { WorldState } from "../engine/state";
 import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type StoredChange } from "./fold";
 import { draft } from "./working";
+import { Areas, type StoreArea } from "./areas";
 import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
 import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
@@ -83,7 +84,7 @@ export const STORE_DEFAULTS = Object.freeze({
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
-const FOLD_VERSION = 4;
+const FOLD_VERSION = 5;
 
 export interface StoreOptions {
   /**
@@ -124,6 +125,8 @@ export interface StoreOptions {
   visitDepth?: number;
   /** The log, for what the store and the engine say for people: a walk cut short by its setting, once for each chain. Unset: the log given before. */
   log?: (message: string, data: Record<string, unknown>) => void;
+  /** The areas whose operations (`<area>.<op>`) fold beside the engine's: the story, the cast, lore overlays (`StoreArea`). */
+  areas?: readonly StoreArea[];
 }
 
 /** A handler's failure, as the store tells it (`StoreOptions.handlerFailed`). */
@@ -182,6 +185,7 @@ interface ChangeDb {
   op: string;
   value: string;
   by: string | null;
+  handle: string | null;
   standing: string | null;
   precision: string | null;
   source: string | null;
@@ -265,6 +269,7 @@ function changeOf(r: ChangeDb): ChangeRow {
     op: r.op,
     value: JSON.parse(r.value) as JsonValue,
     by: r.by,
+    handle: r.handle,
     standing: r.standing as Standing | null,
     precision: r.precision as Precision | null,
     source: r.source as Source | null,
@@ -395,7 +400,7 @@ export class Store {
     // A chat that names no world plays on the blank one, which the store answers for itself.
     const blank = blankWorld(options.registry);
     this.handlerFailed = options.handlerFailed ?? ((f: StoreFailure) => console.error(`RPE's store: the handler for ${f.op} failed on turn ${f.turn}:`, f.error));
-    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)) };
+    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)), areas: new Areas(options.areas ?? []) };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
     const whole = (n: number | undefined, d: number, least: number): number => Math.max(least, Math.floor(n ?? d));
     this.chatsHeld = options.chatsHeld === undefined ? STORE_DEFAULTS.chatsHeld : options.chatsHeld === null ? null : Math.max(1, Math.floor(options.chatsHeld));
@@ -618,6 +623,17 @@ export class Store {
       this.compared.delete(oldest);
     }
     return read;
+  }
+
+  /**
+   * A named read of an area's slice in `state` (`StoreArea.reads`): what the tree and the world state ask an area. An area or read the
+   * store does not have is refused as input it cannot read.
+   */
+  readArea(state: StoreState, area: string, read: string, args: JsonObject = {}): JsonValue {
+    const a = this.env.areas?.get(area);
+    const fn = a?.reads && Object.hasOwn(a.reads, read) ? a.reads[read] : undefined;
+    if (!a || !fn) throw new StoreInputError(`no read ${read} of the area ${area}`);
+    return fn(state.areas?.[area] ?? a.initial?.() ?? {}, args);
   }
 
   /** @internal */ viewOf(state: StoreState): TreeView {
@@ -1303,7 +1319,7 @@ export class UserStore {
   addChanges(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; state: StoreState } {
     const turn = this.turnToWrite(turnId);
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
-    inputs.forEach((c, i) => checkChange(c, i));
+    inputs.forEach((c, i) => checkChange(c, i, this.store.env.areas));
     const jobs = [...new Set(inputs.flatMap((c) => (c.job ? [c.job] : [])))];
     const ended = jobs.find((j) => this.db.query<{ job: string }, [string, string]>("SELECT job FROM job_end WHERE user = ? AND job = ?").get(this.id, j) !== null);
     if (ended !== undefined) throw new StoreInputError(`job ${ended} has ended: it records nothing more`);
@@ -1316,17 +1332,17 @@ export class UserStore {
     const fell = new Set(existing.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
     // The engine's handlers put a change's own objects into the state, which is then held frozen: they apply the store's copy, so the
     // caller's values stay the caller's.
-    const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: turnId, n: turn.depth + 1, by: c.by ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
+    const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: turnId, n: turn.depth + 1, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = applyChecked(this.store.envOf(this.id), state, items, fell);
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
     const through = this.throughTurn(turn);
     const ids = this.write(through, () => {
-      const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, standing, precision, source, cite, job, applied, reports, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const made = inputs.map((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
-        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
+        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
       });
       this.dropSnapshotsThrough(turnId);
       return made;
@@ -1337,12 +1353,12 @@ export class UserStore {
     return { changes: rows, state };
   }
 
-  /** Takes back an open turn's staged changes, all or one agent's (the lead dropping a sub-agent's writes). How many went. */
-  dropStaged(turnId: string, by?: string): number {
+  /** Takes back an open turn's staged changes, all or one run's (`handle`: the lead dropping a sub-agent's writes). How many went. */
+  dropStaged(turnId: string, handle?: string): number {
     const turn = this.turnToWrite(turnId);
     if (turn.status !== "open") throw new StoreInputError(`turn ${turnId} is ${turn.status}: only an open turn's staged changes can be taken back`);
     return this.write(this.throughTurn(turn), () => {
-      const r = by === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND by = ?", [this.id, turnId, by]);
+      const r = handle === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND handle = ?", [this.id, turnId, handle]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
     });
@@ -1410,7 +1426,7 @@ export class UserStore {
   private landing(into: TurnRow, own: readonly ChangeRow[], moved: readonly ChangeRow[]): Outcome[] {
     const state = draft(this.foldNode(into.node).folded.state);
     const fell = new Set(own.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
-    const item = (c: ChangeRow): Item => ({ op: c.op, value: structuredClone(c.value), turn: into.id, n: into.depth + 1, by: c.by, change: c.id, precision: c.precision, standing: c.standing, source: c.source });
+    const item = (c: ChangeRow): Item => ({ op: c.op, value: structuredClone(c.value), turn: into.id, n: into.depth + 1, by: c.by, cite: c.cite, change: c.id, precision: c.precision, standing: c.standing, source: c.source });
     const env = this.store.envOf(this.id);
     const out: Outcome[] = [];
     for (let i = 0; i < moved.length; ) {
@@ -1469,7 +1485,7 @@ export class UserStore {
     const own = this.db.query<ChangeDb, [string, string, string]>("SELECT * FROM change WHERE user = ? AND turn = ? AND job = ? AND applied = 1 ORDER BY ord").all(this.id, turnId, job).map(changeOf);
     if (own.length === 0) return at;
     const state = draft(at.state);
-    applyChecked(this.store.envOf(this.id), state, own.map((c): Item => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by, change: c.id, precision: c.precision, standing: c.standing, source: c.source })), new Set());
+    applyChecked(this.store.envOf(this.id), state, own.map((c): Item => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by, cite: c.cite, change: c.id, precision: c.precision, standing: c.standing, source: c.source })), new Set());
     return { ...at, state };
   }
 
@@ -1746,12 +1762,12 @@ export class UserStore {
   private changesOf(turns: readonly string[]): Map<string, StoredChange[]> {
     const byTurn = new Map<string, StoredChange[]>();
     for (const c of this.db
-      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; applied: number; precision: string | null; standing: string | null; source: string | null }, [string, string]>(
-        "SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied, c.precision, c.standing, c.source FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) AND c.job IS NULL ORDER BY c.turn, c.ord",
+      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; cite: string | null; applied: number; precision: string | null; standing: string | null; source: string | null }, [string, string]>(
+        "SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.cite, c.applied, c.precision, c.standing, c.source FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) AND c.job IS NULL ORDER BY c.turn, c.ord",
       )
       .all(this.id, JSON.stringify(turns))) {
       const list = byTurn.get(c.turn) ?? [];
-      list.push({ id: c.id, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null });
+      list.push({ id: c.id, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, cite: c.cite === null ? null : (JSON.parse(c.cite) as JsonValue), applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null });
       byTurn.set(c.turn, list);
     }
     return byTurn;
@@ -1778,8 +1794,8 @@ export class UserStore {
   private jobsAlong(path: readonly { key: string; turn: string; depth: number; created: number }[]): Map<string, JobChange[]> {
     const out = new Map<string, JobChange[]>();
     const jobs = this.db
-      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; applied: number; precision: string | null; standing: string | null; source: string | null; ended: number }, [string, string]>(
-        `SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied, c.precision, c.standing, c.source, e.ended FROM change c JOIN job_end e ON e.user = c.user AND e.job = c.job
+      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; cite: string | null; applied: number; precision: string | null; standing: string | null; source: string | null; ended: number }, [string, string]>(
+        `SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.cite, c.applied, c.precision, c.standing, c.source, e.ended FROM change c JOIN job_end e ON e.user = c.user AND e.job = c.job
          WHERE c.user = ?1 AND c.job IS NOT NULL AND c.turn IN (SELECT value FROM json_each(?2)) ORDER BY c.id`,
       )
       .all(this.id, JSON.stringify(path.map((p) => p.turn)));
@@ -1789,7 +1805,7 @@ export class UserStore {
       const started = i === undefined ? undefined : path[i];
       const before = i === undefined ? undefined : path.slice(i + 1).find((p) => p.created > c.ended);
       if (!started || !before) continue;
-      const change: JobChange = { id: c.id, turn: c.turn, from: started.depth + 1, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null };
+      const change: JobChange = { id: c.id, turn: c.turn, from: started.depth + 1, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, cite: c.cite === null ? null : (JSON.parse(c.cite) as JsonValue), applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null };
       out.set(before.key, [...(out.get(before.key) ?? []), change]);
     }
     return out;
@@ -1932,8 +1948,8 @@ export class UserStore {
     // The state just before the unit: the turn's start, and what the turn recorded before it.
     const before = draft(this.startOf(turn.id).state);
     const earlier = own.filter((x) => x.applied && x.job === null && x.ord < first);
-    applyUnchecked(this.store.envOf(this.id), before, earlier.map((x): Item => ({ op: x.op, value: x.value, turn: turn.id, n: turn.depth + 1, by: x.by, change: x.id, precision: x.precision, standing: x.standing, source: x.source })));
-    return { plan: reversal(unit, before, this.headState(chat.id).state), on: head };
+    applyUnchecked(this.store.envOf(this.id), before, earlier.map((x): Item => ({ op: x.op, value: x.value, turn: turn.id, n: turn.depth + 1, by: x.by, cite: x.cite, change: x.id, precision: x.precision, standing: x.standing, source: x.source })));
+    return { plan: reversal(unit, before, this.headState(chat.id).state, this.store.env), on: head };
   }
 
   /**

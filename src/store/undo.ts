@@ -17,7 +17,8 @@ import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { own, strOf } from "../engine/pack-kit";
 import { reversedAs, txn } from "../packs/economy/core/pay";
 import { factStore, standing } from "./facts";
-import { eventOf } from "./fold";
+import { eventOf, type FoldEnv } from "./fold";
+import type { AreaOp } from "./areas";
 import { STORE_OPS, type ChangeInput, type ChangeRow, type Report, type StoreState } from "./types";
 
 /** What undoing a change records, and what of it would be left. */
@@ -102,17 +103,44 @@ function reverseFact(c: ChangeRow, now: StoreState): ChangeInput[] | Report {
   return inputs;
 }
 
+/** Whether a later turn than the change's own wrote one of the parts it wrote, by the marks: then it is changed since, whatever its value now. */
+function writtenSince(c: ChangeRow, parts: readonly { ref: string; part: string }[], now: StoreState): boolean {
+  return parts.some(({ ref, part }) => {
+    const mark = now.marks[ref]?.[part];
+    return mark !== undefined && mark.turn !== c.turn;
+  });
+}
+
+/** Undoing an area's change: the reverse its area gives, read against its slice just before it and now; left when its parts were written since. */
+function reverseArea(c: ChangeRow, area: { id: string; name: string; def: AreaOp; initial: JsonObject }, before: StoreState, now: StoreState): ChangeInput[] | Report {
+  if (writtenSince(c, area.def.touches?.(c.value) ?? [], now)) return leftOf("changed_since", c);
+  const inputs = area.def.undo?.(c.value, before.areas?.[area.id] ?? area.initial, now.areas?.[area.id] ?? area.initial) ?? null;
+  if (inputs === null) return leftOf("not_reversible", c);
+  return inputs.map((i) => ({ lane: c.lane, op: `${area.id}.${i.op}`, value: i.value, precision: c.precision, standing: c.standing }));
+}
+
 /**
  * What undoing `unit` (a change with the rest of its unit, in order) records: each change that
  * applied, reversed, the last first, as one unit of its own. `before` is the state just before the
- * unit, `now` the chat's state at its newest reply.
+ * unit, `now` the chat's state at its newest reply. A field or relation an event wrote, or an area's
+ * part, that a later turn wrote since is changed since, by the marks (a sum such as a balance is not).
  */
-export function reversal(unit: readonly ChangeRow[], before: StoreState, now: StoreState): UndoPlan {
+export function reversal(unit: readonly ChangeRow[], before: StoreState, now: StoreState, env: Pick<FoldEnv, "registry" | "areas">): UndoPlan {
   const group = `undo:${unit[0]?.id ?? 0}`;
   const out: UndoPlan = { inputs: [], left: [] };
   for (const c of [...unit].reverse()) {
     if (!c.applied) continue;
-    const r = c.op === STORE_OPS.fact ? reverseFact(c, now) : reverseOne(c, unit, before, now, group);
+    const found = env.areas?.of(c.op) ?? null;
+    const ev = found === null ? eventOf(c.op, c.value) : null;
+    const parts = (ev ? (env.registry.get(ev.type)?.touches?.(ev) ?? []) : []).flatMap((t) => ("field" in t ? [{ ref: `entity:${t.entity}`, part: t.field }] : "rel" in t ? [{ ref: `entity:${t.entity}`, part: t.rel }] : []));
+    const r =
+      found !== null
+        ? reverseArea(c, { id: found.area.id, name: found.name, def: found.def, initial: found.area.initial?.() ?? {} }, before, now)
+        : writtenSince(c, parts, now)
+          ? leftOf("changed_since", c)
+          : c.op === STORE_OPS.fact
+            ? reverseFact(c, now)
+            : reverseOne(c, unit, before, now, group);
     if (Array.isArray(r)) out.inputs.push(...r);
     else if ("code" in r) out.left.push(r);
     else out.inputs.push({ lane: c.lane, op: r.op, value: r.value, precision: c.precision, standing: c.standing });

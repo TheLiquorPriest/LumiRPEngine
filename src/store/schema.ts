@@ -210,6 +210,15 @@ CREATE TABLE fold_mark (
 );
 `,
   },
+  {
+    version: 8,
+    // Who decided a change, and apart from it the run that wrote it (plan §13.4: a lead drops a sub-agent's staged writes by its
+    // handle). A change written before this kept the run's handle in `by`, as its writer gave it: that is its handle.
+    sql: `
+ALTER TABLE change ADD COLUMN handle TEXT;
+UPDATE change SET handle = by;
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

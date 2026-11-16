@@ -5,12 +5,13 @@ import { isRecord } from "../shared/json";
 import { validMarkerBody } from "../engine/events";
 import { FACT_ABOUT } from "./facts";
 import { LANES, PRECISIONS, SOURCES, STANDINGS, STORE_OPS, StoreInputError, type ChangeInput } from "./types";
+import type { Areas } from "./areas";
 
 const oneOf = (list: readonly string[], v: unknown): boolean => v === undefined || v === null || (typeof v === "string" && list.includes(v));
 const text = (v: unknown): boolean => v === undefined || v === null || typeof v === "string";
 
-/** Throws `StoreInputError` when `c` cannot be read as a change. */
-export function checkChange(c: ChangeInput, index: number): void {
+/** Throws `StoreInputError` when `c` cannot be read as a change: an area's operation (`areas`) by its own check. */
+export function checkChange(c: ChangeInput, index: number, areas?: Areas): void {
   const at = `change ${index}`;
   if (!isRecord(c)) throw new StoreInputError(`${at} is not an object`);
   if (!(LANES as readonly string[]).includes(c.lane)) throw new StoreInputError(`${at}: lane must be one of ${LANES.join(", ")}`);
@@ -18,10 +19,17 @@ export function checkChange(c: ChangeInput, index: number): void {
   if (!oneOf(STANDINGS, c.standing)) throw new StoreInputError(`${at}: standing must be one of ${STANDINGS.join(", ")}`);
   if (!oneOf(PRECISIONS, c.precision)) throw new StoreInputError(`${at}: precision must be one of ${PRECISIONS.join(", ")}`);
   if (!oneOf(SOURCES, c.source)) throw new StoreInputError(`${at}: source must be one of ${SOURCES.join(", ")}, or none`);
-  if (!text(c.by) || !text(c.job)) throw new StoreInputError(`${at}: by and job are text`);
+  if (!text(c.by) || !text(c.handle) || !text(c.job)) throw new StoreInputError(`${at}: by, handle and job are text`);
   if (JSON.stringify(c.value) === undefined) throw new StoreInputError(`${at}: value is not JSON`);
   if (c.cite !== undefined && c.cite !== null && JSON.stringify(c.cite) === undefined) throw new StoreInputError(`${at}: cite is not JSON`);
   const v = c.value;
+  if (areas?.owns(c.op)) {
+    const found = areas.of(c.op);
+    if (!found) throw new StoreInputError(`${at}: the area has no operation ${c.op}`);
+    const why = found.def.check(v);
+    if (why !== null) throw new StoreInputError(`${at}: ${why}`);
+    return;
+  }
   if (!c.op.startsWith("store.")) {
     if (!isRecord(v) || v.type !== c.op) throw new StoreInputError(`${at}: an event's value is the event, with type ${c.op}`);
     return;

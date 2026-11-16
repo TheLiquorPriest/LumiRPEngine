@@ -7,6 +7,7 @@
 //
 // A row stored before the store kept parts holds the whole state, and is read as it was.
 
+import type { JsonObject } from "../shared/json";
 import type { WorldState } from "../engine/state";
 import type { NotApplied, StoreState } from "./types";
 
@@ -54,7 +55,7 @@ export function snapshotRows(doc: SnapshotDoc): SnapshotRows {
     parts[key] = hash;
     given.set(hash, body);
   };
-  const { world, ...beside } = doc.state;
+  const { world, areas, ...beside } = doc.state;
   const ids = Object.keys(world.entities);
   put("w", JSON.stringify({ ...world, entities: Math.ceil(ids.length / RUN), packs: Object.keys(world.packs) }));
   for (let r = 0; r * RUN < ids.length; r++) {
@@ -62,8 +63,21 @@ export function snapshotRows(doc: SnapshotDoc): SnapshotRows {
     put(`e${r}`, run.body, run.hash);
   }
   for (const [id, slice] of Object.entries(world.packs)) put(`p:${id}`, JSON.stringify(slice));
-  put("s", JSON.stringify(beside));
+  // Each area's slice a part of its own: one that did not change is the part before.
+  for (const [id, slice] of Object.entries(areas ?? {})) put(`a:${id}`, sliceText(slice));
+  put("s", JSON.stringify(areas === undefined ? beside : { ...beside, areas: Object.keys(areas) }));
   return { manifest: JSON.stringify({ parts, notApplied: doc.notApplied, rebased: doc.rebased }), parts: [...given] };
+}
+
+/** An area's slice as text: held slices are never changed (they are frozen), so one written before is the same text. */
+const slices = new WeakMap<object, string>();
+
+function sliceText(slice: object): string {
+  const hit = slices.get(slice);
+  if (hit !== undefined) return hit;
+  const text = JSON.stringify(slice);
+  if (Object.isFrozen(slice)) slices.set(slice, text);
+  return text;
 }
 
 /** A snapshot row's text read whole: a list of parts (`bodies` gives each part's text by hash), or a whole state stored before parts. */
@@ -92,6 +106,8 @@ export function readSnapshot(text: string, bodies: (hashes: string[]) => Map<str
   const packs: Record<string, unknown> = {};
   for (const id of world.packs) packs[id] = JSON.parse(body(`p:${id}`));
   const whole = { ...world, entities: JSON.parse(`{${entries.join(",")}}`) as WorldState["entities"], packs: packs as WorldState["packs"] };
-  const beside = JSON.parse(body("s")) as Omit<StoreState, "world">;
-  return { state: { world: whole, ...beside }, notApplied: doc.notApplied, rebased: doc.rebased };
+  const { areas: names, ...beside } = JSON.parse(body("s")) as Omit<StoreState, "world" | "areas"> & { areas?: string[] };
+  const state: StoreState = { world: whole, ...beside };
+  if (names !== undefined) state.areas = Object.fromEntries(names.map((id) => [id, JSON.parse(body(`a:${id}`)) as JsonObject]));
+  return { state, notApplied: doc.notApplied, rebased: doc.rebased };
 }

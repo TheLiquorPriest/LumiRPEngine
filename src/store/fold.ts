@@ -28,6 +28,7 @@ import { CLOCK_SET, setsClock } from "./blank";
 import { applyFact } from "./facts";
 import { PRECISIONS, STORE_OPS, type Lane, type NotApplied, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
 import { claim, knownWrites, thawWorld, tryUnit } from "./working";
+import type { AreaOutcome, AreaPart, Areas } from "./areas";
 
 /** A handler that threw while a change applied: the change's turn, and its id once it is kept (null before). */
 export interface FoldFailure {
@@ -37,10 +38,12 @@ export interface FoldFailure {
   change: number | null;
 }
 
-/** What a fold reads besides the changes: the engine's registry, and world documents by revision. */
+/** What a fold reads besides the changes: the engine's registry, world documents by revision, and the areas the store opened with. */
 export interface FoldEnv {
   registry: Registry;
   worlds: (revision: RevisionId) => WorldDoc | undefined;
+  /** The areas whose operations (`<area>.<op>`) fold beside the engine's; none: no area's. */
+  areas?: Areas;
   /**
    * Told when an engine handler, or a pack's code the fold calls (its read context, what its event touches), throws: an error in the
    * engine, whose text is for people (the log, the live view), never for a model.
@@ -62,6 +65,8 @@ export interface StoredChange extends Provenance {
   lane: Lane;
   value: JsonValue;
   by: string | null;
+  /** What its source cites; absent: none. */
+  cite?: JsonValue | null;
   /** Whether it applied when it was recorded, on its own path. */
   applied: boolean;
 }
@@ -99,15 +104,19 @@ export interface Item extends Provenance {
   turn: string;
   n: number;
   by: string | null;
+  cite?: JsonValue | null;
   /** The change's id once it is kept; null (or absent) before. */
   change?: number | null;
 }
 
-/** The state a chat starts from: the world revision's own, as today's engine builds it. */
+/** The state a chat starts from: the world revision's own, as today's engine builds it, and each area's starting slice. */
 export function initialStoreState(env: FoldEnv, revision: RevisionId): StoreState | null {
   const world = env.worlds(revision);
   if (!world) return null;
-  return { world: initialState(world, revision, env.registry), horizon: [], notes: {}, touched: {}, marks: {}, facts: {} };
+  const state: StoreState = { world: initialState(world, revision, env.registry), horizon: [], notes: {}, touched: {}, marks: {}, facts: {} };
+  const areas = env.areas?.initial();
+  if (areas && Object.keys(areas).length > 0) state.areas = areas;
+  return state;
 }
 
 const isStoreOp = (op: string): boolean => op.startsWith("store.");
@@ -340,12 +349,55 @@ function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
   }
 }
 
+/** Keeps, for each part a change wrote, the turn that wrote it last and how (as `markTouched` keeps an event's). */
+function markParts(state: StoreState, parts: readonly AreaPart[], item: Item): void {
+  const mark = { turn: item.turn, n: item.n };
+  for (const { ref, part } of parts) {
+    state.touched[ref] = mark;
+    state.marks[ref] = { ...state.marks[ref], [part]: { ...mark, precision: item.precision ?? null, standing: item.standing ?? null, source: item.source ?? null } };
+  }
+}
+
+/**
+ * Applies an area's operation (`<area>.<op>`) by its area's reducer, to the area's slice: a new slice in its place, the parts it
+ * touches marked. One that no longer applies is reported as its area says; a reducer, or what it touches, that throws is a fault.
+ */
+function applyAreaOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
+  const found = env.areas?.of(item.op);
+  if (!found) return { applied: false, reports: [noHandler(item.op)] };
+  const { area, name, def } = found;
+  const slice = state.areas?.[area.id] ?? area.initial?.() ?? {};
+  let parts: readonly AreaPart[];
+  let outcome: AreaOutcome;
+  try {
+    parts = def.touches?.(item.value) ?? [];
+    outcome = def.apply(slice, { op: name, value: item.value, turn: item.turn, n: item.n, by: item.by, standing: item.standing ?? null, precision: item.precision ?? null, source: item.source ?? null, cite: item.cite ?? null });
+  } catch (e) {
+    return { applied: false, reports: [failed(env, item.op, e, item)] };
+  }
+  if ("applied" in outcome) return { applied: false, reports: outcome.reports };
+  state.areas = { ...state.areas, [area.id]: outcome.slice };
+  markParts(state, parts, item);
+  return { applied: true, reports: outcome.reports ?? [] };
+}
+
+/** The event a change carries; null for a store operation, an area's, or a value that is not one. */
+function eventIn(env: FoldEnv, item: Pick<Item, "op" | "value">): LedgerEvent | null {
+  return env.areas?.owns(item.op) ? null : eventOf(item.op, item.value);
+}
+
+/** Applies a change that is no engine event: a store operation, or an area's. */
+function applyOther(env: FoldEnv, state: StoreState, item: Item): Outcome {
+  if (isStoreOp(item.op)) return applyStoreOp(env, state, item);
+  if (env.areas?.owns(item.op)) return applyAreaOp(env, state, item);
+  return { applied: false, reports: [noHandler(item.op)] };
+}
+
 /** Applies changes as they were recorded: each one that applied then, unchecked. */
 export function applyUnchecked(env: FoldEnv, state: StoreState, items: readonly Item[]): Outcome[] {
   return items.map((item) => {
-    const ev = eventOf(item.op, item.value);
-    if (ev) return applyOne(env, state, ev, item);
-    return isStoreOp(item.op) ? applyStoreOp(env, state, item) : { applied: false, reports: [noHandler(item.op)] };
+    const ev = eventIn(env, item);
+    return ev ? applyOne(env, state, ev, item) : applyOther(env, state, item);
   });
 }
 
@@ -360,14 +412,14 @@ export function applyChecked(env: FoldEnv, state: StoreState, items: readonly It
   let i = 0;
   while (i < items.length) {
     const item = items[i] as Item;
-    if (!eventOf(item.op, item.value)) {
-      out[i] = isStoreOp(item.op) ? applyStoreOp(env, state, item) : { applied: false, reports: [noHandler(item.op)] };
+    if (!eventIn(env, item)) {
+      out[i] = applyOther(env, state, item);
       i++;
       continue;
     }
-    // A run of events between store operations: today's unit rules hold inside it.
+    // A run of events between store and area operations: today's unit rules hold inside it.
     let end = i;
-    while (end < items.length && eventOf((items[end] as Item).op, (items[end] as Item).value)) end++;
+    while (end < items.length && eventIn(env, items[end] as Item)) end++;
     runEvents(env, state, items, i, end, fell, out);
     i = end;
   }
@@ -375,7 +427,7 @@ export function applyChecked(env: FoldEnv, state: StoreState, items: readonly It
 }
 
 function runEvents(env: FoldEnv, state: StoreState, items: readonly Item[], from: number, to: number, fell: Set<string>, out: Outcome[]): void {
-  const events = items.slice(from, to).map((x) => eventOf(x.op, x.value) as LedgerEvent);
+  const events = items.slice(from, to).map((x) => eventIn(env, x) as LedgerEvent);
   const drop = (start: number, end: number, report: Report): void => {
     for (let k = start; k < end; k++) out[from + k] = { applied: false, reports: [report] };
     const group = events[start]?.group;
@@ -426,7 +478,8 @@ export interface FoldResult {
  * stands. A pack that throws while what its event touches is read leaves the change failed, by its report.
  */
 function laterWrite(env: FoldEnv, state: StoreState, c: JobChange): number | null | Report {
-  const ev = eventOf(c.op, c.value);
+  const ev = eventIn(env, c);
+  const area = env.areas?.of(c.op) ?? null;
   const touched: { ref: string; part: string }[] = [];
   if (ev) {
     let touches: readonly Touch[];
@@ -436,6 +489,12 @@ function laterWrite(env: FoldEnv, state: StoreState, c: JobChange): number | nul
       return failed(env, ev.type, e, { turn: c.turn, change: c.id });
     }
     for (const t of touches) touched.push({ ref: `entity:${t.entity}`, part: "field" in t ? t.field : "rel" in t ? t.rel : t.aspect });
+  } else if (area !== null) {
+    try {
+      touched.push(...(area.def.touches?.(c.value) ?? []));
+    } catch (e) {
+      return failed(env, c.op, e, { turn: c.turn, change: c.id });
+    }
   } else if (c.op === STORE_OPS.fact && isRecord(c.value)) {
     const { about, key } = c.value;
     const later = (state.facts[String(about)] ?? []).filter((f) => f.key === key && f.replacedBy === undefined && f.n > c.from);
@@ -471,7 +530,7 @@ function applyJobs(env: FoldEnv, state: StoreState, jobs: readonly JobChange[]):
     const fault = faulted.get(c.id);
     if (fault) out[k] = { applied: false, reports: [fault] };
     else if (at !== undefined) out[k] = { applied: false, reports: [{ code: "later_value", values: { turn: at } }] };
-    else go.push({ k, item: { op: c.op, value: c.value, turn: c.turn, n: c.from, by: c.by, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null } });
+    else go.push({ k, item: { op: c.op, value: c.value, turn: c.turn, n: c.from, by: c.by, cite: c.cite ?? null, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null } });
   });
   applyChecked(env, state, go.map((g) => g.item), new Set()).forEach((o, i) => {
     const k = go[i]?.k;
@@ -504,7 +563,7 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
     // Recorded on this very path, after everything before it: it folds as it was recorded.
     const clean = step.own && upto < first;
     const live = step.changes.filter((c) => c.applied);
-    const items = live.map((c): Item => ({ op: c.op, value: c.value, turn: step.turn, n: step.n, by: c.by, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
+    const items = live.map((c): Item => ({ op: c.op, value: c.value, turn: step.turn, n: step.n, by: c.by, cite: c.cite ?? null, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = clean ? applyUnchecked(env, state, items) : applyChecked(env, state, items, new Set());
     outcomes.forEach((o, k) => {
       const c = live[k];

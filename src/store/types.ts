@@ -55,12 +55,14 @@ export interface Report {
 /** One change as a caller gives it. */
 export interface ChangeInput {
   lane: Lane;
-  /** An engine event type (`set`, `post`, `economy.txn`, …) or a store operation (`STORE_OPS`). */
+  /** An engine event type (`set`, `post`, `economy.txn`, …), a store operation (`STORE_OPS`) or an area's (`<area>.<op>`). */
   op: string;
-  /** For an event, the event itself (its `type` is `op`); for a store operation, its value. */
+  /** For an event, the event itself (its `type` is `op`); for a store or area operation, its value. */
   value: JsonValue;
-  /** Who made it: an agent, the player, an import. */
+  /** Who decided it: an agent's definition, `player`, `import`, `migration`. */
   by?: string | null;
+  /** The run that wrote it (an agent's handle), apart from who decided it: a lead drops a sub-agent's staged writes by it. */
+  handle?: string | null;
   standing?: Standing | null;
   precision?: Precision | null;
   /** Null or absent: unsourced. */
@@ -83,6 +85,7 @@ export interface ChangeRow {
   op: string;
   value: JsonValue;
   by: string | null;
+  handle: string | null;
   standing: Standing | null;
   precision: Precision | null;
   source: Source | null;
@@ -268,6 +271,8 @@ export interface StoreState {
   marks: Record<string, Record<string, Mark>>;
   /** The fact store: every fact recorded on the path, by the tree ref it is about, oldest first. */
   facts: Record<string, Fact[]>;
+  /** Each area's slice (`StoreArea`), by the area's name; an area absent holds its starting slice. */
+  areas?: Record<string, JsonObject>;
 }
 
 /**
