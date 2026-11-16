@@ -82,9 +82,22 @@ A chat's messages as Lumiverse holds them, by a list of ids or by a stretch of i
 | Body | none |
 | Reply | [`ChatMessagesReply`](#chatmessagesreply) |
 
+### `GET /api/v1/chats/:chat/requests`
+
+What waits in a chat for the next message, asked for beside his words: each request with its kind, what was asked and when.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`RequestsReply`](#requestsreply) |
+
 ### `POST /api/v1/chats/:chat/requests`
 
-Holds a panel's request as part of the player's next message, for the turn that answers it.
+Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than requests.textMost is not kept, and the answer says so.
 
 | | |
 |---|---|
@@ -92,8 +105,21 @@ Holds a panel's request as part of the player's next message, for the turn that 
 | Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
-| Body | [`PanelRequestAsk`](#panelrequestask) |
-| Reply | `{ request: PanelRequestHeld }` |
+| Body | [`RequestAsk`](#requestask) |
+| Reply | [`RequestHeldReply`](#requestheldreply) |
+
+### `DELETE /api/v1/chats/:chat/requests/:request`
+
+Withdraws a request that waits; one kept with a turn already stays, and the answer names the turn.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `request` |
+| Query | none |
+| Body | none |
+| Reply | [`RequestWithdrawnReply`](#requestwithdrawnreply) |
 
 ## Turns
 
@@ -178,6 +204,20 @@ One file of a turn's folder, by its path below the folder, as text; no path leav
 | Query | none |
 | Body | none |
 | Reply | [`FileReply`](#filereply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/chats/:chat/turns/:turn/requests`
+
+What a turn was told beside his words and keeps, and what was played as its message.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`RequestsReply`](#requestsreply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/requests/*`
@@ -1279,6 +1319,7 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 | `released` | [`ReplyReleased`](#replyreleased) | A run's reply began to go out to the chat (its first text, or the harness's release, whichever came first), told at that moment while the run may go on. |
 | `state` | `Record<string, never>` | The chat's state changed, and a page reads it again. A newer one replaces one a page has not taken yet. |
 | `handler_failed` | `{ op: string; error: string; turn: string; change: number | null }` | An engine handler failed on a change of this chat, which is recorded as not applied: the operation, the handler's error, the turn and the change (null for one never kept). |
+| `requests` | `{ waiting: number }` | What waits in the chat, asked for beside the player's words, changed: how many requests wait now; a page reads them again. |
 | `extension` | [`ExtensionStatusReply`](#extensionstatusreply) | The extension's status changed: as GET /api/v1/status/extension answers it. |
 
 ## The live socket's messages
@@ -2564,7 +2605,7 @@ export interface LiveBatch {
 One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
 
 ```ts
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 ```
 
 ### `LiveMessage`
@@ -2954,31 +2995,6 @@ export interface PageProof {
 }
 ```
 
-### `PanelRequestAsk`
-
-A panel's request: what was pressed, and what it was pressed on, where it was pressed on something.
-
-```ts
-export interface PanelRequestAsk {
-  what: string;
-  /** What it was pressed on; left out, null or blank, nothing. */
-  on?: string | null;
-}
-```
-
-### `PanelRequestHeld`
-
-A request a panel made, held as part of the player's next message: what was pressed, and what it was pressed on.
-
-```ts
-export interface PanelRequestHeld {
-  id: string;
-  what: string;
-  on: string | null;
-  at: number;
-}
-```
-
 ### `PerceptionRow`
 
 A perception, with the turn it is of and that turn's reply.
@@ -3093,6 +3109,29 @@ export interface ReplySoFar {
 }
 ```
 
+### `RequestAsk`
+
+A composer control's ask, for the next message: its kind, the choice made, and any words typed with it.
+
+```ts
+export interface RequestAsk {
+  kind: "depth" | "swipe";
+  choice: string;
+  /** Words typed with it; left out, null or blank, none. */
+  words?: string | null;
+}
+```
+
+### `RequestHeldReply`
+
+The request held: it waits for the next message, in place of one of its kind that waited.
+
+```ts
+export interface RequestHeldReply {
+  request: RequestShown;
+}
+```
+
 ### `RequestReply`
 
 One model call's request, by its file below the turn's folder, rebuilt from the pointers the harness kept into the turn's files: every message as it was sent, in order, and each tool declared with the file its words came from. Where what is rebuilt is not what was sent, it says so and shows nothing.
@@ -3106,6 +3145,46 @@ export interface RequestReply {
   messages: KeptMessage[];
   /** Each tool declared, in order; none where `same` is false. */
   tools: { name: string; file?: string }[];
+}
+```
+
+### `RequestShown`
+
+Something he asked for beside his words: a panel's tap, or a composer control (depth, swipe), with what was asked as data, whether it was played now as a message of its own, the turn it is kept with (null while it waits) and when it was made.
+
+```ts
+export interface RequestShown {
+  id: string;
+  chat: string;
+  kind: "panel" | "depth" | "swipe";
+  asked: { action: string | null; values: { [key: string]: JsonValue }; from: "palette" | "map" | "panel" | "chip" | "send-now"; what: string; on: string | null } | { choice: string; words: string | null };
+  /** Played now, as a message of its own, rather than with the next message. */
+  played: boolean;
+  /** The message it was sent as, where it was played now. */
+  message: string | null;
+  /** The turn it is kept with; null while it waits. */
+  turn: TurnId | null;
+  at: number;
+}
+```
+
+### `RequestsReply`
+
+Requests, oldest first.
+
+```ts
+export interface RequestsReply {
+  requests: RequestShown[];
+}
+```
+
+### `RequestWithdrawnReply`
+
+The request was withdrawn.
+
+```ts
+export interface RequestWithdrawnReply {
+  withdrawn: true;
 }
 ```
 
@@ -4128,8 +4207,8 @@ export interface TurnReply {
   runs: RunShown[];
   /** Where each slice of the preset's map was in this turn's prompt, with its notices; null where RPH kept none, or no longer keeps it (its folder was pruned). */
   prompt: LocatedSlices | null;
-  /** What he asked for beside his words, through a panel, that this turn was told. */
-  asked: PanelRequestHeld[];
+  /** What he asked for beside his words that this turn was told and keeps, and what was played as its message. */
+  asked: RequestShown[];
   /** The Author's record of the turn as `story_query` shows it, every field; null when it wrote none. */
   record: { [key: string]: JsonValue } | null;
   /** The tools its agents reached through `tool_search` and `tool_use`, by name. */

@@ -10,8 +10,8 @@
 // rules fired, attachments, drops) and, for a carried turn, the old engine's record; what a job he
 // started was told; the Stop of a turn going on now; Settle now, a run on the chat's newest
 // turn that writes nothing into the chat; the files of a turn's folder, listed and read, none outside it;
-// the world's tree for a chat, at its head or at a turn, from the store's own view; a panel's request,
-// held as part of the player's next message; and the jobs (plan §13.5), of the user or of one chat, each
+// the world's tree for a chat, at its head or at a turn, from the store's own view; what he asks for
+// beside his words (`request-routes.ts`); and the jobs (plan §13.5), of the user or of one chat, each
 // as RPH last kept it (how it stands, what started it, what it spent), and the cancel of one. Every
 // route is a page's: it answers only for the user this RPE belongs to. A route that is handed a turn's
 // id answers a turn joined to another (a continue's held turn) as a fact: the turn it joined (`joined`).
@@ -26,7 +26,8 @@ import type { Turns } from "./lane";
 import { turnRecordFields } from "./record";
 import type { RunRecord } from "./runs";
 import { turnSettings } from "./settings";
-import { type ChangeView, chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, jobToldReply, panelRequestBody, panelRequestReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
+import { requestRoutes } from "./request-routes";
+import { type ChangeView, chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, jobToldReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
 
 /** What the world's tree shows when the page names nothing: the world, one level in, each level with its own values. */
@@ -274,7 +275,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       lore: await keptLore(r),
       runs: await runsOf(r, runs, within),
       prompt: turns.prompts.located(user, r.turn),
-      asked: turns.player.requestsFor(user, r.chat, [r.turn]),
+      asked: turns.requests.ofTurn(user, r.turn, turns.store.user(user).turn(r.turn)?.message ?? null),
       record: turnRecordFields(turns.store, { user, chat: r.chat, session: r.session, turn: r.turn }),
       found: foundTools(records),
       todos: openTodos(records),
@@ -375,21 +376,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       handle: async ({ user, params }) => {
         turnOf(user, params.chat, params.turn);
         return { stopped: await turns.lane.stop(user, params.turn) };
-      },
-    }),
-    route({
-      method: "POST",
-      path: "/api/v1/chats/:chat/requests",
-      access: "page",
-      group: "chats",
-      does: "Holds a panel's request as part of the player's next message, for the turn that answers it.",
-      body: panelRequestBody,
-      reply: panelRequestReply,
-      handle: async ({ user, params, body }) => {
-        // A panel acts on a chat RPE plays: a request for one RPE does not hold is refused, and nothing of it is kept.
-        if (turns.store.user(user).chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat}.`);
-        const ask = { what: body.what, on: typeof body.on === "string" && body.on.trim() !== "" ? body.on : null };
-        return { request: await turns.player.hold(user, params.chat, ask, Date.now()) };
       },
     }),
     route({
@@ -543,5 +529,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         return { job: job.id, told: toldTo(user, { job: job.id }) };
       },
     }),
+    ...requestRoutes(turns),
   ] as const;
 }

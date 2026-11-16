@@ -10,8 +10,8 @@
 // tokens and its lore lookups, a row per run), the consents, gap checks and rules that fired (`consent`, `gap_check`,
 // `rule_firing`: each of a turn's, or of a job the user started, which belongs to no turn), what else RPH told RPE about the run
 // (`turn_told`: suggestions, attachments asked for, drops, the release and the end), the player's messages as RPE read them
-// (`player_text`), what the player asked for through a panel (`panel_request`), what a comparison of a chat's path found
-// (`since_found`), which of these a turn was told (`since_told`), and each job as RPH last told of it (`turn_job`).
+// (`player_text`), what the player asked for beside his words, kept with the turn that answered it (`request`), what a comparison
+// of a chat's path found (`since_found`), which of these a turn was told (`since_told`), and each job as RPH last told of it (`turn_job`).
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -410,6 +410,36 @@ INSERT INTO rule_firing (user, chat, turn, job, rule, body, at)
     COALESCE(json_extract(t.body, '$.rule'), ''), t.body, t.at
   FROM turn_told t WHERE t.kind = 'rule' AND json_valid(t.body) ORDER BY t.id;
 DELETE FROM turn_told WHERE kind IN ('consent', 'gap-check', 'rule') AND json_valid(body);
+`,
+  },
+  {
+    version: 17,
+    name: "what the player asks for beside his words, kept with the turn that answered it",
+    // `request` (App. B, `requests.ts`): what was asked as JSON (`asked`), whether it was played now and as which message, the turn it
+    // is kept with (null while it waits). Today's panel requests come over as panel taps for the next message: one some turn was told,
+    // kept with the first turn still standing that was told it; the rest wait. The old table, and the request rows of `since_told`, go.
+    sql: `
+CREATE TABLE request (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  asked TEXT NOT NULL,
+  played INTEGER NOT NULL DEFAULT 0,
+  message TEXT,
+  turn TEXT,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX request_chat ON request (user, chat, at);
+CREATE INDEX request_turn ON request (user, turn) WHERE turn IS NOT NULL;
+INSERT INTO request (user, id, chat, kind, asked, played, message, turn, at)
+  SELECT p.user, p.id, p.chat, 'panel', json_object('action', NULL, 'values', json_object(), 'from', 'panel', 'what', p.what, 'on', p."on"), 0, NULL,
+    (SELECT s.turn FROM since_told s JOIN turn t ON t.user = s.user AND t.id = s.turn WHERE s.user = p.user AND s.item = p.id AND t.status <> 'dropped' ORDER BY t.rowid LIMIT 1),
+    p.at
+  FROM panel_request p ORDER BY p.at, p.rowid;
+DELETE FROM since_told WHERE EXISTS (SELECT 1 FROM panel_request p WHERE p.user = since_told.user AND p.id = since_told.item);
+DROP TABLE panel_request;
 `,
   },
 ];

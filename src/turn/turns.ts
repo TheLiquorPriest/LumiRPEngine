@@ -46,6 +46,7 @@ import { jobsEndedBetween } from "./jobs";
 import type { Writes } from "./kv";
 import type { PlayerSide } from "./player";
 import type { TurnPrompts } from "./prompt";
+import type { PanelAsk, Requests } from "./requests";
 import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
 import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs";
@@ -155,8 +156,10 @@ export interface TurnLaneDeps {
   /** The lore index, whose full lore map the briefing holds. */
   loreIndex: LoreIndex;
   runs: Runs;
-  /** The player's messages as RPE read them, and their requests through a panel. */
+  /** The player's messages as RPE read them. */
   player: PlayerSide;
+  /** What he asks for beside his words (`requests.ts`): told to the turn that answers it, and kept with it. */
+  requests: Requests;
   /** What comparisons of a chat's path found, kept with the chat. */
   since: SinceKept;
   /** The notes agents write, put as they stand at each turn's start (plan §5.4). */
@@ -581,6 +584,17 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
         const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, named ?? begun, found)]);
         run.notGiven = notGiven;
+        // What he asked for beside his words (`requests.ts`): a turn that answers a new message is told what waits; a swipe or a regenerate,
+        // what the earlier attempts at its message were told; a continue is told nothing again. A panel's tap is one line of `asked`, in
+        // the notices part's words.
+        const asking = tag.kind === "continue" ? [] : this.#d.requests.forTurn(user, chat, replaced === null ? null : earlierAttempts);
+        const asked = asking.flatMap((r) => {
+          if (r.kind !== "panel") return [];
+          const tap = r.asked as PanelAsk;
+          const values = Object.entries(tap.values).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+          const line = lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}) });
+          return line === undefined || line.trim() === "" ? [] : [line];
+        });
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
@@ -599,19 +613,23 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           briefing,
           carry: settings.carry,
           since,
+          ...(asked.length > 0 ? { asked } : {}),
           ...(prefill !== undefined ? { prefill } : {}),
           ...(sampling !== undefined ? { presetSampling: sampling } : {}),
           ...(maxTokens !== undefined ? { replyMaxTokens: maxTokens } : {}),
         };
         // Kept before the run: what the turn was told, so no later turn is told it again (for a continue of a named turn, what that turn
-        // was told); and on the turn's row, the story time its briefing gave (plan Appendix B `turn`), as the migration keeps a carried
-        // turn's. A continue's held turn is a row of its own: joined to the turn it extended, that turn keeps its own.
+        // was told), and the requests it was told, kept with it; and on the turn's row, the story time its briefing gave (plan Appendix B
+        // `turn`), as the migration keeps a carried turn's. A continue's held turn is a row of its own: joined to the turn it extended,
+        // that turn keeps its own.
         const timed = storyTime !== null;
-        if (told.length > 0 || timed) {
+        if (told.length > 0 || asking.length > 0 || timed) {
           await this.#d.writes.run((db) => {
             if (told.length > 0) this.#d.since.told(db, user, (named ?? begun).id, told);
+            this.#d.requests.tell(db, user, asking.map((r) => r.id), begun.id);
             if (timed) store.updateTurn(begun.id, { storyTime });
           }, "keeping what a turn was told and its story time");
+          if (asking.length > 0) this.#d.requests.changed(user, chat);
         }
         ask = { scope, guidance, tagged, messages, request, loreMap, lore: activated, attempts: replaced === null ? [] : this.#attempts(user, chat, replaced), received };
         lap("kept");
@@ -1409,13 +1427,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (!again) for (const job of this.#jobsEnded(user, turn)) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
     // The run after a reply is the turn's own work done late (plan §10.9): one stopped at its limit is told as a job is, with what it recorded kept.
     for (const r of stopped) add("job", notices?.line("previous_run_stopped"), { turn: r.turn });
-    // What the player asked for through a panel, as part of the message this turn answers (plan §10.10 "A panel action"): a swipe or a
-    // regenerate answers the message its earlier attempts answered, and is told what they were told.
-    const requests = again ? [] : this.#d.player.requestsFor(user, chat, replaced === null ? null : attempts.map((a) => a.id));
-    for (const r of requests) add("request", notices?.line("panel_request", { what: r.what, ...(r.on !== null ? { on: r.on } : {}) }));
     // What this turn was told that decides what later turns are: a continue's found things, so the turns after the turn it continues
-    // are not told them again; the requests, so a request is told once, and again only to a swipe of the turn told it.
-    return { items, told: [...(again ? kept.map((k) => k.id) : []), ...requests.map((r) => r.id)] };
+    // are not told them again.
+    return { items, told: again ? kept.map((k) => k.id) : [] };
   }
 
   /**

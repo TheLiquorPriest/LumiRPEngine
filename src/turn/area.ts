@@ -17,6 +17,7 @@ import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
 import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
 import { promptOf } from "./request";
+import { REQUESTS_KIND } from "./requests";
 import { turnRoutes } from "./routes";
 import { passConnection, TURN_SETTINGS, turnSettings } from "./settings";
 import { namedStretches } from "./stage";
@@ -77,6 +78,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
       { area: "harness", migrations: HARNESS_MIGRATIONS },
     ],
     settings: [...harnessSettings(), ...TURN_SETTINGS],
+    liveKinds: [REQUESTS_KIND],
     fills: {
       door: {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },

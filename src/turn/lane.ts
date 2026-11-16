@@ -39,6 +39,7 @@ import { kvStore, servedUser, storeUsers } from "./kv";
 import { riskyPattern } from "./pattern";
 import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
+import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
@@ -181,6 +182,8 @@ export interface Turns {
   prompts: TurnPrompts;
   runs: Runs;
   player: PlayerSide;
+  /** What he asks for beside his words, waiting or kept with the turn that answered it. */
+  requests: Requests;
   trace: TurnTrace;
   lore: Lore;
   /** The lore index: what indexing runs wrote of each entry of a chat's lore, beside what the database holds. */
@@ -213,7 +216,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   );
   const prompts = turnPrompts(app.db, app.writes, () => clock.now());
   const runs = new Runs(app.db, app.writes);
-  const player = new PlayerSide(app.db, app.writes);
+  const player = new PlayerSide(app.db);
+  const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));
   const since = new SinceKept(app.db);
   // The lore may not reach the cast: a character's agent named by the cast's id is found in the world by the cast's name for it.
   const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
@@ -339,6 +343,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     loreIndex,
     runs,
     player,
+    requests,
     since,
     notes,
     // The older turn folders, and with them the prompt each of their turns carried and where its slices were (plan §5.5, App. B): kept
@@ -370,5 +375,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   for (const user of storeUsers(app.db)) {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore, loreIndex, notes, suggestions };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, requests, trace, lore, loreIndex, notes, suggestions };
 }

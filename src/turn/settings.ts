@@ -80,6 +80,8 @@ export interface TurnSettings {
   reserve: number;
   /** The turns a chat's list gives when the page names no limit (`turns.page`), and the most one page may ask (`turns.pageMost`). */
   turnsPage: { size: number; most: number };
+  /** The most characters a request's words may hold (`requests.textMost`); one past it is not kept. */
+  requestsTextMost: number;
 }
 
 /** The defaults, where no level sets a value. */
@@ -110,6 +112,7 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   reserve: RESERVE.default as number,
   // The first build's fixed page sizes, made settings.
   turnsPage: { size: 50, most: 500 },
+  requestsTextMost: 2000,
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -257,6 +260,15 @@ const DEFS = {
     about: "The most turns one page of a chat's list may ask for.",
     effect: "use",
   },
+  requestsTextMost: {
+    key: "requests.textMost",
+    default: TURN_DEFAULTS.requestsTextMost,
+    takes: { type: "whole", least: 1 },
+    perConnection: false,
+    name: "Longest request",
+    about: "The most characters a request beside his words may hold (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so.",
+    effect: "use",
+  },
 } as const satisfies Record<string, Setting>;
 
 /** Every setting the turn lane reads, as a config file writes it: its own, and the map's. */
@@ -286,6 +298,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     map: mapConfigRead(read),
     reserve: read.value(RESERVE) as number,
     turnsPage: { size: read.value(DEFS.turnsPage) as number, most: read.value(DEFS.turnsPageMost) as number },
+    requestsTextMost: read.value(DEFS.requestsTextMost) as number,
   };
 }
 

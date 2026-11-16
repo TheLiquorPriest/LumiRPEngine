@@ -7,7 +7,7 @@
 import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
-import type { PanelRequest } from "./player";
+import type { RequestRecord } from "./requests";
 import type { NotGiven, RunKind, RunState, StoppedBy } from "./runs";
 
 const T = shape.text();
@@ -134,8 +134,37 @@ const precision = shape.named("FactPrecision", "How exact a value or a fact is."
 const standing = shape.named("FactStanding", "How sure a value or a fact is.", shape.oneOf("established", "proposed", "assumed"));
 const source = shape.named("FactSource", "Where a value or a fact came from.", shape.oneOf("prose", "lore", "author", "gm", "character", "player", "import", "default", "invented"));
 
-export const panelRequestHeld = shape.named("PanelRequestHeld", "A request a panel made, held as part of the player's next message: what was pressed, and what it was pressed on.", shape.object({ id: T, what: T, on: nullable(T), at: N }));
-type PanelMirrored = Holds<Exactly<Infer<typeof panelRequestHeld>, PanelRequest>>;
+const panelAsk = shape.object({
+  action: field(nullable(T), "The panel action's id; null where the tap names none."),
+  values: field(shape.record(shape.json()), "The action's values."),
+  from: field(shape.oneOf("palette", "map", "panel", "chip", "send-now"), "Where the tap was made."),
+  what: field(T, "The words of what was pressed."),
+  on: field(nullable(T), "What it was pressed on; null for nothing."),
+});
+const composerAsk = shape.object({ choice: field(T, "The choice made, as its choices file names it."), words: field(nullable(T), "Any words typed with it.") });
+export const requestShown = shape.named(
+  "RequestShown",
+  "Something he asked for beside his words: a panel's tap, or a composer control (depth, swipe), with what was asked as data, whether it was played now as a message of its own, the turn it is kept with (null while it waits) and when it was made.",
+  shape.object({
+    id: T,
+    chat: T,
+    kind: shape.oneOf("panel", "depth", "swipe"),
+    asked: shape.union(panelAsk, composerAsk),
+    played: field(shape.yesNo(), "Played now, as a message of its own, rather than with the next message."),
+    message: field(nullable(T), "The message it was sent as, where it was played now."),
+    turn: field(nullable(shape.turnId()), "The turn it is kept with; null while it waits."),
+    at: N,
+  }),
+);
+type RequestMirrored = Holds<Mutually<Infer<typeof requestShown>, RequestRecord>>;
+export const requestsReply = shape.named("RequestsReply", "Requests, oldest first.", shape.object({ requests: shape.list(requestShown) }));
+export const requestAsk = shape.named(
+  "RequestAsk",
+  "A composer control's ask, for the next message: its kind, the choice made, and any words typed with it.",
+  shape.object({ kind: shape.oneOf("depth", "swipe"), choice: shape.text({ blank: false }), words: opt(nullable(T), "Words typed with it; left out, null or blank, none.") }),
+);
+export const requestHeldReply = shape.named("RequestHeldReply", "The request held: it waits for the next message, in place of one of its kind that waited.", shape.object({ request: requestShown }));
+export const requestWithdrawnReply = shape.named("RequestWithdrawnReply", "The request was withdrawn.", shape.object({ withdrawn: shape.literal(true) }));
 
 const sliceAt = shape.object({ message: field(N, "The prompt's message, by place from 0."), start: N, end: N });
 const locatedSlices = shape.named(
@@ -222,7 +251,7 @@ export const turnReply = shape.named(
     ),
     runs: field(shape.list(runShown), "Each of its runs, the first first."),
     prompt: field(nullable(locatedSlices), "Where each slice of the preset's map was in this turn's prompt, with its notices; null where RPH kept none, or no longer keeps it (its folder was pruned)."),
-    asked: field(shape.list(panelRequestHeld), "What he asked for beside his words, through a panel, that this turn was told."),
+    asked: field(shape.list(requestShown), "What he asked for beside his words that this turn was told and keeps, and what was played as its message."),
     record: field(nullable(shape.record(shape.json())), "The Author's record of the turn as `story_query` shows it, every field; null when it wrote none."),
     found: field(shape.list(T), "The tools its agents reached through `tool_search` and `tool_use`, by name."),
     todos: field(shape.list(shape.object({ agent: T, open: shape.list(T) })), "Each agent's `todo` items still open as its list last stood."),
@@ -272,13 +301,6 @@ export const requestReply = shape.named(
 );
 
 export const settleReply = shape.named("SettleReply", "The newest turn, and the Settle now run begun on it.", shape.object({ turn: shape.turnId(), run: T }));
-
-export const panelRequestReply = shape.object({ request: panelRequestHeld });
-export const panelRequestBody = shape.named(
-  "PanelRequestAsk",
-  "A panel's request: what was pressed, and what it was pressed on, where it was pressed on something.",
-  shape.object({ what: shape.text({ blank: false }), on: opt(nullable(T), "What it was pressed on; left out, null or blank, nothing.") }),
-);
 
 // ---------------------------------------------------------------- jobs
 
@@ -343,4 +365,4 @@ export const valuesShown = shape.oneOf("none", "own", "all");
 type ValuesMirrored = Holds<Exactly<Infer<typeof valuesShown>, ValuesShown>>;
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [RunKindMirrored, RunStateMirrored, PanelMirrored, NodeMirrored, ValuesMirrored, LocatedMirrored, GapMirrored, ConsentMirrored];
+export type Mirrors = [RunKindMirrored, RunStateMirrored, RequestMirrored, NodeMirrored, ValuesMirrored, LocatedMirrored, GapMirrored, ConsentMirrored];
