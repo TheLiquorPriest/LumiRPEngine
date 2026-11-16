@@ -290,7 +290,7 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
 }
 
 /** What a turn's read holds beside its runs, for a turn that has none of it: no located prompt, nothing asked, no record, no tool found, nothing open, no change, nothing told, not carried. */
-export const NOTHING_MORE = { prompt: null, asked: [], record: null, found: [], todos: [], changes: [], told: { gapChecks: [], consents: [], rules: [], attachments: [], dropped: [] }, carried: null, card: "", quests: [], unsettled: [] } satisfies Pick<TurnReply, "prompt" | "asked" | "record" | "found" | "todos" | "changes" | "told" | "carried" | "card" | "quests" | "unsettled">;
+export const NOTHING_MORE = { prompt: null, asked: [], record: null, found: [], todos: [], changes: [], told: { gapChecks: [], consents: [], rules: [], attachments: [], dropped: [] }, carried: null, card: "", quests: [], threads: [], unsettled: [] } satisfies Pick<TurnReply, "prompt" | "asked" | "record" | "found" | "todos" | "changes" | "told" | "carried" | "card" | "quests" | "threads" | "unsettled">;
 
 /** A run's scope placed in `chat`: the user and session it had, and the turn when it names one. */
 const inChat = (scope: RunScope, chat: string): Scope => ({ user: scope.user, session: scope.session, chat, ...(typeof scope.turn === "string" ? { turn: scope.turn } : {}) });

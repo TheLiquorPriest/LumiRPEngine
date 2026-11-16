@@ -59,6 +59,15 @@ describe("the Turn page's sections", () => {
     expect(text).toContain("map_lay");
   });
 
+  test("a thread the turn opened and left open is listed with its state and its stakes", () => {
+    const turn: TurnReply = { ...turnAt(), threads: [{ id: "th-1", text: "Who rang the bell?", state: "open", stakes: "the harbour's trust" }] };
+    const text = view(turn);
+    expect(text).toContain("Threads it left open");
+    expect(text).toContain("Who rang the bell?");
+    expect(text).toContain("At stake: the harbour's trust");
+    expect(view(turnAt())).not.toContain("Threads it left open");
+  });
+
   test("the changes stand lane by lane, an ignored engine says so, and a report, an unsourced write and an unapplied one are listed unsettled", () => {
     const unsourced = change(1, "beat", { source: null });
     const unapplied = change(2, "pay", { applied: false, reports: [{ code: "unbalanced" }] });
