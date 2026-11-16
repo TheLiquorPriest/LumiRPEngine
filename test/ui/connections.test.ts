@@ -19,8 +19,8 @@ const LIST: ConnectionsShown = {
   connections: [KEYED, SIGNED],
   default: "c-flash",
   providers: [
-    { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: [], needsBaseUrl: false },
-    { id: "anthropic", name: "Anthropic", auth: ["key", "signin"], apis: [], needsBaseUrl: false },
+    { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: [], needsBaseUrl: false, embeds: true },
+    { id: "anthropic", name: "Anthropic", auth: ["key", "signin"], apis: [], needsBaseUrl: false, embeds: false },
   ],
 };
 
